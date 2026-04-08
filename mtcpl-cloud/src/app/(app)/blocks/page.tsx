@@ -376,31 +376,31 @@ export default async function BlocksPage() {
                 </label>
                 <label className="stack">
                   <span>Length ft</span>
-                  <input defaultValue={String(block.length_ft)} min="0" name="length_ft" step="0.1" type="number" />
+                  <input defaultValue={String(block.length_ft)} min="0" name="length_ft" step="0.01" type="number" />
                 </label>
                 <label className="stack">
                   <span>Width ft</span>
-                  <input defaultValue={String(block.width_ft)} min="0" name="width_ft" step="0.1" type="number" />
+                  <input defaultValue={String(block.width_ft)} min="0" name="width_ft" step="0.01" type="number" />
                 </label>
                 <label className="stack">
                   <span>Height ft</span>
-                  <input defaultValue={String(block.height_ft)} min="0" name="height_ft" step="0.1" type="number" />
+                  <input defaultValue={String(block.height_ft)} min="0" name="height_ft" step="0.01" type="number" />
                 </label>
                 <label className="stack">
                   <span>Trim L</span>
-                  <input defaultValue={String(block.trim_left_ft)} min="0" name="trim_left_ft" step="0.1" type="number" />
+                  <input defaultValue={String(block.trim_left_ft)} min="0" name="trim_left_ft" step="0.01" type="number" />
                 </label>
                 <label className="stack">
                   <span>Trim R</span>
-                  <input defaultValue={String(block.trim_right_ft)} min="0" name="trim_right_ft" step="0.1" type="number" />
+                  <input defaultValue={String(block.trim_right_ft)} min="0" name="trim_right_ft" step="0.01" type="number" />
                 </label>
                 <label className="stack">
                   <span>Trim N</span>
-                  <input defaultValue={String(block.trim_near_ft)} min="0" name="trim_near_ft" step="0.1" type="number" />
+                  <input defaultValue={String(block.trim_near_ft)} min="0" name="trim_near_ft" step="0.01" type="number" />
                 </label>
                 <label className="stack">
                   <span>Trim F</span>
-                  <input defaultValue={String(block.trim_far_ft)} min="0" name="trim_far_ft" step="0.1" type="number" />
+                  <input defaultValue={String(block.trim_far_ft)} min="0" name="trim_far_ft" step="0.01" type="number" />
                 </label>
               </div>
 
@@ -409,7 +409,7 @@ export default async function BlocksPage() {
                   <span>Delete code</span>
                   <input name="delete_code" placeholder="Enter code to delete" />
                 </label>
-                <button className="ghost-button danger-ghost" formAction={deleteBlockAction} name="id" type="submit" value={block.id}>
+                <button className="ghost-button danger-ghost" formAction={deleteBlockAction} formNoValidate name="id" type="submit" value={block.id}>
                   Delete
                 </button>
                 <button className="secondary-button" type="submit">

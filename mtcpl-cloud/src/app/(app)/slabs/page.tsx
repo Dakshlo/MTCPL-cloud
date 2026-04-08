@@ -333,7 +333,7 @@ export default async function SlabsPage() {
                   <button className="secondary-button" type="submit">
                     Update
                   </button>
-                  <button className="ghost-button" formAction={deleteSlabAction} name="id" type="submit" value={slab.id}>
+                  <button className="ghost-button" formAction={deleteSlabAction} formNoValidate name="id" type="submit" value={slab.id}>
                     Delete
                   </button>
                 </div>
@@ -394,12 +394,12 @@ export default async function SlabsPage() {
 
                 <label className="stack">
                   <span>Length</span>
-                  <input defaultValue={String(slab.length_ft)} min="0" name="length_ft" step="0.1" type="number" />
+                  <input defaultValue={String(slab.length_ft)} min="0" name="length_ft" step="0.01" type="number" />
                 </label>
 
                 <label className="stack">
                   <span>Width</span>
-                  <input defaultValue={String(slab.width_ft)} min="0" name="width_ft" step="0.1" type="number" />
+                  <input defaultValue={String(slab.width_ft)} min="0" name="width_ft" step="0.01" type="number" />
                 </label>
 
                 <label className="stack">
@@ -408,7 +408,7 @@ export default async function SlabsPage() {
                     defaultValue={String(slab.thickness_ft)}
                     min="0"
                     name="thickness_ft"
-                    step="0.05"
+                    step="0.01"
                     type="number"
                   />
                 </label>
