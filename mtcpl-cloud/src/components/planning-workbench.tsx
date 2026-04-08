@@ -200,6 +200,7 @@ function runOptimization(blocks: BlockRow[], slabs: SlabRow[], kerfMm: number): 
       id: slab.id,
       label: slab.label,
       temple: slab.temple,
+      stone: slab.stone || null,
       sw: toNum(slab.length_ft),
       sh: toNum(slab.width_ft),
       sd: toNum(slab.thickness_ft)
@@ -212,12 +213,16 @@ function runOptimization(blocks: BlockRow[], slabs: SlabRow[], kerfMm: number): 
   usableBlocks.forEach((block) => {
     if (!remaining.length) return;
 
+    // Only place slabs that match this block's stone type (or have no stone preference)
+    const eligible = remaining.filter((slab) => !slab.stone || slab.stone === block.stone);
+    if (!eligible.length) return;
+
     const usableL = Math.max(0, toNum(block.length_ft) - toNum(block.trim_left_ft) - toNum(block.trim_right_ft));
     const usableW = Math.max(0, toNum(block.width_ft) - toNum(block.trim_near_ft) - toNum(block.trim_far_ft));
 
     if (usableL <= 0.01 || usableW <= 0.01) return;
 
-    const packed = packBlock(usableL, usableW, remaining, kerfFt);
+    const packed = packBlock(usableL, usableW, eligible, kerfFt);
     if (!packed.placed.length) return;
 
     const usedIds = new Set<string>();
@@ -373,6 +378,13 @@ export function PlanningWorkbench({
   const usableBlocks = blocks.filter((block) => block.status === "available" || block.status === "reserved");
   const openSlabs = slabs.filter((slab) => slab.status === "open" || slab.status === "planned");
 
+  const slabsByTemple = openSlabs.reduce<Record<string, SlabRow[]>>((acc, slab) => {
+    if (!acc[slab.temple]) acc[slab.temple] = [];
+    acc[slab.temple].push(slab);
+    return acc;
+  }, {});
+  const templeKeys = Object.keys(slabsByTemple).sort();
+
   function generatePlan() {
     setResult(runOptimization(usableBlocks, openSlabs, kerfMm));
   }
@@ -390,16 +402,83 @@ export function PlanningWorkbench({
           <div>
             <h1>3D Cut Planning</h1>
             <p className="muted">
-              This is the first cloud preview of the optimizer. The generated plan stays only in browser state and is not
-              committed to the database yet.
+              Review stock blocks and required slabs below, then generate a 3D cut plan.
             </p>
           </div>
-          <span className="role-pill">Preview only</span>
         </div>
+      </section>
 
+      <div className="planning-two-col">
+        <section className="page-card">
+          <div className="section-heading">
+            <h2 style={{ margin: 0 }}>Stock Blocks ({usableBlocks.length})</h2>
+            <p className="muted">Available and reserved blocks for cutting</p>
+          </div>
+          <div className="records-stack" style={{ marginTop: 12 }}>
+            {usableBlocks.length === 0 ? (
+              <div className="banner">No usable blocks found.</div>
+            ) : usableBlocks.map((block) => (
+              <div className="record-card compact-record" key={block.id}>
+                <div className="record-head">
+                  <div>
+                    <div className="record-title-row">
+                      <strong>{block.id}</strong>
+                      <span className="role-pill">{block.category}</span>
+                      <span className="role-pill">Yard {block.yard}</span>
+                    </div>
+                    <p className="muted">
+                      {block.stone} | {block.length_ft} × {block.width_ft} × {block.height_ft} ft
+                    </p>
+                    {(toNum(block.trim_left_ft) > 0 || toNum(block.trim_right_ft) > 0 || toNum(block.trim_near_ft) > 0 || toNum(block.trim_far_ft) > 0) ? (
+                      <p className="muted">
+                        Trim L{block.trim_left_ft} R{block.trim_right_ft} N{block.trim_near_ft} F{block.trim_far_ft} ft
+                      </p>
+                    ) : null}
+                  </div>
+                  <span className="role-pill">{block.status}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="page-card">
+          <div className="section-heading">
+            <h2 style={{ margin: 0 }}>Required Slabs ({openSlabs.length})</h2>
+            <p className="muted">Sorted by temple</p>
+          </div>
+          {templeKeys.length === 0 ? (
+            <div className="banner" style={{ marginTop: 12 }}>No open slab requirements found.</div>
+          ) : templeKeys.map((temple) => (
+            <div key={temple} style={{ marginTop: 14 }}>
+              <p className="muted" style={{ fontWeight: 600, marginBottom: 6 }}>{temple}</p>
+              <div className="records-stack">
+                {slabsByTemple[temple].map((slab) => (
+                  <div className="record-card compact-record" key={slab.id}>
+                    <div className="record-head">
+                      <div>
+                        <div className="record-title-row">
+                          <span className="mini-slab" style={{ background: sclr(slab.id) }} />
+                          <strong style={{ color: sclr(slab.id) }}>{slab.id}</strong>
+                          {slab.stone ? <span className="role-pill">{slab.stone}</span> : null}
+                        </div>
+                        <p className="muted">
+                          {slab.label} | {slab.length_ft} × {slab.width_ft} × {slab.thickness_ft} ft
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </section>
+      </div>
+
+      <section className="page-card">
         <div className="planning-toolbar">
           <label className="stack">
-            <span>Blade kerf in mm</span>
+            <span>Blade Kerf</span>
             <input
               min="0.5"
               step="0.5"
@@ -408,14 +487,14 @@ export function PlanningWorkbench({
               onChange={(event) => setKerfMm(Number(event.target.value) || 4)}
             />
           </label>
+          <span className="muted">mm</span>
 
           <div className="banner">
-            <strong>{usableBlocks.length}</strong> usable blocks and <strong>{openSlabs.length}</strong> open slabs are
-            included in the preview run.
+            <strong>{usableBlocks.length}</strong> blocks · <strong>{openSlabs.length}</strong> slabs · stone types are matched automatically
           </div>
 
           <button className="primary-button" onClick={generatePlan} type="button">
-            Generate Plan
+            Generate 3D Cut Plan
           </button>
         </div>
       </section>

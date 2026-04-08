@@ -148,6 +148,7 @@ export default async function SlabsPage() {
         "id, label, temple, stone, length_ft, width_ft, thickness_ft, source_block_id, status, created_at"
       )
       .eq("status", "open")
+      .order("temple", { ascending: true })
       .order("created_at", { ascending: false })
       .limit(100),
     supabase.from("blocks").select("id").eq("status", "available").order("id", { ascending: true }),

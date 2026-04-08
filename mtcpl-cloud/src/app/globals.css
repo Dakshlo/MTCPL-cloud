@@ -552,11 +552,17 @@ textarea {
   align-items: end;
 }
 
+.planning-two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
 .planning-toolbar {
   display: grid;
-  grid-template-columns: 220px 1fr auto;
+  grid-template-columns: 120px auto 1fr auto;
   gap: 14px;
-  align-items: end;
+  align-items: center;
   margin-top: 18px;
 }
 
@@ -645,7 +651,8 @@ textarea {
   }
 
   .planning-toolbar,
-  .plan-grid {
+  .plan-grid,
+  .planning-two-col {
     grid-template-columns: 1fr;
   }
 
