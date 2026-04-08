@@ -57,7 +57,7 @@ export async function getAuthContext() {
   };
 }
 
-export async function requireAuth(roles?: AppRole[]) {
+export async function requireAuth(roles?: AppRole[]): Promise<{ user: NonNullable<Awaited<ReturnType<typeof getAuthContext>>["user"]>; profile: NonNullable<Awaited<ReturnType<typeof getAuthContext>>["profile"]> }> {
   const ctx = await getAuthContext();
 
   if (!ctx.user || !ctx.profile || !ctx.profile.is_active) {
@@ -68,5 +68,5 @@ export async function requireAuth(roles?: AppRole[]) {
     redirect(getDefaultRouteForRole(ctx.profile.role));
   }
 
-  return ctx;
+  return ctx as any;
 }

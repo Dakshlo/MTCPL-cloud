@@ -156,13 +156,13 @@ export default async function CarvingPage() {
               </div>
               <div className="carving-summary">
                 <span className="role-pill summary-pill done-pill">
-                  Done: {items.filter((item) => item.status === "completed").length}
+                  Done: {(items ?? []).filter((item) => item.status === "completed").length}
                 </span>
                 <span className="role-pill summary-pill active-pill">
-                  Active: {items.filter((item) => item.status === "carving_in_progress").length}
+                  Active: {(items ?? []).filter((item) => item.status === "carving_in_progress").length}
                 </span>
                 <span className="role-pill summary-pill pending-pill">
-                  Pending: {items.filter((item) => item.status === "carving_assigned").length}
+                  Pending: {(items ?? []).filter((item) => item.status === "carving_assigned").length}
                 </span>
               </div>
             </div>

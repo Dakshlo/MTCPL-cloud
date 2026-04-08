@@ -257,7 +257,7 @@ export default async function CuttingPage() {
                       <span className="role-pill">{slabIds.length} slabs</span>
                     </div>
 
-                    {layout?.blk ? <IsoBlockPreview block={layout.blk} placed={layout.placed ?? []} /> : null}
+                    {layout?.blk ? <IsoBlockPreview block={layout.blk as any} placed={(layout.placed ?? []) as any} /> : null}
 
                     <div className="chip-row">
                       {(layout?.placed ?? []).map((slab) => (
