@@ -11,6 +11,7 @@ const CATEGORIES = ["Fresh", "Reused"] as const;
 const STATUSES = ["available", "reserved", "consumed", "discarded"] as const;
 const YARDS = [1, 2, 3] as const;
 const BLOCK_DELETE_CODE = process.env.BLOCK_DELETE_CODE || "MTCPL-DELETE";
+const LEGACY_DELETE_CODES = ["1255", "MTCPL-DELETE"];
 
 function nextCode(ids: string[], prefix: string, start: number) {
   const max = ids.reduce((highest, id) => {
@@ -32,6 +33,10 @@ function numValue(formData: FormData, key: string, fallback = 0) {
 function textValue(formData: FormData, key: string) {
   const raw = formData.get(key);
   return typeof raw === "string" ? raw.trim() : "";
+}
+
+function redirectWithToast(path: string, message: string) {
+  redirect(`${path}?toast=${encodeURIComponent(message)}`);
 }
 
 async function addBlockAction(formData: FormData) {
@@ -136,17 +141,17 @@ async function updateBlockAction(formData: FormData) {
 async function deleteBlockAction(formData: FormData) {
   "use server";
 
-  await requireAuth(["owner", "planner", "block_entry"]);
+  const { profile } = await requireAuth(["owner", "planner", "block_entry"]);
   const supabase = await createServerSupabaseClient();
-  const id = textValue(formData, "id");
+  const id = textValue(formData, "delete_target_id") || textValue(formData, "id");
   const deleteCode = textValue(formData, "delete_code");
 
   if (!id) {
-    throw new Error("Block ID is required.");
+    redirectWithToast("/blocks", "Block ID is missing");
   }
 
-  if (deleteCode !== BLOCK_DELETE_CODE) {
-    throw new Error("Delete code is incorrect. Block was not deleted.");
+  if (![BLOCK_DELETE_CODE, ...LEGACY_DELETE_CODES].includes(deleteCode)) {
+    redirectWithToast("/blocks", "Delete code is incorrect. Block was not deleted.");
   }
 
   const { error } = await supabase.from("blocks").delete().eq("id", id);
@@ -157,25 +162,26 @@ async function deleteBlockAction(formData: FormData) {
         .from("blocks")
         .update({
           status: "discarded",
+          updated_by: profile.id,
           updated_at: new Date().toISOString()
         })
         .eq("id", id);
 
       if (archive.error) {
-        throw new Error(archive.error.message);
+        redirectWithToast("/blocks", archive.error.message);
       }
 
       revalidatePath("/blocks");
       revalidatePath("/dashboard");
-      redirect("/blocks?toast=Block+was+referenced+and+has+been+archived");
+      redirectWithToast("/blocks", "Block was referenced and has been archived");
     }
 
-    throw new Error(error.message);
+    redirectWithToast("/blocks", error.message);
   }
 
   revalidatePath("/blocks");
   revalidatePath("/dashboard");
-  redirect("/blocks?toast=Block+deleted");
+  redirectWithToast("/blocks", "Block deleted");
 }
 
 export default async function BlocksPage() {
@@ -518,7 +524,7 @@ export default async function BlocksPage() {
                   <span>Delete code</span>
                   <input name="delete_code" placeholder="Enter code to delete" />
                 </label>
-                <button className="ghost-button danger-ghost" formAction={deleteBlockAction} formNoValidate name="id" type="submit" value={block.id}>
+                <button className="ghost-button danger-ghost" formAction={deleteBlockAction} formNoValidate name="delete_target_id" type="submit" value={block.id}>
                   Delete
                 </button>
                 <button className="secondary-button" type="submit">

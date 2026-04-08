@@ -18,6 +18,7 @@ const STATUSES = [
   "dispatched",
   "rejected"
 ] as const;
+const LEGACY_DELETE_CODES = ["1255", "MTCPL-DELETE"];
 
 function nextCode(ids: string[], prefix: string, start: number) {
   const max = ids.reduce((highest, id) => {
@@ -39,6 +40,10 @@ function numValue(formData: FormData, key: string, fallback = 0) {
 function textValue(formData: FormData, key: string) {
   const raw = formData.get(key);
   return typeof raw === "string" ? raw.trim() : "";
+}
+
+function redirectWithToast(path: string, message: string) {
+  redirect(`${path}?toast=${encodeURIComponent(message)}`);
 }
 
 async function addSlabAction(formData: FormData) {
@@ -143,12 +148,17 @@ async function updateSlabAction(formData: FormData) {
 async function deleteSlabAction(formData: FormData) {
   "use server";
 
-  await requireAuth(["owner", "planner", "slab_entry"]);
+  const { profile } = await requireAuth(["owner", "planner", "slab_entry"]);
   const supabase = await createServerSupabaseClient();
-  const id = textValue(formData, "id");
+  const id = textValue(formData, "delete_target_id") || textValue(formData, "id");
+  const deleteCode = textValue(formData, "delete_code");
 
   if (!id) {
-    throw new Error("Slab ID is required.");
+    redirectWithToast("/slabs", "Slab ID is missing");
+  }
+
+  if (![process.env.BLOCK_DELETE_CODE || "MTCPL-DELETE", ...LEGACY_DELETE_CODES].includes(deleteCode)) {
+    redirectWithToast("/slabs", "Delete code is incorrect. Slab was not deleted.");
   }
 
   const { error } = await supabase.from("slab_requirements").delete().eq("id", id);
@@ -159,25 +169,26 @@ async function deleteSlabAction(formData: FormData) {
         .from("slab_requirements")
         .update({
           status: "rejected",
+          updated_by: profile.id,
           updated_at: new Date().toISOString()
         })
         .eq("id", id);
 
       if (archive.error) {
-        throw new Error(archive.error.message);
+        redirectWithToast("/slabs", archive.error.message);
       }
 
       revalidatePath("/slabs");
       revalidatePath("/dashboard");
-      redirect("/slabs?toast=Slab+was+referenced+and+has+been+archived");
+      redirectWithToast("/slabs", "Slab was referenced and has been archived");
     }
 
-    throw new Error(error.message);
+    redirectWithToast("/slabs", error.message);
   }
 
   revalidatePath("/slabs");
   revalidatePath("/dashboard");
-  redirect("/slabs?toast=Slab+deleted");
+  redirectWithToast("/slabs", "Slab deleted");
 }
 
 export default async function SlabsPage() {
@@ -443,7 +454,7 @@ export default async function SlabsPage() {
                   <button className="secondary-button" type="submit">
                     Update
                   </button>
-                  <button className="ghost-button" formAction={deleteSlabAction} formNoValidate name="id" type="submit" value={slab.id}>
+                  <button className="ghost-button" formAction={deleteSlabAction} formNoValidate name="delete_target_id" type="submit" value={slab.id}>
                     Delete
                   </button>
                 </div>
@@ -500,6 +511,11 @@ export default async function SlabsPage() {
                       </option>
                     ))}
                   </select>
+                </label>
+
+                <label className="stack">
+                  <span>Delete code</span>
+                  <input name="delete_code" placeholder="Enter code to delete" />
                 </label>
 
                 <label className="stack">
