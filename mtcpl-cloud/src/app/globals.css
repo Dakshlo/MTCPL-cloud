@@ -744,3 +744,69 @@ textarea {
     min-width: 100%;
   }
 }
+
+/* Toast notification */
+.toast-notification {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%) translateY(0);
+  background: #2f6c3f;
+  color: #fff;
+  padding: 13px 24px;
+  border-radius: 40px;
+  font-size: 15px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.18);
+  z-index: 9999;
+  transition: opacity 0.4s, transform 0.4s;
+  pointer-events: none;
+}
+
+.toast-icon {
+  font-size: 17px;
+}
+
+.toast-visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+  animation: toast-in 0.3s ease;
+}
+
+.toast-hidden {
+  opacity: 0;
+  transform: translateX(-50%) translateY(12px);
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(16px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* Active carving status buttons */
+.status-btn-active {
+  font-weight: 700;
+  cursor: default;
+  border-width: 2px;
+}
+
+.status-btn-pending {
+  background: #f0ece8;
+  color: #746455;
+  border-color: #b0a090;
+}
+
+.status-btn-progress {
+  background: #e8f0fb;
+  color: #2a5ba0;
+  border-color: #5a8fd4;
+}
+
+.status-btn-done {
+  background: #e9f4e4;
+  color: #2f6c3f;
+  border-color: #4a9a5a;
+}

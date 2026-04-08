@@ -1,4 +1,5 @@
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 
 import { requireAuth } from "@/lib/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
@@ -77,6 +78,7 @@ async function addSlabAction(formData: FormData) {
 
   revalidatePath("/slabs");
   revalidatePath("/dashboard");
+  redirect("/slabs?toast=Slab+added+successfully");
 }
 
 async function updateSlabAction(formData: FormData) {
@@ -114,6 +116,7 @@ async function updateSlabAction(formData: FormData) {
 
   revalidatePath("/slabs");
   revalidatePath("/dashboard");
+  redirect("/slabs?toast=Slab+updated");
 }
 
 async function deleteSlabAction(formData: FormData) {
@@ -135,6 +138,7 @@ async function deleteSlabAction(formData: FormData) {
 
   revalidatePath("/slabs");
   revalidatePath("/dashboard");
+  redirect("/slabs?toast=Slab+deleted");
 }
 
 export default async function SlabsPage() {

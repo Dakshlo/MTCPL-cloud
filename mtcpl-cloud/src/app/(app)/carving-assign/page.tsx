@@ -1,4 +1,5 @@
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 
 import { requireAuth } from "@/lib/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
@@ -59,6 +60,7 @@ async function assignVendorAction(formData: FormData) {
   revalidatePath("/carving-assign");
   revalidatePath("/carving");
   revalidatePath("/dashboard");
+  redirect("/carving-assign?toast=Assigned+to+carving+successfully");
 }
 
 export default async function CarvingAssignPage() {

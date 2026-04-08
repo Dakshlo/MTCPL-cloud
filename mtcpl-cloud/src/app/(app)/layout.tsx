@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 import { LogoutButton } from "@/components/logout-button";
 import { Sidebar } from "@/components/sidebar";
+import { Toast } from "@/components/toast";
 import { requireAuth } from "@/lib/auth";
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
@@ -28,6 +29,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
 
         {children}
       </main>
+      <Toast />
     </div>
   );
 }

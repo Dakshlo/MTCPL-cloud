@@ -1,4 +1,5 @@
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 
 import { requireAuth } from "@/lib/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
@@ -56,6 +57,7 @@ async function setCarvingStatusAction(formData: FormData) {
 
   revalidatePath("/carving");
   revalidatePath("/dashboard");
+  redirect("/carving?toast=Status+updated");
 }
 
 async function dispatchAction(formData: FormData) {
@@ -106,6 +108,7 @@ async function dispatchAction(formData: FormData) {
 
   revalidatePath("/carving");
   revalidatePath("/dashboard");
+  redirect("/carving?toast=Slab+dispatched");
 }
 
 export default async function CarvingPage() {
@@ -188,8 +191,11 @@ export default async function CarvingPage() {
                           <input name="carving_item_id" type="hidden" value={item.id} />
                           <input name="slab_id" type="hidden" value={item.slab_requirement_id} />
                           <input name="status" type="hidden" value="carving_assigned" />
-                          <button className="ghost-button status-button" type="submit">
-                            Not Started
+                          <button
+                            className={`status-button ${item.status === "carving_assigned" ? "status-btn-active status-btn-pending" : "ghost-button"}`}
+                            type="submit"
+                          >
+                            {item.status === "carving_assigned" ? "● Not Started" : "Not Started"}
                           </button>
                         </form>
 
@@ -197,8 +203,11 @@ export default async function CarvingPage() {
                           <input name="carving_item_id" type="hidden" value={item.id} />
                           <input name="slab_id" type="hidden" value={item.slab_requirement_id} />
                           <input name="status" type="hidden" value="carving_in_progress" />
-                          <button className="secondary-button status-button" type="submit">
-                            In Progress
+                          <button
+                            className={`status-button ${item.status === "carving_in_progress" ? "status-btn-active status-btn-progress" : "secondary-button"}`}
+                            type="submit"
+                          >
+                            {item.status === "carving_in_progress" ? "● In Progress" : "In Progress"}
                           </button>
                         </form>
 
@@ -206,8 +215,11 @@ export default async function CarvingPage() {
                           <input name="carving_item_id" type="hidden" value={item.id} />
                           <input name="slab_id" type="hidden" value={item.slab_requirement_id} />
                           <input name="status" type="hidden" value="completed" />
-                          <button className="primary-button status-button" type="submit">
-                            Completed
+                          <button
+                            className={`status-button ${item.status === "completed" ? "status-btn-active status-btn-done" : "primary-button"}`}
+                            type="submit"
+                          >
+                            {item.status === "completed" ? "● Completed" : "Completed"}
                           </button>
                         </form>
                       </>

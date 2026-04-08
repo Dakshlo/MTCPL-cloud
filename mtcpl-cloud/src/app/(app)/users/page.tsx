@@ -1,4 +1,5 @@
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 
 import { requireAuth } from "@/lib/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
@@ -36,6 +37,7 @@ async function updateUserAction(formData: FormData) {
   if (error) throw new Error(error.message);
 
   revalidatePath("/users");
+  redirect("/users?toast=User+updated+successfully");
 }
 
 export default async function UsersPage() {

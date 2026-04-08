@@ -1,4 +1,5 @@
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 
 import { ExportBlocksButton } from "@/components/export-button";
 import { requireAuth } from "@/lib/auth";
@@ -73,6 +74,7 @@ async function addBlockAction(formData: FormData) {
 
   revalidatePath("/blocks");
   revalidatePath("/dashboard");
+  redirect("/blocks?toast=Block+added+successfully");
 }
 
 async function updateBlockAction(formData: FormData) {
@@ -113,6 +115,7 @@ async function updateBlockAction(formData: FormData) {
 
   revalidatePath("/blocks");
   revalidatePath("/dashboard");
+  redirect("/blocks?toast=Block+updated");
 }
 
 async function deleteBlockAction(formData: FormData) {
@@ -139,6 +142,7 @@ async function deleteBlockAction(formData: FormData) {
 
   revalidatePath("/blocks");
   revalidatePath("/dashboard");
+  redirect("/blocks?toast=Block+deleted");
 }
 
 export default async function BlocksPage() {
