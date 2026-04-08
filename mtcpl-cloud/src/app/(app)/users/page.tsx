@@ -30,7 +30,7 @@ async function updateUserAction(formData: FormData) {
 
   const { error } = await supabase
     .from("profiles")
-    .update({ role, full_name, is_active, vendor_id, updated_at: new Date().toISOString() })
+    .update({ role, full_name, is_active, vendor_id })
     .eq("id", id);
 
   if (error) throw new Error(error.message);
