@@ -2,9 +2,11 @@
 
 import { useRouter } from "next/navigation";
 
+import type { Language } from "@/lib/i18n";
+import { t } from "@/lib/i18n";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
-export function LogoutButton() {
+export function LogoutButton({ lang }: { lang: Language }) {
   const router = useRouter();
 
   async function handleLogout() {
@@ -16,7 +18,7 @@ export function LogoutButton() {
 
   return (
     <button className="secondary-button" onClick={handleLogout} type="button">
-      Sign out
+      {t(lang, "signOut")}
     </button>
   );
 }

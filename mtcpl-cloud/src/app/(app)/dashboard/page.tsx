@@ -9,6 +9,10 @@ async function getCount(table: string) {
 
 export default async function DashboardPage() {
   await requireAuth(["owner", "planner", "dispatch"]);
+  const today = new Date().toISOString().slice(0, 10);
+  const startOfMonth = new Date();
+  startOfMonth.setDate(1);
+  const defaultFrom = startOfMonth.toISOString().slice(0, 10);
 
   const [blocks, slabs, carving, dispatches] = await Promise.all([
     getCount("blocks"),
@@ -62,6 +66,21 @@ export default async function DashboardPage() {
           <div className="dashboard-chip">Owner Command Center</div>
           <h1>Performance Dashboard</h1>
           <p className="muted">Track block stock, slab flow, vendor output, and delivery risk from one place.</p>
+          <form action="/dashboard/export" className="dashboard-export-form">
+            <label className="stack">
+              <span>From</span>
+              <input defaultValue={defaultFrom} name="from" type="date" />
+            </label>
+            <label className="stack">
+              <span>To</span>
+              <input defaultValue={today} name="to" type="date" />
+            </label>
+            <div className="record-actions" style={{ alignItems: "end" }}>
+              <button className="primary-button" type="submit">
+                Export to Excel
+              </button>
+            </div>
+          </form>
         </div>
 
         <div className="dashboard-spotlight">

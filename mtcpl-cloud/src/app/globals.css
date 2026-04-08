@@ -232,6 +232,33 @@ textarea {
   background: rgba(255, 255, 255, 0.06);
 }
 
+.language-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  background: #f6efe3;
+  border: 1px solid rgba(109, 75, 39, 0.12);
+}
+
+.language-button {
+  min-height: 34px;
+  min-width: 48px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  color: #7d5b35;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.language-button-active {
+  background: linear-gradient(180deg, #6d4b27 0%, #4a3219 100%);
+  color: #fff7ed;
+}
+
 .main-shell {
   padding: 24px;
 }
@@ -809,6 +836,14 @@ textarea {
   margin: 6px 0;
 }
 
+.dashboard-export-form {
+  display: grid;
+  grid-template-columns: 180px 180px auto;
+  gap: 12px;
+  margin-top: 18px;
+  align-items: end;
+}
+
 .dashboard-metric-strong {
   background: linear-gradient(180deg, #fff6e9 0%, #f5e5c8 100%);
 }
@@ -1099,7 +1134,8 @@ textarea {
   }
 
   .dashboard-hero,
-  .pipeline-grid {
+  .pipeline-grid,
+  .dashboard-export-form {
     grid-template-columns: 1fr;
   }
 
