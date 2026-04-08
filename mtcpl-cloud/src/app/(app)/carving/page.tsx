@@ -4,6 +4,37 @@ import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
+function getDeadlineMeta(dueAt: string | null, completedAt: string | null) {
+  if (!dueAt) {
+    return { label: "No deadline", tone: "neutral", percent: 0 };
+  }
+
+  const due = new Date(dueAt).getTime();
+  const now = Date.now();
+  const total = Math.max(1, due - now + 10 * 24 * 60 * 60 * 1000);
+  const remaining = due - now;
+  const daysLeft = Math.ceil(remaining / (24 * 60 * 60 * 1000));
+  const progress = Math.max(0, Math.min(100, ((total - Math.max(0, remaining)) / total) * 100));
+
+  if (completedAt) {
+    return { label: "Completed", tone: "done", percent: 100 };
+  }
+
+  if (daysLeft <= 0) {
+    return { label: "Overdue", tone: "danger", percent: 100 };
+  }
+
+  if (daysLeft <= 2) {
+    return { label: `${daysLeft} day${daysLeft === 1 ? "" : "s"} left`, tone: "danger", percent: Math.max(progress, 84) };
+  }
+
+  if (daysLeft <= 5) {
+    return { label: `${daysLeft} days left`, tone: "warn", percent: Math.max(progress, 58) };
+  }
+
+  return { label: `${daysLeft} days left`, tone: "safe", percent: Math.max(progress, 18) };
+}
+
 async function setCarvingStatusAction(formData: FormData) {
   "use server";
 
@@ -117,7 +148,7 @@ export default async function CarvingPage() {
 
   let query = supabase
     .from("carving_items")
-    .select("id, slab_requirement_id, vendor_id, vendor_name, vendor_type, status, note, assigned_at, completed_at")
+    .select("id, slab_requirement_id, vendor_id, vendor_name, vendor_type, status, note, assigned_at, completed_at, deadline_days, due_at")
     .order("assigned_at", { ascending: false });
 
   if (profile.role === "vendor" && profile.vendor_id) {
@@ -184,6 +215,24 @@ export default async function CarvingPage() {
                     <span className="role-pill status-pill">{item.status.replaceAll("_", " ")}</span>
                   </div>
 
+                  {(() => {
+                    const deadline = getDeadlineMeta(item.due_at ?? null, item.completed_at ?? null);
+                    return (
+                      <div className="deadline-block">
+                        <div className="deadline-label-row">
+                          <span className="muted">Deadline</span>
+                          <strong className={`deadline-text deadline-${deadline.tone}`}>{deadline.label}</strong>
+                        </div>
+                        <div className="deadline-track">
+                          <div
+                            className={`deadline-fill deadline-${deadline.tone}`}
+                            style={{ width: `${deadline.percent}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                   <div className="record-actions carving-status-actions">
                     {item.status !== "dispatched" ? (
                       <>
@@ -192,10 +241,10 @@ export default async function CarvingPage() {
                           <input name="slab_id" type="hidden" value={item.slab_requirement_id} />
                           <input name="status" type="hidden" value="carving_assigned" />
                           <button
-                            className={`status-button ${item.status === "carving_assigned" ? "status-btn-active status-btn-pending" : "ghost-button"}`}
+                            className={`status-segment ${item.status === "carving_assigned" ? "status-segment-active" : ""}`}
                             type="submit"
                           >
-                            {item.status === "carving_assigned" ? "● Not Started" : "Not Started"}
+                            Not Started
                           </button>
                         </form>
 
@@ -204,10 +253,10 @@ export default async function CarvingPage() {
                           <input name="slab_id" type="hidden" value={item.slab_requirement_id} />
                           <input name="status" type="hidden" value="carving_in_progress" />
                           <button
-                            className={`status-button ${item.status === "carving_in_progress" ? "status-btn-active status-btn-progress" : "secondary-button"}`}
+                            className={`status-segment ${item.status === "carving_in_progress" ? "status-segment-active" : ""}`}
                             type="submit"
                           >
-                            {item.status === "carving_in_progress" ? "● In Progress" : "In Progress"}
+                            In Progress
                           </button>
                         </form>
 
@@ -216,10 +265,10 @@ export default async function CarvingPage() {
                           <input name="slab_id" type="hidden" value={item.slab_requirement_id} />
                           <input name="status" type="hidden" value="completed" />
                           <button
-                            className={`status-button ${item.status === "completed" ? "status-btn-active status-btn-done" : "primary-button"}`}
+                            className={`status-segment ${item.status === "completed" ? "status-segment-active" : ""}`}
                             type="submit"
                           >
-                            {item.status === "completed" ? "● Completed" : "Completed"}
+                            Completed
                           </button>
                         </form>
                       </>

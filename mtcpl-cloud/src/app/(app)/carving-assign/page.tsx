@@ -13,10 +13,14 @@ async function assignVendorAction(formData: FormData) {
   const slabId = String(formData.get("slab_id") || "");
   const vendorId = String(formData.get("vendor_id") || "");
   const note = String(formData.get("note") || "").trim();
+  const deadlineDays = Number(formData.get("deadline_days") || 10);
 
   if (!slabId || !vendorId) {
     throw new Error("Slab and vendor are required.");
   }
+
+  const safeDeadlineDays = Number.isFinite(deadlineDays) ? Math.min(60, Math.max(1, Math.round(deadlineDays))) : 10;
+  const dueAt = new Date(Date.now() + safeDeadlineDays * 24 * 60 * 60 * 1000).toISOString();
 
   const { data: vendor, error: vendorError } = await supabase
     .from("vendors")
@@ -50,6 +54,8 @@ async function assignVendorAction(formData: FormData) {
       vendor_type: vendor.vendor_type,
       note,
       status: "carving_assigned",
+      deadline_days: safeDeadlineDays,
+      due_at: dueAt,
       assigned_by: profile.id,
       assigned_at: new Date().toISOString(),
       completed_at: null
@@ -124,6 +130,18 @@ export default async function CarvingAssignPage() {
                       {vendor.name} ({vendor.vendor_type})
                     </option>
                   ))}
+                </select>
+              </label>
+
+              <label className="stack">
+                <span>Deadline</span>
+                <select defaultValue="10" name="deadline_days">
+                  <option value="3">3 days</option>
+                  <option value="5">5 days</option>
+                  <option value="7">7 days</option>
+                  <option value="10">10 days</option>
+                  <option value="14">14 days</option>
+                  <option value="21">21 days</option>
                 </select>
               </label>
 

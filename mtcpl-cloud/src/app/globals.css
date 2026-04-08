@@ -548,6 +548,209 @@ textarea {
   justify-content: center;
 }
 
+.deadline-block {
+  margin: 14px 0 10px;
+}
+
+.deadline-label-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.deadline-track {
+  height: 10px;
+  border-radius: 999px;
+  background: #efe6d9;
+  overflow: hidden;
+}
+
+.deadline-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.25s ease;
+}
+
+.deadline-safe {
+  background: linear-gradient(90deg, #6bb86f 0%, #8ed28f 100%);
+  color: #2f6c3f;
+}
+
+.deadline-warn {
+  background: linear-gradient(90deg, #d9a746 0%, #f1c56d 100%);
+  color: #9a6b16;
+}
+
+.deadline-danger {
+  background: linear-gradient(90deg, #c65a4d 0%, #e37d72 100%);
+  color: #9a2f2b;
+}
+
+.deadline-done {
+  background: linear-gradient(90deg, #4c8f5b 0%, #74bb86 100%);
+  color: #2f6c3f;
+}
+
+.status-segment {
+  min-width: 154px;
+  min-height: 44px;
+  border-radius: 14px;
+  border: 1px solid rgba(109, 75, 39, 0.18);
+  background: #f8f0e2;
+  color: #7d5b35;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.status-segment-active {
+  background: linear-gradient(180deg, #6d4b27 0%, #4a3219 100%);
+  color: #fff7ed;
+  border-color: transparent;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
+}
+
+.dashboard-hero {
+  display: grid;
+  grid-template-columns: 1.35fr 0.85fr;
+  gap: 18px;
+  background:
+    linear-gradient(135deg, rgba(31, 76, 154, 0.92) 0%, rgba(22, 42, 88, 0.94) 48%, rgba(11, 27, 54, 0.98) 100%);
+  color: #f9fbff;
+}
+
+.dashboard-hero .muted {
+  color: rgba(242, 246, 255, 0.78);
+}
+
+.dashboard-hero h1 {
+  margin: 8px 0 10px;
+  color: #ffffff;
+  font-size: 42px;
+}
+
+.dashboard-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.12);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: #e6efff;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.dashboard-spotlight {
+  padding: 18px;
+  border-radius: 18px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.1);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.dashboard-spotlight strong {
+  font-size: 28px;
+  margin: 6px 0;
+}
+
+.dashboard-metric-strong {
+  background: linear-gradient(180deg, #fff6e9 0%, #f5e5c8 100%);
+}
+
+.dashboard-grid {
+  align-items: start;
+}
+
+.dashboard-panel {
+  min-height: 100%;
+}
+
+.bar-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.bar-row-head {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.bar-track {
+  height: 12px;
+  border-radius: 999px;
+  background: #efe4d4;
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #7aa9ff 0%, #5d81db 100%);
+}
+
+.pipeline-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.pipeline-card {
+  padding: 14px;
+  border-radius: 16px;
+  background: #fbf6ee;
+  border: 1px solid var(--line);
+}
+
+.pipeline-card span {
+  display: block;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.pipeline-card strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 28px;
+  color: var(--brand-strong);
+}
+
+.vendor-report-list {
+  display: grid;
+  gap: 12px;
+}
+
+.vendor-report-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+  border-radius: 16px;
+  background: #fbf7f0;
+  border: 1px solid var(--line);
+}
+
+.vendor-badges {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.overdue-pill {
+  background: #f7dfdb;
+  color: #a83c35;
+}
+
 .dispatch-form {
   align-items: end;
 }
@@ -740,7 +943,16 @@ textarea {
     grid-template-columns: 1fr;
   }
 
+  .dashboard-hero,
+  .pipeline-grid {
+    grid-template-columns: 1fr;
+  }
+
   .status-button {
+    min-width: 100%;
+  }
+
+  .status-segment {
     min-width: 100%;
   }
 }

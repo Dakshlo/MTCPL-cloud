@@ -126,6 +126,8 @@ create table public.carving_items (
   vendor_type public.vendor_type not null,
   note text,
   status public.slab_status not null default 'carving_assigned',
+  deadline_days integer,
+  due_at timestamptz,
   assigned_by uuid references public.profiles(id),
   assigned_at timestamptz not null default now(),
   completed_at timestamptz
