@@ -1,5 +1,6 @@
 import { revalidatePath } from "next/cache";
 
+import { ExportBlocksButton } from "@/components/export-button";
 import { requireAuth } from "@/lib/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
@@ -144,7 +145,7 @@ export default async function BlocksPage() {
   const { profile } = await requireAuth(["owner", "planner", "block_entry"]);
 
   const supabase = await createServerSupabaseClient();
-  const [{ data: blocks, error }, { data: allIds }] = await Promise.all([
+  const [{ data: blocks, error }, { data: allBlocks }, { data: allIds }] = await Promise.all([
     supabase
       .from("blocks")
       .select(
@@ -152,7 +153,14 @@ export default async function BlocksPage() {
       )
       .eq("status", "available")
       .order("created_at", { ascending: false })
-      .limit(100),
+      .limit(200),
+    supabase
+      .from("blocks")
+      .select(
+        "id, stone, yard, category, length_ft, width_ft, height_ft, trim_left_ft, trim_right_ft, trim_near_ft, trim_far_ft, status, created_at"
+      )
+      .order("created_at", { ascending: false })
+      .limit(500),
     supabase.from("blocks").select("id")
   ]);
 
@@ -274,132 +282,112 @@ export default async function BlocksPage() {
       ) : null}
 
       <div className="section-heading" style={{ marginTop: 22 }}>
-        <h2 style={{ margin: 0 }}>Current Inventory</h2>
-        <p className="muted">
-          {blocks?.length ?? 0} open stock blocks. Reserved and consumed blocks are hidden from this entry screen.
-        </p>
+        <div>
+          <h2 style={{ margin: 0 }}>Current Inventory</h2>
+          <p className="muted">
+            {blocks?.length ?? 0} available blocks. Click any row to edit.
+          </p>
+        </div>
+        <ExportBlocksButton blocks={allBlocks ?? []} />
       </div>
 
-      <div className="records-stack">
+      <div className="block-compact-list" style={{ marginTop: 10 }}>
         {(blocks ?? []).map((block) => (
-          <form action={updateBlockAction} className="record-card compact-record inventory-card" key={block.id}>
-            <input name="original_id" type="hidden" value={block.id} />
+          <details className="block-compact-item" key={block.id}>
+            <summary className="block-compact-summary">
+              <span className="mini-cube" />
+              <strong>{block.id}</strong>
+              <span className="role-pill">{block.category}</span>
+              <span className="role-pill">Yard {block.yard}</span>
+              <span className="block-summary-stone">{block.stone}</span>
+              <span className="block-summary-dims">{block.length_ft} × {block.width_ft} × {block.height_ft} ft</span>
+              <span className="block-summary-date muted">{new Date(block.created_at).toLocaleDateString("en-IN")}</span>
+            </summary>
 
-            <div className="record-head">
-              <div>
-                <div className="record-title-row">
-                  <span className="mini-cube" />
-                  <strong>{block.id}</strong>
-                  <span className="role-pill">{block.category}</span>
-                  <span className="role-pill">Yard {block.yard}</span>
-                </div>
-                <p className="muted">
-                  {block.stone} | {block.length_ft} x {block.width_ft} x {block.height_ft} ft
-                </p>
+            <form action={updateBlockAction} className="block-edit-form">
+              <input name="original_id" type="hidden" value={block.id} />
+
+              <div className="inventory-row">
+                <label className="stack">
+                  <span>ID</span>
+                  <input defaultValue={block.id} name="id" required />
+                </label>
+                <label className="stack">
+                  <span>Stone</span>
+                  <select defaultValue={block.stone} name="stone">
+                    {STONES.map((stone) => (
+                      <option key={stone} value={stone}>{stone}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="stack">
+                  <span>Yard</span>
+                  <select defaultValue={String(block.yard)} name="yard">
+                    {YARDS.map((yard) => (
+                      <option key={yard} value={yard}>Yard {yard}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="stack">
+                  <span>Category</span>
+                  <select defaultValue={block.category} name="category">
+                    {CATEGORIES.map((category) => (
+                      <option key={category} value={category}>{category}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="stack">
+                  <span>Status</span>
+                  <select defaultValue={block.status} name="status">
+                    {STATUSES.map((status) => (
+                      <option key={status} value={status}>{status}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="stack">
+                  <span>Length ft</span>
+                  <input defaultValue={String(block.length_ft)} min="0" name="length_ft" step="0.1" type="number" />
+                </label>
+                <label className="stack">
+                  <span>Width ft</span>
+                  <input defaultValue={String(block.width_ft)} min="0" name="width_ft" step="0.1" type="number" />
+                </label>
+                <label className="stack">
+                  <span>Height ft</span>
+                  <input defaultValue={String(block.height_ft)} min="0" name="height_ft" step="0.1" type="number" />
+                </label>
+                <label className="stack">
+                  <span>Trim L</span>
+                  <input defaultValue={String(block.trim_left_ft)} min="0" name="trim_left_ft" step="0.1" type="number" />
+                </label>
+                <label className="stack">
+                  <span>Trim R</span>
+                  <input defaultValue={String(block.trim_right_ft)} min="0" name="trim_right_ft" step="0.1" type="number" />
+                </label>
+                <label className="stack">
+                  <span>Trim N</span>
+                  <input defaultValue={String(block.trim_near_ft)} min="0" name="trim_near_ft" step="0.1" type="number" />
+                </label>
+                <label className="stack">
+                  <span>Trim F</span>
+                  <input defaultValue={String(block.trim_far_ft)} min="0" name="trim_far_ft" step="0.1" type="number" />
+                </label>
               </div>
-              <div className="record-actions compact-actions">
+
+              <div className="block-edit-footer">
+                <label className="stack delete-code-field">
+                  <span>Delete code</span>
+                  <input name="delete_code" placeholder="Enter code to delete" />
+                </label>
+                <button className="ghost-button danger-ghost" formAction={deleteBlockAction} name="id" type="submit" value={block.id}>
+                  Delete
+                </button>
                 <button className="secondary-button" type="submit">
                   Update
                 </button>
               </div>
-            </div>
-
-            <div className="inventory-row">
-              <label className="stack">
-                <span>ID</span>
-                <input defaultValue={block.id} name="id" required />
-              </label>
-
-              <label className="stack">
-                <span>Stone</span>
-                <select defaultValue={block.stone} name="stone">
-                  {STONES.map((stone) => (
-                    <option key={stone} value={stone}>
-                      {stone}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="stack">
-                <span>Yard</span>
-                <select defaultValue={String(block.yard)} name="yard">
-                  {YARDS.map((yard) => (
-                    <option key={yard} value={yard}>
-                      Yard {yard}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="stack">
-                <span>Category</span>
-                <select defaultValue={block.category} name="category">
-                  {CATEGORIES.map((category) => (
-                    <option key={category} value={category}>
-                      {category}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="stack">
-                <span>Status</span>
-                <select defaultValue={block.status} name="status">
-                  {STATUSES.map((status) => (
-                    <option key={status} value={status}>
-                      {status}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="stack">
-                <span>Length</span>
-                <input defaultValue={String(block.length_ft)} min="0" name="length_ft" step="0.1" type="number" />
-              </label>
-
-              <label className="stack">
-                <span>Width</span>
-                <input defaultValue={String(block.width_ft)} min="0" name="width_ft" step="0.1" type="number" />
-              </label>
-
-              <label className="stack">
-                <span>Height</span>
-                <input defaultValue={String(block.height_ft)} min="0" name="height_ft" step="0.1" type="number" />
-              </label>
-
-              <label className="stack">
-                <span>Left trim</span>
-                <input defaultValue={String(block.trim_left_ft)} min="0" name="trim_left_ft" step="0.1" type="number" />
-              </label>
-
-              <label className="stack">
-                <span>Right trim</span>
-                <input defaultValue={String(block.trim_right_ft)} min="0" name="trim_right_ft" step="0.1" type="number" />
-              </label>
-
-              <label className="stack">
-                <span>Near trim</span>
-                <input defaultValue={String(block.trim_near_ft)} min="0" name="trim_near_ft" step="0.1" type="number" />
-              </label>
-
-              <label className="stack">
-                <span>Far trim</span>
-                <input defaultValue={String(block.trim_far_ft)} min="0" name="trim_far_ft" step="0.1" type="number" />
-              </label>
-            </div>
-
-            <div className="delete-row">
-              <label className="stack delete-code-field">
-                <span>Delete code</span>
-                <input name="delete_code" placeholder="Enter code to delete" />
-              </label>
-              <button className="ghost-button danger-ghost" formAction={deleteBlockAction} name="id" type="submit" value={block.id}>
-                Delete Block
-              </button>
-            </div>
-          </form>
+            </form>
+          </details>
         ))}
       </div>
 
