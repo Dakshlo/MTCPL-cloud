@@ -9,7 +9,8 @@ const navItems: NavItem[] = [
   { href: "/planning", label: "Planning", roles: ["owner", "planner"] },
   { href: "/cutting", label: "Cutting", roles: ["owner", "worker"] },
   { href: "/carving-assign", label: "Carving Assign", roles: ["owner", "carving_assigner"] },
-  { href: "/carving", label: "Carving", roles: ["owner", "dispatch", "vendor"] }
+  { href: "/carving", label: "Carving", roles: ["owner", "dispatch", "vendor"] },
+  { href: "/users", label: "Users", roles: ["owner"] }
 ];
 
 export function Sidebar({ role, displayName }: { role: AppRole; displayName?: string }) {
