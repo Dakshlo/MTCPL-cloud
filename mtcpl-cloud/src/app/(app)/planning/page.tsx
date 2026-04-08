@@ -35,6 +35,32 @@ async function approvePlanAction(formData: FormData) {
     throw new Error("No placed blocks found in this plan.");
   }
 
+  const blockIds = Array.from(new Set(plan.map((item) => item.blk.id)));
+  const slabIds = Array.from(new Set(plan.flatMap((item) => item.placed.map((slab) => slab.id))));
+
+  const [{ data: liveBlocks, error: liveBlocksError }, { data: liveSlabs, error: liveSlabsError }] = await Promise.all([
+    supabase.from("blocks").select("id, status").in("id", blockIds),
+    supabase.from("slab_requirements").select("id, status").in("id", slabIds)
+  ]);
+
+  if (liveBlocksError) {
+    throw new Error(liveBlocksError.message);
+  }
+
+  if (liveSlabsError) {
+    throw new Error(liveSlabsError.message);
+  }
+
+  const blockedBlock = (liveBlocks ?? []).find((item) => item.status !== "available");
+  if (blockedBlock) {
+    throw new Error(`Block ${blockedBlock.id} was already changed by another user. Refresh planning and generate again.`);
+  }
+
+  const blockedSlab = (liveSlabs ?? []).find((item) => item.status !== "open");
+  if (blockedSlab) {
+    throw new Error(`Slab ${blockedSlab.id} was already changed by another user. Refresh planning and generate again.`);
+  }
+
   const sessionCode = "CUT-" + new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 12);
 
   const { data: session, error: sessionError } = await supabase
@@ -78,10 +104,16 @@ async function approvePlanAction(formData: FormData) {
         updated_by: profile.id,
         updated_at: new Date().toISOString()
       })
-      .eq("id", item.blk.id);
+      .eq("id", item.blk.id)
+      .eq("status", "available")
+      .select("id");
 
     if (usedBlockStatus.error) {
       throw new Error(usedBlockStatus.error.message);
+    }
+
+    if (!usedBlockStatus.data?.length) {
+      throw new Error(`Block ${item.blk.id} was already reserved by another user. Refresh planning and try again.`);
     }
 
     for (const slab of item.placed) {
@@ -108,10 +140,16 @@ async function approvePlanAction(formData: FormData) {
           updated_by: profile.id,
           updated_at: new Date().toISOString()
         })
-        .eq("id", slab.id);
+        .eq("id", slab.id)
+        .eq("status", "open")
+        .select("id");
 
       if (slabUpdate.error) {
         throw new Error(slabUpdate.error.message);
+      }
+
+      if (!slabUpdate.data?.length) {
+        throw new Error(`Slab ${slab.id} was already used by another user. Refresh planning and try again.`);
       }
     }
   }
@@ -134,10 +172,12 @@ export default async function PlanningPage() {
       .select(
         "id, stone, yard, category, length_ft, width_ft, height_ft, trim_left_ft, trim_right_ft, trim_near_ft, trim_far_ft, status"
       )
+      .eq("status", "available")
       .order("created_at", { ascending: false }),
     supabase
       .from("slab_requirements")
       .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, status")
+      .eq("status", "open")
       .order("created_at", { ascending: false })
   ]);
 

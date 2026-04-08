@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { LogoutButton } from "@/components/logout-button";
+import { RealtimeRefresh } from "@/components/realtime-refresh";
 import { Sidebar } from "@/components/sidebar";
 import { Toast } from "@/components/toast";
 import { requireAuth } from "@/lib/auth";
@@ -12,6 +13,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="app-shell">
+      <RealtimeRefresh />
       <Sidebar displayName={displayName} role={profile.role} />
 
       <main className="main-shell">

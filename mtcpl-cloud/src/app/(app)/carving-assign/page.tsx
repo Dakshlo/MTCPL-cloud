@@ -28,17 +28,34 @@ async function assignVendorAction(formData: FormData) {
     throw new Error(vendorError?.message || "Vendor not found.");
   }
 
-  const { error: carvingInsertError } = await supabase.from("carving_items").upsert({
-    slab_requirement_id: slabId,
-    vendor_id: vendor.id,
-    vendor_name: vendor.name,
-    vendor_type: vendor.vendor_type,
-    note,
-    status: "carving_assigned",
-    assigned_by: profile.id,
-    assigned_at: new Date().toISOString(),
-    completed_at: null
-  });
+  const { data: slab, error: slabReadError } = await supabase
+    .from("slab_requirements")
+    .select("id, status")
+    .eq("id", slabId)
+    .single();
+
+  if (slabReadError || !slab) {
+    throw new Error(slabReadError?.message || "Slab not found.");
+  }
+
+  if (slab.status !== "cut_done" && slab.status !== "carving_assigned") {
+    throw new Error(`Slab ${slabId} is no longer ready for carving assignment. Refresh and try again.`);
+  }
+
+  const { error: carvingInsertError } = await supabase.from("carving_items").upsert(
+    {
+      slab_requirement_id: slabId,
+      vendor_id: vendor.id,
+      vendor_name: vendor.name,
+      vendor_type: vendor.vendor_type,
+      note,
+      status: "carving_assigned",
+      assigned_by: profile.id,
+      assigned_at: new Date().toISOString(),
+      completed_at: null
+    },
+    { onConflict: "slab_requirement_id" }
+  );
 
   if (carvingInsertError) {
     throw new Error(carvingInsertError.message);

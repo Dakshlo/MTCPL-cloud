@@ -47,13 +47,9 @@ async function addSlabAction(formData: FormData) {
   const supabase = await createServerSupabaseClient();
   const { data: existingRows } = await supabase.from("slab_requirements").select("id");
   const existingIds = (existingRows ?? []).map((row) => row.id);
-  let nextId = textValue(formData, "id");
-  if (!nextId || existingIds.includes(nextId)) {
-    nextId = nextCode(existingIds, "S", 200);
-  }
+  const requestedId = textValue(formData, "id");
 
   const payload = {
-    id: nextId,
     label: textValue(formData, "label"),
     temple: textValue(formData, "temple") || "Umia Mata",
     stone: textValue(formData, "stone") || null,
@@ -67,19 +63,41 @@ async function addSlabAction(formData: FormData) {
     updated_by: profile.id
   };
 
-  if (!payload.id || !payload.label) {
+  if (!payload.label) {
     throw new Error("Slab ID and label are required.");
   }
 
-  const { error } = await supabase.from("slab_requirements").insert(payload);
+  let attempt = 0;
+  let nextId = requestedId;
+  let lastError: string | null = null;
 
-  if (error) {
-    throw new Error(error.message);
+  while (attempt < 5) {
+    if (!nextId || existingIds.includes(nextId)) {
+      nextId = nextCode(existingIds, "S", 200);
+    }
+
+    const { error } = await supabase.from("slab_requirements").insert({
+      ...payload,
+      id: nextId
+    });
+
+    if (!error) {
+      revalidatePath("/slabs");
+      revalidatePath("/dashboard");
+      redirect("/slabs?toast=Slab+added+successfully");
+    }
+
+    lastError = error.message;
+    if (error.code !== "23505") {
+      throw new Error(error.message);
+    }
+
+    existingIds.push(nextId);
+    nextId = "";
+    attempt += 1;
   }
 
-  revalidatePath("/slabs");
-  revalidatePath("/dashboard");
-  redirect("/slabs?toast=Slab+added+successfully");
+  throw new Error(lastError || "Unable to generate a unique slab ID. Please try again.");
 }
 
 async function updateSlabAction(formData: FormData) {

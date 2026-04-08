@@ -40,13 +40,9 @@ async function addBlockAction(formData: FormData) {
   const supabase = await createServerSupabaseClient();
   const { data: existingRows } = await supabase.from("blocks").select("id");
   const existingIds = (existingRows ?? []).map((row) => row.id);
-  let nextId = textValue(formData, "id");
-  if (!nextId || existingIds.includes(nextId)) {
-    nextId = nextCode(existingIds, "BLK-", 1000);
-  }
+  const requestedId = textValue(formData, "id");
 
   const payload = {
-    id: nextId,
     stone: textValue(formData, "stone") || "Makrana",
     yard: numValue(formData, "yard", 1),
     category: textValue(formData, "category") || "Fresh",
@@ -62,19 +58,37 @@ async function addBlockAction(formData: FormData) {
     updated_by: profile.id
   };
 
-  if (!payload.id) {
-    throw new Error("Block ID is required.");
+  let attempt = 0;
+  let nextId = requestedId;
+  let lastError: string | null = null;
+
+  while (attempt < 5) {
+    if (!nextId || existingIds.includes(nextId)) {
+      nextId = nextCode(existingIds, "BLK-", 1000);
+    }
+
+    const { error } = await supabase.from("blocks").insert({
+      ...payload,
+      id: nextId
+    });
+
+    if (!error) {
+      revalidatePath("/blocks");
+      revalidatePath("/dashboard");
+      redirect("/blocks?toast=Block+added+successfully");
+    }
+
+    lastError = error.message;
+    if (error.code !== "23505") {
+      throw new Error(error.message);
+    }
+
+    existingIds.push(nextId);
+    nextId = "";
+    attempt += 1;
   }
 
-  const { error } = await supabase.from("blocks").insert(payload);
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  revalidatePath("/blocks");
-  revalidatePath("/dashboard");
-  redirect("/blocks?toast=Block+added+successfully");
+  throw new Error(lastError || "Unable to generate a unique block ID. Please try again.");
 }
 
 async function updateBlockAction(formData: FormData) {
