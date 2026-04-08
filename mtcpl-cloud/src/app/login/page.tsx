@@ -1,6 +1,15 @@
-import { AuthForm } from "@/components/auth-form";
+import { redirect } from "next/navigation";
 
-export default function LoginPage() {
+import { AuthForm } from "@/components/auth-form";
+import { getAuthContext, getDefaultRouteForProfile } from "@/lib/auth";
+
+export default async function LoginPage() {
+  const { user, profile } = await getAuthContext();
+
+  if (user && profile) {
+    redirect(getDefaultRouteForProfile(profile));
+  }
+
   return (
     <main className="login-shell">
       <section className="login-grid">
@@ -12,7 +21,7 @@ export default function LoginPage() {
           </p>
 
           <div className="banner" style={{ marginTop: 18 }}>
-            Use separate roles in the database so each person only sees the screens they are supposed to access.
+            New users will wait for management approval before their portal becomes active.
           </div>
         </div>
 

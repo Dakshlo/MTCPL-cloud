@@ -40,7 +40,9 @@ export function AuthForm() {
         });
 
         if (signUpError) throw signUpError;
-        setMessage("Account created. Check your email if confirmation is enabled.");
+        setMessage(
+          "Account created. Use the same email and password to sign in after confirmation. You will see a waiting screen until management activates and assigns your role."
+        );
       } else {
         const { error: signInError } = await supabase.auth.signInWithPassword({
           email: form.email,
@@ -101,8 +103,8 @@ export function AuthForm() {
         <p>Suggested production flow:</p>
         <ul>
           <li>Use company email and password for all portal users</li>
-          <li>Assign roles in Supabase so each person sees only their own screens</li>
-          <li>Enable MFA later if you want stronger account security</li>
+          <li>New accounts wait in a pending state until management activates them</li>
+          <li>After approval, each person only sees their own portal screens</li>
         </ul>
       </div>
 

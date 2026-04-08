@@ -10,7 +10,7 @@ const STONES = ["Makrana", "Pinkstone"] as const;
 const CATEGORIES = ["Fresh", "Reused"] as const;
 const STATUSES = ["available", "reserved", "consumed", "discarded"] as const;
 const YARDS = [1, 2, 3] as const;
-const BLOCK_DELETE_CODE = process.env.BLOCK_DELETE_CODE || "MTCPL-DELETE";
+const BLOCK_DELETE_CODE = process.env.BLOCK_DELETE_CODE || "1255";
 const LEGACY_DELETE_CODES = ["1255", "MTCPL-DELETE"];
 
 function nextCode(ids: string[], prefix: string, start: number) {

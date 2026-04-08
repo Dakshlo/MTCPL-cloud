@@ -79,7 +79,7 @@ export default async function UsersPage() {
               <span className="role-pill">{user.role}</span>
               {user.phone ? <span className="block-summary-stone">{user.phone}</span> : null}
               <span className={`role-pill ${user.is_active ? "" : "pending-pill"}`}>
-                {user.is_active ? "Active" : "Inactive"}
+                {user.is_active ? "Active" : "Pending approval"}
               </span>
               <span className="block-summary-date muted">
                 {new Date(user.created_at).toLocaleDateString("en-IN")}
@@ -107,10 +107,10 @@ export default async function UsersPage() {
                 </label>
 
                 <label className="stack">
-                  <span>Active</span>
+                  <span>Access</span>
                   <select defaultValue={String(user.is_active)} name="is_active">
-                    <option value="true">Active</option>
-                    <option value="false">Inactive</option>
+                    <option value="true">Approved and active</option>
+                    <option value="false">Pending approval</option>
                   </select>
                 </label>
 

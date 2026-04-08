@@ -18,6 +18,7 @@ const STATUSES = [
   "dispatched",
   "rejected"
 ] as const;
+const BLOCK_DELETE_CODE = process.env.BLOCK_DELETE_CODE || "1255";
 const LEGACY_DELETE_CODES = ["1255", "MTCPL-DELETE"];
 
 function nextCode(ids: string[], prefix: string, start: number) {
@@ -157,7 +158,7 @@ async function deleteSlabAction(formData: FormData) {
     redirectWithToast("/slabs", "Slab ID is missing");
   }
 
-  if (![process.env.BLOCK_DELETE_CODE || "MTCPL-DELETE", ...LEGACY_DELETE_CODES].includes(deleteCode)) {
+  if (![BLOCK_DELETE_CODE, ...LEGACY_DELETE_CODES].includes(deleteCode)) {
     redirectWithToast("/slabs", "Delete code is incorrect. Slab was not deleted.");
   }
 

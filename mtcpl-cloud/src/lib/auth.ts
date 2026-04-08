@@ -24,6 +24,18 @@ export function getDefaultRouteForRole(role?: AppRole | null) {
   }
 }
 
+export function getDefaultRouteForProfile(profile?: Pick<Profile, "role" | "is_active"> | null) {
+  if (!profile) {
+    return "/login";
+  }
+
+  if (!profile.is_active) {
+    return "/pending";
+  }
+
+  return getDefaultRouteForRole(profile.role);
+}
+
 export async function getAuthContext() {
   const supabase = await createServerSupabaseClient();
   const {
@@ -60,8 +72,12 @@ export async function getAuthContext() {
 export async function requireAuth(roles?: AppRole[]): Promise<{ user: NonNullable<Awaited<ReturnType<typeof getAuthContext>>["user"]>; profile: NonNullable<Awaited<ReturnType<typeof getAuthContext>>["profile"]> }> {
   const ctx = await getAuthContext();
 
-  if (!ctx.user || !ctx.profile || !ctx.profile.is_active) {
+  if (!ctx.user || !ctx.profile) {
     redirect("/login");
+  }
+
+  if (!ctx.profile.is_active) {
+    redirect("/pending");
   }
 
   if (roles && roles.length && !roles.includes(ctx.profile.role)) {

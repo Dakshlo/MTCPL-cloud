@@ -41,7 +41,8 @@ textarea {
 }
 
 .landing-shell,
-.login-shell {
+.login-shell,
+.pending-shell {
   min-height: 100vh;
   display: grid;
   place-items: center;
@@ -49,6 +50,7 @@ textarea {
 }
 
 .landing-card,
+.pending-card,
 .auth-card,
 .page-card,
 .metric-card {
@@ -60,6 +62,11 @@ textarea {
 
 .landing-card {
   width: min(840px, 100%);
+  padding: 32px;
+}
+
+.pending-card {
+  width: min(760px, 100%);
   padding: 32px;
 }
 

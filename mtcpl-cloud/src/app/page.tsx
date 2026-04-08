@@ -1,13 +1,13 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { getAuthContext, getDefaultRouteForRole } from "@/lib/auth";
+import { getAuthContext, getDefaultRouteForProfile } from "@/lib/auth";
 
 export default async function HomePage() {
   const { user, profile } = await getAuthContext();
 
   if (user && profile) {
-    redirect(getDefaultRouteForRole(profile.role));
+    redirect(getDefaultRouteForProfile(profile));
   }
 
   return (
