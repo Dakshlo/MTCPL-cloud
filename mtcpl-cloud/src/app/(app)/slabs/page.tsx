@@ -209,113 +209,204 @@ export default async function SlabsPage() {
     "S",
     200
   );
+  const slabList = slabs ?? [];
+  const totalArea = slabList.reduce((sum, slab) => sum + Number(slab.length_ft) * Number(slab.width_ft), 0);
+  const priorityCount = slabList.filter((slab) => slab.priority).length;
+  const templeCount = new Set(slabList.map((slab) => slab.temple)).size;
+  const pinkstoneCount = slabList.filter((slab) => slab.stone === "Pinkstone").length;
 
   return (
-    <section className="page-card">
-      <div className="topbar" style={{ marginBottom: 0 }}>
-        <div>
+    <>
+      <section className="page-card inventory-hero inventory-hero-slabs">
+        <div className="inventory-hero-copy">
+          <div className="dashboard-chip">Demand Pipeline</div>
           <h1>Slab Requirements</h1>
           <p className="muted">
-            Maintain required slabs for each temple project and link them to source blocks when available.
+            Capture upcoming temple demand with more clarity around labels, priorities, source blocks, and stone preference.
           </p>
+          <div className="inventory-chip-row">
+            <span className="role-pill">Editable by owner, planner, slab entry</span>
+            <span className="role-pill">Priority aware</span>
+            <span className="role-pill">Temple grouped</span>
+          </div>
         </div>
-        <span className="role-pill">Editable by: owner, planner, slab entry</span>
-      </div>
+
+        <div className="inventory-hero-panel">
+          <div className="inventory-hero-art">
+            <SlabMiniPreview accent="#C09282" stone="Pinkstone" className="hero-block-art" />
+            <div>
+              <strong>Open Demand Snapshot</strong>
+              <p className="muted">
+                {priorityCount} priority slabs · {templeCount} temple groups · {pinkstoneCount} already tagged Pinkstone.
+              </p>
+            </div>
+          </div>
+          <div className="inventory-mini-bars">
+            <div className="inventory-mini-bar">
+              <div className="inventory-mini-bar-head">
+                <span>Total queue</span>
+                <strong>{slabList.length}</strong>
+              </div>
+              <div className="bar-track">
+                <div className="bar-fill inventory-fill-cool" style={{ width: "100%" }} />
+              </div>
+            </div>
+            <div className="inventory-mini-bar">
+              <div className="inventory-mini-bar-head">
+                <span>Priority share</span>
+                <strong>{priorityCount}</strong>
+              </div>
+              <div className="bar-track">
+                <div
+                  className="bar-fill inventory-fill-warn"
+                  style={{ width: `${slabList.length ? (priorityCount / slabList.length) * 100 : 0}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="metrics-grid inventory-metrics-row">
+        <div className="metric-card inventory-metric">
+          <span>Open Slabs</span>
+          <strong>{slabList.length}</strong>
+        </div>
+        <div className="metric-card inventory-metric">
+          <span>Total Area</span>
+          <strong>{totalArea.toFixed(1)}</strong>
+          <small>ft2 requested</small>
+        </div>
+        <div className="metric-card inventory-metric">
+          <span>Priority Items</span>
+          <strong>{priorityCount}</strong>
+        </div>
+        <div className="metric-card inventory-metric">
+          <span>Temple Groups</span>
+          <strong>{templeCount}</strong>
+        </div>
+      </section>
 
       {canEdit ? (
-        <form action={addSlabAction} className="page-card compact-create-card inventory-create-shell" style={{ marginTop: 18, padding: 18 }}>
-          <div className="section-heading">
-            <h2 style={{ margin: 0 }}>Add New Slab Requirement</h2>
-            <p className="muted">ID is generated automatically first. Planned and processed slabs stay out of this list.</p>
+        <form action={addSlabAction} className="page-card compact-create-card inventory-create-shell inventory-studio" style={{ marginTop: 18, padding: 18 }}>
+          <div className="inventory-studio-main">
+            <div className="section-heading">
+              <div>
+                <h2 style={{ margin: 0 }}>Add New Slab Requirement</h2>
+                <p className="muted">Premium queue entry with automatic IDs, temple grouping, and Pinkstone as the default selection.</p>
+              </div>
+            </div>
+
+            <div className="inventory-row inventory-row-create">
+              <label className="stack">
+                <span>ID</span>
+                <input defaultValue={suggestedId} name="id" placeholder={suggestedId} />
+              </label>
+
+              <label className="stack">
+                <span>Label</span>
+                <input defaultValue="" name="label" placeholder="Main panel" required />
+              </label>
+
+              <label className="stack">
+                <span>Temple</span>
+                <select defaultValue="Umia Mata" name="temple">
+                  {TEMPLES.map((temple) => (
+                    <option key={temple} value={temple}>
+                      {temple}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="stack">
+                <span>Stone</span>
+                <select defaultValue="Pinkstone" name="stone">
+                  <option value="">Auto / not fixed yet</option>
+                  {STONES.filter(Boolean).map((stone) => (
+                    <option key={stone} value={stone}>
+                      {stone}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="stack">
+                <span>Priority</span>
+                <select defaultValue="false" name="priority">
+                  <option value="false">Normal</option>
+                  <option value="true">⚡ Priority</option>
+                </select>
+              </label>
+
+              <input name="status" type="hidden" value="open" />
+            </div>
+
+            <div className="inventory-row inventory-row-create" style={{ marginTop: 12 }}>
+              <label className="stack">
+                <span>Length ft</span>
+                <input defaultValue="3" min="0" name="length_ft" step="0.1" type="number" />
+              </label>
+
+              <label className="stack">
+                <span>Width ft</span>
+                <input defaultValue="2" min="0" name="width_ft" step="0.1" type="number" />
+              </label>
+
+              <label className="stack">
+                <span>Thickness ft</span>
+                <input defaultValue="0.5" min="0" name="thickness_ft" step="0.05" type="number" />
+              </label>
+
+              <label className="stack">
+                <span>Source block</span>
+                <select defaultValue="" name="source_block_id">
+                  <option value="">Not linked yet</option>
+                  {(blocks ?? []).map((block) => (
+                    <option key={block.id} value={block.id}>
+                      {block.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <div className="create-footer" style={{ marginTop: 16 }}>
+              <button className="primary-button" type="submit">
+                Add Slab
+              </button>
+            </div>
           </div>
 
-          <div className="inventory-row inventory-row-create">
-            <label className="stack">
-              <span>ID</span>
-              <input defaultValue={suggestedId} name="id" placeholder={suggestedId} />
-            </label>
-
-            <label className="stack">
-              <span>Label</span>
-              <input defaultValue="" name="label" placeholder="Main panel" required />
-            </label>
-
-            <label className="stack">
-              <span>Temple</span>
-              <select defaultValue="Umia Mata" name="temple">
-                {TEMPLES.map((temple) => (
-                  <option key={temple} value={temple}>
-                    {temple}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="stack">
-              <span>Stone</span>
-              <select defaultValue="Pinkstone" name="stone">
-                <option value="">Auto / not fixed yet</option>
-                {STONES.filter(Boolean).map((stone) => (
-                  <option key={stone} value={stone}>
-                    {stone}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="stack">
-              <span>Priority</span>
-              <select defaultValue="false" name="priority">
-                <option value="false">Normal</option>
-                <option value="true">⚡ Priority</option>
-              </select>
-            </label>
-
-            <input name="status" type="hidden" value="open" />
-          </div>
-
-          <div className="inventory-row inventory-row-create" style={{ marginTop: 12 }}>
-            <label className="stack">
-              <span>Length ft</span>
-              <input defaultValue="3" min="0" name="length_ft" step="0.1" type="number" />
-            </label>
-
-            <label className="stack">
-              <span>Width ft</span>
-              <input defaultValue="2" min="0" name="width_ft" step="0.1" type="number" />
-            </label>
-
-            <label className="stack">
-              <span>Thickness ft</span>
-              <input defaultValue="0.5" min="0" name="thickness_ft" step="0.05" type="number" />
-            </label>
-
-            <label className="stack">
-              <span>Source block</span>
-              <select defaultValue="" name="source_block_id">
-                <option value="">Not linked yet</option>
-                {(blocks ?? []).map((block) => (
-                  <option key={block.id} value={block.id}>
-                    {block.id}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          <div className="create-footer" style={{ marginTop: 16 }}>
-            <button className="primary-button" type="submit">
-              Add Slab
-            </button>
-          </div>
+          <aside className="inventory-studio-side">
+            <div className="inventory-preview-card">
+              <SlabMiniPreview accent="#C09282" stone="Pinkstone" className="inventory-preview-art" />
+              <strong>Queue Builder</strong>
+              <p className="muted">
+                Keep slab demand organized by temple, flag critical pieces with priority, and link source blocks when known.
+              </p>
+              <div className="inventory-preview-stats">
+                <div>
+                  <span className="muted">Suggested code</span>
+                  <strong>{suggestedId}</strong>
+                </div>
+                <div>
+                  <span className="muted">Default stone</span>
+                  <strong>Pinkstone</strong>
+                </div>
+              </div>
+            </div>
+          </aside>
         </form>
       ) : null}
 
-      <div className="section-heading" style={{ marginTop: 22 }}>
-        <h2 style={{ margin: 0 }}>Current Slab Queue</h2>
-        <p className="muted">
-          {slabs?.length ?? 0} open slab requirements. Planned and processed slabs are hidden from this entry screen.
-        </p>
+      <div className="section-heading inventory-list-header" style={{ marginTop: 22 }}>
+        <div>
+          <h2 style={{ margin: 0 }}>Current Slab Queue</h2>
+          <p className="muted">
+            {slabs?.length ?? 0} open slab requirements. Planned and processed slabs are hidden from this entry screen.
+          </p>
+        </div>
       </div>
 
       {(() => {
@@ -452,13 +543,19 @@ export default async function SlabsPage() {
           <div className="records-stack">
             {prioritySlabs.length > 0 ? (
               <>
-                <div className="temple-group-header">⚡ Priority</div>
+                <div className="temple-group-header inventory-cluster-header">
+                  <span>⚡ Priority</span>
+                  <strong>{prioritySlabs.length} items</strong>
+                </div>
                 {prioritySlabs.map(renderSlabForm)}
               </>
             ) : null}
             {templeKeys.map((temple) => (
-              <div key={temple}>
-                <div className="temple-group-header">{temple}</div>
+              <div className="inventory-cluster" key={temple}>
+                <div className="temple-group-header inventory-cluster-header">
+                  <span>{temple}</span>
+                  <strong>{normalByTemple[temple].length} slabs</strong>
+                </div>
                 {normalByTemple[temple].map(renderSlabForm)}
               </div>
             ))}
@@ -471,6 +568,6 @@ export default async function SlabsPage() {
           No slab requirements found yet. Add your first slab requirement above.
         </div>
       ) : null}
-    </section>
+    </>
   );
 }

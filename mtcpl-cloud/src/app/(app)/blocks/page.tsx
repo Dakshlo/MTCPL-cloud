@@ -212,114 +212,202 @@ export default async function BlocksPage() {
     "BLK-",
     1000
   );
+  const blockList = blocks ?? [];
+  const totalVolume = blockList.reduce((sum, block) => {
+    return sum + Number(block.length_ft) * Number(block.width_ft) * Number(block.height_ft);
+  }, 0);
+  const reusedCount = blockList.filter((block) => block.category === "Reused").length;
+  const makranaCount = blockList.filter((block) => block.stone === "Makrana").length;
+  const pinkstoneCount = blockList.filter((block) => block.stone === "Pinkstone").length;
+  const yardSpread = [1, 2, 3].map((yard) => ({
+    yard,
+    count: blockList.filter((block) => Number(block.yard) === yard).length
+  }));
 
   return (
-    <section className="page-card">
-      <div className="topbar" style={{ marginBottom: 0 }}>
-        <div>
-          <h1>Blocks</h1>
+    <>
+      <section className="page-card inventory-hero inventory-hero-blocks">
+        <div className="inventory-hero-copy">
+          <div className="dashboard-chip">Stock Intelligence</div>
+          <h1>Blocks Inventory</h1>
           <p className="muted">
-            Create, update, and maintain stone block stock in the shared cloud database.
+            Track every available block with cleaner visibility across stone type, yard, volume, and reusable remainder stock.
           </p>
+          <div className="inventory-chip-row">
+            <span className="role-pill">Editable by owner, planner, block entry</span>
+            <span className="role-pill">Delete code protected</span>
+            <span className="role-pill">Realtime shared</span>
+          </div>
         </div>
-        <span className="role-pill">Editable by: owner, planner, block entry</span>
-      </div>
+
+        <div className="inventory-hero-panel">
+          <div className="inventory-hero-art">
+            <BlockMiniPreview stone="Pinkstone" className="hero-block-art" />
+            <div>
+              <strong>Live Stock Snapshot</strong>
+              <p className="muted">
+                {pinkstoneCount} Pinkstone · {makranaCount} Makrana · {reusedCount} reused pieces ready for planning.
+              </p>
+            </div>
+          </div>
+          <div className="inventory-mini-bars">
+            {yardSpread.map((item) => (
+              <div className="inventory-mini-bar" key={item.yard}>
+                <div className="inventory-mini-bar-head">
+                  <span>Yard {item.yard}</span>
+                  <strong>{item.count}</strong>
+                </div>
+                <div className="bar-track">
+                  <div
+                    className="bar-fill inventory-fill-warm"
+                    style={{ width: `${blockList.length ? (item.count / blockList.length) * 100 : 0}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="metrics-grid inventory-metrics-row">
+        <div className="metric-card inventory-metric">
+          <span>Available Blocks</span>
+          <strong>{blockList.length}</strong>
+        </div>
+        <div className="metric-card inventory-metric">
+          <span>Total Volume</span>
+          <strong>{totalVolume.toFixed(1)}</strong>
+          <small>ft3 ready for planning</small>
+        </div>
+        <div className="metric-card inventory-metric">
+          <span>Reused Pieces</span>
+          <strong>{reusedCount}</strong>
+        </div>
+        <div className="metric-card inventory-metric">
+          <span>Pinkstone Bias</span>
+          <strong>{pinkstoneCount}</strong>
+        </div>
+      </section>
 
       {canEdit ? (
-        <form action={addBlockAction} className="page-card compact-create-card inventory-create-shell" style={{ marginTop: 18, padding: 18 }}>
-          <div className="section-heading">
-            <h2 style={{ margin: 0 }}>Add New Block</h2>
-            <p className="muted">ID is generated automatically first. You can still change it if needed.</p>
+        <form action={addBlockAction} className="page-card compact-create-card inventory-create-shell inventory-studio" style={{ marginTop: 18, padding: 18 }}>
+          <div className="inventory-studio-main">
+            <div className="section-heading">
+              <div>
+                <h2 style={{ margin: 0 }}>Add New Block</h2>
+                <p className="muted">Fast, structured entry for stock teams. The next block code is prepared automatically.</p>
+              </div>
+            </div>
+
+            <div className="inventory-row inventory-row-create">
+              <label className="stack">
+                <span>ID</span>
+                <input defaultValue={suggestedId} name="id" placeholder={suggestedId} />
+              </label>
+
+              <label className="stack">
+                <span>Stone</span>
+                <select defaultValue="Pinkstone" name="stone">
+                  {STONES.map((stone) => (
+                    <option key={stone} value={stone}>
+                      {stone}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="stack">
+                <span>Yard</span>
+                <select defaultValue="1" name="yard">
+                  {YARDS.map((yard) => (
+                    <option key={yard} value={yard}>
+                      Yard {yard}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="stack">
+                <span>Category</span>
+                <select defaultValue="Fresh" name="category">
+                  {CATEGORIES.map((category) => (
+                    <option key={category} value={category}>
+                      {category}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <input name="status" type="hidden" value="available" />
+            </div>
+
+            <div className="inventory-row inventory-row-create" style={{ marginTop: 12 }}>
+              <label className="stack">
+                <span>Length ft</span>
+                <input defaultValue="6" min="0" name="length_ft" step="0.1" type="number" />
+              </label>
+
+              <label className="stack">
+                <span>Width ft</span>
+                <input defaultValue="4" min="0" name="width_ft" step="0.1" type="number" />
+              </label>
+
+              <label className="stack">
+                <span>Height ft</span>
+                <input defaultValue="2" min="0" name="height_ft" step="0.1" type="number" />
+              </label>
+
+              <label className="stack">
+                <span>Left trim ft</span>
+                <input defaultValue="0" min="0" name="trim_left_ft" step="0.1" type="number" />
+              </label>
+
+              <label className="stack">
+                <span>Right trim ft</span>
+                <input defaultValue="0" min="0" name="trim_right_ft" step="0.1" type="number" />
+              </label>
+
+              <label className="stack">
+                <span>Near trim ft</span>
+                <input defaultValue="0" min="0" name="trim_near_ft" step="0.1" type="number" />
+              </label>
+
+              <label className="stack">
+                <span>Far trim ft</span>
+                <input defaultValue="0" min="0" name="trim_far_ft" step="0.1" type="number" />
+              </label>
+            </div>
+
+            <div className="create-footer" style={{ marginTop: 16 }}>
+              <button className="primary-button" type="submit">
+                Add Block
+              </button>
+            </div>
           </div>
 
-          <div className="inventory-row inventory-row-create">
-            <label className="stack">
-              <span>ID</span>
-              <input defaultValue={suggestedId} name="id" placeholder={suggestedId} />
-            </label>
-
-            <label className="stack">
-              <span>Stone</span>
-              <select defaultValue="Pinkstone" name="stone">
-                {STONES.map((stone) => (
-                  <option key={stone} value={stone}>
-                    {stone}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="stack">
-              <span>Yard</span>
-              <select defaultValue="1" name="yard">
-                {YARDS.map((yard) => (
-                  <option key={yard} value={yard}>
-                    Yard {yard}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="stack">
-              <span>Category</span>
-              <select defaultValue="Fresh" name="category">
-                {CATEGORIES.map((category) => (
-                  <option key={category} value={category}>
-                    {category}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <input name="status" type="hidden" value="available" />
-          </div>
-
-          <div className="inventory-row inventory-row-create" style={{ marginTop: 12 }}>
-            <label className="stack">
-              <span>Length ft</span>
-              <input defaultValue="6" min="0" name="length_ft" step="0.1" type="number" />
-            </label>
-
-            <label className="stack">
-              <span>Width ft</span>
-              <input defaultValue="4" min="0" name="width_ft" step="0.1" type="number" />
-            </label>
-
-            <label className="stack">
-              <span>Height ft</span>
-              <input defaultValue="2" min="0" name="height_ft" step="0.1" type="number" />
-            </label>
-
-            <label className="stack">
-              <span>Left trim ft</span>
-              <input defaultValue="0" min="0" name="trim_left_ft" step="0.1" type="number" />
-            </label>
-
-            <label className="stack">
-              <span>Right trim ft</span>
-              <input defaultValue="0" min="0" name="trim_right_ft" step="0.1" type="number" />
-            </label>
-
-            <label className="stack">
-              <span>Near trim ft</span>
-              <input defaultValue="0" min="0" name="trim_near_ft" step="0.1" type="number" />
-            </label>
-
-            <label className="stack">
-              <span>Far trim ft</span>
-              <input defaultValue="0" min="0" name="trim_far_ft" step="0.1" type="number" />
-            </label>
-          </div>
-
-          <div className="create-footer" style={{ marginTop: 16 }}>
-            <button className="primary-button" type="submit">
-              Add Block
-            </button>
-          </div>
+          <aside className="inventory-studio-side">
+            <div className="inventory-preview-card">
+              <BlockMiniPreview stone="Pinkstone" className="inventory-preview-art" />
+              <strong>Premium Entry Flow</strong>
+              <p className="muted">
+                Default stone is now Pinkstone, IDs auto-increment, and delete stays protected with a code.
+              </p>
+              <div className="inventory-preview-stats">
+                <div>
+                  <span className="muted">Suggested code</span>
+                  <strong>{suggestedId}</strong>
+                </div>
+                <div>
+                  <span className="muted">Recommended size</span>
+                  <strong>6 × 4 × 2</strong>
+                </div>
+              </div>
+            </div>
+          </aside>
         </form>
       ) : null}
 
-      <div className="section-heading" style={{ marginTop: 22 }}>
+      <div className="section-heading inventory-list-header" style={{ marginTop: 22 }}>
         <div>
           <h2 style={{ margin: 0 }}>Current Inventory</h2>
           <p className="muted">
@@ -331,7 +419,6 @@ export default async function BlocksPage() {
 
       <div className="block-compact-list" style={{ marginTop: 10 }}>
         {(() => {
-          const blockList = blocks ?? [];
           const byStone = blockList.reduce<Record<string, typeof blockList>>((acc, block) => {
             if (!acc[block.stone]) acc[block.stone] = [];
             acc[block.stone].push(block);
@@ -339,8 +426,11 @@ export default async function BlocksPage() {
           }, {});
           const stoneKeys = Object.keys(byStone).sort();
           return stoneKeys.map((stone) => (
-            <div key={stone}>
-              <div className="stone-group-header">{stone}</div>
+            <div className="inventory-cluster" key={stone}>
+              <div className="stone-group-header inventory-cluster-header">
+                <span>{stone}</span>
+                <strong>{byStone[stone].length} blocks</strong>
+              </div>
               {byStone[stone].map((block) => (
           <details className="block-compact-item" key={block.id}>
             <summary className="block-compact-summary">
@@ -448,6 +538,6 @@ export default async function BlocksPage() {
           No blocks found yet. Add your first block above.
         </div>
       ) : null}
-    </section>
+    </>
   );
 }
