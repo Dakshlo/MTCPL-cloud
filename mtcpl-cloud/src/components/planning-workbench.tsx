@@ -378,6 +378,9 @@ export function PlanningWorkbench({
   const usableBlocks = blocks.filter((block) => block.status === "available" || block.status === "reserved");
   const openSlabs = slabs.filter((slab) => slab.status === "open" || slab.status === "planned");
 
+  const [selectedBlockIds, setSelectedBlockIds] = useState<Set<string>>(() => new Set(usableBlocks.map((b) => b.id)));
+  const [selectedSlabIds, setSelectedSlabIds] = useState<Set<string>>(() => new Set(openSlabs.map((s) => s.id)));
+
   const slabsByTemple = openSlabs.reduce<Record<string, SlabRow[]>>((acc, slab) => {
     if (!acc[slab.temple]) acc[slab.temple] = [];
     acc[slab.temple].push(slab);
@@ -385,8 +388,26 @@ export function PlanningWorkbench({
   }, {});
   const templeKeys = Object.keys(slabsByTemple).sort();
 
+  function toggleBlock(id: string) {
+    setSelectedBlockIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSlab(id: string) {
+    setSelectedSlabIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
   function generatePlan() {
-    setResult(runOptimization(usableBlocks, openSlabs, kerfMm));
+    const filteredBlocks = usableBlocks.filter((b) => selectedBlockIds.has(b.id));
+    const filteredSlabs = openSlabs.filter((s) => selectedSlabIds.has(s.id));
+    setResult(runOptimization(filteredBlocks, filteredSlabs, kerfMm));
   }
 
   const totalPlaced = result?.plan.reduce((sum, block) => sum + block.placed.length, 0) ?? 0;
@@ -414,26 +435,39 @@ export function PlanningWorkbench({
             <h2 style={{ margin: 0 }}>Stock Blocks ({usableBlocks.length})</h2>
             <p className="muted">Available and reserved blocks for cutting</p>
           </div>
-          <div className="records-stack" style={{ marginTop: 12 }}>
+          <div className="plan-select-row" style={{ marginBottom: 8 }}>
+            <button className="ghost-button" style={{ fontSize: 12, padding: "2px 10px" }} type="button" onClick={() => setSelectedBlockIds(new Set(usableBlocks.map((b) => b.id)))}>Select All</button>
+            <button className="ghost-button" style={{ fontSize: 12, padding: "2px 10px" }} type="button" onClick={() => setSelectedBlockIds(new Set())}>Deselect All</button>
+          </div>
+          <div className="records-stack" style={{ marginTop: 4 }}>
             {usableBlocks.length === 0 ? (
               <div className="banner">No usable blocks found.</div>
             ) : usableBlocks.map((block) => (
-              <div className="record-card compact-record" key={block.id}>
+              <div className={`record-card compact-record plan-selectable${selectedBlockIds.has(block.id) ? "" : " plan-deselected"}`} key={block.id} onClick={() => toggleBlock(block.id)} style={{ cursor: "pointer" }}>
                 <div className="record-head">
-                  <div>
-                    <div className="record-title-row">
-                      <strong>{block.id}</strong>
-                      <span className="role-pill">{block.category}</span>
-                      <span className="role-pill">Yard {block.yard}</span>
-                    </div>
-                    <p className="muted">
-                      {block.stone} | {block.length_ft} × {block.width_ft} × {block.height_ft} ft
-                    </p>
-                    {(toNum(block.trim_left_ft) > 0 || toNum(block.trim_right_ft) > 0 || toNum(block.trim_near_ft) > 0 || toNum(block.trim_far_ft) > 0) ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <input
+                      checked={selectedBlockIds.has(block.id)}
+                      className="plan-check"
+                      readOnly
+                      type="checkbox"
+                      onClick={(e) => { e.stopPropagation(); toggleBlock(block.id); }}
+                    />
+                    <div>
+                      <div className="record-title-row">
+                        <strong>{block.id}</strong>
+                        <span className="role-pill">{block.category}</span>
+                        <span className="role-pill">Yard {block.yard}</span>
+                      </div>
                       <p className="muted">
-                        Trim L{block.trim_left_ft} R{block.trim_right_ft} N{block.trim_near_ft} F{block.trim_far_ft} ft
+                        {block.stone} | {block.length_ft} × {block.width_ft} × {block.height_ft} ft
                       </p>
-                    ) : null}
+                      {(toNum(block.trim_left_ft) > 0 || toNum(block.trim_right_ft) > 0 || toNum(block.trim_near_ft) > 0 || toNum(block.trim_far_ft) > 0) ? (
+                        <p className="muted">
+                          Trim L{block.trim_left_ft} R{block.trim_right_ft} N{block.trim_near_ft} F{block.trim_far_ft} ft
+                        </p>
+                      ) : null}
+                    </div>
                   </div>
                   <span className="role-pill">{block.status}</span>
                 </div>
@@ -447,6 +481,10 @@ export function PlanningWorkbench({
             <h2 style={{ margin: 0 }}>Required Slabs ({openSlabs.length})</h2>
             <p className="muted">Sorted by temple</p>
           </div>
+          <div className="plan-select-row" style={{ marginBottom: 8 }}>
+            <button className="ghost-button" style={{ fontSize: 12, padding: "2px 10px" }} type="button" onClick={() => setSelectedSlabIds(new Set(openSlabs.map((s) => s.id)))}>Select All</button>
+            <button className="ghost-button" style={{ fontSize: 12, padding: "2px 10px" }} type="button" onClick={() => setSelectedSlabIds(new Set())}>Deselect All</button>
+          </div>
           {templeKeys.length === 0 ? (
             <div className="banner" style={{ marginTop: 12 }}>No open slab requirements found.</div>
           ) : templeKeys.map((temple) => (
@@ -454,17 +492,26 @@ export function PlanningWorkbench({
               <p className="muted" style={{ fontWeight: 600, marginBottom: 6 }}>{temple}</p>
               <div className="records-stack">
                 {slabsByTemple[temple].map((slab) => (
-                  <div className="record-card compact-record" key={slab.id}>
+                  <div className={`record-card compact-record plan-selectable${selectedSlabIds.has(slab.id) ? "" : " plan-deselected"}`} key={slab.id} onClick={() => toggleSlab(slab.id)} style={{ cursor: "pointer" }}>
                     <div className="record-head">
-                      <div>
-                        <div className="record-title-row">
-                          <span className="mini-slab" style={{ background: sclr(slab.id) }} />
-                          <strong style={{ color: sclr(slab.id) }}>{slab.id}</strong>
-                          {slab.stone ? <span className="role-pill">{slab.stone}</span> : null}
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <input
+                          checked={selectedSlabIds.has(slab.id)}
+                          className="plan-check"
+                          readOnly
+                          type="checkbox"
+                          onClick={(e) => { e.stopPropagation(); toggleSlab(slab.id); }}
+                        />
+                        <div>
+                          <div className="record-title-row">
+                            <span className="mini-slab" style={{ background: sclr(slab.id) }} />
+                            <strong style={{ color: sclr(slab.id) }}>{slab.id}</strong>
+                            {slab.stone ? <span className="role-pill">{slab.stone}</span> : null}
+                          </div>
+                          <p className="muted">
+                            {slab.label} | {slab.length_ft} × {slab.width_ft} × {slab.thickness_ft} ft
+                          </p>
                         </div>
-                        <p className="muted">
-                          {slab.label} | {slab.length_ft} × {slab.width_ft} × {slab.thickness_ft} ft
-                        </p>
                       </div>
                     </div>
                   </div>
@@ -490,7 +537,7 @@ export function PlanningWorkbench({
           <span className="muted">mm</span>
 
           <div className="banner">
-            <strong>{usableBlocks.length}</strong> blocks · <strong>{openSlabs.length}</strong> slabs · stone types are matched automatically
+            <strong>{selectedBlockIds.size}</strong>/{usableBlocks.length} blocks · <strong>{selectedSlabIds.size}</strong>/{openSlabs.length} slabs selected · stone types matched automatically
           </div>
 
           <button className="primary-button" onClick={generatePlan} type="button">

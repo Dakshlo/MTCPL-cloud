@@ -156,6 +156,7 @@ export default async function BlocksPage() {
         "id, stone, yard, category, length_ft, width_ft, height_ft, trim_left_ft, trim_right_ft, trim_near_ft, trim_far_ft, status, created_at"
       )
       .eq("status", "available")
+      .order("stone", { ascending: true })
       .order("created_at", { ascending: false })
       .limit(200),
     supabase
@@ -296,7 +297,18 @@ export default async function BlocksPage() {
       </div>
 
       <div className="block-compact-list" style={{ marginTop: 10 }}>
-        {(blocks ?? []).map((block) => (
+        {(() => {
+          const blockList = blocks ?? [];
+          const byStone = blockList.reduce<Record<string, typeof blockList>>((acc, block) => {
+            if (!acc[block.stone]) acc[block.stone] = [];
+            acc[block.stone].push(block);
+            return acc;
+          }, {});
+          const stoneKeys = Object.keys(byStone).sort();
+          return stoneKeys.map((stone) => (
+            <div key={stone}>
+              <div className="stone-group-header">{stone}</div>
+              {byStone[stone].map((block) => (
           <details className="block-compact-item" key={block.id}>
             <summary className="block-compact-summary">
               <span className="mini-cube" />
@@ -392,7 +404,10 @@ export default async function BlocksPage() {
               </div>
             </form>
           </details>
-        ))}
+              ))}
+            </div>
+          ));
+        })()}
       </div>
 
       {!blocks?.length ? (

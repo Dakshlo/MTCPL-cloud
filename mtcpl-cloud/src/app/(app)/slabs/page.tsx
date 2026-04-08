@@ -62,6 +62,7 @@ async function addSlabAction(formData: FormData) {
     thickness_ft: numValue(formData, "thickness_ft", 0),
     source_block_id: textValue(formData, "source_block_id") || null,
     status: textValue(formData, "status") || "open",
+    priority: formData.get("priority") === "true",
     created_by: profile.id,
     updated_by: profile.id
   };
@@ -104,6 +105,7 @@ async function updateSlabAction(formData: FormData) {
     thickness_ft: numValue(formData, "thickness_ft", 0),
     source_block_id: textValue(formData, "source_block_id") || null,
     status: textValue(formData, "status") || "open",
+    priority: formData.get("priority") === "true",
     updated_by: profile.id,
     updated_at: new Date().toISOString()
   };
@@ -149,9 +151,10 @@ export default async function SlabsPage() {
     supabase
       .from("slab_requirements")
       .select(
-        "id, label, temple, stone, length_ft, width_ft, thickness_ft, source_block_id, status, created_at"
+        "id, label, temple, stone, length_ft, width_ft, thickness_ft, source_block_id, status, priority, created_at"
       )
       .eq("status", "open")
+      .order("priority", { ascending: false })
       .order("temple", { ascending: true })
       .order("created_at", { ascending: false })
       .limit(100),
@@ -223,6 +226,14 @@ export default async function SlabsPage() {
               </select>
             </label>
 
+            <label className="stack">
+              <span>Priority</span>
+              <select defaultValue="false" name="priority">
+                <option value="false">Normal</option>
+                <option value="true">⚡ Priority</option>
+              </select>
+            </label>
+
             <input name="status" type="hidden" value="open" />
           </div>
 
@@ -270,114 +281,153 @@ export default async function SlabsPage() {
         </p>
       </div>
 
-      <div className="records-stack">
-        {(slabs ?? []).map((slab) => (
-          <form action={updateSlabAction} className="record-card compact-record inventory-card slab-card" key={slab.id}>
-            <input name="original_id" type="hidden" value={slab.id} />
+      {(() => {
+        const allSlabs = slabs ?? [];
+        const prioritySlabs = allSlabs.filter((s) => s.priority);
+        const normalSlabs = allSlabs.filter((s) => !s.priority);
 
-            <div className="record-head">
-              <div>
-                <div className="record-title-row">
-                  <span className="mini-slab" />
-                  <strong>{slab.id}</strong>
-                  <span className="role-pill">{slab.temple}</span>
-                  {slab.stone ? <span className="role-pill">{slab.stone}</span> : null}
+        const normalByTemple = normalSlabs.reduce<Record<string, typeof normalSlabs>>((acc, slab) => {
+          if (!acc[slab.temple]) acc[slab.temple] = [];
+          acc[slab.temple].push(slab);
+          return acc;
+        }, {});
+        const templeKeys = Object.keys(normalByTemple).sort();
+
+        function renderSlabForm(slab: typeof allSlabs[number]) {
+          return (
+            <form action={updateSlabAction} className={`record-card compact-record inventory-card slab-card${slab.priority ? " slab-priority-card" : ""}`} key={slab.id}>
+              <input name="original_id" type="hidden" value={slab.id} />
+
+              <div className="record-head">
+                <div>
+                  <div className="record-title-row">
+                    <span className="mini-slab" />
+                    <strong>{slab.id}</strong>
+                    {slab.priority ? <span className="priority-badge">⚡ Priority</span> : null}
+                    <span className="role-pill">{slab.temple}</span>
+                    {slab.stone ? <span className="role-pill">{slab.stone}</span> : null}
+                  </div>
+                  <p className="muted">
+                    {slab.label} | {slab.length_ft} x {slab.width_ft} x {slab.thickness_ft} ft
+                  </p>
                 </div>
-                <p className="muted">
-                  {slab.label} | {slab.length_ft} x {slab.width_ft} x {slab.thickness_ft} ft
-                </p>
+                <div className="record-actions compact-actions">
+                  <button className="secondary-button" type="submit">
+                    Update
+                  </button>
+                  <button className="ghost-button" formAction={deleteSlabAction} name="id" type="submit" value={slab.id}>
+                    Delete
+                  </button>
+                </div>
               </div>
-              <div className="record-actions compact-actions">
-                <button className="secondary-button" type="submit">
-                  Update
-                </button>
-                <button className="ghost-button" formAction={deleteSlabAction} name="id" type="submit" value={slab.id}>
-                  Delete
-                </button>
+
+              <div className="inventory-row">
+                <label className="stack">
+                  <span>ID</span>
+                  <input defaultValue={slab.id} name="id" required />
+                </label>
+
+                <label className="stack">
+                  <span>Label</span>
+                  <input defaultValue={slab.label} name="label" required />
+                </label>
+
+                <label className="stack">
+                  <span>Temple</span>
+                  <select defaultValue={slab.temple} name="temple">
+                    {TEMPLES.map((temple) => (
+                      <option key={temple} value={temple}>
+                        {temple}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="stack">
+                  <span>Stone</span>
+                  <select defaultValue={slab.stone ?? ""} name="stone">
+                    <option value="">Auto / not fixed yet</option>
+                    {STONES.filter(Boolean).map((stone) => (
+                      <option key={stone} value={stone}>
+                        {stone}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="stack">
+                  <span>Priority</span>
+                  <select defaultValue={String(slab.priority ?? false)} name="priority">
+                    <option value="false">Normal</option>
+                    <option value="true">⚡ Priority</option>
+                  </select>
+                </label>
+
+                <label className="stack">
+                  <span>Status</span>
+                  <select defaultValue={slab.status} name="status">
+                    {STATUSES.map((status) => (
+                      <option key={status} value={status}>
+                        {status}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="stack">
+                  <span>Length</span>
+                  <input defaultValue={String(slab.length_ft)} min="0" name="length_ft" step="0.1" type="number" />
+                </label>
+
+                <label className="stack">
+                  <span>Width</span>
+                  <input defaultValue={String(slab.width_ft)} min="0" name="width_ft" step="0.1" type="number" />
+                </label>
+
+                <label className="stack">
+                  <span>Thickness</span>
+                  <input
+                    defaultValue={String(slab.thickness_ft)}
+                    min="0"
+                    name="thickness_ft"
+                    step="0.05"
+                    type="number"
+                  />
+                </label>
+
+                <label className="stack">
+                  <span>Source block</span>
+                  <select defaultValue={slab.source_block_id ?? ""} name="source_block_id">
+                    <option value="">Not linked yet</option>
+                    {(blocks ?? []).map((block) => (
+                      <option key={block.id} value={block.id}>
+                        {block.id}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
-            </div>
+            </form>
+          );
+        }
 
-            <div className="inventory-row">
-              <label className="stack">
-                <span>ID</span>
-                <input defaultValue={slab.id} name="id" required />
-              </label>
-
-              <label className="stack">
-                <span>Label</span>
-                <input defaultValue={slab.label} name="label" required />
-              </label>
-
-              <label className="stack">
-                <span>Temple</span>
-                <select defaultValue={slab.temple} name="temple">
-                  {TEMPLES.map((temple) => (
-                    <option key={temple} value={temple}>
-                      {temple}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="stack">
-                <span>Stone</span>
-                <select defaultValue={slab.stone ?? ""} name="stone">
-                  <option value="">Auto / not fixed yet</option>
-                  {STONES.filter(Boolean).map((stone) => (
-                    <option key={stone} value={stone}>
-                      {stone}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="stack">
-                <span>Status</span>
-                <select defaultValue={slab.status} name="status">
-                  {STATUSES.map((status) => (
-                    <option key={status} value={status}>
-                      {status}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="stack">
-                <span>Length</span>
-                <input defaultValue={String(slab.length_ft)} min="0" name="length_ft" step="0.1" type="number" />
-              </label>
-
-              <label className="stack">
-                <span>Width</span>
-                <input defaultValue={String(slab.width_ft)} min="0" name="width_ft" step="0.1" type="number" />
-              </label>
-
-              <label className="stack">
-                <span>Thickness</span>
-                <input
-                  defaultValue={String(slab.thickness_ft)}
-                  min="0"
-                  name="thickness_ft"
-                  step="0.05"
-                  type="number"
-                />
-              </label>
-
-              <label className="stack">
-                <span>Source block</span>
-                <select defaultValue={slab.source_block_id ?? ""} name="source_block_id">
-                  <option value="">Not linked yet</option>
-                  {(blocks ?? []).map((block) => (
-                    <option key={block.id} value={block.id}>
-                      {block.id}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-          </form>
-        ))}
-      </div>
+        return (
+          <div className="records-stack">
+            {prioritySlabs.length > 0 ? (
+              <>
+                <div className="temple-group-header">⚡ Priority</div>
+                {prioritySlabs.map(renderSlabForm)}
+              </>
+            ) : null}
+            {templeKeys.map((temple) => (
+              <div key={temple}>
+                <div className="temple-group-header">{temple}</div>
+                {normalByTemple[temple].map(renderSlabForm)}
+              </div>
+            ))}
+          </div>
+        );
+      })()}
 
       {!slabs?.length ? (
         <div className="banner" style={{ marginTop: 16 }}>

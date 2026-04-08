@@ -810,3 +810,60 @@ textarea {
   color: #2f6c3f;
   border-color: #4a9a5a;
 }
+
+/* Temple and stone group headers */
+.temple-group-header,
+.stone-group-header {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #8a7a6a;
+  padding: 10px 0 4px 2px;
+  border-bottom: 1px solid #e8e0d4;
+  margin-bottom: 6px;
+}
+
+.stone-group-header {
+  color: #6a7a8a;
+  border-bottom-color: #d4dce8;
+}
+
+/* Priority badge and card */
+.priority-badge {
+  background: #fff0d0;
+  color: #a05000;
+  border: 1px solid #e8c060;
+  border-radius: 20px;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.slab-priority-card {
+  border-left: 3px solid #e8a020 !important;
+  background: #fffcf4 !important;
+}
+
+/* Planning workbench checkbox selection */
+.plan-check {
+  width: 18px;
+  height: 18px;
+  accent-color: #4a7c59;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.plan-select-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.plan-selectable {
+  transition: opacity 0.15s;
+}
+
+.plan-deselected {
+  opacity: 0.4;
+}

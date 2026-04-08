@@ -5,6 +5,8 @@ import { PrintButton } from "@/components/print-button";
 import { requireAuth } from "@/lib/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
+type SearchParams = Promise<{ show_closed?: string }>;
+
 type SessionRow = {
   id: string;
   session_code: string;
@@ -196,11 +198,14 @@ async function finishBlockAction(formData: FormData) {
   await refreshPaths();
 }
 
-export default async function CuttingPage() {
+export default async function CuttingPage({ searchParams }: { searchParams: SearchParams }) {
   await requireAuth(["owner", "worker"]);
 
+  const params = await searchParams;
+  const showClosed = params.show_closed === "1";
+
   const supabase = await createServerSupabaseClient();
-  const { data: sessions } = await supabase
+  let query = supabase
     .from("cut_sessions")
     .select(
       "id, session_code, status, kerf_mm, created_at, cut_session_blocks(id, status, block_id, largest_remainder, restocked_block_id, layout, cut_session_slabs(id, slab_requirement_id))"
@@ -208,6 +213,11 @@ export default async function CuttingPage() {
     .order("created_at", { ascending: false })
     .limit(20);
 
+  if (!showClosed) {
+    query = query.neq("status", "closed");
+  }
+
+  const { data: sessions } = await query;
   const rows = (sessions ?? []) as SessionRow[];
 
   return (
@@ -217,7 +227,16 @@ export default async function CuttingPage() {
           <h1>Cutting</h1>
           <p className="muted">Workers can now approve blocks, reject them, mark cutting in progress, and finish with optional restock.</p>
         </div>
-        <PrintButton />
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <a
+            className={showClosed ? "secondary-button" : "ghost-button"}
+            href={showClosed ? "/cutting" : "/cutting?show_closed=1"}
+            style={{ textDecoration: "none", fontSize: 13 }}
+          >
+            {showClosed ? "Hide completed" : "Show completed"}
+          </a>
+          <PrintButton />
+        </div>
       </div>
 
       <div className="records-stack" style={{ marginTop: 18 }}>
