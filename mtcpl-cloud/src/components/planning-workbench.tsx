@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { BlockMiniPreview, SlabMiniPreview } from "@/components/stone-previews";
 
 export type BlockRow = {
   id: string;
@@ -453,6 +454,7 @@ export function PlanningWorkbench({
                       type="checkbox"
                       onClick={(e) => { e.stopPropagation(); toggleBlock(block.id); }}
                     />
+                    <BlockMiniPreview stone={block.stone} />
                     <div>
                       <div className="record-title-row">
                         <strong>{block.id}</strong>
@@ -502,9 +504,9 @@ export function PlanningWorkbench({
                           type="checkbox"
                           onClick={(e) => { e.stopPropagation(); toggleSlab(slab.id); }}
                         />
+                        <SlabMiniPreview accent={sclr(slab.id)} stone={slab.stone} />
                         <div>
                           <div className="record-title-row">
-                            <span className="mini-slab" style={{ background: sclr(slab.id) }} />
                             <strong style={{ color: sclr(slab.id) }}>{slab.id}</strong>
                             {slab.stone ? <span className="role-pill">{slab.stone}</span> : null}
                           </div>

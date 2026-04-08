@@ -2,6 +2,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { ExportBlocksButton } from "@/components/export-button";
+import { BlockMiniPreview } from "@/components/stone-previews";
 import { requireAuth } from "@/lib/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
@@ -43,7 +44,7 @@ async function addBlockAction(formData: FormData) {
   const requestedId = textValue(formData, "id");
 
   const payload = {
-    stone: textValue(formData, "stone") || "Makrana",
+    stone: textValue(formData, "stone") || "Pinkstone",
     yard: numValue(formData, "yard", 1),
     category: textValue(formData, "category") || "Fresh",
     length_ft: numValue(formData, "length_ft", 0),
@@ -151,6 +152,24 @@ async function deleteBlockAction(formData: FormData) {
   const { error } = await supabase.from("blocks").delete().eq("id", id);
 
   if (error) {
+    if (error.code === "23503") {
+      const archive = await supabase
+        .from("blocks")
+        .update({
+          status: "discarded",
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", id);
+
+      if (archive.error) {
+        throw new Error(archive.error.message);
+      }
+
+      revalidatePath("/blocks");
+      revalidatePath("/dashboard");
+      redirect("/blocks?toast=Block+was+referenced+and+has+been+archived");
+    }
+
     throw new Error(error.message);
   }
 
@@ -221,7 +240,7 @@ export default async function BlocksPage() {
 
             <label className="stack">
               <span>Stone</span>
-              <select defaultValue="Makrana" name="stone">
+              <select defaultValue="Pinkstone" name="stone">
                 {STONES.map((stone) => (
                   <option key={stone} value={stone}>
                     {stone}
@@ -325,7 +344,7 @@ export default async function BlocksPage() {
               {byStone[stone].map((block) => (
           <details className="block-compact-item" key={block.id}>
             <summary className="block-compact-summary">
-              <span className="mini-cube" />
+              <BlockMiniPreview stone={block.stone} />
               <strong>{block.id}</strong>
               <span className="role-pill">{block.category}</span>
               <span className="role-pill">Yard {block.yard}</span>

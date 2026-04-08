@@ -2,6 +2,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { requireAuth } from "@/lib/auth";
+import { SlabMiniPreview } from "@/components/stone-previews";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 const TEMPLES = ["Umia Mata", "Agroha Dham", "Balaknath", "Shrinathji", "Other"] as const;
@@ -52,7 +53,7 @@ async function addSlabAction(formData: FormData) {
   const payload = {
     label: textValue(formData, "label"),
     temple: textValue(formData, "temple") || "Umia Mata",
-    stone: textValue(formData, "stone") || null,
+    stone: textValue(formData, "stone") || "Pinkstone",
     length_ft: numValue(formData, "length_ft", 0),
     width_ft: numValue(formData, "width_ft", 0),
     thickness_ft: numValue(formData, "thickness_ft", 0),
@@ -153,6 +154,24 @@ async function deleteSlabAction(formData: FormData) {
   const { error } = await supabase.from("slab_requirements").delete().eq("id", id);
 
   if (error) {
+    if (error.code === "23503") {
+      const archive = await supabase
+        .from("slab_requirements")
+        .update({
+          status: "rejected",
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", id);
+
+      if (archive.error) {
+        throw new Error(archive.error.message);
+      }
+
+      revalidatePath("/slabs");
+      revalidatePath("/dashboard");
+      redirect("/slabs?toast=Slab+was+referenced+and+has+been+archived");
+    }
+
     throw new Error(error.message);
   }
 
@@ -234,7 +253,7 @@ export default async function SlabsPage() {
 
             <label className="stack">
               <span>Stone</span>
-              <select defaultValue="" name="stone">
+              <select defaultValue="Pinkstone" name="stone">
                 <option value="">Auto / not fixed yet</option>
                 {STONES.filter(Boolean).map((stone) => (
                   <option key={stone} value={stone}>
@@ -319,7 +338,7 @@ export default async function SlabsPage() {
               <div className="record-head">
                 <div>
                   <div className="record-title-row">
-                    <span className="mini-slab" />
+                    <SlabMiniPreview accent={slab.stone === "Pinkstone" ? "#C09282" : "#C8BFB0"} stone={slab.stone} />
                     <strong>{slab.id}</strong>
                     {slab.priority ? <span className="priority-badge">⚡ Priority</span> : null}
                     <span className="role-pill">{slab.temple}</span>
