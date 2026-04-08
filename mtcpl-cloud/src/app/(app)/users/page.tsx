@@ -14,6 +14,70 @@ const ROLES = [
   "dispatch",
   "vendor"
 ] as const;
+const VENDOR_TYPES = ["CNC", "Manual"] as const;
+
+async function addVendorAction(formData: FormData) {
+  "use server";
+
+  await requireAuth(["owner"]);
+  const supabase = await createServerSupabaseClient();
+
+  const name = String(formData.get("name") || "").trim();
+  const vendor_type = String(formData.get("vendor_type") || "Manual");
+  const is_active = formData.get("is_active") !== "false";
+
+  if (!name) {
+    redirect("/users?toast=Vendor+name+is+required");
+  }
+
+  const { error } = await supabase.from("vendors").insert({
+    name,
+    vendor_type,
+    is_active
+  });
+
+  if (error) {
+    redirect(`/users?toast=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath("/users");
+  revalidatePath("/carving-assign");
+  redirect("/users?toast=Vendor+added+successfully");
+}
+
+async function updateVendorAction(formData: FormData) {
+  "use server";
+
+  await requireAuth(["owner"]);
+  const supabase = await createServerSupabaseClient();
+
+  const id = String(formData.get("id") || "").trim();
+  const name = String(formData.get("name") || "").trim();
+  const vendor_type = String(formData.get("vendor_type") || "Manual");
+  const is_active = formData.get("is_active") === "true";
+
+  if (!id || !name) {
+    redirect("/users?toast=Vendor+details+are+missing");
+  }
+
+  const { error } = await supabase
+    .from("vendors")
+    .update({
+      name,
+      vendor_type,
+      is_active
+    })
+    .eq("id", id);
+
+  if (error) {
+    redirect(`/users?toast=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath("/users");
+  revalidatePath("/carving-assign");
+  revalidatePath("/carving");
+  redirect("/users?toast=Vendor+updated+successfully");
+}
 
 async function updateUserAction(formData: FormData) {
   "use server";
@@ -50,7 +114,7 @@ export default async function UsersPage() {
       .from("profiles")
       .select("id, full_name, phone, role, vendor_id, is_active, created_at")
       .order("created_at", { ascending: false }),
-    supabase.from("vendors").select("id, name").order("name")
+    supabase.from("vendors").select("id, name, vendor_type, is_active, created_at").order("name")
   ]);
 
   if (error) throw new Error(error.message);
@@ -145,6 +209,113 @@ export default async function UsersPage() {
           No users found yet.
         </div>
       ) : null}
+
+      <section style={{ marginTop: 28 }}>
+        <div className="topbar" style={{ marginBottom: 12 }}>
+          <div>
+            <h2 style={{ margin: 0 }}>Vendor Directory</h2>
+            <p className="muted">Add new carving vendors here and make them available in assignment lists.</p>
+          </div>
+          <span className="role-pill">{vendors?.length ?? 0} vendors</span>
+        </div>
+
+        <form action={addVendorAction} className="block-edit-form" style={{ marginBottom: 16 }}>
+          <div className="inventory-row">
+            <label className="stack">
+              <span>Vendor name</span>
+              <input name="name" placeholder="Mohit, New CNC Vendor..." required />
+            </label>
+
+            <label className="stack">
+              <span>Type</span>
+              <select defaultValue="Manual" name="vendor_type">
+                {VENDOR_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="stack">
+              <span>Status</span>
+              <select defaultValue="true" name="is_active">
+                <option value="true">Active</option>
+                <option value="false">Inactive</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="block-edit-footer">
+            <p className="muted" style={{ fontSize: 12, flex: 1 }}>
+              New vendors added here become available in Carving Assign immediately.
+            </p>
+            <button className="secondary-button" type="submit">
+              Add Vendor
+            </button>
+          </div>
+        </form>
+
+        <div className="block-compact-list">
+          {(vendors ?? []).map((vendor) => (
+            <details className="block-compact-item" key={vendor.id}>
+              <summary className="block-compact-summary">
+                <span
+                  className="mini-cube"
+                  style={{ background: vendor.vendor_type === "CNC" ? "#5673c8" : "#8c6d43" }}
+                />
+                <strong>{vendor.name}</strong>
+                <span className="role-pill">{vendor.vendor_type}</span>
+                <span className={`role-pill ${vendor.is_active ? "" : "pending-pill"}`}>
+                  {vendor.is_active ? "Active" : "Inactive"}
+                </span>
+                <span className="block-summary-date muted">
+                  {new Date(vendor.created_at).toLocaleDateString("en-IN")}
+                </span>
+              </summary>
+
+              <form action={updateVendorAction} className="block-edit-form">
+                <input name="id" type="hidden" value={vendor.id} />
+
+                <div className="inventory-row">
+                  <label className="stack">
+                    <span>Vendor name</span>
+                    <input defaultValue={vendor.name} name="name" required />
+                  </label>
+
+                  <label className="stack">
+                    <span>Type</span>
+                    <select defaultValue={vendor.vendor_type} name="vendor_type">
+                      {VENDOR_TYPES.map((type) => (
+                        <option key={type} value={type}>
+                          {type}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="stack">
+                    <span>Status</span>
+                    <select defaultValue={String(vendor.is_active)} name="is_active">
+                      <option value="true">Active</option>
+                      <option value="false">Inactive</option>
+                    </select>
+                  </label>
+                </div>
+
+                <div className="block-edit-footer">
+                  <p className="muted" style={{ fontSize: 12, flex: 1 }}>
+                    Vendor ID: {vendor.id}
+                  </p>
+                  <button className="secondary-button" type="submit">
+                    Save Vendor
+                  </button>
+                </div>
+              </form>
+            </details>
+          ))}
+        </div>
+      </section>
     </section>
   );
 }
