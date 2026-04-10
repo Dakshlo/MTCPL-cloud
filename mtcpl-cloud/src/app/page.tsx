@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
@@ -12,22 +13,16 @@ export default async function HomePage() {
 
   return (
     <main className="landing-shell">
-      <section className="landing-card">
-        <h1>MTCPL Stone Management Cloud</h1>
-        <p>
-          This is the cloud version of your prototype. It is designed for shared access across phones and desktops,
-          with separate roles for owner, planner, block entry, slab entry, worker, carving assigner, dispatch, and
-          vendor users.
-        </p>
-
-        <div className="landing-actions">
-          <Link className="primary-button" href="/login">
-            Open login
-          </Link>
-          <Link className="secondary-button" href="/dashboard">
-            Go to app
-          </Link>
+      <section className="landing-hero">
+        <div className="landing-kicker">MTCPL Cloud</div>
+        <div>
+          <Image src="/logo-dark.png" alt="MTCPL" width={240} height={80} className="landing-logo" />
         </div>
+        <h1 className="landing-title">Stone. Precision. Scale.</h1>
+        <p className="landing-subtitle">End-to-end block tracking and cutting plan system</p>
+        <Link className="primary-button" href="/login">
+          Open Login
+        </Link>
       </section>
     </main>
   );

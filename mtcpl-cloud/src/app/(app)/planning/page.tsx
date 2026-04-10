@@ -169,9 +169,7 @@ export default async function PlanningPage() {
   const [{ data: blocks, error: blockError }, { data: slabs, error: slabError }] = await Promise.all([
     supabase
       .from("blocks")
-      .select(
-        "id, stone, yard, category, length_ft, width_ft, height_ft, trim_left_ft, trim_right_ft, trim_near_ft, trim_far_ft, status"
-      )
+      .select("id, stone, yard, category, length_ft, width_ft, height_ft, status")
       .eq("status", "available")
       .order("created_at", { ascending: false }),
     supabase

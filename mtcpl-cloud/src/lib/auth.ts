@@ -7,7 +7,6 @@ export function getDefaultRouteForRole(role?: AppRole | null) {
   switch (role) {
     case "owner":
     case "planner":
-    case "dispatch":
       return "/dashboard";
     case "block_entry":
       return "/blocks";
@@ -15,10 +14,6 @@ export function getDefaultRouteForRole(role?: AppRole | null) {
       return "/slabs";
     case "worker":
       return "/cutting";
-    case "carving_assigner":
-      return "/carving-assign";
-    case "vendor":
-      return "/carving";
     default:
       return "/login";
   }
@@ -48,24 +43,13 @@ export async function getAuthContext() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("id, full_name, phone, role, vendor_id, is_active")
+    .select("id, full_name, phone, role, is_active")
     .eq("id", user.id)
     .single();
 
-  let vendorName: string | null = null;
-  if (profile?.vendor_id) {
-    const { data: vendor } = await supabase.from("vendors").select("name").eq("id", profile.vendor_id).single();
-    vendorName = vendor?.name ?? null;
-  }
-
   return {
     user,
-    profile: profile
-      ? ({
-          ...profile,
-          vendor_name: vendorName
-        } as Profile)
-      : null
+    profile: (profile as Profile | null) ?? null
   };
 }
 

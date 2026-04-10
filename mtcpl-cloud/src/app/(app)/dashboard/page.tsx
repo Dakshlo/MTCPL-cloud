@@ -8,203 +8,45 @@ async function getCount(table: string) {
 }
 
 export default async function DashboardPage() {
-  await requireAuth(["owner", "planner", "dispatch"]);
-  const today = new Date().toISOString().slice(0, 10);
-  const startOfMonth = new Date();
-  startOfMonth.setDate(1);
-  const defaultFrom = startOfMonth.toISOString().slice(0, 10);
-
-  const [blocks, slabs, carving, dispatches] = await Promise.all([
-    getCount("blocks"),
-    getCount("slab_requirements"),
-    getCount("carving_items"),
-    getCount("dispatch_logs")
-  ]);
+  await requireAuth(["owner", "planner"]);
 
   const supabase = await createServerSupabaseClient();
-  const [{ data: pendingSlabs }, { data: blockRows }, { data: vendorRows }, { data: slabRows }] = await Promise.all([
-    supabase
-      .from("slab_requirements")
-      .select("id, label, temple, status")
-      .order("created_at", { ascending: false })
-      .limit(10),
-    supabase.from("blocks").select("id, stone, status"),
-    supabase.from("carving_items").select("vendor_name, status, due_at, completed_at"),
-    supabase.from("slab_requirements").select("status")
+  const [totalBlocks, slabsInQueue, activeCutSessions, reservedBlocks] = await Promise.all([
+    getCount("blocks"),
+    supabase.from("slab_requirements").select("*", { count: "exact", head: true }).eq("status", "open"),
+    supabase.from("cut_sessions").select("*", { count: "exact", head: true }).eq("status", "in_progress"),
+    supabase.from("blocks").select("*", { count: "exact", head: true }).eq("status", "reserved")
   ]);
 
-  const byStone = (blockRows ?? []).reduce<Record<string, number>>((acc, row) => {
-    acc[row.stone] = (acc[row.stone] || 0) + 1;
-    return acc;
-  }, {});
-
-  const slabPipeline = (slabRows ?? []).reduce<Record<string, number>>((acc, row) => {
-    acc[row.status] = (acc[row.status] || 0) + 1;
-    return acc;
-  }, {});
-
-  const vendorSummary = Object.values(
-    (vendorRows ?? []).reduce<Record<string, { name: string; pending: number; active: number; done: number; overdue: number }>>((acc, row) => {
-      if (!acc[row.vendor_name]) {
-        acc[row.vendor_name] = { name: row.vendor_name, pending: 0, active: 0, done: 0, overdue: 0 };
-      }
-
-      if (row.status === "carving_assigned") acc[row.vendor_name].pending += 1;
-      if (row.status === "carving_in_progress") acc[row.vendor_name].active += 1;
-      if (row.status === "completed" || row.status === "dispatched") acc[row.vendor_name].done += 1;
-      if (row.due_at && !row.completed_at && new Date(row.due_at).getTime() < Date.now()) acc[row.vendor_name].overdue += 1;
-      return acc;
-    }, {})
-  ).sort((a, b) => b.done - a.done || b.active - a.active || a.pending - b.pending);
-
-  const topVendor = vendorSummary[0];
-
   return (
-    <>
-      <section className="page-card dashboard-hero">
-        <div className="dashboard-hero-copy">
-          <div className="dashboard-chip">Owner Command Center</div>
-          <h1>Performance Dashboard</h1>
-          <p className="muted">Track block stock, slab flow, vendor output, and delivery risk from one place.</p>
-          <form action="/dashboard/export" className="dashboard-export-form">
-            <label className="stack">
-              <span>From</span>
-              <input defaultValue={defaultFrom} name="from" type="date" />
-            </label>
-            <label className="stack">
-              <span>To</span>
-              <input defaultValue={today} name="to" type="date" />
-            </label>
-            <div className="record-actions" style={{ alignItems: "end" }}>
-              <button className="primary-button" type="submit">
-                Export to Excel
-              </button>
-            </div>
-          </form>
+    <section className="records-stack">
+      <div className="page-card">
+        <div className="page-heading">
+          <div>
+            <h1>Dashboard</h1>
+            <p className="muted">A focused operating snapshot of the current block-to-cutting pipeline.</p>
+          </div>
         </div>
+      </div>
 
-        <div className="dashboard-spotlight">
-          <span className="muted">Most productive vendor</span>
-          <strong>{topVendor?.name || "No work yet"}</strong>
-          <p className="muted">
-            {topVendor ? `${topVendor.done} done · ${topVendor.active} active · ${topVendor.pending} pending` : "Assign carving work to start vendor tracking."}
-          </p>
-        </div>
-      </section>
-
-      <section className="metrics-grid dashboard-metrics">
-        <div className="metric-card dashboard-metric-strong">
-          <span>Total blocks</span>
-          <strong>{blocks}</strong>
+      <section className="metrics-grid">
+        <div className="metric-card">
+          <span>Total Blocks</span>
+          <strong>{totalBlocks}</strong>
         </div>
         <div className="metric-card">
-          <span>Total slabs</span>
-          <strong>{slabs}</strong>
+          <span>Slabs in Queue</span>
+          <strong>{slabsInQueue.count ?? 0}</strong>
         </div>
         <div className="metric-card">
-          <span>Carving items</span>
-          <strong>{carving}</strong>
+          <span>Active Cut Sessions</span>
+          <strong>{activeCutSessions.count ?? 0}</strong>
         </div>
         <div className="metric-card">
-          <span>Dispatch logs</span>
-          <strong>{dispatches}</strong>
+          <span>Blocks Reserved</span>
+          <strong>{reservedBlocks.count ?? 0}</strong>
         </div>
       </section>
-
-      <section className="two-col dashboard-grid">
-        <div className="page-card dashboard-panel">
-          <div className="section-heading">
-            <h2 style={{ margin: 0 }}>Stock by Stone</h2>
-            <p className="muted">Current inventory mix</p>
-          </div>
-
-          <div className="bar-stack">
-            {Object.entries(byStone).map(([stone, count]) => {
-              const max = Math.max(...Object.values(byStone), 1);
-              return (
-                <div className="bar-row" key={stone}>
-                  <div className="bar-row-head">
-                    <strong>{stone}</strong>
-                    <span>{count}</span>
-                  </div>
-                  <div className="bar-track">
-                    <div className="bar-fill" style={{ width: `${(count / max) * 100}%` }} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="page-card dashboard-panel">
-          <div className="section-heading">
-            <h2 style={{ margin: 0 }}>Slab Pipeline</h2>
-            <p className="muted">Where current work is sitting</p>
-          </div>
-
-          <div className="pipeline-grid">
-            {Object.entries(slabPipeline).map(([status, count]) => (
-              <div className="pipeline-card" key={status}>
-                <span>{status.replaceAll("_", " ")}</span>
-                <strong>{count}</strong>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="two-col dashboard-grid" style={{ marginTop: 16 }}>
-        <div className="page-card dashboard-panel">
-          <div className="section-heading">
-            <h2 style={{ margin: 0 }}>Vendor Performance</h2>
-            <p className="muted">Pending, active, done and overdue work</p>
-          </div>
-
-          <div className="vendor-report-list">
-            {(vendorSummary ?? []).map((vendor) => (
-              <div className="vendor-report-row" key={vendor.name}>
-                <div>
-                  <strong>{vendor.name}</strong>
-                  <p className="muted">{vendor.pending} pending · {vendor.active} active · {vendor.done} done</p>
-                </div>
-                <div className="vendor-badges">
-                  <span className="role-pill summary-pill pending-pill">P {vendor.pending}</span>
-                  <span className="role-pill summary-pill active-pill">A {vendor.active}</span>
-                  <span className="role-pill summary-pill done-pill">D {vendor.done}</span>
-                  {vendor.overdue ? <span className="role-pill overdue-pill">Overdue {vendor.overdue}</span> : null}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="page-card dashboard-panel">
-          <div className="section-heading">
-            <h2 style={{ margin: 0 }}>Latest Slab Requirements</h2>
-            <p className="muted">Newest demand entering the pipeline</p>
-          </div>
-          <table className="list-table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Label</th>
-                <th>Temple</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(pendingSlabs ?? []).map((item) => (
-                <tr key={item.id}>
-                  <td>{item.id}</td>
-                  <td>{item.label}</td>
-                  <td>{item.temple}</td>
-                  <td>{item.status}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-    </>
+    </section>
   );
 }

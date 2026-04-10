@@ -5,10 +5,7 @@ create type public.app_role as enum (
   'planner',
   'block_entry',
   'slab_entry',
-  'worker',
-  'carving_assigner',
-  'dispatch',
-  'vendor'
+  'worker'
 );
 
 create type public.block_category as enum ('Fresh', 'Reused');
@@ -18,31 +15,17 @@ create type public.slab_status as enum (
   'planned',
   'cutting',
   'cut_done',
-  'carving_assigned',
-  'carving_in_progress',
-  'completed',
-  'dispatched',
   'rejected'
 );
 
 create type public.cut_session_status as enum ('draft', 'approved', 'in_progress', 'closed', 'cancelled');
 create type public.cut_block_status as enum ('pending_worker', 'cutting', 'done_prompt', 'done', 'rejected');
-create type public.vendor_type as enum ('CNC', 'Manual');
-
-create table public.vendors (
-  id uuid primary key default gen_random_uuid(),
-  name text not null unique,
-  vendor_type public.vendor_type not null,
-  is_active boolean not null default true,
-  created_at timestamptz not null default now()
-);
 
 create table public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   full_name text,
   phone text,
   role public.app_role not null default 'worker',
-  vendor_id uuid references public.vendors(id) on delete set null,
   is_active boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -50,16 +33,12 @@ create table public.profiles (
 
 create table public.blocks (
   id text primary key,
-  stone text not null check (stone in ('Makrana', 'Pinkstone')),
+  stone text not null check (stone in ('PinkStone', 'WhiteStone')),
   yard smallint not null check (yard in (1, 2, 3)),
   category public.block_category not null default 'Fresh',
   length_ft numeric(8,2) not null,
   width_ft numeric(8,2) not null,
   height_ft numeric(8,2) not null,
-  trim_left_ft numeric(8,2) not null default 0,
-  trim_right_ft numeric(8,2) not null default 0,
-  trim_near_ft numeric(8,2) not null default 0,
-  trim_far_ft numeric(8,2) not null default 0,
   status public.block_status not null default 'available',
   created_by uuid references public.profiles(id),
   updated_by uuid references public.profiles(id),
@@ -71,12 +50,13 @@ create table public.slab_requirements (
   id text primary key,
   label text not null,
   temple text not null,
-  stone text,
+  stone text check (stone in ('PinkStone', 'WhiteStone')),
   length_ft numeric(8,2) not null,
   width_ft numeric(8,2) not null,
   thickness_ft numeric(8,2) not null,
   source_block_id text references public.blocks(id) on delete set null,
   status public.slab_status not null default 'open',
+  priority boolean not null default false,
   created_by uuid references public.profiles(id),
   updated_by uuid references public.profiles(id),
   created_at timestamptz not null default now(),
@@ -118,30 +98,6 @@ create table public.cut_session_slabs (
   rotated boolean not null default false
 );
 
-create table public.carving_items (
-  id uuid primary key default gen_random_uuid(),
-  slab_requirement_id text not null unique references public.slab_requirements(id),
-  vendor_id uuid not null references public.vendors(id),
-  vendor_name text not null,
-  vendor_type public.vendor_type not null,
-  note text,
-  status public.slab_status not null default 'carving_assigned',
-  deadline_days integer,
-  due_at timestamptz,
-  assigned_by uuid references public.profiles(id),
-  assigned_at timestamptz not null default now(),
-  completed_at timestamptz
-);
-
-create table public.dispatch_logs (
-  id uuid primary key default gen_random_uuid(),
-  carving_item_id uuid not null unique references public.carving_items(id),
-  slab_requirement_id text not null references public.slab_requirements(id),
-  dispatched_by uuid references public.profiles(id),
-  dispatch_note text,
-  dispatched_at timestamptz not null default now()
-);
-
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
@@ -176,23 +132,12 @@ as $$
   select role from public.profiles where id = auth.uid()
 $$;
 
-create or replace function public.current_vendor_id()
-returns uuid
-language sql
-stable
-as $$
-  select vendor_id from public.profiles where id = auth.uid()
-$$;
-
-alter table public.vendors enable row level security;
 alter table public.profiles enable row level security;
 alter table public.blocks enable row level security;
 alter table public.slab_requirements enable row level security;
 alter table public.cut_sessions enable row level security;
 alter table public.cut_session_blocks enable row level security;
 alter table public.cut_session_slabs enable row level security;
-alter table public.carving_items enable row level security;
-alter table public.dispatch_logs enable row level security;
 
 create policy "profiles owner read all" on public.profiles
 for select using (public.current_role() = 'owner');
@@ -203,14 +148,8 @@ for select using (auth.uid() = id);
 create policy "profiles owner update" on public.profiles
 for update using (public.current_role() = 'owner');
 
-create policy "vendors read by signed in users" on public.vendors
-for select using (auth.role() = 'authenticated');
-
-create policy "owner full vendors" on public.vendors
-for all using (public.current_role() = 'owner') with check (public.current_role() = 'owner');
-
 create policy "blocks read by allowed roles" on public.blocks
-for select using (public.current_role() in ('owner', 'planner', 'block_entry', 'worker', 'dispatch'));
+for select using (public.current_role() in ('owner', 'planner', 'block_entry', 'worker', 'slab_entry'));
 
 create policy "blocks edit by owner planner block entry" on public.blocks
 for all using (public.current_role() in ('owner', 'planner', 'block_entry'))
@@ -221,7 +160,7 @@ for all using (public.current_role() in ('owner', 'worker'))
 with check (public.current_role() in ('owner', 'worker'));
 
 create policy "slabs read by allowed roles" on public.slab_requirements
-for select using (public.current_role() in ('owner', 'planner', 'slab_entry', 'worker', 'carving_assigner', 'dispatch', 'vendor'));
+for select using (public.current_role() in ('owner', 'planner', 'slab_entry', 'worker'));
 
 create policy "slabs edit by owner planner slab entry" on public.slab_requirements
 for all using (public.current_role() in ('owner', 'planner', 'slab_entry'))
@@ -230,10 +169,6 @@ with check (public.current_role() in ('owner', 'planner', 'slab_entry'));
 create policy "slabs worker cutting update" on public.slab_requirements
 for all using (public.current_role() in ('owner', 'worker'))
 with check (public.current_role() in ('owner', 'worker'));
-
-create policy "slabs carving workflow update" on public.slab_requirements
-for all using (public.current_role() in ('owner', 'carving_assigner', 'dispatch'))
-with check (public.current_role() in ('owner', 'carving_assigner', 'dispatch'));
 
 create policy "cut sessions read by owner planner worker" on public.cut_sessions
 for select using (public.current_role() in ('owner', 'planner', 'worker'));
@@ -260,39 +195,7 @@ create policy "cut slabs write by owner planner" on public.cut_session_slabs
 for all using (public.current_role() in ('owner', 'planner'))
 with check (public.current_role() in ('owner', 'planner'));
 
-create policy "carving items read by owner dispatch assigner" on public.carving_items
-for select using (public.current_role() in ('owner', 'dispatch', 'carving_assigner'));
-
-create policy "carving items vendor read own" on public.carving_items
-for select using (public.current_role() = 'vendor' and vendor_id = public.current_vendor_id());
-
-create policy "carving items assign by owner assigner" on public.carving_items
-for all using (public.current_role() in ('owner', 'carving_assigner'))
-with check (public.current_role() in ('owner', 'carving_assigner'));
-
-create policy "carving items dispatch update" on public.carving_items
-for all using (public.current_role() in ('owner', 'dispatch'))
-with check (public.current_role() in ('owner', 'dispatch'));
-
-create policy "carving items vendor update own" on public.carving_items
-for update using (public.current_role() = 'vendor' and vendor_id = public.current_vendor_id())
-with check (public.current_role() = 'vendor' and vendor_id = public.current_vendor_id());
-
-create policy "dispatch logs read by owner dispatch" on public.dispatch_logs
-for select using (public.current_role() in ('owner', 'dispatch'));
-
-create policy "dispatch logs write by owner dispatch" on public.dispatch_logs
-for all using (public.current_role() in ('owner', 'dispatch'))
-with check (public.current_role() in ('owner', 'dispatch'));
-
-insert into public.vendors (name, vendor_type)
-values
-  ('Mohit', 'CNC'),
-  ('Manthan', 'CNC'),
-  ('Alkesh', 'CNC'),
-  ('Dinesh Dholi', 'Manual'),
-  ('Pintu Bhai', 'Manual'),
-  ('Ramesh Ji', 'Manual'),
-  ('Bharat', 'Manual'),
-  ('Dinesh Ji', 'Manual')
-on conflict (name) do nothing;
+update public.blocks set stone = 'PinkStone' where stone = 'Pinkstone';
+update public.blocks set stone = 'WhiteStone' where stone = 'Makrana';
+update public.slab_requirements set stone = 'PinkStone' where stone = 'Pinkstone';
+update public.slab_requirements set stone = 'WhiteStone' where stone = 'Makrana';

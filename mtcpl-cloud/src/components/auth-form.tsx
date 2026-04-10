@@ -102,9 +102,9 @@ export function AuthForm() {
       <div className="help-box">
         <p>Suggested production flow:</p>
         <ul>
-          <li>Use company email and password for all portal users</li>
+          <li>Use company email and password for every operator account</li>
           <li>New accounts wait in a pending state until management activates them</li>
-          <li>After approval, each person only sees their own portal screens</li>
+          <li>After approval, each person lands in the workflow area tied to their role</li>
         </ul>
       </div>
 

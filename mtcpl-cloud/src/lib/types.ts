@@ -3,25 +3,16 @@ export type AppRole =
   | "planner"
   | "block_entry"
   | "slab_entry"
-  | "worker"
-  | "carving_assigner"
-  | "dispatch"
-  | "vendor";
+  | "worker";
+
+export type Stone = "PinkStone" | "WhiteStone";
 
 export type Profile = {
   id: string;
   full_name: string | null;
   phone: string | null;
   role: AppRole;
-  vendor_id: string | null;
-  vendor_name?: string | null;
   is_active: boolean;
-};
-
-export type Vendor = {
-  id: string;
-  name: string;
-  vendor_type: "CNC" | "Manual";
 };
 
 export type NavItem = {

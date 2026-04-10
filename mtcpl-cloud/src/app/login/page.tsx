@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { redirect } from "next/navigation";
 
 import { AuthForm } from "@/components/auth-form";
@@ -13,15 +14,15 @@ export default async function LoginPage() {
   return (
     <main className="login-shell">
       <section className="login-grid">
-        <div className="login-copy page-card">
-          <h1>MTCPL Login</h1>
+        <div className="login-copy">
+          <Image src="/logo-light.png" alt="MTCPL" width={220} height={72} className="login-logo" />
+          <h1>Stone. Precision. Scale.</h1>
           <p>
-            Sign in with your email and password to access the correct MTCPL portal for your role. Each user should
-            have their own account so blocks, planning, cutting, carving, and dispatch stay properly separated.
+            Sign in to manage block intake, slab demand, planning, and live cutting sessions from one streamlined
+            workspace.
           </p>
-
-          <div className="banner" style={{ marginTop: 18 }}>
-            New users will wait for management approval before their portal becomes active.
+          <div className="banner" style={{ marginTop: 20, color: "rgba(248, 246, 242, 0.8)", background: "rgba(255,255,255,0.04)", borderColor: "rgba(232,197,114,0.16)" }}>
+            New users remain in a pending state until management activates the account and assigns a core workflow role.
           </div>
         </div>
 
