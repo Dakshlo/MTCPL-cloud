@@ -9,7 +9,14 @@ type Temple = { id: string; name: string; code_prefix: string };
 function calcCft(l: string, w: string, t: string): string {
   const lv = parseFloat(l), wv = parseFloat(w), tv = parseFloat(t);
   if (!lv || !wv || !tv) return "—";
-  return ((lv * wv * tv) / 1728).toFixed(2); // cubic feet
+  return ((lv * wv * tv) / 1728).toFixed(2);
+}
+
+function previewCodes(baseCode: string, qty: number): string {
+  if (qty <= 1) return baseCode;
+  const codes = [baseCode];
+  for (let i = 1; i < Math.min(qty, 4); i++) codes.push(`${baseCode}-${i}`);
+  return codes.join(", ") + (qty > 4 ? ` … +${qty - 4} more` : "");
 }
 
 export function AddSlabForm({ temples, existingIds }: { temples: Temple[]; existingIds: string[] }) {
@@ -19,9 +26,11 @@ export function AddSlabForm({ temples, existingIds }: { temples: Temple[]; exist
   const [l, setL] = useState("");
   const [w, setW] = useState("");
   const [t, setT] = useState("");
+  const [qty, setQty] = useState(1);
 
   const cft = calcCft(l, w, t);
-  const previewCode = selectedTemple ? generateSlabCode(existingIds, selectedTemple.code_prefix) : "—";
+  const baseCode = selectedTemple ? generateSlabCode(existingIds, selectedTemple.code_prefix) : "—";
+  const codePreview = baseCode === "—" ? "—" : previewCodes(baseCode, qty);
 
   return (
     <form action={addSlabAction} className="add-panel">
@@ -44,11 +53,11 @@ export function AddSlabForm({ temples, existingIds }: { temples: Temple[]; exist
                 name="temple"
                 value={selectedTemple?.name ?? ""}
                 onChange={e => {
-                  const t = temples.find(t => t.name === e.target.value) ?? null;
-                  setSelectedTemple(t);
+                  const found = temples.find(tp => tp.name === e.target.value) ?? null;
+                  setSelectedTemple(found);
                 }}
               >
-                {temples.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
+                {temples.map(tp => <option key={tp.id} value={tp.name}>{tp.name}</option>)}
               </select>
             )}
           </label>
@@ -92,7 +101,7 @@ export function AddSlabForm({ temples, existingIds }: { temples: Temple[]; exist
           </label>
         </div>
 
-        {/* Row 3: Dimensions + Area + Code + Submit */}
+        {/* Row 3: Dimensions + CFT + Quantity + Code preview + Submit */}
         <div className="add-panel-row">
           <label className="stack" style={{ flex: "1 1 80px" }}>
             <span>Length (in)</span>
@@ -109,19 +118,46 @@ export function AddSlabForm({ temples, existingIds }: { temples: Temple[]; exist
 
           <div className="stack" style={{ flex: "0 0 auto" }}>
             <span>CFT</span>
-            <div className="cft-value" style={{ minWidth: 68 }}>{cft}</div>
+            <div className="cft-value" style={{ minWidth: 60 }}>{cft}</div>
+          </div>
+
+          {/* Quantity stepper */}
+          <div className="stack" style={{ flex: "0 0 auto" }}>
+            <span>Quantity</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <button
+                type="button"
+                className="qty-btn"
+                onClick={() => setQty(q => Math.max(1, q - 1))}
+                disabled={qty <= 1}
+              >−</button>
+              <span className="cft-value" style={{ minWidth: 36, textAlign: "center", fontSize: 15, fontWeight: 700 }}>{qty}</span>
+              <button
+                type="button"
+                className="qty-btn"
+                onClick={() => setQty(q => Math.min(50, q + 1))}
+                disabled={qty >= 50}
+              >+</button>
+            </div>
+            <input type="hidden" name="quantity" value={qty} />
           </div>
 
           <div className="stack" style={{ flex: "0 0 auto" }}>
-            <span>Slab Code</span>
-            <div className="cft-value" style={{ minWidth: 90, fontFamily: "ui-monospace, monospace", fontSize: 13 }}>
-              {previewCode}
+            <span>Code{qty > 1 ? "s" : ""}</span>
+            <div
+              className="cft-value"
+              style={{ minWidth: 90, fontFamily: "ui-monospace, monospace", fontSize: 11, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+              title={codePreview}
+            >
+              {codePreview}
             </div>
           </div>
 
           <div className="stack" style={{ flex: "0 0 auto", justifyContent: "flex-end" }}>
             <span style={{ visibility: "hidden", fontSize: 12 }}>·</span>
-            <button className="primary-button" type="submit" disabled={temples.length === 0}>Add Slab</button>
+            <button className="primary-button" type="submit" disabled={temples.length === 0}>
+              {qty > 1 ? `Add ${qty} Slabs` : "Add Slab"}
+            </button>
           </div>
         </div>
       </div>
