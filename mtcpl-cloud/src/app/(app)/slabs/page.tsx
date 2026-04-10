@@ -3,8 +3,6 @@ import { requireAuth } from "@/lib/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { AddSlabForm } from "./add-slab-form";
 import { SlabGrid } from "./slab-grid";
-import { generateSlabCode } from "./utils";
-
 export default async function SlabsPage() {
   const { profile } = await requireAuth(["owner", "planner", "slab_entry", "block_entry"]);
   const supabase = await createServerSupabaseClient();
@@ -27,9 +25,6 @@ export default async function SlabsPage() {
   const slabList = slabs ?? [];
   const templeList = temples ?? [];
   const existingIds = (allIds ?? []).map(r => r.id);
-
-  // Function to generate next code for a given prefix (passed to client)
-  const suggestedCode = (prefix: string) => generateSlabCode(existingIds, prefix);
 
   const totalOpen = slabList.filter(s => s.status === "open").length;
   const priorityCount = slabList.filter(s => s.priority).length;
@@ -73,7 +68,7 @@ export default async function SlabsPage() {
 
       {/* Add form */}
       {canEdit && templeList.length > 0 && (
-        <AddSlabForm temples={templeList} suggestedCode={suggestedCode} />
+        <AddSlabForm temples={templeList} existingIds={existingIds} />
       )}
       {canEdit && templeList.length === 0 && (
         <div className="banner">

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { addSlabAction } from "./actions";
+import { generateSlabCode } from "./utils";
 
 type Temple = { id: string; name: string; code_prefix: string };
 
@@ -11,7 +12,7 @@ function calcArea(l: string, w: string): string {
   return ((lv * wv) / 144).toFixed(2); // sq ft
 }
 
-export function AddSlabForm({ temples, suggestedCode }: { temples: Temple[]; suggestedCode: (prefix: string) => string }) {
+export function AddSlabForm({ temples, existingIds }: { temples: Temple[]; existingIds: string[] }) {
   const [stone, setStone] = useState<"PinkStone" | "WhiteStone">("PinkStone");
   const [priority, setPriority] = useState(false);
   const [selectedTemple, setSelectedTemple] = useState<Temple | null>(temples[0] ?? null);
@@ -19,7 +20,7 @@ export function AddSlabForm({ temples, suggestedCode }: { temples: Temple[]; sug
   const [w, setW] = useState("");
 
   const area = calcArea(l, w);
-  const previewCode = selectedTemple ? suggestedCode(selectedTemple.code_prefix) : "—";
+  const previewCode = selectedTemple ? generateSlabCode(existingIds, selectedTemple.code_prefix) : "—";
 
   return (
     <form action={addSlabAction} className="add-panel">
