@@ -14,15 +14,23 @@ type SlabPreviewProps = {
   className?: string;
 };
 
-const STONE_PALETTES: Record<string, { top: string; front: string; side: string }> = {
-  PinkStone: { top: "#E8B4A0", front: "#D4927A", side: "#C07858" },
-  WhiteStone: { top: "#E8E6DC", front: "#D0CEC4", side: "#B8B6AC" }
+type BlockCardPreviewProps = {
+  stone: string;
+  l?: number | string;
+  w?: number | string;
+  h?: number | string;
+};
+
+export const STONE_PALETTES: Record<string, { top: string; front: string; side: string; stroke: string }> = {
+  PinkStone: { top: "#EDCFC2", front: "#C87A60", side: "#DDA88A", stroke: "rgba(140,60,35,0.2)" },
+  WhiteStone: { top: "#E8E6DC", front: "#B8B6AC", side: "#D0CEC4", stroke: "rgba(80,78,70,0.15)" }
 };
 
 function paletteFor(stone?: string | null) {
   return STONE_PALETTES[stone || "PinkStone"] || STONE_PALETTES.PinkStone;
 }
 
+/** Small inline preview for planning / cutting lists */
 export function BlockMiniPreview({ stone, className }: BlockPreviewProps) {
   return <BlockCardPreview stone={stone} className={className} length={56} width={36} height={24} />;
 }
@@ -35,62 +43,107 @@ export function BlockCardPreview({
   height = 34
 }: BlockPreviewProps) {
   const pal = paletteFor(stone);
-  const l = Math.max(length, 18);
-  const w = Math.max(width, 14);
-  const h = Math.max(height, 10);
-  const sx = 1.05;
-  const sy = 0.58;
-
-  const topLeft = { x: 70, y: 36 };
-  const topRight = { x: topLeft.x + l * sx, y: topLeft.y - l * sy };
-  const rightMid = { x: topRight.x + w * sx, y: topRight.y + w * sy };
-  const leftMid = { x: topLeft.x + w * sx, y: topLeft.y + w * sy };
-
-  const frontBottomLeft = { x: leftMid.x, y: leftMid.y + h };
-  const frontBottomRight = { x: rightMid.x, y: rightMid.y + h };
-  const sideBottomLeft = { x: topLeft.x, y: topLeft.y + h };
-  const sideBottomRight = { x: leftMid.x, y: leftMid.y + h };
-
   return (
-    <svg className={className} viewBox="0 0 220 140" aria-hidden="true">
-      <defs>
-        <linearGradient id={`shadow-${stone}`} x1="0%" x2="100%">
-          <stop offset="0%" stopColor="rgba(45,36,16,0.18)" />
-          <stop offset="100%" stopColor="rgba(45,36,16,0.03)" />
-        </linearGradient>
-      </defs>
-      <ellipse cx="112" cy="118" rx="78" ry="14" fill={`url(#shadow-${stone})`} />
-      <polygon
-        points={`${topLeft.x},${topLeft.y} ${topRight.x},${topRight.y} ${rightMid.x},${rightMid.y} ${leftMid.x},${leftMid.y}`}
-        fill={pal.top}
-        stroke="rgba(45,36,16,0.16)"
-        strokeWidth="1.2"
-      />
-      <polygon
-        points={`${leftMid.x},${leftMid.y} ${rightMid.x},${rightMid.y} ${frontBottomRight.x},${frontBottomRight.y} ${frontBottomLeft.x},${frontBottomLeft.y}`}
-        fill={pal.front}
-        stroke="rgba(45,36,16,0.14)"
-        strokeWidth="1.2"
-      />
-      <polygon
-        points={`${topLeft.x},${topLeft.y} ${leftMid.x},${leftMid.y} ${sideBottomRight.x},${sideBottomRight.y} ${sideBottomLeft.x},${sideBottomLeft.y}`}
-        fill={pal.side}
-        stroke="rgba(45,36,16,0.14)"
-        strokeWidth="1.2"
-      />
+    <svg className={className} viewBox="0 0 44 34" width="34" height="28" aria-hidden="true">
+      <polygon points="8,12 24,4 38,12 22,20" fill={pal.top} stroke={pal.stroke} strokeWidth="0.8" />
+      <polygon points="8,12 22,20 22,30 8,22" fill={pal.front} stroke={pal.stroke} strokeWidth="0.8" />
+      <polygon points="22,20 38,12 38,22 22,30" fill={pal.side} stroke={pal.stroke} strokeWidth="0.8" />
     </svg>
   );
 }
 
+/** Small inline preview for slabs */
 export function SlabMiniPreview({ stone, accent, className }: SlabPreviewProps) {
   const pal = paletteFor(stone);
   const border = accent || pal.front;
-
   return (
     <svg className={className} viewBox="0 0 42 30" width="32" height="24" aria-hidden="true">
       <polygon points="9,9 25,9 31,5 15,5" fill={pal.side} stroke={border} strokeWidth="0.8" />
       <polygon points="9,9 25,9 25,23 9,23" fill={pal.top} stroke={border} strokeWidth="1.2" />
       <polygon points="25,9 31,5 31,19 25,23" fill={pal.front} stroke={border} strokeWidth="0.8" />
+    </svg>
+  );
+}
+
+/**
+ * Card-sized 3D isometric block preview.
+ * Proportional to actual dimensions (L, W, H) passed in.
+ * Fills the card preview container.
+ */
+export function BlockCardPreview({ stone, l = 60, w = 40, h = 24 }: BlockCardPreviewProps) {
+  const pal = paletteFor(stone);
+
+  const L = Math.max(Number(l) || 60, 1);
+  const W = Math.max(Number(w) || 40, 1);
+  const H = Math.max(Number(h) || 24, 1);
+
+  // Isometric projection constants
+  const C = Math.cos(Math.PI / 6);   // cos 30°
+  const S = 0.5;                      // sin 30°
+
+  // Scale to fit in a ~180x100 viewport
+  const scale = Math.min(180 / ((L + W) * C), 90 / ((L + W) * S + H), 2.2);
+  const offsetX = W * C * scale + 6;
+  const offsetY = H * scale + 6;
+
+  function pt(x: number, y: number, z: number) {
+    return {
+      x: offsetX + (x - y) * C * scale,
+      y: offsetY + (x + y) * S * scale - z * scale
+    };
+  }
+
+  const corners = [
+    pt(0,0,0), pt(L,0,0), pt(L,W,0), pt(0,W,0),
+    pt(0,0,H), pt(L,0,H), pt(L,W,H), pt(0,W,H)
+  ];
+  const xs = corners.map(p => p.x);
+  const ys = corners.map(p => p.y);
+  const minX = Math.min(...xs) - 4;
+  const minY = Math.min(...ys) - 4;
+  const maxX = Math.max(...xs) + 4;
+  const maxY = Math.max(...ys) + 8;
+
+  const vw = maxX - minX;
+  const vh = maxY - minY;
+
+  function ptn(x: number, y: number, z: number) {
+    const p = pt(x, y, z);
+    return `${(p.x - minX).toFixed(1)},${(p.y - minY).toFixed(1)}`;
+  }
+
+  return (
+    <svg
+      viewBox={`0 0 ${vw.toFixed(1)} ${vh.toFixed(1)}`}
+      style={{ width: "100%", height: "100%", maxHeight: 88 }}
+      aria-hidden="true"
+    >
+      {/* Front face */}
+      <polygon
+        points={[ptn(0,0,0), ptn(L,0,0), ptn(L,0,H), ptn(0,0,H)].join(" ")}
+        fill={pal.front}
+        stroke={pal.stroke}
+        strokeWidth="0.6"
+      />
+      {/* Right face */}
+      <polygon
+        points={[ptn(L,0,0), ptn(L,W,0), ptn(L,W,H), ptn(L,0,H)].join(" ")}
+        fill={pal.side}
+        stroke={pal.stroke}
+        strokeWidth="0.6"
+      />
+      {/* Top face */}
+      <polygon
+        points={[ptn(0,0,H), ptn(L,0,H), ptn(L,W,H), ptn(0,W,H)].join(" ")}
+        fill={pal.top}
+        stroke={pal.stroke}
+        strokeWidth="0.6"
+      />
+      {/* Subtle highlight on top */}
+      <polygon
+        points={[ptn(0,0,H), ptn(L,0,H), ptn(L,W,H), ptn(0,W,H)].join(" ")}
+        fill="rgba(255,255,255,0.15)"
+      />
     </svg>
   );
 }

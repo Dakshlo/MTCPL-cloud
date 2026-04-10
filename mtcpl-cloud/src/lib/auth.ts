@@ -14,6 +14,10 @@ export function getDefaultRouteForRole(role?: AppRole | null) {
       return "/slabs";
     case "worker":
       return "/cutting";
+    case "carving_assigner":
+      return "/dashboard";
+    case "vendor":
+      return "/cutting";
     default:
       return "/login";
   }

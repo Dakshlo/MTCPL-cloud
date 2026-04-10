@@ -1,184 +1,208 @@
-import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
-
-import { BlocksManager } from "@/components/blocks-manager";
 import { requireAuth } from "@/lib/auth";
 import type { Stone } from "@/lib/types";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { BlockCardPreview } from "@/components/stone-previews";
+import { AddBlockForm } from "./add-block-form";
+import { generateNextCode } from "./utils";
+import { updateBlockAction, deleteBlockAction } from "./actions";
 
-const BLOCK_DELETE_CODE = process.env.BLOCK_DELETE_CODE || "1255";
-const LEGACY_DELETE_CODES = ["1255", "MTCPL-DELETE"];
+const STONES = ["PinkStone", "WhiteStone"] as const;
+const YARDS = [1, 2, 3] as const;
+const STATUSES = ["available", "reserved", "consumed", "discarded"] as const;
 
-function textValue(formData: FormData, key: string) {
-  const raw = formData.get(key);
-  return typeof raw === "string" ? raw.trim() : "";
+function calcCft(l: number, w: number, h: number) {
+  return ((l * w * h) / 1728).toFixed(2);
 }
 
-function numValue(formData: FormData, key: string, fallback = 0) {
-  const parsed = Number(formData.get(key));
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function inchesToFeet(value: number) {
-  return Math.round((value / 12) * 100) / 100;
-}
-
-function currentMonthPrefix() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  return `BLK-${year}${month}-`;
-}
-
-function nextCode(ids: string[]) {
-  const prefix = currentMonthPrefix();
-  const maxForMonth = ids.reduce((highest, id) => {
-    const match = String(id).match(/^BLK-(\d{6})-(\d{4})$/);
-    if (!match || `${prefix}` !== `BLK-${match[1]}-`) return highest;
-    return Math.max(highest, Number(match[2]));
-  }, 0);
-
-  return `${prefix}${String(maxForMonth + 1).padStart(4, "0")}`;
-}
-
-function redirectWithToast(path: string, message: string) {
-  redirect(`${path}?toast=${encodeURIComponent(message)}`);
-}
-
-async function addBlockAction(formData: FormData) {
-  "use server";
-
-  const { profile } = await requireAuth(["owner", "planner", "block_entry"]);
-  const supabase = await createServerSupabaseClient();
-  const { data: existingRows } = await supabase.from("blocks").select("id");
-  const existingIds = (existingRows ?? []).map((row) => row.id);
-  const requestedId = textValue(formData, "id");
-
-  const payload = {
-    stone: (textValue(formData, "stone") || "PinkStone") as Stone,
-    yard: numValue(formData, "yard", 1),
-    category: textValue(formData, "category") || "Fresh",
-    length_ft: inchesToFeet(numValue(formData, "length_in", 0)),
-    width_ft: inchesToFeet(numValue(formData, "width_in", 0)),
-    height_ft: inchesToFeet(numValue(formData, "height_in", 0)),
-    status: textValue(formData, "status") || "available",
-    created_by: profile.id,
-    updated_by: profile.id
+function statusBadgeClass(status: string) {
+  const map: Record<string, string> = {
+    available: "badge-available",
+    reserved:  "badge-reserved",
+    consumed:  "badge-consumed",
+    discarded: "badge-discarded"
   };
-
-  const id = !requestedId || existingIds.includes(requestedId) ? nextCode(existingIds) : requestedId;
-  const { error } = await supabase.from("blocks").insert({ ...payload, id });
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  revalidatePath("/blocks");
-  revalidatePath("/dashboard");
-  redirectWithToast("/blocks", "Block added successfully");
-}
-
-async function updateBlockAction(formData: FormData) {
-  "use server";
-
-  const { profile } = await requireAuth(["owner", "planner", "block_entry"]);
-  const supabase = await createServerSupabaseClient();
-
-  const originalId = textValue(formData, "original_id");
-  const nextId = textValue(formData, "id");
-
-  if (!originalId || !nextId) {
-    throw new Error("Block code is required.");
-  }
-
-  const payload = {
-    id: nextId,
-    stone: (textValue(formData, "stone") || "PinkStone") as Stone,
-    yard: numValue(formData, "yard", 1),
-    category: textValue(formData, "category") || "Fresh",
-    length_ft: inchesToFeet(numValue(formData, "length_in", 0)),
-    width_ft: inchesToFeet(numValue(formData, "width_in", 0)),
-    height_ft: inchesToFeet(numValue(formData, "height_in", 0)),
-    status: textValue(formData, "status") || "available",
-    updated_by: profile.id,
-    updated_at: new Date().toISOString()
-  };
-
-  const { error } = await supabase.from("blocks").update(payload).eq("id", originalId);
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  revalidatePath("/blocks");
-  revalidatePath("/dashboard");
-  redirectWithToast("/blocks", "Block updated");
-}
-
-async function deleteBlockAction(formData: FormData) {
-  "use server";
-
-  const { profile } = await requireAuth(["owner", "planner", "block_entry"]);
-  const supabase = await createServerSupabaseClient();
-  const id = textValue(formData, "delete_target_id");
-  const deleteCode = textValue(formData, "delete_code");
-
-  if (![BLOCK_DELETE_CODE, ...LEGACY_DELETE_CODES].includes(deleteCode)) {
-    redirectWithToast("/blocks", "Delete code is incorrect. Block was not deleted.");
-  }
-
-  const { error } = await supabase.from("blocks").delete().eq("id", id);
-  if (error) {
-    if (error.code === "23503") {
-      const archive = await supabase
-        .from("blocks")
-        .update({
-          status: "discarded",
-          updated_by: profile.id,
-          updated_at: new Date().toISOString()
-        })
-        .eq("id", id);
-
-      if (archive.error) {
-        throw new Error(archive.error.message);
-      }
-
-      revalidatePath("/blocks");
-      revalidatePath("/dashboard");
-      redirectWithToast("/blocks", "Block was referenced and has been archived");
-    }
-
-    throw new Error(error.message);
-  }
-
-  revalidatePath("/blocks");
-  revalidatePath("/dashboard");
-  redirectWithToast("/blocks", "Block deleted");
+  return map[status] || "";
 }
 
 export default async function BlocksPage() {
   await requireAuth(["owner", "planner", "block_entry"]);
   const supabase = await createServerSupabaseClient();
-
   const [{ data: blocks, error }, { data: allIds }] = await Promise.all([
     supabase
       .from("blocks")
       .select("id, stone, yard, category, length_ft, width_ft, height_ft, status, created_at")
+      .in("status", ["available", "reserved"])
       .order("created_at", { ascending: false })
       .limit(300),
     supabase.from("blocks").select("id")
   ]);
 
-  if (error) {
-    throw new Error(error.message);
-  }
+  if (error) throw new Error(error.message);
+
+  const canEdit = ["owner", "planner", "block_entry"].includes(profile.role);
+  const blockList = blocks ?? [];
+  const suggestedId = generateNextCode((allIds ?? []).map(r => r.id));
+
+  const totalBlocks = blockList.length;
+  const pinkCount = blockList.filter(b => b.stone === "PinkStone").length;
+  const whiteCount = blockList.filter(b => b.stone === "WhiteStone").length;
+  const totalCft = blockList.reduce((sum, b) =>
+    sum + (Number(b.length_ft) * Number(b.width_ft) * Number(b.height_ft)) / 1728, 0
+  );
 
   return (
-    <BlocksManager
-      addAction={addBlockAction}
-      blocks={(blocks ?? []) as any}
-      deleteAction={deleteBlockAction}
-      suggestedId={nextCode((allIds ?? []).map((row) => row.id))}
-      updateAction={updateBlockAction}
-    />
+    <>
+      {/* Page header */}
+      <div className="page-header">
+        <div>
+          <h1>Blocks Inventory</h1>
+          <p className="muted">Available and reserved blocks ready for planning.</p>
+        </div>
+      </div>
+
+      {/* Quick metrics */}
+      <div className="metrics-row">
+        <div className="metric-card">
+          <span>Total Blocks</span>
+          <strong>{totalBlocks}</strong>
+          <small>available + reserved</small>
+        </div>
+        <div className="metric-card">
+          <span>PinkStone</span>
+          <strong>{pinkCount}</strong>
+        </div>
+        <div className="metric-card">
+          <span>WhiteStone</span>
+          <strong>{whiteCount}</strong>
+        </div>
+        <div className="metric-card">
+          <span>Total Volume</span>
+          <strong>{totalCft.toFixed(1)}</strong>
+          <small>cubic feet</small>
+        </div>
+      </div>
+
+      {/* Add form — client component for CFT auto-calc */}
+      {canEdit ? <AddBlockForm suggestedId={suggestedId} /> : null}
+
+      {/* Inventory header */}
+      <div className="section-heading" style={{ marginTop: 4 }}>
+        <div>
+          <h2>{totalBlocks} Blocks</h2>
+          <p>Click any card to edit · Delete requires code 1255</p>
+        </div>
+      </div>
+
+      {/* Card grid */}
+      {blockList.length === 0 ? (
+        <div className="banner">No blocks yet. Add your first block above.</div>
+      ) : (
+        <div className="block-card-grid">
+          {blockList.map(block => {
+            const L = Number(block.length_ft);
+            const W = Number(block.width_ft);
+            const H = Number(block.height_ft);
+            const cft = calcCft(L, W, H);
+            const stoneBadge = block.stone === "PinkStone" ? "badge-pink" : "badge-white-stone";
+
+            return (
+              <details className="block-card" key={block.id}>
+                {/* Card face */}
+                <summary className="block-card-face">
+                  <div className="block-card-preview">
+                    <BlockCardPreview stone={block.stone} l={L} w={W} h={H} />
+                  </div>
+                  <div className="block-card-info">
+                    <div className="block-card-code">{block.id}</div>
+                    <div className="block-card-badges">
+                      <span className={`role-pill ${stoneBadge}`}>{block.stone}</span>
+                      <span className="role-pill">Yard {block.yard}</span>
+                      <span className={`role-pill ${statusBadgeClass(block.status)}`}>{block.status}</span>
+                    </div>
+                    <div className="block-card-dims">{L} × {W} × {H} in</div>
+                    <div className="block-card-cft">{cft} CFT</div>
+                  </div>
+                  <div className="block-card-hint">↓ Click to edit</div>
+                </summary>
+
+                {/* Edit form */}
+                {canEdit ? (
+                  <div className="block-card-edit">
+                    <div className="block-card-edit-header">
+                      <h3>Edit Block — {block.id}</h3>
+                    </div>
+
+                    <form action={updateBlockAction}>
+                      <input name="original_id" type="hidden" value={block.id} />
+
+                      <div className="inventory-row" style={{ marginBottom: 12 }}>
+                        <label className="stack">
+                          <span>Block Code</span>
+                          <input defaultValue={block.id} name="id" required style={{ fontFamily: "monospace" }} />
+                        </label>
+                        <label className="stack">
+                          <span>Stone</span>
+                          <select defaultValue={block.stone} name="stone">
+                            {STONES.map(s => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                        </label>
+                        <label className="stack">
+                          <span>Yard</span>
+                          <select defaultValue={String(block.yard)} name="yard">
+                            {YARDS.map(y => <option key={y} value={y}>Yard {y}</option>)}
+                          </select>
+                        </label>
+                        <label className="stack">
+                          <span>Status</span>
+                          <select defaultValue={block.status} name="status">
+                            {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                        </label>
+                      </div>
+
+                      <div className="inventory-row" style={{ marginBottom: 14 }}>
+                        <label className="stack">
+                          <span>Length (in)</span>
+                          <input defaultValue={String(L)} min="0" name="length_in" step="0.5" type="number" />
+                        </label>
+                        <label className="stack">
+                          <span>Width (in)</span>
+                          <input defaultValue={String(W)} min="0" name="width_in" step="0.5" type="number" />
+                        </label>
+                        <label className="stack">
+                          <span>Height (in)</span>
+                          <input defaultValue={String(H)} min="0" name="height_in" step="0.5" type="number" />
+                        </label>
+                      </div>
+
+                      <div className="record-actions">
+                        <label className="stack" style={{ flex: "0 0 auto" }}>
+                          <span>Delete Code</span>
+                          <input name="delete_code" placeholder="Enter to delete" style={{ width: 160 }} />
+                        </label>
+                        <button
+                          className="ghost-button danger-ghost"
+                          formAction={deleteBlockAction}
+                          formNoValidate
+                          name="delete_target_id"
+                          type="submit"
+                          value={block.id}
+                          style={{ alignSelf: "flex-end" }}
+                        >
+                          Delete
+                        </button>
+                        <button className="secondary-button" type="submit" style={{ alignSelf: "flex-end" }}>
+                          Update
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                ) : null}
+              </details>
+            );
+          })}
+        </div>
+      )}
+    </>
   );
 }

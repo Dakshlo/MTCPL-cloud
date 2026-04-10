@@ -1,7 +1,11 @@
-export type Language = "en" | "hi";
+export type Language = "en";
 
-const dictionary = {
-  en: {
+export function getLanguage(_value: string | undefined): Language {
+  return "en";
+}
+
+export function t(_lang: Language, key: string): string {
+  const labels: Record<string, string> = {
     signedIn: "Signed in",
     signOut: "Sign out",
     dashboard: "Dashboard",
@@ -14,33 +18,9 @@ const dictionary = {
     block_entry: "Block Entry",
     slab_entry: "Slab Entry",
     worker: "Worker",
-    cft: "CFT",
-    stoneType: "Stone Type",
-    yard: "Yard"
-  },
-  hi: {
-    signedIn: "साइन इन",
-    signOut: "साइन आउट",
-    dashboard: "डैशबोर्ड",
-    blocks: "ब्लॉक्स",
-    slabs: "स्लैब्स",
-    planning: "प्लान जनरेटर",
-    cutting: "कटिंग",
-    owner: "ओनर",
-    planner: "प्लानर",
-    block_entry: "ब्लॉक एंट्री",
-    slab_entry: "स्लैब एंट्री",
-    worker: "वर्कर",
-    cft: "सीएफटी",
-    stoneType: "स्टोन टाइप",
-    yard: "यार्ड"
-  }
-} as const;
-
-export function getLanguage(value: string | undefined): Language {
-  return value === "hi" ? "hi" : "en";
-}
-
-export function t(lang: Language, key: keyof typeof dictionary.en) {
-  return dictionary[lang][key];
+    carving_assigner: "Carving Assigner",
+    dispatch: "Dispatch",
+    vendor: "Vendor"
+  };
+  return labels[key] ?? key;
 }

@@ -7,7 +7,17 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 const TEMPLES = ["Umia Mata", "Agroha Dham", "Balaknath", "Shrinathji", "Other"] as const;
 const STONES = ["", "PinkStone", "WhiteStone"] as const;
-const STATUSES = ["open", "planned", "cutting", "cut_done", "rejected"] as const;
+const STATUSES = [
+  "open",
+  "planned",
+  "cutting",
+  "cut_done",
+  "carving_assigned",
+  "carving_in_progress",
+  "completed",
+  "dispatched",
+  "rejected"
+] as const;
 const BLOCK_DELETE_CODE = process.env.BLOCK_DELETE_CODE || "1255";
 const LEGACY_DELETE_CODES = ["1255", "MTCPL-DELETE"];
 
@@ -158,6 +168,10 @@ export default async function SlabsPage() {
   if (error) throw new Error(error.message);
 
   const slabList = slabs ?? [];
+  const totalArea = slabList.reduce((sum, slab) => sum + Number(slab.length_ft) * Number(slab.width_ft), 0);
+  const priorityCount = slabList.filter((slab) => slab.priority).length;
+  const templeCount = new Set(slabList.map((slab) => slab.temple)).size;
+  const pinkstoneCount = slabList.filter((slab) => slab.stone === "PinkStone").length;
 
   return (
     <div className="records-stack">
@@ -169,64 +183,172 @@ export default async function SlabsPage() {
           </div>
         </div>
 
-        <form action={addSlabAction} className="form-row">
-          <label className="stack form-col-2">
-            <span>Slab Code</span>
-            <input defaultValue={nextCode((allIds ?? []).map((row) => row.id))} name="id" />
-          </label>
-          <label className="stack form-col-3">
-            <span>Label</span>
-            <input name="label" placeholder="Temple panel / riser / tread" required />
-          </label>
-          <label className="stack form-col-2">
-            <span>Temple</span>
-            <select defaultValue="Umia Mata" name="temple">
-              {TEMPLES.map((temple) => <option key={temple} value={temple}>{temple}</option>)}
-            </select>
-          </label>
-          <label className="stack form-col-2">
-            <span>Stone</span>
-            <select defaultValue="PinkStone" name="stone">
-              {STONES.map((stone) => <option key={stone} value={stone}>{stone || "Any"}</option>)}
-            </select>
-          </label>
-          <label className="stack form-col-1">
-            <span>L ft</span>
-            <input defaultValue="4" name="length_ft" step="0.01" type="number" />
-          </label>
-          <label className="stack form-col-1">
-            <span>W ft</span>
-            <input defaultValue="2" name="width_ft" step="0.01" type="number" />
-          </label>
-          <label className="stack form-col-1">
-            <span>T ft</span>
-            <input defaultValue="0.2" name="thickness_ft" step="0.01" type="number" />
-          </label>
-          <label className="stack form-col-2">
-            <span>Source Block</span>
-            <select defaultValue="" name="source_block_id">
-              <option value="">Not linked</option>
-              {(blocks ?? []).map((block) => <option key={block.id} value={block.id}>{block.id}</option>)}
-            </select>
-          </label>
-          <label className="stack form-col-2">
-            <span>Status</span>
-            <select defaultValue="open" name="status">
-              {STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
-            </select>
-          </label>
-          <label className="stack form-col-2">
-            <span>Priority</span>
-            <select defaultValue="false" name="priority">
-              <option value="false">Standard</option>
-              <option value="true">Priority</option>
-            </select>
-          </label>
-          <div className="form-col-2">
-            <button className="primary-button" style={{ width: "100%" }} type="submit">
-              Add Slab
-            </button>
+        <div className="inventory-hero-panel">
+          <div className="inventory-hero-art">
+            <SlabMiniPreview accent="#C09282" stone="PinkStone" className="hero-block-art" />
+            <div>
+              <strong>Open Demand Snapshot</strong>
+              <p className="muted">
+                {priorityCount} priority slabs · {templeCount} temple groups · {pinkstoneCount} already tagged PinkStone.
+              </p>
+            </div>
           </div>
+          <div className="inventory-mini-bars">
+            <div className="inventory-mini-bar">
+              <div className="inventory-mini-bar-head">
+                <span>Total queue</span>
+                <strong>{slabList.length}</strong>
+              </div>
+              <div className="bar-track">
+                <div className="bar-fill inventory-fill-cool" style={{ width: "100%" }} />
+              </div>
+            </div>
+            <div className="inventory-mini-bar">
+              <div className="inventory-mini-bar-head">
+                <span>Priority share</span>
+                <strong>{priorityCount}</strong>
+              </div>
+              <div className="bar-track">
+                <div
+                  className="bar-fill inventory-fill-warn"
+                  style={{ width: `${slabList.length ? (priorityCount / slabList.length) * 100 : 0}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="metrics-grid inventory-metrics-row">
+        <div className="metric-card inventory-metric">
+          <span>Open Slabs</span>
+          <strong>{slabList.length}</strong>
+        </div>
+        <div className="metric-card inventory-metric">
+          <span>Total Area</span>
+          <strong>{totalArea.toFixed(1)}</strong>
+          <small>ft2 requested</small>
+        </div>
+        <div className="metric-card inventory-metric">
+          <span>Priority Items</span>
+          <strong>{priorityCount}</strong>
+        </div>
+        <div className="metric-card inventory-metric">
+          <span>Temple Groups</span>
+          <strong>{templeCount}</strong>
+        </div>
+      </section>
+
+      {canEdit ? (
+        <form action={addSlabAction} className="page-card compact-create-card inventory-create-shell inventory-studio" style={{ marginTop: 18, padding: 18 }}>
+          <div className="inventory-studio-main">
+            <div className="section-heading">
+              <div>
+                <h2 style={{ margin: 0 }}>Add New Slab Requirement</h2>
+                <p className="muted">Premium queue entry with automatic IDs, temple grouping, and PinkStone as the default selection.</p>
+              </div>
+            </div>
+
+            <div className="inventory-row inventory-row-create">
+              <label className="stack">
+                <span>ID</span>
+                <input defaultValue={suggestedId} name="id" placeholder={suggestedId} />
+              </label>
+
+              <label className="stack">
+                <span>Label</span>
+                <input defaultValue="" name="label" placeholder="Main panel" required />
+              </label>
+
+              <label className="stack">
+                <span>Temple</span>
+                <select defaultValue="Umia Mata" name="temple">
+                  {TEMPLES.map((temple) => (
+                    <option key={temple} value={temple}>
+                      {temple}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="stack">
+                <span>Stone</span>
+                <select defaultValue="PinkStone" name="stone">
+                  <option value="">Auto / not fixed yet</option>
+                  {STONES.filter(Boolean).map((stone) => (
+                    <option key={stone} value={stone}>
+                      {stone}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="stack">
+                <span>Priority</span>
+                <select defaultValue="false" name="priority">
+                  <option value="false">Normal</option>
+                  <option value="true">⚡ Priority</option>
+                </select>
+              </label>
+
+              <input name="status" type="hidden" value="open" />
+            </div>
+
+            <div className="inventory-row inventory-row-create" style={{ marginTop: 12 }}>
+              <label className="stack">
+                <span>Length ft</span>
+                <input defaultValue="3" min="0" name="length_ft" step="0.1" type="number" />
+              </label>
+
+              <label className="stack">
+                <span>Width ft</span>
+                <input defaultValue="2" min="0" name="width_ft" step="0.1" type="number" />
+              </label>
+
+              <label className="stack">
+                <span>Thickness ft</span>
+                <input defaultValue="0.5" min="0" name="thickness_ft" step="0.05" type="number" />
+              </label>
+
+              <label className="stack">
+                <span>Source block</span>
+                <select defaultValue="" name="source_block_id">
+                  <option value="">Not linked yet</option>
+                  {(blocks ?? []).map((block) => (
+                    <option key={block.id} value={block.id}>
+                      {block.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <div className="create-footer" style={{ marginTop: 16 }}>
+              <button className="primary-button" type="submit">
+                Add Slab
+              </button>
+            </div>
+          </div>
+
+          <aside className="inventory-studio-side">
+            <div className="inventory-preview-card">
+              <SlabMiniPreview accent="#C09282" stone="PinkStone" className="inventory-preview-art" />
+              <strong>Queue Builder</strong>
+              <p className="muted">
+                Keep slab demand organized by temple, flag critical pieces with priority, and link source blocks when known.
+              </p>
+              <div className="inventory-preview-stats">
+                <div>
+                  <span className="muted">Suggested code</span>
+                  <strong>{suggestedId}</strong>
+                </div>
+                <div>
+                  <span className="muted">Default stone</span>
+                  <strong>PinkStone</strong>
+                </div>
+              </div>
+            </div>
+          </aside>
         </form>
       </section>
 
@@ -242,10 +364,11 @@ export default async function SlabsPage() {
           {slabList.map((slab, index) => (
             <form action={updateSlabAction} className="record-card" key={slab.id} style={{ background: index % 2 ? "var(--surface-alt)" : "var(--surface)" }}>
               <input name="original_id" type="hidden" value={slab.id} />
-              <div className="record-head" style={{ marginBottom: 16 }}>
-                <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                  <SlabMiniPreview accent={slab.stone === "PinkStone" ? "#D4927A" : "#B8B6AC"} stone={slab.stone} />
-                  <div>
+
+              <div className="record-head">
+                <div>
+                  <div className="record-title-row">
+                    <SlabMiniPreview accent={slab.stone === "PinkStone" ? "#C87A60" : "#B8B6AC"} stone={slab.stone} />
                     <strong>{slab.id}</strong>
                     <p className="muted" style={{ margin: "6px 0 0" }}>{slab.label}</p>
                   </div>

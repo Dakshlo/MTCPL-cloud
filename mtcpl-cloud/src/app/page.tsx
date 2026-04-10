@@ -13,17 +13,47 @@ export default async function HomePage() {
 
   return (
     <main className="landing-shell">
-      <section className="landing-hero">
-        <div className="landing-kicker">MTCPL Cloud</div>
-        <div>
-          <Image src="/logo-dark.png" alt="MTCPL" width={240} height={80} className="landing-logo" />
+      <div className="landing-glow" />
+      <div className="landing-hero">
+        {/* Logo — filter inverts dark logo to white on dark bg */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/logo-dark.png"
+          alt="MTCPL"
+          className="landing-logo"
+        />
+
+        <div className="landing-tagline">
+          <h1>
+            Stone. <em>Precision.</em> Scale.
+          </h1>
+          <p>
+            End-to-end block inventory and cutting plan management.<br />
+            Built for the yard. Designed for clarity.
+          </p>
         </div>
-        <h1 className="landing-title">Stone. Precision. Scale.</h1>
-        <p className="landing-subtitle">End-to-end block tracking and cutting plan system</p>
-        <Link className="primary-button" href="/login">
-          Open Login
+
+        <Link href="/login" className="landing-cta">
+          Enter System →
         </Link>
-      </section>
+
+        <div className="landing-divider" />
+
+        <div className="landing-features">
+          <div className="landing-feature">
+            <strong>Block Entry</strong>
+            <span>Inventory</span>
+          </div>
+          <div className="landing-feature">
+            <strong>Plan Generator</strong>
+            <span>Cut Planning</span>
+          </div>
+          <div className="landing-feature">
+            <strong>Cutting</strong>
+            <span>Workflow</span>
+          </div>
+        </div>
+      </div>
     </main>
   );
 }

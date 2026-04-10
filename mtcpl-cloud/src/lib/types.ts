@@ -7,6 +7,8 @@ export type AppRole =
 
 export type Stone = "PinkStone" | "WhiteStone";
 
+export type StoneType = "PinkStone" | "WhiteStone";
+
 export type Profile = {
   id: string;
   full_name: string | null;

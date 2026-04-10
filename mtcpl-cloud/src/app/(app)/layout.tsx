@@ -6,32 +6,31 @@ import { RealtimeRefresh } from "@/components/realtime-refresh";
 import { Sidebar } from "@/components/sidebar";
 import { Toast } from "@/components/toast";
 import { requireAuth } from "@/lib/auth";
-import { t } from "@/lib/i18n";
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const { profile } = await requireAuth();
-  const lang = "en";
-  const displayName = profile.full_name || profile.phone || "MTCPL User";
+  const displayName = profile.vendor_name || profile.full_name || profile.phone || "MTCPL User";
 
   return (
     <div className="app-shell">
       <RealtimeRefresh />
-      <Sidebar displayName={displayName} role={profile.role} lang={lang} />
+      <Sidebar displayName={displayName} role={profile.role} />
 
       <main className="main-shell">
-        <header className="topbar">
-          <PageHeader />
-          <div className="topbar-actions">
-            <div className="topbar-user">
-              <span className="muted">{t(lang, "signedIn")}</span>
-              <strong>{displayName}</strong>
-              <span className="status-badge">{t(lang, profile.role)}</span>
-            </div>
-            <LogoutButton lang={lang} />
+        <div className="topbar">
+          <div className="topbar-left">
+            <span className="topbar-label">Signed in as</span>
+            <strong className="topbar-name">{displayName}</strong>
+          </div>
+          <div className="topbar-right">
+            <span className="role-pill">{profile.role.replace("_", " ")}</span>
+            <LogoutButton />
           </div>
         </header>
 
-        <div className="page-content">{children}</div>
+        <div className="page-content">
+          {children}
+        </div>
       </main>
       <Toast />
     </div>

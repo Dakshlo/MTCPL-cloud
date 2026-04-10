@@ -7,26 +7,18 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 type Mode = "sign_in" | "sign_up";
 
-const initialState = {
-  email: "",
-  password: ""
-};
-
 export function AuthForm() {
   const router = useRouter();
   const supabase = createBrowserSupabaseClient();
 
   const [mode, setMode] = useState<Mode>("sign_in");
-  const [form, setForm] = useState(initialState);
-  const [message, setMessage] = useState<string>("");
-  const [error, setError] = useState<string>("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
 
-  function updateField(field: keyof typeof initialState, value: string) {
-    setForm((prev) => ({ ...prev, [field]: value }));
-  }
-
-  async function handlePasswordSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPending(true);
     setError("");
@@ -34,22 +26,12 @@ export function AuthForm() {
 
     try {
       if (mode === "sign_up") {
-        const { error: signUpError } = await supabase.auth.signUp({
-          email: form.email,
-          password: form.password
-        });
-
-        if (signUpError) throw signUpError;
-        setMessage(
-          "Account created. Use the same email and password to sign in after confirmation. You will see a waiting screen until management activates and assigns your role."
-        );
+        const { error: err } = await supabase.auth.signUp({ email, password });
+        if (err) throw err;
+        setMessage("Account created. Sign in after confirmation. Management will activate your account and assign your role.");
       } else {
-        const { error: signInError } = await supabase.auth.signInWithPassword({
-          email: form.email,
-          password: form.password
-        });
-
-        if (signInError) throw signInError;
+        const { error: err } = await supabase.auth.signInWithPassword({ email, password });
+        if (err) throw err;
         router.push("/");
         router.refresh();
       }
@@ -61,24 +43,39 @@ export function AuthForm() {
   }
 
   return (
-    <div className="auth-card">
-      <div className="auth-switch">
-        <button className={mode === "sign_in" ? "active" : ""} onClick={() => setMode("sign_in")} type="button">
+    <div>
+      <h2 style={{ marginBottom: 20, fontSize: 20, fontWeight: 700 }}>
+        {mode === "sign_in" ? "Sign in to MTCPL" : "Create account"}
+      </h2>
+
+      {/* Mode toggle */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+        <button
+          type="button"
+          onClick={() => setMode("sign_in")}
+          className={mode === "sign_in" ? "primary-button" : "secondary-button"}
+          style={{ flex: 1, fontSize: 13 }}
+        >
           Sign in
         </button>
-        <button className={mode === "sign_up" ? "active" : ""} onClick={() => setMode("sign_up")} type="button">
+        <button
+          type="button"
+          onClick={() => setMode("sign_up")}
+          className={mode === "sign_up" ? "primary-button" : "secondary-button"}
+          style={{ flex: 1, fontSize: 13 }}
+        >
           Sign up
         </button>
       </div>
 
-      <form onSubmit={handlePasswordSubmit} className="stack">
+      <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         <label className="stack">
           <span>Email</span>
           <input
             type="email"
             placeholder="owner@mtcpl.com"
-            value={form.email}
-            onChange={(event) => updateField("email", event.target.value)}
+            value={email}
+            onChange={e => setEmail(e.target.value)}
             required
           />
         </label>
@@ -88,28 +85,24 @@ export function AuthForm() {
           <input
             type="password"
             placeholder="Enter password"
-            value={form.password}
-            onChange={(event) => updateField("password", event.target.value)}
+            value={password}
+            onChange={e => setPassword(e.target.value)}
             required
           />
         </label>
 
-        <button className="primary-button" disabled={pending} type="submit">
-          {pending ? "Please wait..." : mode === "sign_in" ? "Continue" : "Create account"}
+        <button className="primary-button" disabled={pending} type="submit" style={{ marginTop: 4 }}>
+          {pending ? "Please wait…" : mode === "sign_in" ? "Sign in" : "Create account"}
         </button>
       </form>
 
-      <div className="help-box">
-        <p>Suggested production flow:</p>
-        <ul>
-          <li>Use company email and password for every operator account</li>
-          <li>New accounts wait in a pending state until management activates them</li>
-          <li>After approval, each person lands in the workflow area tied to their role</li>
-        </ul>
-      </div>
+      {message ? (
+        <div className="banner" style={{ marginTop: 14 }}>{message}</div>
+      ) : null}
 
-      {message ? <p className="success-text">{message}</p> : null}
-      {error ? <p className="error-text">{error}</p> : null}
+      {error ? (
+        <p style={{ marginTop: 14, fontSize: 13, color: "var(--danger)" }}>{error}</p>
+      ) : null}
     </div>
   );
 }

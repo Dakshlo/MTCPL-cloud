@@ -31,14 +31,15 @@ create table public.profiles (
   updated_at timestamptz not null default now()
 );
 
+-- Dimensions stored in inches. stone: 'PinkStone' | 'WhiteStone'
 create table public.blocks (
   id text primary key,
   stone text not null check (stone in ('PinkStone', 'WhiteStone')),
   yard smallint not null check (yard in (1, 2, 3)),
   category public.block_category not null default 'Fresh',
-  length_ft numeric(8,2) not null,
-  width_ft numeric(8,2) not null,
-  height_ft numeric(8,2) not null,
+  length_ft numeric(10,2) not null,
+  width_ft numeric(10,2) not null,
+  height_ft numeric(10,2) not null,
   status public.block_status not null default 'available',
   created_by uuid references public.profiles(id),
   updated_by uuid references public.profiles(id),
@@ -50,10 +51,10 @@ create table public.slab_requirements (
   id text primary key,
   label text not null,
   temple text not null,
-  stone text check (stone in ('PinkStone', 'WhiteStone')),
-  length_ft numeric(8,2) not null,
-  width_ft numeric(8,2) not null,
-  thickness_ft numeric(8,2) not null,
+  stone text,
+  length_ft numeric(10,2) not null,
+  width_ft numeric(10,2) not null,
+  thickness_ft numeric(10,2) not null,
   source_block_id text references public.blocks(id) on delete set null,
   status public.slab_status not null default 'open',
   priority boolean not null default false,
@@ -91,10 +92,10 @@ create table public.cut_session_slabs (
   id uuid primary key default gen_random_uuid(),
   cut_session_block_id uuid not null references public.cut_session_blocks(id) on delete cascade,
   slab_requirement_id text not null references public.slab_requirements(id),
-  placed_width_ft numeric(8,2) not null,
-  placed_height_ft numeric(8,2) not null,
-  pos_x_ft numeric(8,2) not null,
-  pos_y_ft numeric(8,2) not null,
+  placed_width_ft numeric(10,2) not null,
+  placed_height_ft numeric(10,2) not null,
+  pos_x_ft numeric(10,2) not null,
+  pos_y_ft numeric(10,2) not null,
   rotated boolean not null default false
 );
 
@@ -149,7 +150,7 @@ create policy "profiles owner update" on public.profiles
 for update using (public.current_role() = 'owner');
 
 create policy "blocks read by allowed roles" on public.blocks
-for select using (public.current_role() in ('owner', 'planner', 'block_entry', 'worker', 'slab_entry'));
+for select using (public.current_role() in ('owner', 'planner', 'block_entry', 'worker'));
 
 create policy "blocks edit by owner planner block entry" on public.blocks
 for all using (public.current_role() in ('owner', 'planner', 'block_entry'))
@@ -194,8 +195,3 @@ for select using (public.current_role() in ('owner', 'planner', 'worker'));
 create policy "cut slabs write by owner planner" on public.cut_session_slabs
 for all using (public.current_role() in ('owner', 'planner'))
 with check (public.current_role() in ('owner', 'planner'));
-
-update public.blocks set stone = 'PinkStone' where stone = 'Pinkstone';
-update public.blocks set stone = 'WhiteStone' where stone = 'Makrana';
-update public.slab_requirements set stone = 'PinkStone' where stone = 'Pinkstone';
-update public.slab_requirements set stone = 'WhiteStone' where stone = 'Makrana';

@@ -67,8 +67,8 @@ export type PlanResult = {
 };
 
 const STONE_PALETTES: Record<string, { top: string; front: string; side: string }> = {
-  PinkStone: { top: "#E8B4A0", front: "#D4927A", side: "#C07858" },
-  WhiteStone: { top: "#E8E6DC", front: "#D0CEC4", side: "#B8B6AC" }
+  PinkStone: { top: "#EDCFC2", front: "#C87A60", side: "#DDA88A" },
+  WhiteStone: { top: "#E8E6DC", front: "#B8B6AC", side: "#D0CEC4" }
 };
 
 const SLAB_COLORS = ["#C9973A", "#9C6ADE", "#2E8B57", "#D75D39", "#4C88E8", "#9D7A33", "#C2495E", "#5B6770"];
@@ -190,6 +190,7 @@ function runOptimization(blocks: BlockRow[], slabs: SlabRow[], kerfMm: number): 
 
     const usableL = Math.max(0, toNum(block.length_ft));
     const usableW = Math.max(0, toNum(block.width_ft));
+
     if (usableL <= 0.01 || usableW <= 0.01) return;
 
     const packed = packBlock(usableL, usableW, eligible, kerfFt);
@@ -250,7 +251,7 @@ export function IsoBlockPreview({ block, placed }: { block: PlanBlock["blk"]; pl
   const scale = Math.min(320 / ((L + W) * C), 180 / (((L + W) * S) + H), 28);
   const offsetX = W * C * scale + 8;
   const offsetY = H * scale + 8;
-  const pal = STONE_PALETTES[block.stone] || STONE_PALETTES.WhiteStone;
+  const pal = STONE_PALETTES[block.stone] || STONE_PALETTES.PinkStone;
 
   function pt(x: number, y: number, z: number) {
     return {
@@ -284,7 +285,9 @@ export function IsoBlockPreview({ block, placed }: { block: PlanBlock["blk"]; pl
       <polygon points={[ptn(0, 0, H), ptn(L, 0, H), ptn(L, W, H), ptn(0, W, H)].join(" ")} fill={pal.top} />
 
       {placed.map((item) => {
-        const center = txt(item.px + item.pw / 2, item.py + item.ph / 2, H);
+        const ox = 0;
+        const oy = 0;
+        const center = txt(ox + item.px + item.pw / 2, oy + item.py + item.ph / 2, H);
         return (
           <g key={item.id}>
             <polygon

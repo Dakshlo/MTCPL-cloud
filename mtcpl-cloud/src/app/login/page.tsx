@@ -13,21 +13,45 @@ export default async function LoginPage() {
 
   return (
     <main className="login-shell">
-      <section className="login-grid">
-        <div className="login-copy">
-          <Image src="/logo-light.png" alt="MTCPL" width={220} height={72} className="login-logo" />
-          <h1>Stone. Precision. Scale.</h1>
+      {/* Left panel — dark branded */}
+      <div className="login-left">
+        <img
+          src="/logo-dark.png"
+          alt="MTCPL"
+          className="login-logo"
+        />
+
+        <div className="login-left-copy">
+          <h2>Stone Management,<br />Brought Online</h2>
           <p>
-            Sign in to manage block intake, slab demand, planning, and live cutting sessions from one streamlined
-            workspace.
+            Track every block from yard to slab. Generate cutting plans, manage workflow, and keep your team in sync.
           </p>
-          <div className="banner" style={{ marginTop: 20, color: "rgba(248, 246, 242, 0.8)", background: "rgba(255,255,255,0.04)", borderColor: "rgba(232,197,114,0.16)" }}>
-            New users remain in a pending state until management activates the account and assigns a core workflow role.
-          </div>
         </div>
 
-        <AuthForm />
-      </section>
+        <div className="login-features">
+          {[
+            "Block inventory with CFT tracking",
+            "Automated cut plan generation",
+            "Real-time cutting workflow",
+            "Role-based access for your team"
+          ].map(f => (
+            <div key={f} className="login-feature">
+              <span className="login-feature-dot" />
+              {f}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Right panel — form */}
+      <div className="login-right">
+        <div className="login-form-card">
+          <AuthForm />
+          <p className="muted" style={{ marginTop: 16, fontSize: 12, textAlign: "center" }}>
+            New accounts require management approval before access is granted.
+          </p>
+        </div>
+      </div>
     </main>
   );
 }

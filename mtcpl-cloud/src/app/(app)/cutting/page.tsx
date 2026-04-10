@@ -131,7 +131,7 @@ async function finishBlockAction(formData: FormData) {
   const sessionBlockId = String(formData.get("session_block_id") || "");
   const sessionId = String(formData.get("session_id") || "");
   const blockId = String(formData.get("block_id") || "");
-  const stone = String(formData.get("stone") || "WhiteStone");
+  const stone = String(formData.get("stone") || "PinkStone");
   const yard = Number(formData.get("yard") || 1);
   const slabIds = JSON.parse(String(formData.get("slab_ids") || "[]")) as string[];
   const restock = String(formData.get("restock") || "") === "yes";
@@ -325,7 +325,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                             <input name="session_block_id" type="hidden" value={block.id} />
                             <input name="session_id" type="hidden" value={session.id} />
                             <input name="block_id" type="hidden" value={block.block_id} />
-                            <input name="stone" type="hidden" value={layout?.blk?.stone ?? "WhiteStone"} />
+                            <input name="stone" type="hidden" value={layout?.blk?.stone ?? "PinkStone"} />
                             <input name="yard" type="hidden" value={String(layout?.blk?.yard ?? 1)} />
                             <input name="slab_ids" type="hidden" value={JSON.stringify(slabIds)} />
                             <input name="largest_remainder" type="hidden" value={JSON.stringify(remainder)} />
@@ -339,7 +339,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                             <input name="session_block_id" type="hidden" value={block.id} />
                             <input name="session_id" type="hidden" value={session.id} />
                             <input name="block_id" type="hidden" value={block.block_id} />
-                            <input name="stone" type="hidden" value={layout?.blk?.stone ?? "WhiteStone"} />
+                            <input name="stone" type="hidden" value={layout?.blk?.stone ?? "PinkStone"} />
                             <input name="yard" type="hidden" value={String(layout?.blk?.yard ?? 1)} />
                             <input name="slab_ids" type="hidden" value={JSON.stringify(slabIds)} />
                             <input name="largest_remainder" type="hidden" value={JSON.stringify(remainder)} />
