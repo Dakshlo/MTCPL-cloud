@@ -20,7 +20,7 @@ type SessionRow = {
     largest_remainder: { l: number; w: number; h: number } | null;
     restocked_block_id: string | null;
     layout: {
-      blk?: { id: string; stone: string; yard: number; l: number; w: number; h: number; tL?: number; tR?: number; tT?: number; tB?: number };
+      blk?: { id: string; stone: string; yard: number; l: number; w: number; h: number };
       placed?: Array<{ id: string; sw: number; sh: number; pw?: number; ph?: number; px?: number; py?: number; aw?: number; ah?: number; rot: boolean; label?: string; temple?: string; sd?: number }>;
     } | null;
     cut_session_slabs: Array<{
@@ -34,7 +34,6 @@ async function refreshPaths() {
   revalidatePath("/cutting");
   revalidatePath("/blocks");
   revalidatePath("/slabs");
-  revalidatePath("/carving-assign");
   revalidatePath("/dashboard");
 }
 
@@ -132,7 +131,7 @@ async function finishBlockAction(formData: FormData) {
   const sessionBlockId = String(formData.get("session_block_id") || "");
   const sessionId = String(formData.get("session_id") || "");
   const blockId = String(formData.get("block_id") || "");
-  const stone = String(formData.get("stone") || "Makrana");
+  const stone = String(formData.get("stone") || "PinkStone");
   const yard = Number(formData.get("yard") || 1);
   const slabIds = JSON.parse(String(formData.get("slab_ids") || "[]")) as string[];
   const restock = String(formData.get("restock") || "") === "yes";
@@ -152,10 +151,6 @@ async function finishBlockAction(formData: FormData) {
       length_ft: remainder.l,
       width_ft: remainder.w,
       height_ft: remainder.h,
-      trim_left_ft: 0,
-      trim_right_ft: 0,
-      trim_near_ft: 0,
-      trim_far_ft: 0,
       status: "available",
       created_by: profile.id,
       updated_by: profile.id
@@ -330,7 +325,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                             <input name="session_block_id" type="hidden" value={block.id} />
                             <input name="session_id" type="hidden" value={session.id} />
                             <input name="block_id" type="hidden" value={block.block_id} />
-                            <input name="stone" type="hidden" value={layout?.blk?.stone ?? "Makrana"} />
+                            <input name="stone" type="hidden" value={layout?.blk?.stone ?? "PinkStone"} />
                             <input name="yard" type="hidden" value={String(layout?.blk?.yard ?? 1)} />
                             <input name="slab_ids" type="hidden" value={JSON.stringify(slabIds)} />
                             <input name="largest_remainder" type="hidden" value={JSON.stringify(remainder)} />
@@ -344,7 +339,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                             <input name="session_block_id" type="hidden" value={block.id} />
                             <input name="session_id" type="hidden" value={session.id} />
                             <input name="block_id" type="hidden" value={block.block_id} />
-                            <input name="stone" type="hidden" value={layout?.blk?.stone ?? "Makrana"} />
+                            <input name="stone" type="hidden" value={layout?.blk?.stone ?? "PinkStone"} />
                             <input name="yard" type="hidden" value={String(layout?.blk?.yard ?? 1)} />
                             <input name="slab_ids" type="hidden" value={JSON.stringify(slabIds)} />
                             <input name="largest_remainder" type="hidden" value={JSON.stringify(remainder)} />

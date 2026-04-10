@@ -170,7 +170,7 @@ export default async function PlanningPage() {
     supabase
       .from("blocks")
       .select(
-        "id, stone, yard, category, length_ft, width_ft, height_ft, trim_left_ft, trim_right_ft, trim_near_ft, trim_far_ft, status"
+        "id, stone, yard, category, length_ft, width_ft, height_ft, status"
       )
       .eq("status", "available")
       .order("created_at", { ascending: false }),

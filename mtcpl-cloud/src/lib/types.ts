@@ -8,6 +8,8 @@ export type AppRole =
   | "dispatch"
   | "vendor";
 
+export type StoneType = "PinkStone" | "WhiteStone";
+
 export type Profile = {
   id: string;
   full_name: string | null;

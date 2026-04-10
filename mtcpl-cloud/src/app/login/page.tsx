@@ -12,21 +12,45 @@ export default async function LoginPage() {
 
   return (
     <main className="login-shell">
-      <section className="login-grid">
-        <div className="login-copy page-card">
-          <h1>MTCPL Login</h1>
-          <p>
-            Sign in with your email and password to access the correct MTCPL portal for your role. Each user should
-            have their own account so blocks, planning, cutting, carving, and dispatch stay properly separated.
-          </p>
+      {/* Left panel — dark branded */}
+      <div className="login-left">
+        <img
+          src="/logo-dark.png"
+          alt="MTCPL"
+          className="login-logo"
+        />
 
-          <div className="banner" style={{ marginTop: 18 }}>
-            New users will wait for management approval before their portal becomes active.
-          </div>
+        <div className="login-left-copy">
+          <h2>Stone Management,<br />Brought Online</h2>
+          <p>
+            Track every block from yard to slab. Generate cutting plans, manage workflow, and keep your team in sync.
+          </p>
         </div>
 
-        <AuthForm />
-      </section>
+        <div className="login-features">
+          {[
+            "Block inventory with CFT tracking",
+            "Automated cut plan generation",
+            "Real-time cutting workflow",
+            "Role-based access for your team"
+          ].map(f => (
+            <div key={f} className="login-feature">
+              <span className="login-feature-dot" />
+              {f}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Right panel — form */}
+      <div className="login-right">
+        <div className="login-form-card">
+          <AuthForm />
+          <p className="muted" style={{ marginTop: 16, fontSize: 12, textAlign: "center" }}>
+            New accounts require management approval before access is granted.
+          </p>
+        </div>
+      </div>
     </main>
   );
 }

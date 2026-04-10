@@ -48,18 +48,15 @@ create table public.profiles (
   updated_at timestamptz not null default now()
 );
 
+-- Dimensions stored in inches. stone: 'PinkStone' | 'WhiteStone'
 create table public.blocks (
   id text primary key,
-  stone text not null check (stone in ('Makrana', 'Pinkstone')),
+  stone text not null check (stone in ('PinkStone', 'WhiteStone')),
   yard smallint not null check (yard in (1, 2, 3)),
   category public.block_category not null default 'Fresh',
-  length_ft numeric(8,2) not null,
-  width_ft numeric(8,2) not null,
-  height_ft numeric(8,2) not null,
-  trim_left_ft numeric(8,2) not null default 0,
-  trim_right_ft numeric(8,2) not null default 0,
-  trim_near_ft numeric(8,2) not null default 0,
-  trim_far_ft numeric(8,2) not null default 0,
+  length_ft numeric(10,2) not null,
+  width_ft numeric(10,2) not null,
+  height_ft numeric(10,2) not null,
   status public.block_status not null default 'available',
   created_by uuid references public.profiles(id),
   updated_by uuid references public.profiles(id),
@@ -72,11 +69,12 @@ create table public.slab_requirements (
   label text not null,
   temple text not null,
   stone text,
-  length_ft numeric(8,2) not null,
-  width_ft numeric(8,2) not null,
-  thickness_ft numeric(8,2) not null,
+  length_ft numeric(10,2) not null,
+  width_ft numeric(10,2) not null,
+  thickness_ft numeric(10,2) not null,
   source_block_id text references public.blocks(id) on delete set null,
   status public.slab_status not null default 'open',
+  priority boolean not null default false,
   created_by uuid references public.profiles(id),
   updated_by uuid references public.profiles(id),
   created_at timestamptz not null default now(),
@@ -111,10 +109,10 @@ create table public.cut_session_slabs (
   id uuid primary key default gen_random_uuid(),
   cut_session_block_id uuid not null references public.cut_session_blocks(id) on delete cascade,
   slab_requirement_id text not null references public.slab_requirements(id),
-  placed_width_ft numeric(8,2) not null,
-  placed_height_ft numeric(8,2) not null,
-  pos_x_ft numeric(8,2) not null,
-  pos_y_ft numeric(8,2) not null,
+  placed_width_ft numeric(10,2) not null,
+  placed_height_ft numeric(10,2) not null,
+  pos_x_ft numeric(10,2) not null,
+  pos_y_ft numeric(10,2) not null,
   rotated boolean not null default false
 );
 
@@ -210,7 +208,7 @@ create policy "owner full vendors" on public.vendors
 for all using (public.current_role() = 'owner') with check (public.current_role() = 'owner');
 
 create policy "blocks read by allowed roles" on public.blocks
-for select using (public.current_role() in ('owner', 'planner', 'block_entry', 'worker', 'dispatch'));
+for select using (public.current_role() in ('owner', 'planner', 'block_entry', 'worker'));
 
 create policy "blocks edit by owner planner block entry" on public.blocks
 for all using (public.current_role() in ('owner', 'planner', 'block_entry'))
@@ -221,7 +219,7 @@ for all using (public.current_role() in ('owner', 'worker'))
 with check (public.current_role() in ('owner', 'worker'));
 
 create policy "slabs read by allowed roles" on public.slab_requirements
-for select using (public.current_role() in ('owner', 'planner', 'slab_entry', 'worker', 'carving_assigner', 'dispatch', 'vendor'));
+for select using (public.current_role() in ('owner', 'planner', 'slab_entry', 'worker'));
 
 create policy "slabs edit by owner planner slab entry" on public.slab_requirements
 for all using (public.current_role() in ('owner', 'planner', 'slab_entry'))
@@ -230,10 +228,6 @@ with check (public.current_role() in ('owner', 'planner', 'slab_entry'));
 create policy "slabs worker cutting update" on public.slab_requirements
 for all using (public.current_role() in ('owner', 'worker'))
 with check (public.current_role() in ('owner', 'worker'));
-
-create policy "slabs carving workflow update" on public.slab_requirements
-for all using (public.current_role() in ('owner', 'carving_assigner', 'dispatch'))
-with check (public.current_role() in ('owner', 'carving_assigner', 'dispatch'));
 
 create policy "cut sessions read by owner planner worker" on public.cut_sessions
 for select using (public.current_role() in ('owner', 'planner', 'worker'));
@@ -259,40 +253,3 @@ for select using (public.current_role() in ('owner', 'planner', 'worker'));
 create policy "cut slabs write by owner planner" on public.cut_session_slabs
 for all using (public.current_role() in ('owner', 'planner'))
 with check (public.current_role() in ('owner', 'planner'));
-
-create policy "carving items read by owner dispatch assigner" on public.carving_items
-for select using (public.current_role() in ('owner', 'dispatch', 'carving_assigner'));
-
-create policy "carving items vendor read own" on public.carving_items
-for select using (public.current_role() = 'vendor' and vendor_id = public.current_vendor_id());
-
-create policy "carving items assign by owner assigner" on public.carving_items
-for all using (public.current_role() in ('owner', 'carving_assigner'))
-with check (public.current_role() in ('owner', 'carving_assigner'));
-
-create policy "carving items dispatch update" on public.carving_items
-for all using (public.current_role() in ('owner', 'dispatch'))
-with check (public.current_role() in ('owner', 'dispatch'));
-
-create policy "carving items vendor update own" on public.carving_items
-for update using (public.current_role() = 'vendor' and vendor_id = public.current_vendor_id())
-with check (public.current_role() = 'vendor' and vendor_id = public.current_vendor_id());
-
-create policy "dispatch logs read by owner dispatch" on public.dispatch_logs
-for select using (public.current_role() in ('owner', 'dispatch'));
-
-create policy "dispatch logs write by owner dispatch" on public.dispatch_logs
-for all using (public.current_role() in ('owner', 'dispatch'))
-with check (public.current_role() in ('owner', 'dispatch'));
-
-insert into public.vendors (name, vendor_type)
-values
-  ('Mohit', 'CNC'),
-  ('Manthan', 'CNC'),
-  ('Alkesh', 'CNC'),
-  ('Dinesh Dholi', 'Manual'),
-  ('Pintu Bhai', 'Manual'),
-  ('Ramesh Ji', 'Manual'),
-  ('Bharat', 'Manual'),
-  ('Dinesh Ji', 'Manual')
-on conflict (name) do nothing;

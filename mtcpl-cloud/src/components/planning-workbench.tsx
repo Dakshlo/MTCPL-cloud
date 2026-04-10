@@ -11,10 +11,6 @@ export type BlockRow = {
   length_ft: number | string;
   width_ft: number | string;
   height_ft: number | string;
-  trim_left_ft: number | string;
-  trim_right_ft: number | string;
-  trim_near_ft: number | string;
-  trim_far_ft: number | string;
   status: string;
 };
 
@@ -53,10 +49,6 @@ export type PlanBlock = {
     l: number;
     w: number;
     h: number;
-    tL: number;
-    tR: number;
-    tT: number;
-    tB: number;
   };
   placed: PlacedSlab[];
   spaces: Array<{ x: number; y: number; w: number; h: number }>;
@@ -74,8 +66,8 @@ export type PlanResult = {
 };
 
 const STONE_PALETTES: Record<string, { top: string; front: string; side: string }> = {
-  Makrana: { top: "#EEE8DC", front: "#C8BFB0", side: "#D8D0BE" },
-  Pinkstone: { top: "#EDCFC2", front: "#C09282", side: "#D8B4A2" }
+  PinkStone: { top: "#EDCFC2", front: "#C87A60", side: "#DDA88A" },
+  WhiteStone: { top: "#E8E6DC", front: "#B8B6AC", side: "#D0CEC4" }
 };
 
 const SLAB_COLORS = ["#D85A30", "#378ADD", "#1D9E75", "#7F77DD", "#BA7517", "#639922", "#D4537E", "#E24B4A", "#5F5E5A", "#0F6E56"];
@@ -218,8 +210,8 @@ function runOptimization(blocks: BlockRow[], slabs: SlabRow[], kerfMm: number): 
     const eligible = remaining.filter((slab) => !slab.stone || slab.stone === block.stone);
     if (!eligible.length) return;
 
-    const usableL = Math.max(0, toNum(block.length_ft) - toNum(block.trim_left_ft) - toNum(block.trim_right_ft));
-    const usableW = Math.max(0, toNum(block.width_ft) - toNum(block.trim_near_ft) - toNum(block.trim_far_ft));
+    const usableL = Math.max(0, toNum(block.length_ft));
+    const usableW = Math.max(0, toNum(block.width_ft));
 
     if (usableL <= 0.01 || usableW <= 0.01) return;
 
@@ -255,11 +247,7 @@ function runOptimization(blocks: BlockRow[], slabs: SlabRow[], kerfMm: number): 
         yard: toNum(block.yard, 1),
         l: round2(toNum(block.length_ft)),
         w: round2(toNum(block.width_ft)),
-        h: round2(toNum(block.height_ft)),
-        tL: round2(toNum(block.trim_left_ft)),
-        tR: round2(toNum(block.trim_right_ft)),
-        tT: round2(toNum(block.trim_near_ft)),
-        tB: round2(toNum(block.trim_far_ft))
+        h: round2(toNum(block.height_ft))
       },
       placed: packed.placed,
       spaces: packed.spaces,
@@ -293,7 +281,7 @@ export function IsoBlockPreview({ block, placed }: { block: PlanBlock["blk"]; pl
   const scale = Math.min(320 / ((L + W) * C), 180 / (((L + W) * S) + H), 28);
   const offsetX = W * C * scale + 8;
   const offsetY = H * scale + 8;
-  const pal = STONE_PALETTES[block.stone] || STONE_PALETTES.Makrana;
+  const pal = STONE_PALETTES[block.stone] || STONE_PALETTES.PinkStone;
 
   function pt(x: number, y: number, z: number) {
     return {
@@ -327,8 +315,8 @@ export function IsoBlockPreview({ block, placed }: { block: PlanBlock["blk"]; pl
       <polygon points={[ptn(0, 0, H), ptn(L, 0, H), ptn(L, W, H), ptn(0, W, H)].join(" ")} fill={pal.top} />
 
       {placed.map((item) => {
-        const ox = block.tL;
-        const oy = block.tT;
+        const ox = 0;
+        const oy = 0;
         const center = txt(ox + item.px + item.pw / 2, oy + item.py + item.ph / 2, H);
         return (
           <g key={item.id}>
@@ -464,11 +452,6 @@ export function PlanningWorkbench({
                       <p className="muted">
                         {block.stone} | {block.length_ft} × {block.width_ft} × {block.height_ft} ft
                       </p>
-                      {(toNum(block.trim_left_ft) > 0 || toNum(block.trim_right_ft) > 0 || toNum(block.trim_near_ft) > 0 || toNum(block.trim_far_ft) > 0) ? (
-                        <p className="muted">
-                          Trim L{block.trim_left_ft} R{block.trim_right_ft} N{block.trim_near_ft} F{block.trim_far_ft} ft
-                        </p>
-                      ) : null}
                     </div>
                   </div>
                   <span className="role-pill">{block.status}</span>

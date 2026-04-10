@@ -1,53 +1,71 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
+import type { AppRole } from "@/lib/types";
 
-import type { AppRole, NavItem } from "@/lib/types";
-import type { Language } from "@/lib/i18n";
-import { t } from "@/lib/i18n";
-
-const navItems: NavItem[] = [
-  { href: "/dashboard", label: "dashboard", roles: ["owner", "planner", "dispatch"] },
-  { href: "/blocks", label: "blocks", roles: ["owner", "planner", "block_entry"] },
-  { href: "/slabs", label: "slabs", roles: ["owner", "planner", "slab_entry"] },
-  { href: "/planning", label: "planning", roles: ["owner", "planner"] },
-  { href: "/cutting", label: "cutting", roles: ["owner", "worker"] },
-  { href: "/carving-assign", label: "carvingAssign", roles: ["owner", "carving_assigner"] },
-  { href: "/carving", label: "carving", roles: ["owner", "dispatch", "vendor"] },
-  { href: "/users", label: "users", roles: ["owner"] }
+const navItems = [
+  { href: "/dashboard",  label: "Dashboard",      icon: "◈", roles: ["owner", "planner", "dispatch", "block_entry", "slab_entry", "worker", "carving_assigner", "vendor"] as AppRole[] },
+  { href: "/blocks",     label: "Blocks",          icon: "▣", roles: ["owner", "planner", "block_entry"] as AppRole[] },
+  { href: "/slabs",      label: "Slabs",           icon: "▤", roles: ["owner", "planner", "slab_entry"] as AppRole[] },
+  { href: "/planning",   label: "Plan Generator",  icon: "⌘", roles: ["owner", "planner"] as AppRole[] },
+  { href: "/cutting",    label: "Cutting",         icon: "◌", roles: ["owner", "worker", "planner"] as AppRole[] }
 ];
 
-export function Sidebar({ role, displayName, lang }: { role: AppRole; displayName?: string; lang: Language }) {
+export function Sidebar({ role, displayName }: { role: AppRole; displayName?: string }) {
+  const pathname = usePathname();
+  const visibleItems = navItems.filter(item => item.roles.includes(role));
+
   return (
     <aside className="sidebar">
-      <div className="brand-block">
-        <div className="brand-mark">MC</div>
-        <div>
-          <strong>{role === "vendor" && displayName ? displayName : "MTCPL Cloud"}</strong>
-          <p>{role === "vendor" && displayName ? t(lang, "vendorWorkspace") : t(lang, "sharedWorkflow")}</p>
-        </div>
+      {/* Brand */}
+      <div className="sidebar-brand">
+        <img
+          src="/logo-light.png"
+          alt="MTCPL"
+          className="sidebar-logo"
+          onError={e => {
+            const el = e.currentTarget as HTMLImageElement;
+            el.style.display = "none";
+            const fallback = el.nextElementSibling as HTMLElement | null;
+            if (fallback) fallback.style.display = "block";
+          }}
+        />
+        <span className="sidebar-logo-fallback" style={{ display: "none" }}>MTCPL</span>
       </div>
 
-      <nav className="nav-stack">
-        {navItems
-          .filter((item) => item.roles.includes(role))
-          .map((item) => (
-            <Link className="nav-link" href={item.href} key={item.href}>
-              {t(lang, item.label as keyof ReturnType<typeof getLabels>)}
+      {/* User info */}
+      <div className="sidebar-user">
+        <div className="sidebar-user-name">{displayName || "MTCPL User"}</div>
+        <div className="sidebar-user-role">{role.replace(/_/g, " ")}</div>
+      </div>
+
+      {/* Navigation */}
+      <nav className="sidebar-nav">
+        {visibleItems.map(item => {
+          const isActive = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(item.href));
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`nav-link${isActive ? " nav-link-active" : ""}`}
+            >
+              <span className="nav-icon">{item.icon}</span>
+              {item.label}
+              {isActive && <span className="nav-active-dot" />}
             </Link>
-          ))}
+          );
+        })}
       </nav>
+
+      {/* Footer logout */}
+      <div className="sidebar-footer">
+        <form action="/api/auth/signout" method="post">
+          <button className="logout-btn" type="submit">
+            Sign out
+          </button>
+        </form>
+      </div>
     </aside>
   );
-}
-
-function getLabels() {
-  return {
-    dashboard: "",
-    blocks: "",
-    slabs: "",
-    planning: "",
-    cutting: "",
-    carvingAssign: "",
-    carving: "",
-    users: ""
-  };
 }

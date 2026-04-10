@@ -1,0 +1,138 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+
+import { requireAuth } from "@/lib/auth";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { generateNextCode } from "./utils";
+
+const BLOCK_DELETE_CODE = process.env.BLOCK_DELETE_CODE || "1255";
+const LEGACY_DELETE_CODES = ["1255", "MTCPL-DELETE"];
+
+function numValue(formData: FormData, key: string, fallback = 0) {
+  const raw = formData.get(key);
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function textValue(formData: FormData, key: string) {
+  const raw = formData.get(key);
+  return typeof raw === "string" ? raw.trim() : "";
+}
+
+function redirectWithToast(path: string, message: string): never {
+  redirect(`${path}?toast=${encodeURIComponent(message)}`);
+}
+
+export async function addBlockAction(formData: FormData) {
+  const { profile } = await requireAuth(["owner", "planner", "block_entry"]);
+  const supabase = await createServerSupabaseClient();
+
+  const { data: existingRows } = await supabase.from("blocks").select("id");
+  const existingIds = (existingRows ?? []).map(r => r.id);
+  const requestedId = textValue(formData, "id");
+
+  const payload = {
+    stone: textValue(formData, "stone") || "PinkStone",
+    yard: numValue(formData, "yard", 1),
+    category: "Fresh" as const,
+    length_ft: numValue(formData, "length_in", 0),
+    width_ft: numValue(formData, "width_in", 0),
+    height_ft: numValue(formData, "height_in", 0),
+    status: "available" as const,
+    created_by: profile.id,
+    updated_by: profile.id
+  };
+
+  let nextId = requestedId || generateNextCode(existingIds);
+  let attempt = 0;
+  let lastError: string | null = null;
+
+  while (attempt < 5) {
+    if (existingIds.includes(nextId)) {
+      nextId = generateNextCode([...existingIds, nextId]);
+    }
+
+    const { error } = await supabase.from("blocks").insert({ ...payload, id: nextId });
+
+    if (!error) {
+      revalidatePath("/blocks");
+      revalidatePath("/dashboard");
+      redirect("/blocks?toast=Block+added+successfully");
+    }
+
+    lastError = error.message;
+    if (error.code !== "23505") throw new Error(error.message);
+
+    existingIds.push(nextId);
+    nextId = generateNextCode(existingIds);
+    attempt++;
+  }
+
+  throw new Error(lastError || "Unable to generate a unique block ID. Please try again.");
+}
+
+export async function updateBlockAction(formData: FormData) {
+  const { profile } = await requireAuth(["owner", "planner", "block_entry"]);
+  const supabase = await createServerSupabaseClient();
+
+  const originalId = textValue(formData, "original_id");
+  const nextId = textValue(formData, "id");
+
+  if (!originalId || !nextId) throw new Error("Block ID is required.");
+
+  const payload = {
+    id: nextId,
+    stone: textValue(formData, "stone") || "PinkStone",
+    yard: numValue(formData, "yard", 1),
+    length_ft: numValue(formData, "length_in", 0),
+    width_ft: numValue(formData, "width_in", 0),
+    height_ft: numValue(formData, "height_in", 0),
+    status: textValue(formData, "status") || "available",
+    updated_by: profile.id,
+    updated_at: new Date().toISOString()
+  };
+
+  const { error } = await supabase.from("blocks").update(payload).eq("id", originalId);
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/blocks");
+  revalidatePath("/dashboard");
+  redirect("/blocks?toast=Block+updated");
+}
+
+export async function deleteBlockAction(formData: FormData) {
+  const { profile } = await requireAuth(["owner", "planner", "block_entry"]);
+  const supabase = await createServerSupabaseClient();
+
+  const id = textValue(formData, "delete_target_id") || textValue(formData, "id");
+  const deleteCode = textValue(formData, "delete_code");
+
+  if (!id) redirectWithToast("/blocks", "Block ID is missing");
+  if (![BLOCK_DELETE_CODE, ...LEGACY_DELETE_CODES].includes(deleteCode)) {
+    redirectWithToast("/blocks", "Delete code is incorrect. Block was not deleted.");
+  }
+
+  const { error } = await supabase.from("blocks").delete().eq("id", id);
+
+  if (error) {
+    if (error.code === "23503") {
+      const archive = await supabase
+        .from("blocks")
+        .update({ status: "discarded", updated_by: profile.id, updated_at: new Date().toISOString() })
+        .eq("id", id);
+
+      if (archive.error) redirectWithToast("/blocks", archive.error.message);
+
+      revalidatePath("/blocks");
+      revalidatePath("/dashboard");
+      redirectWithToast("/blocks", "Block was referenced and has been archived");
+    }
+    redirectWithToast("/blocks", error.message);
+  }
+
+  revalidatePath("/blocks");
+  revalidatePath("/dashboard");
+  redirectWithToast("/blocks", "Block deleted");
+}

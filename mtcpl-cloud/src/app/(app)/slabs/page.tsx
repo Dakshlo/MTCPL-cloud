@@ -6,7 +6,7 @@ import { SlabMiniPreview } from "@/components/stone-previews";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 const TEMPLES = ["Umia Mata", "Agroha Dham", "Balaknath", "Shrinathji", "Other"] as const;
-const STONES = ["", "Makrana", "Pinkstone"] as const;
+const STONES = ["", "PinkStone", "WhiteStone"] as const;
 const STATUSES = [
   "open",
   "planned",
@@ -59,7 +59,7 @@ async function addSlabAction(formData: FormData) {
   const payload = {
     label: textValue(formData, "label"),
     temple: textValue(formData, "temple") || "Umia Mata",
-    stone: textValue(formData, "stone") || "Pinkstone",
+    stone: textValue(formData, "stone") || "PinkStone",
     length_ft: numValue(formData, "length_ft", 0),
     width_ft: numValue(formData, "width_ft", 0),
     thickness_ft: numValue(formData, "thickness_ft", 0),
@@ -225,7 +225,7 @@ export default async function SlabsPage() {
   const totalArea = slabList.reduce((sum, slab) => sum + Number(slab.length_ft) * Number(slab.width_ft), 0);
   const priorityCount = slabList.filter((slab) => slab.priority).length;
   const templeCount = new Set(slabList.map((slab) => slab.temple)).size;
-  const pinkstoneCount = slabList.filter((slab) => slab.stone === "Pinkstone").length;
+  const pinkstoneCount = slabList.filter((slab) => slab.stone === "PinkStone").length;
 
   return (
     <>
@@ -245,11 +245,11 @@ export default async function SlabsPage() {
 
         <div className="inventory-hero-panel">
           <div className="inventory-hero-art">
-            <SlabMiniPreview accent="#C09282" stone="Pinkstone" className="hero-block-art" />
+            <SlabMiniPreview accent="#C09282" stone="PinkStone" className="hero-block-art" />
             <div>
               <strong>Open Demand Snapshot</strong>
               <p className="muted">
-                {priorityCount} priority slabs · {templeCount} temple groups · {pinkstoneCount} already tagged Pinkstone.
+                {priorityCount} priority slabs · {templeCount} temple groups · {pinkstoneCount} already tagged PinkStone.
               </p>
             </div>
           </div>
@@ -305,7 +305,7 @@ export default async function SlabsPage() {
             <div className="section-heading">
               <div>
                 <h2 style={{ margin: 0 }}>Add New Slab Requirement</h2>
-                <p className="muted">Premium queue entry with automatic IDs, temple grouping, and Pinkstone as the default selection.</p>
+                <p className="muted">Premium queue entry with automatic IDs, temple grouping, and PinkStone as the default selection.</p>
               </div>
             </div>
 
@@ -333,7 +333,7 @@ export default async function SlabsPage() {
 
               <label className="stack">
                 <span>Stone</span>
-                <select defaultValue="Pinkstone" name="stone">
+                <select defaultValue="PinkStone" name="stone">
                   <option value="">Auto / not fixed yet</option>
                   {STONES.filter(Boolean).map((stone) => (
                     <option key={stone} value={stone}>
@@ -392,7 +392,7 @@ export default async function SlabsPage() {
 
           <aside className="inventory-studio-side">
             <div className="inventory-preview-card">
-              <SlabMiniPreview accent="#C09282" stone="Pinkstone" className="inventory-preview-art" />
+              <SlabMiniPreview accent="#C09282" stone="PinkStone" className="inventory-preview-art" />
               <strong>Queue Builder</strong>
               <p className="muted">
                 Keep slab demand organized by temple, flag critical pieces with priority, and link source blocks when known.
@@ -404,7 +404,7 @@ export default async function SlabsPage() {
                 </div>
                 <div>
                   <span className="muted">Default stone</span>
-                  <strong>Pinkstone</strong>
+                  <strong>PinkStone</strong>
                 </div>
               </div>
             </div>
@@ -441,7 +441,7 @@ export default async function SlabsPage() {
               <div className="record-head">
                 <div>
                   <div className="record-title-row">
-                    <SlabMiniPreview accent={slab.stone === "Pinkstone" ? "#C09282" : "#C8BFB0"} stone={slab.stone} />
+                    <SlabMiniPreview accent={slab.stone === "PinkStone" ? "#C87A60" : "#B8B6AC"} stone={slab.stone} />
                     <strong>{slab.id}</strong>
                     {slab.priority ? <span className="priority-badge">⚡ Priority</span> : null}
                     <span className="role-pill">{slab.temple}</span>

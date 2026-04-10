@@ -12,23 +12,47 @@ export default async function HomePage() {
 
   return (
     <main className="landing-shell">
-      <section className="landing-card">
-        <h1>MTCPL Stone Management Cloud</h1>
-        <p>
-          This is the cloud version of your prototype. It is designed for shared access across phones and desktops,
-          with separate roles for owner, planner, block entry, slab entry, worker, carving assigner, dispatch, and
-          vendor users.
-        </p>
+      <div className="landing-glow" />
+      <div className="landing-hero">
+        {/* Logo — filter inverts dark logo to white on dark bg */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/logo-dark.png"
+          alt="MTCPL"
+          className="landing-logo"
+        />
 
-        <div className="landing-actions">
-          <Link className="primary-button" href="/login">
-            Open login
-          </Link>
-          <Link className="secondary-button" href="/dashboard">
-            Go to app
-          </Link>
+        <div className="landing-tagline">
+          <h1>
+            Stone. <em>Precision.</em> Scale.
+          </h1>
+          <p>
+            End-to-end block inventory and cutting plan management.<br />
+            Built for the yard. Designed for clarity.
+          </p>
         </div>
-      </section>
+
+        <Link href="/login" className="landing-cta">
+          Enter System →
+        </Link>
+
+        <div className="landing-divider" />
+
+        <div className="landing-features">
+          <div className="landing-feature">
+            <strong>Block Entry</strong>
+            <span>Inventory</span>
+          </div>
+          <div className="landing-feature">
+            <strong>Plan Generator</strong>
+            <span>Cut Planning</span>
+          </div>
+          <div className="landing-feature">
+            <strong>Cutting</strong>
+            <span>Workflow</span>
+          </div>
+        </div>
+      </div>
     </main>
   );
 }
