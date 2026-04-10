@@ -47,6 +47,15 @@ create table public.blocks (
   updated_at timestamptz not null default now()
 );
 
+-- Temple configuration (managed via Settings page)
+create table public.temples (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  code_prefix text not null unique,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
 create table public.slab_requirements (
   id text primary key,
   label text not null,
