@@ -5,7 +5,10 @@ create type public.app_role as enum (
   'planner',
   'block_entry',
   'slab_entry',
-  'worker'
+  'worker',
+  'carving_assigner',
+  'dispatch',
+  'vendor'
 );
 
 create type public.block_category as enum ('Fresh', 'Reused');
@@ -15,17 +18,31 @@ create type public.slab_status as enum (
   'planned',
   'cutting',
   'cut_done',
+  'carving_assigned',
+  'carving_in_progress',
+  'completed',
+  'dispatched',
   'rejected'
 );
 
 create type public.cut_session_status as enum ('draft', 'approved', 'in_progress', 'closed', 'cancelled');
 create type public.cut_block_status as enum ('pending_worker', 'cutting', 'done_prompt', 'done', 'rejected');
+create type public.vendor_type as enum ('CNC', 'Manual');
+
+create table public.vendors (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  vendor_type public.vendor_type not null,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now()
+);
 
 create table public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   full_name text,
   phone text,
   role public.app_role not null default 'worker',
+  vendor_id uuid references public.vendors(id) on delete set null,
   is_active boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -108,6 +125,30 @@ create table public.cut_session_slabs (
   rotated boolean not null default false
 );
 
+create table public.carving_items (
+  id uuid primary key default gen_random_uuid(),
+  slab_requirement_id text not null unique references public.slab_requirements(id),
+  vendor_id uuid not null references public.vendors(id),
+  vendor_name text not null,
+  vendor_type public.vendor_type not null,
+  note text,
+  status public.slab_status not null default 'carving_assigned',
+  deadline_days integer,
+  due_at timestamptz,
+  assigned_by uuid references public.profiles(id),
+  assigned_at timestamptz not null default now(),
+  completed_at timestamptz
+);
+
+create table public.dispatch_logs (
+  id uuid primary key default gen_random_uuid(),
+  carving_item_id uuid not null unique references public.carving_items(id),
+  slab_requirement_id text not null references public.slab_requirements(id),
+  dispatched_by uuid references public.profiles(id),
+  dispatch_note text,
+  dispatched_at timestamptz not null default now()
+);
+
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
@@ -142,12 +183,23 @@ as $$
   select role from public.profiles where id = auth.uid()
 $$;
 
+create or replace function public.current_vendor_id()
+returns uuid
+language sql
+stable
+as $$
+  select vendor_id from public.profiles where id = auth.uid()
+$$;
+
+alter table public.vendors enable row level security;
 alter table public.profiles enable row level security;
 alter table public.blocks enable row level security;
 alter table public.slab_requirements enable row level security;
 alter table public.cut_sessions enable row level security;
 alter table public.cut_session_blocks enable row level security;
 alter table public.cut_session_slabs enable row level security;
+alter table public.carving_items enable row level security;
+alter table public.dispatch_logs enable row level security;
 
 create policy "profiles owner read all" on public.profiles
 for select using (public.current_role() = 'owner');
@@ -157,6 +209,12 @@ for select using (auth.uid() = id);
 
 create policy "profiles owner update" on public.profiles
 for update using (public.current_role() = 'owner');
+
+create policy "vendors read by signed in users" on public.vendors
+for select using (auth.role() = 'authenticated');
+
+create policy "owner full vendors" on public.vendors
+for all using (public.current_role() = 'owner') with check (public.current_role() = 'owner');
 
 create policy "blocks read by allowed roles" on public.blocks
 for select using (public.current_role() in ('owner', 'planner', 'block_entry', 'worker'));

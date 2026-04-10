@@ -7,6 +7,7 @@ export function getLanguage(_value: string | undefined): Language {
 export function t(_lang: Language, key: string): string {
   const labels: Record<string, string> = {
     signedIn: "Signed in",
+    portal: "Portal",
     signOut: "Sign out",
     dashboard: "Dashboard",
     blocks: "Blocks",

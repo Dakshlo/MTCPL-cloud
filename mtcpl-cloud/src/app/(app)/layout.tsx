@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 
 import { LogoutButton } from "@/components/logout-button";
-import { PageHeader } from "@/components/page-header";
 import { RealtimeRefresh } from "@/components/realtime-refresh";
 import { Sidebar } from "@/components/sidebar";
 import { Toast } from "@/components/toast";
@@ -26,7 +25,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             <span className="role-pill">{profile.role.replace("_", " ")}</span>
             <LogoutButton />
           </div>
-        </header>
+        </div>
 
         <div className="page-content">
           {children}

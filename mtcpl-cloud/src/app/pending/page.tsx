@@ -32,7 +32,8 @@ export default async function PendingAccessPage() {
             Signed in as <strong>{user.email}</strong>
           </p>
           <p className="muted" style={{ margin: 0 }}>
-            If you need urgent access, contact the owner or management team to activate your account.
+            If you need urgent access, contact the owner or management team to activate your account from the Users
+            page.
           </p>
         </div>
         <div className="landing-actions" style={{ marginTop: 24 }}>

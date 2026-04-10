@@ -1,15 +1,10 @@
-import type { Stone } from "@/lib/types";
-
 type BlockPreviewProps = {
-  stone: Stone | string;
+  stone: string;
   className?: string;
-  length?: number;
-  width?: number;
-  height?: number;
 };
 
 type SlabPreviewProps = {
-  stone?: Stone | string | null;
+  stone?: string | null;
   accent?: string;
   className?: string;
 };
@@ -32,16 +27,6 @@ function paletteFor(stone?: string | null) {
 
 /** Small inline preview for planning / cutting lists */
 export function BlockMiniPreview({ stone, className }: BlockPreviewProps) {
-  return <BlockCardPreview stone={stone} className={className} length={56} width={36} height={24} />;
-}
-
-export function BlockCardPreview({
-  stone,
-  className,
-  length = 72,
-  width = 46,
-  height = 34
-}: BlockPreviewProps) {
   const pal = paletteFor(stone);
   return (
     <svg className={className} viewBox="0 0 44 34" width="34" height="28" aria-hidden="true">

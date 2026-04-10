@@ -1,5 +1,4 @@
 import { requireAuth } from "@/lib/auth";
-import type { Stone } from "@/lib/types";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { AddBlockForm } from "./add-block-form";
 import { BlockGrid } from "./block-grid";

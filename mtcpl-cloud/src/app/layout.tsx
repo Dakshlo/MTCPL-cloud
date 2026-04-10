@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 
 export const metadata: Metadata = {
   title: "MTCPL Cloud",
-  description: "End-to-end block tracking and cutting plan system"
+  description: "Cloud workflow for blocks, slabs, cutting, carving and dispatch"
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

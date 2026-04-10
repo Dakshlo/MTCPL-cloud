@@ -69,6 +69,7 @@ export default async function SlabsPage() {
           <strong>{slabList.filter(s => s.status === "planned").length}</strong>
           <small>in sessions</small>
         </div>
+      </div>
 
       {/* Add form */}
       {canEdit && templeList.length > 0 && (
