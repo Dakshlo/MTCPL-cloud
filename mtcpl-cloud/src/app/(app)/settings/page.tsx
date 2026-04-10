@@ -127,41 +127,6 @@ export default async function SettingsPage() {
         )}
       </div>
 
-      {/* Migration hint */}
-      <div className="settings-section">
-        <div className="settings-section-header">
-          <h2>Database Migration</h2>
-          <p>Run this SQL in Supabase once to create the temples table and update constraints.</p>
-        </div>
-        <div className="settings-card">
-          <pre className="settings-sql">{`-- Run in Supabase SQL Editor
-CREATE TABLE IF NOT EXISTS public.temples (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  name text NOT NULL UNIQUE,
-  code_prefix text NOT NULL UNIQUE,
-  is_active boolean NOT NULL DEFAULT true,
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-
--- Fix stone constraint
-ALTER TABLE blocks DROP CONSTRAINT IF EXISTS blocks_stone_check;
-UPDATE blocks SET stone = 'PinkStone' WHERE stone IN ('Pinkstone','Pink Stone');
-UPDATE blocks SET stone = 'WhiteStone' WHERE stone IN ('Makrana','White Stone');
-ALTER TABLE blocks ADD CONSTRAINT blocks_stone_check
-  CHECK (stone IN ('PinkStone','WhiteStone'));
-
--- Drop legacy trim columns
-ALTER TABLE blocks
-  DROP COLUMN IF EXISTS trim_left_ft,
-  DROP COLUMN IF EXISTS trim_right_ft,
-  DROP COLUMN IF EXISTS trim_near_ft,
-  DROP COLUMN IF EXISTS trim_far_ft;
-
--- Add priority to slabs if missing
-ALTER TABLE slab_requirements
-  ADD COLUMN IF NOT EXISTS priority boolean NOT NULL DEFAULT false;`}</pre>
-        </div>
-      </div>
     </>
   );
 }

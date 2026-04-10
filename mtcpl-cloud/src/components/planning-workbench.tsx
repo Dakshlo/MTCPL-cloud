@@ -200,57 +200,83 @@ function runOptimization(blocks: BlockRow[], slabs: SlabRow[], kerfMm: number): 
     }))
     .sort((a, b) => b.sw * b.sh - a.sw * a.sh);
 
+  // Best-Fit Decreasing: each round evaluate ALL unused blocks, pick the one
+  // with highest efficiency (placed area / block area). This prevents a huge
+  // block "swallowing" all slabs when smaller blocks would be less wasteful.
   const usableBlocks = blocks.filter((block) => block.status === "available" || block.status === "reserved");
+  const usedBlockIds = new Set<string>();
   const plan: PlanBlock[] = [];
 
-  usableBlocks.forEach((block) => {
-    if (!remaining.length) return;
+  while (remaining.length > 0) {
+    let bestBlock: BlockRow | null = null;
+    let bestPacked: ReturnType<typeof packBlock> | null = null;
+    let bestScore = -Infinity;
 
-    // Only place slabs that match this block's stone type (or have no stone preference)
-    const eligible = remaining.filter((slab) => !slab.stone || slab.stone === block.stone);
-    if (!eligible.length) return;
+    for (const block of usableBlocks) {
+      if (usedBlockIds.has(block.id)) continue;
 
-    const usableL = Math.max(0, toNum(block.length_ft));
-    const usableW = Math.max(0, toNum(block.width_ft));
+      const eligible = remaining.filter((slab) => !slab.stone || slab.stone === block.stone);
+      if (!eligible.length) continue;
 
-    if (usableL <= 0.01 || usableW <= 0.01) return;
+      const L = Math.max(0, toNum(block.length_ft));
+      const W = Math.max(0, toNum(block.width_ft));
+      if (L <= 0.01 || W <= 0.01) continue;
 
-    const packed = packBlock(usableL, usableW, eligible, kerfFt);
-    if (!packed.placed.length) return;
+      const packed = packBlock(L, W, eligible, kerfFt);
+      if (!packed.placed.length) continue;
 
+      const placedArea = packed.placed.reduce((sum, p) => sum + p.pw * p.ph, 0);
+      const blockArea = L * W;
+      // Primary: efficiency (higher = better). Tie-break: prefer smaller block
+      // so large blocks are preserved for bigger batches.
+      const score = (placedArea / blockArea) * 1000 - blockArea * 0.0001;
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestBlock = block;
+        bestPacked = packed;
+      }
+    }
+
+    if (!bestBlock || !bestPacked) break;
+
+    usedBlockIds.add(bestBlock.id);
+
+    const L = toNum(bestBlock.length_ft);
+    const W = toNum(bestBlock.width_ft);
+    const baseArea = L * W;
     const usedIds = new Set<string>();
     let usedArea = 0;
     let kerfWaste = 0;
 
-    packed.placed.forEach((item) => {
+    bestPacked.placed.forEach((item) => {
       usedIds.add(item.id);
       usedArea += item.pw * item.ph;
       kerfWaste += item.aw * item.ah - item.pw * item.ph;
     });
 
     let biggest: { l: number; w: number; h: number } | null = null;
-    packed.spaces.forEach((space) => {
+    bestPacked.spaces.forEach((space) => {
       if (!biggest || space.w * space.h > biggest.l * biggest.w) {
         biggest = {
           l: round2(space.w),
           w: round2(space.h),
-          h: round2(toNum(block.height_ft))
+          h: round2(toNum(bestBlock!.height_ft))
         };
       }
     });
 
-    const baseArea = usableL * usableW;
     plan.push({
       blk: {
-        id: block.id,
-        stone: block.stone,
-        yard: toNum(block.yard, 1),
-        l: round2(toNum(block.length_ft)),
-        w: round2(toNum(block.width_ft)),
-        h: round2(toNum(block.height_ft))
+        id: bestBlock.id,
+        stone: bestBlock.stone,
+        yard: toNum(bestBlock.yard, 1),
+        l: round2(L),
+        w: round2(W),
+        h: round2(toNum(bestBlock.height_ft))
       },
-      placed: packed.placed,
-      spaces: packed.spaces,
+      placed: bestPacked.placed,
+      spaces: bestPacked.spaces,
       ua: round2(usedArea),
       ka: round2(kerfWaste),
       ba: round2(baseArea),
@@ -259,16 +285,12 @@ function runOptimization(blocks: BlockRow[], slabs: SlabRow[], kerfMm: number): 
     });
 
     remaining = remaining.filter((slab) => !usedIds.has(slab.id));
-  });
+  }
 
   return {
     plan,
     unmet: remaining.map((item) => ({ id: item.id, label: item.label, temple: item.temple })),
-    totalWaste: round2(
-      plan.reduce((sum, block) => {
-        return sum + Math.max(0, block.ba - block.ua);
-      }, 0)
-    )
+    totalWaste: round2(plan.reduce((sum, b) => sum + Math.max(0, b.ba - b.ua), 0))
   };
 }
 

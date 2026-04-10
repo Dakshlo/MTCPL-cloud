@@ -6,10 +6,10 @@ import { generateSlabCode } from "./utils";
 
 type Temple = { id: string; name: string; code_prefix: string };
 
-function calcArea(l: string, w: string): string {
-  const lv = parseFloat(l), wv = parseFloat(w);
-  if (!lv || !wv) return "—";
-  return ((lv * wv) / 144).toFixed(2); // sq ft
+function calcCft(l: string, w: string, t: string): string {
+  const lv = parseFloat(l), wv = parseFloat(w), tv = parseFloat(t);
+  if (!lv || !wv || !tv) return "—";
+  return ((lv * wv * tv) / 1728).toFixed(2); // cubic feet
 }
 
 export function AddSlabForm({ temples, existingIds }: { temples: Temple[]; existingIds: string[] }) {
@@ -18,8 +18,9 @@ export function AddSlabForm({ temples, existingIds }: { temples: Temple[]; exist
   const [selectedTemple, setSelectedTemple] = useState<Temple | null>(temples[0] ?? null);
   const [l, setL] = useState("");
   const [w, setW] = useState("");
+  const [t, setT] = useState("");
 
-  const area = calcArea(l, w);
+  const cft = calcCft(l, w, t);
   const previewCode = selectedTemple ? generateSlabCode(existingIds, selectedTemple.code_prefix) : "—";
 
   return (
@@ -103,12 +104,12 @@ export function AddSlabForm({ temples, existingIds }: { temples: Temple[]; exist
           </label>
           <label className="stack" style={{ flex: "1 1 70px" }}>
             <span>Thickness (in)</span>
-            <input name="thickness_in" type="number" min="0" step="0.25" placeholder="2" required />
+            <input name="thickness_in" type="number" min="0" step="0.25" value={t} onChange={e => setT(e.target.value)} placeholder="2" required />
           </label>
 
           <div className="stack" style={{ flex: "0 0 auto" }}>
-            <span>Area (sq ft)</span>
-            <div className="cft-value" style={{ minWidth: 68 }}>{area}</div>
+            <span>CFT</span>
+            <div className="cft-value" style={{ minWidth: 68 }}>{cft}</div>
           </div>
 
           <div className="stack" style={{ flex: "0 0 auto" }}>
