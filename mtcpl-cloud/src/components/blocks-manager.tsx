@@ -3,7 +3,7 @@
 import { useState } from "react";
 
 import { BlockCardPreview } from "@/components/stone-previews";
-import type { Stone } from "@/lib/types";
+import type { StoneType as Stone } from "@/lib/types";
 
 type BlockRecord = {
   id: string;
@@ -158,11 +158,10 @@ export function BlocksManager({
               <article className="block-card" key={block.id}>
                 <div className="block-card-visual">
                   <BlockCardPreview
-                    className="block-card-preview"
-                    height={Math.max(16, hi)}
-                    length={Math.max(36, li)}
+                    h={Math.max(16, hi)}
+                    l={Math.max(36, li)}
                     stone={block.stone}
-                    width={Math.max(24, wi)}
+                    w={Math.max(24, wi)}
                   />
                 </div>
 
