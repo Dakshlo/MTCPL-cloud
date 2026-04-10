@@ -162,32 +162,43 @@ async function approvePlanAction(formData: FormData) {
   redirect("/cutting");
 }
 
-export default async function PlanningPage() {
+export default async function PlanningPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ slabs?: string }>;
+}) {
   await requireAuth(["owner", "planner"]);
 
   const supabase = await createServerSupabaseClient();
+  const params = await searchParams;
+
+  // slabs param: comma-separated IDs sent from Slab View page
+  const selectedSlabIds = params.slabs
+    ? params.slabs.split(",").map(s => s.trim()).filter(Boolean)
+    : null;
+
+  let slabQuery = supabase
+    .from("slab_requirements")
+    .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, status")
+    .eq("status", "open")
+    .order("created_at", { ascending: false });
+
+  // If specific slabs were selected from the Slab View, only load those
+  if (selectedSlabIds && selectedSlabIds.length > 0) {
+    slabQuery = slabQuery.in("id", selectedSlabIds);
+  }
+
   const [{ data: blocks, error: blockError }, { data: slabs, error: slabError }] = await Promise.all([
     supabase
       .from("blocks")
-      .select(
-        "id, stone, yard, category, length_ft, width_ft, height_ft, status"
-      )
+      .select("id, stone, yard, category, length_ft, width_ft, height_ft, status")
       .eq("status", "available")
       .order("created_at", { ascending: false }),
-    supabase
-      .from("slab_requirements")
-      .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, status")
-      .eq("status", "open")
-      .order("created_at", { ascending: false })
+    slabQuery,
   ]);
 
-  if (blockError) {
-    throw new Error(blockError.message);
-  }
-
-  if (slabError) {
-    throw new Error(slabError.message);
-  }
+  if (blockError) throw new Error(blockError.message);
+  if (slabError) throw new Error(slabError.message);
 
   return <PlanningWorkbench approveAction={approvePlanAction} blocks={blocks ?? []} slabs={slabs ?? []} />;
 }
