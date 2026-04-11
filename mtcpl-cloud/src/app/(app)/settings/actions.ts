@@ -57,3 +57,21 @@ export async function deleteTempleAction(formData: FormData) {
   revalidatePath("/settings");
   redirect("/settings?toast=Temple+deleted");
 }
+
+export async function updateUserAction(formData: FormData) {
+  const { profile: currentUser } = await requireAuth(["owner"]);
+  const supabase = await createServerSupabaseClient();
+
+  const id = text(formData, "id");
+  const role = text(formData, "role");
+  const is_active = formData.get("is_active") === "true";
+
+  if (!id || !role) redirect("/settings?toast=Missing+fields");
+  if (id === currentUser.id) redirect("/settings?toast=Cannot+edit+your+own+account");
+
+  const { error } = await supabase.from("profiles").update({ role, is_active }).eq("id", id);
+  if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
+
+  revalidatePath("/settings");
+  redirect("/settings?toast=User+updated");
+}

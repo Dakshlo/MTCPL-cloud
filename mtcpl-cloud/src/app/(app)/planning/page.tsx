@@ -200,5 +200,21 @@ export default async function PlanningPage({
   if (blockError) throw new Error(blockError.message);
   if (slabError) throw new Error(slabError.message);
 
+  // No slabs param = user navigated directly, not from Slab View
+  if (!selectedSlabIds) {
+    return (
+      <div className="page-content" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "60vh", textAlign: "center", gap: 16 }}>
+        <div style={{ fontSize: 56, lineHeight: 1 }}>⌘</div>
+        <h2 style={{ margin: 0 }}>No Slabs Selected</h2>
+        <p className="muted" style={{ maxWidth: 400 }}>
+          Go to Slab View, select the slabs you want to cut today, then click &ldquo;Send to Plan Generator&rdquo;.
+        </p>
+        <a href="/slabs/view" className="primary-button" style={{ textDecoration: "none", marginTop: 8 }}>
+          Go to Slab View →
+        </a>
+      </div>
+    );
+  }
+
   return <PlanningWorkbench approveAction={approvePlanAction} blocks={blocks ?? []} slabs={slabs ?? []} />;
 }
