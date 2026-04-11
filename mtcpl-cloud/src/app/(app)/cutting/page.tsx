@@ -19,6 +19,7 @@ type SessionRow = {
     block_id: string;
     largest_remainder: { l: number; w: number; h: number } | null;
     restocked_block_id: string | null;
+    updated_at: string | null;
     layout: {
       blk?: { id: string; stone: string; yard: number; l: number; w: number; h: number };
       placed?: Array<{ id: string; sw: number; sh: number; pw?: number; ph?: number; px?: number; py?: number; aw?: number; ah?: number; rot: boolean; label?: string; temple?: string; sd?: number }>;
@@ -203,7 +204,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
   let query = supabase
     .from("cut_sessions")
     .select(
-      "id, session_code, status, kerf_mm, created_at, cut_session_blocks(id, status, block_id, largest_remainder, restocked_block_id, layout, cut_session_slabs(id, slab_requirement_id))"
+      "id, session_code, status, kerf_mm, created_at, cut_session_blocks(id, status, block_id, largest_remainder, restocked_block_id, layout, updated_at, cut_session_slabs(id, slab_requirement_id))"
     )
     .order("created_at", { ascending: false })
     .limit(20);
@@ -353,7 +354,8 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
 
                       {block.status === "done" ? (
                         <span className="role-pill">
-                          Done {block.restocked_block_id ? `| Restocked ${block.restocked_block_id}` : "| Discarded"}
+                          Done {block.restocked_block_id ? `· Restocked ${block.restocked_block_id}` : "· Discarded"}
+                          {block.updated_at ? ` · Cut ${new Date(block.updated_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}` : ""}
                         </span>
                       ) : null}
 

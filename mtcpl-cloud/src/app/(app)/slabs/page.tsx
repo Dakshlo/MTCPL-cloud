@@ -10,7 +10,7 @@ export default async function SlabsPage() {
   const [{ data: slabs, error }, { data: temples }, { data: allIds }] = await Promise.all([
     supabase
       .from("slab_requirements")
-      .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, status, priority, created_at")
+      .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, status, priority, created_at, updated_at")
       .in("status", ["open", "planned"])
       .order("priority", { ascending: false })
       .order("created_at", { ascending: false })

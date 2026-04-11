@@ -15,6 +15,8 @@ type Slab = {
   thickness_ft: number;
   status: string;
   priority: boolean;
+  created_at: string | null;
+  updated_at: string | null;
 };
 
 type Temple = { id: string; name: string; code_prefix: string };
@@ -31,8 +33,14 @@ function statusBadge(status: string) {
     planned: "badge-planned",
     completed: "badge-available",
     rejected: "badge-discarded",
+    cut_done: "badge-consumed",
   };
   return m[status] || "";
+}
+
+function fmtDate(iso: string | null) {
+  if (!iso) return null;
+  return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
 }
 
 export function SlabGrid({ slabs, temples, canEdit }: { slabs: Slab[]; temples: Temple[]; canEdit: boolean }) {
@@ -49,7 +57,7 @@ export function SlabGrid({ slabs, temples, canEdit }: { slabs: Slab[]; temples: 
     <>
       <div className="slab-card-grid">
         {slabs.map(slab => {
-          const area = ((Number(slab.length_ft) * Number(slab.width_ft)) / 144).toFixed(1);
+          const cft = ((Number(slab.length_ft) * Number(slab.width_ft) * Number(slab.thickness_ft)) / 1728).toFixed(2);
           const isSelected = selectedId === slab.id;
 
           return (
@@ -74,14 +82,19 @@ export function SlabGrid({ slabs, temples, canEdit }: { slabs: Slab[]; temples: 
               <div className="slab-card-footer">
                 {slab.stone && <span className={`role-pill ${stoneBadge(slab.stone)}`}>{slab.stone === "PinkStone" ? "Pink" : "White"}</span>}
                 <span className={`role-pill ${statusBadge(slab.status)}`}>{slab.status}</span>
-                <span className="slab-card-area">{area} sq ft</span>
+                <span className="slab-card-area">{cft} CFT</span>
+              </div>
+              <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                {slab.created_at && <>Added {fmtDate(slab.created_at)}</>}
+                {slab.status === "cut_done" && slab.updated_at && (
+                  <> · Cut {fmtDate(slab.updated_at)}</>
+                )}
               </div>
             </div>
           );
         })}
       </div>
 
-      {/* Edit Drawer */}
       {selected && canEdit && (
         <>
           <div className="drawer-backdrop" onClick={() => setSelectedId(null)} />

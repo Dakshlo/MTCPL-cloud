@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { BlockMiniPreview, SlabMiniPreview } from "@/components/stone-previews";
 
 export type BlockRow = {
@@ -325,84 +325,154 @@ function runOptimization(blocks: BlockRow[], slabs: SlabRow[], kerfMm: number): 
 }
 
 export function IsoBlockPreview({ block, placed }: { block: PlanBlock["blk"]; placed: PlacedSlab[] }) {
-  const [angle, setAngle] = useState(0);
-  const L = block.l;
-  const W = block.w;
-  const H = block.h;
-  const C = Math.cos(Math.PI / 6);
-  const S = 0.5;
-  const scale = Math.min(320 / ((L + W) * C), 180 / (((L + W) * S) + H), 28);
-  const offsetX = W * C * scale + 8;
-  const offsetY = H * scale + 8;
-  const pal = STONE_PALETTES[block.stone] || STONE_PALETTES.PinkStone;
+  const [az, setAz] = useState(Math.PI * 0.25); // continuous azimuth angle
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const dragRef = useRef({ active: false, lastX: 0 });
 
-  // 4 isometric viewpoints: SW (default), NW, NE, SE
-  // Each proj transforms (x, y) before the isometric formula so different faces become visible
-  function proj(x: number, y: number): [number, number] {
-    switch (angle % 4) {
-      case 1: return [x, W - y];       // NW: flip y — shows north + east faces
-      case 2: return [L - x, W - y];   // NE: flip both — shows north + west faces
-      case 3: return [L - x, y];       // SE: flip x — shows south + west faces
-      default: return [x, y];          // SW: default — shows south + east faces
-    }
+  const L = block.l, W = block.w, H = block.h;
+  const C = Math.cos(Math.PI / 6); // ≈ 0.866 horizontal compression
+  const S = 0.5;                   // vertical compression
+  const diag = Math.sqrt(L * L + W * W);
+  const scale = Math.min(280 / (diag * C + 4), 160 / (diag * S + H + 4), 30);
+
+  const Ca = Math.cos(az), Sa = Math.sin(az);
+
+  // Raw 3D → 2D projection (centered at origin)
+  function raw(x: number, y: number, z: number) {
+    const rx = x * Ca - y * Sa; // rotate horizontally
+    const ry = x * Sa + y * Ca;
+    return { x: rx * C * scale, y: ry * S * scale - z * scale };
   }
 
-  function pt(x: number, y: number, z: number) {
-    const [px, py] = proj(x, y);
-    return {
-      x: offsetX + (px - py) * C * scale,
-      y: offsetY + (px + py) * S * scale - z * scale
-    };
-  }
-
-  const allPoints = [
-    pt(0, 0, 0), pt(L, 0, 0), pt(0, W, 0), pt(L, W, 0),
-    pt(0, 0, H), pt(L, 0, H), pt(0, W, H), pt(L, W, H)
-  ];
-  const xs = allPoints.map((p) => p.x);
-  const ys = allPoints.map((p) => p.y);
-  const minX = Math.min(...xs) - 6;
-  const minY = Math.min(...ys) - 6;
-  const maxX = Math.max(...xs) + 6;
-  const maxY = Math.max(...ys) + 18;
+  // Bounding box from 8 block corners
+  const corners8 = (
+    [[0,0,0],[L,0,0],[0,W,0],[L,W,0],[0,0,H],[L,0,H],[0,W,H],[L,W,H]] as Array<[number,number,number]>
+  ).map(([x,y,z]) => raw(x,y,z));
+  const pad = 8;
+  const minX = Math.min(...corners8.map(p => p.x)) - pad;
+  const minY = Math.min(...corners8.map(p => p.y)) - pad;
+  const maxX = Math.max(...corners8.map(p => p.x)) + pad;
+  const maxY = Math.max(...corners8.map(p => p.y)) + pad + 14;
 
   function ptn(x: number, y: number, z: number) {
-    const p = pt(x, y, z);
+    const p = raw(x, y, z);
     return `${(p.x - minX).toFixed(1)},${(p.y - minY).toFixed(1)}`;
   }
-
-  function txt(x: number, y: number, z: number) {
-    const p = pt(x, y, z);
+  function ptObj(x: number, y: number, z: number) {
+    const p = raw(x, y, z);
     return { x: p.x - minX, y: p.y - minY };
   }
 
-  // Visible faces change with angle:
-  // face1 (front): south (y=0) for angles 0,3 | north (y=W) for angles 1,2
-  // face2 (side):  east (x=L) for angles 0,1  | west (x=0) for angles 2,3
-  const face1Pts = (angle === 1 || angle === 2)
-    ? [ptn(0, W, 0), ptn(L, W, 0), ptn(L, W, H), ptn(0, W, H)].join(" ")
-    : [ptn(0, 0, 0), ptn(L, 0, 0), ptn(L, 0, H), ptn(0, 0, H)].join(" ");
+  const pal = STONE_PALETTES[block.stone] || STONE_PALETTES.PinkStone;
 
-  const face2Pts = (angle === 2 || angle === 3)
-    ? [ptn(0, 0, 0), ptn(0, W, 0), ptn(0, W, H), ptn(0, 0, H)].join(" ")
-    : [ptn(L, 0, 0), ptn(L, W, 0), ptn(L, W, H), ptn(L, 0, H)].join(" ");
+  // Which block faces face the viewer
+  const showFrontY = Sa >= 0;  // y=0 face visible when Sa ≥ 0
+  const showRightX = Ca >= 0;  // x=L face visible when Ca ≥ 0
+  const bY = showFrontY ? 0 : W;
+  const bX = showRightX ? L : 0;
+
+  // Sort slabs back-to-front: larger ry = further from viewer = draw first
+  const sortedSlabs = [...placed].sort((a, b) => {
+    const ra = (a.px + a.pw / 2) * Sa + (a.py + a.ph / 2) * Ca;
+    const rb = (b.px + b.pw / 2) * Sa + (b.py + b.ph / 2) * Ca;
+    return rb - ra;
+  });
+
+  // Drag to rotate
+  function onStart(cx: number) {
+    dragRef.current = { active: true, lastX: cx };
+  }
+  function onMove(cx: number) {
+    if (!dragRef.current.active) return;
+    const dx = cx - dragRef.current.lastX;
+    setAz(a => a - dx * 0.015);
+    dragRef.current.lastX = cx;
+  }
+  function onEnd() { dragRef.current.active = false; }
+
+  const vbW = (maxX - minX).toFixed(1);
+  const vbH = (maxY - minY).toFixed(1);
 
   return (
     <svg
       className="plan-svg"
-      viewBox={`0 0 ${(maxX - minX).toFixed(1)} ${(maxY - minY).toFixed(1)}`}
-      onContextMenu={(e) => { e.preventDefault(); setAngle((a) => (a + 1) % 4); }}
-      style={{ cursor: "context-menu" }}
-      aria-label="Right-click to rotate view"
+      viewBox={`0 0 ${vbW} ${vbH}`}
+      style={{ cursor: "grab", touchAction: "none", userSelect: "none" }}
+      onMouseDown={e => onStart(e.clientX)}
+      onMouseMove={e => onMove(e.clientX)}
+      onMouseUp={onEnd}
+      onMouseLeave={onEnd}
+      onTouchStart={e => onStart(e.touches[0].clientX)}
+      onTouchMove={e => { e.preventDefault(); onMove(e.touches[0].clientX); }}
+      onTouchEnd={onEnd}
     >
-      <polygon points={face1Pts} fill={pal.front} />
-      <polygon points={face2Pts} fill={pal.side} />
-      <polygon points={[ptn(0, 0, H), ptn(L, 0, H), ptn(L, W, H), ptn(0, W, H)].join(" ")} fill={pal.top} />
+      {/* Block side face (front Y) */}
+      <polygon
+        points={[ptn(0,bY,0),ptn(L,bY,0),ptn(L,bY,H),ptn(0,bY,H)].join(" ")}
+        fill={pal.front}
+      />
+      {/* Block side face (right X) */}
+      <polygon
+        points={[ptn(bX,0,0),ptn(bX,W,0),ptn(bX,W,H),ptn(bX,0,H)].join(" ")}
+        fill={pal.side}
+      />
+      {/* Block top face */}
+      <polygon
+        points={[ptn(0,0,H),ptn(L,0,H),ptn(L,W,H),ptn(0,W,H)].join(" ")}
+        fill={pal.top}
+      />
 
-      {placed.map((item) => {
-        const center = txt(item.px + item.pw / 2, item.py + item.ph / 2, H);
+      {/* Slab 3D boxes — sorted back to front */}
+      {sortedSlabs.map(item => {
+        const isHovered = hoveredId === item.id;
+        const dimmed = hoveredId !== null && !isHovered;
+        const topAlpha = dimmed ? 0.15 : 0.88;
+        const sideAlpha = dimmed ? 0.10 : 0.70;
+        const color = sclr(item.id);
+        const zBot = Math.max(0, H - (item.sd > 0 ? item.sd : H * 0.4));
+
+        // Visible face in Y direction
+        const sy = showFrontY ? item.py : item.py + item.ph;
+        // Visible face in X direction
+        const sx = showRightX ? item.px + item.pw : item.px;
+
+        const center = ptObj(item.px + item.pw / 2, item.py + item.ph / 2, H);
+        const showLabel = Math.min(item.pw, item.ph) * scale > 14;
+
         return (
-          <g key={item.id}>
+          <g
+            key={item.id}
+            style={{ cursor: "pointer" }}
+            onMouseEnter={() => setHoveredId(item.id)}
+            onMouseLeave={() => setHoveredId(null)}
+          >
+            {/* Y-direction side face (depth into block) */}
+            <polygon
+              points={[
+                ptn(item.px, sy, zBot),
+                ptn(item.px + item.pw, sy, zBot),
+                ptn(item.px + item.pw, sy, H),
+                ptn(item.px, sy, H)
+              ].join(" ")}
+              fill={color}
+              opacity={sideAlpha}
+              stroke="rgba(0,0,0,0.12)"
+              strokeWidth="0.5"
+            />
+            {/* X-direction side face (depth into block) */}
+            <polygon
+              points={[
+                ptn(sx, item.py, zBot),
+                ptn(sx, item.py + item.ph, zBot),
+                ptn(sx, item.py + item.ph, H),
+                ptn(sx, item.py, H)
+              ].join(" ")}
+              fill={color}
+              opacity={sideAlpha * 0.82}
+              stroke="rgba(0,0,0,0.12)"
+              strokeWidth="0.5"
+            />
+            {/* Top face */}
             <polygon
               points={[
                 ptn(item.px, item.py, H),
@@ -410,12 +480,12 @@ export function IsoBlockPreview({ block, placed }: { block: PlanBlock["blk"]; pl
                 ptn(item.px + item.pw, item.py + item.ph, H),
                 ptn(item.px, item.py + item.ph, H)
               ].join(" ")}
-              fill={sclr(item.id)}
-              opacity="0.86"
-              stroke="rgba(255,255,255,0.72)"
-              strokeWidth="0.8"
+              fill={color}
+              opacity={topAlpha}
+              stroke={isHovered ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.6)"}
+              strokeWidth={isHovered ? "2" : "0.8"}
             />
-            {Math.min(item.pw, item.ph) * scale > 16 ? (
+            {showLabel && (
               <text
                 x={center.x}
                 y={center.y}
@@ -424,13 +494,26 @@ export function IsoBlockPreview({ block, placed }: { block: PlanBlock["blk"]; pl
                 fill="#fff"
                 fontSize={10}
                 fontWeight={700}
+                style={{ pointerEvents: "none" }}
               >
                 {item.id}
               </text>
-            ) : null}
+            )}
           </g>
         );
       })}
+
+      {/* Drag hint label */}
+      <text
+        x={Number(vbW) / 2}
+        y={Number(vbH) - 4}
+        textAnchor="middle"
+        fill="var(--muted, #7A6A52)"
+        fontSize={9}
+        style={{ pointerEvents: "none" }}
+      >
+        drag to rotate · hover slab to highlight
+      </text>
     </svg>
   );
 }
@@ -637,7 +720,7 @@ export function PlanningWorkbench({
 
           <section className="page-card">
             <div className="banner" style={{ marginBottom: 16 }}>
-              Kerf {kerfMm} mm applied. Total waste {result.totalWaste.toFixed(2)} ft². Right-click any block preview to rotate view.
+              Kerf {kerfMm} mm applied. Total waste {result.totalWaste.toFixed(2)} ft². Drag any block preview to rotate · hover slab to highlight.
             </div>
 
             <div className="plan-grid">

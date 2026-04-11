@@ -22,6 +22,11 @@ function statusBadgeClass(status: string) {
   return map[status] || "";
 }
 
+function fmtDate(iso: string | null) {
+  if (!iso) return null;
+  return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
+}
+
 type Block = {
   id: string;
   stone: string;
@@ -30,13 +35,13 @@ type Block = {
   width_ft: number;
   height_ft: number;
   status: string;
+  created_at: string | null;
 };
 
 export function BlockGrid({ blocks, canEdit }: { blocks: Block[]; canEdit: boolean }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = blocks.find(b => b.id === selectedId) ?? null;
 
-  // Close drawer on Escape
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") setSelectedId(null);
@@ -47,7 +52,6 @@ export function BlockGrid({ blocks, canEdit }: { blocks: Block[]; canEdit: boole
 
   return (
     <>
-      {/* Card Grid */}
       <div className="block-card-grid">
         {blocks.map(block => {
           const L = Number(block.length_ft);
@@ -76,8 +80,11 @@ export function BlockGrid({ blocks, canEdit }: { blocks: Block[]; canEdit: boole
                   <span className="role-pill">Y{block.yard}</span>
                   <span className={`role-pill ${statusBadgeClass(block.status)}`}>{block.status}</span>
                 </div>
-                <div className="block-card-dims">{L} × {W} × {H}"</div>
+                <div className="block-card-dims">{L} × {W} × {H} ft</div>
                 <div className="block-card-cft">{cft} CFT</div>
+                {block.created_at && (
+                  <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>Added {fmtDate(block.created_at)}</div>
+                )}
               </div>
               {canEdit && <div className="block-card-edit-hint">{isSelected ? "✕ Close" : "Edit"}</div>}
             </div>
@@ -85,7 +92,6 @@ export function BlockGrid({ blocks, canEdit }: { blocks: Block[]; canEdit: boole
         })}
       </div>
 
-      {/* Slide-in Edit Drawer */}
       {selected && canEdit && (
         <>
           <div className="drawer-backdrop" onClick={() => setSelectedId(null)} />
@@ -99,7 +105,6 @@ export function BlockGrid({ blocks, canEdit }: { blocks: Block[]; canEdit: boole
             </div>
 
             <div className="drawer-body">
-              {/* Preview */}
               <div className="drawer-preview">
                 <BlockCardPreview
                   stone={selected.stone}
@@ -141,22 +146,20 @@ export function BlockGrid({ blocks, canEdit }: { blocks: Block[]; canEdit: boole
 
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
                   <label className="stack">
-                    <span>Length (in)</span>
+                    <span>Length (ft)</span>
                     <input name="length_in" type="number" min="0" step="0.5" defaultValue={String(selected.length_ft)} />
                   </label>
                   <label className="stack">
-                    <span>Width (in)</span>
+                    <span>Width (ft)</span>
                     <input name="width_in" type="number" min="0" step="0.5" defaultValue={String(selected.width_ft)} />
                   </label>
                   <label className="stack">
-                    <span>Height (in)</span>
+                    <span>Height (ft)</span>
                     <input name="height_in" type="number" min="0" step="0.5" defaultValue={String(selected.height_ft)} />
                   </label>
                 </div>
 
-                <button className="primary-button" type="submit" style={{ marginTop: 4 }}>
-                  Save Changes
-                </button>
+                <button className="primary-button" type="submit" style={{ marginTop: 4 }}>Save Changes</button>
               </form>
 
               <div className="drawer-divider" />
