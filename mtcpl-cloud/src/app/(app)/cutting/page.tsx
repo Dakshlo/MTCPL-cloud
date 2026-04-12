@@ -1,6 +1,7 @@
 import { revalidatePath } from "next/cache";
 import { IsoBlockPreview } from "@/components/planning-workbench";
 import { PrintButton } from "@/components/print-button";
+import { RejectButton } from "./reject-button";
 
 import { requireAuth } from "@/lib/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
@@ -304,9 +305,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                             <input name="session_id" type="hidden" value={session.id} />
                             <input name="block_id" type="hidden" value={block.block_id} />
                             <input name="slab_ids" type="hidden" value={JSON.stringify(slabIds)} />
-                            <button className="ghost-button" type="submit">
-                              Reject
-                            </button>
+                            <RejectButton />
                           </form>
                         </>
                       ) : null}

@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { generateNextCode } from "./utils";
+import { logAudit } from "@/lib/audit";
 
 const BLOCK_DELETE_CODE = process.env.BLOCK_DELETE_CODE || "1255";
 const LEGACY_DELETE_CODES = ["1255", "MTCPL-DELETE"];
@@ -67,6 +68,7 @@ export async function addBlockAction(formData: FormData) {
     const { error } = await supabase.from("blocks").insert({ ...payload, id: nextId });
 
     if (!error) {
+      await logAudit(profile.id, "create", "block", nextId, { stone: payload.stone, yard: payload.yard, status: payload.status });
       revalidatePath("/blocks");
       revalidatePath("/dashboard");
       redirect("/blocks?toast=Block+added+successfully");
@@ -116,6 +118,7 @@ export async function updateBlockAction(formData: FormData) {
   const { error } = await supabase.from("blocks").update(payload).eq("id", originalId);
   if (error) throw new Error(error.message);
 
+  await logAudit(profile.id, "update", "block", originalId, { new_id: nextId, status: payload.status });
   revalidatePath("/blocks");
   revalidatePath("/dashboard");
   redirect("/blocks?toast=Block+updated");
@@ -141,6 +144,7 @@ export async function deleteBlockAction(formData: FormData) {
 
   if (error) redirectWithToast("/blocks", error.message);
 
+  await logAudit(profile.id, "delete", "block", id, { status: "discarded" });
   revalidatePath("/blocks");
   revalidatePath("/dashboard");
   redirectWithToast("/blocks", "Block removed and archived in history");

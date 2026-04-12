@@ -12,6 +12,7 @@ export type BlockRow = {
   width_ft: number | string;
   height_ft: number | string;
   status: string;
+  quality: string | null;
 };
 
 export type SlabRow = {
@@ -23,6 +24,7 @@ export type SlabRow = {
   width_ft: number | string;
   thickness_ft: number | string;
   status: string;
+  quality: string | null;
 };
 
 export type PlacedSlab = {
@@ -248,7 +250,11 @@ function runOptimization(blocks: BlockRow[], slabs: SlabRow[], kerfMm: number): 
       for (const orient of blockOrients) {
         // For each slab, find the best orientation given this block depth
         const eligible = remaining
-          .filter((s) => !s.stone || s.stone === block.stone)
+          .filter((s) => {
+              if (s.stone && s.stone !== block.stone) return false;
+              if (block.quality === "B" && s.quality === "A") return false;
+              return true;
+            })
           .map((s) => {
             const face = bestSlabFace(s.sl, s.sw, s.sd, orient.depth);
             if (!face) return null;
