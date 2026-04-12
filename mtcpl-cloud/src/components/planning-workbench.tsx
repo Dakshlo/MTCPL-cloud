@@ -216,6 +216,7 @@ function runOptimization(blocks: BlockRow[], slabs: SlabRow[], kerfMm: number): 
       label: slab.label,
       temple: slab.temple,
       stone: slab.stone || null,
+      quality: slab.quality || null,
       sl: toNum(slab.length_ft),
       sw: toNum(slab.width_ft),
       sd: toNum(slab.thickness_ft)
