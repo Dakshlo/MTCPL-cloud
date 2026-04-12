@@ -7,20 +7,9 @@ import { updateBlockAction, deleteBlockAction } from "./actions";
 const STONES = ["PinkStone", "WhiteStone"] as const;
 const YARDS = [1, 2, 3] as const;
 const STATUSES = ["available", "reserved", "consumed", "discarded"] as const;
-const QUALITIES = ["", "A", "B"] as const;
 
 function calcCft(l: number, w: number, h: number) {
   return ((l * w * h) / 1728).toFixed(2);
-}
-
-function statusLabel(status: string) {
-  const map: Record<string, string> = {
-    available: "Fresh",
-    reserved: "In Process",
-    consumed: "Used",
-    discarded: "Removed",
-  };
-  return map[status] || status;
 }
 
 function statusBadgeClass(status: string) {
@@ -33,15 +22,9 @@ function statusBadgeClass(status: string) {
   return map[status] || "";
 }
 
-function fmtSmartDate(iso: string | null) {
+function fmtDate(iso: string | null) {
   if (!iso) return null;
-  const d = new Date(iso);
-  const now = new Date();
-  const isToday = d.toDateString() === now.toDateString();
-  if (isToday) {
-    return "Today " + d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
-  }
-  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
+  return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
 }
 
 type Block = {
@@ -52,11 +35,7 @@ type Block = {
   width_ft: number;
   height_ft: number;
   status: string;
-  quality?: string | null;
   created_at: string | null;
-  truck_no?: string | null;
-  vendor_name?: string | null;
-  bill_no?: string | null;
 };
 
 export function BlockGrid({ blocks, canEdit }: { blocks: Block[]; canEdit: boolean }) {
@@ -99,17 +78,12 @@ export function BlockGrid({ blocks, canEdit }: { blocks: Block[]; canEdit: boole
                 <div className="block-card-badges">
                   <span className={`role-pill ${stoneBadge}`}>{block.stone === "PinkStone" ? "Pink" : "White"}</span>
                   <span className="role-pill">Y{block.yard}</span>
-                  <span className={`role-pill ${statusBadgeClass(block.status)}`}>{statusLabel(block.status)}</span>
-                  {block.quality && (
-                    <span className="role-pill" style={{ background: block.quality === "A" ? "#d4edda" : "#fff3cd", color: block.quality === "A" ? "#155724" : "#856404", fontWeight: 700 }}>
-                      Grade {block.quality}
-                    </span>
-                  )}
+                  <span className={`role-pill ${statusBadgeClass(block.status)}`}>{block.status}</span>
                 </div>
-                <div className="block-card-dims">{L} × {W} × {H} in</div>
+                <div className="block-card-dims">{L} × {W} × {H} ft</div>
                 <div className="block-card-cft">{cft} CFT</div>
                 {block.created_at && (
-                  <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>Added {fmtSmartDate(block.created_at)}</div>
+                  <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>Added {fmtDate(block.created_at)}</div>
                 )}
               </div>
               {canEdit && <div className="block-card-edit-hint">{isSelected ? "✕ Close" : "Edit"}</div>}
@@ -163,55 +137,26 @@ export function BlockGrid({ blocks, canEdit }: { blocks: Block[]; canEdit: boole
                   </label>
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                  <label className="stack">
-                    <span>Status</span>
-                    <select name="status" defaultValue={selected.status}>
-                      {STATUSES.map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}
-                    </select>
-                  </label>
-                  <label className="stack">
-                    <span>Quality Grade</span>
-                    <select name="quality" defaultValue={selected.quality ?? ""}>
-                      <option value="">Both (A + B)</option>
-                      {QUALITIES.filter(q => q !== "").map(q => (
-                        <option key={q} value={q}>Grade {q}</option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
+                <label className="stack">
+                  <span>Status</span>
+                  <select name="status" defaultValue={selected.status}>
+                    {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </label>
 
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
                   <label className="stack">
-                    <span>Length (in)</span>
+                    <span>Length (ft)</span>
                     <input name="length_in" type="number" min="0" step="0.5" defaultValue={String(selected.length_ft)} />
                   </label>
                   <label className="stack">
-                    <span>Width (in)</span>
+                    <span>Width (ft)</span>
                     <input name="width_in" type="number" min="0" step="0.5" defaultValue={String(selected.width_ft)} />
                   </label>
                   <label className="stack">
-                    <span>Height (in)</span>
+                    <span>Height (ft)</span>
                     <input name="height_in" type="number" min="0" step="0.5" defaultValue={String(selected.height_ft)} />
                   </label>
-                </div>
-
-                <div style={{ borderTop: "1px solid var(--border-light)", paddingTop: 12, marginTop: 2 }}>
-                  <p style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", marginBottom: 10 }}>Logistics Info</p>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    <label className="stack">
-                      <span>Truck No.</span>
-                      <input name="truck_no" defaultValue={selected.truck_no ?? ""} placeholder="e.g. GJ01AB1234" />
-                    </label>
-                    <label className="stack">
-                      <span>Vendor / Supplier</span>
-                      <input name="vendor_name" defaultValue={selected.vendor_name ?? ""} placeholder="e.g. Rajasthan Stones" />
-                    </label>
-                    <label className="stack">
-                      <span>Bill No.</span>
-                      <input name="bill_no" defaultValue={selected.bill_no ?? ""} placeholder="e.g. INV-2024-001" />
-                    </label>
-                  </div>
                 </div>
 
                 <button className="primary-button" type="submit" style={{ marginTop: 4 }}>Save Changes</button>
@@ -221,9 +166,6 @@ export function BlockGrid({ blocks, canEdit }: { blocks: Block[]; canEdit: boole
 
               <div className="drawer-danger-zone">
                 <p className="drawer-danger-label">Danger Zone</p>
-                <p className="muted" style={{ fontSize: 11, marginBottom: 8 }}>
-                  Deleting marks the block as removed — it stays in history and export for records.
-                </p>
                 <form action={deleteBlockAction} style={{ display: "flex", gap: 10 }}>
                   <input name="delete_target_id" type="hidden" value={selected.id} />
                   <input name="delete_code" placeholder="Enter code 1255 to delete" style={{ flex: 1 }} />
