@@ -169,7 +169,7 @@ export function BlockGrid({ blocks, canEdit }: { blocks: Block[]; canEdit: boole
                 <form action={deleteBlockAction} style={{ display: "flex", gap: 10 }}>
                   <input name="delete_target_id" type="hidden" value={selected.id} />
                   <input name="delete_code" placeholder="Enter code 1255 to delete" style={{ flex: 1 }} />
-                  <button className="ghost-button danger-ghost" type="submit" formNoValidate>Delete</button>
+                  <button className="ghost-button danger-ghost" type="submit" formNoValidate onClick={(e) => { if (!confirm('Are you sure?')) e.preventDefault(); }}>Delete</button>
                 </form>
               </div>
             </div>

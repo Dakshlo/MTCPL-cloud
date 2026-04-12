@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { generateSlabCode } from "./utils";
+import { logAudit } from "@/lib/audit";
 
 const SLAB_DELETE_CODE = process.env.BLOCK_DELETE_CODE || "1255";
 
@@ -60,6 +61,7 @@ export async function addSlabAction(formData: FormData) {
   const { error } = await supabase.from("slab_requirements").insert(rows);
   if (error) toast("/slabs", error.message);
 
+  await logAudit(profile.id, "create", "slab", baseId, { temple, qty, stone: common.stone });
   revalidatePath("/slabs");
   revalidatePath("/planning");
   redirect(`/slabs?toast=${qty > 1 ? `${qty}+slabs+added` : "Slab+added"}`);
@@ -89,6 +91,7 @@ export async function updateSlabAction(formData: FormData) {
   const { error } = await supabase.from("slab_requirements").update(payload).eq("id", id);
   if (error) toast("/slabs", error.message);
 
+  await logAudit(profile.id, "update", "slab", id, { status: payload.status });
   revalidatePath("/slabs");
   revalidatePath("/planning");
   redirect("/slabs?toast=Slab+updated");
@@ -108,12 +111,14 @@ export async function deleteSlabAction(formData: FormData) {
   if (error) {
     if (error.code === "23503") {
       await supabase.from("slab_requirements").update({ status: "rejected", updated_by: profile.id }).eq("id", id);
+      await logAudit(profile.id, "archive", "slab", id, { reason: "referenced_delete" });
       revalidatePath("/slabs");
       toast("/slabs", "Slab was referenced — archived as rejected");
     }
     toast("/slabs", error.message);
   }
 
+  await logAudit(profile.id, "delete", "slab", id);
   revalidatePath("/slabs");
   redirect("/slabs?toast=Slab+deleted");
 }

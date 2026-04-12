@@ -179,7 +179,7 @@ export default async function PlanningPage({
 
   let slabQuery = supabase
     .from("slab_requirements")
-    .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, status")
+    .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status")
     .eq("status", "open")
     .order("created_at", { ascending: false });
 
@@ -191,7 +191,7 @@ export default async function PlanningPage({
   const [{ data: blocks, error: blockError }, { data: slabs, error: slabError }] = await Promise.all([
     supabase
       .from("blocks")
-      .select("id, stone, yard, category, length_ft, width_ft, height_ft, status")
+      .select("id, stone, yard, category, quality, length_ft, width_ft, height_ft, status")
       .eq("status", "available")
       .order("created_at", { ascending: false }),
     slabQuery,
