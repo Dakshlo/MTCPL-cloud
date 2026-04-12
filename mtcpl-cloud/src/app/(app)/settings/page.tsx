@@ -3,11 +3,11 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { addTempleAction, updateTempleAction, deleteTempleAction, updateUserAction, deleteUserAction } from "./actions";
 import type { AppRole } from "@/lib/types";
 
-// Only 3 roles shown in UI
 const UI_ROLES = [
   { value: "owner", label: "Owner" },
   { value: "planner", label: "Team Head" },
   { value: "block_entry", label: "Entry (Block & Slab)" },
+  { value: "worker", label: "Cutting Operator" },
 ];
 
 const ROLE_ACCESS: Record<string, string[]> = {
@@ -15,7 +15,7 @@ const ROLE_ACCESS: Record<string, string[]> = {
   planner: ["Dashboard", "Blocks", "Slabs", "Plan Generator", "Cutting", "Settings"],
   block_entry: ["Dashboard", "Blocks", "Slabs"],
   slab_entry: ["Dashboard", "Blocks", "Slabs"],
-  worker: ["Dashboard", "Cutting"],
+  worker: ["Cutting"],
   carving_assigner: ["Dashboard"],
   dispatch: ["Dashboard"],
   vendor: ["Dashboard"],
@@ -115,7 +115,7 @@ export default async function SettingsPage() {
 
                         <label className="stack" style={{ flex: "1 1 120px" }}>
                           <span>Role</span>
-                          <select name="role" defaultValue={role === "slab_entry" ? "block_entry" : role} disabled={isSelf}>
+                          <select name="role" defaultValue={UI_ROLES.some(r => r.value === role) ? role : "block_entry"} disabled={isSelf}>
                             {UI_ROLES.map((r) => (
                               <option key={r.value} value={r.value}>{r.label}</option>
                             ))}
