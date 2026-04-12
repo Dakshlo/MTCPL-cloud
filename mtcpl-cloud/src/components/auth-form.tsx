@@ -26,9 +26,10 @@ export function AuthForm() {
 
     try {
       if (mode === "sign_up") {
-        const { error: err } = await supabase.auth.signUp({ email, password });
+        const redirectTo = `${window.location.origin}/auth/callback`;
+        const { error: err } = await supabase.auth.signUp({ email, password, options: { emailRedirectTo: redirectTo } });
         if (err) throw err;
-        setMessage("Account created. Sign in after confirmation. Management will activate your account and assign your role.");
+        setMessage("Check your email and click the confirmation link. Once confirmed, sign in here — management will then activate your account.");
       } else {
         const { error: err } = await supabase.auth.signInWithPassword({ email, password });
         if (err) throw err;
