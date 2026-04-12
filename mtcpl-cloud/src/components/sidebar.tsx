@@ -51,6 +51,12 @@ const navItems: NavItem[] = [
     roles: ["owner", "worker", "planner"],
   },
   {
+    href: "/slabs/ready",
+    label: "Ready Slabs",
+    icon: "✦",
+    roles: ["owner", "planner", "slab_entry", "block_entry"],
+  },
+  {
     href: "/settings",
     label: "Settings",
     icon: "⚙",
