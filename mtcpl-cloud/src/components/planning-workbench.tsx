@@ -255,34 +255,55 @@ function runOptimization(blocks: BlockRow[], slabs: SlabRow[], kerfMm: number): 
           return true;
         });
 
-        // Layer loop: keep slicing plates until we run out of block or slabs
+        // Layer loop: each iteration = one gang-saw pass at a fixed cut depth.
+        // All slabs in one pass must share the same thickness (physically required).
+        // We group eligible slabs by their thickness, try each group, pick the one
+        // that fills the face best, then advance the block depth by exactly that thickness.
         while (tempRemaining.length > 0 && axis.depth - depthUsed > 0.01) {
           const availDepth = axis.depth - depthUsed;
 
-          const eligible = tempRemaining
-            .map((s) => {
-              const face = bestSlabFaceForAxis(s.sl, s.sw, s.sd, axis.faceL, axis.faceW, availDepth);
-              if (!face) return null;
-              return { id: s.id, label: s.label, temple: s.temple, sw: face.fw, sh: face.fh, sd: face.depth, quality: s.quality };
-            })
-            .filter((x): x is NonNullable<typeof x> => x !== null);
+          // Map every remaining slab to its best face orientation and required depth
+          type EligSlab = { id: string; label: string; temple: string; fw: number; fh: number; depth: number; quality: string | null };
+          const eligibleAll: EligSlab[] = [];
+          for (const s of tempRemaining) {
+            const face = bestSlabFaceForAxis(s.sl, s.sw, s.sd, axis.faceL, axis.faceW, availDepth);
+            if (face) eligibleAll.push({ id: s.id, label: s.label, temple: s.temple, fw: face.fw, fh: face.fh, depth: face.depth, quality: s.quality });
+          }
+          if (!eligibleAll.length) break;
 
-          if (!eligible.length) break;
+          // Group by thickness (0.1 mm resolution to handle float rounding)
+          const byDepth = new Map<number, EligSlab[]>();
+          for (const e of eligibleAll) {
+            const key = Math.round(e.depth * 10000); // units: 0.1 mm
+            if (!byDepth.has(key)) byDepth.set(key, []);
+            byDepth.get(key)!.push(e);
+          }
 
-          const packed = packBlock(axis.faceL, axis.faceW, eligible, kerfFt);
-          if (!packed.placed.length) break;
+          // Try each thickness group — pick the one that places the most slabs on the face
+          let bestLayerPack: ReturnType<typeof packBlock> | null = null;
+          let bestLayerDepth = 0;
 
-          // Plate thickness = thickest slab placed in this layer
-          const layerT = Math.max(...packed.placed.map((p) => p.sd));
-          // zTop / zBot in the block's cutting-depth coordinate (0 = far side, axis.depth = near side / "top")
+          for (const [key, group] of byDepth) {
+            const depth = key / 10000;
+            const items = group.map(e => ({ id: e.id, label: e.label, temple: e.temple, sw: e.fw, sh: e.fh, sd: depth }));
+            const tryPack = packBlock(axis.faceL, axis.faceW, items, kerfFt);
+            if (tryPack.placed.length > (bestLayerPack?.placed.length ?? 0)) {
+              bestLayerPack = tryPack;
+              bestLayerDepth = depth;
+            }
+          }
+
+          if (!bestLayerPack || !bestLayerPack.placed.length) break;
+
+          // zTop / zBot: depth coordinate inside the block (0 = far end, axis.depth = near/"top")
           const zTop = axis.depth - depthUsed;
-          const zBot = Math.max(0, zTop - layerT);
+          const zBot = Math.max(0, zTop - bestLayerDepth);
 
-          packed.placed.forEach((p) => allPlaced.push({ ...p, zTop, zBot }));
-          lastSpaces = packed.spaces;
+          bestLayerPack.placed.forEach((p) => allPlaced.push({ ...p, zTop, zBot }));
+          lastSpaces = bestLayerPack.spaces;
 
-          depthUsed += layerT + kerfFt;
-          const placedIds = new Set(packed.placed.map((p) => p.id));
+          depthUsed += bestLayerDepth + kerfFt;
+          const placedIds = new Set(bestLayerPack.placed.map((p) => p.id));
           tempRemaining = tempRemaining.filter((s) => !placedIds.has(s.id));
         }
 
