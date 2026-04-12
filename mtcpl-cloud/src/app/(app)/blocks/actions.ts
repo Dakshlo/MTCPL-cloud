@@ -33,14 +33,24 @@ export async function addBlockAction(formData: FormData) {
   const existingIds = (existingRows ?? []).map(r => r.id);
   const requestedId = textValue(formData, "id");
 
+  const truck_no = textValue(formData, "truck_no") || null;
+  const vendor_name = textValue(formData, "vendor_name") || null;
+  const bill_no = textValue(formData, "bill_no") || null;
+
+  const quality = textValue(formData, "quality") || null;
+
   const payload = {
     stone: textValue(formData, "stone") || "PinkStone",
     yard: numValue(formData, "yard", 1),
     category: "Fresh" as const,
+    quality,
     length_ft: numValue(formData, "length_in", 0),
     width_ft: numValue(formData, "width_in", 0),
     height_ft: numValue(formData, "height_in", 0),
     status: "available" as const,
+    ...(truck_no ? { truck_no } : {}),
+    ...(vendor_name ? { vendor_name } : {}),
+    ...(bill_no ? { bill_no } : {}),
     created_by: profile.id,
     updated_by: profile.id
   };
@@ -82,14 +92,23 @@ export async function updateBlockAction(formData: FormData) {
 
   if (!originalId || !nextId) throw new Error("Block ID is required.");
 
+  // Logistics — store empty string as null
+  const truck_no = textValue(formData, "truck_no") || null;
+  const vendor_name = textValue(formData, "vendor_name") || null;
+  const bill_no = textValue(formData, "bill_no") || null;
+
   const payload = {
     id: nextId,
     stone: textValue(formData, "stone") || "PinkStone",
     yard: numValue(formData, "yard", 1),
+    quality: textValue(formData, "quality") || null,
     length_ft: numValue(formData, "length_in", 0),
     width_ft: numValue(formData, "width_in", 0),
     height_ft: numValue(formData, "height_in", 0),
     status: textValue(formData, "status") || "available",
+    truck_no,
+    vendor_name,
+    bill_no,
     updated_by: profile.id,
     updated_at: new Date().toISOString()
   };
@@ -114,25 +133,15 @@ export async function deleteBlockAction(formData: FormData) {
     redirectWithToast("/blocks", "Delete code is incorrect. Block was not deleted.");
   }
 
-  const { error } = await supabase.from("blocks").delete().eq("id", id);
+  // Always soft-delete: mark as discarded so the block stays in history/export
+  const { error } = await supabase
+    .from("blocks")
+    .update({ status: "discarded", updated_by: profile.id, updated_at: new Date().toISOString() })
+    .eq("id", id);
 
-  if (error) {
-    if (error.code === "23503") {
-      const archive = await supabase
-        .from("blocks")
-        .update({ status: "discarded", updated_by: profile.id, updated_at: new Date().toISOString() })
-        .eq("id", id);
-
-      if (archive.error) redirectWithToast("/blocks", archive.error.message);
-
-      revalidatePath("/blocks");
-      revalidatePath("/dashboard");
-      redirectWithToast("/blocks", "Block was referenced and has been archived");
-    }
-    redirectWithToast("/blocks", error.message);
-  }
+  if (error) redirectWithToast("/blocks", error.message);
 
   revalidatePath("/blocks");
   revalidatePath("/dashboard");
-  redirectWithToast("/blocks", "Block deleted");
+  redirectWithToast("/blocks", "Block removed and archived in history");
 }
