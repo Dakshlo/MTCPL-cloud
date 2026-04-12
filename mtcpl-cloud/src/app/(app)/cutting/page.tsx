@@ -2,6 +2,7 @@ import { revalidatePath } from "next/cache";
 import { IsoBlockPreview } from "@/components/planning-workbench";
 import { PrintButton } from "@/components/print-button";
 import { RejectButton } from "./reject-button";
+import { UndoButton } from "./undo-button";
 
 import { requireAuth } from "@/lib/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
@@ -111,6 +112,49 @@ async function rejectBlockAction(formData: FormData) {
   await refreshPaths();
 }
 
+async function undoDonePromptAction(formData: FormData) {
+  "use server";
+
+  await requireAuth(["owner", "worker"]);
+  const supabase = await createServerSupabaseClient();
+  const sessionBlockId = String(formData.get("session_block_id") || "");
+
+  const { error } = await supabase.from("cut_session_blocks").update({ status: "cutting" }).eq("id", sessionBlockId);
+  if (error) throw new Error(error.message);
+
+  await refreshPaths();
+}
+
+async function undoDoneAction(formData: FormData) {
+  "use server";
+
+  const { profile } = await requireAuth(["owner"]);
+  const supabase = await createServerSupabaseClient();
+  const sessionBlockId = String(formData.get("session_block_id") || "");
+  const blockId = String(formData.get("block_id") || "");
+  const slabIds = JSON.parse(String(formData.get("slab_ids") || "[]")) as string[];
+  const restockedBlockId = String(formData.get("restocked_block_id") || "");
+
+  // Revert block back to reserved (it was reserved before being consumed)
+  await supabase.from("blocks").update({ status: "reserved", updated_by: profile.id, updated_at: new Date().toISOString() }).eq("id", blockId);
+
+  // Delete the restocked remainder block if one was created
+  if (restockedBlockId) {
+    await supabase.from("blocks").delete().eq("id", restockedBlockId);
+  }
+
+  // Revert slabs back to planned
+  if (slabIds.length) {
+    await supabase.from("slab_requirements").update({ status: "planned", updated_by: profile.id, updated_at: new Date().toISOString() }).in("id", slabIds);
+  }
+
+  // Revert session block back to cutting
+  await supabase.from("cut_session_blocks").update({ status: "cutting", restocked_block_id: null }).eq("id", sessionBlockId);
+
+  await supabase.from("cut_sessions").update({ status: "in_progress" }).eq("id", String(formData.get("session_id") || ""));
+  await refreshPaths();
+}
+
 async function markDonePromptAction(formData: FormData) {
   "use server";
 
@@ -196,7 +240,7 @@ async function finishBlockAction(formData: FormData) {
 }
 
 export default async function CuttingPage({ searchParams }: { searchParams: SearchParams }) {
-  await requireAuth(["owner", "worker"]);
+  const { profile } = await requireAuth(["owner", "worker"]);
 
   const params = await searchParams;
   const showClosed = params.show_closed === "1";
@@ -321,6 +365,11 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
 
                       {block.status === "done_prompt" ? (
                         <>
+                          <form action={undoDonePromptAction}>
+                            <input name="session_block_id" type="hidden" value={block.id} />
+                            <UndoButton label="← Go Back" message="Go back to cutting status?" />
+                          </form>
+
                           <form action={finishBlockAction}>
                             <input name="session_block_id" type="hidden" value={block.id} />
                             <input name="session_id" type="hidden" value={session.id} />
@@ -352,10 +401,22 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                       ) : null}
 
                       {block.status === "done" ? (
-                        <span className="role-pill">
-                          Done {block.restocked_block_id ? `· Restocked ${block.restocked_block_id}` : "· Discarded"}
-                          {block.updated_at ? ` · Cut ${new Date(block.updated_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}` : ""}
-                        </span>
+                        <>
+                          <span className="role-pill">
+                            Done {block.restocked_block_id ? `· Restocked ${block.restocked_block_id}` : "· Discarded"}
+                            {block.updated_at ? ` · Cut ${new Date(block.updated_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}` : ""}
+                          </span>
+                          {profile.role === "owner" && (
+                            <form action={undoDoneAction}>
+                              <input name="session_block_id" type="hidden" value={block.id} />
+                              <input name="session_id" type="hidden" value={session.id} />
+                              <input name="block_id" type="hidden" value={block.block_id} />
+                              <input name="slab_ids" type="hidden" value={JSON.stringify(slabIds)} />
+                              <input name="restocked_block_id" type="hidden" value={block.restocked_block_id ?? ""} />
+                              <UndoButton message="Undo this cut? Block goes back to reserved and slabs back to planned." />
+                            </form>
+                          )}
+                        </>
                       ) : null}
 
                       {block.status === "rejected" ? <span className="role-pill">Rejected and returned</span> : null}

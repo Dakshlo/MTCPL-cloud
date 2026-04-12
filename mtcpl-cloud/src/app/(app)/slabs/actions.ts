@@ -7,7 +7,6 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { generateSlabCode } from "./utils";
 import { logAudit } from "@/lib/audit";
 
-const SLAB_DELETE_CODE = process.env.BLOCK_DELETE_CODE || "1255";
 
 function num(fd: FormData, key: string, fallback = 0) {
   const v = Number(fd.get(key));
@@ -102,10 +101,8 @@ export async function deleteSlabAction(formData: FormData) {
   const supabase = await createServerSupabaseClient();
 
   const id = text(formData, "id");
-  const code = text(formData, "delete_code");
 
   if (!id) toast("/slabs", "Missing ID");
-  if (code !== SLAB_DELETE_CODE) toast("/slabs", "Incorrect delete code");
 
   const { error } = await supabase.from("slab_requirements").delete().eq("id", id);
   if (error) {
