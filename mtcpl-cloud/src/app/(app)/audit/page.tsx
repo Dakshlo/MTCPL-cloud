@@ -48,7 +48,8 @@ export default async function AuditPage() {
 
   if (error) throw new Error(error.message);
 
-  const rows = (logs ?? []) as AuditLog[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows = (logs ?? []) as any as AuditLog[];
 
   return (
     <section className="page-card">
