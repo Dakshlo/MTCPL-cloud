@@ -27,16 +27,17 @@ export async function addSlabAction(formData: FormData) {
   const temple = text(formData, "temple");
   if (!temple) toast("/slabs", "Temple is required");
 
+  const qty = Math.min(50, Math.max(1, parseInt(text(formData, "quantity") || "1", 10)));
+
   // Get prefix from temples table
   const { data: templeRow } = await supabase.from("temples").select("code_prefix").eq("name", temple).single();
   const prefix = templeRow?.code_prefix ?? "SLB";
 
   const { data: existing } = await supabase.from("slab_requirements").select("id");
   const existingIds = (existing ?? []).map(r => r.id);
-  const id = generateSlabCode(existingIds, prefix);
+  const baseId = generateSlabCode(existingIds, prefix);
 
-  const payload = {
-    id,
+  const common = {
     label: text(formData, "label") || temple,
     temple,
     stone: text(formData, "stone") || null,
@@ -49,12 +50,18 @@ export async function addSlabAction(formData: FormData) {
     updated_by: profile.id,
   };
 
-  const { error } = await supabase.from("slab_requirements").insert(payload);
+  // Build all rows: first gets base code (e.g. RM-0021), rest get RM-0021-1, RM-0021-2…
+  const rows = Array.from({ length: qty }, (_, i) => ({
+    ...common,
+    id: i === 0 ? baseId : `${baseId}-${i}`,
+  }));
+
+  const { error } = await supabase.from("slab_requirements").insert(rows);
   if (error) toast("/slabs", error.message);
 
   revalidatePath("/slabs");
   revalidatePath("/planning");
-  redirect("/slabs?toast=Slab+added");
+  redirect(`/slabs?toast=${qty > 1 ? `${qty}+slabs+added` : "Slab+added"}`);
 }
 
 export async function updateSlabAction(formData: FormData) {

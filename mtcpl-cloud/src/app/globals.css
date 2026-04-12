@@ -520,6 +520,24 @@ input[readonly] {
   font-weight: 700;
 }
 
+.qty-btn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+.qty-btn:hover:not(:disabled) { background: var(--surface-alt); }
+.qty-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
 /* CFT display */
 .cft-box {
   display: flex;

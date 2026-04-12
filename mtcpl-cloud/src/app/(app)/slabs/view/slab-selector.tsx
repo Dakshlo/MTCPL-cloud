@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 
 type Slab = {
@@ -14,9 +14,15 @@ type Slab = {
   thickness_ft: number;
   status: string;
   priority: boolean;
+  created_at: string | null;
 };
 
 type ActiveFilters = { temple?: string; stone?: string; priority?: string; status?: string; q?: string };
+
+function fmtDate(iso: string | null) {
+  if (!iso) return null;
+  return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
+}
 
 export function SlabSelector({
   slabs,
@@ -34,7 +40,6 @@ export function SlabSelector({
   const [q, setQ] = useState(activeFilters.q ?? "");
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  // Live text filter on top of server filters
   const filtered = useMemo(() => {
     if (!q.trim()) return slabs;
     const lower = q.toLowerCase();
@@ -46,7 +51,6 @@ export function SlabSelector({
     );
   }, [slabs, q]);
 
-  // Group by temple for display
   const grouped = useMemo(() => {
     const map = new Map<string, Slab[]>();
     for (const s of filtered) {
@@ -98,11 +102,9 @@ export function SlabSelector({
   }
 
   const priorityCount = filtered.filter(s => s.priority).length;
-  const selectedArr = [...selected];
 
   return (
     <>
-      {/* Page Header */}
       <div className="page-header">
         <div>
           <h1>Slab Inventory</h1>
@@ -163,14 +165,15 @@ export function SlabSelector({
           <option value="false">Normal only</option>
         </select>
 
+        {/* Status: default "open", "all" shows open+planned */}
         <select
           className="filter-select"
-          value={activeFilters.status ?? ""}
+          value={activeFilters.status ?? "open"}
           onChange={e => setFilter("status", e.target.value)}
         >
-          <option value="">Open + Planned</option>
           <option value="open">Open only</option>
           <option value="planned">Planned only</option>
+          <option value="all">Open + Planned</option>
         </select>
 
         {priorityCount > 0 && (
@@ -236,7 +239,7 @@ export function SlabSelector({
 
                 <div className="slab-group-rows">
                   {groupSlabs.map(slab => {
-                    const area = ((Number(slab.length_ft) * Number(slab.width_ft)) / 144).toFixed(1);
+                    const cft = ((Number(slab.length_ft) * Number(slab.width_ft) * Number(slab.thickness_ft)) / 1728).toFixed(2);
                     const isChecked = selected.has(slab.id);
 
                     return (
@@ -265,8 +268,9 @@ export function SlabSelector({
                           <div className="slab-row-label">{slab.label}</div>
                         </div>
                         <div className="slab-row-dims">
-                          <span>{Number(slab.length_ft)}" × {Number(slab.width_ft)}"</span>
-                          <span className="muted">{area} sq ft</span>
+                          <span>{Number(slab.length_ft)}" × {Number(slab.width_ft)}" × {Number(slab.thickness_ft)}"</span>
+                          <span className="muted">{cft} CFT</span>
+                          {slab.created_at && <span className="muted" style={{ fontSize: 11 }}>Added {fmtDate(slab.created_at)}</span>}
                         </div>
                       </label>
                     );
@@ -278,7 +282,7 @@ export function SlabSelector({
         </div>
       )}
 
-      {/* Sticky Send Button when items are selected */}
+      {/* Sticky Send Button */}
       {selected.size > 0 && (
         <div className="slab-send-sticky">
           <div className="slab-send-sticky-inner">

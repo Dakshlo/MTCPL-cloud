@@ -57,3 +57,41 @@ export async function deleteTempleAction(formData: FormData) {
   revalidatePath("/settings");
   redirect("/settings?toast=Temple+deleted");
 }
+
+export async function updateUserAction(formData: FormData) {
+  const { profile: currentUser } = await requireAuth(["owner"]);
+  const supabase = await createServerSupabaseClient();
+
+  const id = text(formData, "id");
+  const role = text(formData, "role") || "block_entry";
+  const full_name = text(formData, "full_name") || null;
+  const is_active = formData.get("is_active") === "true";
+
+  if (!id) redirect("/settings?toast=Missing+fields");
+  if (id === currentUser.id) redirect("/settings?toast=Cannot+edit+your+own+account");
+
+  const { error } = await supabase
+    .from("profiles")
+    .update({ role, is_active, ...(full_name !== null ? { full_name } : {}) })
+    .eq("id", id);
+  if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
+
+  revalidatePath("/settings");
+  redirect("/settings?toast=User+updated");
+}
+
+export async function deleteUserAction(formData: FormData) {
+  const { profile: currentUser } = await requireAuth(["owner"]);
+  const supabase = await createServerSupabaseClient();
+
+  const id = text(formData, "id");
+  if (!id) redirect("/settings?toast=Missing+ID");
+  if (id === currentUser.id) redirect("/settings?toast=Cannot+remove+your+own+account");
+
+  // Delete profile — user loses access but their auth account remains
+  const { error } = await supabase.from("profiles").delete().eq("id", id);
+  if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
+
+  revalidatePath("/settings");
+  redirect("/settings?toast=User+removed");
+}

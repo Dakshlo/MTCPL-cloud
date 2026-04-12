@@ -36,7 +36,21 @@ export function getDefaultRouteForProfile(profile?: Pick<Profile, "role" | "is_a
   return getDefaultRouteForRole(profile.role);
 }
 
+const DEV_MOCK_PROFILE = {
+  id: "dev-user-id",
+  full_name: "Dev Owner",
+  phone: null,
+  role: "owner" as AppRole,
+  vendor_id: null,
+  vendor_name: null,
+  is_active: true,
+};
+
 export async function getAuthContext() {
+  if (process.env.NODE_ENV === "development" && process.env.DEV_BYPASS_AUTH === "1") {
+    return { user: { id: "dev-user-id", email: "dev@local" } as any, profile: DEV_MOCK_PROFILE };
+  }
+
   const supabase = await createServerSupabaseClient();
   const {
     data: { user }

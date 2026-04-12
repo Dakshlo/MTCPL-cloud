@@ -24,15 +24,15 @@ export default async function PendingAccessPage() {
           before access is enabled.
         </p>
         <div className="banner" style={{ marginTop: 18 }}>
-          Please sign in later using the same email and password you created. Until approval is complete, this waiting
-          screen is the only page available to your account.
+          You can sign in again with your mobile number at any time. Until approval is complete, this waiting screen is
+          the only page available to your account.
         </div>
         <div className="stack" style={{ marginTop: 20 }}>
           <p className="muted" style={{ margin: 0 }}>
-            Signed in as <strong>{user.email}</strong>
+            Signed in as <strong>{user.phone ?? user.email}</strong>
           </p>
           <p className="muted" style={{ margin: 0 }}>
-            If you need urgent access, contact the owner or management team to activate your account from the Users
+            If you need urgent access, contact the owner or management team to activate your account from the Settings
             page.
           </p>
         </div>
