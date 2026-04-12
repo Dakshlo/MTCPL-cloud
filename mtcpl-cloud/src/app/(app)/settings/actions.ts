@@ -104,6 +104,15 @@ export async function deleteUserAction(formData: FormData) {
     redirect("/settings?toast=" + encodeURIComponent("Service role key not configured — add SUPABASE_SERVICE_ROLE_KEY to environment variables."));
   }
 
+  // Clear references to this user in blocks and slabs before deleting
+  // (foreign key constraints on created_by / updated_by columns)
+  await Promise.all([
+    admin.from("blocks").update({ updated_by: null }).eq("updated_by", id),
+    admin.from("blocks").update({ created_by: null }).eq("created_by", id),
+    admin.from("slabs").update({ updated_by: null }).eq("updated_by", id),
+    admin.from("slabs").update({ created_by: null }).eq("created_by", id),
+  ]);
+
   const { error } = await admin
     .from("profiles")
     .delete()
