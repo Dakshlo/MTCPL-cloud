@@ -2,33 +2,35 @@ import { requireAuth } from "@/lib/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { AddBlockForm } from "./add-block-form";
 import { BlockGrid } from "./block-grid";
+import { BlockExport } from "./block-export";
 import { generateNextCode } from "./utils";
 
 export default async function BlocksPage() {
   const { profile } = await requireAuth(["owner", "planner", "block_entry", "slab_entry"]);
 
   const supabase = await createServerSupabaseClient();
-  const [{ data: blocks, error }, { data: allIds }, { data: consumed }] = await Promise.all([
+  const [{ data: blocks, error }, { data: allIds }, { data: history }] = await Promise.all([
     supabase
       .from("blocks")
-      .select("id, stone, yard, category, length_ft, width_ft, height_ft, status, created_at")
+      .select("id, stone, yard, category, length_ft, width_ft, height_ft, status, created_at, truck_no, vendor_name, bill_no")
       .in("status", ["available", "reserved"])
       .order("created_at", { ascending: false })
       .limit(500),
     supabase.from("blocks").select("id"),
     supabase
       .from("blocks")
-      .select("id, stone, yard, length_ft, width_ft, height_ft, updated_at")
-      .eq("status", "consumed")
+      .select("id, stone, yard, length_ft, width_ft, height_ft, status, created_at, updated_at, truck_no, vendor_name, bill_no")
+      .in("status", ["consumed", "discarded"])
       .order("updated_at", { ascending: false })
-      .limit(30),
+      .limit(50),
   ]);
 
   if (error) throw new Error(error.message);
 
   const canEdit = ["owner", "planner", "block_entry"].includes(profile.role);
+  const canExport = ["owner", "planner"].includes(profile.role);
   const blockList = blocks ?? [];
-  const consumedList = consumed ?? [];
+  const historyList = history ?? [];
   const suggestedId = generateNextCode((allIds ?? []).map(r => r.id));
 
   const totalBlocks = blockList.length;
@@ -90,31 +92,59 @@ export default async function BlocksPage() {
         <BlockGrid blocks={blockList} canEdit={canEdit} />
       )}
 
-      {/* Block Usage History */}
-      {consumedList.length > 0 && (
+      {/* Export Panel — owner/planner only */}
+      {canExport && (
+        <div style={{ marginTop: 40 }}>
+          <div className="section-heading">
+            <div>
+              <h2>Export</h2>
+              <p className="muted">Download block records including all statuses</p>
+            </div>
+          </div>
+          <BlockExport />
+        </div>
+      )}
+
+      {/* Block History — consumed + discarded */}
+      {historyList.length > 0 && (
         <>
           <div className="section-heading" style={{ marginTop: 40 }}>
             <div>
-              <h2>Block History ({consumedList.length})</h2>
-              <p className="muted">Recently consumed blocks · used in cut sessions</p>
+              <h2>Block History ({historyList.length})</h2>
+              <p className="muted">Consumed blocks (used in cutting) and removed/discarded blocks</p>
             </div>
           </div>
           <div className="records-stack">
-            {consumedList.map(blk => {
+            {historyList.map(blk => {
               const cft = ((Number(blk.length_ft) * Number(blk.width_ft) * Number(blk.height_ft)) / 1728).toFixed(2);
+              const isDiscarded = blk.status === "discarded";
               return (
                 <div className="record-card compact-record" key={blk.id}>
                   <div className="record-head">
                     <div>
                       <strong style={{ fontFamily: "ui-monospace, monospace" }}>{blk.id}</strong>
-                      <p className="muted" style={{ margin: "2px 0 0" }}>
-                        {blk.stone} · Yard {blk.yard} · {Number(blk.length_ft)} × {Number(blk.width_ft)} × {Number(blk.height_ft)} ft · {cft} CFT
+                      <p className="muted" style={{ margin: "2px 0 0", fontSize: 13 }}>
+                        {blk.stone} · Yard {blk.yard} · {Number(blk.length_ft)} × {Number(blk.width_ft)} × {Number(blk.height_ft)} in · {cft} CFT
                       </p>
+                      {(blk.truck_no || blk.vendor_name || blk.bill_no) && (
+                        <p className="muted" style={{ margin: "3px 0 0", fontSize: 12 }}>
+                          {[
+                            blk.truck_no ? `Truck: ${blk.truck_no}` : null,
+                            blk.vendor_name ? `Vendor: ${blk.vendor_name}` : null,
+                            blk.bill_no ? `Bill: ${blk.bill_no}` : null,
+                          ].filter(Boolean).join(" · ")}
+                        </p>
+                      )}
                     </div>
-                    <div style={{ textAlign: "right" }}>
-                      <span className="role-pill badge-consumed">consumed</span>
+                    <div style={{ textAlign: "right", flexShrink: 0 }}>
+                      <span className={`role-pill ${isDiscarded ? "badge-discarded" : "badge-consumed"}`}>
+                        {isDiscarded ? "removed" : "consumed"}
+                      </span>
                       <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                        Used: {fmtDate(blk.updated_at)}
+                        Added: {fmtDate(blk.created_at)}
+                      </p>
+                      <p className="muted" style={{ fontSize: 12, marginTop: 1 }}>
+                        {isDiscarded ? "Removed" : "Used"}: {fmtDate(blk.updated_at)}
                       </p>
                     </div>
                   </div>

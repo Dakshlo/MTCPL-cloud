@@ -36,6 +36,9 @@ type Block = {
   height_ft: number;
   status: string;
   created_at: string | null;
+  truck_no?: string | null;
+  vendor_name?: string | null;
+  bill_no?: string | null;
 };
 
 export function BlockGrid({ blocks, canEdit }: { blocks: Block[]; canEdit: boolean }) {
@@ -80,7 +83,7 @@ export function BlockGrid({ blocks, canEdit }: { blocks: Block[]; canEdit: boole
                   <span className="role-pill">Y{block.yard}</span>
                   <span className={`role-pill ${statusBadgeClass(block.status)}`}>{block.status}</span>
                 </div>
-                <div className="block-card-dims">{L} × {W} × {H} ft</div>
+                <div className="block-card-dims">{L} × {W} × {H} in</div>
                 <div className="block-card-cft">{cft} CFT</div>
                 {block.created_at && (
                   <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>Added {fmtDate(block.created_at)}</div>
@@ -114,6 +117,7 @@ export function BlockGrid({ blocks, canEdit }: { blocks: Block[]; canEdit: boole
                 />
               </div>
 
+              {/* Main edit form */}
               <form action={updateBlockAction} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                 <input name="original_id" type="hidden" value={selected.id} />
 
@@ -146,17 +150,38 @@ export function BlockGrid({ blocks, canEdit }: { blocks: Block[]; canEdit: boole
 
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
                   <label className="stack">
-                    <span>Length (ft)</span>
+                    <span>Length (in)</span>
                     <input name="length_in" type="number" min="0" step="0.5" defaultValue={String(selected.length_ft)} />
                   </label>
                   <label className="stack">
-                    <span>Width (ft)</span>
+                    <span>Width (in)</span>
                     <input name="width_in" type="number" min="0" step="0.5" defaultValue={String(selected.width_ft)} />
                   </label>
                   <label className="stack">
-                    <span>Height (ft)</span>
+                    <span>Height (in)</span>
                     <input name="height_in" type="number" min="0" step="0.5" defaultValue={String(selected.height_ft)} />
                   </label>
+                </div>
+
+                {/* Logistics Info in edit drawer */}
+                <div style={{ borderTop: "1px solid var(--border-light)", paddingTop: 12, marginTop: 2 }}>
+                  <p style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", marginBottom: 10 }}>
+                    Logistics Info
+                  </p>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <label className="stack">
+                      <span>Truck No.</span>
+                      <input name="truck_no" defaultValue={selected.truck_no ?? ""} placeholder="e.g. GJ01AB1234" />
+                    </label>
+                    <label className="stack">
+                      <span>Vendor / Supplier</span>
+                      <input name="vendor_name" defaultValue={selected.vendor_name ?? ""} placeholder="e.g. Rajasthan Stones" />
+                    </label>
+                    <label className="stack">
+                      <span>Bill No.</span>
+                      <input name="bill_no" defaultValue={selected.bill_no ?? ""} placeholder="e.g. INV-2024-001" />
+                    </label>
+                  </div>
                 </div>
 
                 <button className="primary-button" type="submit" style={{ marginTop: 4 }}>Save Changes</button>
@@ -166,6 +191,9 @@ export function BlockGrid({ blocks, canEdit }: { blocks: Block[]; canEdit: boole
 
               <div className="drawer-danger-zone">
                 <p className="drawer-danger-label">Danger Zone</p>
+                <p className="muted" style={{ fontSize: 11, marginBottom: 8 }}>
+                  Deleting marks the block as discarded — it stays in history and export for records.
+                </p>
                 <form action={deleteBlockAction} style={{ display: "flex", gap: 10 }}>
                   <input name="delete_target_id" type="hidden" value={selected.id} />
                   <input name="delete_code" placeholder="Enter code 1255 to delete" style={{ flex: 1 }} />
