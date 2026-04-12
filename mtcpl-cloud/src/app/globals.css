@@ -1277,6 +1277,61 @@ details.block-card[open] {
   padding: 40px 24px;
 }
 
+/* ── Mobile Bottom Nav ───────────────────────────────────────── */
+
+.mobile-bottom-nav {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .mobile-bottom-nav {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 300;
+    background: var(--sidebar-bg);
+    border-top: 1px solid rgba(255,255,255,0.1);
+    padding: 0 4px env(safe-area-inset-bottom, 8px);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .mobile-nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 8px 10px;
+    flex: 1;
+    min-width: 52px;
+    text-decoration: none;
+    color: rgba(255,255,255,0.5);
+    font-size: 10px;
+    white-space: nowrap;
+  }
+
+  .mobile-nav-item:hover,
+  .mobile-nav-item:active {
+    color: var(--gold);
+  }
+
+  .mobile-nav-icon {
+    font-size: 18px;
+    line-height: 1;
+  }
+
+  .mobile-nav-label {
+    font-size: 10px;
+    font-weight: 500;
+  }
+
+  .page-content {
+    padding-bottom: 80px;
+  }
+}
+
 /* ── Hamburger & Mobile Sidebar ─────────────────────────────── */
 
 .hamburger-btn {

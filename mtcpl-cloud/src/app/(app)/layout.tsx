@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { LogoutButton } from "@/components/logout-button";
+import { MobileNav } from "@/components/mobile-nav";
 import { RealtimeRefresh } from "@/components/realtime-refresh";
 import { Sidebar } from "@/components/sidebar";
 import { Toast } from "@/components/toast";
@@ -33,6 +34,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           {children}
         </div>
       </main>
+      <MobileNav role={profile.role} />
       <Toast />
     </div>
   );
