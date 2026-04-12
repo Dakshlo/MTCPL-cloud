@@ -358,8 +358,10 @@ export function IsoBlockPreview({ block, placed }: { block: PlanBlock["blk"]; pl
   const [az, setAz] = useState(Math.PI * 0.25);
   const [zoom, setZoom] = useState(1.0);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
   const dragRef = useRef({ active: false, lastX: 0 });
   const svgRef = useRef<SVGSVGElement>(null);
+  const hoveredSlab = placed.find(p => p.id === hoveredId) ?? null;
 
   // Non-passive wheel & touchmove listeners to enable preventDefault
   useEffect(() => {
@@ -428,23 +430,29 @@ export function IsoBlockPreview({ block, placed }: { block: PlanBlock["blk"]; pl
     return aZ - bZ;
   });
 
-  // Right-click drag → rotation
+  // Left-click drag → rotation
   function onMouseDown(e: React.MouseEvent) {
-    if (e.button === 2) {
+    if (e.button === 0) {
       e.preventDefault();
       dragRef.current = { active: true, lastX: e.clientX };
     }
   }
   function onMouseMove(e: React.MouseEvent) {
-    if (!dragRef.current.active) return;
-    const dx = e.clientX - dragRef.current.lastX;
-    setAz((a) => a - dx * 0.012);
-    dragRef.current.lastX = e.clientX;
+    if (dragRef.current.active) {
+      const dx = e.clientX - dragRef.current.lastX;
+      setAz((a) => a - dx * 0.012);
+      dragRef.current.lastX = e.clientX;
+    }
+    // Update tooltip position
+    if (hoveredId) {
+      const rect = svgRef.current?.getBoundingClientRect();
+      if (rect) setTooltipPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+    }
   }
   function onMouseUp() { dragRef.current.active = false; }
   function onContextMenu(e: React.MouseEvent) { e.preventDefault(); }
 
-  // Touch → single-finger rotate (no right-click on mobile)
+  // Touch → single-finger rotate
   function onTouchStart(e: React.TouchEvent) {
     if (e.touches.length === 1) dragRef.current = { active: true, lastX: e.touches[0].clientX };
   }
@@ -463,15 +471,41 @@ export function IsoBlockPreview({ block, placed }: { block: PlanBlock["blk"]; pl
   const cy = (Number(vbH) - 14) / 2; // centre above hint text
 
   return (
+    <div style={{ position: "relative" }}>
+    {/* Tooltip overlay */}
+    {hoveredSlab && tooltipPos && (
+      <div style={{
+        position: "absolute",
+        left: Math.min(tooltipPos.x + 12, 240),
+        top: tooltipPos.y + 12,
+        zIndex: 10,
+        background: "var(--surface)",
+        border: "1px solid var(--border)",
+        borderRadius: 6,
+        padding: "6px 10px",
+        fontSize: 12,
+        pointerEvents: "none",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.18)",
+        maxWidth: 180,
+        lineHeight: 1.5
+      }}>
+        <strong style={{ color: sclr(hoveredSlab.id) }}>{hoveredSlab.id}</strong>
+        {hoveredSlab.label ? <div className="muted">{hoveredSlab.label}</div> : null}
+        {hoveredSlab.temple ? <div className="muted" style={{ fontSize: 11 }}>{hoveredSlab.temple}</div> : null}
+        <div>{hoveredSlab.sw} × {hoveredSlab.sh} in{hoveredSlab.sd ? ` · T: ${hoveredSlab.sd} in` : ""}</div>
+        {hoveredSlab.rot ? <div className="muted" style={{ fontSize: 11 }}>Rotated 90°</div> : null}
+        {hoveredSlab.zTop != null ? <div className="muted" style={{ fontSize: 11 }}>Layer depth {hoveredSlab.zBot?.toFixed(1)}–{hoveredSlab.zTop.toFixed(1)}</div> : null}
+      </div>
+    )}
     <svg
       ref={svgRef}
       className="plan-svg"
       viewBox={`0 0 ${vbW} ${vbH}`}
-      style={{ cursor: "grab", touchAction: "none", userSelect: "none" }}
+      style={{ cursor: dragRef.current.active ? "grabbing" : "grab", touchAction: "none", userSelect: "none" }}
       onMouseDown={onMouseDown}
       onMouseMove={onMouseMove}
       onMouseUp={onMouseUp}
-      onMouseLeave={onMouseUp}
+      onMouseLeave={e => { onMouseUp(); setTooltipPos(null); }}
       onContextMenu={onContextMenu}
       onTouchStart={onTouchStart}
       onTouchMove={onTouchMoveReact}
@@ -517,7 +551,7 @@ export function IsoBlockPreview({ block, placed }: { block: PlanBlock["blk"]; pl
               key={item.id}
               style={{ cursor: "pointer" }}
               onMouseEnter={() => setHoveredId(item.id)}
-              onMouseLeave={() => setHoveredId(null)}
+              onMouseLeave={() => { setHoveredId(null); setTooltipPos(null); }}
             >
               {/* Y-direction side face */}
               <polygon
@@ -586,9 +620,10 @@ export function IsoBlockPreview({ block, placed }: { block: PlanBlock["blk"]; pl
         fontSize={9}
         style={{ pointerEvents: "none" }}
       >
-        right-click drag to rotate · scroll to zoom · hover to highlight
+        drag to rotate · scroll to zoom · hover slab for details
       </text>
     </svg>
+    </div>
   );
 }
 

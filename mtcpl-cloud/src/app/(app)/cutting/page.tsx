@@ -22,7 +22,13 @@ type SessionRow = {
     updated_at: string | null;
     layout: {
       blk?: { id: string; stone: string; yard: number; l: number; w: number; h: number };
-      placed?: Array<{ id: string; sw: number; sh: number; pw?: number; ph?: number; px?: number; py?: number; aw?: number; ah?: number; rot: boolean; label?: string; temple?: string; sd?: number }>;
+      placed?: Array<{
+        id: string; sw: number; sh: number; sd?: number;
+        pw?: number; ph?: number; px?: number; py?: number;
+        aw?: number; ah?: number; rot: boolean;
+        label?: string; temple?: string;
+        zTop?: number; zBot?: number;
+      }>;
     } | null;
     cut_session_slabs: Array<{
       id: string;
@@ -54,22 +60,18 @@ async function syncSessionStatus(sessionId: string) {
 
 async function approveBlockAction(formData: FormData) {
   "use server";
-
   await requireAuth(["owner", "worker"]);
   const supabase = await createServerSupabaseClient();
   const sessionBlockId = String(formData.get("session_block_id") || "");
   const sessionId = String(formData.get("session_id") || "");
-
   const { error } = await supabase.from("cut_session_blocks").update({ status: "cutting" }).eq("id", sessionBlockId);
   if (error) throw new Error(error.message);
-
   await supabase.from("cut_sessions").update({ status: "in_progress" }).eq("id", sessionId);
   await refreshPaths();
 }
 
 async function rejectBlockAction(formData: FormData) {
   "use server";
-
   const { profile } = await requireAuth(["owner", "worker"]);
   const supabase = await createServerSupabaseClient();
   const sessionBlockId = String(formData.get("session_block_id") || "");
@@ -77,55 +79,33 @@ async function rejectBlockAction(formData: FormData) {
   const blockId = String(formData.get("block_id") || "");
   const slabIds = JSON.parse(String(formData.get("slab_ids") || "[]")) as string[];
 
-  const blockUpdate = await supabase
-    .from("blocks")
-    .update({
-      status: "available",
-      updated_by: profile.id,
-      updated_at: new Date().toISOString()
-    })
+  await supabase.from("blocks")
+    .update({ status: "available", updated_by: profile.id, updated_at: new Date().toISOString() })
     .eq("id", blockId);
-  if (blockUpdate.error) throw new Error(blockUpdate.error.message);
 
   if (slabIds.length) {
-    const slabReset = await supabase
-      .from("slab_requirements")
-      .update({
-        status: "open",
-        source_block_id: null,
-        updated_by: profile.id,
-        updated_at: new Date().toISOString()
-      })
+    await supabase.from("slab_requirements")
+      .update({ status: "open", source_block_id: null, updated_by: profile.id, updated_at: new Date().toISOString() })
       .in("id", slabIds);
-    if (slabReset.error) throw new Error(slabReset.error.message);
   }
 
-  const sessionBlockUpdate = await supabase
-    .from("cut_session_blocks")
-    .update({ status: "rejected" })
-    .eq("id", sessionBlockId);
-  if (sessionBlockUpdate.error) throw new Error(sessionBlockUpdate.error.message);
-
+  await supabase.from("cut_session_blocks").update({ status: "rejected" }).eq("id", sessionBlockId);
   await syncSessionStatus(sessionId);
   await refreshPaths();
 }
 
 async function markDonePromptAction(formData: FormData) {
   "use server";
-
   await requireAuth(["owner", "worker"]);
   const supabase = await createServerSupabaseClient();
   const sessionBlockId = String(formData.get("session_block_id") || "");
-
   const { error } = await supabase.from("cut_session_blocks").update({ status: "done_prompt" }).eq("id", sessionBlockId);
   if (error) throw new Error(error.message);
-
   await refreshPaths();
 }
 
 async function finishBlockAction(formData: FormData) {
   "use server";
-
   const { profile } = await requireAuth(["owner", "worker"]);
   const supabase = await createServerSupabaseClient();
 
@@ -134,61 +114,51 @@ async function finishBlockAction(formData: FormData) {
   const blockId = String(formData.get("block_id") || "");
   const stone = String(formData.get("stone") || "PinkStone");
   const yard = Number(formData.get("yard") || 1);
-  const slabIds = JSON.parse(String(formData.get("slab_ids") || "[]")) as string[];
-  const restock = String(formData.get("restock") || "") === "yes";
-  const remainder = JSON.parse(String(formData.get("largest_remainder") || "null")) as
-    | { l: number; w: number; h: number }
-    | null;
+
+  // Partial cutting: only checked checkboxes arrive in FormData
+  const successSlabIds = formData.getAll("success_slab_ids").map(String);
+  const allSlabIds = JSON.parse(String(formData.get("all_slab_ids") || "[]")) as string[];
+  const failedSlabIds = allSlabIds.filter(id => !successSlabIds.includes(id));
+
+  // Editable remainder block
+  const remL = Number(formData.get("remainder_l") || 0);
+  const remW = Number(formData.get("remainder_w") || 0);
+  const remH = Number(formData.get("remainder_h") || 0);
+  const hasRemainder = remL > 0 && remW > 0 && remH > 0;
 
   let restockedBlockId: string | null = null;
-
-  if (restock && remainder && remainder.l > 0 && remainder.w > 0 && remainder.h > 0) {
+  if (hasRemainder) {
     restockedBlockId = `${blockId}-R-${Date.now().toString().slice(-5)}`;
-    const insertRemainder = await supabase.from("blocks").insert({
-      id: restockedBlockId,
-      stone,
-      yard,
-      category: "Reused",
-      length_ft: remainder.l,
-      width_ft: remainder.w,
-      height_ft: remainder.h,
-      status: "available",
-      created_by: profile.id,
-      updated_by: profile.id
+    await supabase.from("blocks").insert({
+      id: restockedBlockId, stone, yard, category: "Reused",
+      length_ft: remL, width_ft: remW, height_ft: remH,
+      status: "available", created_by: profile.id, updated_by: profile.id
     });
-    if (insertRemainder.error) throw new Error(insertRemainder.error.message);
   }
 
-  const blockConsumed = await supabase
-    .from("blocks")
-    .update({
-      status: "consumed",
-      updated_by: profile.id,
-      updated_at: new Date().toISOString()
-    })
+  await supabase.from("blocks")
+    .update({ status: "consumed", updated_by: profile.id, updated_at: new Date().toISOString() })
     .eq("id", blockId);
-  if (blockConsumed.error) throw new Error(blockConsumed.error.message);
 
-  if (slabIds.length) {
-    const slabDone = await supabase
-      .from("slab_requirements")
-      .update({
-        status: "cut_done",
-        updated_by: profile.id,
-        updated_at: new Date().toISOString()
-      })
-      .in("id", slabIds);
-    if (slabDone.error) throw new Error(slabDone.error.message);
+  if (successSlabIds.length) {
+    await supabase.from("slab_requirements")
+      .update({ status: "cut_done", updated_by: profile.id, updated_at: new Date().toISOString() })
+      .in("id", successSlabIds);
   }
 
-  const sessionBlockDone = await supabase
-    .from("cut_session_blocks")
+  if (failedSlabIds.length) {
+    await supabase.from("slab_requirements")
+      .update({ status: "open", source_block_id: null, updated_by: profile.id, updated_at: new Date().toISOString() })
+      .in("id", failedSlabIds);
+  }
+
+  await supabase.from("cut_session_blocks")
     .update({
       status: "done",
-      restocked_block_id: restockedBlockId
+      restocked_block_id: restockedBlockId,
+      largest_remainder: hasRemainder ? { l: remL, w: remW, h: remH } : null
     })
     .eq("id", sessionBlockId);
-  if (sessionBlockDone.error) throw new Error(sessionBlockDone.error.message);
 
   await syncSessionStatus(sessionId);
   await refreshPaths();
@@ -216,12 +186,17 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
   const { data: sessions } = await query;
   const rows = (sessions ?? []) as SessionRow[];
 
+  function fmtDate(iso: string | null) {
+    if (!iso) return null;
+    return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  }
+
   return (
     <section className="page-card">
       <div className="record-head print-hide">
         <div>
           <h1>Cutting</h1>
-          <p className="muted">Workers can now approve blocks, reject them, mark cutting in progress, and finish with optional restock.</p>
+          <p className="muted">Approve blocks, mark individual slabs cut or returned, add restocked remainder.</p>
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           <a
@@ -236,6 +211,9 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
       </div>
 
       <div className="records-stack" style={{ marginTop: 18 }}>
+        {rows.length === 0 && (
+          <div className="banner">No active cutting sessions. Generate and approve a plan first.</div>
+        )}
         {rows.map((session) => (
           <article className="record-card" key={session.id}>
             <div className="record-head">
@@ -247,15 +225,16 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
               </div>
               <span className="role-pill">
                 {session.cut_session_blocks.length} blocks /{" "}
-                {session.cut_session_blocks.reduce((sum, block) => sum + block.cut_session_slabs.length, 0)} slabs
+                {session.cut_session_blocks.reduce((sum, b) => sum + b.cut_session_slabs.length, 0)} slabs
               </span>
             </div>
 
             <div className="records-stack">
               {session.cut_session_blocks.map((block) => {
-                const slabIds = block.cut_session_slabs.map((slab) => slab.slab_requirement_id);
+                const slabIds = block.cut_session_slabs.map((s) => s.slab_requirement_id);
                 const layout = block.layout || null;
                 const remainder = block.largest_remainder || null;
+                const placedSlabs = layout?.placed ?? [];
 
                 return (
                   <div className="plan-card" key={block.id}>
@@ -263,103 +242,128 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                       <div>
                         <strong>{block.block_id}</strong>
                         <p className="muted">
-                          Status {block.status}
+                          Status: <strong>{block.status}</strong>
                           {layout?.blk
-                            ? ` | ${layout.blk.stone} | Yard ${layout.blk.yard} | ${layout.blk.l} x ${layout.blk.w} x ${layout.blk.h} ft`
+                            ? ` | ${layout.blk.stone} | Yard ${layout.blk.yard} | ${layout.blk.l} × ${layout.blk.w} × ${layout.blk.h} in`
                             : ""}
                         </p>
                       </div>
                       <span className="role-pill">{slabIds.length} slabs</span>
                     </div>
 
-                    {layout?.blk ? <IsoBlockPreview block={layout.blk as any} placed={(layout.placed ?? []) as any} /> : null}
+                    {layout?.blk ? <IsoBlockPreview block={layout.blk as any} placed={placedSlabs as any} /> : null}
 
                     <div className="chip-row">
-                      {(layout?.placed ?? []).map((slab) => (
+                      {placedSlabs.map((slab) => (
                         <span className="plan-chip" key={slab.id}>
-                          {slab.id} {slab.rot ? "R" : ""} {slab.sw}x{slab.sh} ft
+                          {slab.id} {slab.rot ? "R" : ""} {slab.sw}×{slab.sh} in
                         </span>
                       ))}
                     </div>
 
                     {remainder ? (
-                      <p className="muted" style={{ marginTop: 12 }}>
-                        Largest remainder {remainder.l} x {remainder.w} x {remainder.h} ft
+                      <p className="muted" style={{ marginTop: 10 }}>
+                        Suggested remainder {remainder.l} × {remainder.w} × {remainder.h} in
                       </p>
                     ) : null}
 
                     <div className="record-actions print-hide" style={{ marginTop: 14 }}>
+
+                      {/* ── PENDING WORKER ── */}
                       {block.status === "pending_worker" ? (
                         <>
                           <form action={approveBlockAction}>
                             <input name="session_block_id" type="hidden" value={block.id} />
                             <input name="session_id" type="hidden" value={session.id} />
                             <button className="primary-button" type="submit">
-                              Approve Block
+                              Approve Block and Start Cutting
                             </button>
                           </form>
-
                           <form action={rejectBlockAction}>
                             <input name="session_block_id" type="hidden" value={block.id} />
                             <input name="session_id" type="hidden" value={session.id} />
                             <input name="block_id" type="hidden" value={block.block_id} />
                             <input name="slab_ids" type="hidden" value={JSON.stringify(slabIds)} />
-                            <button className="ghost-button" type="submit">
-                              Reject
-                            </button>
+                            <button className="ghost-button" type="submit">Reject</button>
                           </form>
                         </>
                       ) : null}
 
+                      {/* ── CUTTING ── */}
                       {block.status === "cutting" ? (
                         <form action={markDonePromptAction}>
                           <input name="session_block_id" type="hidden" value={block.id} />
-                          <button className="primary-button" type="submit">
-                            Mark as Done
-                          </button>
+                          <button className="primary-button" type="submit">Mark as Done</button>
                         </form>
                       ) : null}
 
+                      {/* ── DONE PROMPT: partial cut checklist + editable remainder ── */}
                       {block.status === "done_prompt" ? (
-                        <>
-                          <form action={finishBlockAction}>
-                            <input name="session_block_id" type="hidden" value={block.id} />
-                            <input name="session_id" type="hidden" value={session.id} />
-                            <input name="block_id" type="hidden" value={block.block_id} />
-                            <input name="stone" type="hidden" value={layout?.blk?.stone ?? "PinkStone"} />
-                            <input name="yard" type="hidden" value={String(layout?.blk?.yard ?? 1)} />
-                            <input name="slab_ids" type="hidden" value={JSON.stringify(slabIds)} />
-                            <input name="largest_remainder" type="hidden" value={JSON.stringify(remainder)} />
-                            <input name="restock" type="hidden" value="yes" />
-                            <button className="primary-button" type="submit">
-                              Done and Restock
-                            </button>
-                          </form>
+                        <form action={finishBlockAction} style={{ width: "100%" }}>
+                          <input name="session_block_id" type="hidden" value={block.id} />
+                          <input name="session_id" type="hidden" value={session.id} />
+                          <input name="block_id" type="hidden" value={block.block_id} />
+                          <input name="stone" type="hidden" value={layout?.blk?.stone ?? "PinkStone"} />
+                          <input name="yard" type="hidden" value={String(layout?.blk?.yard ?? 1)} />
+                          <input name="all_slab_ids" type="hidden" value={JSON.stringify(slabIds)} />
 
-                          <form action={finishBlockAction}>
-                            <input name="session_block_id" type="hidden" value={block.id} />
-                            <input name="session_id" type="hidden" value={session.id} />
-                            <input name="block_id" type="hidden" value={block.block_id} />
-                            <input name="stone" type="hidden" value={layout?.blk?.stone ?? "PinkStone"} />
-                            <input name="yard" type="hidden" value={String(layout?.blk?.yard ?? 1)} />
-                            <input name="slab_ids" type="hidden" value={JSON.stringify(slabIds)} />
-                            <input name="largest_remainder" type="hidden" value={JSON.stringify(remainder)} />
-                            <input name="restock" type="hidden" value="no" />
-                            <button className="secondary-button" type="submit">
-                              Done and Discard
-                            </button>
-                          </form>
-                        </>
+                          <p style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>✓ Which slabs were successfully cut?</p>
+                          <p className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
+                            Uncheck any slab that could NOT be cut (cracks, colour issues, etc.) — it returns to inventory as <strong>open</strong>.
+                          </p>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
+                            {(placedSlabs.length > 0 ? placedSlabs : slabIds.map(id => ({ id, sw: 0, sh: 0, rot: false }))).map(slab => (
+                              <label key={slab.id} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", padding: "6px 10px", borderRadius: 6, background: "var(--bg)", border: "1px solid var(--border-light)" }}>
+                                <input
+                                  type="checkbox"
+                                  name="success_slab_ids"
+                                  value={slab.id}
+                                  defaultChecked
+                                  style={{ width: 16, height: 16, accentColor: "var(--gold)", flexShrink: 0 }}
+                                />
+                                <span style={{ fontSize: 13 }}>
+                                  <strong>{slab.id}</strong>
+                                  {"label" in slab && (slab as any).label ? ` — ${(slab as any).label}` : ""}
+                                  {slab.sw > 0 ? <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>{slab.sw}×{slab.sh} in</span> : null}
+                                </span>
+                              </label>
+                            ))}
+                          </div>
+
+                          <p style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>Remaining block dimensions</p>
+                          <p className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+                            Enter actual leftover size to auto-restock it. Set all to 0 if no usable piece remains.
+                          </p>
+                          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+                            <label className="stack" style={{ flex: "1 1 80px" }}>
+                              <span>Length (in)</span>
+                              <input name="remainder_l" type="number" min="0" step="0.5" defaultValue={String(remainder?.l ?? 0)} />
+                            </label>
+                            <label className="stack" style={{ flex: "1 1 80px" }}>
+                              <span>Width (in)</span>
+                              <input name="remainder_w" type="number" min="0" step="0.5" defaultValue={String(remainder?.w ?? 0)} />
+                            </label>
+                            <label className="stack" style={{ flex: "1 1 80px" }}>
+                              <span>Height (in)</span>
+                              <input name="remainder_h" type="number" min="0" step="0.5" defaultValue={String(remainder?.h ?? 0)} />
+                            </label>
+                          </div>
+
+                          <button className="primary-button" type="submit">Finish Cutting and Save</button>
+                        </form>
                       ) : null}
 
+                      {/* ── DONE ── */}
                       {block.status === "done" ? (
                         <span className="role-pill">
-                          Done {block.restocked_block_id ? `· Restocked ${block.restocked_block_id}` : "· Discarded"}
-                          {block.updated_at ? ` · Cut ${new Date(block.updated_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}` : ""}
+                          Done{block.restocked_block_id ? ` · Restocked as ${block.restocked_block_id}` : " · No remainder"}
+                          {block.updated_at ? ` · Cut ${fmtDate(block.updated_at)}` : ""}
                         </span>
                       ) : null}
 
-                      {block.status === "rejected" ? <span className="role-pill">Rejected and returned</span> : null}
+                      {block.status === "rejected" ? (
+                        <span className="role-pill">Rejected — block and slabs returned to inventory</span>
+                      ) : null}
                     </div>
                   </div>
                 );

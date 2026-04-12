@@ -60,6 +60,37 @@ export default async function SettingsPage() {
             <p>Manage registered users — edit name, role and activate or deactivate accounts.</p>
           </div>
 
+          {/* RLS fix instructions */}
+          <details className="settings-card" style={{ marginBottom: 12 }}>
+            <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: 13, color: "var(--gold)" }}>
+              ⚠ If Save / Remove User is not working → click for database fix SQL
+            </summary>
+            <div style={{ marginTop: 12 }}>
+              <p className="muted" style={{ fontSize: 13, marginBottom: 8 }}>
+                Run this SQL once in your <strong>Supabase Dashboard → SQL Editor</strong>. This allows the Owner role to update and delete other users&apos; profiles.
+              </p>
+              <pre style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 6, padding: 12, fontSize: 12, overflowX: "auto", userSelect: "text" }}>{`-- Allow owners to update any profile
+CREATE POLICY IF NOT EXISTS "Owners can update any profile"
+  ON profiles FOR UPDATE
+  USING (
+    EXISTS (
+      SELECT 1 FROM profiles p
+      WHERE p.id = auth.uid() AND p.role = 'owner'
+    )
+  );
+
+-- Allow owners to delete any profile
+CREATE POLICY IF NOT EXISTS "Owners can delete any profile"
+  ON profiles FOR DELETE
+  USING (
+    EXISTS (
+      SELECT 1 FROM profiles p
+      WHERE p.id = auth.uid() AND p.role = 'owner'
+    )
+  );`}</pre>
+            </div>
+          </details>
+
           {userList.length === 0 ? (
             <div className="banner">No users found.</div>
           ) : (
@@ -163,6 +194,21 @@ export default async function SettingsPage() {
           )}
         </div>
       )}
+
+      {/* Measurement Unit Preference */}
+      <div className="settings-section">
+        <div className="settings-section-header">
+          <h2>Measurement Units</h2>
+          <p>Choose how dimensions are entered on Add Block and Add Slab forms. The toggle is available directly in each form header.</p>
+        </div>
+        <div className="settings-card">
+          <p className="muted" style={{ fontSize: 13 }}>
+            <strong>Inches (default):</strong> type a single number, e.g. 66 for 66 inches.<br />
+            <strong>Feet + Inches:</strong> type 5 ft 6 in — converts automatically to 66 inches for storage.<br /><br />
+            Open the <strong>Add Block</strong> or <strong>Add Slab</strong> form and click the <span style={{ background: "var(--border)", padding: "1px 6px", borderRadius: 4, fontSize: 12, fontFamily: "monospace" }}>in / ft+in</span> toggle in the form header to switch modes. Your choice is remembered.
+          </p>
+        </div>
+      </div>
 
       {/* Temple Code Configuration */}
       <div className="settings-section">

@@ -70,11 +70,18 @@ export async function updateUserAction(formData: FormData) {
   if (!id) redirect("/settings?toast=Missing+fields");
   if (id === currentUser.id) redirect("/settings?toast=Cannot+edit+your+own+account");
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("profiles")
     .update({ role, is_active, ...(full_name !== null ? { full_name } : {}) })
-    .eq("id", id);
+    .eq("id", id)
+    .select("id");
+
   if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
+
+  // If 0 rows returned the RLS policy is blocking the update
+  if (!data || data.length === 0) {
+    redirect("/settings?toast=" + encodeURIComponent("Update blocked — run the RLS fix SQL in your Supabase dashboard (shown in Settings)."));
+  }
 
   revalidatePath("/settings");
   redirect("/settings?toast=User+updated");
@@ -88,9 +95,17 @@ export async function deleteUserAction(formData: FormData) {
   if (!id) redirect("/settings?toast=Missing+ID");
   if (id === currentUser.id) redirect("/settings?toast=Cannot+remove+your+own+account");
 
-  // Delete profile — user loses access but their auth account remains
-  const { error } = await supabase.from("profiles").delete().eq("id", id);
+  const { data, error } = await supabase
+    .from("profiles")
+    .delete()
+    .eq("id", id)
+    .select("id");
+
   if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
+
+  if (!data || data.length === 0) {
+    redirect("/settings?toast=" + encodeURIComponent("Delete blocked — run the RLS fix SQL in your Supabase dashboard (shown in Settings)."));
+  }
 
   revalidatePath("/settings");
   redirect("/settings?toast=User+removed");
