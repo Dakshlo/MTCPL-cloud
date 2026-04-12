@@ -1393,7 +1393,7 @@ details.block-card[open] {
     grid-template-columns: 1fr;
   }
   .page-content {
-    padding: 16px 16px 32px;
+    padding: 16px 16px 90px; /* 90px bottom clears the fixed mobile bottom nav */
   }
   .planning-two-col {
     grid-template-columns: 1fr;

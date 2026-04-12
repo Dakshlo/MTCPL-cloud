@@ -36,6 +36,9 @@ type Block = {
   height_ft: number;
   status: string;
   quality: string | null;
+  truck_no: string | null;
+  vendor_name: string | null;
+  bill_no: string | null;
   created_at: string | null;
 };
 
@@ -173,6 +176,26 @@ export function BlockGrid({ blocks, canEdit }: { blocks: Block[]; canEdit: boole
                     <input name="height_in" type="number" min="0" step="0.5" defaultValue={String(selected.height_ft)} />
                   </label>
                 </div>
+
+                <details style={{ marginTop: 4 }}>
+                  <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--muted)", padding: "4px 0", userSelect: "none" }}>
+                    Logistics Info (Truck No., Vendor, Bill No.)
+                  </summary>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginTop: 10 }}>
+                    <label className="stack">
+                      <span>Truck No.</span>
+                      <input name="truck_no" defaultValue={selected.truck_no ?? ""} placeholder="e.g. GJ01AB1234" />
+                    </label>
+                    <label className="stack">
+                      <span>Vendor</span>
+                      <input name="vendor_name" defaultValue={selected.vendor_name ?? ""} placeholder="e.g. Raj Stones" />
+                    </label>
+                    <label className="stack">
+                      <span>Bill No.</span>
+                      <input name="bill_no" defaultValue={selected.bill_no ?? ""} placeholder="e.g. INV-001" />
+                    </label>
+                  </div>
+                </details>
 
                 <button className="primary-button" type="submit" style={{ marginTop: 4 }}>Save Changes</button>
               </form>
