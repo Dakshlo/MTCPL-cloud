@@ -57,12 +57,6 @@ const navItems: NavItem[] = [
     roles: ["owner", "planner", "slab_entry", "block_entry"],
   },
   {
-    href: "/audit",
-    label: "Audit Log",
-    icon: "◎",
-    roles: ["owner"],
-  },
-  {
     href: "/settings",
     label: "Settings",
     icon: "⚙",

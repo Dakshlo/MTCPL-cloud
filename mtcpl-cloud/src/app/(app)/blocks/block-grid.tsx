@@ -35,6 +35,7 @@ type Block = {
   width_ft: number;
   height_ft: number;
   status: string;
+  quality: string | null;
   created_at: string | null;
 };
 
@@ -79,6 +80,11 @@ export function BlockGrid({ blocks, canEdit }: { blocks: Block[]; canEdit: boole
                   <span className={`role-pill ${stoneBadge}`}>{block.stone === "PinkStone" ? "Pink" : "White"}</span>
                   <span className="role-pill">Y{block.yard}</span>
                   <span className={`role-pill ${statusBadgeClass(block.status)}`}>{block.status}</span>
+                  {block.quality && (
+                    <span className={`role-pill ${block.quality === "A" ? "badge-available" : "badge-reserved"}`}>
+                      {block.quality === "A" ? "Grade A" : "Grade B"}
+                    </span>
+                  )}
                 </div>
                 <div className="block-card-dims">{L} × {W} × {H} ft</div>
                 <div className="block-card-cft">{cft} CFT</div>
@@ -144,6 +150,15 @@ export function BlockGrid({ blocks, canEdit }: { blocks: Block[]; canEdit: boole
                   </select>
                 </label>
 
+                <label className="stack">
+                  <span>Quality Grade</span>
+                  <select name="quality" defaultValue={selected.quality ?? ""}>
+                    <option value="">Both / Unspecified</option>
+                    <option value="A">Grade A</option>
+                    <option value="B">Grade B</option>
+                  </select>
+                </label>
+
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
                   <label className="stack">
                     <span>Length (ft)</span>
@@ -166,10 +181,9 @@ export function BlockGrid({ blocks, canEdit }: { blocks: Block[]; canEdit: boole
 
               <div className="drawer-danger-zone">
                 <p className="drawer-danger-label">Danger Zone</p>
-                <form action={deleteBlockAction} style={{ display: "flex", gap: 10 }}>
+                <form action={deleteBlockAction} onSubmit={(e) => { if (!confirm(`Delete block ${selected.id}? This cannot be undone.`)) e.preventDefault(); }}>
                   <input name="delete_target_id" type="hidden" value={selected.id} />
-                  <input name="delete_code" placeholder="Enter code 1255 to delete" style={{ flex: 1 }} />
-                  <button className="ghost-button danger-ghost" type="submit" formNoValidate onClick={(e) => { if (!confirm('Are you sure?')) e.preventDefault(); }}>Delete</button>
+                  <button className="ghost-button danger-ghost" type="submit">Delete Block</button>
                 </form>
               </div>
             </div>

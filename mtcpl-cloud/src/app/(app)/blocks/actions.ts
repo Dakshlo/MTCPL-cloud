@@ -8,8 +8,6 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { generateNextCode } from "./utils";
 import { logAudit } from "@/lib/audit";
 
-const BLOCK_DELETE_CODE = process.env.BLOCK_DELETE_CODE || "1255";
-const LEGACY_DELETE_CODES = ["1255", "MTCPL-DELETE"];
 
 function numValue(formData: FormData, key: string, fallback = 0) {
   const raw = formData.get(key);
@@ -129,12 +127,8 @@ export async function deleteBlockAction(formData: FormData) {
   const supabase = await createServerSupabaseClient();
 
   const id = textValue(formData, "delete_target_id") || textValue(formData, "id");
-  const deleteCode = textValue(formData, "delete_code");
 
   if (!id) redirectWithToast("/blocks", "Block ID is missing");
-  if (![BLOCK_DELETE_CODE, ...LEGACY_DELETE_CODES].includes(deleteCode)) {
-    redirectWithToast("/blocks", "Delete code is incorrect. Block was not deleted.");
-  }
 
   // Always soft-delete: mark as discarded so the block stays in history/export
   const { error } = await supabase

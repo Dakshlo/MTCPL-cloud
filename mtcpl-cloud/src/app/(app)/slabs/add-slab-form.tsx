@@ -22,6 +22,7 @@ function previewCodes(baseCode: string, qty: number): string {
 export function AddSlabForm({ temples, existingIds }: { temples: Temple[]; existingIds: string[] }) {
   const [stone, setStone] = useState<"PinkStone" | "WhiteStone">("PinkStone");
   const [priority, setPriority] = useState(false);
+  const [quality, setQuality] = useState<"" | "A" | "B">("");
   const [selectedTemple, setSelectedTemple] = useState<Temple | null>(temples[0] ?? null);
   const [l, setL] = useState("");
   const [w, setW] = useState("");
@@ -90,6 +91,23 @@ export function AddSlabForm({ temples, existingIds }: { temples: Temple[]; exist
               {priority ? "⚡ Priority" : "Normal"}
             </button>
             <input type="hidden" name="priority" value={String(priority)} />
+          </div>
+
+          <div className="stack" style={{ flex: "0 0 auto" }}>
+            <span>Quality</span>
+            <div className="stone-toggle">
+              {([["", "Both"], ["A", "Grade A"], ["B", "Grade B"]] as const).map(([val, label]) => (
+                <button
+                  key={val}
+                  type="button"
+                  className={`stone-toggle-btn${quality === val ? " active-pink" : ""}`}
+                  onClick={() => setQuality(val)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <input type="hidden" name="quality" value={quality} />
           </div>
         </div>
 

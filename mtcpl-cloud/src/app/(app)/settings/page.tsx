@@ -40,6 +40,12 @@ export default async function SettingsPage() {
     supabase.from("profiles").select("id, full_name, phone, role, is_active, created_at").order("full_name"),
   ]);
 
+  const { data: recentAudit } = await supabase
+    .from("audit_logs")
+    .select("id, action, entity_type, entity_id, created_at, profiles(full_name)")
+    .order("created_at", { ascending: false })
+    .limit(50);
+
   const templeList = temples ?? [];
   const userList = users ?? [];
 
@@ -161,6 +167,36 @@ export default async function SettingsPage() {
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Audit Log */}
+      {currentUser.role === "owner" && (
+        <div className="settings-section">
+          <div className="settings-section-header">
+            <h2>Audit Log</h2>
+            <p>Last 50 actions by your team.</p>
+          </div>
+          <div className="settings-card" style={{ padding: 0, overflow: "hidden" }}>
+            {(recentAudit ?? []).length === 0 ? (
+              <p className="muted" style={{ padding: 16 }}>No actions recorded yet.</p>
+            ) : (
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <tbody>
+                  {(recentAudit ?? []).map((log: any) => (
+                    <tr key={log.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                      <td style={{ padding: "8px 14px", color: "var(--muted)", whiteSpace: "nowrap" }}>
+                        {new Date(log.created_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                      </td>
+                      <td style={{ padding: "8px 14px", fontWeight: 600 }}>{log.profiles?.full_name ?? "—"}</td>
+                      <td style={{ padding: "8px 14px" }}><span className="role-pill">{log.action}</span></td>
+                      <td style={{ padding: "8px 14px", color: "var(--muted)" }}>{log.entity_type} · <code style={{ fontSize: 11 }}>{log.entity_id}</code></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
         </div>
       )}
 
