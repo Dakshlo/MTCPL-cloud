@@ -332,20 +332,20 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
 
                           <p style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>Remaining block dimensions</p>
                           <p className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
-                            Enter actual leftover size to auto-restock it. Set all to 0 if no usable piece remains.
+                            If there is a usable leftover piece, enter its actual size to auto-restock it. Leave at 0 if no piece remains. Suggested size shown as placeholder.
                           </p>
                           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
                             <label className="stack" style={{ flex: "1 1 80px" }}>
                               <span>Length (in)</span>
-                              <input name="remainder_l" type="number" min="0" step="0.5" defaultValue={String(remainder?.l ?? 0)} />
+                              <input name="remainder_l" type="number" min="0" step="any" defaultValue="0" placeholder={String(remainder?.l ?? "")} />
                             </label>
                             <label className="stack" style={{ flex: "1 1 80px" }}>
                               <span>Width (in)</span>
-                              <input name="remainder_w" type="number" min="0" step="0.5" defaultValue={String(remainder?.w ?? 0)} />
+                              <input name="remainder_w" type="number" min="0" step="any" defaultValue="0" placeholder={String(remainder?.w ?? "")} />
                             </label>
                             <label className="stack" style={{ flex: "1 1 80px" }}>
                               <span>Height (in)</span>
-                              <input name="remainder_h" type="number" min="0" step="0.5" defaultValue={String(remainder?.h ?? 0)} />
+                              <input name="remainder_h" type="number" min="0" step="any" defaultValue="0" placeholder={String(remainder?.h ?? "")} />
                             </label>
                           </div>
 
