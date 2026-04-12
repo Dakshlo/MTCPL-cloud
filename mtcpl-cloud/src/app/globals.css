@@ -885,7 +885,7 @@ details.block-card[open] {
 
 .plan-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(520px, 1fr));
   gap: 20px;
   margin-top: 16px;
 }
@@ -900,7 +900,7 @@ details.block-card[open] {
 
 .plan-svg {
   width: 100%;
-  max-height: 300px;
+  max-height: 440px;
   display: block;
   border-radius: var(--radius-sm);
   background: var(--bg);
@@ -1393,7 +1393,7 @@ details.block-card[open] {
     grid-template-columns: 1fr;
   }
   .page-content {
-    padding: 16px 16px 32px;
+    padding: 16px 16px 90px; /* 90px bottom clears the fixed mobile bottom nav */
   }
   .planning-two-col {
     grid-template-columns: 1fr;

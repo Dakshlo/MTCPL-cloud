@@ -8,6 +8,7 @@ type Block = {
   stone: string;
   yard: number;
   category: string | null;
+  quality: string | null;
   length_ft: number;
   width_ft: number;
   height_ft: number;
@@ -50,6 +51,7 @@ export function ReportClient({ blocks }: { blocks: Block[] }) {
   const [statusFilter, setStatusFilter] = useState<string[]>([]);  // empty = all
   const [stoneFilter, setStoneFilter] = useState("all");
   const [yardFilter, setYardFilter] = useState("all");
+  const [qualityFilter, setQualityFilter] = useState("all");
   const [vendorSearch, setVendorSearch] = useState("");
   const [blockSearch, setBlockSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
@@ -73,6 +75,9 @@ export function ReportClient({ blocks }: { blocks: Block[] }) {
     if (statusFilter.length > 0) rows = rows.filter(b => statusFilter.includes(b.status));
     if (stoneFilter !== "all") rows = rows.filter(b => b.stone === stoneFilter);
     if (yardFilter !== "all") rows = rows.filter(b => String(b.yard) === yardFilter);
+    if (qualityFilter === "A") rows = rows.filter(b => b.quality === "A");
+    else if (qualityFilter === "B") rows = rows.filter(b => b.quality === "B");
+    else if (qualityFilter === "none") rows = rows.filter(b => !b.quality);
     if (vendorSearch) rows = rows.filter(b => b.vendor_name?.toLowerCase().includes(vendorSearch.toLowerCase()));
     if (blockSearch) rows = rows.filter(b => b.id.toLowerCase().includes(blockSearch.toLowerCase()));
     if (dateFrom) rows = rows.filter(b => b.created_at && b.created_at >= dateFrom);
@@ -115,6 +120,7 @@ export function ReportClient({ blocks }: { blocks: Block[] }) {
     setStatusFilter([]);
     setStoneFilter("all");
     setYardFilter("all");
+    setQualityFilter("all");
     setVendorSearch("");
     setBlockSearch("");
     setDateFrom("");
@@ -219,6 +225,17 @@ export function ReportClient({ blocks }: { blocks: Block[] }) {
             </select>
           </label>
 
+          {/* Quality */}
+          <label className="stack" style={{ flex: "0 0 auto" }}>
+            <span>Quality</span>
+            <select value={qualityFilter} onChange={e => setQualityFilter(e.target.value)}>
+              <option value="all">All Grades</option>
+              <option value="A">Grade A</option>
+              <option value="B">Grade B</option>
+              <option value="none">Unspecified</option>
+            </select>
+          </label>
+
           {/* Vendor dropdown (from data) */}
           <label className="stack" style={{ flex: "1 1 150px" }}>
             <span>Vendor</span>
@@ -301,6 +318,7 @@ export function ReportClient({ blocks }: { blocks: Block[] }) {
                 { label: "Yard", col: "yard" as SortCol },
                 { label: "Dimensions (in)", col: null },
                 { label: "CFT", col: "cft" as SortCol },
+                { label: "Quality", col: null },
                 { label: "Status", col: "status" as SortCol },
                 { label: "Truck No.", col: null },
                 { label: "Vendor", col: "vendor_name" as SortCol },
@@ -332,7 +350,7 @@ export function ReportClient({ blocks }: { blocks: Block[] }) {
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={11} style={{ padding: 32, textAlign: "center", color: "var(--muted)" }}>
+                <td colSpan={12} style={{ padding: 32, textAlign: "center", color: "var(--muted)" }}>
                   No blocks match the current filters.
                 </td>
               </tr>
@@ -356,6 +374,13 @@ export function ReportClient({ blocks }: { blocks: Block[] }) {
                       {Number(b.length_ft)} × {Number(b.width_ft)} × {Number(b.height_ft)}
                     </td>
                     <td style={{ padding: "9px 12px" }}>{cft.toFixed(2)}</td>
+                    <td style={{ padding: "9px 12px" }}>
+                      {b.quality ? (
+                        <span className={`role-pill ${b.quality === "A" ? "badge-available" : "badge-reserved"}`}>
+                          Grade {b.quality}
+                        </span>
+                      ) : <span className="muted">—</span>}
+                    </td>
                     <td style={{ padding: "9px 12px" }}>
                       <span className={`role-pill ${statusBadgeClass(b.status)}`}>{b.status}</span>
                     </td>

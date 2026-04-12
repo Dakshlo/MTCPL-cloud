@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 
 function text(fd: FormData, key: string) {
   const v = fd.get(key);
@@ -60,7 +61,8 @@ export async function deleteTempleAction(formData: FormData) {
 
 export async function updateUserAction(formData: FormData) {
   const { profile: currentUser } = await requireAuth(["owner"]);
-  const supabase = await createServerSupabaseClient();
+  // Use admin client to bypass RLS when editing other users' profiles
+  const admin = createAdminSupabaseClient();
 
   const id = text(formData, "id");
   const role = text(formData, "role") || "block_entry";
@@ -70,7 +72,7 @@ export async function updateUserAction(formData: FormData) {
   if (!id) redirect("/settings?toast=Missing+fields");
   if (id === currentUser.id) redirect("/settings?toast=Cannot+edit+your+own+account");
 
-  const { error } = await supabase
+  const { error } = await admin
     .from("profiles")
     .update({ role, is_active, ...(full_name !== null ? { full_name } : {}) })
     .eq("id", id);
@@ -82,14 +84,15 @@ export async function updateUserAction(formData: FormData) {
 
 export async function deleteUserAction(formData: FormData) {
   const { profile: currentUser } = await requireAuth(["owner"]);
-  const supabase = await createServerSupabaseClient();
+  // Use admin client to bypass RLS when deleting other users' profiles
+  const admin = createAdminSupabaseClient();
 
   const id = text(formData, "id");
   if (!id) redirect("/settings?toast=Missing+ID");
   if (id === currentUser.id) redirect("/settings?toast=Cannot+remove+your+own+account");
 
   // Delete profile — user loses access but their auth account remains
-  const { error } = await supabase.from("profiles").delete().eq("id", id);
+  const { error } = await admin.from("profiles").delete().eq("id", id);
   if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
 
   revalidatePath("/settings");

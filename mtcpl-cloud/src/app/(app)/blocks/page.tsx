@@ -2,6 +2,7 @@ import { requireAuth } from "@/lib/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { AddBlockForm } from "./add-block-form";
 import { BlockGrid } from "./block-grid";
+import { BlockExport } from "./block-export";
 import { generateNextCode } from "./utils";
 
 export default async function BlocksPage() {
@@ -11,7 +12,7 @@ export default async function BlocksPage() {
   const [{ data: blocks, error }, { data: allIds }, { data: consumed }] = await Promise.all([
     supabase
       .from("blocks")
-      .select("id, stone, yard, category, length_ft, width_ft, height_ft, status, quality, created_at")
+      .select("id, stone, yard, category, length_ft, width_ft, height_ft, status, quality, truck_no, vendor_name, bill_no, created_at")
       .in("status", ["available", "reserved"])
       .order("created_at", { ascending: false })
       .limit(500),
@@ -76,6 +77,8 @@ export default async function BlocksPage() {
       </div>
 
       {canEdit && <AddBlockForm suggestedId={suggestedId} />}
+
+      <BlockExport />
 
       <div className="section-heading">
         <div>

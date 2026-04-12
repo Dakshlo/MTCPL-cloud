@@ -10,6 +10,7 @@ type Slab = {
   label: string;
   temple: string;
   stone: string | null;
+  quality: string | null;
   length_ft: number;
   width_ft: number;
   thickness_ft: number;
@@ -81,6 +82,11 @@ export function SlabGrid({ slabs, temples, canEdit }: { slabs: Slab[]; temples: 
               </div>
               <div className="slab-card-footer">
                 {slab.stone && <span className={`role-pill ${stoneBadge(slab.stone)}`}>{slab.stone === "PinkStone" ? "Pink" : "White"}</span>}
+                {slab.quality && (
+                  <span className={`role-pill ${slab.quality === "A" ? "badge-available" : "badge-reserved"}`}>
+                    Grade {slab.quality}
+                  </span>
+                )}
                 <span className={`role-pill ${statusBadge(slab.status)}`}>{slab.status}</span>
                 <span className="slab-card-area">{cft} CFT</span>
               </div>
@@ -148,6 +154,15 @@ export function SlabGrid({ slabs, temples, canEdit }: { slabs: Slab[]; temples: 
                   </label>
                 </div>
 
+                <label className="stack">
+                  <span>Quality Grade</span>
+                  <select name="quality" defaultValue={selected.quality ?? ""}>
+                    <option value="">Both / Unspecified</option>
+                    <option value="A">Grade A</option>
+                    <option value="B">Grade B</option>
+                  </select>
+                </label>
+
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                   <label className="stack">
                     <span>Status</span>
@@ -171,10 +186,9 @@ export function SlabGrid({ slabs, temples, canEdit }: { slabs: Slab[]; temples: 
 
               <div className="drawer-danger-zone">
                 <p className="drawer-danger-label">Danger Zone</p>
-                <form action={deleteSlabAction} style={{ display: "flex", gap: 10 }}>
+                <form action={deleteSlabAction} onSubmit={(e) => { if (!confirm(`Delete slab ${selected.id}? This cannot be undone.`)) e.preventDefault(); }}>
                   <input name="id" type="hidden" value={selected.id} />
-                  <input name="delete_code" placeholder="Code 1255 to delete" style={{ flex: 1 }} />
-                  <button className="ghost-button danger-ghost" type="submit" formNoValidate onClick={(e) => { if (!confirm('Are you sure?')) e.preventDefault(); }}>Delete</button>
+                  <button className="ghost-button danger-ghost" type="submit">Delete Slab</button>
                 </form>
               </div>
             </div>
