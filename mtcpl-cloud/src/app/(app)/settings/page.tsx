@@ -69,8 +69,12 @@ export default async function SettingsPage() {
               <p className="muted" style={{ fontSize: 13, marginBottom: 8 }}>
                 Run this SQL once in your <strong>Supabase Dashboard → SQL Editor</strong>. This allows the Owner role to update and delete other users&apos; profiles.
               </p>
-              <pre style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 6, padding: 12, fontSize: 12, overflowX: "auto", userSelect: "text" }}>{`-- Allow owners to update any profile
-CREATE POLICY IF NOT EXISTS "Owners can update any profile"
+              <pre style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 6, padding: 12, fontSize: 12, overflowX: "auto", userSelect: "text" }}>{`-- Step 1: Drop existing policies if any (safe to re-run)
+DROP POLICY IF EXISTS "Owners can update any profile" ON profiles;
+DROP POLICY IF EXISTS "Owners can delete any profile" ON profiles;
+
+-- Step 2: Allow owners to update any profile
+CREATE POLICY "Owners can update any profile"
   ON profiles FOR UPDATE
   USING (
     EXISTS (
@@ -79,8 +83,8 @@ CREATE POLICY IF NOT EXISTS "Owners can update any profile"
     )
   );
 
--- Allow owners to delete any profile
-CREATE POLICY IF NOT EXISTS "Owners can delete any profile"
+-- Step 3: Allow owners to delete any profile
+CREATE POLICY "Owners can delete any profile"
   ON profiles FOR DELETE
   USING (
     EXISTS (
