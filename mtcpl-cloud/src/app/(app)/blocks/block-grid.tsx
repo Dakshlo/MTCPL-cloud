@@ -7,9 +7,20 @@ import { updateBlockAction, deleteBlockAction } from "./actions";
 const STONES = ["PinkStone", "WhiteStone"] as const;
 const YARDS = [1, 2, 3] as const;
 const STATUSES = ["available", "reserved", "consumed", "discarded"] as const;
+const QUALITIES = ["", "A", "B"] as const;
 
 function calcCft(l: number, w: number, h: number) {
   return ((l * w * h) / 1728).toFixed(2);
+}
+
+function statusLabel(status: string) {
+  const map: Record<string, string> = {
+    available: "Fresh",
+    reserved: "In Process",
+    consumed: "Used",
+    discarded: "Removed",
+  };
+  return map[status] || status;
 }
 
 function statusBadgeClass(status: string) {
@@ -22,9 +33,15 @@ function statusBadgeClass(status: string) {
   return map[status] || "";
 }
 
-function fmtDate(iso: string | null) {
+function fmtSmartDate(iso: string | null) {
   if (!iso) return null;
-  return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
+  const d = new Date(iso);
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  if (isToday) {
+    return "Today " + d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+  }
+  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
 }
 
 type Block = {
@@ -35,6 +52,7 @@ type Block = {
   width_ft: number;
   height_ft: number;
   status: string;
+  quality?: string | null;
   created_at: string | null;
   truck_no?: string | null;
   vendor_name?: string | null;
@@ -81,12 +99,17 @@ export function BlockGrid({ blocks, canEdit }: { blocks: Block[]; canEdit: boole
                 <div className="block-card-badges">
                   <span className={`role-pill ${stoneBadge}`}>{block.stone === "PinkStone" ? "Pink" : "White"}</span>
                   <span className="role-pill">Y{block.yard}</span>
-                  <span className={`role-pill ${statusBadgeClass(block.status)}`}>{block.status}</span>
+                  <span className={`role-pill ${statusBadgeClass(block.status)}`}>{statusLabel(block.status)}</span>
+                  {block.quality && (
+                    <span className="role-pill" style={{ background: block.quality === "A" ? "#d4edda" : "#fff3cd", color: block.quality === "A" ? "#155724" : "#856404", fontWeight: 700 }}>
+                      Grade {block.quality}
+                    </span>
+                  )}
                 </div>
                 <div className="block-card-dims">{L} × {W} × {H} in</div>
                 <div className="block-card-cft">{cft} CFT</div>
                 {block.created_at && (
-                  <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>Added {fmtDate(block.created_at)}</div>
+                  <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>Added {fmtSmartDate(block.created_at)}</div>
                 )}
               </div>
               {canEdit && <div className="block-card-edit-hint">{isSelected ? "✕ Close" : "Edit"}</div>}
@@ -117,7 +140,6 @@ export function BlockGrid({ blocks, canEdit }: { blocks: Block[]; canEdit: boole
                 />
               </div>
 
-              {/* Main edit form */}
               <form action={updateBlockAction} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                 <input name="original_id" type="hidden" value={selected.id} />
 
@@ -141,12 +163,23 @@ export function BlockGrid({ blocks, canEdit }: { blocks: Block[]; canEdit: boole
                   </label>
                 </div>
 
-                <label className="stack">
-                  <span>Status</span>
-                  <select name="status" defaultValue={selected.status}>
-                    {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                </label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <label className="stack">
+                    <span>Status</span>
+                    <select name="status" defaultValue={selected.status}>
+                      {STATUSES.map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}
+                    </select>
+                  </label>
+                  <label className="stack">
+                    <span>Quality Grade</span>
+                    <select name="quality" defaultValue={selected.quality ?? ""}>
+                      <option value="">Both (A + B)</option>
+                      {QUALITIES.filter(q => q !== "").map(q => (
+                        <option key={q} value={q}>Grade {q}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
 
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
                   <label className="stack">
@@ -163,11 +196,8 @@ export function BlockGrid({ blocks, canEdit }: { blocks: Block[]; canEdit: boole
                   </label>
                 </div>
 
-                {/* Logistics Info in edit drawer */}
                 <div style={{ borderTop: "1px solid var(--border-light)", paddingTop: 12, marginTop: 2 }}>
-                  <p style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", marginBottom: 10 }}>
-                    Logistics Info
-                  </p>
+                  <p style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", marginBottom: 10 }}>Logistics Info</p>
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     <label className="stack">
                       <span>Truck No.</span>
@@ -192,7 +222,7 @@ export function BlockGrid({ blocks, canEdit }: { blocks: Block[]; canEdit: boole
               <div className="drawer-danger-zone">
                 <p className="drawer-danger-label">Danger Zone</p>
                 <p className="muted" style={{ fontSize: 11, marginBottom: 8 }}>
-                  Deleting marks the block as discarded — it stays in history and export for records.
+                  Deleting marks the block as removed — it stays in history and export for records.
                 </p>
                 <form action={deleteBlockAction} style={{ display: "flex", gap: 10 }}>
                   <input name="delete_target_id" type="hidden" value={selected.id} />

@@ -37,6 +37,11 @@ const navItems: NavItem[] = [
         label: "View Inventory",
         roles: ["owner", "planner"],
       },
+      {
+        href: "/slabs/ready",
+        label: "Ready Slabs",
+        roles: ["owner", "planner", "slab_entry", "block_entry"],
+      },
     ],
   },
   {

@@ -42,6 +42,7 @@ function FtInInput({ label, inchValue, onInchChange }: { label: string; inchValu
 
 export function AddBlockForm({ suggestedId }: { suggestedId: string }) {
   const [stone, setStone] = useState<"PinkStone" | "WhiteStone">("PinkStone");
+  const [quality, setQuality] = useState<"" | "A" | "B">("");
   const [l, setL] = useState("");
   const [w, setW] = useState("");
   const [h, setH] = useState("");
@@ -120,6 +121,21 @@ export function AddBlockForm({ suggestedId }: { suggestedId: string }) {
               {YARDS.map(y => <option key={y} value={y}>Yard {y}</option>)}
             </select>
           </label>
+
+          <div className="stack" style={{ flex: "0 0 auto" }}>
+            <span>Quality</span>
+            <div className="stone-toggle">
+              {(["", "A", "B"] as const).map(q => (
+                <button key={q} type="button"
+                  className={`stone-toggle-btn${quality === q ? " active-gold" : ""}`}
+                  onClick={() => setQuality(q)}
+                >
+                  {q === "" ? "Both" : `Grade ${q}`}
+                </button>
+              ))}
+            </div>
+            <input type="hidden" name="quality" value={quality} />
+          </div>
         </div>
 
         {/* Row 2: Dimensions + CFT + Submit */}

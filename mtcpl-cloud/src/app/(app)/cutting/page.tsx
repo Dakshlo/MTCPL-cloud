@@ -1,6 +1,7 @@
 import { revalidatePath } from "next/cache";
 import { IsoBlockPreview } from "@/components/planning-workbench";
 import { PrintButton } from "@/components/print-button";
+import { RemainderPieces } from "@/components/remainder-pieces";
 
 import { requireAuth } from "@/lib/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
@@ -120,21 +121,24 @@ async function finishBlockAction(formData: FormData) {
   const allSlabIds = JSON.parse(String(formData.get("all_slab_ids") || "[]")) as string[];
   const failedSlabIds = allSlabIds.filter(id => !successSlabIds.includes(id));
 
-  // Editable remainder block
-  const remL = Number(formData.get("remainder_l") || 0);
-  const remW = Number(formData.get("remainder_w") || 0);
-  const remH = Number(formData.get("remainder_h") || 0);
-  const hasRemainder = remL > 0 && remW > 0 && remH > 0;
+  // Multiple remainder pieces — serialized as JSON from RemainderPieces component
+  const piecesRaw = String(formData.get("remainder_pieces") || "[]");
+  const pieces = (JSON.parse(piecesRaw) as { l: number; w: number; h: number }[])
+    .filter(p => p.l > 0 && p.w > 0 && p.h > 0);
 
-  let restockedBlockId: string | null = null;
-  if (hasRemainder) {
-    restockedBlockId = `${blockId}-R-${Date.now().toString().slice(-5)}`;
+  const restockedIds: string[] = [];
+  for (let i = 0; i < pieces.length; i++) {
+    const p = pieces[i];
+    const restockedId = `${blockId}-R${i + 1}`;
     await supabase.from("blocks").insert({
-      id: restockedBlockId, stone, yard, category: "Reused",
-      length_ft: remL, width_ft: remW, height_ft: remH,
+      id: restockedId, stone, yard, category: "Reused",
+      length_ft: p.l, width_ft: p.w, height_ft: p.h,
       status: "available", created_by: profile.id, updated_by: profile.id
     });
+    restockedIds.push(restockedId);
   }
+  const restockedBlockId = restockedIds[0] ?? null;
+  const hasRemainder = restockedIds.length > 0;
 
   await supabase.from("blocks")
     .update({ status: "consumed", updated_by: profile.id, updated_at: new Date().toISOString() })
@@ -156,7 +160,7 @@ async function finishBlockAction(formData: FormData) {
     .update({
       status: "done",
       restocked_block_id: restockedBlockId,
-      largest_remainder: hasRemainder ? { l: remL, w: remW, h: remH } : null
+      largest_remainder: pieces.length > 0 ? pieces[0] : null
     })
     .eq("id", sessionBlockId);
 
@@ -330,23 +334,12 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                             ))}
                           </div>
 
-                          <p style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>Remaining block dimensions</p>
-                          <p className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
-                            If there is a usable leftover piece, enter its actual size to auto-restock it. Leave at 0 if no piece remains. Suggested size shown as placeholder.
-                          </p>
-                          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
-                            <label className="stack" style={{ flex: "1 1 80px" }}>
-                              <span>Length (in)</span>
-                              <input name="remainder_l" type="number" min="0" step="any" defaultValue="0" placeholder={String(remainder?.l ?? "")} />
-                            </label>
-                            <label className="stack" style={{ flex: "1 1 80px" }}>
-                              <span>Width (in)</span>
-                              <input name="remainder_w" type="number" min="0" step="any" defaultValue="0" placeholder={String(remainder?.w ?? "")} />
-                            </label>
-                            <label className="stack" style={{ flex: "1 1 80px" }}>
-                              <span>Height (in)</span>
-                              <input name="remainder_h" type="number" min="0" step="any" defaultValue="0" placeholder={String(remainder?.h ?? "")} />
-                            </label>
+                          <div style={{ marginBottom: 14 }}>
+                            <RemainderPieces
+                              suggestedL={String(remainder?.l ?? "")}
+                              suggestedW={String(remainder?.w ?? "")}
+                              suggestedH={String(remainder?.h ?? "")}
+                            />
                           </div>
 
                           <button className="primary-button" type="submit">Finish Cutting and Save</button>
@@ -356,7 +349,10 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                       {/* ── DONE ── */}
                       {block.status === "done" ? (
                         <span className="role-pill">
-                          Done{block.restocked_block_id ? ` · Restocked as ${block.restocked_block_id}` : " · No remainder"}
+                          Done
+                          {block.restocked_block_id
+                            ? ` · Restocked: ${block.restocked_block_id}${block.restocked_block_id.endsWith("-R1") ? ", -R2… (check blocks)" : ""}`
+                            : " · No remainder"}
                           {block.updated_at ? ` · Cut ${fmtDate(block.updated_at)}` : ""}
                         </span>
                       ) : null}

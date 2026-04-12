@@ -35,13 +35,17 @@ export default async function SettingsPage() {
   const { profile: currentUser } = await requireAuth(["owner", "planner"]);
   const supabase = await createServerSupabaseClient();
 
-  const [{ data: temples }, { data: users }] = await Promise.all([
+  const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+
+  const [{ data: temples }, { data: users }, { data: activeUsers }] = await Promise.all([
     supabase.from("temples").select("*").order("name"),
     supabase.from("profiles").select("id, full_name, phone, role, is_active, created_at").order("full_name"),
+    supabase.from("profiles").select("id, full_name, role, last_seen_at").gte("last_seen_at", fiveMinAgo),
   ]);
 
   const templeList = temples ?? [];
   const userList = users ?? [];
+  const onlineList = activeUsers ?? [];
 
   return (
     <>
@@ -50,6 +54,25 @@ export default async function SettingsPage() {
           <h1>Settings</h1>
           <p className="muted">Manage temples and system users.</p>
         </div>
+      </div>
+
+      {/* Active Users — who's on site right now */}
+      <div className="settings-card" style={{ marginBottom: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: onlineList.length > 0 ? 12 : 0 }}>
+          <span style={{ width: 10, height: 10, borderRadius: "50%", background: "#22c55e", display: "inline-block", flexShrink: 0, boxShadow: "0 0 0 3px #dcfce7" }} />
+          <strong style={{ fontSize: 14 }}>
+            {onlineList.length === 0 ? "No one else online right now" : `${onlineList.length} user${onlineList.length > 1 ? "s" : ""} active in the last 5 minutes`}
+          </strong>
+        </div>
+        {onlineList.length > 0 && (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {onlineList.map(u => (
+              <span key={u.id} className="role-pill" style={{ fontSize: 12 }}>
+                {u.full_name || "—"} · {u.role.replace("_", " ")}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* User Management — owner only */}

@@ -15,6 +15,7 @@ type Slab = {
   thickness_ft: number;
   status: string;
   priority: boolean;
+  quality?: string | null;
   created_at: string | null;
   updated_at: string | null;
 };
@@ -38,9 +39,27 @@ function statusBadge(status: string) {
   return m[status] || "";
 }
 
-function fmtDate(iso: string | null) {
+function statusLabel(status: string) {
+  const m: Record<string, string> = {
+    open: "Open",
+    planned: "Planned",
+    cutting: "In Process",
+    cut_done: "Cut Done",
+    completed: "Completed",
+    rejected: "Rejected",
+  };
+  return m[status] || status;
+}
+
+function fmtSmartDate(iso: string | null) {
   if (!iso) return null;
-  return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
+  const d = new Date(iso);
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  if (isToday) {
+    return "Today " + d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+  }
+  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
 }
 
 export function SlabGrid({ slabs, temples, canEdit }: { slabs: Slab[]; temples: Temple[]; canEdit: boolean }) {
@@ -81,13 +100,18 @@ export function SlabGrid({ slabs, temples, canEdit }: { slabs: Slab[]; temples: 
               </div>
               <div className="slab-card-footer">
                 {slab.stone && <span className={`role-pill ${stoneBadge(slab.stone)}`}>{slab.stone === "PinkStone" ? "Pink" : "White"}</span>}
-                <span className={`role-pill ${statusBadge(slab.status)}`}>{slab.status}</span>
+                <span className={`role-pill ${statusBadge(slab.status)}`}>{statusLabel(slab.status)}</span>
+                {slab.quality && (
+                  <span className="role-pill" style={{ background: slab.quality === "A" ? "#d4edda" : "#fff3cd", color: slab.quality === "A" ? "#155724" : "#856404", fontWeight: 700 }}>
+                    Grade {slab.quality}
+                  </span>
+                )}
                 <span className="slab-card-area">{cft} CFT</span>
               </div>
               <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
-                {slab.created_at && <>Added {fmtDate(slab.created_at)}</>}
+                {slab.created_at && <>Added {fmtSmartDate(slab.created_at)}</>}
                 {slab.status === "cut_done" && slab.updated_at && (
-                  <> · Cut {fmtDate(slab.updated_at)}</>
+                  <> · Cut {fmtSmartDate(slab.updated_at)}</>
                 )}
               </div>
             </div>
@@ -133,6 +157,31 @@ export function SlabGrid({ slabs, temples, canEdit }: { slabs: Slab[]; temples: 
                   </label>
                 </div>
 
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <label className="stack">
+                    <span>Status</span>
+                    <select name="status" defaultValue={selected.status}>
+                      {STATUSES.map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}
+                    </select>
+                  </label>
+                  <label className="stack">
+                    <span>Quality Grade</span>
+                    <select name="quality" defaultValue={selected.quality ?? ""}>
+                      <option value="">Both (A + B)</option>
+                      <option value="A">Grade A (Premium)</option>
+                      <option value="B">Grade B (Good)</option>
+                    </select>
+                  </label>
+                </div>
+
+                <label className="stack">
+                  <span>Priority</span>
+                  <select name="priority" defaultValue={String(selected.priority)}>
+                    <option value="false">Normal</option>
+                    <option value="true">⚡ Priority</option>
+                  </select>
+                </label>
+
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
                   <label className="stack">
                     <span>Length (in)</span>
@@ -145,22 +194,6 @@ export function SlabGrid({ slabs, temples, canEdit }: { slabs: Slab[]; temples: 
                   <label className="stack">
                     <span>Thickness (in)</span>
                     <input name="thickness_in" type="number" min="0" step="0.25" defaultValue={String(selected.thickness_ft)} />
-                  </label>
-                </div>
-
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                  <label className="stack">
-                    <span>Status</span>
-                    <select name="status" defaultValue={selected.status}>
-                      {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </label>
-                  <label className="stack">
-                    <span>Priority</span>
-                    <select name="priority" defaultValue={String(selected.priority)}>
-                      <option value="false">Normal</option>
-                      <option value="true">⚡ Priority</option>
-                    </select>
                   </label>
                 </div>
 

@@ -37,10 +37,13 @@ export async function addBlockAction(formData: FormData) {
   const vendor_name = textValue(formData, "vendor_name") || null;
   const bill_no = textValue(formData, "bill_no") || null;
 
+  const quality = textValue(formData, "quality") || null;
+
   const payload = {
     stone: textValue(formData, "stone") || "PinkStone",
     yard: numValue(formData, "yard", 1),
     category: "Fresh" as const,
+    quality,
     length_ft: numValue(formData, "length_in", 0),
     width_ft: numValue(formData, "width_in", 0),
     height_ft: numValue(formData, "height_in", 0),
@@ -98,6 +101,7 @@ export async function updateBlockAction(formData: FormData) {
     id: nextId,
     stone: textValue(formData, "stone") || "PinkStone",
     yard: numValue(formData, "yard", 1),
+    quality: textValue(formData, "quality") || null,
     length_ft: numValue(formData, "length_in", 0),
     width_ft: numValue(formData, "width_in", 0),
     height_ft: numValue(formData, "height_in", 0),

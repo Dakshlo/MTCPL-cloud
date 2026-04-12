@@ -60,6 +60,7 @@ function FtInInput({
 
 export function AddSlabForm({ temples, existingIds }: { temples: Temple[]; existingIds: string[] }) {
   const [stone, setStone] = useState<"PinkStone" | "WhiteStone">("PinkStone");
+  const [quality, setQuality] = useState<"" | "A" | "B">("");
   const [priority, setPriority] = useState(false);
   const [selectedTemple, setSelectedTemple] = useState<Temple | null>(temples[0] ?? null);
   const [l, setL] = useState("");
@@ -145,6 +146,21 @@ export function AddSlabForm({ temples, existingIds }: { temples: Temple[]; exist
               ))}
             </div>
             <input type="hidden" name="stone" value={stone} />
+          </div>
+
+          <div className="stack" style={{ flex: "0 0 auto" }}>
+            <span>Quality</span>
+            <div className="stone-toggle">
+              {(["", "A", "B"] as const).map(q => (
+                <button key={q} type="button"
+                  className={`stone-toggle-btn${quality === q ? " active-gold" : ""}`}
+                  onClick={() => setQuality(q)}
+                >
+                  {q === "" ? "Both" : `Grade ${q}`}
+                </button>
+              ))}
+            </div>
+            <input type="hidden" name="quality" value={quality} />
           </div>
 
           <div className="stack" style={{ flex: "0 0 auto" }}>
