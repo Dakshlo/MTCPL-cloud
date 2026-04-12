@@ -2,6 +2,7 @@ import { requireAuth } from "@/lib/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { AddBlockForm } from "./add-block-form";
 import { BlockGrid } from "./block-grid";
+import { BlockExport } from "./block-export";
 import { generateNextCode } from "./utils";
 
 export default async function BlocksPage() {
@@ -76,6 +77,8 @@ export default async function BlocksPage() {
       </div>
 
       {canEdit && <AddBlockForm suggestedId={suggestedId} />}
+
+      <BlockExport />
 
       <div className="section-heading">
         <div>

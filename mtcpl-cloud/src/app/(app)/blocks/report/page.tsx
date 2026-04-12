@@ -9,7 +9,7 @@ export default async function BlockReportPage() {
 
   const { data, error } = await supabase
     .from("blocks")
-    .select("id, stone, yard, category, length_ft, width_ft, height_ft, status, truck_no, vendor_name, bill_no, created_at, updated_at")
+    .select("id, stone, yard, category, quality, length_ft, width_ft, height_ft, status, truck_no, vendor_name, bill_no, created_at, updated_at")
     .order("created_at", { ascending: false });
 
   if (error) throw new Error(error.message);
