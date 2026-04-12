@@ -5,7 +5,7 @@ import { SlabSelector } from "./slab-selector";
 export default async function SlabViewPage({
   searchParams,
 }: {
-  searchParams: Promise<{ temple?: string; stone?: string; priority?: string; status?: string; q?: string }>;
+  searchParams: Promise<{ temple?: string; stone?: string; priority?: string; status?: string; q?: string; quality?: string }>;
 }) {
   // Entry roles (block_entry / slab_entry) cannot access this page
   await requireAuth(["owner", "planner"]);
@@ -17,7 +17,7 @@ export default async function SlabViewPage({
 
   let query = supabase
     .from("slab_requirements")
-    .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, status, priority, created_at")
+    .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, status, priority, quality, created_at")
     .order("priority", { ascending: false })
     .order("created_at", { ascending: true });
 
@@ -31,6 +31,8 @@ export default async function SlabViewPage({
 
   if (params.temple) query = query.eq("temple", params.temple);
   if (params.stone)  query = query.eq("stone", params.stone);
+  if (params.quality === "A" || params.quality === "B") query = query.eq("quality", params.quality);
+  if (params.quality === "none") query = query.is("quality", null);
 
   const { data: slabs } = await query.limit(1000);
   const { data: temples } = await supabase.from("temples").select("name").eq("is_active", true).order("name");

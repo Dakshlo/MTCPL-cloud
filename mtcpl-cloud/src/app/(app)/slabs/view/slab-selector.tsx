@@ -14,10 +14,11 @@ type Slab = {
   thickness_ft: number;
   status: string;
   priority: boolean;
+  quality: string | null;
   created_at: string | null;
 };
 
-type ActiveFilters = { temple?: string; stone?: string; priority?: string; status?: string; q?: string };
+type ActiveFilters = { temple?: string; stone?: string; priority?: string; status?: string; q?: string; quality?: string };
 
 function fmtDate(iso: string | null) {
   if (!iso) return null;
@@ -41,15 +42,17 @@ export function SlabSelector({
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const filtered = useMemo(() => {
-    if (!q.trim()) return slabs;
-    const lower = q.toLowerCase();
-    return slabs.filter(
-      s =>
-        s.id.toLowerCase().includes(lower) ||
-        s.label.toLowerCase().includes(lower) ||
-        s.temple.toLowerCase().includes(lower)
-    );
-  }, [slabs, q]);
+    return slabs.filter(s => {
+      if (q.trim()) {
+        const lower = q.toLowerCase();
+        if (!s.id.toLowerCase().includes(lower) && !s.label.toLowerCase().includes(lower) && !s.temple.toLowerCase().includes(lower)) return false;
+      }
+      if (activeFilters.quality === "A" && s.quality !== "A") return false;
+      if (activeFilters.quality === "B" && s.quality !== "B") return false;
+      if (activeFilters.quality === "none" && s.quality !== null && s.quality !== "") return false;
+      return true;
+    });
+  }, [slabs, q, activeFilters.quality]);
 
   const grouped = useMemo(() => {
     const map = new Map<string, Slab[]>();
@@ -157,6 +160,17 @@ export function SlabSelector({
 
         <select
           className="filter-select"
+          value={activeFilters.quality ?? ""}
+          onChange={e => setFilter("quality", e.target.value)}
+        >
+          <option value="">All Quality</option>
+          <option value="A">Grade A only</option>
+          <option value="B">Grade B only</option>
+          <option value="none">Unspecified only</option>
+        </select>
+
+        <select
+          className="filter-select"
           value={activeFilters.priority ?? ""}
           onChange={e => setFilter("priority", e.target.value)}
         >
@@ -259,6 +273,11 @@ export function SlabSelector({
                             {slab.stone && (
                               <span className={`role-pill ${slab.stone === "PinkStone" ? "badge-pink" : "badge-white-stone"}`}>
                                 {slab.stone === "PinkStone" ? "Pink" : "White"}
+                              </span>
+                            )}
+                            {slab.quality && (
+                              <span className={`role-pill ${slab.quality === "A" ? "badge-available" : "badge-reserved"}`}>
+                                {slab.quality === "A" ? "A" : "B"}
                               </span>
                             )}
                             <span className={`role-pill ${slab.status === "open" ? "badge-open" : "badge-planned"}`}>
