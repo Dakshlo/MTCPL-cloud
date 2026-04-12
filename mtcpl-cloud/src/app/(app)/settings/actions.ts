@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 
 function text(fd: FormData, key: string) {
   const v = fd.get(key);
@@ -60,7 +61,6 @@ export async function deleteTempleAction(formData: FormData) {
 
 export async function updateUserAction(formData: FormData) {
   const { profile: currentUser } = await requireAuth(["owner"]);
-  const supabase = await createServerSupabaseClient();
 
   const id = text(formData, "id");
   const role = text(formData, "role") || "block_entry";
@@ -70,42 +70,46 @@ export async function updateUserAction(formData: FormData) {
   if (!id) redirect("/settings?toast=Missing+fields");
   if (id === currentUser.id) redirect("/settings?toast=Cannot+edit+your+own+account");
 
-  const { data, error } = await supabase
+  // Use admin client to bypass RLS — owner operations should never be blocked by policies
+  let admin;
+  try {
+    admin = createAdminSupabaseClient();
+  } catch {
+    redirect("/settings?toast=" + encodeURIComponent("Service role key not configured — add SUPABASE_SERVICE_ROLE_KEY to environment variables."));
+  }
+
+  const { error } = await admin
     .from("profiles")
     .update({ role, is_active, ...(full_name !== null ? { full_name } : {}) })
-    .eq("id", id)
-    .select("id");
+    .eq("id", id);
 
   if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
 
-  // If 0 rows returned the RLS policy is blocking the update
-  if (!data || data.length === 0) {
-    redirect("/settings?toast=" + encodeURIComponent("Update blocked — run the RLS fix SQL in your Supabase dashboard (shown in Settings)."));
-  }
-
   revalidatePath("/settings");
+  revalidatePath("/");
   redirect("/settings?toast=User+updated");
 }
 
 export async function deleteUserAction(formData: FormData) {
   const { profile: currentUser } = await requireAuth(["owner"]);
-  const supabase = await createServerSupabaseClient();
 
   const id = text(formData, "id");
   if (!id) redirect("/settings?toast=Missing+ID");
   if (id === currentUser.id) redirect("/settings?toast=Cannot+remove+your+own+account");
 
-  const { data, error } = await supabase
+  let admin;
+  try {
+    admin = createAdminSupabaseClient();
+  } catch {
+    redirect("/settings?toast=" + encodeURIComponent("Service role key not configured — add SUPABASE_SERVICE_ROLE_KEY to environment variables."));
+  }
+
+  const { error } = await admin
     .from("profiles")
     .delete()
-    .eq("id", id)
-    .select("id");
+    .eq("id", id);
 
   if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
-
-  if (!data || data.length === 0) {
-    redirect("/settings?toast=" + encodeURIComponent("Delete blocked — run the RLS fix SQL in your Supabase dashboard (shown in Settings)."));
-  }
 
   revalidatePath("/settings");
   redirect("/settings?toast=User+removed");
