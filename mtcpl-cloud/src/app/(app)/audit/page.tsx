@@ -22,7 +22,7 @@ type AuditLog = {
   entity_id: string;
   details: Record<string, unknown> | null;
   created_at: string;
-  profiles: { display_name: string | null } | null;
+  profiles: { full_name: string | null } | null;
 };
 
 function fmtDateTime(iso: string) {
@@ -42,7 +42,7 @@ export default async function AuditPage() {
 
   const { data: logs, error } = await supabase
     .from("audit_logs")
-    .select("id, action, entity_type, entity_id, details, created_at, profiles(display_name)")
+    .select("id, action, entity_type, entity_id, details, created_at, profiles(full_name)")
     .order("created_at", { ascending: false })
     .limit(200);
 
@@ -87,7 +87,7 @@ export default async function AuditPage() {
                     {fmtDateTime(log.created_at)}
                   </td>
                   <td style={{ padding: "8px 12px" }}>
-                    {log.profiles?.display_name ?? <span className="muted">—</span>}
+                    {log.profiles?.full_name ?? <span className="muted">—</span>}
                   </td>
                   <td style={{ padding: "8px 12px" }}>
                     <span className="role-pill">{log.action}</span>
