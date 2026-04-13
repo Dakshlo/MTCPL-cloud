@@ -113,7 +113,41 @@ export default async function SettingsPage() {
                 const role = user.role as AppRole;
                 const isSelf = user.id === currentUser.id;
                 const isDeveloper = role === "developer";
-                const isLocked = isDeveloper && !isSelf; // other people can't touch developer rows
+                // Lock: developer rows for everyone; owner rows for team_head
+                const isLocked =
+                  (isDeveloper && !isSelf) ||
+                  (role === "owner" && currentUser.role === "team_head");
+
+                // Locked rows: render as plain div (not expandable)
+                if (isLocked) {
+                  return (
+                    <div key={user.id} className="settings-table-row" style={{ cursor: "default" }}>
+                      <div className="settings-table-row-face" style={{ gridTemplateColumns: "2fr 1fr 1fr 1fr auto" }}>
+                        <span>
+                          <span className="settings-temple-name">{user.full_name || "—"}</span>
+                          {user.phone ? <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>{user.phone}</span> : null}
+                          {user.created_at ? <span className="muted" style={{ fontSize: 11, marginLeft: 8 }}>Joined {formatDate(user.created_at)}</span> : null}
+                        </span>
+                        <span>
+                          <span className="role-pill" style={
+                            isDeveloper ? { background: "var(--gold)", color: "#fff", fontWeight: 700 } :
+                            role === "owner" ? { background: "#1a1a1a", color: "#fff", fontWeight: 700 } : {}
+                          }>
+                            {roleLabel(role)}
+                          </span>
+                        </span>
+                        <span className="muted" style={{ fontSize: 12 }}>{(ROLE_ACCESS[role] ?? []).join(", ")}</span>
+                        <span>
+                          <span className={`role-pill ${user.is_active ? "badge-available" : "badge-discarded"}`}>
+                            {user.is_active ? "Active" : "Inactive"}
+                          </span>
+                        </span>
+                        <span className="muted" style={{ fontSize: 12 }}>🔒 Locked</span>
+                      </div>
+                    </div>
+                  );
+                }
+
                 return (
                   <details key={user.id} className="settings-table-row">
                     <summary className="settings-table-row-face" style={{ gridTemplateColumns: "2fr 1fr 1fr 1fr auto" }}>
@@ -141,17 +175,11 @@ export default async function SettingsPage() {
                           {user.is_active ? "Active" : "Inactive"}
                         </span>
                       </span>
-                      <span className="muted" style={{ fontSize: 12 }}>{isLocked ? "🔒 Locked" : "Edit ▾"}</span>
+                      <span className="muted" style={{ fontSize: 12 }}>Edit ▾</span>
                     </summary>
 
                     <div className="settings-table-edit">
-                      {isLocked ? (
-                        <p className="muted" style={{ fontSize: 13, margin: 0 }}>
-                          🔒 Developer account — cannot be edited or removed by anyone.
-                        </p>
-                      ) : (
-                        <>
-                          <form action={updateUserAction} className="settings-form-row" style={{ flexWrap: "wrap" }}>
+                      <form action={updateUserAction} className="settings-form-row" style={{ flexWrap: "wrap" }}>
                             <input type="hidden" name="id" value={user.id} />
 
                             <label className="stack" style={{ flex: "2 1 160px" }}>
@@ -219,11 +247,9 @@ export default async function SettingsPage() {
                             </div>
                           )}
 
-                          <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-                            Access pages: {(ROLE_ACCESS[role] ?? []).join(" · ")}
-                          </div>
-                        </>
-                      )}
+                      <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+                        Access pages: {(ROLE_ACCESS[role] ?? []).join(" · ")}
+                      </div>
                     </div>
                   </details>
                 );
