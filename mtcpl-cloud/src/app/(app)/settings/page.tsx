@@ -357,6 +357,29 @@ export default async function SettingsPage() {
         )}
       </div>
 
+      {/* Full System Backup — developer only */}
+      {currentUser.role === "developer" && (
+        <div className="settings-section">
+          <div className="settings-section-header">
+            <h2>Full System Backup</h2>
+            <p>Download all live data as an Excel file. Each table is a separate sheet with raw column names — ready to insert directly into Supabase.</p>
+          </div>
+          <div className="settings-card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+            <div>
+              <p style={{ margin: 0, fontWeight: 600, fontSize: 14 }}>Export: blocks · slab_requirements · cut_sessions · temples · vendors · profiles</p>
+              <p className="muted" style={{ margin: "4px 0 0", fontSize: 12 }}>Snapshot of current live data at time of download. JSONB columns are stringified.</p>
+            </div>
+            <a
+              href="/api/export/full-backup"
+              className="primary-button"
+              style={{ textDecoration: "none", whiteSpace: "nowrap" }}
+            >
+              ↓ Download Backup
+            </a>
+          </div>
+        </div>
+      )}
+
       {/* Audit Log */}
       {(currentUser.role === "owner" || currentUser.role === "developer") && (
         <div className="settings-section">
