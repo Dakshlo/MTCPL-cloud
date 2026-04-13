@@ -84,17 +84,17 @@ export async function updateUserAction(formData: FormData) {
 
 export async function deleteUserAction(formData: FormData) {
   const { profile: currentUser } = await requireAuth(["owner"]);
-  // Use admin client to bypass RLS when deleting other users' profiles
+  // Use admin client to bypass RLS when editing other users' profiles
   const admin = createAdminSupabaseClient();
 
   const id = text(formData, "id");
   if (!id) redirect("/settings?toast=Missing+ID");
   if (id === currentUser.id) redirect("/settings?toast=Cannot+remove+your+own+account");
 
-  // Delete profile — user loses access but their auth account remains
-  const { error } = await admin.from("profiles").delete().eq("id", id);
+  // Soft-delete: mark inactive so they can't log in but data history is preserved
+  const { error } = await admin.from("profiles").update({ is_active: false }).eq("id", id);
   if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
 
   revalidatePath("/settings");
-  redirect("/settings?toast=User+removed");
+  redirect("/settings?toast=User+deactivated");
 }
