@@ -60,12 +60,11 @@ export async function deleteTempleAction(formData: FormData) {
 }
 
 export async function updateUserAction(formData: FormData) {
-  const { profile: currentUser } = await requireAuth(["owner"]);
-  // Use admin client to bypass RLS when editing other users' profiles
+  const { profile: currentUser } = await requireAuth(["owner", "planner", "developer"]);
   const admin = createAdminSupabaseClient();
 
   const id = text(formData, "id");
-  const role = text(formData, "role") || "block_entry";
+  const requestedRole = text(formData, "role") || "block_entry";
   const full_name = text(formData, "full_name") || null;
   const is_active = formData.get("is_active") === "true";
 
@@ -75,6 +74,22 @@ export async function updateUserAction(formData: FormData) {
   // Developer accounts are protected — nobody can edit them
   const { data: target } = await admin.from("profiles").select("role").eq("id", id).single();
   if (target?.role === "developer") redirect("/settings?toast=Developer+account+is+protected");
+
+  // Role assignment rules:
+  // - Developer: can assign any role
+  // - Planner: can assign planner/block_entry/worker only (not owner or developer)
+  // - Owner: cannot change roles
+  const PLANNER_ASSIGNABLE = ["planner", "block_entry", "slab_entry", "worker"];
+  let role = requestedRole;
+  if (currentUser.role === "owner") {
+    // Owner cannot change roles — keep existing role
+    role = target?.role ?? requestedRole;
+  } else if (currentUser.role === "planner") {
+    if (!PLANNER_ASSIGNABLE.includes(requestedRole)) {
+      redirect("/settings?toast=Team+Head+cannot+assign+that+role");
+    }
+  }
+  // developer: no restriction
 
   const { error } = await admin
     .from("profiles")

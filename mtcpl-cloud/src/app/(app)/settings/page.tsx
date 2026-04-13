@@ -1,14 +1,27 @@
 import { requireAuth } from "@/lib/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { addTempleAction, updateTempleAction, deleteTempleAction, updateUserAction, deleteUserAction } from "./actions";
 import type { AppRole } from "@/lib/types";
 
-const UI_ROLES = [
+// All assignable roles — only shown to developer
+const UI_ROLES_ALL = [
+  { value: "developer", label: "Developer" },
   { value: "owner", label: "Owner" },
   { value: "planner", label: "Team Head" },
   { value: "block_entry", label: "Entry (Block & Slab)" },
   { value: "worker", label: "Cutting Operator" },
 ];
+
+// Roles a team-lead (planner) can assign — cannot promote to owner or developer
+const UI_ROLES_PLANNER = [
+  { value: "planner", label: "Team Head" },
+  { value: "block_entry", label: "Entry (Block & Slab)" },
+  { value: "worker", label: "Cutting Operator" },
+];
+
+// Legacy — kept for roleLabel lookup
+const UI_ROLES = UI_ROLES_ALL;
 
 const ROLE_ACCESS: Record<string, string[]> = {
   developer: ["Dashboard", "Blocks", "Slabs", "Plan Generator", "Cutting", "Settings"],
@@ -36,10 +49,12 @@ function formatDate(iso: string | null) {
 export default async function SettingsPage() {
   const { profile: currentUser } = await requireAuth(["owner", "planner", "developer"]);
   const supabase = await createServerSupabaseClient();
+  const admin = createAdminSupabaseClient();
 
   const [{ data: temples }, { data: users }] = await Promise.all([
     supabase.from("temples").select("*").order("name"),
-    supabase.from("profiles").select("id, full_name, phone, role, is_active, created_at").order("full_name"),
+    // Admin client needed — RLS on profiles only returns the current user's own row
+    admin.from("profiles").select("id, full_name, phone, role, is_active, created_at").order("full_name"),
   ]);
 
   const { data: recentAudit } = await supabase
@@ -129,11 +144,28 @@ export default async function SettingsPage() {
 
                             <label className="stack" style={{ flex: "1 1 120px" }}>
                               <span>Role</span>
-                              <select name="role" defaultValue={UI_ROLES.some(r => r.value === role) ? role : "block_entry"} disabled={isSelf}>
-                                {UI_ROLES.map((r) => (
-                                  <option key={r.value} value={r.value}>{r.label}</option>
-                                ))}
-                              </select>
+                              {/* Developer: full list | Planner: restricted list | Owner: read-only */}
+                              {currentUser.role === "developer" ? (
+                                <select name="role" defaultValue={role} disabled={isSelf}>
+                                  {UI_ROLES_ALL.map((r) => (
+                                    <option key={r.value} value={r.value}>{r.label}</option>
+                                  ))}
+                                </select>
+                              ) : currentUser.role === "planner" ? (
+                                <select name="role" defaultValue={UI_ROLES_PLANNER.some(r => r.value === role) ? role : "block_entry"}>
+                                  {UI_ROLES_PLANNER.map((r) => (
+                                    <option key={r.value} value={r.value}>{r.label}</option>
+                                  ))}
+                                </select>
+                              ) : (
+                                // Owner — cannot change roles
+                                <>
+                                  <input name="role" type="hidden" value={role} />
+                                  <select disabled defaultValue={role}>
+                                    <option value={role}>{roleLabel(role)}</option>
+                                  </select>
+                                </>
+                              )}
                               {isSelf ? <input type="hidden" name="role" value={role} /> : null}
                             </label>
 
