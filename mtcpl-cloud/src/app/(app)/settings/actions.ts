@@ -76,17 +76,13 @@ export async function updateUserAction(formData: FormData) {
   if (target?.role === "developer") redirect("/settings?toast=Developer+account+is+protected");
 
   // Role assignment rules:
-  // - Developer: can assign any role
-  // - Planner: can assign planner/block_entry/worker only (not owner or developer)
-  // - Owner: cannot change roles
-  const PLANNER_ASSIGNABLE = ["planner", "block_entry", "slab_entry", "block_only", "worker"];
+  // - Developer: can assign any role including owner/developer
+  // - Owner + Planner: can assign any role EXCEPT owner and developer
+  const RESTRICTED_ASSIGNABLE = ["planner", "block_entry", "slab_entry", "block_only", "worker"];
   let role = requestedRole;
-  if (currentUser.role === "owner") {
-    // Owner cannot change roles — keep existing role
-    role = target?.role ?? requestedRole;
-  } else if (currentUser.role === "planner") {
-    if (!PLANNER_ASSIGNABLE.includes(requestedRole)) {
-      redirect("/settings?toast=Team+Head+cannot+assign+that+role");
+  if (currentUser.role === "owner" || currentUser.role === "planner") {
+    if (!RESTRICTED_ASSIGNABLE.includes(requestedRole)) {
+      redirect("/settings?toast=Cannot+assign+that+role");
     }
   }
   // developer: no restriction

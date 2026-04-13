@@ -155,27 +155,20 @@ export default async function SettingsPage() {
 
                             <label className="stack" style={{ flex: "1 1 120px" }}>
                               <span>Role</span>
-                              {/* Developer: full list | Planner: restricted list | Owner: read-only */}
+                              {/* Developer: full list | Owner+Planner: restricted list (no owner/developer) */}
                               {currentUser.role === "developer" ? (
                                 <select name="role" defaultValue={role} disabled={isSelf}>
                                   {UI_ROLES_ALL.map((r) => (
                                     <option key={r.value} value={r.value}>{r.label}</option>
                                   ))}
                                 </select>
-                              ) : currentUser.role === "planner" ? (
-                                <select name="role" defaultValue={UI_ROLES_PLANNER.some(r => r.value === role) ? role : "block_entry"}>
+                              ) : (
+                                // Owner and Planner — can assign any role except owner/developer
+                                <select name="role" defaultValue={UI_ROLES_PLANNER.some(r => r.value === role) ? role : "block_entry"} disabled={isSelf}>
                                   {UI_ROLES_PLANNER.map((r) => (
                                     <option key={r.value} value={r.value}>{r.label}</option>
                                   ))}
                                 </select>
-                              ) : (
-                                // Owner — cannot change roles
-                                <>
-                                  <input name="role" type="hidden" value={role} />
-                                  <select disabled defaultValue={role}>
-                                    <option value={role}>{roleLabel(role)}</option>
-                                  </select>
-                                </>
                               )}
                               {isSelf ? <input type="hidden" name="role" value={role} /> : null}
                             </label>
