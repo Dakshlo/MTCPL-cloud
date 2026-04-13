@@ -131,7 +131,8 @@ export default async function SettingsPage() {
                         <span>
                           <span className="role-pill" style={
                             isDeveloper ? { background: "var(--gold)", color: "#fff", fontWeight: 700 } :
-                            role === "owner" ? { background: "#1a1a1a", color: "#fff", fontWeight: 700 } : {}
+                            role === "owner" ? { background: "#1a1a1a", color: "#fff", fontWeight: 700 } :
+                            role === "team_head" ? { background: "#1e3a5f", color: "#fff", fontWeight: 700 } : {}
                           }>
                             {roleLabel(role)}
                           </span>
@@ -163,6 +164,7 @@ export default async function SettingsPage() {
                           style={
                             isDeveloper ? { background: "var(--gold)", color: "#fff", fontWeight: 700 } :
                             role === "owner" ? { background: "#1a1a1a", color: "#fff", fontWeight: 700 } :
+                            role === "team_head" ? { background: "#1e3a5f", color: "#fff", fontWeight: 700 } :
                             {}
                           }
                         >

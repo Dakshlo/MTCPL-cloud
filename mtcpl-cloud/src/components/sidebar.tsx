@@ -112,7 +112,12 @@ export function Sidebar({ role, displayName }: { role: AppRole; displayName?: st
       {/* User */}
       <div className="sidebar-user">
         <div className="sidebar-user-name">{displayName || "MTCPL User"}</div>
-        <div className="sidebar-user-role">{roleLabel(role)}</div>
+        <div
+          className="sidebar-user-role"
+          style={role === "team_head" ? { color: "#7eaadc", fontWeight: 700 } : undefined}
+        >
+          {roleLabel(role)}
+        </div>
       </div>
 
       {/* Navigation */}

@@ -28,6 +28,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             <span className="role-pill" style={
               profile.role === "developer" ? { background: "var(--gold)", color: "#fff", fontWeight: 700 } :
               profile.role === "owner"     ? { background: "#1a1a1a", color: "#fff", fontWeight: 700 } :
+              profile.role === "team_head" ? { background: "#1e3a5f", color: "#fff", fontWeight: 700 } :
               {}
             }>
               {({
