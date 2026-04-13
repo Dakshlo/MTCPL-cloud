@@ -39,8 +39,8 @@ async function approvePlanAction(formData: FormData) {
   const slabIds = Array.from(new Set(plan.flatMap((item) => item.placed.map((slab) => slab.id))));
 
   const [{ data: liveBlocks, error: liveBlocksError }, { data: liveSlabs, error: liveSlabsError }] = await Promise.all([
-    supabase.from("blocks").select("id, status").in("id", blockIds),
-    supabase.from("slab_requirements").select("id, status").in("id", slabIds)
+    supabase.from("blocks").select("id, status, stone").in("id", blockIds),
+    supabase.from("slab_requirements").select("id, status, stone").in("id", slabIds)
   ]);
 
   if (liveBlocksError) {
@@ -59,6 +59,21 @@ async function approvePlanAction(formData: FormData) {
   const blockedSlab = (liveSlabs ?? []).find((item) => item.status !== "open");
   if (blockedSlab) {
     throw new Error(`Slab ${blockedSlab.id} was already changed by another user. Refresh planning and generate again.`);
+  }
+
+  // Stone compatibility — no slab can be cut from a block of a different stone type
+  const slabStoneMap = Object.fromEntries((liveSlabs ?? []).map(s => [s.id, s.stone]));
+  const blockStoneMap = Object.fromEntries((liveBlocks ?? []).map(b => [b.id, b.stone]));
+  for (const item of plan) {
+    const blockStone = blockStoneMap[item.blk.id];
+    for (const slab of item.placed) {
+      const slabStone = slabStoneMap[slab.id];
+      if (slabStone && blockStone && slabStone !== blockStone) {
+        throw new Error(
+          `Stone mismatch: slab ${slab.id} is ${slabStone} but block ${item.blk.id} is ${blockStone}. A ${slabStone} slab cannot be cut from a ${blockStone} block.`
+        );
+      }
+    }
   }
 
   const sessionCode = "CUT-" + new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 12);

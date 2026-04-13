@@ -37,10 +37,13 @@ export async function addSlabAction(formData: FormData) {
   const existingIds = (existing ?? []).map(r => r.id);
   const baseId = generateSlabCode(existingIds, prefix);
 
+  const stone = text(formData, "stone");
+  if (!stone) toast("/slabs", "Stone type is required");
+
   const common = {
     label: text(formData, "label") || temple,
     temple,
-    stone: text(formData, "stone") || null,
+    stone,
     quality: text(formData, "quality") || null,
     length_ft: num(formData, "length_in"),
     width_ft: num(formData, "width_in"),
@@ -73,10 +76,13 @@ export async function updateSlabAction(formData: FormData) {
   const id = text(formData, "id");
   if (!id) toast("/slabs", "Missing slab ID");
 
+  const stone = text(formData, "stone");
+  if (!stone) toast("/slabs", "Stone type is required");
+
   const payload = {
     label: text(formData, "label"),
     temple: text(formData, "temple"),
-    stone: text(formData, "stone") || null,
+    stone,
     quality: text(formData, "quality") || null,
     length_ft: num(formData, "length_in"),
     width_ft: num(formData, "width_in"),
