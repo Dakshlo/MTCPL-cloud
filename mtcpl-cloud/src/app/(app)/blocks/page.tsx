@@ -1,5 +1,6 @@
 import { requireAuth } from "@/lib/auth";
 import { createDataClient } from "@/lib/supabase/server";
+import { getProfilesMap } from "@/lib/profiles";
 import { AddBlockForm } from "./add-block-form";
 import { BlockGrid } from "./block-grid";
 import { BlockExport } from "./block-export";
@@ -12,7 +13,7 @@ export default async function BlocksPage() {
   const [{ data: blocks, error }, { data: allIds }, { data: consumed }, { data: vendorRows }] = await Promise.all([
     supabase
       .from("blocks")
-      .select("id, stone, yard, category, length_ft, width_ft, height_ft, status, quality, truck_no, vendor_name, bill_no, created_at")
+      .select("id, stone, yard, category, length_ft, width_ft, height_ft, status, quality, truck_no, vendor_name, bill_no, created_at, created_by")
       .in("status", ["available", "reserved"])
       .order("created_at", { ascending: false })
       .limit(500),
@@ -32,6 +33,8 @@ export default async function BlocksPage() {
   ]);
 
   if (error) throw new Error(error.message);
+
+  const profilesMap = await getProfilesMap();
 
   const canEdit = ["developer", "owner", "team_head", "block_slab_entry", "block_entry"].includes(profile.role);
   const canViewReport = ["developer", "owner", "team_head"].includes(profile.role);
@@ -89,7 +92,7 @@ export default async function BlocksPage() {
       {blockList.length === 0 ? (
         <div className="banner">No blocks yet. Add your first block above.</div>
       ) : (
-        <BlockGrid blocks={blockList} canEdit={canEdit} vendors={vendors} />
+        <BlockGrid blocks={blockList} canEdit={canEdit} vendors={vendors} profilesMap={profilesMap} />
       )}
 
       {/* Block Usage History — collapsible */}

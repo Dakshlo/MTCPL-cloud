@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireAuth } from "@/lib/auth";
 import { createDataClient } from "@/lib/supabase/server";
+import { getProfilesMap } from "@/lib/profiles";
 import { AddSlabForm } from "./add-slab-form";
 import { SlabGrid } from "./slab-grid";
 export default async function SlabsPage() {
@@ -10,7 +11,7 @@ export default async function SlabsPage() {
   const [{ data: slabs, error }, { data: temples }, { data: allIds }] = await Promise.all([
     supabase
       .from("slab_requirements")
-      .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority, created_at, updated_at")
+      .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority, created_at, updated_at, created_by")
       .in("status", ["open", "planned"])
       .order("priority", { ascending: false })
       .order("created_at", { ascending: false })
@@ -21,6 +22,7 @@ export default async function SlabsPage() {
 
   if (error) throw new Error(error.message);
 
+  const profilesMap = await getProfilesMap();
   const canEdit = ["developer", "owner", "team_head", "slab_entry"].includes(profile.role);
   const slabList = slabs ?? [];
   const templeList = temples ?? [];
@@ -67,7 +69,7 @@ export default async function SlabsPage() {
       {slabList.length === 0 ? (
         <div className="banner">No open slabs yet. Add your first slab requirement above.</div>
       ) : (
-        <SlabGrid slabs={slabList} temples={templeList} canEdit={canEdit} />
+        <SlabGrid slabs={slabList} temples={templeList} canEdit={canEdit} profilesMap={profilesMap} />
       )}
     </>
   );

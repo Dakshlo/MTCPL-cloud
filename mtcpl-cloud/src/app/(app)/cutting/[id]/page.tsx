@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { getProfilesMap } from "@/lib/profiles";
 import { IsoBlockPreview } from "@/components/planning-workbench";
 import { FinishBlockForm } from "../finish-block-form";
 import { UndoButton } from "../undo-button";
@@ -33,7 +34,7 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
   const { data: block, error } = await supabase
     .from("cut_session_blocks")
     .select(
-      "id, status, block_id, largest_remainder, restocked_block_id, layout, updated_at, cut_session_id, cut_sessions(id, session_code, kerf_mm, created_at), cut_session_slabs(id, slab_requirement_id)"
+      "id, status, block_id, largest_remainder, restocked_block_id, layout, updated_at, cut_session_id, cut_sessions(id, session_code, kerf_mm, created_at, planned_by), cut_session_slabs(id, slab_requirement_id)"
     )
     .eq("id", id)
     .single();
@@ -48,11 +49,14 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
 
   const blk = layout?.blk;
   const placed = layout?.placed ?? [];
+  const profilesMap = await getProfilesMap();
+
   const session = block.cut_sessions as unknown as {
     id: string;
     session_code: string;
     kerf_mm: number;
     created_at: string;
+    planned_by: string | null;
   } | null;
   const slabReqIds = (
     block.cut_session_slabs as Array<{ id: string; slab_requirement_id: string }>
@@ -98,6 +102,14 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
               : ""}
             {session?.kerf_mm ? ` · Kerf ${session.kerf_mm} mm` : ""}
           </p>
+          {session?.planned_by && profilesMap[session.planned_by] && (
+            <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--muted)" }}>
+              Plan by{" "}
+              <span style={{ color: "var(--gold-dark)", fontWeight: 600 }}>
+                {profilesMap[session.planned_by]}
+              </span>
+            </p>
+          )}
         </div>
         <div>
           {isPending && (

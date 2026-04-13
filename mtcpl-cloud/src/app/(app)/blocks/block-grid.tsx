@@ -54,9 +54,10 @@ type Block = {
   vendor_name: string | null;
   bill_no: string | null;
   created_at: string | null;
+  created_by: string | null;
 };
 
-export function BlockGrid({ blocks, canEdit, vendors }: { blocks: Block[]; canEdit: boolean; vendors: string[] }) {
+export function BlockGrid({ blocks, canEdit, vendors, profilesMap = {} }: { blocks: Block[]; canEdit: boolean; vendors: string[]; profilesMap?: Record<string, string> }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = blocks.find(b => b.id === selectedId) ?? null;
 
@@ -106,7 +107,12 @@ export function BlockGrid({ blocks, canEdit, vendors }: { blocks: Block[]; canEd
                 <div className="block-card-dims">{L} × {W} × {H} ft</div>
                 <div className="block-card-cft">{cft} CFT</div>
                 {block.created_at && (
-                  <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>Added {fmtDate(block.created_at)}</div>
+                  <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+                    Added {fmtDate(block.created_at)}
+                    {block.created_by && profilesMap[block.created_by] && (
+                      <> · <span style={{ color: "var(--gold-dark)", fontWeight: 600 }}>by {profilesMap[block.created_by]}</span></>
+                    )}
+                  </div>
                 )}
               </div>
               {canEdit && <div className="block-card-edit-hint">{isSelected ? "✕ Close" : "Edit"}</div>}

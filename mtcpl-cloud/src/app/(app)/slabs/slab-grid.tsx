@@ -18,6 +18,7 @@ type Slab = {
   priority: boolean;
   created_at: string | null;
   updated_at: string | null;
+  created_by: string | null;
 };
 
 type Temple = { id: string; name: string; code_prefix: string };
@@ -50,7 +51,7 @@ function fmtDate(iso: string | null) {
   return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
 }
 
-export function SlabGrid({ slabs, temples, canEdit }: { slabs: Slab[]; temples: Temple[]; canEdit: boolean }) {
+export function SlabGrid({ slabs, temples, canEdit, profilesMap = {} }: { slabs: Slab[]; temples: Temple[]; canEdit: boolean; profilesMap?: Record<string, string> }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = slabs.find(s => s.id === selectedId) ?? null;
 
@@ -98,6 +99,9 @@ export function SlabGrid({ slabs, temples, canEdit }: { slabs: Slab[]; temples: 
               </div>
               <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
                 {slab.created_at && <>Added {fmtDate(slab.created_at)}</>}
+                {slab.created_by && profilesMap[slab.created_by] && (
+                  <> · <span style={{ color: "var(--gold-dark)", fontWeight: 600 }}>by {profilesMap[slab.created_by]}</span></>
+                )}
                 {slab.status === "cut_done" && slab.updated_at && (
                   <> · Cut {fmtDate(slab.updated_at)}</>
                 )}

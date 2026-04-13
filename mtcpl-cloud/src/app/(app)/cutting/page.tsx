@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { getProfilesMap } from "@/lib/profiles";
 import { approveBlockAction, rejectBlockAction } from "./actions";
 import { RejectButton } from "./reject-button";
 
@@ -18,7 +19,7 @@ type BlockRow = {
   } | null;
   updated_at: string | null;
   cut_session_id: string;
-  cut_sessions: { session_code: string; kerf_mm: number } | null;
+  cut_sessions: { session_code: string; kerf_mm: number; planned_by: string | null } | null;
   cut_session_slabs: Array<{ slab_requirement_id: string }>;
 };
 
@@ -32,6 +33,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
   const params = await searchParams;
   const activeTab: Tab = (params.tab as Tab) || defaultTab(profile.role);
   const supabase = createAdminSupabaseClient();
+  const profilesMap = await getProfilesMap();
 
   // Count per individual block status — each block handled independently
   const [
@@ -61,7 +63,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
   const { data: blocks } = await supabase
     .from("cut_session_blocks")
     .select(
-      "id, status, block_id, restocked_block_id, layout, updated_at, cut_session_id, cut_sessions(session_code, kerf_mm), cut_session_slabs(slab_requirement_id)"
+      "id, status, block_id, restocked_block_id, layout, updated_at, cut_session_id, cut_sessions(session_code, kerf_mm, planned_by), cut_session_slabs(slab_requirement_id)"
     )
     .in("status", statusFilter)
     .order("updated_at", { ascending: activeTab !== "done" })
@@ -199,6 +201,14 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                           ? ` · Kerf ${block.cut_sessions.kerf_mm} mm`
                           : ""}
                       </p>
+                      {block.cut_sessions?.planned_by && profilesMap[block.cut_sessions.planned_by] && (
+                        <p style={{ margin: "3px 0 0", fontSize: 11, color: "var(--muted)" }}>
+                          Plan by{" "}
+                          <span style={{ color: "var(--gold-dark)", fontWeight: 600 }}>
+                            {profilesMap[block.cut_sessions.planned_by]}
+                          </span>
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -214,6 +224,26 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                     <span className="role-pill">
                       {slabCount} slab{slabCount !== 1 ? "s" : ""}
                     </span>
+                    {block.status === "pending_worker" && (
+                      <Link
+                        href={`/cutting/${block.id}/print`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          textDecoration: "none",
+                          fontSize: 12,
+                          padding: "4px 12px",
+                          background: "var(--bg)",
+                          border: "1px solid var(--border)",
+                          borderRadius: 6,
+                          color: "var(--muted)",
+                          fontWeight: 500,
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        🖨 Print
+                      </Link>
+                    )}
                     <Link
                       href={`/cutting/${block.id}`}
                       style={{
