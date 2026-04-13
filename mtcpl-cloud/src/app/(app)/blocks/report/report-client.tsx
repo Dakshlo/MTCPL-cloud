@@ -38,6 +38,13 @@ function calcCft(l: number, w: number, h: number) {
   return (l * w * h) / 1728;
 }
 
+const STATUS_LABELS: Record<string, string> = {
+  available: "fresh",
+  reserved: "used",
+  consumed: "in-process",
+  discarded: "deleted",
+};
+
 function statusBadgeClass(status: string) {
   const map: Record<string, string> = {
     available: "badge-available",
@@ -205,7 +212,7 @@ export function ReportClient({ blocks }: { blocks: Block[] }) {
                     transition: "background 0.15s",
                   }}
                 >
-                  {s}
+                  {STATUS_LABELS[s] ?? s}
                 </button>
               ))}
             </div>
@@ -282,7 +289,7 @@ export function ReportClient({ blocks }: { blocks: Block[] }) {
           {[
             { label: "Active only", fn: () => setStatusFilter(["available", "reserved"]) },
             { label: "Deleted only", fn: () => setStatusFilter(["discarded"]) },
-            { label: "Consumed only", fn: () => setStatusFilter(["consumed"]) },
+            { label: "In-process only", fn: () => setStatusFilter(["consumed"]) },
             { label: "Last 7 days", fn: () => { setDateFrom(new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10)); setDateTo(today); } },
             { label: "Last 30 days", fn: () => { setDateFrom(new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10)); setDateTo(today); } },
             { label: "Last 90 days", fn: () => { setDateFrom(new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10)); setDateTo(today); } },
@@ -386,7 +393,7 @@ export function ReportClient({ blocks }: { blocks: Block[] }) {
                       ) : <span className="muted">—</span>}
                     </td>
                     <td style={{ padding: "9px 12px" }}>
-                      <span className={`role-pill ${statusBadgeClass(b.status)}`}>{b.status}</span>
+                      <span className={`role-pill ${statusBadgeClass(b.status)}`}>{STATUS_LABELS[b.status] ?? b.status}</span>
                     </td>
                     <td style={{ padding: "9px 12px", color: "var(--muted)" }}>{b.truck_no || "—"}</td>
                     <td style={{ padding: "9px 12px", color: "var(--muted)" }}>{b.vendor_name || "—"}</td>

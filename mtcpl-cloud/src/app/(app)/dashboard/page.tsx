@@ -24,10 +24,10 @@ export default async function DashboardPage() {
   ]);
 
   const metrics = [
-    { label: "Available Blocks",    value: availableBlocks ?? 0,  hint: "Ready for planning",       accent: "accent-green" },
+    { label: "Fresh Blocks",         value: availableBlocks ?? 0,  hint: "Ready for planning",       accent: "accent-green" },
     { label: "Slabs in Queue",      value: openSlabs ?? 0,         hint: "Open requirements",        accent: "accent-orange" },
     { label: "Active Cut Sessions", value: activeSessions ?? 0,    hint: "Currently in progress",    accent: "accent-blue" },
-    { label: "Blocks Reserved",     value: reservedBlocks ?? 0,    hint: "Committed to sessions",    accent: "" }
+    { label: "Used Blocks",         value: reservedBlocks ?? 0,    hint: "Committed to sessions",    accent: "" }
   ];
 
   return (

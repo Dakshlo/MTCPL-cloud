@@ -423,7 +423,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                               <input name="block_id" type="hidden" value={block.block_id} />
                               <input name="slab_ids" type="hidden" value={JSON.stringify(slabIds)} />
                               <input name="restocked_block_id" type="hidden" value={block.restocked_block_id ?? ""} />
-                              <UndoButton message="Undo this cut? Block goes back to reserved and slabs back to planned." />
+                              <UndoButton message="Undo this cut? Block goes back to used and slabs back to planned." />
                             </form>
                           )}
                         </>

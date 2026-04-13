@@ -12,6 +12,13 @@ function calcCft(l: number, w: number, h: number) {
   return ((l * w * h) / 1728).toFixed(2);
 }
 
+const STATUS_LABELS: Record<string, string> = {
+  available: "fresh",
+  reserved: "used",
+  consumed: "in-process",
+  discarded: "deleted",
+};
+
 function statusBadgeClass(status: string) {
   const map: Record<string, string> = {
     available: "badge-available",
@@ -88,7 +95,7 @@ export function BlockGrid({ blocks, canEdit }: { blocks: Block[]; canEdit: boole
                 <div className="block-card-badges">
                   <span className={`role-pill ${stoneBadge}`}>{block.stone === "PinkStone" ? "Pink" : "White"}</span>
                   <span className="role-pill">Y{block.yard}</span>
-                  <span className={`role-pill ${statusBadgeClass(block.status)}`}>{block.status}</span>
+                  <span className={`role-pill ${statusBadgeClass(block.status)}`}>{STATUS_LABELS[block.status] ?? block.status}</span>
                   {block.quality && (
                     <span className={`role-pill ${block.quality === "A" ? "badge-available" : "badge-reserved"}`}>
                       {block.quality === "A" ? "Grade A" : "Grade B"}
@@ -155,7 +162,7 @@ export function BlockGrid({ blocks, canEdit }: { blocks: Block[]; canEdit: boole
                 <label className="stack">
                   <span>Status</span>
                   <select name="status" defaultValue={selected.status}>
-                    {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                    {STATUSES.map(s => <option key={s} value={s}>{STATUS_LABELS[s] ?? s}</option>)}
                   </select>
                 </label>
 

@@ -98,7 +98,7 @@ export default async function BlocksPage() {
                       </p>
                     </div>
                     <div style={{ textAlign: "right" }}>
-                      <span className="role-pill badge-consumed">consumed</span>
+                      <span className="role-pill badge-consumed">in-process</span>
                       <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
                         Used: {fmtDate(blk.updated_at)}
                       </p>

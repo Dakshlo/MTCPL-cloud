@@ -228,16 +228,25 @@ export function FinishBlockForm({
 
       {/* Action buttons */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <form action={finishAction}>
-          {hiddenInputs("yes")}
-          <button className="primary-button" type="submit">
-            Done &amp; Restock{validRemainders.length > 0 ? ` (${validRemainders.length} piece${validRemainders.length > 1 ? "s" : ""})` : ""}
-          </button>
-        </form>
-        <form action={finishAction}>
-          {hiddenInputs("no")}
-          <button className="secondary-button" type="submit">Done &amp; Discard</button>
-        </form>
+        {validRemainders.length > 0 ? (
+          <>
+            <form action={finishAction}>
+              {hiddenInputs("yes")}
+              <button className="primary-button" type="submit">
+                Done &amp; Restock ({validRemainders.length} piece{validRemainders.length > 1 ? "s" : ""})
+              </button>
+            </form>
+            <form action={finishAction}>
+              {hiddenInputs("no")}
+              <button className="secondary-button" type="submit">Done &amp; Discard</button>
+            </form>
+          </>
+        ) : (
+          <form action={finishAction}>
+            {hiddenInputs("no")}
+            <button className="primary-button" type="submit">Done</button>
+          </form>
+        )}
       </div>
     </div>
   );
