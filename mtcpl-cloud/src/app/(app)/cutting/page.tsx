@@ -416,7 +416,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                               : "· Discarded"}
                             {block.updated_at ? ` · ${new Date(block.updated_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}` : ""}
                           </span>
-                          {profile.role === "owner" && (
+                          {(profile.role === "owner" || profile.role === "developer") && (
                             <form action={undoDoneAction}>
                               <input name="session_block_id" type="hidden" value={block.id} />
                               <input name="session_id" type="hidden" value={session.id} />

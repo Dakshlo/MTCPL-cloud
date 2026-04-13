@@ -25,7 +25,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             <strong className="topbar-name">{displayName}</strong>
           </div>
           <div className="topbar-right">
-            <span className="role-pill">{profile.role.replace("_", " ")}</span>
+            <span className="role-pill" style={profile.role === "developer" ? { background: "var(--gold)", color: "#fff", fontWeight: 700 } : {}}>
+              {profile.role === "developer" ? "Developer" : profile.role.replace(/_/g, " ")}
+            </span>
             <LogoutButton />
           </div>
         </div>

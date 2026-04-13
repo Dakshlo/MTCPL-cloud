@@ -27,7 +27,7 @@ export default async function BlocksPage() {
 
   if (error) throw new Error(error.message);
 
-  const canEdit = ["owner", "planner", "block_entry"].includes(profile.role);
+  const canEdit = ["developer", "owner", "planner", "block_entry"].includes(profile.role);
   const blockList = blocks ?? [];
   const consumedList = consumed ?? [];
   const suggestedId = generateNextCode((allIds ?? []).map(r => r.id));

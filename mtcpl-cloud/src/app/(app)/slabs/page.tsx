@@ -21,7 +21,7 @@ export default async function SlabsPage() {
 
   if (error) throw new Error(error.message);
 
-  const canEdit = ["owner", "planner", "slab_entry"].includes(profile.role);
+  const canEdit = ["developer", "owner", "planner", "slab_entry"].includes(profile.role);
   const slabList = slabs ?? [];
   const templeList = temples ?? [];
   const existingIds = (allIds ?? []).map(r => r.id);
