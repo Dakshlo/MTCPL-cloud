@@ -667,7 +667,7 @@ export function PlanningWorkbench({
   slabs: SlabRow[];
   approveAction: (formData: FormData) => void | Promise<void>;
 }) {
-  const [kerfMm, setKerfMm] = useState(4);
+  const [kerfMm, setKerfMm] = useState(20);
   const [result, setResult] = useState<PlanResult | null>(null);
 
   const usableBlocks = blocks.filter((block) => block.status === "available" || block.status === "reserved");

@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { addBlockAction } from "./actions";
 
-const YARDS = [1, 2, 3] as const;
+const YARDS = [1, 2, 3, 4, 5, 6] as const;
 type UnitMode = "inches" | "feetinches";
 
 function toInches(ft: string, ino: string): string {
@@ -127,7 +127,7 @@ export function AddBlockForm({ suggestedId }: { suggestedId: string }) {
             <div className="stone-toggle">
               {(["", "A", "B"] as const).map(q => (
                 <button key={q} type="button"
-                  className={`stone-toggle-btn${quality === q ? " active-gold" : ""}`}
+                  className={`stone-toggle-btn${quality === q ? " active-pink" : ""}`}
                   onClick={() => setQuality(q)}
                 >
                   {q === "" ? "Both" : `Grade ${q}`}
@@ -179,29 +179,6 @@ export function AddBlockForm({ suggestedId }: { suggestedId: string }) {
           </div>
         </div>
 
-        {/* Logistics Info — collapsible, internal tracking only */}
-        <details style={{ marginTop: 8 }}>
-          <summary style={{ cursor: "pointer", fontSize: 13, color: "var(--muted)", padding: "4px 0", userSelect: "none" }}>
-            + Logistics Info (Truck No., Vendor, Bill No.)
-          </summary>
-          <div className="add-panel-row" style={{ marginTop: 10 }}>
-            <label className="stack" style={{ flex: "1 1 110px" }}>
-              <span>Truck No.</span>
-              <input name="truck_no" placeholder="e.g. GJ01AB1234" />
-            </label>
-            <label className="stack" style={{ flex: "2 1 160px" }}>
-              <span>Vendor / Supplier</span>
-              <input name="vendor_name" placeholder="e.g. Rajasthan Stones" />
-            </label>
-            <label className="stack" style={{ flex: "1 1 110px" }}>
-              <span>Bill No.</span>
-              <input name="bill_no" placeholder="e.g. INV-2024-001" />
-            </label>
-          </div>
-          <p className="muted" style={{ fontSize: 11, marginTop: 4 }}>
-            For internal tracking only — not shown in plans or cutting workflows.
-          </p>
-        </details>
       </div>
     </form>
   );

@@ -5,7 +5,7 @@ import { BlockCardPreview } from "@/components/stone-previews";
 import { updateBlockAction, deleteBlockAction } from "./actions";
 
 const STONES = ["PinkStone", "WhiteStone"] as const;
-const YARDS = [1, 2, 3] as const;
+const YARDS = [1, 2, 3, 4, 5, 6] as const;
 const STATUSES = ["available", "reserved", "consumed", "discarded"] as const;
 
 function calcCft(l: number, w: number, h: number) {
