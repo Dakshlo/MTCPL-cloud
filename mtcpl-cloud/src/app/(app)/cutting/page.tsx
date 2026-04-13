@@ -139,9 +139,12 @@ async function undoDoneAction(formData: FormData) {
   // Revert block back to reserved (it was reserved before being consumed)
   await supabase.from("blocks").update({ status: "reserved", updated_by: profile.id, updated_at: new Date().toISOString() }).eq("id", blockId);
 
-  // Delete the restocked remainder block if one was created
+  // Delete all restocked remainder blocks (stored as comma-separated IDs)
   if (restockedBlockId) {
-    await supabase.from("blocks").delete().eq("id", restockedBlockId);
+    const ids = restockedBlockId.split(",").map(s => s.trim()).filter(Boolean);
+    if (ids.length > 0) {
+      await supabase.from("blocks").delete().in("id", ids);
+    }
   }
 
   // Revert slabs back to planned
@@ -185,28 +188,35 @@ async function finishBlockAction(formData: FormData) {
   const allSlabIds = JSON.parse(String(formData.get("all_slab_ids") || formData.get("slab_ids") || "[]")) as string[];
   const notCutSlabIds = allSlabIds.filter(id => !cutSlabIds.includes(id));
   const restock = String(formData.get("restock") || "") === "yes";
-  const remainder = JSON.parse(String(formData.get("largest_remainder") || "null")) as
-    | { l: number; w: number; h: number }
-    | null;
+  const remainders = JSON.parse(String(formData.get("remainders_json") || "[]")) as Array<{
+    id: string; l: number; w: number; h: number;
+  }>;
 
-  let restockedBlockId: string | null = null;
+  const restockedIds: string[] = [];
 
-  if (restock && remainder && remainder.l > 0 && remainder.w > 0 && remainder.h > 0) {
-    restockedBlockId = `${blockId}-R-${Date.now().toString().slice(-5)}`;
-    const insertRemainder = await supabase.from("blocks").insert({
-      id: restockedBlockId,
-      stone,
-      yard,
-      category: "Reused",
-      length_ft: remainder.l,
-      width_ft: remainder.w,
-      height_ft: remainder.h,
-      status: "available",
-      created_by: profile.id,
-      updated_by: profile.id
-    });
-    if (insertRemainder.error) throw new Error(insertRemainder.error.message);
+  if (restock && remainders.length > 0) {
+    for (const piece of remainders) {
+      if (piece.l > 0 && piece.w > 0 && piece.h > 0) {
+        const { error } = await supabase.from("blocks").insert({
+          id: piece.id,
+          stone,
+          yard,
+          category: "Reused",
+          length_ft: piece.l,
+          width_ft: piece.w,
+          height_ft: piece.h,
+          status: "available",
+          created_by: profile.id,
+          updated_by: profile.id,
+        });
+        if (error) throw new Error(`Failed to create block ${piece.id}: ${error.message}`);
+        restockedIds.push(piece.id);
+      }
+    }
   }
+
+  // Store as comma-separated so we can delete all on undo
+  const restockedBlockId = restockedIds.length > 0 ? restockedIds.join(",") : null;
 
   const blockConsumed = await supabase
     .from("blocks")
@@ -392,7 +402,6 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                               sw: s.sw,
                               sh: s.sh,
                             }))}
-                            largestRemainder={remainder}
                             finishAction={finishBlockAction}
                           />
                         </div>
@@ -401,8 +410,11 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                       {block.status === "done" ? (
                         <>
                           <span className="role-pill">
-                            Done {block.restocked_block_id ? `· Restocked ${block.restocked_block_id}` : "· Discarded"}
-                            {block.updated_at ? ` · Cut ${new Date(block.updated_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}` : ""}
+                            Done{" "}
+                            {block.restocked_block_id
+                              ? `· Restocked ${block.restocked_block_id.split(",").join(", ")}`
+                              : "· Discarded"}
+                            {block.updated_at ? ` · ${new Date(block.updated_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}` : ""}
                           </span>
                           {profile.role === "owner" && (
                             <form action={undoDoneAction}>
