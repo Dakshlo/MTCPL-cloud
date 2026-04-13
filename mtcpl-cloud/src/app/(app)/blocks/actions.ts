@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { requireAuth } from "@/lib/auth";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { generateNextCode } from "./utils";
 import { logAudit } from "@/lib/audit";
@@ -27,7 +26,7 @@ function redirectWithToast(path: string, message: string): never {
 
 export async function addBlockAction(formData: FormData) {
   const { profile } = await requireAuth(["owner", "team_head", "block_slab_entry", "block_entry"]);
-  const supabase = await createServerSupabaseClient();
+  const supabase = createAdminSupabaseClient();
 
   const { data: existingRows } = await supabase.from("blocks").select("id");
   const existingIds = (existingRows ?? []).map(r => r.id);
@@ -86,7 +85,7 @@ export async function addBlockAction(formData: FormData) {
 
 export async function updateBlockAction(formData: FormData) {
   const { profile } = await requireAuth(["owner", "team_head", "block_slab_entry", "block_entry"]);
-  const supabase = await createServerSupabaseClient();
+  const supabase = createAdminSupabaseClient();
 
   const originalId = textValue(formData, "original_id");
   const nextId = textValue(formData, "id");
@@ -145,7 +144,7 @@ export async function addBlockVendorAction(name: string): Promise<{ error: strin
 
 export async function deleteBlockAction(formData: FormData) {
   const { profile } = await requireAuth(["owner", "team_head", "block_slab_entry", "block_entry"]);
-  const supabase = await createServerSupabaseClient();
+  const supabase = createAdminSupabaseClient();
 
   const id = textValue(formData, "delete_target_id") || textValue(formData, "id");
 

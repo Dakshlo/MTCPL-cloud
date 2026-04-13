@@ -285,6 +285,13 @@ export default async function SettingsPage() {
                 style={{ textTransform: "uppercase", fontFamily: "ui-monospace, monospace", fontWeight: 700 }}
               />
             </label>
+            <label className="stack" style={{ flex: "0 0 auto" }}>
+              <span>Stone Type</span>
+              <select name="default_stone" defaultValue="PinkStone">
+                <option value="PinkStone">Pink Stone</option>
+                <option value="WhiteStone">White Stone</option>
+              </select>
+            </label>
             <div className="stack" style={{ flex: "0 0 auto", justifyContent: "flex-end" }}>
               <span style={{ visibility: "hidden", fontSize: 12 }}>.</span>
               <button className="primary-button" type="submit">Add Temple</button>
@@ -335,6 +342,13 @@ export default async function SettingsPage() {
                         required
                         style={{ textTransform: "uppercase", fontFamily: "ui-monospace, monospace", fontWeight: 700 }}
                       />
+                    </label>
+                    <label className="stack" style={{ flex: "0 0 auto" }}>
+                      <span>Stone Type</span>
+                      <select name="default_stone" defaultValue={(temple as any).default_stone ?? "PinkStone"}>
+                        <option value="PinkStone">Pink Stone</option>
+                        <option value="WhiteStone">White Stone</option>
+                      </select>
                     </label>
                     <label className="stack" style={{ flex: "0 0 auto" }}>
                       <span>Status</span>

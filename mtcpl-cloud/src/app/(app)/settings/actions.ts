@@ -17,10 +17,11 @@ export async function addTempleAction(formData: FormData) {
 
   const name = text(formData, "name");
   const code_prefix = text(formData, "code_prefix").toUpperCase();
+  const default_stone = text(formData, "default_stone") || "PinkStone";
 
   if (!name || !code_prefix) redirect("/settings?toast=Name+and+prefix+required");
 
-  const { error } = await supabase.from("temples").insert({ name, code_prefix });
+  const { error } = await supabase.from("temples").insert({ name, code_prefix, default_stone });
   if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
 
   revalidatePath("/settings");
@@ -35,11 +36,12 @@ export async function updateTempleAction(formData: FormData) {
   const id = text(formData, "id");
   const name = text(formData, "name");
   const code_prefix = text(formData, "code_prefix").toUpperCase();
+  const default_stone = text(formData, "default_stone") || "PinkStone";
   const is_active = formData.get("is_active") === "true";
 
   if (!id) redirect("/settings?toast=Missing+ID");
 
-  const { error } = await supabase.from("temples").update({ name, code_prefix, is_active }).eq("id", id);
+  const { error } = await supabase.from("temples").update({ name, code_prefix, default_stone, is_active }).eq("id", id);
   if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
 
   revalidatePath("/settings");

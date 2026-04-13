@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { generateSlabCode } from "./utils";
 import { logAudit } from "@/lib/audit";
 
@@ -22,7 +22,7 @@ function toast(path: string, msg: string): never {
 
 export async function addSlabAction(formData: FormData) {
   const { profile } = await requireAuth(["owner", "team_head", "slab_entry"]);
-  const supabase = await createServerSupabaseClient();
+  const supabase = createAdminSupabaseClient();
 
   const temple = text(formData, "temple");
   if (!temple) toast("/slabs", "Temple is required");
@@ -68,7 +68,7 @@ export async function addSlabAction(formData: FormData) {
 
 export async function updateSlabAction(formData: FormData) {
   const { profile } = await requireAuth(["owner", "team_head", "slab_entry"]);
-  const supabase = await createServerSupabaseClient();
+  const supabase = createAdminSupabaseClient();
 
   const id = text(formData, "id");
   if (!id) toast("/slabs", "Missing slab ID");
@@ -98,7 +98,7 @@ export async function updateSlabAction(formData: FormData) {
 
 export async function deleteSlabAction(formData: FormData) {
   const { profile } = await requireAuth(["owner", "team_head", "slab_entry"]);
-  const supabase = await createServerSupabaseClient();
+  const supabase = createAdminSupabaseClient();
 
   const id = text(formData, "id");
 

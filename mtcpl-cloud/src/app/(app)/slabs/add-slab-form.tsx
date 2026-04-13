@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { addSlabAction } from "./actions";
 import { generateSlabCode } from "./utils";
 
-type Temple = { id: string; name: string; code_prefix: string };
+type Temple = { id: string; name: string; code_prefix: string; default_stone?: string | null };
 type UnitMode = "inches" | "feetinches";
 
 function toInches(ft: string, ino: string): string {
@@ -51,6 +51,9 @@ function FtInInput({ label, inchValue, onInchChange }: { label: string; inchValu
 export function AddSlabForm({ temples, existingIds }: { temples: Temple[]; existingIds: string[] }) {
   const [quality, setQuality] = useState<"" | "A" | "B">("");
   const [selectedTemple, setSelectedTemple] = useState<Temple | null>(temples[0] ?? null);
+  const [stone, setStone] = useState<"PinkStone" | "WhiteStone">(
+    (temples[0]?.default_stone as "PinkStone" | "WhiteStone") ?? "PinkStone"
+  );
   const [l, setL] = useState("");
   const [w, setW] = useState("");
   const [t, setT] = useState("");
@@ -111,12 +114,32 @@ export function AddSlabForm({ temples, existingIds }: { temples: Temple[]; exist
                 onChange={e => {
                   const found = temples.find(tp => tp.name === e.target.value) ?? null;
                   setSelectedTemple(found);
+                  if (found?.default_stone === "PinkStone" || found?.default_stone === "WhiteStone") {
+                    setStone(found.default_stone);
+                  }
                 }}
               >
                 {temples.map(tp => <option key={tp.id} value={tp.name}>{tp.name}</option>)}
               </select>
             )}
           </label>
+
+          <div className="stack" style={{ flex: "0 0 auto" }}>
+            <span>Stone Type</span>
+            <div className="stone-toggle">
+              {(["PinkStone", "WhiteStone"] as const).map(s => (
+                <button
+                  key={s}
+                  type="button"
+                  className={`stone-toggle-btn${stone === s ? (s === "PinkStone" ? " active-pink" : " active-white") : ""}`}
+                  onClick={() => setStone(s)}
+                >
+                  {s === "PinkStone" ? "Pink" : "White"}
+                </button>
+              ))}
+            </div>
+            <input type="hidden" name="stone" value={stone} />
+          </div>
 
           <div className="stack" style={{ flex: "0 0 auto" }}>
             <span>Quality</span>

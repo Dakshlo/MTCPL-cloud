@@ -15,7 +15,7 @@ export default async function SlabsPage() {
       .order("priority", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(200),
-    supabase.from("temples").select("id, name, code_prefix").eq("is_active", true).order("name"),
+    supabase.from("temples").select("id, name, code_prefix, default_stone").eq("is_active", true).order("name"),
     supabase.from("slab_requirements").select("id"),
   ]);
 
