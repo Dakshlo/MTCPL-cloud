@@ -17,24 +17,24 @@ const navItems: NavItem[] = [
     href: "/dashboard",
     label: "Dashboard",
     icon: "◈",
-    roles: ["owner", "planner", "dispatch", "block_entry", "slab_entry", "worker", "carving_assigner", "vendor"],
+    roles: ["developer", "owner", "planner", "dispatch", "block_entry", "slab_entry", "worker", "carving_assigner", "vendor"],
   },
   {
     href: "/blocks",
     label: "Blocks",
     icon: "▣",
-    roles: ["owner", "planner", "block_entry", "slab_entry"],
+    roles: ["developer", "owner", "planner", "block_entry", "slab_entry"],
   },
   {
     href: "/slabs",
     label: "Slabs",
     icon: "▤",
-    roles: ["owner", "planner", "slab_entry", "block_entry"],
+    roles: ["developer", "owner", "planner", "slab_entry", "block_entry"],
     children: [
       {
         href: "/slabs/view",
         label: "View Inventory",
-        roles: ["owner", "planner"],
+        roles: ["developer", "owner", "planner"],
       },
     ],
   },
@@ -42,30 +42,31 @@ const navItems: NavItem[] = [
     href: "/planning",
     label: "Plan Generator",
     icon: "⌘",
-    roles: ["owner", "planner"],
+    roles: ["developer", "owner", "planner"],
   },
   {
     href: "/cutting",
     label: "Cutting",
     icon: "◌",
-    roles: ["owner", "worker", "planner"],
+    roles: ["developer", "owner", "worker", "planner"],
   },
   {
     href: "/slabs/ready",
     label: "Ready Slabs",
     icon: "✦",
-    roles: ["owner", "planner", "slab_entry", "block_entry"],
+    roles: ["developer", "owner", "planner", "slab_entry", "block_entry"],
   },
   {
     href: "/settings",
     label: "Settings",
     icon: "⚙",
-    roles: ["owner", "planner"],
+    roles: ["developer", "owner", "planner"],
   },
 ];
 
 function roleLabel(role: AppRole): string {
   const labels: Partial<Record<AppRole, string>> = {
+    developer: "Developer",
     owner: "Owner",
     planner: "Team Head",
     block_entry: "Entry",

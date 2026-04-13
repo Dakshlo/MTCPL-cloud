@@ -4,13 +4,13 @@ import type { AppRole } from "@/lib/types";
 type NavItem = { href: string; label: string; icon: string; roles: AppRole[] };
 
 const items: NavItem[] = [
-  { href: "/dashboard",   label: "Home",     icon: "◈", roles: ["owner","planner","block_entry","slab_entry","worker","carving_assigner","dispatch","vendor"] },
-  { href: "/blocks",      label: "Blocks",   icon: "▣", roles: ["owner","planner","block_entry","slab_entry"] },
-  { href: "/slabs",       label: "Slabs",    icon: "▤", roles: ["owner","planner","slab_entry","block_entry"] },
-  { href: "/planning",    label: "Plan",     icon: "⌘", roles: ["owner","planner"] },
-  { href: "/cutting",     label: "Cutting",  icon: "◌", roles: ["owner","worker","planner"] },
-  { href: "/slabs/ready", label: "Ready",    icon: "✦", roles: ["owner","planner","slab_entry","block_entry"] },
-  { href: "/settings",    label: "Settings", icon: "⚙", roles: ["owner","planner"] },
+  { href: "/dashboard",   label: "Home",     icon: "◈", roles: ["developer","owner","planner","block_entry","slab_entry","worker","carving_assigner","dispatch","vendor"] },
+  { href: "/blocks",      label: "Blocks",   icon: "▣", roles: ["developer","owner","planner","block_entry","slab_entry"] },
+  { href: "/slabs",       label: "Slabs",    icon: "▤", roles: ["developer","owner","planner","slab_entry","block_entry"] },
+  { href: "/planning",    label: "Plan",     icon: "⌘", roles: ["developer","owner","planner"] },
+  { href: "/cutting",     label: "Cutting",  icon: "◌", roles: ["developer","owner","worker","planner"] },
+  { href: "/slabs/ready", label: "Ready",    icon: "✦", roles: ["developer","owner","planner","slab_entry","block_entry"] },
+  { href: "/settings",    label: "Settings", icon: "⚙", roles: ["developer","owner","planner"] },
 ];
 
 export function MobileNav({ role }: { role: AppRole }) {
