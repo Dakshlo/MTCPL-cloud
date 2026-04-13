@@ -56,7 +56,7 @@ const navItems: NavItem[] = [
     href: "/slabs/ready",
     label: "Ready Slabs",
     icon: "✦",
-    roles: ["developer", "owner", "team_head", "slab_entry", "block_slab_entry"],
+    roles: ["developer", "owner", "team_head", "block_slab_entry"],
   },
   {
     href: "/settings",
@@ -88,6 +88,8 @@ export function Sidebar({ role, displayName }: { role: AppRole; displayName?: st
 
   function isActive(href: string) {
     if (href === "/dashboard") return pathname === "/dashboard";
+    // /slabs/ready is its own top-level nav item — don't let /slabs match it
+    if (href === "/slabs") return pathname === "/slabs" || pathname === "/slabs/view";
     return pathname === href || pathname.startsWith(href + "/");
   }
 
