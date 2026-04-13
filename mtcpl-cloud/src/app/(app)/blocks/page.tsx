@@ -9,7 +9,7 @@ export default async function BlocksPage() {
   const { profile } = await requireAuth(["owner", "team_head", "block_slab_entry", "slab_entry", "block_entry"]);
 
   const supabase = await createDataClient(profile.role);
-  const [{ data: blocks, error }, { data: allIds }, { data: consumed }] = await Promise.all([
+  const [{ data: blocks, error }, { data: allIds }, { data: consumed }, { data: vendorRows }] = await Promise.all([
     supabase
       .from("blocks")
       .select("id, stone, yard, category, length_ft, width_ft, height_ft, status, quality, truck_no, vendor_name, bill_no, created_at")
@@ -23,6 +23,12 @@ export default async function BlocksPage() {
       .eq("status", "consumed")
       .order("updated_at", { ascending: false })
       .limit(30),
+    supabase
+      .from("vendors")
+      .select("name")
+      .eq("vendor_type", "block_vendor")
+      .eq("is_active", true)
+      .order("name"),
   ]);
 
   if (error) throw new Error(error.message);
@@ -31,6 +37,7 @@ export default async function BlocksPage() {
   const canViewReport = ["developer", "owner", "team_head"].includes(profile.role);
   const blockList = blocks ?? [];
   const consumedList = consumed ?? [];
+  const vendors = (vendorRows ?? []).map(v => v.name);
   const suggestedId = generateNextCode((allIds ?? []).map(r => r.id));
 
   const totalBlocks = blockList.length;
@@ -60,7 +67,7 @@ export default async function BlocksPage() {
         </div>
       </div>
 
-      {canEdit && <AddBlockForm suggestedId={suggestedId} />}
+      {canEdit && <AddBlockForm suggestedId={suggestedId} vendors={vendors} />}
 
       {canViewReport && <BlockExport />}
 
@@ -74,7 +81,7 @@ export default async function BlocksPage() {
       {blockList.length === 0 ? (
         <div className="banner">No blocks yet. Add your first block above.</div>
       ) : (
-        <BlockGrid blocks={blockList} canEdit={canEdit} />
+        <BlockGrid blocks={blockList} canEdit={canEdit} vendors={vendors} />
       )}
 
       {/* Block Usage History */}

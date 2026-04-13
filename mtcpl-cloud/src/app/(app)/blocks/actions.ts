@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 
 import { requireAuth } from "@/lib/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { generateNextCode } from "./utils";
 import { logAudit } from "@/lib/audit";
 
@@ -120,6 +121,26 @@ export async function updateBlockAction(formData: FormData) {
   revalidatePath("/blocks");
   revalidatePath("/dashboard");
   redirect("/blocks?toast=Block+updated");
+}
+
+export async function addBlockVendorAction(name: string): Promise<{ error: string } | undefined> {
+  await requireAuth(["owner", "team_head", "block_slab_entry", "block_entry"]);
+  const admin = createAdminSupabaseClient(); // bypass RLS — vendors write policy is owner-only
+
+  const trimmed = name.trim();
+  if (!trimmed) return { error: "Vendor name is required" };
+
+  const { error } = await admin
+    .from("vendors")
+    .insert({ name: trimmed, vendor_type: "block_vendor", is_active: true });
+
+  if (error) {
+    if (error.code === "23505") return { error: "Vendor already exists" };
+    return { error: error.message };
+  }
+
+  revalidatePath("/blocks");
+  return undefined;
 }
 
 export async function deleteBlockAction(formData: FormData) {

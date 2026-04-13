@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { BlockCardPreview } from "@/components/stone-previews";
 import { updateBlockAction, deleteBlockAction } from "./actions";
+import { VendorSelect } from "./vendor-select";
 
 const STONES = ["PinkStone", "WhiteStone"] as const;
 const YARDS = [1, 2, 3, 4, 5, 6] as const;
@@ -55,7 +56,7 @@ type Block = {
   created_at: string | null;
 };
 
-export function BlockGrid({ blocks, canEdit }: { blocks: Block[]; canEdit: boolean }) {
+export function BlockGrid({ blocks, canEdit, vendors }: { blocks: Block[]; canEdit: boolean; vendors: string[] }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = blocks.find(b => b.id === selectedId) ?? null;
 
@@ -201,7 +202,7 @@ export function BlockGrid({ blocks, canEdit }: { blocks: Block[]; canEdit: boole
                     </label>
                     <label className="stack">
                       <span>Vendor</span>
-                      <input name="vendor_name" defaultValue={selected.vendor_name ?? ""} placeholder="e.g. Raj Stones" />
+                      <VendorSelect vendors={vendors} defaultValue={selected.vendor_name} name="vendor_name" />
                     </label>
                     <label className="stack">
                       <span>Bill No.</span>

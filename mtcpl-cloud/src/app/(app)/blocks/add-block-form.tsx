@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { addBlockAction } from "./actions";
+import { VendorSelect } from "./vendor-select";
 
 const YARDS = [1, 2, 3, 4, 5, 6] as const;
 type UnitMode = "inches" | "feetinches";
@@ -40,7 +41,7 @@ function FtInInput({ label, inchValue, onInchChange }: { label: string; inchValu
   );
 }
 
-export function AddBlockForm({ suggestedId }: { suggestedId: string }) {
+export function AddBlockForm({ suggestedId, vendors }: { suggestedId: string; vendors: string[] }) {
   const [stone, setStone] = useState<"PinkStone" | "WhiteStone">("PinkStone");
   const [quality, setQuality] = useState<"" | "A" | "B">("");
   const [l, setL] = useState("");
@@ -191,7 +192,7 @@ export function AddBlockForm({ suggestedId }: { suggestedId: string }) {
             </label>
             <label className="stack" style={{ flex: "2 1 160px" }}>
               <span>Vendor / Supplier</span>
-              <input name="vendor_name" placeholder="e.g. Rajasthan Stones" />
+              <VendorSelect vendors={vendors} name="vendor_name" />
             </label>
             <label className="stack" style={{ flex: "1 1 110px" }}>
               <span>Bill No.</span>
