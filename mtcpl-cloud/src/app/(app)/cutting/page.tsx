@@ -340,7 +340,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                     <div className="chip-row">
                       {(layout?.placed ?? []).map((slab) => (
                         <span className="plan-chip" key={slab.id}>
-                          {slab.id} {slab.rot ? "R" : ""} {slab.sw}x{slab.sh} ft
+                          {slab.id} {slab.rot ? "R" : ""} {slab.sw}×{slab.sh}{slab.sd ? `×${slab.sd}` : ""} ft
                         </span>
                       ))}
                     </div>

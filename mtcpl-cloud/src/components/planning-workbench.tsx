@@ -758,6 +758,11 @@ export function PlanningWorkbench({
                         <strong>{block.id}</strong>
                         <span className="role-pill">{block.category}</span>
                         <span className="role-pill">Yard {block.yard}</span>
+                        {block.quality ? (
+                          <span className={`role-pill ${block.quality === "A" ? "badge-available" : "badge-reserved"}`}>
+                            Grade {block.quality}
+                          </span>
+                        ) : <span className="role-pill">Any Grade</span>}
                       </div>
                       <p className="muted">
                         {block.stone} | {block.length_ft} × {block.width_ft} × {block.height_ft} ft
@@ -804,6 +809,11 @@ export function PlanningWorkbench({
                           <div className="record-title-row">
                             <strong style={{ color: sclr(slab.id) }}>{slab.id}</strong>
                             {slab.stone ? <span className="role-pill">{slab.stone}</span> : null}
+                            {slab.quality ? (
+                              <span className={`role-pill ${slab.quality === "A" ? "badge-available" : "badge-reserved"}`}>
+                                Grade {slab.quality}
+                              </span>
+                            ) : <span className="role-pill">Any Grade</span>}
                           </div>
                           <p className="muted">
                             {slab.label} | {slab.length_ft} × {slab.width_ft} × {slab.thickness_ft} ft
@@ -912,7 +922,7 @@ export function PlanningWorkbench({
                               key={slab.id}
                               style={{ background: `${sclr(slab.id)}22`, color: sclr(slab.id), borderColor: `${sclr(slab.id)}44` }}
                             >
-                              {slab.id} {slab.rot ? "R" : ""} {slab.sw}×{slab.sh} ft
+                              {slab.id} {slab.rot ? "R" : ""} {slab.sw}×{slab.sh}×{slab.sd} ft
                             </span>
                           ))}
                         </div>
