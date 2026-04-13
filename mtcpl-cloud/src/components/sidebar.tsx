@@ -18,25 +18,25 @@ const navItems: NavItem[] = [
     label: "Dashboard",
     icon: "◈",
     // worker (CUTTING OPERATOR) has NO dashboard access
-    roles: ["developer", "owner", "planner", "dispatch", "block_entry", "slab_entry", "carving_assigner", "vendor"],
+    roles: ["developer", "owner", "team_head", "dispatch", "block_slab_entry", "slab_entry", "carving_assigner", "vendor"],
   },
   {
     href: "/blocks",
     label: "Blocks",
     icon: "▣",
-    roles: ["developer", "owner", "planner", "block_entry", "block_only"],
-    // slab_entry sees slabs only; block_only sees blocks only (no report link via nav)
+    roles: ["developer", "owner", "team_head", "block_slab_entry", "block_entry"],
+    // slab_entry sees slabs only; block_entry sees blocks only (no report link via nav)
   },
   {
     href: "/slabs",
     label: "Slabs",
     icon: "▤",
-    roles: ["developer", "owner", "planner", "slab_entry", "block_entry"],
+    roles: ["developer", "owner", "team_head", "slab_entry", "block_slab_entry"],
     children: [
       {
         href: "/slabs/view",
         label: "View Inventory",
-        roles: ["developer", "owner", "planner"],
+        roles: ["developer", "owner", "team_head"],
       },
     ],
   },
@@ -44,25 +44,25 @@ const navItems: NavItem[] = [
     href: "/planning",
     label: "Plan Generator",
     icon: "⌘",
-    roles: ["developer", "owner", "planner"],
+    roles: ["developer", "owner", "team_head"],
   },
   {
     href: "/cutting",
     label: "Cutting",
     icon: "◌",
-    roles: ["developer", "owner", "worker", "planner"],
+    roles: ["developer", "owner", "cutting_operator", "team_head"],
   },
   {
     href: "/slabs/ready",
     label: "Ready Slabs",
     icon: "✦",
-    roles: ["developer", "owner", "planner", "slab_entry", "block_entry"],
+    roles: ["developer", "owner", "team_head", "slab_entry", "block_slab_entry"],
   },
   {
     href: "/settings",
     label: "Settings",
     icon: "⚙",
-    roles: ["developer", "owner", "planner"],
+    roles: ["developer", "owner", "team_head"],
   },
 ];
 
@@ -70,11 +70,11 @@ function roleLabel(role: AppRole): string {
   const labels: Partial<Record<AppRole, string>> = {
     developer: "DEVELOPER",
     owner: "OWNER",
-    planner: "TEAM HEAD",
-    block_entry: "BLOCK+SLAB ENTRY",
+    team_head: "TEAM HEAD",
+    block_slab_entry: "BLOCK+SLAB ENTRY",
     slab_entry: "SLAB ENTRY",
-    block_only: "BLOCK ENTRY",
-    worker: "CUTTING OPERATOR",
+    block_entry: "BLOCK ENTRY",
+    cutting_operator: "CUTTING OPERATOR",
     dispatch: "DISPATCH",
     carving_assigner: "CARVING",
     vendor: "VENDOR",

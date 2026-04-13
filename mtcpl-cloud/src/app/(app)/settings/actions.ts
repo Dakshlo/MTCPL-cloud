@@ -12,7 +12,7 @@ function text(fd: FormData, key: string) {
 }
 
 export async function addTempleAction(formData: FormData) {
-  await requireAuth(["owner", "planner"]);
+  await requireAuth(["owner", "team_head"]);
   const supabase = await createServerSupabaseClient();
 
   const name = text(formData, "name");
@@ -29,7 +29,7 @@ export async function addTempleAction(formData: FormData) {
 }
 
 export async function updateTempleAction(formData: FormData) {
-  await requireAuth(["owner", "planner"]);
+  await requireAuth(["owner", "team_head"]);
   const supabase = await createServerSupabaseClient();
 
   const id = text(formData, "id");
@@ -48,7 +48,7 @@ export async function updateTempleAction(formData: FormData) {
 }
 
 export async function deleteTempleAction(formData: FormData) {
-  await requireAuth(["owner", "planner"]);
+  await requireAuth(["owner", "team_head"]);
   const supabase = await createServerSupabaseClient();
 
   const id = text(formData, "id");
@@ -60,11 +60,11 @@ export async function deleteTempleAction(formData: FormData) {
 }
 
 export async function updateUserAction(formData: FormData) {
-  const { profile: currentUser } = await requireAuth(["owner", "planner", "developer"]);
+  const { profile: currentUser } = await requireAuth(["owner", "team_head", "developer"]);
   const admin = createAdminSupabaseClient();
 
   const id = text(formData, "id");
-  const requestedRole = text(formData, "role") || "block_entry";
+  const requestedRole = text(formData, "role") || "block_slab_entry";
   const full_name = text(formData, "full_name") || null;
   const is_active = formData.get("is_active") === "true";
 
@@ -78,9 +78,9 @@ export async function updateUserAction(formData: FormData) {
   // Role assignment rules:
   // - Developer: can assign any role including owner/developer
   // - Owner + Planner: can assign any role EXCEPT owner and developer
-  const RESTRICTED_ASSIGNABLE = ["planner", "block_entry", "slab_entry", "block_only", "worker"];
+  const RESTRICTED_ASSIGNABLE = ["team_head", "block_slab_entry", "slab_entry", "block_entry", "cutting_operator"];
   let role = requestedRole;
-  if (currentUser.role === "owner" || currentUser.role === "planner") {
+  if (currentUser.role === "owner" || currentUser.role === "team_head") {
     if (!RESTRICTED_ASSIGNABLE.includes(requestedRole)) {
       redirect("/settings?toast=Cannot+assign+that+role");
     }

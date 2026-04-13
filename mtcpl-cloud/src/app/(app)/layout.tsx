@@ -33,11 +33,11 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               {({
                 developer: "DEVELOPER",
                 owner: "OWNER",
-                planner: "TEAM HEAD",
-                block_entry: "BLOCK+SLAB ENTRY",
+                team_head: "TEAM HEAD",
+                block_slab_entry: "BLOCK+SLAB ENTRY",
                 slab_entry: "SLAB ENTRY",
-                block_only: "BLOCK ENTRY",
-                worker: "CUTTING OPERATOR",
+                block_entry: "BLOCK ENTRY",
+                cutting_operator: "CUTTING OPERATOR",
               } as Record<string, string>)[profile.role] ?? profile.role.replace(/_/g, " ").toUpperCase()}
             </span>
             <LogoutButton />

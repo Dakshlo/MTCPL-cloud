@@ -1,11 +1,11 @@
 export type AppRole =
   | "developer"
   | "owner"
-  | "planner"
-  | "block_entry"
+  | "team_head"
+  | "block_slab_entry"
   | "slab_entry"
-  | "block_only"
-  | "worker"
+  | "block_entry"
+  | "cutting_operator"
   | "carving_assigner"
   | "dispatch"
   | "vendor";

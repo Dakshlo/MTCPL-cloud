@@ -6,38 +6,38 @@ import type { AppRole } from "@/lib/types";
 
 // All assignable roles — only shown to developer
 const UI_ROLES_ALL = [
-  { value: "developer", label: "DEVELOPER" },
-  { value: "owner",     label: "OWNER" },
-  { value: "planner",   label: "TEAM HEAD" },
-  { value: "block_entry", label: "BLOCK+SLAB ENTRY" },
-  { value: "slab_entry",  label: "SLAB ENTRY" },
-  { value: "block_only",  label: "BLOCK ENTRY" },
-  { value: "worker",    label: "CUTTING OPERATOR" },
+  { value: "developer",        label: "DEVELOPER" },
+  { value: "owner",            label: "OWNER" },
+  { value: "team_head",        label: "TEAM HEAD" },
+  { value: "block_slab_entry", label: "BLOCK+SLAB ENTRY" },
+  { value: "slab_entry",       label: "SLAB ENTRY" },
+  { value: "block_entry",      label: "BLOCK ENTRY" },
+  { value: "cutting_operator", label: "CUTTING OPERATOR" },
 ];
 
-// Roles a team-lead (planner) can assign — cannot promote to owner or developer
+// Roles owner/team-head can assign — cannot promote to owner or developer
 const UI_ROLES_PLANNER = [
-  { value: "planner",   label: "TEAM HEAD" },
-  { value: "block_entry", label: "BLOCK+SLAB ENTRY" },
-  { value: "slab_entry",  label: "SLAB ENTRY" },
-  { value: "block_only",  label: "BLOCK ENTRY" },
-  { value: "worker",    label: "CUTTING OPERATOR" },
+  { value: "team_head",        label: "TEAM HEAD" },
+  { value: "block_slab_entry", label: "BLOCK+SLAB ENTRY" },
+  { value: "slab_entry",       label: "SLAB ENTRY" },
+  { value: "block_entry",      label: "BLOCK ENTRY" },
+  { value: "cutting_operator", label: "CUTTING OPERATOR" },
 ];
 
 // Legacy — kept for roleLabel lookup
 const UI_ROLES = UI_ROLES_ALL;
 
 const ROLE_ACCESS: Record<string, string[]> = {
-  developer:   ["Dashboard", "Blocks", "Slabs", "Plan Generator", "Cutting", "Settings"],
-  owner:       ["Dashboard", "Blocks", "Slabs", "Plan Generator", "Cutting", "Settings"],
-  planner:     ["Dashboard", "Blocks", "Slabs", "Plan Generator", "Cutting", "Settings"],
-  block_entry: ["Dashboard", "Blocks", "Slabs"],
-  slab_entry:  ["Dashboard", "Slabs"],
-  block_only:  ["Blocks"],
-  worker:      ["Cutting"],
+  developer:        ["Dashboard", "Blocks", "Slabs", "Plan Generator", "Cutting", "Settings"],
+  owner:            ["Dashboard", "Blocks", "Slabs", "Plan Generator", "Cutting", "Settings"],
+  team_head:        ["Dashboard", "Blocks", "Slabs", "Plan Generator", "Cutting", "Settings"],
+  block_slab_entry: ["Dashboard", "Blocks", "Slabs"],
+  slab_entry:       ["Dashboard", "Slabs"],
+  block_entry:      ["Blocks"],
+  cutting_operator: ["Cutting"],
   carving_assigner: ["Dashboard"],
-  dispatch:    ["Dashboard"],
-  vendor:      ["Dashboard"],
+  dispatch:         ["Dashboard"],
+  vendor:           ["Dashboard"],
 };
 
 function roleLabel(role: string): string {
@@ -50,7 +50,7 @@ function formatDate(iso: string | null) {
 }
 
 export default async function SettingsPage() {
-  const { profile: currentUser } = await requireAuth(["owner", "planner", "developer"]);
+  const { profile: currentUser } = await requireAuth(["owner", "team_head", "developer"]);
   const supabase = await createServerSupabaseClient();
   const admin = createAdminSupabaseClient();
 
@@ -164,7 +164,7 @@ export default async function SettingsPage() {
                                 </select>
                               ) : (
                                 // Owner and Planner — can assign any role except owner/developer
-                                <select name="role" defaultValue={UI_ROLES_PLANNER.some(r => r.value === role) ? role : "block_entry"} disabled={isSelf}>
+                                <select name="role" defaultValue={UI_ROLES_PLANNER.some(r => r.value === role) ? role : "block_slab_entry"} disabled={isSelf}>
                                   {UI_ROLES_PLANNER.map((r) => (
                                     <option key={r.value} value={r.value}>{r.label}</option>
                                   ))}

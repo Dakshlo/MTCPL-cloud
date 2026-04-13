@@ -21,7 +21,7 @@ function toast(path: string, msg: string): never {
 }
 
 export async function addSlabAction(formData: FormData) {
-  const { profile } = await requireAuth(["owner", "planner", "slab_entry"]);
+  const { profile } = await requireAuth(["owner", "team_head", "slab_entry"]);
   const supabase = await createServerSupabaseClient();
 
   const temple = text(formData, "temple");
@@ -67,7 +67,7 @@ export async function addSlabAction(formData: FormData) {
 }
 
 export async function updateSlabAction(formData: FormData) {
-  const { profile } = await requireAuth(["owner", "planner", "slab_entry"]);
+  const { profile } = await requireAuth(["owner", "team_head", "slab_entry"]);
   const supabase = await createServerSupabaseClient();
 
   const id = text(formData, "id");
@@ -97,7 +97,7 @@ export async function updateSlabAction(formData: FormData) {
 }
 
 export async function deleteSlabAction(formData: FormData) {
-  const { profile } = await requireAuth(["owner", "planner", "slab_entry"]);
+  const { profile } = await requireAuth(["owner", "team_head", "slab_entry"]);
   const supabase = await createServerSupabaseClient();
 
   const id = text(formData, "id");

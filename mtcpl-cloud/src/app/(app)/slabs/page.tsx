@@ -4,7 +4,7 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { AddSlabForm } from "./add-slab-form";
 import { SlabGrid } from "./slab-grid";
 export default async function SlabsPage() {
-  const { profile } = await requireAuth(["owner", "planner", "slab_entry", "block_entry"]);
+  const { profile } = await requireAuth(["owner", "team_head", "slab_entry", "block_slab_entry"]);
   const supabase = await createServerSupabaseClient();
 
   const [{ data: slabs, error }, { data: temples }, { data: allIds }] = await Promise.all([
@@ -21,7 +21,7 @@ export default async function SlabsPage() {
 
   if (error) throw new Error(error.message);
 
-  const canEdit = ["developer", "owner", "planner", "slab_entry"].includes(profile.role);
+  const canEdit = ["developer", "owner", "team_head", "slab_entry"].includes(profile.role);
   const slabList = slabs ?? [];
   const templeList = temples ?? [];
   const existingIds = (allIds ?? []).map(r => r.id);

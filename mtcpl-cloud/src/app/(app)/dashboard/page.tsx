@@ -3,7 +3,7 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 
 export default async function DashboardPage() {
-  await requireAuth(["owner", "planner", "dispatch", "carving_assigner", "developer"]);
+  await requireAuth(["owner", "team_head", "dispatch", "carving_assigner", "developer"]);
 
   const supabase = await createServerSupabaseClient();
   const admin = createAdminSupabaseClient();

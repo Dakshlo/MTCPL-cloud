@@ -8,7 +8,7 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 async function approvePlanAction(formData: FormData) {
   "use server";
 
-  const { profile } = await requireAuth(["owner", "planner"]);
+  const { profile } = await requireAuth(["owner", "team_head"]);
   const supabase = await createServerSupabaseClient();
 
   const kerfMm = Number(formData.get("kerf_mm"));
@@ -167,7 +167,7 @@ export default async function PlanningPage({
 }: {
   searchParams: Promise<{ slabs?: string }>;
 }) {
-  await requireAuth(["owner", "planner"]);
+  await requireAuth(["owner", "team_head"]);
 
   const supabase = await createServerSupabaseClient();
   const params = await searchParams;

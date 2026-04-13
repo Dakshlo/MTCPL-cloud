@@ -3,7 +3,7 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { ReadySlabsClient } from "./ready-client";
 
 export default async function ReadySlabsPage() {
-  await requireAuth(["owner", "planner", "slab_entry", "block_entry"]);
+  await requireAuth(["owner", "team_head", "slab_entry", "block_slab_entry"]);
   const supabase = await createServerSupabaseClient();
 
   const { data, error } = await supabase

@@ -6,7 +6,7 @@ import { BlockExport } from "./block-export";
 import { generateNextCode } from "./utils";
 
 export default async function BlocksPage() {
-  const { profile } = await requireAuth(["owner", "planner", "block_entry", "slab_entry", "block_only"]);
+  const { profile } = await requireAuth(["owner", "team_head", "block_slab_entry", "slab_entry", "block_entry"]);
 
   const supabase = await createServerSupabaseClient();
   const [{ data: blocks, error }, { data: allIds }, { data: consumed }] = await Promise.all([
@@ -27,8 +27,8 @@ export default async function BlocksPage() {
 
   if (error) throw new Error(error.message);
 
-  const canEdit = ["developer", "owner", "planner", "block_entry", "block_only"].includes(profile.role);
-  const canViewReport = ["developer", "owner", "planner"].includes(profile.role);
+  const canEdit = ["developer", "owner", "team_head", "block_slab_entry", "block_entry"].includes(profile.role);
+  const canViewReport = ["developer", "owner", "team_head"].includes(profile.role);
   const blockList = blocks ?? [];
   const consumedList = consumed ?? [];
   const suggestedId = generateNextCode((allIds ?? []).map(r => r.id));

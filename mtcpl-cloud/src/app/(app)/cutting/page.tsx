@@ -58,7 +58,7 @@ async function syncSessionStatus(sessionId: string) {
 async function approveBlockAction(formData: FormData) {
   "use server";
 
-  await requireAuth(["owner", "worker"]);
+  await requireAuth(["owner", "cutting_operator"]);
   const supabase = await createServerSupabaseClient();
   const sessionBlockId = String(formData.get("session_block_id") || "");
   const sessionId = String(formData.get("session_id") || "");
@@ -73,7 +73,7 @@ async function approveBlockAction(formData: FormData) {
 async function rejectBlockAction(formData: FormData) {
   "use server";
 
-  const { profile } = await requireAuth(["owner", "worker"]);
+  const { profile } = await requireAuth(["owner", "cutting_operator"]);
   const supabase = await createServerSupabaseClient();
   const sessionBlockId = String(formData.get("session_block_id") || "");
   const sessionId = String(formData.get("session_id") || "");
@@ -116,7 +116,7 @@ async function rejectBlockAction(formData: FormData) {
 async function undoDonePromptAction(formData: FormData) {
   "use server";
 
-  await requireAuth(["owner", "worker"]);
+  await requireAuth(["owner", "cutting_operator"]);
   const supabase = await createServerSupabaseClient();
   const sessionBlockId = String(formData.get("session_block_id") || "");
 
@@ -162,7 +162,7 @@ async function undoDoneAction(formData: FormData) {
 async function markDonePromptAction(formData: FormData) {
   "use server";
 
-  await requireAuth(["owner", "worker"]);
+  await requireAuth(["owner", "cutting_operator"]);
   const supabase = await createServerSupabaseClient();
   const sessionBlockId = String(formData.get("session_block_id") || "");
 
@@ -175,7 +175,7 @@ async function markDonePromptAction(formData: FormData) {
 async function finishBlockAction(formData: FormData) {
   "use server";
 
-  const { profile } = await requireAuth(["owner", "worker"]);
+  const { profile } = await requireAuth(["owner", "cutting_operator"]);
   const supabase = await createServerSupabaseClient();
 
   const sessionBlockId = String(formData.get("session_block_id") || "");
@@ -258,7 +258,7 @@ async function finishBlockAction(formData: FormData) {
 }
 
 export default async function CuttingPage({ searchParams }: { searchParams: SearchParams }) {
-  const { profile } = await requireAuth(["owner", "worker"]);
+  const { profile } = await requireAuth(["owner", "cutting_operator"]);
 
   const params = await searchParams;
   const showClosed = params.show_closed === "1";

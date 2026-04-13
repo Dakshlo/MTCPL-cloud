@@ -4,7 +4,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { ReportClient } from "./report-client";
 
 export default async function BlockReportPage() {
-  await requireAuth(["owner", "planner", "developer"]);
+  await requireAuth(["owner", "team_head", "developer"]);
   // Admin client bypasses RLS so developer can see all blocks too
   const admin = createAdminSupabaseClient();
 
