@@ -1,13 +1,14 @@
 import Link from "next/link";
 import { requireAuth } from "@/lib/auth";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { ReportClient } from "./report-client";
 
 export default async function BlockReportPage() {
-  await requireAuth(["owner", "planner"]);
-  const supabase = await createServerSupabaseClient();
+  await requireAuth(["owner", "planner", "developer"]);
+  // Admin client bypasses RLS so developer can see all blocks too
+  const admin = createAdminSupabaseClient();
 
-  const { data, error } = await supabase
+  const { data, error } = await admin
     .from("blocks")
     .select("id, stone, yard, category, quality, length_ft, width_ft, height_ft, status, truck_no, vendor_name, bill_no, created_at, updated_at")
     .order("created_at", { ascending: false });

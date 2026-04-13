@@ -60,7 +60,8 @@ export default async function SettingsPage() {
     admin.from("profiles").select("id, full_name, phone, role, is_active, created_at").order("full_name"),
   ]);
 
-  const { data: recentAudit } = await supabase
+  // Admin client needed — profiles join in audit log returns null names for non-self users under RLS
+  const { data: recentAudit } = await admin
     .from("audit_logs")
     .select("id, action, entity_type, entity_id, created_at, profiles(full_name)")
     .order("created_at", { ascending: false })

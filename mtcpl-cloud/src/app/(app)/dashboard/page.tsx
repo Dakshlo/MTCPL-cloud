@@ -1,10 +1,12 @@
 import { requireAuth } from "@/lib/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 
 export default async function DashboardPage() {
-  await requireAuth(["owner", "planner", "dispatch", "carving_assigner"]);
+  await requireAuth(["owner", "planner", "dispatch", "carving_assigner", "developer"]);
 
   const supabase = await createServerSupabaseClient();
+  const admin = createAdminSupabaseClient();
   const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
 
   const [
@@ -20,7 +22,8 @@ export default async function DashboardPage() {
     supabase.from("blocks").select("*", { count: "exact", head: true }).eq("status", "reserved"),
     supabase.from("slab_requirements").select("*", { count: "exact", head: true }).eq("status", "open"),
     supabase.from("cut_sessions").select("*", { count: "exact", head: true }).eq("status", "in_progress"),
-    supabase.from("profiles").select("id, full_name, role").gte("last_seen_at", fiveMinAgo)
+    // Admin client needed — RLS on profiles restricts non-owner roles from seeing other users
+    admin.from("profiles").select("id, full_name, role").gte("last_seen_at", fiveMinAgo)
   ]);
 
   const metrics = [
