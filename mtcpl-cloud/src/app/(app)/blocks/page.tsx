@@ -69,7 +69,15 @@ export default async function BlocksPage() {
 
       {canEdit && <AddBlockForm suggestedId={suggestedId} vendors={vendors} />}
 
-      {canViewReport && <BlockExport />}
+      {canViewReport && (
+        <div style={{ margin: "28px 0 4px", padding: "14px 18px", background: "var(--surface)", border: "2px dashed var(--border)", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
+          <div>
+            <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: "var(--text)" }}>Block Report</p>
+            <p className="muted" style={{ margin: "3px 0 0", fontSize: 12 }}>View, filter and sort all block records — including consumed, discarded, and active · Export to Excel</p>
+          </div>
+          <BlockExport />
+        </div>
+      )}
 
       <div className="section-heading">
         <div>
@@ -84,16 +92,18 @@ export default async function BlocksPage() {
         <BlockGrid blocks={blockList} canEdit={canEdit} vendors={vendors} />
       )}
 
-      {/* Block Usage History */}
+      {/* Block Usage History — collapsible */}
       {consumedList.length > 0 && (
-        <>
-          <div className="section-heading" style={{ marginTop: 40 }}>
-            <div>
-              <h2>Block History ({consumedList.length})</h2>
-              <p className="muted">Recently consumed blocks · used in cut sessions</p>
+        <details style={{ marginTop: 40 }}>
+          <summary style={{ cursor: "pointer", listStyle: "none", userSelect: "none" }}>
+            <div className="section-heading" style={{ marginTop: 0, display: "inline-flex", width: "100%", alignItems: "center", justifyContent: "space-between" }}>
+              <div>
+                <h2 style={{ margin: 0 }}>Block History ({consumedList.length}) ▾</h2>
+                <p className="muted" style={{ margin: "2px 0 0" }}>Recently consumed blocks · click to expand</p>
+              </div>
             </div>
-          </div>
-          <div className="records-stack">
+          </summary>
+          <div className="records-stack" style={{ marginTop: 12 }}>
             {consumedList.map(blk => {
               const cft = ((Number(blk.length_ft) * Number(blk.width_ft) * Number(blk.height_ft)) / 1728).toFixed(2);
               return (
@@ -106,7 +116,7 @@ export default async function BlocksPage() {
                       </p>
                     </div>
                     <div style={{ textAlign: "right" }}>
-                      <span className="role-pill badge-consumed">in-process</span>
+                      <span className="role-pill badge-consumed">cut &amp; consumed</span>
                       <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
                         Used: {fmtDate(blk.updated_at)}
                       </p>
