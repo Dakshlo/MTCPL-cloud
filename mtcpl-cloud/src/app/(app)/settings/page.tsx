@@ -6,39 +6,42 @@ import type { AppRole } from "@/lib/types";
 
 // All assignable roles — only shown to developer
 const UI_ROLES_ALL = [
-  { value: "developer", label: "Developer" },
-  { value: "owner", label: "Owner" },
-  { value: "planner", label: "Team Head" },
-  { value: "block_entry", label: "Entry (Block & Slab)" },
-  { value: "worker", label: "Cutting Operator" },
+  { value: "developer", label: "DEVELOPER" },
+  { value: "owner",     label: "OWNER" },
+  { value: "planner",   label: "TEAM HEAD" },
+  { value: "block_entry", label: "BLOCK+SLAB ENTRY" },
+  { value: "slab_entry",  label: "SLAB ENTRY" },
+  { value: "block_only",  label: "BLOCK ENTRY" },
+  { value: "worker",    label: "CUTTING OPERATOR" },
 ];
 
 // Roles a team-lead (planner) can assign — cannot promote to owner or developer
 const UI_ROLES_PLANNER = [
-  { value: "planner", label: "Team Head" },
-  { value: "block_entry", label: "Entry (Block & Slab)" },
-  { value: "worker", label: "Cutting Operator" },
+  { value: "planner",   label: "TEAM HEAD" },
+  { value: "block_entry", label: "BLOCK+SLAB ENTRY" },
+  { value: "slab_entry",  label: "SLAB ENTRY" },
+  { value: "block_only",  label: "BLOCK ENTRY" },
+  { value: "worker",    label: "CUTTING OPERATOR" },
 ];
 
 // Legacy — kept for roleLabel lookup
 const UI_ROLES = UI_ROLES_ALL;
 
 const ROLE_ACCESS: Record<string, string[]> = {
-  developer: ["Dashboard", "Blocks", "Slabs", "Plan Generator", "Cutting", "Settings"],
-  owner: ["Dashboard", "Blocks", "Slabs", "Plan Generator", "Cutting", "Settings"],
-  planner: ["Dashboard", "Blocks", "Slabs", "Plan Generator", "Cutting", "Settings"],
+  developer:   ["Dashboard", "Blocks", "Slabs", "Plan Generator", "Cutting", "Settings"],
+  owner:       ["Dashboard", "Blocks", "Slabs", "Plan Generator", "Cutting", "Settings"],
+  planner:     ["Dashboard", "Blocks", "Slabs", "Plan Generator", "Cutting", "Settings"],
   block_entry: ["Dashboard", "Blocks", "Slabs"],
-  slab_entry: ["Dashboard", "Blocks", "Slabs"],
-  worker: ["Cutting"],
+  slab_entry:  ["Dashboard", "Slabs"],
+  block_only:  ["Blocks"],
+  worker:      ["Cutting"],
   carving_assigner: ["Dashboard"],
-  dispatch: ["Dashboard"],
-  vendor: ["Dashboard"],
+  dispatch:    ["Dashboard"],
+  vendor:      ["Dashboard"],
 };
 
 function roleLabel(role: string): string {
-  if (role === "developer") return "Developer";
-  if (role === "slab_entry" || role === "block_entry") return "Entry (Block & Slab)";
-  return UI_ROLES.find(r => r.value === role)?.label ?? role.replace(/_/g, " ");
+  return UI_ROLES.find(r => r.value === role)?.label ?? role.replace(/_/g, " ").toUpperCase();
 }
 
 function formatDate(iso: string | null) {
@@ -109,7 +112,14 @@ export default async function SettingsPage() {
                         {user.created_at ? <span className="muted" style={{ fontSize: 11, marginLeft: 8 }}>Joined {formatDate(user.created_at)}</span> : null}
                       </span>
                       <span>
-                        <span className={`role-pill ${isDeveloper ? "badge-reserved" : ""}`} style={isDeveloper ? { background: "var(--gold)", color: "#fff", fontWeight: 700 } : {}}>
+                        <span
+                          className="role-pill"
+                          style={
+                            isDeveloper ? { background: "var(--gold)", color: "#fff", fontWeight: 700 } :
+                            role === "owner" ? { background: "#1a1a1a", color: "#fff", fontWeight: 700 } :
+                            {}
+                          }
+                        >
                           {roleLabel(role)}
                         </span>
                       </span>

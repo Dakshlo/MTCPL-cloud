@@ -4,8 +4,8 @@ import type { AppRole } from "@/lib/types";
 type NavItem = { href: string; label: string; icon: string; roles: AppRole[] };
 
 const items: NavItem[] = [
-  { href: "/dashboard",   label: "Home",     icon: "◈", roles: ["developer","owner","planner","block_entry","slab_entry","worker","carving_assigner","dispatch","vendor"] },
-  { href: "/blocks",      label: "Blocks",   icon: "▣", roles: ["developer","owner","planner","block_entry","slab_entry"] },
+  { href: "/dashboard",   label: "Home",     icon: "◈", roles: ["developer","owner","planner","block_entry","slab_entry","carving_assigner","dispatch","vendor"] },
+  { href: "/blocks",      label: "Blocks",   icon: "▣", roles: ["developer","owner","planner","block_entry","block_only"] },
   { href: "/slabs",       label: "Slabs",    icon: "▤", roles: ["developer","owner","planner","slab_entry","block_entry"] },
   { href: "/planning",    label: "Plan",     icon: "⌘", roles: ["developer","owner","planner"] },
   { href: "/cutting",     label: "Cutting",  icon: "◌", roles: ["developer","owner","worker","planner"] },

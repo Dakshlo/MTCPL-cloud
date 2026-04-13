@@ -25,7 +25,7 @@ function redirectWithToast(path: string, message: string): never {
 }
 
 export async function addBlockAction(formData: FormData) {
-  const { profile } = await requireAuth(["owner", "planner", "block_entry"]);
+  const { profile } = await requireAuth(["owner", "planner", "block_entry", "block_only"]);
   const supabase = await createServerSupabaseClient();
 
   const { data: existingRows } = await supabase.from("blocks").select("id");
@@ -84,7 +84,7 @@ export async function addBlockAction(formData: FormData) {
 }
 
 export async function updateBlockAction(formData: FormData) {
-  const { profile } = await requireAuth(["owner", "planner", "block_entry"]);
+  const { profile } = await requireAuth(["owner", "planner", "block_entry", "block_only"]);
   const supabase = await createServerSupabaseClient();
 
   const originalId = textValue(formData, "original_id");
@@ -123,7 +123,7 @@ export async function updateBlockAction(formData: FormData) {
 }
 
 export async function deleteBlockAction(formData: FormData) {
-  const { profile } = await requireAuth(["owner", "planner", "block_entry"]);
+  const { profile } = await requireAuth(["owner", "planner", "block_entry", "block_only"]);
   const supabase = await createServerSupabaseClient();
 
   const id = textValue(formData, "delete_target_id") || textValue(formData, "id");

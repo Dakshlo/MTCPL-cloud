@@ -25,8 +25,20 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             <strong className="topbar-name">{displayName}</strong>
           </div>
           <div className="topbar-right">
-            <span className="role-pill" style={profile.role === "developer" ? { background: "var(--gold)", color: "#fff", fontWeight: 700 } : {}}>
-              {profile.role === "developer" ? "Developer" : profile.role.replace(/_/g, " ")}
+            <span className="role-pill" style={
+              profile.role === "developer" ? { background: "var(--gold)", color: "#fff", fontWeight: 700 } :
+              profile.role === "owner"     ? { background: "#1a1a1a", color: "#fff", fontWeight: 700 } :
+              {}
+            }>
+              {({
+                developer: "DEVELOPER",
+                owner: "OWNER",
+                planner: "TEAM HEAD",
+                block_entry: "BLOCK+SLAB ENTRY",
+                slab_entry: "SLAB ENTRY",
+                block_only: "BLOCK ENTRY",
+                worker: "CUTTING OPERATOR",
+              } as Record<string, string>)[profile.role] ?? profile.role.replace(/_/g, " ").toUpperCase()}
             </span>
             <LogoutButton />
           </div>

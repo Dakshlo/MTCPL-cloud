@@ -4,6 +4,7 @@ export type AppRole =
   | "planner"
   | "block_entry"
   | "slab_entry"
+  | "block_only"
   | "worker"
   | "carving_assigner"
   | "dispatch"

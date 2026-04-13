@@ -17,13 +17,15 @@ const navItems: NavItem[] = [
     href: "/dashboard",
     label: "Dashboard",
     icon: "◈",
-    roles: ["developer", "owner", "planner", "dispatch", "block_entry", "slab_entry", "worker", "carving_assigner", "vendor"],
+    // worker (CUTTING OPERATOR) has NO dashboard access
+    roles: ["developer", "owner", "planner", "dispatch", "block_entry", "slab_entry", "carving_assigner", "vendor"],
   },
   {
     href: "/blocks",
     label: "Blocks",
     icon: "▣",
-    roles: ["developer", "owner", "planner", "block_entry", "slab_entry"],
+    roles: ["developer", "owner", "planner", "block_entry", "block_only"],
+    // slab_entry sees slabs only; block_only sees blocks only (no report link via nav)
   },
   {
     href: "/slabs",
@@ -66,17 +68,18 @@ const navItems: NavItem[] = [
 
 function roleLabel(role: AppRole): string {
   const labels: Partial<Record<AppRole, string>> = {
-    developer: "Developer",
-    owner: "Owner",
-    planner: "Team Head",
-    block_entry: "Entry",
-    slab_entry: "Entry",
-    worker: "Worker",
-    dispatch: "Dispatch",
-    carving_assigner: "Carving",
-    vendor: "Vendor",
+    developer: "DEVELOPER",
+    owner: "OWNER",
+    planner: "TEAM HEAD",
+    block_entry: "BLOCK+SLAB ENTRY",
+    slab_entry: "SLAB ENTRY",
+    block_only: "BLOCK ENTRY",
+    worker: "CUTTING OPERATOR",
+    dispatch: "DISPATCH",
+    carving_assigner: "CARVING",
+    vendor: "VENDOR",
   };
-  return labels[role] ?? role.replace(/_/g, " ");
+  return labels[role] ?? role.replace(/_/g, " ").toUpperCase();
 }
 
 export function Sidebar({ role, displayName }: { role: AppRole; displayName?: string }) {

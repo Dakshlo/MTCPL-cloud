@@ -79,7 +79,7 @@ export async function updateUserAction(formData: FormData) {
   // - Developer: can assign any role
   // - Planner: can assign planner/block_entry/worker only (not owner or developer)
   // - Owner: cannot change roles
-  const PLANNER_ASSIGNABLE = ["planner", "block_entry", "slab_entry", "worker"];
+  const PLANNER_ASSIGNABLE = ["planner", "block_entry", "slab_entry", "block_only", "worker"];
   let role = requestedRole;
   if (currentUser.role === "owner") {
     // Owner cannot change roles — keep existing role
