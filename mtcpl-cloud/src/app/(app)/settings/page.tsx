@@ -29,7 +29,7 @@ const UI_ROLES = UI_ROLES_ALL;
 const ROLE_ACCESS: Record<string, string[]> = {
   developer:        ["Dashboard", "Blocks", "Slabs", "Plan Generator", "Cutting", "Settings"],
   owner:            ["Dashboard", "Blocks", "Slabs", "Plan Generator", "Cutting", "Settings"],
-  team_head:        ["Dashboard", "Blocks", "Slabs", "Plan Generator", "Cutting", "Settings"],
+  team_head:        ["Blocks", "Slabs", "Plan Generator", "Cutting", "Settings"],
   block_slab_entry: ["Dashboard", "Blocks", "Slabs"],
   slab_entry:       ["Dashboard", "Slabs"],
   block_entry:      ["Blocks"],
@@ -90,8 +90,8 @@ export default async function SettingsPage() {
         </div>
       </div>
 
-      {/* User Management — owner/developer only */}
-      {(currentUser.role === "owner" || currentUser.role === "developer") && (
+      {/* User Management — owner, team_head, developer */}
+      {(currentUser.role === "owner" || currentUser.role === "developer" || currentUser.role === "team_head") && (
         <div className="settings-section">
           <div className="settings-section-header">
             <h2>Users</h2>

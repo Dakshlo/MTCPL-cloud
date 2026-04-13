@@ -17,8 +17,8 @@ const navItems: NavItem[] = [
     href: "/dashboard",
     label: "Dashboard",
     icon: "◈",
-    // worker (CUTTING OPERATOR) has NO dashboard access
-    roles: ["developer", "owner", "team_head", "dispatch", "block_slab_entry", "slab_entry", "carving_assigner", "vendor"],
+    // Only owner and developer can see Dashboard
+    roles: ["developer", "owner"],
   },
   {
     href: "/blocks",

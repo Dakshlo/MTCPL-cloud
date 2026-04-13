@@ -7,9 +7,10 @@ export function getDefaultRouteForRole(role?: AppRole | null) {
   switch (role) {
     case "developer":
     case "owner":
-    case "team_head":
-    case "dispatch":
       return "/dashboard";
+    case "team_head":
+      return "/slabs";
+    case "dispatch":
     case "block_slab_entry":
     case "block_entry":
       return "/blocks";
