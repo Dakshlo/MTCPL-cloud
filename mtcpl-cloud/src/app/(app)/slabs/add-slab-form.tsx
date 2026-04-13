@@ -124,22 +124,8 @@ export function AddSlabForm({ temples, existingIds }: { temples: Temple[]; exist
             )}
           </label>
 
-          <div className="stack" style={{ flex: "0 0 auto" }}>
-            <span>Stone Type</span>
-            <div className="stone-toggle">
-              {(["PinkStone", "WhiteStone"] as const).map(s => (
-                <button
-                  key={s}
-                  type="button"
-                  className={`stone-toggle-btn${stone === s ? (s === "PinkStone" ? " active-pink" : " active-white") : ""}`}
-                  onClick={() => setStone(s)}
-                >
-                  {s === "PinkStone" ? "Pink" : "White"}
-                </button>
-              ))}
-            </div>
-            <input type="hidden" name="stone" value={stone} />
-          </div>
+          {/* Stone is derived from temple — sent as hidden field, not shown */}
+          <input type="hidden" name="stone" value={stone} />
 
           <div className="stack" style={{ flex: "0 0 auto" }}>
             <span>Quality</span>
