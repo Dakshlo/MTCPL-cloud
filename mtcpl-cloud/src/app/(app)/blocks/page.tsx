@@ -126,7 +126,7 @@ export default async function BlocksPage() {
               );
             })}
           </div>
-        </>
+        </details>
       )}
     </>
   );
