@@ -1,5 +1,5 @@
 import { requireAuth } from "@/lib/auth";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createDataClient } from "@/lib/supabase/server";
 import { AddBlockForm } from "./add-block-form";
 import { BlockGrid } from "./block-grid";
 import { BlockExport } from "./block-export";
@@ -8,7 +8,7 @@ import { generateNextCode } from "./utils";
 export default async function BlocksPage() {
   const { profile } = await requireAuth(["owner", "team_head", "block_slab_entry", "slab_entry", "block_entry"]);
 
-  const supabase = await createServerSupabaseClient();
+  const supabase = await createDataClient(profile.role);
   const [{ data: blocks, error }, { data: allIds }, { data: consumed }] = await Promise.all([
     supabase
       .from("blocks")

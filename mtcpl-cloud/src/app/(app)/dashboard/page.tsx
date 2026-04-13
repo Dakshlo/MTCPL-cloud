@@ -1,11 +1,11 @@
 import { requireAuth } from "@/lib/auth";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createDataClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 
 export default async function DashboardPage() {
-  await requireAuth(["owner", "team_head", "dispatch", "carving_assigner", "developer"]);
+  const { profile } = await requireAuth(["owner", "team_head", "dispatch", "carving_assigner", "developer"]);
 
-  const supabase = await createServerSupabaseClient();
+  const supabase = await createDataClient(profile.role);
   const admin = createAdminSupabaseClient();
   const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
 

@@ -6,7 +6,7 @@ import { UndoButton } from "./undo-button";
 import { FinishBlockForm } from "./finish-block-form";
 
 import { requireAuth } from "@/lib/auth";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 
 type SearchParams = Promise<{ show_closed?: string }>;
 
@@ -42,7 +42,7 @@ async function refreshPaths() {
 }
 
 async function syncSessionStatus(sessionId: string) {
-  const supabase = await createServerSupabaseClient();
+  const supabase = createAdminSupabaseClient();
   const { data: blocks } = await supabase
     .from("cut_session_blocks")
     .select("status")
@@ -59,7 +59,7 @@ async function approveBlockAction(formData: FormData) {
   "use server";
 
   await requireAuth(["owner", "cutting_operator"]);
-  const supabase = await createServerSupabaseClient();
+  const supabase = createAdminSupabaseClient();
   const sessionBlockId = String(formData.get("session_block_id") || "");
   const sessionId = String(formData.get("session_id") || "");
 
@@ -74,7 +74,7 @@ async function rejectBlockAction(formData: FormData) {
   "use server";
 
   const { profile } = await requireAuth(["owner", "cutting_operator"]);
-  const supabase = await createServerSupabaseClient();
+  const supabase = createAdminSupabaseClient();
   const sessionBlockId = String(formData.get("session_block_id") || "");
   const sessionId = String(formData.get("session_id") || "");
   const blockId = String(formData.get("block_id") || "");
@@ -117,7 +117,7 @@ async function undoDonePromptAction(formData: FormData) {
   "use server";
 
   await requireAuth(["owner", "cutting_operator"]);
-  const supabase = await createServerSupabaseClient();
+  const supabase = createAdminSupabaseClient();
   const sessionBlockId = String(formData.get("session_block_id") || "");
 
   const { error } = await supabase.from("cut_session_blocks").update({ status: "cutting" }).eq("id", sessionBlockId);
@@ -130,7 +130,7 @@ async function undoDoneAction(formData: FormData) {
   "use server";
 
   const { profile } = await requireAuth(["owner"]);
-  const supabase = await createServerSupabaseClient();
+  const supabase = createAdminSupabaseClient();
   const sessionBlockId = String(formData.get("session_block_id") || "");
   const blockId = String(formData.get("block_id") || "");
   const slabIds = JSON.parse(String(formData.get("slab_ids") || "[]")) as string[];
@@ -163,7 +163,7 @@ async function markDonePromptAction(formData: FormData) {
   "use server";
 
   await requireAuth(["owner", "cutting_operator"]);
-  const supabase = await createServerSupabaseClient();
+  const supabase = createAdminSupabaseClient();
   const sessionBlockId = String(formData.get("session_block_id") || "");
 
   const { error } = await supabase.from("cut_session_blocks").update({ status: "done_prompt" }).eq("id", sessionBlockId);
@@ -176,7 +176,7 @@ async function finishBlockAction(formData: FormData) {
   "use server";
 
   const { profile } = await requireAuth(["owner", "cutting_operator"]);
-  const supabase = await createServerSupabaseClient();
+  const supabase = createAdminSupabaseClient();
 
   const sessionBlockId = String(formData.get("session_block_id") || "");
   const sessionId = String(formData.get("session_id") || "");
@@ -263,7 +263,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
   const params = await searchParams;
   const showClosed = params.show_closed === "1";
 
-  const supabase = await createServerSupabaseClient();
+  const supabase = createAdminSupabaseClient();
   let query = supabase
     .from("cut_sessions")
     .select(

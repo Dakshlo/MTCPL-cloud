@@ -1,5 +1,5 @@
 import { requireAuth } from "@/lib/auth";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createDataClient } from "@/lib/supabase/server";
 import { SlabSelector } from "./slab-selector";
 
 export default async function SlabViewPage({
@@ -8,8 +8,8 @@ export default async function SlabViewPage({
   searchParams: Promise<{ temple?: string; stone?: string; priority?: string; status?: string; q?: string; quality?: string }>;
 }) {
   // Entry roles (block_entry / slab_entry) cannot access this page
-  await requireAuth(["owner", "team_head"]);
-  const supabase = await createServerSupabaseClient();
+  const { profile } = await requireAuth(["owner", "team_head"]);
+  const supabase = await createDataClient(profile.role);
   const params = await searchParams;
 
   // Default to "open" only; "all" shows open+planned

@@ -1,5 +1,16 @@
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
+import { createAdminSupabaseClient } from "./admin";
+import type { AppRole } from "@/lib/types";
+
+/**
+ * Returns admin client for developer role (bypasses RLS so developer sees all data),
+ * regular session client for everyone else.
+ */
+export async function createDataClient(role: AppRole) {
+  if (role === "developer") return createAdminSupabaseClient();
+  return createServerSupabaseClient();
+}
 
 export async function createServerSupabaseClient() {
   const cookieStore = await cookies();

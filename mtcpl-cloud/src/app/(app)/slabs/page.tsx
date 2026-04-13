@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { requireAuth } from "@/lib/auth";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createDataClient } from "@/lib/supabase/server";
 import { AddSlabForm } from "./add-slab-form";
 import { SlabGrid } from "./slab-grid";
 export default async function SlabsPage() {
   const { profile } = await requireAuth(["owner", "team_head", "slab_entry", "block_slab_entry"]);
-  const supabase = await createServerSupabaseClient();
+  const supabase = await createDataClient(profile.role);
 
   const [{ data: slabs, error }, { data: temples }, { data: allIds }] = await Promise.all([
     supabase

@@ -3,7 +3,7 @@ import { revalidatePath } from "next/cache";
 
 import { PlanningWorkbench } from "@/components/planning-workbench";
 import { requireAuth } from "@/lib/auth";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createServerSupabaseClient, createDataClient } from "@/lib/supabase/server";
 
 async function approvePlanAction(formData: FormData) {
   "use server";
@@ -167,9 +167,9 @@ export default async function PlanningPage({
 }: {
   searchParams: Promise<{ slabs?: string }>;
 }) {
-  await requireAuth(["owner", "team_head"]);
+  const { profile } = await requireAuth(["owner", "team_head"]);
 
-  const supabase = await createServerSupabaseClient();
+  const supabase = await createDataClient(profile.role);
   const params = await searchParams;
 
   // slabs param: comma-separated IDs sent from Slab View page

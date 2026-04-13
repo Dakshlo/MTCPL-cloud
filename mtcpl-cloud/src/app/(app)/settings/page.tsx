@@ -1,5 +1,4 @@
 import { requireAuth } from "@/lib/auth";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { addTempleAction, updateTempleAction, deleteTempleAction, updateUserAction, deleteUserAction } from "./actions";
 import type { AppRole } from "@/lib/types";
@@ -64,11 +63,10 @@ function fmtAuditDate(iso: string) {
 
 export default async function SettingsPage() {
   const { profile: currentUser } = await requireAuth(["owner", "team_head", "developer"]);
-  const supabase = await createServerSupabaseClient();
   const admin = createAdminSupabaseClient();
 
   const [{ data: temples }, { data: users }] = await Promise.all([
-    supabase.from("temples").select("*").order("name"),
+    admin.from("temples").select("*").order("name"),
     // Admin client needed — RLS on profiles only returns the current user's own row
     admin.from("profiles").select("id, full_name, phone, role, is_active, created_at").order("full_name"),
   ]);

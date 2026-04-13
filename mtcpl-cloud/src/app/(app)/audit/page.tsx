@@ -13,7 +13,7 @@
  */
 
 import { requireAuth } from "@/lib/auth";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 
 type AuditLog = {
   id: string;
@@ -38,9 +38,9 @@ function fmtDateTime(iso: string) {
 export default async function AuditPage() {
   await requireAuth(["owner"]);
 
-  const supabase = await createServerSupabaseClient();
+  const admin = createAdminSupabaseClient();
 
-  const { data: logs, error } = await supabase
+  const { data: logs, error } = await admin
     .from("audit_logs")
     .select("id, action, entity_type, entity_id, details, created_at, profiles(full_name)")
     .order("created_at", { ascending: false })
