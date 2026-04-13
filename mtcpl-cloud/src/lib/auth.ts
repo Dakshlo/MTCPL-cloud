@@ -5,6 +5,7 @@ import type { AppRole, Profile } from "@/lib/types";
 
 export function getDefaultRouteForRole(role?: AppRole | null) {
   switch (role) {
+    case "developer":
     case "owner":
     case "planner":
     case "dispatch":
@@ -94,7 +95,8 @@ export async function requireAuth(roles?: AppRole[]): Promise<{ user: NonNullabl
     redirect("/pending");
   }
 
-  if (roles && roles.length && !roles.includes(ctx.profile.role)) {
+  // Developer role is a superuser — bypasses all role checks
+  if (roles && roles.length && ctx.profile.role !== "developer" && !roles.includes(ctx.profile.role)) {
     redirect(getDefaultRouteForRole(ctx.profile.role));
   }
 

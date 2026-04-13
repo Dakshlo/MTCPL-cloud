@@ -11,6 +11,7 @@ const UI_ROLES = [
 ];
 
 const ROLE_ACCESS: Record<string, string[]> = {
+  developer: ["Dashboard", "Blocks", "Slabs", "Plan Generator", "Cutting", "Settings"],
   owner: ["Dashboard", "Blocks", "Slabs", "Plan Generator", "Cutting", "Settings"],
   planner: ["Dashboard", "Blocks", "Slabs", "Plan Generator", "Cutting", "Settings"],
   block_entry: ["Dashboard", "Blocks", "Slabs"],
@@ -22,6 +23,7 @@ const ROLE_ACCESS: Record<string, string[]> = {
 };
 
 function roleLabel(role: string): string {
+  if (role === "developer") return "Developer";
   if (role === "slab_entry" || role === "block_entry") return "Entry (Block & Slab)";
   return UI_ROLES.find(r => r.value === role)?.label ?? role.replace(/_/g, " ");
 }
@@ -32,7 +34,7 @@ function formatDate(iso: string | null) {
 }
 
 export default async function SettingsPage() {
-  const { profile: currentUser } = await requireAuth(["owner", "planner"]);
+  const { profile: currentUser } = await requireAuth(["owner", "planner", "developer"]);
   const supabase = await createServerSupabaseClient();
 
   const [{ data: temples }, { data: users }] = await Promise.all([
@@ -58,8 +60,8 @@ export default async function SettingsPage() {
         </div>
       </div>
 
-      {/* User Management — owner only */}
-      {currentUser.role === "owner" && (
+      {/* User Management — owner/developer only */}
+      {(currentUser.role === "owner" || currentUser.role === "developer") && (
         <div className="settings-section">
           <div className="settings-section-header">
             <h2>Users</h2>
@@ -80,6 +82,8 @@ export default async function SettingsPage() {
               {userList.map((user) => {
                 const role = user.role as AppRole;
                 const isSelf = user.id === currentUser.id;
+                const isDeveloper = role === "developer";
+                const isLocked = isDeveloper && !isSelf; // other people can't touch developer rows
                 return (
                   <details key={user.id} className="settings-table-row">
                     <summary className="settings-table-row-face" style={{ gridTemplateColumns: "2fr 1fr 1fr 1fr auto" }}>
@@ -89,78 +93,90 @@ export default async function SettingsPage() {
                         {isSelf ? <span className="role-pill" style={{ marginLeft: 8, fontSize: 11 }}>You</span> : null}
                         {user.created_at ? <span className="muted" style={{ fontSize: 11, marginLeft: 8 }}>Joined {formatDate(user.created_at)}</span> : null}
                       </span>
-                      <span><span className="role-pill">{roleLabel(role)}</span></span>
+                      <span>
+                        <span className={`role-pill ${isDeveloper ? "badge-reserved" : ""}`} style={isDeveloper ? { background: "var(--gold)", color: "#fff", fontWeight: 700 } : {}}>
+                          {roleLabel(role)}
+                        </span>
+                      </span>
                       <span className="muted" style={{ fontSize: 12 }}>{(ROLE_ACCESS[role] ?? []).join(", ")}</span>
                       <span>
                         <span className={`role-pill ${user.is_active ? "badge-available" : "badge-discarded"}`}>
                           {user.is_active ? "Active" : "Inactive"}
                         </span>
                       </span>
-                      <span className="muted" style={{ fontSize: 12 }}>Edit ▾</span>
+                      <span className="muted" style={{ fontSize: 12 }}>{isLocked ? "🔒 Locked" : "Edit ▾"}</span>
                     </summary>
 
                     <div className="settings-table-edit">
-                      <form action={updateUserAction} className="settings-form-row" style={{ flexWrap: "wrap" }}>
-                        <input type="hidden" name="id" value={user.id} />
-
-                        <label className="stack" style={{ flex: "2 1 160px" }}>
-                          <span>Display Name</span>
-                          <input
-                            name="full_name"
-                            defaultValue={user.full_name ?? ""}
-                            placeholder="Enter full name"
-                            disabled={isSelf}
-                          />
-                        </label>
-
-                        <label className="stack" style={{ flex: "1 1 120px" }}>
-                          <span>Role</span>
-                          <select name="role" defaultValue={UI_ROLES.some(r => r.value === role) ? role : "block_entry"} disabled={isSelf}>
-                            {UI_ROLES.map((r) => (
-                              <option key={r.value} value={r.value}>{r.label}</option>
-                            ))}
-                          </select>
-                          {isSelf ? <input type="hidden" name="role" value={role} /> : null}
-                        </label>
-
-                        <label className="stack" style={{ flex: "0 0 auto" }}>
-                          <span>Status</span>
-                          <select name="is_active" defaultValue={String(user.is_active)} disabled={isSelf}>
-                            <option value="true">Active</option>
-                            <option value="false">Inactive</option>
-                          </select>
-                          {isSelf ? <input type="hidden" name="is_active" value="true" /> : null}
-                        </label>
-
-                        <div style={{ alignSelf: "flex-end", display: "flex", gap: 8 }}>
-                          <button className="secondary-button" type="submit" disabled={isSelf}>
-                            {isSelf ? "Can't edit self" : "Save"}
-                          </button>
-                        </div>
-                      </form>
-
-                      {!isSelf && (
-                        <div style={{ marginTop: 10 }}>
-                          <form action={deleteUserAction} style={{ display: "inline" }}>
+                      {isLocked ? (
+                        <p className="muted" style={{ fontSize: 13, margin: 0 }}>
+                          🔒 Developer account — cannot be edited or removed by anyone.
+                        </p>
+                      ) : (
+                        <>
+                          <form action={updateUserAction} className="settings-form-row" style={{ flexWrap: "wrap" }}>
                             <input type="hidden" name="id" value={user.id} />
-                            <button
-                              className="ghost-button danger-ghost"
-                              type="submit"
-                              formNoValidate
-                              style={{ fontSize: 12 }}
-                            >
-                              Remove User
-                            </button>
-                          </form>
-                          <span className="muted" style={{ fontSize: 11, marginLeft: 10 }}>
-                            Removes access. Auth account remains in Supabase.
-                          </span>
-                        </div>
-                      )}
 
-                      <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-                        Access pages: {(ROLE_ACCESS[role] ?? []).join(" · ")}
-                      </div>
+                            <label className="stack" style={{ flex: "2 1 160px" }}>
+                              <span>Display Name</span>
+                              <input
+                                name="full_name"
+                                defaultValue={user.full_name ?? ""}
+                                placeholder="Enter full name"
+                                disabled={isSelf}
+                              />
+                            </label>
+
+                            <label className="stack" style={{ flex: "1 1 120px" }}>
+                              <span>Role</span>
+                              <select name="role" defaultValue={UI_ROLES.some(r => r.value === role) ? role : "block_entry"} disabled={isSelf}>
+                                {UI_ROLES.map((r) => (
+                                  <option key={r.value} value={r.value}>{r.label}</option>
+                                ))}
+                              </select>
+                              {isSelf ? <input type="hidden" name="role" value={role} /> : null}
+                            </label>
+
+                            <label className="stack" style={{ flex: "0 0 auto" }}>
+                              <span>Status</span>
+                              <select name="is_active" defaultValue={String(user.is_active)} disabled={isSelf}>
+                                <option value="true">Active</option>
+                                <option value="false">Inactive</option>
+                              </select>
+                              {isSelf ? <input type="hidden" name="is_active" value="true" /> : null}
+                            </label>
+
+                            <div style={{ alignSelf: "flex-end", display: "flex", gap: 8 }}>
+                              <button className="secondary-button" type="submit" disabled={isSelf}>
+                                {isSelf ? "Can't edit self" : "Save"}
+                              </button>
+                            </div>
+                          </form>
+
+                          {!isSelf && (
+                            <div style={{ marginTop: 10 }}>
+                              <form action={deleteUserAction} style={{ display: "inline" }}>
+                                <input type="hidden" name="id" value={user.id} />
+                                <button
+                                  className="ghost-button danger-ghost"
+                                  type="submit"
+                                  formNoValidate
+                                  style={{ fontSize: 12 }}
+                                >
+                                  Remove User
+                                </button>
+                              </form>
+                              <span className="muted" style={{ fontSize: 11, marginLeft: 10 }}>
+                                Removes access. Auth account remains in Supabase.
+                              </span>
+                            </div>
+                          )}
+
+                          <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+                            Access pages: {(ROLE_ACCESS[role] ?? []).join(" · ")}
+                          </div>
+                        </>
+                      )}
                     </div>
                   </details>
                 );
@@ -267,7 +283,7 @@ export default async function SettingsPage() {
       </div>
 
       {/* Audit Log */}
-      {currentUser.role === "owner" && (
+      {(currentUser.role === "owner" || currentUser.role === "developer") && (
         <div className="settings-section">
           <div className="settings-section-header">
             <h2>Audit Log</h2>

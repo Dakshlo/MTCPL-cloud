@@ -1,4 +1,5 @@
 export type AppRole =
+  | "developer"
   | "owner"
   | "planner"
   | "block_entry"

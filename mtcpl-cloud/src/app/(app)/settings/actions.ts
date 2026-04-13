@@ -72,6 +72,10 @@ export async function updateUserAction(formData: FormData) {
   if (!id) redirect("/settings?toast=Missing+fields");
   if (id === currentUser.id) redirect("/settings?toast=Cannot+edit+your+own+account");
 
+  // Developer accounts are protected — nobody can edit them
+  const { data: target } = await admin.from("profiles").select("role").eq("id", id).single();
+  if (target?.role === "developer") redirect("/settings?toast=Developer+account+is+protected");
+
   const { error } = await admin
     .from("profiles")
     .update({ role, is_active, ...(full_name !== null ? { full_name } : {}) })
@@ -90,6 +94,10 @@ export async function deleteUserAction(formData: FormData) {
   const id = text(formData, "id");
   if (!id) redirect("/settings?toast=Missing+ID");
   if (id === currentUser.id) redirect("/settings?toast=Cannot+remove+your+own+account");
+
+  // Developer accounts are protected — nobody can deactivate them
+  const { data: target } = await admin.from("profiles").select("role").eq("id", id).single();
+  if (target?.role === "developer") redirect("/settings?toast=Developer+account+is+protected");
 
   // Soft-delete: mark inactive so they can't log in but data history is preserved
   const { error } = await admin.from("profiles").update({ is_active: false }).eq("id", id);
