@@ -5,19 +5,26 @@ import { usePathname } from "next/navigation";
 import type { AppRole } from "@/lib/types";
 
 type NavItem = {
+  type?: "item";
   href: string;
   label: string;
   icon: string;
   roles: AppRole[];
-  children?: { href: string; label: string; roles: AppRole[] }[];
 };
 
-const navItems: NavItem[] = [
+type NavDivider = {
+  type: "divider";
+  label?: string;
+  roles: AppRole[];
+};
+
+type NavEntry = NavItem | NavDivider;
+
+const navEntries: NavEntry[] = [
   {
     href: "/dashboard",
     label: "Dashboard",
     icon: "◈",
-    // Only owner and developer can see Dashboard
     roles: ["developer", "owner"],
   },
   {
@@ -25,31 +32,29 @@ const navItems: NavItem[] = [
     label: "Blocks",
     icon: "▣",
     roles: ["developer", "owner", "team_head", "block_slab_entry", "block_entry"],
-    // slab_entry sees slabs only; block_entry sees blocks only (no report link via nav)
   },
   {
     href: "/slabs",
     label: "Slabs",
     icon: "▤",
     roles: ["developer", "owner", "team_head", "slab_entry", "block_slab_entry"],
-    children: [
-      {
-        href: "/slabs/view",
-        label: "View Inventory",
-        roles: ["developer", "owner", "team_head"],
-      },
-    ],
   },
   {
-    href: "/planning",
+    href: "/slabs/view",
     label: "Plan Generator",
     icon: "⌘",
     roles: ["developer", "owner", "team_head"],
   },
+  // — Section break before workshop / execution items —
+  {
+    type: "divider",
+    label: "WORKSHOP",
+    roles: ["developer", "owner", "team_head", "cutting_operator"],
+  },
   {
     href: "/cutting",
     label: "Cutting",
-    icon: "◌",
+    icon: "✂",
     roles: ["developer", "owner", "cutting_operator", "team_head"],
   },
   {
@@ -57,12 +62,6 @@ const navItems: NavItem[] = [
     label: "Ready Slabs",
     icon: "✦",
     roles: ["developer", "owner", "team_head", "block_slab_entry"],
-  },
-  {
-    href: "/settings",
-    label: "Settings",
-    icon: "⚙",
-    roles: ["developer", "owner", "team_head"],
   },
 ];
 
@@ -84,12 +83,17 @@ function roleLabel(role: AppRole): string {
 
 export function Sidebar({ role, displayName }: { role: AppRole; displayName?: string }) {
   const pathname = usePathname();
-  const visibleItems = navItems.filter(item => item.roles.includes(role));
+  const visibleEntries = navEntries.filter((entry) => entry.roles.includes(role));
 
   function isActive(href: string) {
     if (href === "/dashboard") return pathname === "/dashboard";
-    // /slabs/ready is its own top-level nav item — don't let /slabs match it
-    if (href === "/slabs") return pathname === "/slabs" || pathname === "/slabs/view";
+    // /slabs/view (Plan Generator) owns /slabs/view and /planning
+    if (href === "/slabs/view")
+      return pathname.startsWith("/slabs/view") || pathname.startsWith("/planning");
+    // /slabs only matches the slabs list page itself, not sub-pages with their own nav items
+    if (href === "/slabs") return pathname === "/slabs";
+    // /slabs/ready is its own top-level item
+    if (href === "/slabs/ready") return pathname.startsWith("/slabs/ready");
     return pathname === href || pathname.startsWith(href + "/");
   }
 
@@ -101,14 +105,16 @@ export function Sidebar({ role, displayName }: { role: AppRole; displayName?: st
           src="/logo-light.png"
           alt="MTCPL"
           className="sidebar-logo"
-          onError={e => {
+          onError={(e) => {
             const el = e.currentTarget as HTMLImageElement;
             el.style.display = "none";
             const fb = el.nextElementSibling as HTMLElement | null;
             if (fb) fb.style.display = "block";
           }}
         />
-        <span className="sidebar-logo-fallback" style={{ display: "none" }}>MTCPL</span>
+        <span className="sidebar-logo-fallback" style={{ display: "none" }}>
+          MTCPL
+        </span>
       </div>
 
       {/* User */}
@@ -116,7 +122,9 @@ export function Sidebar({ role, displayName }: { role: AppRole; displayName?: st
         <div className="sidebar-user-name">{displayName || "MTCPL User"}</div>
         <div
           className="sidebar-user-role"
-          style={role === "team_head" ? { color: "#7eaadc", fontWeight: 700 } : undefined}
+          style={
+            role === "team_head" ? { color: "#7eaadc", fontWeight: 700 } : undefined
+          }
         >
           {roleLabel(role)}
         </div>
@@ -124,42 +132,30 @@ export function Sidebar({ role, displayName }: { role: AppRole; displayName?: st
 
       {/* Navigation */}
       <nav className="sidebar-nav">
-        {visibleItems.map(item => {
+        {visibleEntries.map((entry, i) => {
+          if (entry.type === "divider") {
+            return (
+              <div key={`divider-${i}`} className="nav-divider">
+                {entry.label && (
+                  <span className="nav-divider-label">{entry.label}</span>
+                )}
+              </div>
+            );
+          }
+
+          const item = entry as NavItem;
           const active = isActive(item.href);
-          const hasActiveChild = item.children?.some(c => pathname.startsWith(c.href));
 
           return (
-            <div key={item.href} className="nav-group">
-              <Link
-                href={item.href}
-                className={`nav-link${active && !hasActiveChild ? " nav-link-active" : ""}`}
-              >
-                <span className="nav-icon">{item.icon}</span>
-                {item.label}
-                {(active && !hasActiveChild) && <span className="nav-active-dot" />}
-              </Link>
-
-              {/* Sub-nav children — shown when parent or child is active */}
-              {item.children && (active || hasActiveChild) && (
-                <div className="nav-children">
-                  {item.children
-                    .filter(c => c.roles.includes(role))
-                    .map(child => {
-                      const childActive = pathname === child.href || pathname.startsWith(child.href + "/");
-                      return (
-                        <Link
-                          key={child.href}
-                          href={child.href}
-                          className={`nav-child${childActive ? " nav-child-active" : ""}`}
-                        >
-                          {child.label}
-                          {childActive && <span className="nav-active-dot" style={{ width: 5, height: 5 }} />}
-                        </Link>
-                      );
-                    })}
-                </div>
-              )}
-            </div>
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`nav-link${active ? " nav-link-active" : ""}`}
+            >
+              <span className="nav-icon">{item.icon}</span>
+              {item.label}
+              {active && <span className="nav-active-dot" />}
+            </Link>
           );
         })}
       </nav>
@@ -167,7 +163,9 @@ export function Sidebar({ role, displayName }: { role: AppRole; displayName?: st
       {/* Footer */}
       <div className="sidebar-footer">
         <form action="/api/auth/signout" method="post">
-          <button className="logout-btn" type="submit">Sign out</button>
+          <button className="logout-btn" type="submit">
+            Sign out
+          </button>
         </form>
       </div>
     </aside>

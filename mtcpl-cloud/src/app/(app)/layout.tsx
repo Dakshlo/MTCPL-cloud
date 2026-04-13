@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import Link from "next/link";
 
 import { LogoutButton } from "@/components/logout-button";
 import { MobileNav } from "@/components/mobile-nav";
@@ -7,6 +8,8 @@ import { Sidebar } from "@/components/sidebar";
 import { Toast } from "@/components/toast";
 import { Heartbeat } from "@/components/heartbeat";
 import { requireAuth } from "@/lib/auth";
+
+const SETTINGS_ROLES = ["developer", "owner", "team_head"];
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const { profile } = await requireAuth();
@@ -41,6 +44,11 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                 cutting_operator: "CUTTING OPERATOR",
               } as Record<string, string>)[profile.role] ?? profile.role.replace(/_/g, " ").toUpperCase()}
             </span>
+            {SETTINGS_ROLES.includes(profile.role) && (
+              <Link href="/settings" className="topbar-settings-btn" title="Settings">
+                ⚙
+              </Link>
+            )}
             <LogoutButton />
           </div>
         </div>
