@@ -24,7 +24,13 @@ function statusBadgeClass(status: string) {
 
 function fmtDate(iso: string | null) {
   if (!iso) return null;
-  return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
+  const d = new Date(iso);
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  const yest = new Date(now); yest.setDate(yest.getDate() - 1);
+  if (isToday) return d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+  if (d.toDateString() === yest.toDateString()) return "Yesterday";
+  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
 }
 
 type Block = {

@@ -42,30 +42,6 @@ export default async function SlabsPage() {
         </Link>
       </div>
 
-      {/* Metrics */}
-      <div className="metrics-row">
-        <div className="metric-card accent-orange">
-          <span>Open Slabs</span>
-          <strong>{totalOpen}</strong>
-          <small>awaiting planning</small>
-        </div>
-        <div className="metric-card">
-          <span>Priority</span>
-          <strong>{priorityCount}</strong>
-          <small>marked urgent</small>
-        </div>
-        <div className="metric-card">
-          <span>Temples</span>
-          <strong>{templeGroups}</strong>
-          <small>active groups</small>
-        </div>
-        <div className="metric-card accent-blue">
-          <span>Planned</span>
-          <strong>{slabList.filter(s => s.status === "planned").length}</strong>
-          <small>in sessions</small>
-        </div>
-      </div>
-
       {/* Add form */}
       {canEdit && templeList.length > 0 && (
         <AddSlabForm temples={templeList} existingIds={existingIds} />

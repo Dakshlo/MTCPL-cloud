@@ -41,7 +41,13 @@ export default async function BlocksPage() {
 
   function fmtDate(iso: string | null) {
     if (!iso) return "—";
-    return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+    const d = new Date(iso);
+    const now = new Date();
+    const isToday = d.toDateString() === now.toDateString();
+    const yest = new Date(now); yest.setDate(yest.getDate() - 1);
+    if (isToday) return d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+    if (d.toDateString() === yest.toDateString()) return "Yesterday";
+    return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
   }
 
   return (
@@ -50,29 +56,6 @@ export default async function BlocksPage() {
         <div>
           <h1>Blocks Inventory</h1>
           <p className="muted">Available and reserved blocks ready for planning.</p>
-        </div>
-      </div>
-
-      <div className="metrics-row">
-        <div className="metric-card accent-green">
-          <span>Available</span>
-          <strong>{blockList.filter(b => b.status === "available").length}</strong>
-          <small>ready for planning</small>
-        </div>
-        <div className="metric-card">
-          <span>Reserved</span>
-          <strong>{blockList.filter(b => b.status === "reserved").length}</strong>
-          <small>in active sessions</small>
-        </div>
-        <div className="metric-card accent-orange">
-          <span>PinkStone</span>
-          <strong>{pinkCount}</strong>
-          <small>{totalBlocks > 0 ? Math.round((pinkCount / totalBlocks) * 100) : 0}%</small>
-        </div>
-        <div className="metric-card">
-          <span>Total Volume</span>
-          <strong>{totalCft.toFixed(0)}</strong>
-          <small>cubic feet</small>
         </div>
       </div>
 

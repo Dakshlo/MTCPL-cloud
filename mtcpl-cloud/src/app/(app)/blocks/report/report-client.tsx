@@ -25,7 +25,13 @@ const ALL_STONES = ["PinkStone", "WhiteStone"] as const;
 
 function fmtDate(iso: string | null) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  const d = new Date(iso);
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  const yest = new Date(now); yest.setDate(yest.getDate() - 1);
+  if (isToday) return d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+  if (d.toDateString() === yest.toDateString()) return "Yesterday";
+  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
 }
 
 function calcCft(l: number, w: number, h: number) {
@@ -102,7 +108,7 @@ export function ReportClient({ blocks }: { blocks: Block[] }) {
     });
 
     return rows;
-  }, [blocks, statusFilter, stoneFilter, yardFilter, vendorSearch, blockSearch, dateFrom, dateTo, sortBy, sortDir]);
+  }, [blocks, statusFilter, stoneFilter, yardFilter, qualityFilter, vendorSearch, blockSearch, dateFrom, dateTo, sortBy, sortDir]);
 
   const totalCft = filtered.reduce(
     (sum, b) => sum + calcCft(Number(b.length_ft), Number(b.width_ft), Number(b.height_ft)),
@@ -219,9 +225,7 @@ export function ReportClient({ blocks }: { blocks: Block[] }) {
             <span>Yard</span>
             <select value={yardFilter} onChange={e => setYardFilter(e.target.value)}>
               <option value="all">All Yards</option>
-              <option value="1">Yard 1</option>
-              <option value="2">Yard 2</option>
-              <option value="3">Yard 3</option>
+              {[1,2,3,4,5,6].map(y => <option key={y} value={String(y)}>Yard {y}</option>)}
             </select>
           </label>
 
