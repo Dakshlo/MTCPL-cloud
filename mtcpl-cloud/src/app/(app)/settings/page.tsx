@@ -46,7 +46,20 @@ function roleLabel(role: string): string {
 
 function formatDate(iso: string | null) {
   if (!iso) return null;
-  return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  return new Date(iso).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" });
+}
+
+function fmtAuditDate(iso: string) {
+  const tz = "Asia/Kolkata";
+  const d = new Date(iso);
+  const now = new Date();
+  const yest = new Date(now.getTime() - 86400000);
+  // Compare calendar dates in IST, not UTC
+  const fmt = (dt: Date) => dt.toLocaleDateString("en-CA", { timeZone: tz }); // YYYY-MM-DD
+  const timeStr = d.toLocaleTimeString("en-IN", { timeZone: tz, hour: "2-digit", minute: "2-digit" });
+  if (fmt(d) === fmt(now)) return timeStr;
+  if (fmt(d) === fmt(yest)) return "Yesterday, " + timeStr;
+  return d.toLocaleDateString("en-IN", { timeZone: tz, day: "numeric", month: "short" }) + ", " + timeStr;
 }
 
 export default async function SettingsPage() {
@@ -334,7 +347,7 @@ export default async function SettingsPage() {
                   {(recentAudit ?? []).map((log: any) => (
                     <tr key={log.id} style={{ borderBottom: "1px solid var(--border)" }}>
                       <td style={{ padding: "8px 14px", color: "var(--muted)", whiteSpace: "nowrap" }}>
-                        {new Date(log.created_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                        {fmtAuditDate(log.created_at)}
                       </td>
                       <td style={{ padding: "8px 14px", fontWeight: 600 }}>{log.profiles?.full_name ?? "—"}</td>
                       <td style={{ padding: "8px 14px" }}><span className="role-pill">{log.action}</span></td>
