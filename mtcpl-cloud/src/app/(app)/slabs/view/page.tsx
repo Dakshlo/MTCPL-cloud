@@ -1,6 +1,7 @@
 import { requireAuth } from "@/lib/auth";
 import { createDataClient } from "@/lib/supabase/server";
 import { SlabSelector } from "./slab-selector";
+import { UrgentSlabBanner } from "@/components/urgent-slab-banner";
 
 export default async function SlabViewPage({
   searchParams,
@@ -42,10 +43,13 @@ export default async function SlabViewPage({
   const allTemples = [...new Set(slabList.map(s => s.temple))].sort();
 
   return (
+    <>
+    <UrgentSlabBanner />
     <SlabSelector
       slabs={slabList}
       temples={[...new Set([...allTemples, ...templeNames])].sort()}
       activeFilters={{ ...params, status: statusParam }}
     />
+    </>
   );
 }

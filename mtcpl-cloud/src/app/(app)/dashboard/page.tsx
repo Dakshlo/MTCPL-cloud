@@ -4,7 +4,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { DateFilter } from "./date-filter";
 import { pushSlabAlertAction, clearSlabAlertAction } from "./actions";
 
-type SearchParams = Promise<{ date?: string; pushed?: string }>;
+type SearchParams = Promise<{ date?: string; pushed?: string; q?: string }>;
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -102,14 +102,15 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
     admin.from("profiles").select("id, full_name, role").gte("last_seen_at", fiveMinAgo),
   ]);
 
-  // Extra query for push panel — all open/planned slabs
-  const { data: pushableSlabs } = await admin
+  // Extra query for push panel — all open/planned slabs (no limit, search done server-side)
+  const pushQuery = admin
     .from("slab_requirements")
     .select("id, label, temple, stone, status, priority, deadline, priority_note")
     .in("status", ["open", "planned"])
     .order("priority", { ascending: false })
-    .order("created_at", { ascending: true })
-    .limit(50);
+    .order("created_at", { ascending: true });
+
+  const { data: pushableSlabs } = await pushQuery.limit(1000);
 
   // ── Block stats ──
   const bs: Record<string, { count: number; cft: number }> = {
@@ -156,7 +157,16 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
   // ── Misc ──
   const liveList    = (liveBlocks ?? []) as unknown as Array<{ id: string; block_id: string; layout: unknown; cut_sessions: { session_code: string } | null }>;
   const priorityList = (prioritySlabs ?? []) as Array<{ id: string; label: string; temple: string; deadline: string | null; priority_note: string | null }>;
-  const pushList = (pushableSlabs ?? []) as Array<{ id: string; label: string; temple: string; stone: string | null; status: string; priority: boolean; deadline: string | null; priority_note: string | null }>;
+  const rawPushList = (pushableSlabs ?? []) as Array<{ id: string; label: string; temple: string; stone: string | null; status: string; priority: boolean; deadline: string | null; priority_note: string | null }>;
+  const pushSearch = (params.q ?? "").trim().toLowerCase();
+  const pushList = pushSearch
+    ? rawPushList.filter(s =>
+        s.id.toLowerCase().includes(pushSearch) ||
+        s.temple.toLowerCase().includes(pushSearch) ||
+        s.label.toLowerCase().includes(pushSearch) ||
+        (s.stone ?? "").toLowerCase().includes(pushSearch)
+      )
+    : rawPushList;
   const pushed = params.pushed === "1";
   const onlineList  = onlineUsers ?? [];
 
@@ -548,9 +558,49 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
           )}
         </div>
 
-        {pushList.length === 0 ? (
+        {/* Search bar */}
+        <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)", background: "var(--surface)" }}>
+          <form method="GET" action="/dashboard" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input type="hidden" name="date" value={selectedDate} />
+            <input
+              type="search"
+              name="q"
+              defaultValue={params.q ?? ""}
+              placeholder="Search by slab ID, temple, label or stone…"
+              style={{
+                flex: 1,
+                fontSize: 12,
+                padding: "6px 10px",
+                border: "1px solid var(--border)",
+                borderRadius: 6,
+                background: "var(--bg)",
+                color: "var(--text)",
+                outline: "none",
+              }}
+            />
+            <button type="submit" style={{ fontSize: 12, padding: "6px 14px", border: "none", borderRadius: 6, background: "var(--gold)", color: "#fff", fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
+              Search
+            </button>
+            {pushSearch && (
+              <a href={`/dashboard?date=${selectedDate}`} style={{ fontSize: 12, color: "var(--muted)", textDecoration: "none", whiteSpace: "nowrap" }}>
+                Clear
+              </a>
+            )}
+          </form>
+          {pushSearch && (
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 6 }}>
+              {pushList.length} result{pushList.length !== 1 ? "s" : ""} for &ldquo;{pushSearch}&rdquo; out of {rawPushList.length} slabs
+            </div>
+          )}
+        </div>
+
+        {rawPushList.length === 0 ? (
           <div style={{ padding: 24, textAlign: "center", color: "var(--muted-light)", fontSize: 13 }}>
             No open or planned slabs to push alerts for
+          </div>
+        ) : pushList.length === 0 ? (
+          <div style={{ padding: 24, textAlign: "center", color: "var(--muted-light)", fontSize: 13 }}>
+            No slabs match &ldquo;{pushSearch}&rdquo;
           </div>
         ) : (
           <div style={{ overflowX: "auto" }}>

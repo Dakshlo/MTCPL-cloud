@@ -950,7 +950,28 @@ export function PlanningWorkbench({
                 {result.plan.length ? (
                   <form action={approveAction} style={{ marginTop: 18 }}>
                     <input name="kerf_mm" type="hidden" value={String(kerfMm)} />
-                    <input name="plan_json" type="hidden" value={JSON.stringify(result.plan)} />
+                    {/* Only send what the server needs — strip spaces/eff/ua/ka/ba/aw/ah/zTop/zBot/label/temple */}
+                    <input
+                      name="plan_json"
+                      type="hidden"
+                      value={JSON.stringify(result.plan.map(pb => ({
+                        blk: pb.blk,
+                        placed: pb.placed.map(s => ({
+                          id: s.id,
+                          sw: s.sw, sh: s.sh, sd: s.sd,
+                          pw: s.pw, ph: s.ph,
+                          px: s.px, py: s.py,
+                          rot: s.rot,
+                        })),
+                        biggest: pb.biggest,
+                      })))}
+                    />
+                    {/* Pass slab IDs so server can redirect back to workbench on error */}
+                    <input
+                      name="slab_ids"
+                      type="hidden"
+                      value={[...new Set(result.plan.flatMap(pb => pb.placed.map(s => s.id)))].join(",")}
+                    />
                     <button className="primary-button" type="submit">
                       Approve Plan and Create Cutting Session
                     </button>
