@@ -1839,7 +1839,7 @@ details.block-card[open] {
 .slab-row:last-child { border-bottom: none; }
 .slab-row:hover { background: var(--bg); }
 .slab-row-selected { background: var(--gold-subtle) !important; }
-.slab-row-priority { border-left: 3px solid var(--warning); }
+.slab-row-priority { border-left: 3px solid #DC2626; background: rgba(220,38,38,0.06) !important; }
 
 .slab-row input[type="checkbox"] { flex-shrink: 0; width: 16px; height: 16px; cursor: pointer; accent-color: var(--gold); }
 
@@ -1854,7 +1854,7 @@ details.block-card[open] {
 }
 
 .slab-row-code { font-family: ui-monospace, monospace; font-size: 12px; font-weight: 700; color: var(--text); }
-.slab-priority-badge { font-size: 11px; font-weight: 700; color: var(--warning); }
+.slab-priority-badge { font-size: 11px; font-weight: 700; color: #DC2626; background: rgba(220,38,38,0.1); padding: 1px 7px; border-radius: 8px; }
 .slab-row-label { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .slab-row-dims {

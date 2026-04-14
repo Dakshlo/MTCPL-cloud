@@ -17,7 +17,7 @@ export default async function SlabViewPage({
 
   let query = supabase
     .from("slab_requirements")
-    .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, status, priority, quality, created_at")
+    .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, status, priority, priority_note, quality, created_at")
     .order("priority", { ascending: false })
     .order("created_at", { ascending: true });
 
@@ -39,7 +39,7 @@ export default async function SlabViewPage({
   // Always fetch priority slabs regardless of filter so they always appear
   const { data: urgentSlabs } = await supabase
     .from("slab_requirements")
-    .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, status, priority, quality, created_at")
+    .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, status, priority, priority_note, quality, created_at")
     .eq("priority", true)
     .in("status", ["open", "planned"])
     .order("created_at", { ascending: true });

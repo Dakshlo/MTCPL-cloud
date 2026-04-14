@@ -14,6 +14,7 @@ type Slab = {
   thickness_ft: number;
   status: string;
   priority: boolean;
+  priority_note: string | null;
   quality: string | null;
   created_at: string | null;
 };
@@ -202,7 +203,7 @@ export function SlabSelector({
               });
             }}
           >
-            ⚡ Select all {priorityCount} priority
+            ⚡ Select all {priorityCount} urgent
           </button>
         )}
       </div>
@@ -269,7 +270,7 @@ export function SlabSelector({
                         <div className="slab-row-main">
                           <div className="slab-row-top">
                             <code className="slab-row-code">{slab.id}</code>
-                            {slab.priority && <span className="slab-priority-badge">⚡ Priority</span>}
+                            {slab.priority && <span className="slab-priority-badge">⚡ Urgent</span>}
                             {slab.stone && (
                               <span className={`role-pill ${slab.stone === "PinkStone" ? "badge-pink" : "badge-white-stone"}`}>
                                 {slab.stone === "PinkStone" ? "Pink" : "White"}
@@ -285,6 +286,11 @@ export function SlabSelector({
                             </span>
                           </div>
                           <div className="slab-row-label">{slab.label}</div>
+                          {slab.priority && slab.priority_note && (
+                            <div style={{ fontSize: 11, color: "#DC2626", fontStyle: "italic", marginTop: 2 }}>
+                              &ldquo;{slab.priority_note}&rdquo;
+                            </div>
+                          )}
                         </div>
                         <div className="slab-row-dims">
                           <span>{Number(slab.length_ft)}" × {Number(slab.width_ft)}" × {Number(slab.thickness_ft)}"</span>
