@@ -99,6 +99,26 @@ export async function updateUserAction(formData: FormData) {
   redirect("/settings?toast=User+updated");
 }
 
+export async function updateOwnNameAction(formData: FormData) {
+  const { profile: currentUser } = await requireAuth([
+    "owner", "team_head", "developer", "block_slab_entry",
+    "slab_entry", "block_entry", "cutting_operator",
+  ]);
+  const admin = createAdminSupabaseClient();
+
+  const full_name = text(formData, "full_name").trim();
+  if (!full_name) redirect("/settings?toast=Name+cannot+be+empty");
+
+  const { error } = await admin
+    .from("profiles")
+    .update({ full_name })
+    .eq("id", currentUser.id);
+  if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
+
+  revalidatePath("/settings");
+  redirect("/settings?toast=Your+name+updated");
+}
+
 export async function deleteUserAction(formData: FormData) {
   const { profile: currentUser } = await requireAuth(["owner", "developer"]);
   const admin = createAdminSupabaseClient();

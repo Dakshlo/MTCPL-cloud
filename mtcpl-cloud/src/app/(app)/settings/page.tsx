@@ -1,6 +1,6 @@
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { addTempleAction, updateTempleAction, deleteTempleAction, updateUserAction, deleteUserAction } from "./actions";
+import { addTempleAction, updateTempleAction, deleteTempleAction, updateUserAction, deleteUserAction, updateOwnNameAction } from "./actions";
 import type { AppRole } from "@/lib/types";
 
 // All assignable roles — only shown to developer
@@ -181,6 +181,27 @@ export default async function SettingsPage() {
                     </summary>
 
                     <div className="settings-table-edit">
+                      {/* Own row: only allow changing display name */}
+                      {isSelf ? (
+                        <form action={updateOwnNameAction} className="settings-form-row" style={{ flexWrap: "wrap" }}>
+                          <label className="stack" style={{ flex: "2 1 160px" }}>
+                            <span>Your Display Name</span>
+                            <input
+                              name="full_name"
+                              defaultValue={user.full_name ?? ""}
+                              placeholder="Enter your name"
+                              required
+                            />
+                          </label>
+                          <div style={{ alignSelf: "flex-end", display: "flex", gap: 8 }}>
+                            <button className="secondary-button" type="submit">Update Name</button>
+                          </div>
+                          <p className="muted" style={{ fontSize: 11, width: "100%", margin: "4px 0 0" }}>
+                            This name appears on blocks, slabs, and cutting plans you create.
+                            Role and status can only be changed by another admin.
+                          </p>
+                        </form>
+                      ) : (
                       <form action={updateUserAction} className="settings-form-row" style={{ flexWrap: "wrap" }}>
                             <input type="hidden" name="id" value={user.id} />
 
@@ -190,45 +211,39 @@ export default async function SettingsPage() {
                                 name="full_name"
                                 defaultValue={user.full_name ?? ""}
                                 placeholder="Enter full name"
-                                disabled={isSelf}
                               />
                             </label>
 
                             <label className="stack" style={{ flex: "1 1 120px" }}>
                               <span>Role</span>
-                              {/* Developer: full list | Owner+Planner: restricted list (no owner/developer) */}
                               {currentUser.role === "developer" ? (
-                                <select name="role" defaultValue={role} disabled={isSelf}>
+                                <select name="role" defaultValue={role}>
                                   {UI_ROLES_ALL.map((r) => (
                                     <option key={r.value} value={r.value}>{r.label}</option>
                                   ))}
                                 </select>
                               ) : (
-                                // Owner and Planner — can assign any role except owner/developer
-                                <select name="role" defaultValue={UI_ROLES_PLANNER.some(r => r.value === role) ? role : "block_slab_entry"} disabled={isSelf}>
+                                <select name="role" defaultValue={UI_ROLES_PLANNER.some(r => r.value === role) ? role : "block_slab_entry"}>
                                   {UI_ROLES_PLANNER.map((r) => (
                                     <option key={r.value} value={r.value}>{r.label}</option>
                                   ))}
                                 </select>
                               )}
-                              {isSelf ? <input type="hidden" name="role" value={role} /> : null}
                             </label>
 
                             <label className="stack" style={{ flex: "0 0 auto" }}>
                               <span>Status</span>
-                              <select name="is_active" defaultValue={String(user.is_active)} disabled={isSelf}>
+                              <select name="is_active" defaultValue={String(user.is_active)}>
                                 <option value="true">Active</option>
                                 <option value="false">Inactive</option>
                               </select>
-                              {isSelf ? <input type="hidden" name="is_active" value="true" /> : null}
                             </label>
 
                             <div style={{ alignSelf: "flex-end", display: "flex", gap: 8 }}>
-                              <button className="secondary-button" type="submit" disabled={isSelf}>
-                                {isSelf ? "Can't edit self" : "Save"}
-                              </button>
+                              <button className="secondary-button" type="submit">Save</button>
                             </div>
                           </form>
+                      )}
 
                           {!isSelf && (
                             <div style={{ marginTop: 10 }}>
