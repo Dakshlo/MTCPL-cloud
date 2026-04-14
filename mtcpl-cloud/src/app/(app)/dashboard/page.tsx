@@ -2,8 +2,9 @@ import Link from "next/link";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { DateFilter } from "./date-filter";
+import { pushSlabAlertAction, clearSlabAlertAction } from "./actions";
 
-type SearchParams = Promise<{ date?: string }>;
+type SearchParams = Promise<{ date?: string; pushed?: string }>;
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -89,9 +90,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
     { data: selDateSlabs },
     { data: onlineUsers },
   ] = await Promise.all([
-    admin.from("blocks").select("status, length_ft, width_ft, height_ft, created_at"),
+    admin.from("blocks").select("status, yard, length_ft, width_ft, height_ft"),
     admin.from("slab_requirements").select("status, length_ft, width_ft, thickness_ft, priority, created_at, updated_at"),
-    admin.from("slab_requirements").select("id, label, temple").eq("priority", true).in("status", ["open", "planned"]),
+    admin.from("slab_requirements").select("id, label, temple, deadline, priority_note").eq("priority", true).in("status", ["open", "planned"]),
     admin.from("cut_session_blocks").select("id, block_id, layout, cut_sessions(session_code)").eq("status", "cutting"),
     admin.from("cut_session_blocks").select("id, layout").eq("status", "done").gte("updated_at", today.start).lte("updated_at", today.end),
     admin.from("cut_session_blocks").select("id, layout").eq("status", "done").gte("updated_at", yesterday.start).lte("updated_at", yesterday.end),
@@ -101,14 +102,32 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
     admin.from("profiles").select("id, full_name, role").gte("last_seen_at", fiveMinAgo),
   ]);
 
+  // Extra query for push panel — all open/planned slabs
+  const { data: pushableSlabs } = await admin
+    .from("slab_requirements")
+    .select("id, label, temple, stone, status, priority, deadline, priority_note")
+    .in("status", ["open", "planned"])
+    .order("priority", { ascending: false })
+    .order("created_at", { ascending: true })
+    .limit(50);
+
   // ── Block stats ──
   const bs: Record<string, { count: number; cft: number }> = {
     available: { count: 0, cft: 0 }, reserved: { count: 0, cft: 0 },
     consumed:  { count: 0, cft: 0 }, discarded: { count: 0, cft: 0 },
   };
+  // Yard breakdown for available blocks
+  const yardMap: Record<number, { count: number; cft: number }> = {};
   for (const b of allBlocks ?? []) {
     if (bs[b.status]) { bs[b.status].count++; bs[b.status].cft += cft(b.length_ft, b.width_ft, b.height_ft); }
+    if (b.status === "available") {
+      const y = Number(b.yard);
+      if (!yardMap[y]) yardMap[y] = { count: 0, cft: 0 };
+      yardMap[y].count++;
+      yardMap[y].cft += cft(b.length_ft, b.width_ft, b.height_ft);
+    }
   }
+  const yardEntries = Object.entries(yardMap).sort((a, b) => Number(a[0]) - Number(b[0]));
   const totalBlocks = Object.values(bs).reduce((a, v) => a + v.count, 0);
   const totalBlockCft = Object.values(bs).reduce((a, v) => a + v.cft, 0);
 
@@ -136,7 +155,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
 
   // ── Misc ──
   const liveList    = (liveBlocks ?? []) as unknown as Array<{ id: string; block_id: string; layout: unknown; cut_sessions: { session_code: string } | null }>;
-  const priorityList = (prioritySlabs ?? []) as Array<{ id: string; label: string; temple: string }>;
+  const priorityList = (prioritySlabs ?? []) as Array<{ id: string; label: string; temple: string; deadline: string | null; priority_note: string | null }>;
+  const pushList = (pushableSlabs ?? []) as Array<{ id: string; label: string; temple: string; stone: string | null; status: string; priority: boolean; deadline: string | null; priority_note: string | null }>;
+  const pushed = params.pushed === "1";
   const onlineList  = onlineUsers ?? [];
 
   const istObj = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
@@ -257,12 +278,11 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
               </thead>
               <tbody>
                 {[
-                  { key: "open",      label: "Open / Pending",  color: "#D97706", bg: "#FEF3C7" },
-                  { key: "planned",   label: "Planned",         color: "#2563EB", bg: "#DBEAFE" },
-                  { key: "cutting",   label: "In Cutting",      color: "#DC2626", bg: "#FEE2E2" },
-                  { key: "cut_done",  label: "Cut Done",        color: "#16A34A", bg: "#DCFCE7" },
-                  { key: "completed", label: "Completed",       color: "#16A34A", bg: "#DCFCE7" },
-                  { key: "rejected",  label: "Rejected",        color: "#7A6A52", bg: "#F5F5F4" },
+                  { key: "open",      label: "Open / Pending",  color: "#D97706" },
+                  { key: "planned",   label: "Planned",         color: "#2563EB" },
+                  { key: "cutting",   label: "In Cutting",      color: "#DC2626" },
+                  { key: "cut_done",  label: "Cut Done",        color: "#16A34A" },
+                  { key: "completed", label: "Completed",       color: "#16A34A" },
                 ].map(row => {
                   const stat = ss[row.key];
                   const pct = totalSlabs > 0 ? ((stat.count / totalSlabs) * 100).toFixed(0) : "0";
@@ -368,20 +388,33 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
             </div>
             <div style={{ padding: "12px 18px", display: "flex", flexDirection: "column", gap: 8 }}>
               {priorityList.length === 0 ? (
-                <div style={{ textAlign: "center", padding: "16px 0", color: "var(--muted-light)", fontSize: 12 }}>No urgent slabs right now</div>
+                <div style={{ textAlign: "center", padding: "16px 0", color: "var(--muted-light)", fontSize: 12 }}>No urgent slabs pushed right now</div>
               ) : (
-                priorityList.slice(0, 5).map(s => (
-                  <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", background: "rgba(217,119,6,0.05)", border: "1px solid rgba(217,119,6,0.15)", borderRadius: 7 }}>
-                    <span style={{ fontSize: 14, flexShrink: 0 }}>⚡</span>
-                    <div>
-                      <div style={{ fontFamily: "ui-monospace, monospace", fontSize: 12, fontWeight: 700, color: "var(--text)" }}>{s.id}</div>
-                      <div style={{ fontSize: 11, color: "var(--muted)" }}>{s.temple} · {s.label}</div>
+                priorityList.slice(0, 6).map(s => {
+                  const dl = s.deadline ? new Date(s.deadline) : null;
+                  const daysLeft = dl ? Math.ceil((dl.getTime() - Date.now()) / 86400000) : null;
+                  const urgent = daysLeft !== null && daysLeft <= 1;
+                  return (
+                    <div key={s.id} style={{ padding: "9px 11px", background: urgent ? "rgba(220,38,38,0.06)" : "rgba(217,119,6,0.05)", border: `1px solid ${urgent ? "rgba(220,38,38,0.2)" : "rgba(217,119,6,0.15)"}`, borderRadius: 7 }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <span style={{ fontSize: 12 }}>{urgent ? "🔴" : "⚡"}</span>
+                          <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 12, fontWeight: 700, color: "var(--text)" }}>{s.id}</span>
+                        </div>
+                        {daysLeft !== null && (
+                          <span style={{ fontSize: 10, fontWeight: 700, color: urgent ? "#DC2626" : "#D97706", background: urgent ? "rgba(220,38,38,0.1)" : "rgba(217,119,6,0.1)", padding: "2px 6px", borderRadius: 10 }}>
+                            {daysLeft <= 0 ? "Overdue" : daysLeft === 1 ? "Due tomorrow" : `${daysLeft}d left`}
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>{s.temple} · {s.label}</div>
+                      {s.priority_note && <div style={{ fontSize: 11, color: "var(--gold-dark)", marginTop: 3, fontStyle: "italic" }}>"{s.priority_note}"</div>}
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
-              {priorityList.length > 5 && (
-                <div style={{ textAlign: "center", fontSize: 11, color: "var(--muted)", paddingTop: 4 }}>+{priorityList.length - 5} more priority slabs</div>
+              {priorityList.length > 6 && (
+                <div style={{ textAlign: "center", fontSize: 11, color: "var(--muted)", paddingTop: 4 }}>+{priorityList.length - 6} more urgent slabs</div>
               )}
             </div>
           </div>
@@ -392,39 +425,47 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
               <span style={{ fontWeight: 700, fontSize: 13 }}>Block Inventory</span>
               <Link href="/blocks" style={{ fontSize: 11, color: "var(--gold-dark)", fontWeight: 600, textDecoration: "none" }}>Manage →</Link>
             </div>
-            <div style={{ padding: "16px 18px", display: "flex", flexDirection: "column", gap: 10 }}>
-              {/* Bar */}
-              <div style={{ height: 10, borderRadius: 5, background: "var(--border)", overflow: "hidden", display: "flex" }}>
-                {totalBlocks > 0 && [
-                  { key: "available", color: "#16A34A" },
-                  { key: "reserved",  color: "#2563EB" },
-                  { key: "consumed",  color: "#D97706" },
-                  { key: "discarded", color: "#E5E7EB" },
-                ].map(item => (
-                  <div key={item.key} style={{ width: `${(bs[item.key].count / totalBlocks) * 100}%`, height: "100%", background: item.color }} />
-                ))}
-              </div>
+            <div style={{ padding: "16px 18px", display: "flex", flexDirection: "column", gap: 12 }}>
+              {/* Fresh vs In Use */}
               {[
-                { key: "available", label: "Fresh",    color: "#16A34A" },
-                { key: "reserved",  label: "In Use",   color: "#2563EB" },
-                { key: "consumed",  label: "Processed",color: "#D97706" },
-                { key: "discarded", label: "Discarded",color: "#9CA3AF" },
+                { key: "available", label: "Fresh Stock", color: "#16A34A", bg: "rgba(22,163,74,0.07)" },
+                { key: "reserved",  label: "In Use",      color: "#2563EB", bg: "rgba(37,99,235,0.07)" },
               ].map(item => (
-                <div key={item.key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                    <span style={{ width: 8, height: 8, borderRadius: 2, background: item.color, flexShrink: 0 }} />
-                    <span style={{ fontSize: 12, color: "var(--muted)" }}>{item.label}</span>
+                <div key={item.key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: item.bg, borderRadius: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ width: 9, height: 9, borderRadius: 2, background: item.color, flexShrink: 0 }} />
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{item.label}</span>
                   </div>
-                  <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                    <span style={{ fontSize: 12, fontFamily: "ui-monospace, monospace", fontWeight: 600, color: "var(--text)" }}>{bs[item.key].count} blk</span>
-                    <span style={{ fontSize: 11, color: "var(--muted-light)", width: 70, textAlign: "right" }}>{fc(bs[item.key].cft)} CFT</span>
+                  <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
+                    <span style={{ fontSize: 18, fontWeight: 800, fontFamily: "ui-monospace, monospace", color: item.color }}>{bs[item.key].count}</span>
+                    <span style={{ fontSize: 11, color: "var(--muted-light)", minWidth: 65, textAlign: "right" }}>{fc(bs[item.key].cft)} CFT</span>
                   </div>
                 </div>
               ))}
-              <div style={{ marginTop: 4, paddingTop: 10, borderTop: "1px solid var(--border-light)", display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--muted)" }}>
-                <span>{totalBlocks} blocks total</span>
-                <span style={{ fontWeight: 600, color: "var(--text)" }}>{fc(totalBlockCft)} CFT</span>
-              </div>
+
+              {/* Yard breakdown */}
+              {yardEntries.length > 0 && (
+                <div style={{ marginTop: 2 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 8 }}>
+                    Fresh stock by yard
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {yardEntries.map(([yard, stat]) => {
+                      const maxCft = Math.max(...yardEntries.map(([, s]) => s.cft), 1);
+                      return (
+                        <div key={yard} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontSize: 11, color: "var(--muted)", width: 44, flexShrink: 0 }}>Yard {yard}</span>
+                          <div style={{ flex: 1, height: 6, background: "var(--border)", borderRadius: 3, overflow: "hidden" }}>
+                            <div style={{ width: `${(stat.cft / maxCft) * 100}%`, height: "100%", background: "var(--gold)", borderRadius: 3 }} />
+                          </div>
+                          <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text)", width: 24, textAlign: "right" }}>{stat.count}</span>
+                          <span style={{ fontSize: 10, color: "var(--muted-light)", width: 60, textAlign: "right" }}>{fc(stat.cft)} CFT</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -487,6 +528,103 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
             </div>
           ))}
         </div>
+      </div>
+
+      {/* ── PUSH ALERT PANEL ── */}
+      <div style={{ background: "var(--surface)", border: "2px solid var(--gold-border)", borderRadius: 10, overflow: "hidden" }}>
+        <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)", background: "var(--gold-subtle)", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 14, color: "var(--text)", display: "flex", alignItems: "center", gap: 8 }}>
+              🔔 Push Urgent Alert to Workers
+            </div>
+            <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 3 }}>
+              Mark a slab as priority — workers will see a red alert banner on their pages
+            </div>
+          </div>
+          {pushed && (
+            <span style={{ fontSize: 12, fontWeight: 600, color: "#16A34A", background: "rgba(22,163,74,0.1)", padding: "4px 12px", borderRadius: 20 }}>
+              ✓ Alert pushed successfully
+            </span>
+          )}
+        </div>
+
+        {pushList.length === 0 ? (
+          <div style={{ padding: 24, textAlign: "center", color: "var(--muted-light)", fontSize: 13 }}>
+            No open or planned slabs to push alerts for
+          </div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 640 }}>
+              <thead>
+                <tr style={{ background: "var(--surface-alt)" }}>
+                  {["Slab ID", "Temple · Label", "Stone", "Status", "Deadline", "Note", "Action"].map(h => (
+                    <th key={h} style={{ padding: "8px 14px", textAlign: "left", fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.07em", whiteSpace: "nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {pushList.map(s => (
+                  <tr key={s.id} style={{ borderTop: "1px solid var(--border-light)", background: s.priority ? "rgba(217,119,6,0.03)" : "transparent" }}>
+                    <td style={{ padding: "10px 14px", fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 12, whiteSpace: "nowrap" }}>
+                      {s.priority && <span style={{ marginRight: 5 }}>⚡</span>}
+                      {s.id}
+                    </td>
+                    <td style={{ padding: "10px 14px", fontSize: 12 }}>
+                      <div style={{ fontWeight: 600 }}>{s.temple}</div>
+                      <div style={{ color: "var(--muted)", fontSize: 11 }}>{s.label}</div>
+                    </td>
+                    <td style={{ padding: "10px 14px", fontSize: 12, color: "var(--muted)" }}>{s.stone ?? "—"}</td>
+                    <td style={{ padding: "10px 14px" }}>
+                      <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: s.status === "planned" ? "rgba(37,99,235,0.1)" : "rgba(217,119,6,0.1)", color: s.status === "planned" ? "#2563EB" : "#D97706", fontWeight: 600 }}>
+                        {s.status}
+                      </span>
+                    </td>
+                    <td style={{ padding: "10px 14px" }}>
+                      {s.deadline
+                        ? <span style={{ fontSize: 12, fontWeight: 600, color: "var(--gold-dark)" }}>{new Date(s.deadline).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</span>
+                        : <span style={{ fontSize: 11, color: "var(--muted-light)" }}>—</span>
+                      }
+                    </td>
+                    <td style={{ padding: "10px 14px", fontSize: 11, color: "var(--muted)", maxWidth: 140 }}>
+                      {s.priority_note ? <span style={{ fontStyle: "italic" }}>&ldquo;{s.priority_note}&rdquo;</span> : "—"}
+                    </td>
+                    <td style={{ padding: "10px 14px" }}>
+                      {s.priority ? (
+                        <form action={clearSlabAlertAction} style={{ display: "inline" }}>
+                          <input type="hidden" name="id" value={s.id} />
+                          <button type="submit" style={{ fontSize: 11, padding: "4px 10px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--muted)", cursor: "pointer", whiteSpace: "nowrap" }}>
+                            Clear alert
+                          </button>
+                        </form>
+                      ) : (
+                        <form action={pushSlabAlertAction} style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                          <input type="hidden" name="id" value={s.id} />
+                          <input
+                            type="date"
+                            name="deadline"
+                            min={today.label}
+                            placeholder="Deadline"
+                            style={{ fontSize: 11, padding: "4px 6px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)", width: 118 }}
+                          />
+                          <input
+                            type="text"
+                            name="note"
+                            placeholder="Note (optional)"
+                            maxLength={60}
+                            style={{ fontSize: 11, padding: "4px 8px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)", width: 130 }}
+                          />
+                          <button type="submit" style={{ fontSize: 11, padding: "4px 12px", border: "none", borderRadius: 6, background: "var(--gold)", color: "#fff", fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>
+                            🔔 Push
+                          </button>
+                        </form>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
     </div>

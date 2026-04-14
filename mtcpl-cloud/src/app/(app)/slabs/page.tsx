@@ -4,6 +4,7 @@ import { createDataClient } from "@/lib/supabase/server";
 import { getProfilesMap } from "@/lib/profiles";
 import { AddSlabForm } from "./add-slab-form";
 import { SlabGrid } from "./slab-grid";
+import { UrgentSlabBanner } from "@/components/urgent-slab-banner";
 export default async function SlabsPage() {
   const { profile } = await requireAuth(["owner", "team_head", "slab_entry", "block_slab_entry"]);
   const supabase = await createDataClient(profile.role);
@@ -34,6 +35,7 @@ export default async function SlabsPage() {
 
   return (
     <>
+      <UrgentSlabBanner />
       <div className="page-header">
         <div>
           <h1>Slab Requirements</h1>

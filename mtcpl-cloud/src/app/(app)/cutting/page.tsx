@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { requireAuth } from "@/lib/auth";
+import { UrgentSlabBanner } from "@/components/urgent-slab-banner";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
 import { approveBlockAction, rejectBlockAction } from "./actions";
@@ -85,6 +86,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
 
   return (
     <section className="page-card">
+      <UrgentSlabBanner />
       <div className="record-head">
         <div>
           <h1>Cutting</h1>
