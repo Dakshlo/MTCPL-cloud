@@ -20,7 +20,7 @@ export default async function PlanningPage({
 
   let slabQuery = supabase
     .from("slab_requirements")
-    .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status")
+    .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority")
     .eq("status", "open")
     .order("created_at", { ascending: false });
 

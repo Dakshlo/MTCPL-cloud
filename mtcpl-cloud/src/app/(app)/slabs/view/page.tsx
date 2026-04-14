@@ -1,7 +1,6 @@
 import { requireAuth } from "@/lib/auth";
 import { createDataClient } from "@/lib/supabase/server";
 import { SlabSelector } from "./slab-selector";
-import { UrgentSlabBanner } from "@/components/urgent-slab-banner";
 
 export default async function SlabViewPage({
   searchParams,
@@ -36,20 +35,31 @@ export default async function SlabViewPage({
   if (params.quality === "none") query = query.is("quality", null);
 
   const { data: slabs } = await query.limit(1000);
-  const { data: temples } = await supabase.from("temples").select("name").eq("is_active", true).order("name");
 
-  const slabList = slabs ?? [];
+  // Always fetch priority slabs regardless of filter so they always appear
+  const { data: urgentSlabs } = await supabase
+    .from("slab_requirements")
+    .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, status, priority, quality, created_at")
+    .eq("priority", true)
+    .in("status", ["open", "planned"])
+    .order("created_at", { ascending: true });
+
+  // Merge urgent slabs into the list (deduplicate by ID)
+  const slabList = (() => {
+    const base = slabs ?? [];
+    const urgentToAdd = (urgentSlabs ?? []).filter(u => !base.some(s => s.id === u.id));
+    return [...urgentToAdd, ...base];
+  })();
+
+  const { data: temples } = await supabase.from("temples").select("name").eq("is_active", true).order("name");
   const templeNames = (temples ?? []).map(t => t.name);
   const allTemples = [...new Set(slabList.map(s => s.temple))].sort();
 
   return (
-    <>
-    <UrgentSlabBanner />
     <SlabSelector
       slabs={slabList}
       temples={[...new Set([...allTemples, ...templeNames])].sort()}
       activeFilters={{ ...params, status: statusParam }}
     />
-    </>
   );
 }

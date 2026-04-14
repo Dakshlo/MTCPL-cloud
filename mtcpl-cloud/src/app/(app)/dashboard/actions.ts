@@ -9,9 +9,20 @@ export async function pushSlabAlertAction(formData: FormData) {
   await requireAuth(["owner", "developer"]);
   const admin = createAdminSupabaseClient();
 
-  const id       = formData.get("id") as string;
-  const deadline = formData.get("deadline") as string | null;
-  const note     = (formData.get("note") as string | null)?.trim() || null;
+  const id             = formData.get("id") as string;
+  const deadlineMonth  = formData.get("deadline_month") as string | null;
+  const deadlineDay    = formData.get("deadline_day") as string | null;
+  const note           = (formData.get("note") as string | null)?.trim() || null;
+
+  // Construct date from month+day using current year (or next year if date already passed)
+  let deadline: string | null = null;
+  if (deadlineMonth && deadlineDay) {
+    const now = new Date();
+    const year = now.getFullYear();
+    const candidate = `${year}-${deadlineMonth}-${deadlineDay}`;
+    // If the date has already passed this year, use next year
+    deadline = new Date(candidate) < now ? `${year + 1}-${deadlineMonth}-${deadlineDay}` : candidate;
+  }
 
   if (!id) redirect("/dashboard?toast=Missing+slab+ID");
 

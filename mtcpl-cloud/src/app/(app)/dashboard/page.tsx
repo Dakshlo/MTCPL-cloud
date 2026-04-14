@@ -649,13 +649,18 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
                       ) : (
                         <form action={pushSlabAlertAction} style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                           <input type="hidden" name="id" value={s.id} />
-                          <input
-                            type="date"
-                            name="deadline"
-                            min={today.label}
-                            placeholder="Deadline"
-                            style={{ fontSize: 11, padding: "4px 6px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)", width: 118 }}
-                          />
+                          <select name="deadline_month" style={{ fontSize: 11, padding: "4px 6px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)", width: 70 }}>
+                            <option value="">Month</option>
+                            {["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"].map((m, i) => (
+                              <option key={m} value={String(i + 1).padStart(2,"0")}>{m}</option>
+                            ))}
+                          </select>
+                          <select name="deadline_day" style={{ fontSize: 11, padding: "4px 6px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)", width: 58 }}>
+                            <option value="">Day</option>
+                            {Array.from({length: 31}, (_, i) => i + 1).map(d => (
+                              <option key={d} value={String(d).padStart(2,"0")}>{d}</option>
+                            ))}
+                          </select>
                           <input
                             type="text"
                             name="note"

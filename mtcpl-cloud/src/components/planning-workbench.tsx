@@ -25,6 +25,7 @@ export type SlabRow = {
   thickness_ft: number | string;
   status: string;
   quality: string | null;
+  priority?: boolean;
 };
 
 export type PlacedSlab = {
@@ -669,11 +670,14 @@ export function PlanningWorkbench({
 }) {
   const [kerfMm, setKerfMm] = useState(20);
   const [result, setResult] = useState<PlanResult | null>(null);
+  const [yardFilter, setYardFilter] = useState<number | null>(null);
 
-  const usableBlocks = blocks.filter((block) => block.status === "available" || block.status === "reserved");
+  const allUsableBlocks = blocks.filter((block) => block.status === "available" || block.status === "reserved");
+  const yards = [...new Set(allUsableBlocks.map(b => Number(b.yard)))].sort((a, b) => a - b);
+  const usableBlocks = yardFilter !== null ? allUsableBlocks.filter(b => Number(b.yard) === yardFilter) : allUsableBlocks;
   const openSlabs = slabs.filter((slab) => slab.status === "open" || slab.status === "planned");
 
-  const [selectedBlockIds, setSelectedBlockIds] = useState<Set<string>>(() => new Set(usableBlocks.map((b) => b.id)));
+  const [selectedBlockIds, setSelectedBlockIds] = useState<Set<string>>(() => new Set(allUsableBlocks.map((b) => b.id)));
   const [selectedSlabIds, setSelectedSlabIds] = useState<Set<string>>(() => new Set(openSlabs.map((s) => s.id)));
 
   const slabsByTemple = openSlabs.reduce<Record<string, SlabRow[]>>((acc, slab) => {
@@ -734,6 +738,28 @@ export function PlanningWorkbench({
             <h2 style={{ margin: 0 }}>Stock Blocks ({usableBlocks.length})</h2>
             <p className="muted">Available and reserved blocks for cutting</p>
           </div>
+          {/* Yard filter */}
+          {yards.length > 1 && (
+            <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={() => setYardFilter(null)}
+                style={{ fontSize: 11, padding: "3px 10px", borderRadius: 20, border: "1px solid var(--border)", background: yardFilter === null ? "var(--gold)" : "var(--bg)", color: yardFilter === null ? "#fff" : "var(--muted)", fontWeight: 600, cursor: "pointer" }}
+              >
+                All Yards
+              </button>
+              {yards.map(y => (
+                <button
+                  key={y}
+                  type="button"
+                  onClick={() => setYardFilter(y)}
+                  style={{ fontSize: 11, padding: "3px 10px", borderRadius: 20, border: "1px solid var(--border)", background: yardFilter === y ? "var(--gold)" : "var(--bg)", color: yardFilter === y ? "#fff" : "var(--muted)", fontWeight: 600, cursor: "pointer" }}
+                >
+                  Yard {y}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="plan-select-row" style={{ marginBottom: 8 }}>
             <button className="ghost-button" style={{ fontSize: 12, padding: "2px 10px" }} type="button" onClick={() => setSelectedBlockIds(new Set(usableBlocks.map((b) => b.id)))}>Select All</button>
             <button className="ghost-button" style={{ fontSize: 12, padding: "2px 10px" }} type="button" onClick={() => setSelectedBlockIds(new Set())}>Deselect All</button>
@@ -794,7 +820,7 @@ export function PlanningWorkbench({
               <p className="muted" style={{ fontWeight: 600, marginBottom: 6 }}>{temple}</p>
               <div className="records-stack">
                 {slabsByTemple[temple].map((slab) => (
-                  <div className={`record-card compact-record plan-selectable${selectedSlabIds.has(slab.id) ? "" : " plan-deselected"}`} key={slab.id} onClick={() => toggleSlab(slab.id)} style={{ cursor: "pointer" }}>
+                  <div className={`record-card compact-record plan-selectable${selectedSlabIds.has(slab.id) ? "" : " plan-deselected"}`} key={slab.id} onClick={() => toggleSlab(slab.id)} style={{ cursor: "pointer", ...(slab.priority ? { borderLeft: "3px solid #DC2626", background: "rgba(220,38,38,0.03)" } : {}) }}>
                     <div className="record-head">
                       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                         <input
@@ -808,6 +834,7 @@ export function PlanningWorkbench({
                         <div>
                           <div className="record-title-row">
                             <strong style={{ color: sclr(slab.id) }}>{slab.id}</strong>
+                            {slab.priority && <span style={{ fontSize: 10, fontWeight: 700, color: "#DC2626", background: "rgba(220,38,38,0.12)", padding: "1px 6px", borderRadius: 8 }}>⚡ Urgent</span>}
                             {slab.stone ? <span className="role-pill">{slab.stone}</span> : null}
                             {slab.quality ? (
                               <span className={`role-pill ${slab.quality === "A" ? "badge-available" : "badge-reserved"}`}>

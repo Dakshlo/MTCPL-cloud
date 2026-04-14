@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { requireAuth } from "@/lib/auth";
-import { UrgentSlabBanner } from "@/components/urgent-slab-banner";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
 import { approveBlockAction, rejectBlockAction } from "./actions";
@@ -61,6 +60,14 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
   else if (activeTab === "in_progress") statusFilter = ["cutting", "done_prompt"];
   else statusFilter = ["done", "rejected"];
 
+  // Fetch urgent slab IDs to highlight blocks containing them
+  const { data: urgentSlabData } = await supabase
+    .from("slab_requirements")
+    .select("id")
+    .eq("priority", true)
+    .in("status", ["open", "planned", "cutting"]);
+  const urgentSlabIds = new Set((urgentSlabData ?? []).map(s => s.id));
+
   const { data: blocks } = await supabase
     .from("cut_session_blocks")
     .select(
@@ -86,7 +93,6 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
 
   return (
     <section className="page-card">
-      <UrgentSlabBanner />
       <div className="record-head">
         <div>
           <h1>Cutting</h1>
@@ -161,9 +167,10 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
             const placed = block.layout?.placed ?? [];
             const slabCount = block.cut_session_slabs.length;
             const isLive = block.status === "cutting";
+            const isUrgent = block.cut_session_slabs.some(s => urgentSlabIds.has(s.slab_requirement_id));
 
             return (
-              <div className="plan-card" key={block.id}>
+              <div className="plan-card" key={block.id} style={isUrgent ? { borderLeft: "3px solid #DC2626", background: "rgba(220,38,38,0.02)" } : {}}>
                 <div
                   className="record-head"
                   style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-start" }}
@@ -194,6 +201,11 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                       >
                         {block.block_id}
                       </strong>
+                      {isUrgent && (
+                        <span style={{ fontSize: 11, fontWeight: 700, color: "#DC2626", background: "rgba(220,38,38,0.12)", padding: "2px 8px", borderRadius: 8, marginLeft: 6 }}>
+                          ⚡ Urgent slab
+                        </span>
+                      )}
                       <p className="muted" style={{ margin: "2px 0 0", fontSize: 12 }}>
                         {block.cut_sessions?.session_code}
                         {blk
