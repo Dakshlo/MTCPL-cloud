@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
 import { requireAuth } from "@/lib/auth";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 
 function errUrl(msg: string, slabIds?: string) {
   const base = `/planning?err=${encodeURIComponent(msg)}`;
@@ -16,7 +16,7 @@ export async function approvePlanAction(formData: FormData) {
 
   try {
     const { profile } = await requireAuth(["owner", "team_head"]);
-    const supabase = await createServerSupabaseClient();
+    const supabase = createAdminSupabaseClient();
 
     const kerfMm = Number(formData.get("kerf_mm"));
     const planJson = formData.get("plan_json");
