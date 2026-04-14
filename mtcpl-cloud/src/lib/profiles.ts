@@ -7,10 +7,10 @@ export async function getProfilesMap(): Promise<ProfilesMap> {
   const supabase = createAdminSupabaseClient();
   const { data } = await supabase
     .from("profiles")
-    .select("id, full_name, vendor_name, phone");
+    .select("id, full_name, phone");
   const map: ProfilesMap = {};
   for (const p of data ?? []) {
-    map[p.id] = p.full_name || p.vendor_name || p.phone || "Unknown";
+    map[p.id] = p.full_name || p.phone || "Unknown";
   }
   return map;
 }
