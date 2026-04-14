@@ -159,8 +159,8 @@ export function IsoBlockStaticSVG({
                 ptn(item.px + item.pw, sy, slabZTop),
                 ptn(item.px, sy, slabZTop),
               ].join(" ")}
-              fill={color} opacity={0.7}
-              stroke="rgba(0,0,0,0.12)" strokeWidth="0.5"
+              fill={color} opacity={0.65}
+              stroke="rgba(0,0,0,0.18)" strokeWidth="0.7"
             />
             {/* X-side face */}
             <polygon
@@ -170,8 +170,8 @@ export function IsoBlockStaticSVG({
                 ptn(sx, item.py + item.ph, slabZTop),
                 ptn(sx, item.py, slabZTop),
               ].join(" ")}
-              fill={color} opacity={0.57}
-              stroke="rgba(0,0,0,0.12)" strokeWidth="0.5"
+              fill={color} opacity={0.52}
+              stroke="rgba(0,0,0,0.18)" strokeWidth="0.7"
             />
             {/* Top face */}
             <polygon
@@ -181,8 +181,8 @@ export function IsoBlockStaticSVG({
                 ptn(item.px + item.pw, item.py + item.ph, slabZTop),
                 ptn(item.px, item.py + item.ph, slabZTop),
               ].join(" ")}
-              fill={color} opacity={0.88}
-              stroke="rgba(255,255,255,0.6)" strokeWidth="0.8"
+              fill={color} opacity={0.72}
+              stroke="rgba(255,255,255,0.8)" strokeWidth="1.2"
             />
             {showLabel && (
               <text

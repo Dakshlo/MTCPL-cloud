@@ -977,7 +977,7 @@ export function PlanningWorkbench({
                 {result.plan.length ? (
                   <form action={approveAction} style={{ marginTop: 18 }}>
                     <input name="kerf_mm" type="hidden" value={String(kerfMm)} />
-                    {/* Only send what the server needs — strip spaces/eff/ua/ka/ba/aw/ah/zTop/zBot/label/temple */}
+                    {/* Only send what the server needs — strip spaces/eff/ua/ka/ba/aw/ah/label/temple. Keep zTop/zBot for 3D rendering. */}
                     <input
                       name="plan_json"
                       type="hidden"
@@ -989,6 +989,7 @@ export function PlanningWorkbench({
                           pw: s.pw, ph: s.ph,
                           px: s.px, py: s.py,
                           rot: s.rot,
+                          zTop: s.zTop, zBot: s.zBot,
                         })),
                         biggest: pb.biggest,
                       })))}

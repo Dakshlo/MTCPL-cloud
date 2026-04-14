@@ -73,11 +73,19 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
     day: "numeric", month: "long", year: "numeric",
   });
 
-  const views = [
-    { az: Math.PI * 0.25,  label: "Front-Left" },
-    { az: -Math.PI * 0.25, label: "Front-Right" },
-    { az: Math.PI * 0.75,  label: "Back-Left" },
-  ];
+  // Build 2D top-down layout SVG inline
+  const topDownSvg = (() => {
+    if (!blk || placed.length === 0) return null;
+    const PAD = 12;
+    const MAX_W = 340;
+    const MAX_H = 280;
+    const scaleX = (MAX_W - PAD * 2) / blk.l;
+    const scaleY = (MAX_H - PAD * 2) / blk.w;
+    const sc = Math.min(scaleX, scaleY, 6);
+    const svgW = blk.l * sc + PAD * 2;
+    const svgH = blk.w * sc + PAD * 2;
+    return { sc, PAD, svgW, svgH };
+  })();
 
   // Volume in CFT (values stored in inches, 1728 in³ = 1 ft³)
   const volCft = blk ? ((blk.l * blk.w * blk.h) / 1728).toFixed(2) : null;
@@ -179,16 +187,17 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
         }
         .meta-val.mono { font-family: ui-monospace, monospace; }
 
-        /* 3D Views */
+        /* 3D + 2D Views */
         .views-row {
           display: grid;
-          grid-template-columns: repeat(3, 1fr);
-          gap: 10px;
+          grid-template-columns: 1fr 1fr;
+          gap: 14px;
+          align-items: start;
         }
         .view-card {
           border: 1px solid #ddd;
           border-radius: 6px;
-          padding: 6px 6px 4px;
+          padding: 8px 8px 4px;
           background: #fafafa;
         }
         .view-lbl {
@@ -424,22 +433,76 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
           )}
         </div>
 
-        {/* ── 3D Views ── */}
+        {/* ── 3D Isometric + 2D Top Layout ── */}
         {blk && placed.length > 0 && (
           <>
-            <div className="section-head">3D Block Views — {placed.length} slab{placed.length !== 1 ? "s" : ""} planned</div>
+            <div className="section-head">Block Layout — {placed.length} slab{placed.length !== 1 ? "s" : ""} planned</div>
             <div className="views-row">
-              {views.map((v) => (
-                <div className="view-card" key={v.label}>
-                  <IsoBlockStaticSVG
-                    block={{ l: blk.l, w: blk.w, h: blk.h, stone: blk.stone }}
-                    placed={placed}
-                    az={v.az}
-                    size={220}
-                  />
-                  <div className="view-lbl">{v.label}</div>
+              {/* Left: Isometric 3D View */}
+              <div className="view-card">
+                <IsoBlockStaticSVG
+                  block={{ l: blk.l, w: blk.w, h: blk.h, stone: blk.stone }}
+                  placed={placed}
+                  az={Math.PI * 0.25}
+                  size={300}
+                />
+                <div className="view-lbl">Isometric View</div>
+              </div>
+
+              {/* Right: 2D Top-Down Layout Plan */}
+              {topDownSvg && (
+                <div className="view-card">
+                  <svg
+                    viewBox={`0 0 ${topDownSvg.svgW.toFixed(1)} ${topDownSvg.svgH.toFixed(1)}`}
+                    style={{ width: "100%", display: "block" }}
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    {/* Block outline */}
+                    <rect
+                      x={topDownSvg.PAD} y={topDownSvg.PAD}
+                      width={blk.l * topDownSvg.sc} height={blk.w * topDownSvg.sc}
+                      fill="none" stroke="#888" strokeWidth="1.5" strokeDasharray="4 2"
+                    />
+                    {/* Block dimension labels */}
+                    <text x={topDownSvg.PAD + (blk.l * topDownSvg.sc) / 2} y={topDownSvg.PAD - 4}
+                      textAnchor="middle" fill="#666" fontSize={8} fontFamily="ui-monospace,monospace">
+                      {blk.l}&quot; L
+                    </text>
+                    <text x={topDownSvg.PAD - 4} y={topDownSvg.PAD + (blk.w * topDownSvg.sc) / 2}
+                      textAnchor="middle" dominantBaseline="middle" fill="#666" fontSize={8}
+                      transform={`rotate(-90,${topDownSvg.PAD - 4},${topDownSvg.PAD + (blk.w * topDownSvg.sc) / 2})`}
+                      fontFamily="ui-monospace,monospace">
+                      {blk.w}&quot; W
+                    </text>
+                    {/* Placed slabs */}
+                    {placed.map((s) => {
+                      const col = slabColor(s.id);
+                      const x = topDownSvg.PAD + s.px * topDownSvg.sc;
+                      const y = topDownSvg.PAD + s.py * topDownSvg.sc;
+                      const w = s.pw * topDownSvg.sc;
+                      const h = s.ph * topDownSvg.sc;
+                      const cx = x + w / 2;
+                      const cy = y + h / 2;
+                      const showId = Math.min(w, h) > 18;
+                      return (
+                        <g key={s.id}>
+                          <rect x={x} y={y} width={w} height={h}
+                            fill={col} fillOpacity={0.28}
+                            stroke={col} strokeWidth="1.2"
+                          />
+                          {showId && (
+                            <text x={cx} y={cy} textAnchor="middle" dominantBaseline="middle"
+                              fill="#1a1a1a" fontSize={8} fontWeight={700} fontFamily="ui-monospace,monospace">
+                              {s.id}
+                            </text>
+                          )}
+                        </g>
+                      );
+                    })}
+                  </svg>
+                  <div className="view-lbl">Top-Down Layout Plan (L × W)</div>
                 </div>
-              ))}
+              )}
             </div>
           </>
         )}
