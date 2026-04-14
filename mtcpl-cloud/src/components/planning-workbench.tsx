@@ -820,7 +820,7 @@ export function PlanningWorkbench({
               <p className="muted" style={{ fontWeight: 600, marginBottom: 6 }}>{temple}</p>
               <div className="records-stack">
                 {slabsByTemple[temple].map((slab) => (
-                  <div className={`record-card compact-record plan-selectable${selectedSlabIds.has(slab.id) ? "" : " plan-deselected"}`} key={slab.id} onClick={() => toggleSlab(slab.id)} style={{ cursor: "pointer", ...(slab.priority ? { borderLeft: "3px solid #DC2626", background: "rgba(220,38,38,0.03)" } : {}) }}>
+                  <div className={`record-card compact-record plan-selectable${selectedSlabIds.has(slab.id) ? "" : " plan-deselected"}`} key={slab.id} onClick={() => toggleSlab(slab.id)} style={{ cursor: "pointer", ...(slab.priority ? { borderLeft: "4px solid #DC2626", background: "rgba(220,38,38,0.10)" } : {}) }}>
                     <div className="record-head">
                       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                         <input

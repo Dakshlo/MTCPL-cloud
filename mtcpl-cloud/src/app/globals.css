@@ -1839,7 +1839,7 @@ details.block-card[open] {
 .slab-row:last-child { border-bottom: none; }
 .slab-row:hover { background: var(--bg); }
 .slab-row-selected { background: var(--gold-subtle) !important; }
-.slab-row-priority { border-left: 3px solid #DC2626; background: rgba(220,38,38,0.06) !important; }
+.slab-row-priority { border-left: 3px solid #DC2626; background: rgba(220,38,38,0.13) !important; }
 
 .slab-row input[type="checkbox"] { flex-shrink: 0; width: 16px; height: 16px; cursor: pointer; accent-color: var(--gold); }
 

@@ -170,7 +170,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
             const isUrgent = block.cut_session_slabs.some(s => urgentSlabIds.has(s.slab_requirement_id));
 
             return (
-              <div className="plan-card" key={block.id} style={isUrgent ? { borderLeft: "3px solid #DC2626", background: "rgba(220,38,38,0.02)" } : {}}>
+              <div className="plan-card" key={block.id} style={isUrgent ? { borderLeft: "4px solid #DC2626", background: "rgba(220,38,38,0.10)" } : {}}>
                 <div
                   className="record-head"
                   style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-start" }}
