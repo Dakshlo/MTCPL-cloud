@@ -25,7 +25,14 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         <div className="topbar">
           <div className="topbar-left">
             <span className="topbar-label">Signed in as</span>
-            <strong className="topbar-name">{displayName}</strong>
+            <Link
+              href="/profile"
+              className="topbar-name"
+              title="Click to update your display name"
+              style={{ textDecoration: "none", borderBottom: "1px dashed var(--border)", cursor: "pointer" }}
+            >
+              {displayName}
+            </Link>
           </div>
           <div className="topbar-right">
             <span className="role-pill" style={
