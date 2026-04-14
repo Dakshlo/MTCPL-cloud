@@ -1,0 +1,573 @@
+import { notFound } from "next/navigation";
+import { requireAuth } from "@/lib/auth";
+import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { getProfilesMap } from "@/lib/profiles";
+import { IsoBlockStaticSVG } from "@/components/iso-block-static";
+import { PrintBtn } from "./print-btn";
+
+type Params = Promise<{ id: string }>;
+
+type PlacedSlab = {
+  id: string;
+  label?: string;
+  temple?: string;
+  sw: number;
+  sh: number;
+  sd?: number;
+  px: number;
+  py: number;
+  pw: number;
+  ph: number;
+  aw?: number;
+  ah?: number;
+  rot?: boolean;
+  zTop?: number;
+  zBot?: number;
+};
+
+const SLAB_COLORS = [
+  "#D85A30","#378ADD","#1D9E75","#7F77DD","#BA7517",
+  "#639922","#D4537E","#E24B4A","#5F5E5A","#0F6E56",
+];
+function slabColor(id: string) {
+  const num = parseInt(String(id || "").replace(/\D/g, ""), 10);
+  if (!num || Number.isNaN(num)) return SLAB_COLORS[0];
+  return SLAB_COLORS[(num - 1) % SLAB_COLORS.length];
+}
+
+export default async function CuttingPrintPage({ params }: { params: Params }) {
+  await requireAuth(["owner", "team_head", "cutting_operator"]);
+  const { id } = await params;
+  const supabase = createAdminSupabaseClient();
+
+  const { data: block, error } = await supabase
+    .from("cut_session_blocks")
+    .select(
+      "id, status, block_id, largest_remainder, layout, cut_session_id, cut_sessions(id, session_code, kerf_mm, created_at, planned_by), cut_session_slabs(id, slab_requirement_id)"
+    )
+    .eq("id", id)
+    .single();
+
+  if (error || !block) notFound();
+
+  const profilesMap = await getProfilesMap();
+
+  const layout = block.layout as {
+    blk?: { id: string; stone: string; yard: number; l: number; w: number; h: number; quality?: string | null };
+    placed?: PlacedSlab[];
+    biggest?: { l: number; w: number; h: number } | null;
+  } | null;
+
+  const blk = layout?.blk;
+  const placed = layout?.placed ?? [];
+  const session = block.cut_sessions as unknown as {
+    id: string;
+    session_code: string;
+    kerf_mm: number;
+    created_at: string;
+    planned_by: string | null;
+  } | null;
+
+  const plannerName = session?.planned_by ? (profilesMap[session.planned_by] ?? "Unknown") : null;
+  const printDate = new Date().toLocaleDateString("en-IN", {
+    day: "numeric", month: "long", year: "numeric",
+  });
+
+  const views = [
+    { az: Math.PI * 0.25,  label: "Front-Left" },
+    { az: -Math.PI * 0.25, label: "Front-Right" },
+    { az: Math.PI * 0.75,  label: "Back-Left" },
+  ];
+
+  // Volume in CFT (values stored in inches, 1728 in³ = 1 ft³)
+  const volCft = blk ? ((blk.l * blk.w * blk.h) / 1728).toFixed(2) : null;
+
+  return (
+    <>
+      <style>{`
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+          font-size: 13px;
+          color: #1a1a1a;
+          background: #f0f0f0;
+        }
+
+        .print-wrap {
+          max-width: 900px;
+          margin: 0 auto;
+          background: #fff;
+          padding: 28px 32px 36px;
+        }
+
+        /* Screen-only print button bar */
+        .screen-bar {
+          background: #1a1a1a;
+          color: #fff;
+          padding: 10px 32px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          max-width: 900px;
+          margin: 0 auto;
+        }
+        .screen-bar-title { font-size: 13px; color: rgba(255,255,255,0.65); }
+        .print-action-btn {
+          background: #b87333;
+          color: #fff;
+          border: none;
+          padding: 8px 22px;
+          border-radius: 6px;
+          font-size: 13px;
+          font-weight: 600;
+          cursor: pointer;
+          letter-spacing: 0.02em;
+        }
+        .print-action-btn:hover { background: #a06428; }
+
+        /* Typography */
+        .doc-eyebrow {
+          font-size: 10px;
+          font-weight: 700;
+          color: #888;
+          text-transform: uppercase;
+          letter-spacing: 0.1em;
+          margin-bottom: 6px;
+        }
+        .doc-title {
+          font-size: 22px;
+          font-weight: 700;
+          color: #1a1a1a;
+          font-family: ui-monospace, monospace;
+          margin-bottom: 3px;
+        }
+        .doc-sub { font-size: 13px; color: #555; }
+        .doc-date { font-size: 11px; color: #888; text-align: right; line-height: 1.6; }
+
+        /* Section headings */
+        .section-head {
+          font-size: 11px;
+          font-weight: 700;
+          color: #666;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          border-bottom: 2px solid #1a1a1a;
+          padding-bottom: 4px;
+          margin: 20px 0 10px;
+        }
+
+        /* Meta grid */
+        .meta-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+          gap: 12px 20px;
+        }
+        .meta-label {
+          font-size: 9px;
+          font-weight: 700;
+          color: #999;
+          text-transform: uppercase;
+          letter-spacing: 0.07em;
+          margin-bottom: 2px;
+        }
+        .meta-val {
+          font-size: 14px;
+          font-weight: 600;
+          color: #1a1a1a;
+        }
+        .meta-val.mono { font-family: ui-monospace, monospace; }
+
+        /* 3D Views */
+        .views-row {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 10px;
+        }
+        .view-card {
+          border: 1px solid #ddd;
+          border-radius: 6px;
+          padding: 6px 6px 4px;
+          background: #fafafa;
+        }
+        .view-lbl {
+          font-size: 9px;
+          font-weight: 700;
+          color: #888;
+          text-align: center;
+          text-transform: uppercase;
+          letter-spacing: 0.07em;
+          margin-top: 4px;
+        }
+
+        /* Planned slabs table */
+        table.slab-table {
+          width: 100%;
+          border-collapse: collapse;
+          font-size: 12px;
+        }
+        table.slab-table th {
+          background: #f5f5f5;
+          padding: 5px 8px;
+          text-align: left;
+          font-size: 10px;
+          font-weight: 700;
+          color: #666;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          border-bottom: 2px solid #ddd;
+        }
+        table.slab-table td {
+          padding: 6px 8px;
+          border-bottom: 1px solid #f0f0f0;
+          vertical-align: middle;
+        }
+        table.slab-table tr:last-child td { border-bottom: none; }
+
+        .color-dot {
+          display: inline-block;
+          width: 9px;
+          height: 9px;
+          border-radius: 2px;
+          margin-right: 5px;
+          vertical-align: middle;
+          flex-shrink: 0;
+        }
+        .slab-code { font-family: ui-monospace, monospace; font-weight: 700; }
+
+        /* ─── MANUAL ENTRY SECTION ─────────────────────────── */
+        .manual-section {
+          margin-top: 24px;
+          border: 2px dashed #bbb;
+          border-radius: 8px;
+          padding: 16px 20px 20px;
+          page-break-inside: avoid;
+        }
+        .manual-title {
+          font-size: 12px;
+          font-weight: 700;
+          color: #444;
+          text-transform: uppercase;
+          letter-spacing: 0.07em;
+          margin-bottom: 4px;
+        }
+        .manual-hint {
+          font-size: 10px;
+          color: #888;
+          margin-bottom: 14px;
+        }
+
+        /* Slab checklist in manual section */
+        .slab-checklist {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+          gap: 6px 16px;
+          margin-bottom: 18px;
+        }
+        .slab-check-row {
+          display: flex;
+          align-items: center;
+          gap: 7px;
+          font-size: 12px;
+        }
+        .check-box {
+          width: 14px;
+          height: 14px;
+          border: 1.5px solid #555;
+          border-radius: 3px;
+          flex-shrink: 0;
+          display: inline-block;
+        }
+
+        /* Waste block form lines */
+        .waste-table {
+          width: 100%;
+          border-collapse: collapse;
+          font-size: 12px;
+          margin-bottom: 16px;
+        }
+        .waste-table th {
+          background: #f5f5f5;
+          padding: 5px 10px;
+          text-align: left;
+          font-size: 10px;
+          font-weight: 700;
+          color: #666;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          border-bottom: 2px solid #ddd;
+        }
+        .waste-table td {
+          padding: 0;
+          border-bottom: 1px solid #eee;
+          height: 34px;
+        }
+        .write-line {
+          display: block;
+          width: 100%;
+          height: 100%;
+          border-bottom: 1.5px solid #ccc;
+          margin: 0 8px;
+          width: calc(100% - 16px);
+        }
+
+        /* Sign-off row */
+        .signoff-row {
+          display: grid;
+          grid-template-columns: 1fr 1fr 1fr;
+          gap: 20px;
+          margin-top: 12px;
+        }
+        .signoff-field { display: flex; flex-direction: column; gap: 4px; }
+        .signoff-label { font-size: 9px; color: #888; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+        .signoff-line { border-bottom: 1.5px solid #888; height: 28px; width: 100%; }
+
+        /* Footer */
+        .doc-footer {
+          margin-top: 20px;
+          padding-top: 10px;
+          border-top: 1px solid #e0e0e0;
+          display: flex;
+          justify-content: space-between;
+          font-size: 10px;
+          color: #aaa;
+        }
+
+        @media print {
+          body { background: #fff; }
+          .screen-bar { display: none !important; }
+          .print-wrap { max-width: none; padding: 10mm 12mm; margin: 0; }
+          .section-head { margin-top: 14px; }
+          @page { margin: 10mm; }
+        }
+
+        @media screen {
+          body { padding: 0; }
+        }
+      `}</style>
+
+      {/* Screen-only top bar with print button */}
+      <div className="screen-bar">
+        <span className="screen-bar-title">
+          Cutting Plan — {block.block_id} · {session?.session_code ?? ""}
+        </span>
+        <PrintBtn />
+      </div>
+
+      <div className="print-wrap">
+
+        {/* ── Header ── */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18 }}>
+          <div>
+            <div className="doc-eyebrow">MTCPL · Cutting Plan</div>
+            <div className="doc-title">{block.block_id}</div>
+            <div className="doc-sub">
+              Session: <strong>{session?.session_code ?? "—"}</strong>
+              {plannerName && (
+                <> &nbsp;·&nbsp; Plan by <strong style={{ color: "#b87333" }}>{plannerName}</strong></>
+              )}
+            </div>
+          </div>
+          <div className="doc-date">
+            <div>Printed: {printDate}</div>
+            {session?.created_at && (
+              <div>Plan date: {new Date(session.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</div>
+            )}
+          </div>
+        </div>
+
+        {/* ── Block info ── */}
+        <div className="section-head">Block Information</div>
+        <div className="meta-grid">
+          <div>
+            <div className="meta-label">Block ID</div>
+            <div className="meta-val mono">{block.block_id}</div>
+          </div>
+          <div>
+            <div className="meta-label">Stone</div>
+            <div className="meta-val">{blk?.stone ?? "—"}</div>
+          </div>
+          <div>
+            <div className="meta-label">Yard</div>
+            <div className="meta-val">Yard {blk?.yard ?? "—"}</div>
+          </div>
+          <div>
+            <div className="meta-label">Dimensions (in)</div>
+            <div className="meta-val mono">
+              {blk ? `${blk.l} × ${blk.w} × ${blk.h}` : "—"} in
+            </div>
+          </div>
+          {volCft && (
+            <div>
+              <div className="meta-label">Volume</div>
+              <div className="meta-val">{volCft} CFT</div>
+            </div>
+          )}
+          <div>
+            <div className="meta-label">Kerf</div>
+            <div className="meta-val">{session?.kerf_mm ?? "—"} mm</div>
+          </div>
+          {blk?.quality && (
+            <div>
+              <div className="meta-label">Quality</div>
+              <div className="meta-val">Grade {blk.quality}</div>
+            </div>
+          )}
+          {layout?.biggest && (
+            <div>
+              <div className="meta-label">Expected Remainder (in)</div>
+              <div className="meta-val mono">
+                {layout.biggest.l} × {layout.biggest.w} × {layout.biggest.h} in
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── 3D Views ── */}
+        {blk && placed.length > 0 && (
+          <>
+            <div className="section-head">3D Block Views — {placed.length} slab{placed.length !== 1 ? "s" : ""} planned</div>
+            <div className="views-row">
+              {views.map((v) => (
+                <div className="view-card" key={v.label}>
+                  <IsoBlockStaticSVG
+                    block={{ l: blk.l, w: blk.w, h: blk.h, stone: blk.stone }}
+                    placed={placed}
+                    az={v.az}
+                    size={220}
+                  />
+                  <div className="view-lbl">{v.label}</div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* ── Planned slabs table ── */}
+        <div className="section-head">Slabs to Cut ({placed.length})</div>
+        {placed.length === 0 ? (
+          <p style={{ color: "#888", fontSize: 12 }}>No slabs planned.</p>
+        ) : (
+          <table className="slab-table">
+            <thead>
+              <tr>
+                <th style={{ width: 24 }}>#</th>
+                <th>Slab ID</th>
+                <th>Temple</th>
+                <th>Label</th>
+                <th>W × H (in)</th>
+                <th>Thickness (in)</th>
+                <th>Position X, Y (in)</th>
+                <th>Rotated</th>
+                <th>Layer Depth (in)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {placed.map((s, i) => {
+                const color = slabColor(s.id);
+                return (
+                  <tr key={s.id}>
+                    <td style={{ color: "#999" }}>{i + 1}</td>
+                    <td>
+                      <span className="color-dot" style={{ background: color }} />
+                      <span className="slab-code">{s.id}</span>
+                    </td>
+                    <td>{s.temple ?? "—"}</td>
+                    <td style={{ color: "#555" }}>{s.label ?? "—"}</td>
+                    <td style={{ fontFamily: "ui-monospace, monospace" }}>{s.sw} × {s.sh}</td>
+                    <td style={{ fontFamily: "ui-monospace, monospace" }}>{s.sd ?? "—"}</td>
+                    <td style={{ fontFamily: "ui-monospace, monospace" }}>
+                      {s.px != null ? `${Number(s.px).toFixed(1)}, ${Number(s.py).toFixed(1)}` : "—"}
+                    </td>
+                    <td style={{ textAlign: "center" }}>{s.rot ? "↻" : "—"}</td>
+                    <td style={{ fontFamily: "ui-monospace, monospace", color: "#888" }}>
+                      {s.zBot != null && s.zTop != null
+                        ? `${Number(s.zBot).toFixed(1)} – ${Number(s.zTop).toFixed(1)}`
+                        : "—"}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+
+        {/* ── MANUAL ENTRY SECTION (filled after cutting) ── */}
+        <div className="manual-section">
+          <div className="manual-title">✍ After Cutting — Fill in Manually &amp; Return to Office</div>
+          <div className="manual-hint">Cutter fills this section. Office staff enters into system after receiving.</div>
+
+          {/* Slab checklist */}
+          {placed.length > 0 && (
+            <>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#666", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
+                Slabs Actually Cut — tick each one completed:
+              </div>
+              <div className="slab-checklist">
+                {placed.map((s) => (
+                  <div className="slab-check-row" key={s.id}>
+                    <span className="check-box" />
+                    <span className="color-dot" style={{ background: slabColor(s.id) }} />
+                    <span className="slab-code" style={{ fontSize: 12 }}>{s.id}</span>
+                    <span style={{ fontSize: 11, color: "#888" }}>{s.sw}×{s.sh} in</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* Waste / remainder block entries */}
+          <div style={{ fontSize: 10, fontWeight: 700, color: "#666", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
+            Remaining Block Pieces (leave blank if none / discarded):
+          </div>
+          <table className="waste-table">
+            <thead>
+              <tr>
+                <th style={{ width: 28 }}>#</th>
+                <th>Length (in)</th>
+                <th>Width (in)</th>
+                <th>Height (in)</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[1, 2, 3, 4].map((n) => (
+                <tr key={n}>
+                  <td style={{ padding: "0 8px", color: "#999", textAlign: "center", verticalAlign: "middle" }}>{n}</td>
+                  <td><span className="write-line" /></td>
+                  <td><span className="write-line" /></td>
+                  <td><span className="write-line" /></td>
+                  <td><span className="write-line" /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {/* Sign-off row */}
+          <div className="signoff-row">
+            <div className="signoff-field">
+              <div className="signoff-label">Cutting Operator</div>
+              <div className="signoff-line" />
+            </div>
+            <div className="signoff-field">
+              <div className="signoff-label">Date Completed</div>
+              <div className="signoff-line" />
+            </div>
+            <div className="signoff-field">
+              <div className="signoff-label">Checked By (Office)</div>
+              <div className="signoff-line" />
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="doc-footer">
+          <span>MTCPL · Cutting Plan · {block.block_id}</span>
+          <span>{session?.session_code ?? ""}{plannerName ? ` · Plan by ${plannerName}` : ""}</span>
+        </div>
+
+      </div>
+    </>
+  );
+}

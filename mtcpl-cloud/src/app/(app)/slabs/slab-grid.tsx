@@ -99,8 +99,8 @@ export function SlabGrid({ slabs, temples, canEdit, profilesMap = {} }: { slabs:
               </div>
               <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
                 {slab.created_at && <>Added {fmtDate(slab.created_at)}</>}
-                {slab.created_by && profilesMap[slab.created_by] && (
-                  <> · <span style={{ color: "var(--gold-dark)", fontWeight: 600 }}>by {profilesMap[slab.created_by]}</span></>
+                {slab.created_by && (
+                  <> · <span style={{ color: "var(--gold-dark)", fontWeight: 600 }}>by {profilesMap[slab.created_by] ?? "Unknown"}</span></>
                 )}
                 {slab.status === "cut_done" && slab.updated_at && (
                   <> · Cut {fmtDate(slab.updated_at)}</>

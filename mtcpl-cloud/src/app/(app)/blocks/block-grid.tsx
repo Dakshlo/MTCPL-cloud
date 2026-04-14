@@ -109,8 +109,8 @@ export function BlockGrid({ blocks, canEdit, vendors, profilesMap = {} }: { bloc
                 {block.created_at && (
                   <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
                     Added {fmtDate(block.created_at)}
-                    {block.created_by && profilesMap[block.created_by] && (
-                      <> · <span style={{ color: "var(--gold-dark)", fontWeight: 600 }}>by {profilesMap[block.created_by]}</span></>
+                    {block.created_by && (
+                      <> · <span style={{ color: "var(--gold-dark)", fontWeight: 600 }}>by {profilesMap[block.created_by] ?? "Unknown"}</span></>
                     )}
                   </div>
                 )}
