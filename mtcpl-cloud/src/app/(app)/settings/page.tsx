@@ -66,13 +66,31 @@ export default async function SettingsPage() {
   const { profile: currentUser } = await requireAuth(["owner", "team_head", "developer"]);
   const admin = createAdminSupabaseClient();
 
-  const [{ data: temples }, { data: users }, { data: stoneTypes }] = await Promise.all([
+  const [{ data: temples }, { data: users }, { data: stoneTypes }, { data: blockStones }, { data: slabStones }, { data: templeSlabCounts }] = await Promise.all([
     admin.from("temples").select("*").order("name"),
     // Admin client needed — RLS on profiles only returns the current user's own row
     admin.from("profiles").select("id, full_name, phone, role, is_active, created_at").order("full_name"),
     admin.from("stone_types").select("id, name, color_top, color_front, color_side, is_active, sort_order").order("sort_order").order("name"),
+    // Usage counts for stone types
+    admin.from("blocks").select("stone"),
+    admin.from("slab_requirements").select("stone, temple"),
+    admin.from("slab_requirements").select("temple"),
   ]);
   const stoneList = stoneTypes ?? [];
+
+  // Pre-compute usage counts so delete guards are visible in UI
+  const blockStoneCount = (blockStones ?? []).reduce<Record<string, number>>((acc, b) => {
+    if (b.stone) acc[b.stone] = (acc[b.stone] ?? 0) + 1;
+    return acc;
+  }, {});
+  const slabStoneCount = (slabStones ?? []).reduce<Record<string, number>>((acc, s) => {
+    if (s.stone) acc[s.stone] = (acc[s.stone] ?? 0) + 1;
+    return acc;
+  }, {});
+  const templeSlabCount = (templeSlabCounts ?? []).reduce<Record<string, number>>((acc, s) => {
+    if (s.temple) acc[s.temple] = (acc[s.temple] ?? 0) + 1;
+    return acc;
+  }, {});
 
   // Admin client needed — profiles join in audit log returns null names for non-self users under RLS
   const { data: recentAudit } = await admin
@@ -295,7 +313,7 @@ export default async function SettingsPage() {
             </label>
             <label className="stack" style={{ flex: "0 0 auto" }}>
               <span>Stone Colour</span>
-              <input type="color" name="color" defaultValue="#C87A60" style={{ width: 56, height: 36, padding: 2, cursor: "pointer", borderRadius: 6 }} />
+              <input type="color" name="color" defaultValue="#A85555" style={{ width: 56, height: 36, padding: 2, cursor: "pointer", borderRadius: 6 }} />
             </label>
             <div className="stack" style={{ flex: "0 0 auto", justifyContent: "flex-end" }}>
               <span style={{ visibility: "hidden", fontSize: 12 }}>.</span>
@@ -334,7 +352,15 @@ export default async function SettingsPage() {
                     <span title="Front" style={{ width: 22, height: 22, borderRadius: 4, background: st.color_front, border: "1px solid rgba(0,0,0,0.1)", display: "inline-block" }} />
                     <span title="Side" style={{ width: 22, height: 22, borderRadius: 4, background: st.color_side, border: "1px solid rgba(0,0,0,0.1)", display: "inline-block" }} />
                   </span>
-                  <span className="muted" style={{ fontSize: 12 }}>—</span>
+                  <span style={{ fontSize: 12 }}>
+                    {(() => {
+                      const bc = blockStoneCount[st.name] ?? 0;
+                      const sc = slabStoneCount[st.name] ?? 0;
+                      const total = bc + sc;
+                      if (total === 0) return <span className="muted">None</span>;
+                      return <span style={{ color: "#b87333", fontWeight: 600 }}>{bc} block{bc !== 1 ? "s" : ""}, {sc} slab{sc !== 1 ? "s" : ""}</span>;
+                    })()}
+                  </span>
                   <span>
                     {isBuiltIn ? (
                       <span className="muted" style={{ fontSize: 12 }}>🔒 Protected</span>
@@ -342,7 +368,14 @@ export default async function SettingsPage() {
                       <form action={deleteStoneTypeAction} style={{ display: "inline" }}>
                         <input type="hidden" name="id" value={st.id} />
                         <input type="hidden" name="name" value={st.name} />
-                        <button className="ghost-button danger-ghost" type="submit" style={{ fontSize: 12, padding: "3px 10px" }}>
+                        <button
+                          className="ghost-button danger-ghost"
+                          type="submit"
+                          style={{ fontSize: 12, padding: "3px 10px" }}
+                          title={(blockStoneCount[st.name] ?? 0) + (slabStoneCount[st.name] ?? 0) > 0
+                            ? "Cannot delete — blocks/slabs exist with this stone type"
+                            : "Delete stone type"}
+                        >
                           Delete
                         </button>
                       </form>
@@ -429,8 +462,18 @@ export default async function SettingsPage() {
                 </summary>
 
                 <div className="settings-table-edit">
+                  {(() => {
+                    const sc = templeSlabCount[temple.name] ?? 0;
+                    if (sc > 0) return (
+                      <p style={{ fontSize: 12, color: "#b87333", margin: "0 0 10px", fontWeight: 600 }}>
+                        ⚠️ {sc} slab{sc !== 1 ? "s" : ""} belong to this temple — delete is blocked until all slabs are completed or removed.
+                      </p>
+                    );
+                    return null;
+                  })()}
                   <form action={updateTempleAction} className="settings-form-row">
                     <input type="hidden" name="id" value={temple.id} />
+                    <input type="hidden" name="temple_name" value={temple.name} />
                     <label className="stack" style={{ flex: 2 }}>
                       <span>Temple Name</span>
                       <input name="name" defaultValue={temple.name} required />

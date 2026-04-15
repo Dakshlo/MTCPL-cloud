@@ -56,6 +56,17 @@ export async function deleteStoneTypeAction(formData: FormData) {
     redirect("/settings?toast=Cannot+delete+built-in+stone+types");
   }
 
+  // Block deletion if any blocks or slabs still use this stone type
+  const admin = createAdminSupabaseClient();
+  const [{ count: blockCount }, { count: slabCount }] = await Promise.all([
+    admin.from("blocks").select("id", { count: "exact", head: true }).eq("stone", name),
+    admin.from("slab_requirements").select("id", { count: "exact", head: true }).eq("stone", name),
+  ]);
+  const total = (blockCount ?? 0) + (slabCount ?? 0);
+  if (total > 0) {
+    redirect(`/settings?toast=${encodeURIComponent(`Cannot delete — ${blockCount ?? 0} block(s) and ${slabCount ?? 0} slab(s) still use "${name}". Change their stone type first.`)}`);
+  }
+
   const { error } = await supabase.from("stone_types").delete().eq("id", id);
   if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
 
@@ -109,6 +120,20 @@ export async function deleteTempleAction(formData: FormData) {
   const supabase = await createServerSupabaseClient();
 
   const id = text(formData, "id");
+  const name = text(formData, "temple_name");
+
+  // Block deletion if any slabs still reference this temple
+  if (name) {
+    const admin = createAdminSupabaseClient();
+    const { count } = await admin
+      .from("slab_requirements")
+      .select("id", { count: "exact", head: true })
+      .eq("temple", name);
+    if ((count ?? 0) > 0) {
+      redirect(`/settings?toast=${encodeURIComponent(`Cannot delete — ${count} slab(s) still belong to "${name}". Those slabs must be completed or removed first.`)}`);
+    }
+  }
+
   const { error } = await supabase.from("temples").delete().eq("id", id);
   if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
 
