@@ -165,13 +165,30 @@ export function ManualCutModal({
                     placeholder="Filter by ID, temple, label…"
                     value={filter}
                     onChange={(e) => setFilter(e.target.value)}
-                    style={{ flex: 1, fontSize: 13 }}
+                    style={{
+                      flex: 1,
+                      fontSize: 13,
+                      border: "1px solid var(--border)",
+                      borderRadius: 5,
+                      padding: "6px 10px",
+                      background: "var(--bg)",
+                      color: "var(--text)",
+                      outline: "none",
+                    }}
                   />
                   {temples.length > 1 && (
                     <select
                       value={templeFilter}
                       onChange={(e) => setTempleFilter(e.target.value)}
-                      style={{ fontSize: 13, minWidth: 120 }}
+                      style={{
+                        fontSize: 13,
+                        minWidth: 120,
+                        border: "1px solid var(--border)",
+                        borderRadius: 5,
+                        padding: "6px 8px",
+                        background: "var(--bg)",
+                        color: "var(--text)",
+                      }}
                     >
                       <option value="all">All temples</option>
                       {temples.map((t) => (

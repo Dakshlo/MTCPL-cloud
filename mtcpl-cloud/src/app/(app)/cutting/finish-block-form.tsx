@@ -195,7 +195,18 @@ export function FinishBlockForm({
                 placeholder="Filter by ID, temple, label…"
                 value={extraFilter}
                 onChange={(e) => setExtraFilter(e.target.value)}
-                style={{ width: "100%", fontSize: 13, marginBottom: 8, boxSizing: "border-box" }}
+                style={{
+                  width: "100%",
+                  fontSize: 13,
+                  marginBottom: 8,
+                  boxSizing: "border-box",
+                  border: "1px solid var(--border)",
+                  borderRadius: 5,
+                  padding: "6px 10px",
+                  background: "var(--bg)",
+                  color: "var(--text)",
+                  outline: "none",
+                }}
               />
               <div style={{ maxHeight: 220, overflowY: "auto", display: "flex", flexDirection: "column", gap: 5 }}>
                 {filteredOpenSlabs.length === 0 ? (
