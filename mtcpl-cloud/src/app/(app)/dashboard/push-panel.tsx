@@ -24,6 +24,8 @@ export function PushPanel({
   todayLabel: string;
 }) {
   const [q, setQ] = useState("");
+  const [showAll, setShowAll] = useState(false);
+  const COLLAPSED_COUNT = 3;
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -35,6 +37,11 @@ export function PushPanel({
       (s.stone ?? "").toLowerCase().includes(term)
     );
   }, [slabs, q]);
+
+  // When searching, always show all matches. Otherwise collapse to COLLAPSED_COUNT.
+  const isSearching = q.trim().length > 0;
+  const visible = isSearching || showAll ? filtered : filtered.slice(0, COLLAPSED_COUNT);
+  const hiddenCount = filtered.length - visible.length;
 
   return (
     <div style={{ background: "var(--surface)", border: "2px solid var(--gold-border)", borderRadius: 10, overflow: "hidden" }}>
@@ -101,7 +108,7 @@ export function PushPanel({
               </tr>
             </thead>
             <tbody>
-              {filtered.map(s => (
+              {visible.map(s => (
                 <tr key={s.id} style={{ borderTop: "1px solid var(--border-light)", background: s.priority ? "rgba(220,38,38,0.04)" : "transparent" }}>
                   <td style={{ padding: "10px 14px", fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 12, whiteSpace: "nowrap" }}>
                     {s.priority && <span style={{ marginRight: 5 }}>⚡</span>}
@@ -166,6 +173,30 @@ export function PushPanel({
               ))}
             </tbody>
           </table>
+
+          {/* Show more / less toggle (only when not searching and there's something hidden) */}
+          {!isSearching && filtered.length > COLLAPSED_COUNT && (
+            <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border-light)", background: "var(--surface-alt)", textAlign: "center" }}>
+              <button
+                type="button"
+                onClick={() => setShowAll((v) => !v)}
+                style={{
+                  fontSize: 12,
+                  fontWeight: 700,
+                  padding: "6px 16px",
+                  border: "1px solid var(--border)",
+                  borderRadius: 20,
+                  background: "var(--bg)",
+                  color: "var(--gold-dark)",
+                  cursor: "pointer",
+                }}
+              >
+                {showAll
+                  ? `▲ Show less`
+                  : `▼ Show all ${filtered.length} slabs (${hiddenCount} more)`}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
