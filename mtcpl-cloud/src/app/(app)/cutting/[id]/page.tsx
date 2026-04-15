@@ -98,7 +98,7 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
           <p className="muted" style={{ marginTop: 4 }}>
             {session?.session_code ?? "—"}
             {blk
-              ? ` · ${blk.stone} · Yard ${blk.yard} · ${blk.l} × ${blk.w} × ${blk.h} ft`
+              ? ` · ${blk.stone} · Yard ${blk.yard} · ${blk.l} × ${blk.w} × ${blk.h} in`
               : ""}
             {session?.kerf_mm ? ` · Kerf ${session.kerf_mm} mm` : ""}
           </p>
@@ -200,7 +200,7 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
               Planned Largest Remainder
             </p>
             <p style={{ margin: "3px 0 0", fontSize: 15, fontWeight: 700 }}>
-              {layout.biggest.l} × {layout.biggest.w} × {layout.biggest.h} ft
+              {layout.biggest.l} × {layout.biggest.w} × {layout.biggest.h} in
             </p>
           </div>
         )}
@@ -250,7 +250,7 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
               <span className="plan-chip" key={s.id} style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}>
                 {s.id}
                 {s.temple ? ` · ${s.temple}` : ""}
-                {` · ${s.sw}×${s.sh}${s.sd ? `×${s.sd}` : ""} ft`}
+                {` · ${s.sw}×${s.sh}${s.sd ? `×${s.sd}` : ""} in`}
                 {s.rot ? " ↻" : ""}
               </span>
             ))}

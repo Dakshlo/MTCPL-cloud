@@ -209,7 +209,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                       <p className="muted" style={{ margin: "2px 0 0", fontSize: 12 }}>
                         {block.cut_sessions?.session_code}
                         {blk
-                          ? ` · ${blk.stone} · Yard ${blk.yard} · ${blk.l} × ${blk.w} × ${blk.h} ft`
+                          ? ` · ${blk.stone} · Yard ${blk.yard} · ${blk.l} × ${blk.w} × ${blk.h} in`
                           : ""}
                         {block.cut_sessions?.kerf_mm
                           ? ` · Kerf ${block.cut_sessions.kerf_mm} mm`

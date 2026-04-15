@@ -13,14 +13,25 @@ function text(fd: FormData, key: string) {
 
 // ── Stone Type Actions ──────────────────────────────────────────────────────
 
+function adjustHex(hex: string, factor: number): string {
+  const clean = hex.replace("#", "").padEnd(6, "0");
+  const r = Math.min(255, Math.round(parseInt(clean.slice(0, 2), 16) * factor));
+  const g = Math.min(255, Math.round(parseInt(clean.slice(2, 4), 16) * factor));
+  const b = Math.min(255, Math.round(parseInt(clean.slice(4, 6), 16) * factor));
+  return "#" + [r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("");
+}
+
 export async function addStoneTypeAction(formData: FormData) {
   await requireAuth(["owner", "team_head", "developer"]);
   const supabase = await createServerSupabaseClient();
 
   const name = text(formData, "name").replace(/\s+/g, "");
-  const color_top   = text(formData, "color_top")   || "#E8E6DC";
-  const color_front = text(formData, "color_front") || "#B8B6AC";
-  const color_side  = text(formData, "color_side")  || "#D0CEC4";
+  const base = text(formData, "color") || "#C87A60";
+
+  // Auto-derive 3 face colours from one base colour
+  const color_top   = adjustHex(base, 1.35);  // lighten for top face
+  const color_front = adjustHex(base, 0.80);  // darken for front face
+  const color_side  = adjustHex(base, 1.10);  // slightly lighter for side face
 
   if (!name) redirect("/settings?toast=Stone+type+name+required");
 

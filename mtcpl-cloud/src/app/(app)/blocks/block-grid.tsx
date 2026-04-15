@@ -110,7 +110,7 @@ export function BlockGrid({ blocks, canEdit, vendors, profilesMap = {}, stoneTyp
                     </span>
                   )}
                 </div>
-                <div className="block-card-dims">{L} × {W} × {H} ft</div>
+                <div className="block-card-dims">{L} × {W} × {H} in</div>
                 <div className="block-card-cft">{cft} CFT</div>
                 {block.created_at && (
                   <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
@@ -190,15 +190,15 @@ export function BlockGrid({ blocks, canEdit, vendors, profilesMap = {}, stoneTyp
 
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
                   <label className="stack">
-                    <span>Length (ft)</span>
+                    <span>Length (in)</span>
                     <input name="length_in" type="number" min="0" step="0.5" defaultValue={String(selected.length_ft)} />
                   </label>
                   <label className="stack">
-                    <span>Width (ft)</span>
+                    <span>Width (in)</span>
                     <input name="width_in" type="number" min="0" step="0.5" defaultValue={String(selected.width_ft)} />
                   </label>
                   <label className="stack">
-                    <span>Height (ft)</span>
+                    <span>Height (in)</span>
                     <input name="height_in" type="number" min="0" step="0.5" defaultValue={String(selected.height_ft)} />
                   </label>
                 </div>

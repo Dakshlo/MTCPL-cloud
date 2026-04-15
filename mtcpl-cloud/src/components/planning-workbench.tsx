@@ -206,7 +206,7 @@ function bestSlabFaceForAxis(
  * view can render them at the correct depth inside the block.
  */
 function runOptimization(blocks: BlockRow[], slabs: SlabRow[], kerfMm: number): PlanResult {
-  const kerfFt = kerfMm / 304.8;
+  const kerfFt = kerfMm / 25.4; // mm → inches (all dimensions stored in inches)
 
   let remaining = slabs
     .filter((slab) => slab.status === "open" || slab.status === "planned")
@@ -788,7 +788,7 @@ export function PlanningWorkbench({
                         ) : <span className="role-pill">Any Grade</span>}
                       </div>
                       <p className="muted">
-                        {block.stone} | {block.length_ft} × {block.width_ft} × {block.height_ft} ft
+                        {block.stone} | {block.length_ft} × {block.width_ft} × {block.height_ft} in
                       </p>
                     </div>
                   </div>
@@ -840,7 +840,7 @@ export function PlanningWorkbench({
                             ) : <span className="role-pill">Any Grade</span>}
                           </div>
                           <p className="muted">
-                            {slab.label} | {slab.length_ft} × {slab.width_ft} × {slab.thickness_ft} ft
+                            {slab.label} | {slab.length_ft} × {slab.width_ft} × {slab.thickness_ft} in
                           </p>
                         </div>
                       </div>
@@ -929,7 +929,7 @@ export function PlanningWorkbench({
                           <div>
                             <strong>{item.blk.id}</strong>
                             <p className="muted">
-                              {item.blk.stone} | Yard {item.blk.yard} | {item.blk.l} × {item.blk.w} × {item.blk.h} ft
+                              {item.blk.stone} | Yard {item.blk.yard} | {item.blk.l} × {item.blk.w} × {item.blk.h} in
                               {item.blk.orient ? <> · <span className="role-pill">{item.blk.orient}</span></> : null}
                               {layerCount > 1 ? <> · <span className="role-pill">{layerCount} layers</span></> : null}
                             </p>
@@ -946,18 +946,18 @@ export function PlanningWorkbench({
                               key={slab.id}
                               style={{ background: `${sclr(slab.id)}22`, color: sclr(slab.id), borderColor: `${sclr(slab.id)}44` }}
                             >
-                              {slab.id} {slab.rot ? "R" : ""} {slab.sw}×{slab.sh}×{slab.sd} ft
+                              {slab.id} {slab.rot ? "R" : ""} {slab.sw}×{slab.sh}×{slab.sd} in
                             </span>
                           ))}
                         </div>
 
                         <p className="muted" style={{ marginTop: 10 }}>
-                          Used {item.ua.toFixed(2)} ft³ | Kerf {item.ka.toFixed(2)} ft³ | Block vol. {item.ba.toFixed(2)} ft³ | Waste {Math.max(0, item.ba - item.ua - item.ka).toFixed(2)} ft³
+                          Used {(item.ua / 1728).toFixed(3)} CFT | Kerf {(item.ka / 1728).toFixed(3)} CFT | Block vol. {(item.ba / 1728).toFixed(3)} CFT | Waste {(Math.max(0, item.ba - item.ua - item.ka) / 1728).toFixed(3)} CFT
                         </p>
 
                         {item.biggest ? (
                           <p className="muted">
-                            Largest remainder {item.biggest.l} × {item.biggest.w} × {item.biggest.h} ft
+                            Largest remainder {item.biggest.l} × {item.biggest.w} × {item.biggest.h} in
                           </p>
                         ) : null}
                       </article>

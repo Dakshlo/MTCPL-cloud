@@ -290,20 +290,12 @@ export default async function SettingsPage() {
           <h3 className="settings-card-title">Add Stone Type</h3>
           <form action={addStoneTypeAction} className="settings-form-row">
             <label className="stack" style={{ flex: 2 }}>
-              <span>Name (no spaces)</span>
+              <span>Name (no spaces, e.g. RedStone)</span>
               <input name="name" placeholder="e.g. RedStone" required style={{ fontFamily: "ui-monospace, monospace", fontWeight: 600 }} />
             </label>
             <label className="stack" style={{ flex: "0 0 auto" }}>
-              <span>Top colour</span>
-              <input type="color" name="color_top" defaultValue="#D8D4CC" style={{ width: 56, height: 36, padding: 2, cursor: "pointer", borderRadius: 6 }} />
-            </label>
-            <label className="stack" style={{ flex: "0 0 auto" }}>
-              <span>Front colour</span>
-              <input type="color" name="color_front" defaultValue="#A09C94" style={{ width: 56, height: 36, padding: 2, cursor: "pointer", borderRadius: 6 }} />
-            </label>
-            <label className="stack" style={{ flex: "0 0 auto" }}>
-              <span>Side colour</span>
-              <input type="color" name="color_side" defaultValue="#B8B4AC" style={{ width: 56, height: 36, padding: 2, cursor: "pointer", borderRadius: 6 }} />
+              <span>Stone Colour</span>
+              <input type="color" name="color" defaultValue="#C87A60" style={{ width: 56, height: 36, padding: 2, cursor: "pointer", borderRadius: 6 }} />
             </label>
             <div className="stack" style={{ flex: "0 0 auto", justifyContent: "flex-end" }}>
               <span style={{ visibility: "hidden", fontSize: 12 }}>.</span>

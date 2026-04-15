@@ -119,7 +119,7 @@ export default async function BlocksPage() {
                     <div>
                       <strong style={{ fontFamily: "ui-monospace, monospace" }}>{blk.id}</strong>
                       <p className="muted" style={{ margin: "2px 0 0" }}>
-                        {blk.stone} · Yard {blk.yard} · {Number(blk.length_ft)} × {Number(blk.width_ft)} × {Number(blk.height_ft)} ft · {cft} CFT
+                        {blk.stone} · Yard {blk.yard} · {Number(blk.length_ft)} × {Number(blk.width_ft)} × {Number(blk.height_ft)} in · {cft} CFT
                       </p>
                     </div>
                     <div style={{ textAlign: "right" }}>

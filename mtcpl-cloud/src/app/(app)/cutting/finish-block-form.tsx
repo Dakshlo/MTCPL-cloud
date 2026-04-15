@@ -111,7 +111,7 @@ export function FinishBlockForm({
                 </span>
               )}
               <span className="muted" style={{ fontSize: 11 }}>
-                {slab.sw}×{slab.sh} ft
+                {slab.sw}×{slab.sh} in
               </span>
               <span
                 className={`role-pill ${checkedIds.has(slab.id) ? "badge-available" : "badge-discarded"}`}
@@ -176,7 +176,7 @@ export function FinishBlockForm({
                 type="number"
                 min="0"
                 step="0.1"
-                placeholder="L ft"
+                placeholder="L in"
                 value={r.l}
                 onChange={(e) => updateRemainder(i, "l", e.target.value)}
                 style={{ width: 72, fontSize: 13 }}
@@ -186,7 +186,7 @@ export function FinishBlockForm({
                 type="number"
                 min="0"
                 step="0.1"
-                placeholder="W ft"
+                placeholder="W in"
                 value={r.w}
                 onChange={(e) => updateRemainder(i, "w", e.target.value)}
                 style={{ width: 72, fontSize: 13 }}
@@ -196,7 +196,7 @@ export function FinishBlockForm({
                 type="number"
                 min="0"
                 step="0.1"
-                placeholder="H ft"
+                placeholder="H in"
                 value={r.h}
                 onChange={(e) => updateRemainder(i, "h", e.target.value)}
                 style={{ width: 72, fontSize: 13 }}
