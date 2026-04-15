@@ -62,9 +62,18 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
 
   const blk = layout?.blk;
   const placed = layout?.placed ?? [];
-  const [profilesMap, { data: stoneTypes }] = await Promise.all([
+  const blockStone = blk?.stone ?? null;
+  const [profilesMap, { data: stoneTypes }, { data: openSlabs }] = await Promise.all([
     getProfilesMap(),
     createAdminSupabaseClient().from("stone_types").select("id, name, color_top, color_front, color_side").order("name"),
+    blockStone
+      ? supabase
+          .from("slab_requirements")
+          .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft")
+          .eq("status", "open")
+          .eq("stone", blockStone)
+          .order("created_at", { ascending: false })
+      : Promise.resolve({ data: [] as Array<{ id: string; label: string | null; temple: string | null; stone: string | null; quality: string | null; length_ft: number; width_ft: number; thickness_ft: number }> }),
   ]);
 
   const session = block.cut_sessions as unknown as {
@@ -409,6 +418,7 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
               sw: s.sw,
               sh: s.sh,
             }))}
+            openSlabs={(openSlabs ?? []).filter(s => !placed.some(p => p.id === s.id))}
             finishAction={finishBlockAction}
           />
         </>

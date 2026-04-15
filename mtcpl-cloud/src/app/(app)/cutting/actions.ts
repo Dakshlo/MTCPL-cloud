@@ -106,6 +106,7 @@ export async function finishBlockAction(formData: FormData) {
   const remainders = JSON.parse(
     String(formData.get("remainders_json") || "[]")
   ) as Array<{ id: string; l: number; w: number; h: number }>;
+  const extraSlabIds = JSON.parse(String(formData.get("extra_slab_ids") || "[]")) as string[];
 
   const restockedIds: string[] = [];
 
@@ -151,19 +152,44 @@ export async function finishBlockAction(formData: FormData) {
       .in("id", notCutSlabIds);
   }
 
+  if (extraSlabIds.length > 0) {
+    const { data: updated, error: extraErr } = await supabase
+      .from("slab_requirements")
+      .update({
+        status: "cut_done",
+        source_block_id: blockId,
+        updated_by: profile.id,
+        updated_at: new Date().toISOString(),
+      })
+      .in("id", extraSlabIds)
+      .eq("status", "open")
+      .select("id");
+    if (extraErr) throw new Error(extraErr.message);
+    if ((updated?.length ?? 0) !== extraSlabIds.length) {
+      throw new Error("One or more unplanned slabs were already taken by another operation. Refresh and try again.");
+    }
+  }
+
   await supabase
     .from("cut_session_blocks")
     .update({ status: "done", restocked_block_id: restockedBlockId })
     .eq("id", sessionBlockId);
 
-  await logAudit(profile.id, "cutting_done", "cut_session_block", sessionBlockId, {
-    session_id: sessionId,
-    block_id: blockId,
-    cut_slabs: cutSlabIds,
-    not_cut_slabs: notCutSlabIds,
-    restocked_blocks: restockedIds,
-    restock,
-  });
+  await logAudit(
+    profile.id,
+    extraSlabIds.length > 0 ? "cutting_done_with_deviation" : "cutting_done",
+    "cut_session_block",
+    sessionBlockId,
+    {
+      session_id: sessionId,
+      block_id: blockId,
+      cut_slabs: cutSlabIds,
+      not_cut_slabs: notCutSlabIds,
+      restocked_blocks: restockedIds,
+      restock,
+      ...(extraSlabIds.length > 0 ? { extra_slabs: extraSlabIds } : {}),
+    }
+  );
 
   await syncSessionStatus(sessionId);
   await refreshPaths();

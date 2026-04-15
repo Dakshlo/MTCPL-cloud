@@ -12,7 +12,7 @@ export default async function BlocksPage() {
 
   const supabase = await createDataClient(profile.role);
   const admin = createAdminSupabaseClient();
-  const [{ data: blocks, error }, { data: allIds }, { data: consumed }, { data: vendorRows }, { data: stoneTypes }] = await Promise.all([
+  const [{ data: blocks, error }, { data: allIds }, { data: consumed }, { data: vendorRows }, { data: stoneTypes }, { data: openSlabs }] = await Promise.all([
     supabase
       .from("blocks")
       .select("id, stone, yard, category, length_ft, width_ft, height_ft, status, quality, truck_no, vendor_name, bill_no, created_at, created_by")
@@ -33,6 +33,12 @@ export default async function BlocksPage() {
       .eq("is_active", true)
       .order("name"),
     admin.from("stone_types").select("id, name, color_top, color_front, color_side").order("sort_order").order("name"),
+    admin
+      .from("slab_requirements")
+      .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, priority")
+      .eq("status", "open")
+      .order("priority", { ascending: false })
+      .order("created_at", { ascending: false }),
   ]);
 
   if (error) throw new Error(error.message);
@@ -96,7 +102,7 @@ export default async function BlocksPage() {
       {blockList.length === 0 ? (
         <div className="banner">No blocks yet. Add your first block above.</div>
       ) : (
-        <BlockGrid blocks={blockList} canEdit={canEdit} vendors={vendors} profilesMap={profilesMap} stoneTypes={stoneList} />
+        <BlockGrid blocks={blockList} canEdit={canEdit} vendors={vendors} profilesMap={profilesMap} stoneTypes={stoneList} openSlabs={openSlabs ?? []} />
       )}
 
       {/* Block Usage History — collapsible */}

@@ -10,6 +10,17 @@ type PlacedSlab = {
   sh: number;
 };
 
+type OpenSlab = {
+  id: string;
+  label?: string | null;
+  temple?: string | null;
+  stone?: string | null;
+  quality?: string | null;
+  length_ft: number;
+  width_ft: number;
+  thickness_ft: number;
+};
+
 type RemainderEntry = { l: string; w: string; h: string };
 
 export function FinishBlockForm({
@@ -19,6 +30,7 @@ export function FinishBlockForm({
   stone,
   yard,
   allSlabs,
+  openSlabs = [],
   finishAction,
 }: {
   sessionBlockId: string;
@@ -27,15 +39,28 @@ export function FinishBlockForm({
   stone: string;
   yard: number;
   allSlabs: PlacedSlab[];
+  openSlabs?: OpenSlab[];
   finishAction: (formData: FormData) => Promise<void>;
 }) {
   const [checkedIds, setCheckedIds] = useState<Set<string>>(
     new Set(allSlabs.map((s) => s.id))
   );
   const [remainders, setRemainders] = useState<RemainderEntry[]>([]);
+  const [extraIds, setExtraIds] = useState<Set<string>>(new Set());
+  const [extraFilter, setExtraFilter] = useState("");
+  const [showExtra, setShowExtra] = useState(false);
 
   function toggle(id: string) {
     setCheckedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleExtra(id: string) {
+    setExtraIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -70,6 +95,7 @@ export function FinishBlockForm({
   })).filter((r) => r.l > 0 && r.w > 0 && r.h > 0);
 
   const remaindersJson = JSON.stringify(validRemainders);
+  const extraSlabIdsList = [...extraIds];
 
   const hiddenInputs = (restock: "yes" | "no") => (
     <>
@@ -82,8 +108,19 @@ export function FinishBlockForm({
       <input type="hidden" name="all_slab_ids" value={JSON.stringify(allSlabs.map((s) => s.id))} />
       <input type="hidden" name="remainders_json" value={remaindersJson} />
       <input type="hidden" name="restock" value={restock} />
+      <input type="hidden" name="extra_slab_ids" value={JSON.stringify(extraSlabIdsList)} />
     </>
   );
+
+  const filteredOpenSlabs = openSlabs.filter((s) => {
+    if (!extraFilter) return true;
+    const q = extraFilter.toLowerCase();
+    return (
+      s.id.toLowerCase().includes(q) ||
+      (s.temple ?? "").toLowerCase().includes(q) ||
+      (s.label ?? "").toLowerCase().includes(q)
+    );
+  });
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 8 }}>
@@ -128,6 +165,80 @@ export function FinishBlockForm({
           </p>
         )}
       </div>
+
+      {/* Unplanned slabs (deviation picker) */}
+      {openSlabs.length > 0 && (
+        <div style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: showExtra ? 10 : 0 }}>
+            <p style={{ fontSize: 12, fontWeight: 600, margin: 0, color: "var(--text)" }}>
+              Also cut from this block (unplanned)
+              {extraIds.size > 0 && (
+                <span className="role-pill badge-available" style={{ fontSize: 10, marginLeft: 8 }}>
+                  {extraIds.size} selected
+                </span>
+              )}
+            </p>
+            <button
+              type="button"
+              className="ghost-button"
+              style={{ fontSize: 12, padding: "2px 10px" }}
+              onClick={() => setShowExtra((v) => !v)}
+            >
+              {showExtra ? "− Hide" : "+ Add unplanned slab"}
+            </button>
+          </div>
+
+          {showExtra && (
+            <>
+              <input
+                type="text"
+                placeholder="Filter by ID, temple, label…"
+                value={extraFilter}
+                onChange={(e) => setExtraFilter(e.target.value)}
+                style={{ width: "100%", fontSize: 13, marginBottom: 8, boxSizing: "border-box" }}
+              />
+              <div style={{ maxHeight: 220, overflowY: "auto", display: "flex", flexDirection: "column", gap: 5 }}>
+                {filteredOpenSlabs.length === 0 ? (
+                  <p className="muted" style={{ fontSize: 12 }}>No matching slabs found.</p>
+                ) : (
+                  filteredOpenSlabs.map((slab) => (
+                    <label
+                      key={slab.id}
+                      style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13 }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={extraIds.has(slab.id)}
+                        onChange={() => toggleExtra(slab.id)}
+                        style={{ width: 15, height: 15, cursor: "pointer" }}
+                      />
+                      <code style={{ fontSize: 12, fontWeight: 600 }}>{slab.id}</code>
+                      {slab.temple && (
+                        <span className="muted" style={{ fontSize: 11 }}>
+                          {slab.temple}{slab.label && slab.label !== slab.temple ? ` · ${slab.label}` : ""}
+                        </span>
+                      )}
+                      <span className="muted" style={{ fontSize: 11 }}>
+                        {slab.length_ft}×{slab.width_ft}×{slab.thickness_ft} in
+                      </span>
+                      {extraIds.has(slab.id) && (
+                        <span className="role-pill badge-available" style={{ fontSize: 10, marginLeft: "auto" }}>
+                          Added ✓
+                        </span>
+                      )}
+                    </label>
+                  ))
+                )}
+              </div>
+              {extraIds.size > 0 && (
+                <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+                  {extraIds.size} unplanned slab{extraIds.size > 1 ? "s" : ""} will be marked as cut from this block.
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {/* Remaining block pieces */}
       <div style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px" }}>

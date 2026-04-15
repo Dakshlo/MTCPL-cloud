@@ -163,3 +163,87 @@ export async function deleteBlockAction(formData: FormData) {
   revalidatePath("/dashboard");
   redirectWithToast("/blocks", "Block removed and archived in history");
 }
+
+export async function manualCutBlockAction(formData: FormData) {
+  const { profile } = await requireAuth(["owner", "team_head", "cutting_operator"]);
+  const supabase = createAdminSupabaseClient();
+
+  const blockId = textValue(formData, "block_id");
+  const stone = textValue(formData, "stone") || "PinkStone";
+  const yard = numValue(formData, "yard", 1);
+  const slabIds = JSON.parse(String(formData.get("slab_ids") || "[]")) as string[];
+  const remainders = JSON.parse(String(formData.get("remainders_json") || "[]")) as Array<{ id: string; l: number; w: number; h: number }>;
+  const restock = String(formData.get("restock") || "") === "yes";
+
+  if (!blockId || slabIds.length === 0) {
+    throw new Error("Block and at least one slab are required.");
+  }
+
+  // 1. Consume block (race-condition guard: only if still available)
+  const blockUpdate = await supabase
+    .from("blocks")
+    .update({ status: "consumed", updated_by: profile.id, updated_at: new Date().toISOString() })
+    .eq("id", blockId)
+    .eq("status", "available")
+    .select("id");
+  if (blockUpdate.error) throw new Error(blockUpdate.error.message);
+  if (!blockUpdate.data?.length) {
+    throw new Error(`Block ${blockId} is no longer available — refresh and try again.`);
+  }
+
+  // 2. Mark slabs cut_done (race-condition guard: only if still open)
+  const slabUpdate = await supabase
+    .from("slab_requirements")
+    .update({
+      status: "cut_done",
+      source_block_id: blockId,
+      updated_by: profile.id,
+      updated_at: new Date().toISOString(),
+    })
+    .in("id", slabIds)
+    .eq("status", "open")
+    .select("id");
+  if (slabUpdate.error) throw new Error(slabUpdate.error.message);
+  if ((slabUpdate.data?.length ?? 0) !== slabIds.length) {
+    // Roll back block status so it isn't orphaned
+    await supabase.from("blocks").update({ status: "available", updated_by: profile.id, updated_at: new Date().toISOString() }).eq("id", blockId);
+    throw new Error("One or more slabs were already taken. Refresh and try again.");
+  }
+
+  // 3. Optional remainder restock
+  const restockedIds: string[] = [];
+  if (restock && remainders.length > 0) {
+    for (const piece of remainders) {
+      if (piece.l > 0 && piece.w > 0 && piece.h > 0) {
+        const { error } = await supabase.from("blocks").insert({
+          id: piece.id,
+          stone,
+          yard,
+          category: "Reused",
+          length_ft: piece.l,
+          width_ft: piece.w,
+          height_ft: piece.h,
+          status: "available",
+          created_by: profile.id,
+          updated_by: profile.id,
+        });
+        if (error) throw new Error(`Failed to create block ${piece.id}: ${error.message}`);
+        restockedIds.push(piece.id);
+      }
+    }
+  }
+
+  // 4. Audit
+  await logAudit(profile.id, "manual_cut_block", "block", blockId, {
+    slabs: slabIds,
+    restocked_blocks: restockedIds,
+    restock,
+  });
+
+  // 5. Revalidate
+  revalidatePath("/blocks");
+  revalidatePath("/slabs");
+  revalidatePath("/planning");
+  revalidatePath("/cutting");
+  revalidatePath("/dashboard");
+}

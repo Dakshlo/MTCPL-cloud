@@ -6,8 +6,20 @@ import { updateBlockAction, deleteBlockAction } from "./actions";
 import { VendorSelect } from "./vendor-select";
 import { stoneDisplayName } from "@/lib/stone-utils";
 import type { StoneTypeDef } from "@/lib/stone-utils";
+import { ManualCutModal } from "./manual-cut-modal";
 
 type StoneType = StoneTypeDef;
+type OpenSlab = {
+  id: string;
+  label?: string | null;
+  temple?: string | null;
+  stone?: string | null;
+  quality?: string | null;
+  length_ft: number;
+  width_ft: number;
+  thickness_ft: number;
+  priority?: boolean;
+};
 const FALLBACK_STONES: StoneType[] = [
   { name: "PinkStone",  color_top: "#EDCFC2", color_front: "#C87A60", color_side: "#DDA88A" },
   { name: "WhiteStone", color_top: "#E8E6DC", color_front: "#B8B6AC", color_side: "#D0CEC4" },
@@ -63,18 +75,22 @@ type Block = {
   created_by: string | null;
 };
 
-export function BlockGrid({ blocks, canEdit, vendors, profilesMap = {}, stoneTypes }: { blocks: Block[]; canEdit: boolean; vendors: string[]; profilesMap?: Record<string, string>; stoneTypes?: StoneType[] }) {
+export function BlockGrid({ blocks, canEdit, vendors, profilesMap = {}, stoneTypes, openSlabs = [] }: { blocks: Block[]; canEdit: boolean; vendors: string[]; profilesMap?: Record<string, string>; stoneTypes?: StoneType[]; openSlabs?: OpenSlab[] }) {
   const stones = stoneTypes && stoneTypes.length > 0 ? stoneTypes : FALLBACK_STONES;
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [manualCutOpen, setManualCutOpen] = useState(false);
   const selected = blocks.find(b => b.id === selectedId) ?? null;
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setSelectedId(null);
+      if (e.key === "Escape") {
+        if (manualCutOpen) setManualCutOpen(false);
+        else setSelectedId(null);
+      }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [manualCutOpen]);
 
   return (
     <>
@@ -231,6 +247,19 @@ export function BlockGrid({ blocks, canEdit, vendors, profilesMap = {}, stoneTyp
                 <button className="primary-button" type="submit" style={{ marginTop: 4 }}>Save Changes</button>
               </form>
 
+              {canEdit && (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  style={{ marginTop: 8, width: "100%" }}
+                  disabled={selected.status !== "available"}
+                  onClick={() => setManualCutOpen(true)}
+                  title={selected.status !== "available" ? "Only available blocks can be manually cut" : "Record what was actually cut from this block"}
+                >
+                  ✂ Manual Cut (skip planning)
+                </button>
+              )}
+
               <div className="drawer-divider" />
 
               <div className="drawer-danger-zone">
@@ -243,6 +272,21 @@ export function BlockGrid({ blocks, canEdit, vendors, profilesMap = {}, stoneTyp
             </div>
           </div>
         </>
+      )}
+
+      {selected && manualCutOpen && (
+        <ManualCutModal
+          block={{
+            id: selected.id,
+            stone: selected.stone,
+            yard: selected.yard,
+            length_ft: Number(selected.length_ft),
+            width_ft: Number(selected.width_ft),
+            height_ft: Number(selected.height_ft),
+          }}
+          openSlabs={openSlabs.filter(s => s.stone === selected.stone)}
+          onClose={() => setManualCutOpen(false)}
+        />
       )}
     </>
   );
