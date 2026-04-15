@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { logAudit } from "@/lib/audit";
 
 function errUrl(msg: string, slabIds?: string) {
   const base = `/planning?err=${encodeURIComponent(msg)}`;
@@ -147,6 +148,16 @@ export async function approvePlanAction(formData: FormData) {
         if (!slabUpdate.data?.length) redirect(errUrl(`Slab ${slab.id} was already used — refresh and try again.`, slabIdsParam));
       }
     }
+
+    // Audit: plan approved and sent to cutting
+    await logAudit(profile.id, "plan_approved", "cut_session", session.id, {
+      session_code: sessionCode,
+      kerf_mm: kerfMm,
+      blocks: blockIds,
+      slabs: slabIds,
+      block_count: blockIds.length,
+      slab_count: slabIds.length,
+    });
 
     revalidatePath("/planning");
     revalidatePath("/cutting");

@@ -68,10 +68,13 @@ export function SlabGrid({ slabs, temples, canEdit, profilesMap = {} }: { slabs:
           const cft = ((Number(slab.length_ft) * Number(slab.width_ft) * Number(slab.thickness_ft)) / 1728).toFixed(2);
           const isSelected = selectedId === slab.id;
 
+          const isNotOpen = slab.status !== "open";
+
           return (
             <div
               key={slab.id}
               className={`slab-card${slab.priority ? " slab-card-priority" : ""}${isSelected ? " slab-card-active" : ""}`}
+              style={isNotOpen ? { filter: "grayscale(0.85)", opacity: 0.6 } : undefined}
               onClick={() => setSelectedId(isSelected ? null : slab.id)}
               role="button"
               tabIndex={0}

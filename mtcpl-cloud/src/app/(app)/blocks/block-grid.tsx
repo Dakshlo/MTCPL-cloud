@@ -21,8 +21,8 @@ function calcCft(l: number, w: number, h: number) {
 
 const STATUS_LABELS: Record<string, string> = {
   available: "fresh",
-  reserved: "used",
-  consumed: "in-process",
+  reserved: "in-progress",
+  consumed: "used",
   discarded: "deleted",
 };
 
@@ -87,10 +87,13 @@ export function BlockGrid({ blocks, canEdit, vendors, profilesMap = {}, stoneTyp
           const stoneColor = stones.find(s => s.name === block.stone)?.color_top ?? "#D8D4CC";
           const isSelected = selectedId === block.id;
 
+          const isUnavailable = block.status !== "available";
+
           return (
             <div
               key={block.id}
               className={`block-card${isSelected ? " block-card-active" : ""}`}
+              style={isUnavailable ? { filter: "grayscale(0.9)", opacity: 0.65 } : undefined}
               onClick={() => setSelectedId(isSelected ? null : block.id)}
               role="button"
               tabIndex={0}

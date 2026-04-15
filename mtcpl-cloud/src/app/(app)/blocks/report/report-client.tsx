@@ -21,7 +21,6 @@ type Block = {
 };
 
 const ALL_STATUSES = ["available", "reserved", "consumed", "discarded"] as const;
-const ALL_STONES = ["PinkStone", "WhiteStone"] as const;
 
 function fmtDate(iso: string | null) {
   if (!iso) return "—";
@@ -40,8 +39,8 @@ function calcCft(l: number, w: number, h: number) {
 
 const STATUS_LABELS: Record<string, string> = {
   available: "fresh",
-  reserved: "used",
-  consumed: "in-process",
+  reserved: "in-progress",
+  consumed: "used",
   discarded: "deleted",
 };
 
@@ -57,7 +56,8 @@ function statusBadgeClass(status: string) {
 
 type SortCol = "id" | "stone" | "yard" | "cft" | "status" | "vendor_name" | "created_at" | "updated_at";
 
-export function ReportClient({ blocks }: { blocks: Block[] }) {
+export function ReportClient({ blocks, stoneNames }: { blocks: Block[]; stoneNames?: string[] }) {
+  const ALL_STONES = stoneNames && stoneNames.length > 0 ? stoneNames : ["PinkStone", "WhiteStone"];
   const today = new Date().toISOString().slice(0, 10);
 
   // Filters
@@ -289,7 +289,7 @@ export function ReportClient({ blocks }: { blocks: Block[] }) {
           {[
             { label: "Active only", fn: () => setStatusFilter(["available", "reserved"]) },
             { label: "Deleted only", fn: () => setStatusFilter(["discarded"]) },
-            { label: "In-process only", fn: () => setStatusFilter(["consumed"]) },
+            { label: "Used only", fn: () => setStatusFilter(["consumed"]) },
             { label: "Last 7 days", fn: () => { setDateFrom(new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10)); setDateTo(today); } },
             { label: "Last 30 days", fn: () => { setDateFrom(new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10)); setDateTo(today); } },
             { label: "Last 90 days", fn: () => { setDateFrom(new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10)); setDateTo(today); } },

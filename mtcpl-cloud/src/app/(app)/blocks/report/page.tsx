@@ -8,12 +8,20 @@ export default async function BlockReportPage() {
   // Admin client bypasses RLS so developer can see all blocks too
   const admin = createAdminSupabaseClient();
 
-  const { data, error } = await admin
-    .from("blocks")
-    .select("id, stone, yard, category, quality, length_ft, width_ft, height_ft, status, truck_no, vendor_name, bill_no, created_at, updated_at")
-    .order("created_at", { ascending: false });
+  const [{ data, error }, { data: stoneTypeRows }] = await Promise.all([
+    admin
+      .from("blocks")
+      .select("id, stone, yard, category, quality, length_ft, width_ft, height_ft, status, truck_no, vendor_name, bill_no, created_at, updated_at")
+      .order("created_at", { ascending: false }),
+    admin
+      .from("stone_types")
+      .select("name")
+      .order("name"),
+  ]);
 
   if (error) throw new Error(error.message);
+
+  const stoneNames = (stoneTypeRows ?? []).map((s) => s.name);
 
   return (
     <>
@@ -27,7 +35,7 @@ export default async function BlockReportPage() {
         </Link>
       </div>
 
-      <ReportClient blocks={data ?? []} />
+      <ReportClient blocks={data ?? []} stoneNames={stoneNames} />
     </>
   );
 }

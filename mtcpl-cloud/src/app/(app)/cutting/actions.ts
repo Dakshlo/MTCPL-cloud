@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { logAudit } from "@/lib/audit";
 
 async function refreshPaths() {
   revalidatePath("/cutting");
@@ -31,7 +32,7 @@ async function syncSessionStatus(sessionId: string) {
 }
 
 export async function approveBlockAction(formData: FormData) {
-  await requireAuth(["owner", "team_head", "cutting_operator"]);
+  const { profile } = await requireAuth(["owner", "team_head", "cutting_operator"]);
   const supabase = createAdminSupabaseClient();
   const sessionBlockId = String(formData.get("session_block_id") || "");
   const sessionId = String(formData.get("session_id") || "");
@@ -46,6 +47,10 @@ export async function approveBlockAction(formData: FormData) {
     .from("cut_sessions")
     .update({ status: "in_progress" })
     .eq("id", sessionId);
+
+  await logAudit(profile.id, "cutting_started", "cut_session_block", sessionBlockId, {
+    session_id: sessionId,
+  });
 
   await refreshPaths();
 }
@@ -74,6 +79,12 @@ export async function rejectBlockAction(formData: FormData) {
     .from("cut_session_blocks")
     .update({ status: "rejected" })
     .eq("id", sessionBlockId);
+
+  await logAudit(profile.id, "block_rejected", "cut_session_block", sessionBlockId, {
+    session_id: sessionId,
+    block_id: blockId,
+    slabs_released: slabIds,
+  });
 
   await syncSessionStatus(sessionId);
   await refreshPaths();
@@ -145,6 +156,15 @@ export async function finishBlockAction(formData: FormData) {
     .update({ status: "done", restocked_block_id: restockedBlockId })
     .eq("id", sessionBlockId);
 
+  await logAudit(profile.id, "cutting_done", "cut_session_block", sessionBlockId, {
+    session_id: sessionId,
+    block_id: blockId,
+    cut_slabs: cutSlabIds,
+    not_cut_slabs: notCutSlabIds,
+    restocked_blocks: restockedIds,
+    restock,
+  });
+
   await syncSessionStatus(sessionId);
   await refreshPaths();
   redirect("/cutting?tab=done");
@@ -185,6 +205,13 @@ export async function undoDoneAction(formData: FormData) {
     .from("cut_sessions")
     .update({ status: "in_progress" })
     .eq("id", sessionId);
+
+  await logAudit(profile.id, "cutting_undo_done", "cut_session_block", sessionBlockId, {
+    session_id: sessionId,
+    block_id: blockId,
+    slabs_reverted: slabIds,
+    restocked_block_id: restockedBlockId || null,
+  });
 
   await refreshPaths();
   redirect(`/cutting/${sessionBlockId}`);
