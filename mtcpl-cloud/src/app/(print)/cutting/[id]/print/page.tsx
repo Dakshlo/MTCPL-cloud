@@ -50,7 +50,10 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
 
   if (error || !block) notFound();
 
-  const profilesMap = await getProfilesMap();
+  const [profilesMap, { data: stoneTypes }] = await Promise.all([
+    getProfilesMap(),
+    supabase.from("stone_types").select("id, name, color_top, color_front, color_side").order("sort_order").order("name"),
+  ]);
 
   const layout = block.layout as {
     blk?: { id: string; stone: string; yard: number; l: number; w: number; h: number; quality?: string | null };
@@ -445,6 +448,7 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
                   placed={placed}
                   az={Math.PI * 0.25}
                   size={300}
+                  stoneTypes={stoneTypes ?? undefined}
                 />
                 <div className="view-lbl">Isometric View</div>
               </div>

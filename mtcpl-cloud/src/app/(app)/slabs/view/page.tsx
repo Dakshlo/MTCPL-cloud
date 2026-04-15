@@ -51,15 +51,20 @@ export default async function SlabViewPage({
     return [...urgentToAdd, ...base];
   })();
 
-  const { data: temples } = await supabase.from("temples").select("name").eq("is_active", true).order("name");
+  const [{ data: temples }, { data: stoneTypes }] = await Promise.all([
+    supabase.from("temples").select("name").eq("is_active", true).order("name"),
+    supabase.from("stone_types").select("name").order("sort_order").order("name"),
+  ]);
   const templeNames = (temples ?? []).map(t => t.name);
   const allTemples = [...new Set(slabList.map(s => s.temple))].sort();
+  const stoneNames = (stoneTypes ?? []).map(s => s.name);
 
   return (
     <SlabSelector
       slabs={slabList}
       temples={[...new Set([...allTemples, ...templeNames])].sort()}
       activeFilters={{ ...params, status: statusParam }}
+      stoneNames={stoneNames.length > 0 ? stoneNames : undefined}
     />
   );
 }

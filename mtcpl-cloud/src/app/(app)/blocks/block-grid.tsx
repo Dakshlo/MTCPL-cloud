@@ -4,8 +4,13 @@ import { useEffect, useState } from "react";
 import { BlockCardPreview } from "@/components/stone-previews";
 import { updateBlockAction, deleteBlockAction } from "./actions";
 import { VendorSelect } from "./vendor-select";
+import { stoneDisplayName } from "@/lib/stone-utils";
 
-const STONES = ["PinkStone", "WhiteStone"] as const;
+type StoneType = { name: string; color_top: string };
+const FALLBACK_STONES: StoneType[] = [
+  { name: "PinkStone",  color_top: "#EDCFC2" },
+  { name: "WhiteStone", color_top: "#E8E6DC" },
+];
 const YARDS = [1, 2, 3, 4, 5, 6] as const;
 const STATUSES = ["available", "reserved", "consumed", "discarded"] as const;
 
@@ -57,7 +62,8 @@ type Block = {
   created_by: string | null;
 };
 
-export function BlockGrid({ blocks, canEdit, vendors, profilesMap = {} }: { blocks: Block[]; canEdit: boolean; vendors: string[]; profilesMap?: Record<string, string> }) {
+export function BlockGrid({ blocks, canEdit, vendors, profilesMap = {}, stoneTypes }: { blocks: Block[]; canEdit: boolean; vendors: string[]; profilesMap?: Record<string, string>; stoneTypes?: StoneType[] }) {
+  const stones = stoneTypes && stoneTypes.length > 0 ? stoneTypes : FALLBACK_STONES;
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = blocks.find(b => b.id === selectedId) ?? null;
 
@@ -77,7 +83,7 @@ export function BlockGrid({ blocks, canEdit, vendors, profilesMap = {} }: { bloc
           const W = Number(block.width_ft);
           const H = Number(block.height_ft);
           const cft = calcCft(L, W, H);
-          const stoneBadge = block.stone === "PinkStone" ? "badge-pink" : "badge-white-stone";
+          const stoneColor = stones.find(s => s.name === block.stone)?.color_top ?? "#D8D4CC";
           const isSelected = selectedId === block.id;
 
           return (
@@ -95,7 +101,7 @@ export function BlockGrid({ blocks, canEdit, vendors, profilesMap = {} }: { bloc
               <div className="block-card-info">
                 <div className="block-card-code">{block.id}</div>
                 <div className="block-card-badges">
-                  <span className={`role-pill ${stoneBadge}`}>{block.stone === "PinkStone" ? "Pink" : "White"}</span>
+                  <span className="role-pill" style={{ background: stoneColor + "55", color: "#1a1a1a", border: `1px solid ${stoneColor}` }}>{stoneDisplayName(block.stone)}</span>
                   <span className="role-pill">Y{block.yard}</span>
                   <span className={`role-pill ${statusBadgeClass(block.status)}`}>{STATUS_LABELS[block.status] ?? block.status}</span>
                   {block.quality && (
@@ -155,7 +161,7 @@ export function BlockGrid({ blocks, canEdit, vendors, profilesMap = {} }: { bloc
                   <label className="stack">
                     <span>Stone</span>
                     <select name="stone" defaultValue={selected.stone}>
-                      {STONES.map(s => <option key={s} value={s}>{s}</option>)}
+                      {stones.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
                     </select>
                   </label>
                   <label className="stack">

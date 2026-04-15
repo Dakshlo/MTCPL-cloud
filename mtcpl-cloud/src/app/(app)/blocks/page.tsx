@@ -1,5 +1,6 @@
 import { requireAuth } from "@/lib/auth";
 import { createDataClient } from "@/lib/supabase/server";
+import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
 import { AddBlockForm } from "./add-block-form";
 import { BlockGrid } from "./block-grid";
@@ -10,7 +11,8 @@ export default async function BlocksPage() {
   const { profile } = await requireAuth(["owner", "team_head", "block_slab_entry", "slab_entry", "block_entry"]);
 
   const supabase = await createDataClient(profile.role);
-  const [{ data: blocks, error }, { data: allIds }, { data: consumed }, { data: vendorRows }] = await Promise.all([
+  const admin = createAdminSupabaseClient();
+  const [{ data: blocks, error }, { data: allIds }, { data: consumed }, { data: vendorRows }, { data: stoneTypes }] = await Promise.all([
     supabase
       .from("blocks")
       .select("id, stone, yard, category, length_ft, width_ft, height_ft, status, quality, truck_no, vendor_name, bill_no, created_at, created_by")
@@ -30,6 +32,7 @@ export default async function BlocksPage() {
       .eq("vendor_type", "block_vendor")
       .eq("is_active", true)
       .order("name"),
+    admin.from("stone_types").select("id, name, color_top, color_front, color_side").order("sort_order").order("name"),
   ]);
 
   if (error) throw new Error(error.message);
@@ -42,6 +45,7 @@ export default async function BlocksPage() {
   const consumedList = consumed ?? [];
   const vendors = (vendorRows ?? []).map(v => v.name);
   const suggestedId = generateNextCode((allIds ?? []).map(r => r.id));
+  const stoneList = stoneTypes ?? [];
 
   const totalBlocks = blockList.length;
   const pinkCount = blockList.filter(b => b.stone === "PinkStone").length;
@@ -70,7 +74,7 @@ export default async function BlocksPage() {
         </div>
       </div>
 
-      {canEdit && <AddBlockForm suggestedId={suggestedId} vendors={vendors} />}
+      {canEdit && <AddBlockForm suggestedId={suggestedId} vendors={vendors} stoneTypes={stoneList} />}
 
       {canViewReport && (
         <div style={{ margin: "28px 0 4px", padding: "14px 18px", background: "var(--surface)", border: "2px dashed var(--border)", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
@@ -92,7 +96,7 @@ export default async function BlocksPage() {
       {blockList.length === 0 ? (
         <div className="banner">No blocks yet. Add your first block above.</div>
       ) : (
-        <BlockGrid blocks={blockList} canEdit={canEdit} vendors={vendors} profilesMap={profilesMap} />
+        <BlockGrid blocks={blockList} canEdit={canEdit} vendors={vendors} profilesMap={profilesMap} stoneTypes={stoneList} />
       )}
 
       {/* Block Usage History — collapsible */}

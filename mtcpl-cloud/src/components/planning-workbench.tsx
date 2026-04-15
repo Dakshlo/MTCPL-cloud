@@ -2,6 +2,8 @@
 
 import { useState, useRef, useEffect } from "react";
 import { BlockMiniPreview, SlabMiniPreview } from "@/components/stone-previews";
+import { getStonePalette } from "@/lib/stone-utils";
+import type { StoneTypeDef } from "@/lib/stone-utils";
 
 export type BlockRow = {
   id: string;
@@ -70,11 +72,6 @@ export type PlanResult = {
   plan: PlanBlock[];
   unmet: Array<{ id: string; label: string; temple: string }>;
   totalWaste: number;
-};
-
-const STONE_PALETTES: Record<string, { top: string; front: string; side: string }> = {
-  PinkStone: { top: "#EDCFC2", front: "#C87A60", side: "#DDA88A" },
-  WhiteStone: { top: "#E8E6DC", front: "#B8B6AC", side: "#D0CEC4" }
 };
 
 const SLAB_COLORS = ["#D85A30", "#378ADD", "#1D9E75", "#7F77DD", "#BA7517", "#639922", "#D4537E", "#E24B4A", "#5F5E5A", "#0F6E56"];
@@ -384,7 +381,7 @@ function runOptimization(blocks: BlockRow[], slabs: SlabRow[], kerfMm: number): 
 
 // ─── 3D Isometric Block Preview ────────────────────────────────────────────────
 
-export function IsoBlockPreview({ block, placed }: { block: PlanBlock["blk"]; placed: PlacedSlab[] }) {
+export function IsoBlockPreview({ block, placed, stoneTypes }: { block: PlanBlock["blk"]; placed: PlacedSlab[]; stoneTypes?: StoneTypeDef[] }) {
   const [az, setAz] = useState(Math.PI * 0.25);
   const [zoom, setZoom] = useState(1.0);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -443,7 +440,7 @@ export function IsoBlockPreview({ block, placed }: { block: PlanBlock["blk"]; pl
     return { x: p.x - minX, y: p.y - minY };
   }
 
-  const pal = STONE_PALETTES[block.stone] || STONE_PALETTES.PinkStone;
+  const pal = getStonePalette(block.stone, stoneTypes);
   const showFrontY = Sa >= 0;
   const showRightX = Ca >= 0;
   const bY = showFrontY ? 0 : W;

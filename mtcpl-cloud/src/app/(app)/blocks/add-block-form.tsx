@@ -3,6 +3,9 @@
 import { useState, useEffect } from "react";
 import { addBlockAction } from "./actions";
 import { VendorSelect } from "./vendor-select";
+import { stoneDisplayName } from "@/lib/stone-utils";
+
+type StoneType = { name: string; color_top: string };
 
 const YARDS = [1, 2, 3, 4, 5, 6] as const;
 type UnitMode = "inches" | "feetinches";
@@ -41,8 +44,14 @@ function FtInInput({ label, inchValue, onInchChange }: { label: string; inchValu
   );
 }
 
-export function AddBlockForm({ suggestedId, vendors }: { suggestedId: string; vendors: string[] }) {
-  const [stone, setStone] = useState<"PinkStone" | "WhiteStone">("PinkStone");
+const FALLBACK_STONES: StoneType[] = [
+  { name: "PinkStone",  color_top: "#EDCFC2" },
+  { name: "WhiteStone", color_top: "#E8E6DC" },
+];
+
+export function AddBlockForm({ suggestedId, vendors, stoneTypes }: { suggestedId: string; vendors: string[]; stoneTypes?: StoneType[] }) {
+  const stones = stoneTypes && stoneTypes.length > 0 ? stoneTypes : FALLBACK_STONES;
+  const [stone, setStone] = useState<string>(stones[0]?.name ?? "PinkStone");
   const [quality, setQuality] = useState<"" | "A" | "B">("");
   const [l, setL] = useState("");
   const [w, setW] = useState("");
@@ -103,13 +112,14 @@ export function AddBlockForm({ suggestedId, vendors }: { suggestedId: string; ve
           <div className="stack" style={{ flex: "0 0 auto" }}>
             <span>Stone Type</span>
             <div className="stone-toggle">
-              {(["PinkStone", "WhiteStone"] as const).map(s => (
+              {stones.map(s => (
                 <button
-                  key={s} type="button"
-                  className={`stone-toggle-btn${stone === s ? (s === "PinkStone" ? " active-pink" : " active-white") : ""}`}
-                  onClick={() => setStone(s)}
+                  key={s.name} type="button"
+                  className={`stone-toggle-btn${stone === s.name ? " active-pink" : ""}`}
+                  style={stone === s.name ? { borderColor: s.color_top, background: s.color_top + "44" } : undefined}
+                  onClick={() => setStone(s.name)}
                 >
-                  {s === "PinkStone" ? "Pink" : "White"}
+                  {stoneDisplayName(s.name)}
                 </button>
               ))}
             </div>

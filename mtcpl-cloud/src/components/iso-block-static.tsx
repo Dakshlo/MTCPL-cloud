@@ -5,10 +5,8 @@
  * Rendering logic mirrors IsoBlockPreview from planning-workbench.tsx.
  */
 
-const STONE_PALETTES: Record<string, { top: string; front: string; side: string }> = {
-  PinkStone:  { top: "#EDCFC2", front: "#C87A60", side: "#DDA88A" },
-  WhiteStone: { top: "#E8E6DC", front: "#B8B6AC", side: "#D0CEC4" },
-};
+import { getStonePalette } from "@/lib/stone-utils";
+import type { StoneTypeDef } from "@/lib/stone-utils";
 
 const SLAB_COLORS = [
   "#D85A30","#378ADD","#1D9E75","#7F77DD","#BA7517",
@@ -52,12 +50,14 @@ export function IsoBlockStaticSVG({
   az = Math.PI * 0.25,
   size = 280,
   label,
+  stoneTypes,
 }: {
   block: Block;
   placed: PlacedSlab[];
   az?: number;
   size?: number;
   label?: string;
+  stoneTypes?: StoneTypeDef[];
 }) {
   const L = block.l, W = block.w, H = block.h;
   const C = Math.cos(Math.PI / 6); // ≈ 0.866
@@ -97,7 +97,7 @@ export function IsoBlockStaticSVG({
     return { x: p.x - minX, y: p.y - minY };
   }
 
-  const pal = STONE_PALETTES[block.stone] || STONE_PALETTES.PinkStone;
+  const pal = getStonePalette(block.stone, stoneTypes);
   const showFrontY = Sa >= 0;
   const showRightX = Ca >= 0;
   const bY = showFrontY ? 0 : W;

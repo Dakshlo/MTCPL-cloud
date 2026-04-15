@@ -11,6 +11,50 @@ function text(fd: FormData, key: string) {
   return typeof v === "string" ? v.trim() : "";
 }
 
+// ── Stone Type Actions ──────────────────────────────────────────────────────
+
+export async function addStoneTypeAction(formData: FormData) {
+  await requireAuth(["owner", "team_head", "developer"]);
+  const supabase = await createServerSupabaseClient();
+
+  const name = text(formData, "name").replace(/\s+/g, "");
+  const color_top   = text(formData, "color_top")   || "#E8E6DC";
+  const color_front = text(formData, "color_front") || "#B8B6AC";
+  const color_side  = text(formData, "color_side")  || "#D0CEC4";
+
+  if (!name) redirect("/settings?toast=Stone+type+name+required");
+
+  const { error } = await supabase.from("stone_types").insert({ name, color_top, color_front, color_side });
+  if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
+
+  revalidatePath("/settings");
+  revalidatePath("/blocks");
+  revalidatePath("/slabs");
+  redirect("/settings?toast=Stone+type+added");
+}
+
+export async function deleteStoneTypeAction(formData: FormData) {
+  await requireAuth(["owner", "team_head", "developer"]);
+  const supabase = await createServerSupabaseClient();
+
+  const id = text(formData, "id");
+  const name = text(formData, "name");
+
+  // Protect the two built-in types
+  if (name === "PinkStone" || name === "WhiteStone") {
+    redirect("/settings?toast=Cannot+delete+built-in+stone+types");
+  }
+
+  const { error } = await supabase.from("stone_types").delete().eq("id", id);
+  if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
+
+  revalidatePath("/settings");
+  revalidatePath("/blocks");
+  redirect("/settings?toast=Stone+type+deleted");
+}
+
+// ── Temple Actions ───────────────────────────────────────────────────────────
+
 export async function addTempleAction(formData: FormData) {
   await requireAuth(["owner", "team_head"]);
   const supabase = await createServerSupabaseClient();

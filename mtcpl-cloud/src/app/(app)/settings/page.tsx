@@ -1,6 +1,7 @@
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { addTempleAction, updateTempleAction, deleteTempleAction, updateUserAction, deleteUserAction, updateOwnNameAction } from "./actions";
+import { addTempleAction, updateTempleAction, deleteTempleAction, updateUserAction, deleteUserAction, updateOwnNameAction, addStoneTypeAction, deleteStoneTypeAction } from "./actions";
+import { stoneDisplayName } from "@/lib/stone-utils";
 import type { AppRole } from "@/lib/types";
 
 // All assignable roles — only shown to developer
@@ -65,11 +66,13 @@ export default async function SettingsPage() {
   const { profile: currentUser } = await requireAuth(["owner", "team_head", "developer"]);
   const admin = createAdminSupabaseClient();
 
-  const [{ data: temples }, { data: users }] = await Promise.all([
+  const [{ data: temples }, { data: users }, { data: stoneTypes }] = await Promise.all([
     admin.from("temples").select("*").order("name"),
     // Admin client needed — RLS on profiles only returns the current user's own row
     admin.from("profiles").select("id, full_name, phone, role, is_active, created_at").order("full_name"),
+    admin.from("stone_types").select("id, name, color_top, color_front, color_side, is_active, sort_order").order("sort_order").order("name"),
   ]);
+  const stoneList = stoneTypes ?? [];
 
   // Admin client needed — profiles join in audit log returns null names for non-self users under RLS
   const { data: recentAudit } = await admin
@@ -276,6 +279,93 @@ export default async function SettingsPage() {
         </div>
       )}
 
+      {/* Stone Type Configuration — developer, owner, team_head */}
+      <div className="settings-section">
+        <div className="settings-section-header">
+          <h2>Stone Types</h2>
+          <p>Add custom stone types (e.g. Red Stone). They appear automatically in block entry, filters, and 3D views.</p>
+        </div>
+
+        <div className="settings-card">
+          <h3 className="settings-card-title">Add Stone Type</h3>
+          <form action={addStoneTypeAction} className="settings-form-row">
+            <label className="stack" style={{ flex: 2 }}>
+              <span>Name (no spaces)</span>
+              <input name="name" placeholder="e.g. RedStone" required style={{ fontFamily: "ui-monospace, monospace", fontWeight: 600 }} />
+            </label>
+            <label className="stack" style={{ flex: "0 0 auto" }}>
+              <span>Top colour</span>
+              <input type="color" name="color_top" defaultValue="#D8D4CC" style={{ width: 56, height: 36, padding: 2, cursor: "pointer", borderRadius: 6 }} />
+            </label>
+            <label className="stack" style={{ flex: "0 0 auto" }}>
+              <span>Front colour</span>
+              <input type="color" name="color_front" defaultValue="#A09C94" style={{ width: 56, height: 36, padding: 2, cursor: "pointer", borderRadius: 6 }} />
+            </label>
+            <label className="stack" style={{ flex: "0 0 auto" }}>
+              <span>Side colour</span>
+              <input type="color" name="color_side" defaultValue="#B8B4AC" style={{ width: 56, height: 36, padding: 2, cursor: "pointer", borderRadius: 6 }} />
+            </label>
+            <div className="stack" style={{ flex: "0 0 auto", justifyContent: "flex-end" }}>
+              <span style={{ visibility: "hidden", fontSize: 12 }}>.</span>
+              <button className="primary-button" type="submit">Add Stone</button>
+            </div>
+          </form>
+        </div>
+
+        <div className="settings-table">
+          <div className="settings-table-head" style={{ gridTemplateColumns: "1fr auto auto auto" }}>
+            <span>Stone Type</span>
+            <span>3D Colours</span>
+            <span>Blocks Use It</span>
+            <span></span>
+          </div>
+          {stoneList.map(st => {
+            const isBuiltIn = st.name === "PinkStone" || st.name === "WhiteStone";
+            return (
+              <div key={st.id} className="settings-table-row">
+                <div className="settings-table-row-face" style={{ gridTemplateColumns: "1fr auto auto auto" }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span
+                      style={{
+                        width: 28, height: 28, borderRadius: 6, flexShrink: 0,
+                        background: `linear-gradient(135deg, ${st.color_top} 50%, ${st.color_front} 50%)`,
+                        border: "1px solid rgba(0,0,0,0.1)",
+                        display: "inline-block",
+                      }}
+                    />
+                    <span className="settings-temple-name">{st.name}</span>
+                    <span className="muted" style={{ fontSize: 12 }}>({stoneDisplayName(st.name)})</span>
+                    {isBuiltIn && <span className="role-pill" style={{ fontSize: 11 }}>Built-in</span>}
+                  </span>
+                  <span style={{ display: "flex", gap: 4 }}>
+                    <span title="Top" style={{ width: 22, height: 22, borderRadius: 4, background: st.color_top, border: "1px solid rgba(0,0,0,0.1)", display: "inline-block" }} />
+                    <span title="Front" style={{ width: 22, height: 22, borderRadius: 4, background: st.color_front, border: "1px solid rgba(0,0,0,0.1)", display: "inline-block" }} />
+                    <span title="Side" style={{ width: 22, height: 22, borderRadius: 4, background: st.color_side, border: "1px solid rgba(0,0,0,0.1)", display: "inline-block" }} />
+                  </span>
+                  <span className="muted" style={{ fontSize: 12 }}>—</span>
+                  <span>
+                    {isBuiltIn ? (
+                      <span className="muted" style={{ fontSize: 12 }}>🔒 Protected</span>
+                    ) : (
+                      <form action={deleteStoneTypeAction} style={{ display: "inline" }}>
+                        <input type="hidden" name="id" value={st.id} />
+                        <input type="hidden" name="name" value={st.name} />
+                        <button className="ghost-button danger-ghost" type="submit" style={{ fontSize: 12, padding: "3px 10px" }}>
+                          Delete
+                        </button>
+                      </form>
+                    )}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+          {stoneList.length === 0 && (
+            <div className="banner">No stone types found. Run the database setup SQL first.</div>
+          )}
+        </div>
+      </div>
+
       {/* Temple Code Configuration */}
       <div className="settings-section">
         <div className="settings-section-header">
@@ -303,8 +393,13 @@ export default async function SettingsPage() {
             <label className="stack" style={{ flex: "0 0 auto" }}>
               <span>Stone Type</span>
               <select name="default_stone" defaultValue="PinkStone">
-                <option value="PinkStone">Pink Stone</option>
-                <option value="WhiteStone">White Stone</option>
+                {stoneList.length > 0
+                  ? stoneList.map(st => <option key={st.name} value={st.name}>{st.name}</option>)
+                  : <>
+                      <option value="PinkStone">PinkStone</option>
+                      <option value="WhiteStone">WhiteStone</option>
+                    </>
+                }
               </select>
             </label>
             <div className="stack" style={{ flex: "0 0 auto", justifyContent: "flex-end" }}>
@@ -361,8 +456,13 @@ export default async function SettingsPage() {
                     <label className="stack" style={{ flex: "0 0 auto" }}>
                       <span>Stone Type</span>
                       <select name="default_stone" defaultValue={(temple as any).default_stone ?? "PinkStone"}>
-                        <option value="PinkStone">Pink Stone</option>
-                        <option value="WhiteStone">White Stone</option>
+                        {stoneList.length > 0
+                          ? stoneList.map(st => <option key={st.name} value={st.name}>{st.name}</option>)
+                          : <>
+                              <option value="PinkStone">PinkStone</option>
+                              <option value="WhiteStone">WhiteStone</option>
+                            </>
+                        }
                       </select>
                     </label>
                     <label className="stack" style={{ flex: "0 0 auto" }}>

@@ -30,10 +30,12 @@ export function SlabSelector({
   slabs,
   temples,
   activeFilters,
+  stoneNames,
 }: {
   slabs: Slab[];
   temples: string[];
   activeFilters: ActiveFilters;
+  stoneNames?: string[];
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -155,8 +157,10 @@ export function SlabSelector({
           onChange={e => setFilter("stone", e.target.value)}
         >
           <option value="">All Stones</option>
-          <option value="PinkStone">PinkStone</option>
-          <option value="WhiteStone">WhiteStone</option>
+          {(stoneNames && stoneNames.length > 0
+            ? stoneNames
+            : ["PinkStone", "WhiteStone"]
+          ).map(n => <option key={n} value={n}>{n}</option>)}
         </select>
 
         <select
