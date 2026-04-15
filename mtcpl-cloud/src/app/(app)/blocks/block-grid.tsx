@@ -5,11 +5,12 @@ import { BlockCardPreview } from "@/components/stone-previews";
 import { updateBlockAction, deleteBlockAction } from "./actions";
 import { VendorSelect } from "./vendor-select";
 import { stoneDisplayName } from "@/lib/stone-utils";
+import type { StoneTypeDef } from "@/lib/stone-utils";
 
-type StoneType = { name: string; color_top: string };
+type StoneType = StoneTypeDef;
 const FALLBACK_STONES: StoneType[] = [
-  { name: "PinkStone",  color_top: "#EDCFC2" },
-  { name: "WhiteStone", color_top: "#E8E6DC" },
+  { name: "PinkStone",  color_top: "#EDCFC2", color_front: "#C87A60", color_side: "#DDA88A" },
+  { name: "WhiteStone", color_top: "#E8E6DC", color_front: "#B8B6AC", color_side: "#D0CEC4" },
 ];
 const YARDS = [1, 2, 3, 4, 5, 6] as const;
 const STATUSES = ["available", "reserved", "consumed", "discarded"] as const;
@@ -96,7 +97,7 @@ export function BlockGrid({ blocks, canEdit, vendors, profilesMap = {}, stoneTyp
               onKeyDown={e => { if (e.key === "Enter" || e.key === " ") setSelectedId(isSelected ? null : block.id); }}
             >
               <div className="block-card-preview">
-                <BlockCardPreview stone={block.stone} l={L} w={W} h={H} />
+                <BlockCardPreview stone={block.stone} l={L} w={W} h={H} stoneTypes={stones} />
               </div>
               <div className="block-card-info">
                 <div className="block-card-code">{block.id}</div>
@@ -146,6 +147,7 @@ export function BlockGrid({ blocks, canEdit, vendors, profilesMap = {}, stoneTyp
                   l={Number(selected.length_ft)}
                   w={Number(selected.width_ft)}
                   h={Number(selected.height_ft)}
+                  stoneTypes={stones}
                 />
               </div>
 

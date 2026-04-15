@@ -16,18 +16,28 @@ type BlockCardPreviewProps = {
   h?: number | string;
 };
 
+import { getStonePalette } from "@/lib/stone-utils";
+import type { StoneTypeDef } from "@/lib/stone-utils";
+
 export const STONE_PALETTES: Record<string, { top: string; front: string; side: string; stroke: string }> = {
   PinkStone: { top: "#EDCFC2", front: "#C87A60", side: "#DDA88A", stroke: "rgba(140,60,35,0.2)" },
   WhiteStone: { top: "#E8E6DC", front: "#B8B6AC", side: "#D0CEC4", stroke: "rgba(80,78,70,0.15)" }
 };
 
-function paletteFor(stone?: string | null) {
-  return STONE_PALETTES[stone || "PinkStone"] || STONE_PALETTES.PinkStone;
+function paletteFor(stone?: string | null, stoneTypes?: StoneTypeDef[]) {
+  const pal = getStonePalette(stone ?? "PinkStone", stoneTypes);
+  // derive stroke from front colour
+  return {
+    top: pal.top,
+    front: pal.front,
+    side: pal.side,
+    stroke: STONE_PALETTES[stone ?? ""]?.stroke ?? "rgba(0,0,0,0.12)",
+  };
 }
 
 /** Small inline preview for planning / cutting lists */
-export function BlockMiniPreview({ stone, className }: BlockPreviewProps) {
-  const pal = paletteFor(stone);
+export function BlockMiniPreview({ stone, className, stoneTypes }: BlockPreviewProps & { stoneTypes?: StoneTypeDef[] }) {
+  const pal = paletteFor(stone, stoneTypes);
   return (
     <svg className={className} viewBox="0 0 44 34" width="34" height="28" aria-hidden="true">
       <polygon points="8,12 24,4 38,12 22,20" fill={pal.top} stroke={pal.stroke} strokeWidth="0.8" />
@@ -38,8 +48,8 @@ export function BlockMiniPreview({ stone, className }: BlockPreviewProps) {
 }
 
 /** Small inline preview for slabs */
-export function SlabMiniPreview({ stone, accent, className }: SlabPreviewProps) {
-  const pal = paletteFor(stone);
+export function SlabMiniPreview({ stone, accent, className, stoneTypes }: SlabPreviewProps & { stoneTypes?: StoneTypeDef[] }) {
+  const pal = paletteFor(stone, stoneTypes);
   const border = accent || pal.front;
   return (
     <svg className={className} viewBox="0 0 42 30" width="32" height="24" aria-hidden="true">
@@ -55,8 +65,8 @@ export function SlabMiniPreview({ stone, accent, className }: SlabPreviewProps) 
  * Proportional to actual dimensions (L, W, H) passed in.
  * Fills the card preview container.
  */
-export function BlockCardPreview({ stone, l = 60, w = 40, h = 24 }: BlockCardPreviewProps) {
-  const pal = paletteFor(stone);
+export function BlockCardPreview({ stone, l = 60, w = 40, h = 24, stoneTypes }: BlockCardPreviewProps & { stoneTypes?: StoneTypeDef[] }) {
+  const pal = paletteFor(stone, stoneTypes);
 
   const L = Math.max(Number(l) || 60, 1);
   const W = Math.max(Number(w) || 40, 1);

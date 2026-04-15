@@ -659,11 +659,13 @@ export function IsoBlockPreview({ block, placed, stoneTypes }: { block: PlanBloc
 export function PlanningWorkbench({
   blocks,
   slabs,
-  approveAction
+  approveAction,
+  stoneTypes,
 }: {
   blocks: BlockRow[];
   slabs: SlabRow[];
   approveAction: (formData: FormData) => void | Promise<void>;
+  stoneTypes?: StoneTypeDef[];
 }) {
   const [kerfMm, setKerfMm] = useState(20);
   const [result, setResult] = useState<PlanResult | null>(null);
@@ -775,7 +777,7 @@ export function PlanningWorkbench({
                       type="checkbox"
                       onClick={(e) => { e.stopPropagation(); toggleBlock(block.id); }}
                     />
-                    <BlockMiniPreview stone={block.stone} />
+                    <BlockMiniPreview stone={block.stone} stoneTypes={stoneTypes} />
                     <div>
                       <div className="record-title-row">
                         <strong>{block.id}</strong>
@@ -827,7 +829,7 @@ export function PlanningWorkbench({
                           type="checkbox"
                           onClick={(e) => { e.stopPropagation(); toggleSlab(slab.id); }}
                         />
-                        <SlabMiniPreview accent={sclr(slab.id)} stone={slab.stone} />
+                        <SlabMiniPreview accent={sclr(slab.id)} stone={slab.stone} stoneTypes={stoneTypes} />
                         <div>
                           <div className="record-title-row">
                             <strong style={{ color: sclr(slab.id) }}>{slab.id}</strong>
@@ -937,7 +939,7 @@ export function PlanningWorkbench({
                           <span className="role-pill">Vol. eff. {item.eff}%</span>
                         </div>
 
-                        <IsoBlockPreview block={item.blk} placed={item.placed} />
+                        <IsoBlockPreview block={item.blk} placed={item.placed} stoneTypes={stoneTypes} />
 
                         <div className="chip-row">
                           {item.placed.map((slab) => (

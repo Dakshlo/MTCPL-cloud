@@ -1,6 +1,7 @@
 import { PlanningWorkbench } from "@/components/planning-workbench";
 import { requireAuth } from "@/lib/auth";
 import { createDataClient } from "@/lib/supabase/server";
+import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { approvePlanAction } from "./actions";
 
 export default async function PlanningPage({
@@ -28,13 +29,15 @@ export default async function PlanningPage({
     slabQuery = slabQuery.in("id", selectedSlabIds);
   }
 
-  const [{ data: blocks, error: blockError }, { data: slabs, error: slabError }] = await Promise.all([
+  const admin = createAdminSupabaseClient();
+  const [{ data: blocks, error: blockError }, { data: slabs, error: slabError }, { data: stoneTypes }] = await Promise.all([
     supabase
       .from("blocks")
       .select("id, stone, yard, category, quality, length_ft, width_ft, height_ft, status")
       .eq("status", "available")
       .order("created_at", { ascending: false }),
     slabQuery,
+    admin.from("stone_types").select("id, name, color_top, color_front, color_side").order("sort_order").order("name"),
   ]);
 
   if (blockError) throw new Error(blockError.message);
@@ -85,7 +88,7 @@ export default async function PlanningPage({
   return (
     <>
       {ErrorBanner}
-      <PlanningWorkbench approveAction={approvePlanAction} blocks={blocks ?? []} slabs={slabs ?? []} />
+      <PlanningWorkbench approveAction={approvePlanAction} blocks={blocks ?? []} slabs={slabs ?? []} stoneTypes={stoneTypes ?? undefined} />
     </>
   );
 }
