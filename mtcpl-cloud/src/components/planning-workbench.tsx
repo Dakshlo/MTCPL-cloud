@@ -71,6 +71,7 @@ export type PlanBlock = {
 export type PlanResult = {
   plan: PlanBlock[];
   unmet: Array<{ id: string; label: string; temple: string }>;
+  unfittableLong?: Array<{ id: string; label: string; temple: string; maxDim: number }>;
   totalWaste: number;
 };
 
@@ -205,163 +206,227 @@ function bestSlabFaceForAxis(
  * more slabs fit. Each layer's slabs receive zTop / zBot annotations so the 3D
  * view can render them at the correct depth inside the block.
  */
+type RemainingSlab = {
+  id: string;
+  label: string;
+  temple: string;
+  stone: string | null;
+  quality: string | null;
+  sl: number;
+  sw: number;
+  sd: number;
+};
+
+type BlockAxis = { faceL: number; faceW: number; depth: number; label: string };
+
+type PackedResult = {
+  allPlaced: PlacedSlab[];
+  orient: BlockAxis | null;
+  lastSpaces: Array<{ x: number; y: number; w: number; h: number }>;
+  depthUsed: number;
+};
+
+/**
+ * Try to pack slabs into a single block. Tries all 3 block orientations,
+ * picks the one that places the most slabs. Returns empty if nothing fits.
+ */
+function tryPackBlock(
+  block: BlockRow,
+  remaining: RemainingSlab[],
+  kerfFt: number,
+): PackedResult {
+  const bl = toNum(block.length_ft);
+  const bw = toNum(block.width_ft);
+  const bh = toNum(block.height_ft);
+  if (bl <= 0.01 || bw <= 0.01 || bh <= 0.01) {
+    return { allPlaced: [], orient: null, lastSpaces: [], depthUsed: 0 };
+  }
+
+  // All 3 ways to orient the block under the saw
+  const blockAxes: BlockAxis[] = [
+    { faceL: bl, faceW: bw, depth: bh, label: "L×W face" },
+    { faceL: bl, faceW: bh, depth: bw, label: "L×H face" },
+    { faceL: bw, faceW: bh, depth: bl, label: "W×H face" },
+  ];
+
+  let best: PackedResult = { allPlaced: [], orient: null, lastSpaces: [], depthUsed: 0 };
+
+  for (const axis of blockAxes) {
+    let depthUsed = 0;
+    const allPlaced: PlacedSlab[] = [];
+    let lastSpaces: Array<{ x: number; y: number; w: number; h: number }> = [];
+    let tempRemaining = remaining.filter((s) => {
+      if (s.stone && s.stone !== block.stone) return false;
+      if (block.quality === "B" && s.quality === "A") return false;
+      return true;
+    });
+
+    while (tempRemaining.length > 0 && axis.depth - depthUsed > 0.01) {
+      const availDepth = axis.depth - depthUsed;
+
+      type EligSlab = { id: string; label: string; temple: string; fw: number; fh: number; depth: number; quality: string | null };
+      const eligibleAll: EligSlab[] = [];
+      for (const s of tempRemaining) {
+        const face = bestSlabFaceForAxis(s.sl, s.sw, s.sd, axis.faceL, axis.faceW, availDepth);
+        if (face) eligibleAll.push({ id: s.id, label: s.label, temple: s.temple, fw: face.fw, fh: face.fh, depth: face.depth, quality: s.quality });
+      }
+      if (!eligibleAll.length) break;
+
+      const byDepth = new Map<number, EligSlab[]>();
+      for (const e of eligibleAll) {
+        const key = Math.round(e.depth * 10000);
+        if (!byDepth.has(key)) byDepth.set(key, []);
+        byDepth.get(key)!.push(e);
+      }
+
+      let bestLayerPack: ReturnType<typeof packBlock> | null = null;
+      let bestLayerDepth = 0;
+
+      for (const [key, group] of byDepth) {
+        const depth = key / 10000;
+        const items = group.map(e => ({ id: e.id, label: e.label, temple: e.temple, sw: e.fw, sh: e.fh, sd: depth }));
+        const tryPack = packBlock(axis.faceL, axis.faceW, items, kerfFt);
+        if (tryPack.placed.length > (bestLayerPack?.placed.length ?? 0)) {
+          bestLayerPack = tryPack;
+          bestLayerDepth = depth;
+        }
+      }
+
+      if (!bestLayerPack || !bestLayerPack.placed.length) break;
+
+      const zTop = axis.depth - depthUsed;
+      const zBot = Math.max(0, zTop - bestLayerDepth);
+
+      bestLayerPack.placed.forEach((p) => allPlaced.push({ ...p, zTop, zBot }));
+      lastSpaces = bestLayerPack.spaces;
+
+      depthUsed += bestLayerDepth + kerfFt;
+      const placedIds = new Set(bestLayerPack.placed.map((p) => p.id));
+      tempRemaining = tempRemaining.filter((s) => !placedIds.has(s.id));
+    }
+
+    if (allPlaced.length > best.allPlaced.length) {
+      best = { allPlaced, orient: axis, lastSpaces, depthUsed };
+    }
+  }
+
+  return best;
+}
+
 function runOptimization(blocks: BlockRow[], slabs: SlabRow[], kerfMm: number): PlanResult {
   const kerfFt = kerfMm / 25.4; // mm → inches (all dimensions stored in inches)
 
-  let remaining = slabs
+  // Sort slabs LONGEST-DIMENSION first (tiebreak by face area).
+  // This makes the longest unplaced slab the "anchor" on every iteration, so
+  // big/beam slabs claim their long blocks before small slabs eat into them.
+  let remaining: RemainingSlab[] = slabs
     .filter((slab) => slab.status === "open" || slab.status === "planned")
     .map((slab) => ({
-      id: slab.id, label: slab.label, temple: slab.temple, stone: slab.stone || null, quality: slab.quality || null,
-      sl: toNum(slab.length_ft), sw: toNum(slab.width_ft), sd: toNum(slab.thickness_ft)
+      id: slab.id, label: slab.label, temple: slab.temple,
+      stone: slab.stone || null, quality: slab.quality || null,
+      sl: toNum(slab.length_ft), sw: toNum(slab.width_ft), sd: toNum(slab.thickness_ft),
     }))
-    .sort((a, b) => b.sl * b.sw - a.sl * a.sw);
+    .sort((a, b) => {
+      const aMax = Math.max(a.sl, a.sw);
+      const bMax = Math.max(b.sl, b.sw);
+      if (bMax !== aMax) return bMax - aMax;                 // longest first
+      return (b.sl * b.sw) - (a.sl * a.sw);                   // tiebreak: bigger face
+    });
 
   const usableBlocks = blocks.filter((block) => block.status === "available" || block.status === "reserved");
   const plan: PlanBlock[] = [];
   const usedBlockIds = new Set<string>();
+  const unfittable: RemainingSlab[] = [];
 
   while (remaining.length > 0) {
-    let bestBlock: BlockRow | null = null;
-    let bestOrient: { faceL: number; faceW: number; depth: number; label: string } | null = null;
-    let bestAllPlaced: PlacedSlab[] = [];
-    let bestLastSpaces: Array<{ x: number; y: number; w: number; h: number }> = [];
-    let bestDepthUsed = 0;
-    let bestScore = -Infinity;
+    const anchor = remaining[0];
+    const anchorMax = Math.max(anchor.sl, anchor.sw);
 
-    for (const block of usableBlocks) {
-      if (usedBlockIds.has(block.id)) continue;
+    // Candidate blocks: not yet used, stone/quality compatible, long enough for anchor.
+    // Sorted ascending by volume so the SMALLEST sufficient block is tried first.
+    const candidates = usableBlocks
+      .filter((b) => !usedBlockIds.has(b.id))
+      .filter((b) => {
+        const bl = toNum(b.length_ft);
+        const bw = toNum(b.width_ft);
+        const bh = toNum(b.height_ft);
+        const bMax = Math.max(bl, bw, bh);
+        if (bMax + 0.001 < anchorMax) return false;
+        if (anchor.stone && anchor.stone !== b.stone) return false;
+        if (b.quality === "B" && anchor.quality === "A") return false;
+        return true;
+      })
+      .sort((a, b) => {
+        const va = toNum(a.length_ft) * toNum(a.width_ft) * toNum(a.height_ft);
+        const vb = toNum(b.length_ft) * toNum(b.width_ft) * toNum(b.height_ft);
+        return va - vb;
+      });
 
-      const bl = toNum(block.length_ft);
-      const bw = toNum(block.width_ft);
-      const bh = toNum(block.height_ft);
-      if (bl <= 0.01 || bw <= 0.01 || bh <= 0.01) continue;
-
-      // All 3 ways to orient the block under the saw
-      const blockAxes = [
-        { faceL: bl, faceW: bw, depth: bh, label: "L×W face" },  // cuts go through H
-        { faceL: bl, faceW: bh, depth: bw, label: "L×H face" },  // cuts go through W
-        { faceL: bw, faceW: bh, depth: bl, label: "W×H face" },  // cuts go through L
-      ];
-
-      for (const axis of blockAxes) {
-        let depthUsed = 0;
-        const allPlaced: PlacedSlab[] = [];
-        let lastSpaces: Array<{ x: number; y: number; w: number; h: number }> = [];
-        let tempRemaining = remaining.filter((s) => {
-          if (s.stone && s.stone !== block.stone) return false;
-          if (block.quality === "B" && s.quality === "A") return false;
-          return true;
-        });
-
-        // Layer loop: each iteration = one gang-saw pass at a fixed cut depth.
-        // All slabs in one pass must share the same thickness (physically required).
-        // We group eligible slabs by their thickness, try each group, pick the one
-        // that fills the face best, then advance the block depth by exactly that thickness.
-        while (tempRemaining.length > 0 && axis.depth - depthUsed > 0.01) {
-          const availDepth = axis.depth - depthUsed;
-
-          // Map every remaining slab to its best face orientation and required depth
-          type EligSlab = { id: string; label: string; temple: string; fw: number; fh: number; depth: number; quality: string | null };
-          const eligibleAll: EligSlab[] = [];
-          for (const s of tempRemaining) {
-            const face = bestSlabFaceForAxis(s.sl, s.sw, s.sd, axis.faceL, axis.faceW, availDepth);
-            if (face) eligibleAll.push({ id: s.id, label: s.label, temple: s.temple, fw: face.fw, fh: face.fh, depth: face.depth, quality: s.quality });
-          }
-          if (!eligibleAll.length) break;
-
-          // Group by thickness (0.1 mm resolution to handle float rounding)
-          const byDepth = new Map<number, EligSlab[]>();
-          for (const e of eligibleAll) {
-            const key = Math.round(e.depth * 10000); // units: 0.1 mm
-            if (!byDepth.has(key)) byDepth.set(key, []);
-            byDepth.get(key)!.push(e);
-          }
-
-          // Try each thickness group — pick the one that places the most slabs on the face
-          let bestLayerPack: ReturnType<typeof packBlock> | null = null;
-          let bestLayerDepth = 0;
-
-          for (const [key, group] of byDepth) {
-            const depth = key / 10000;
-            const items = group.map(e => ({ id: e.id, label: e.label, temple: e.temple, sw: e.fw, sh: e.fh, sd: depth }));
-            const tryPack = packBlock(axis.faceL, axis.faceW, items, kerfFt);
-            if (tryPack.placed.length > (bestLayerPack?.placed.length ?? 0)) {
-              bestLayerPack = tryPack;
-              bestLayerDepth = depth;
-            }
-          }
-
-          if (!bestLayerPack || !bestLayerPack.placed.length) break;
-
-          // zTop / zBot: depth coordinate inside the block (0 = far end, axis.depth = near/"top")
-          const zTop = axis.depth - depthUsed;
-          const zBot = Math.max(0, zTop - bestLayerDepth);
-
-          bestLayerPack.placed.forEach((p) => allPlaced.push({ ...p, zTop, zBot }));
-          lastSpaces = bestLayerPack.spaces;
-
-          depthUsed += bestLayerDepth + kerfFt;
-          const placedIds = new Set(bestLayerPack.placed.map((p) => p.id));
-          tempRemaining = tempRemaining.filter((s) => !placedIds.has(s.id));
-        }
-
-        if (!allPlaced.length) continue;
-
-        // Score: maximise slabs placed; secondary: prefer smaller block (less waste)
-        const blockVol = bl * bw * bh;
-        const score = allPlaced.length * 1000 - blockVol * 0.001;
-
-        if (score > bestScore) {
-          bestScore = score;
-          bestBlock = block;
-          bestOrient = axis;
-          bestAllPlaced = allPlaced;
-          bestLastSpaces = lastSpaces;
-          bestDepthUsed = depthUsed;
-        }
-      }
+    if (candidates.length === 0) {
+      // No block can physically hold this slab — skip it and continue with the rest.
+      unfittable.push(remaining.shift()!);
+      continue;
     }
 
-    if (!bestBlock || !bestOrient || !bestAllPlaced.length) break;
+    // Try candidates smallest-first. Accept the first block that actually packs the anchor.
+    let chosenBlock: BlockRow | null = null;
+    let chosenPacked: PackedResult | null = null;
+    for (const block of candidates) {
+      const packed = tryPackBlock(block, remaining, kerfFt);
+      if (!packed.allPlaced.length || !packed.orient) continue;
+      if (!packed.allPlaced.some((p) => p.id === anchor.id)) continue;
+      chosenBlock = block;
+      chosenPacked = packed;
+      break;
+    }
 
-    usedBlockIds.add(bestBlock.id);
-    const usedIds = new Set(bestAllPlaced.map((p) => p.id));
+    if (!chosenBlock || !chosenPacked || !chosenPacked.orient) {
+      // Geometry said the anchor fits, but no candidate actually packed it
+      // (quirky thickness/orientation edge case). Mark unfittable, move on.
+      unfittable.push(remaining.shift()!);
+      continue;
+    }
 
-    // Volume-based efficiency
-    const bl = toNum(bestBlock.length_ft);
-    const bw = toNum(bestBlock.width_ft);
-    const bh = toNum(bestBlock.height_ft);
+    usedBlockIds.add(chosenBlock.id);
+    const usedIds = new Set(chosenPacked.allPlaced.map((p) => p.id));
+
+    const bl = toNum(chosenBlock.length_ft);
+    const bw = toNum(chosenBlock.width_ft);
+    const bh = toNum(chosenBlock.height_ft);
     const blockVol = bl * bw * bh;
-    const placedVol = bestAllPlaced.reduce((sum, p) => sum + p.pw * p.ph * p.sd, 0);
-    const kerfVol = bestAllPlaced.reduce((sum, p) => sum + (p.aw * p.ah - p.pw * p.ph) * p.sd, 0);
+    const placedVol = chosenPacked.allPlaced.reduce((sum, p) => sum + p.pw * p.ph * p.sd, 0);
+    const kerfVol = chosenPacked.allPlaced.reduce((sum, p) => sum + (p.aw * p.ah - p.pw * p.ph) * p.sd, 0);
 
-    // Biggest remainder: remaining full plates (depth × face)
-    const remainingDepth = Math.max(0, bestOrient.depth - bestDepthUsed);
+    // Biggest remainder
+    const remainingDepth = Math.max(0, chosenPacked.orient.depth - chosenPacked.depthUsed);
     let biggest: { l: number; w: number; h: number } | null = null;
     if (remainingDepth > 0.05) {
-      biggest = { l: round2(bestOrient.faceL), w: round2(bestOrient.faceW), h: round2(remainingDepth) };
+      biggest = {
+        l: round2(chosenPacked.orient.faceL),
+        w: round2(chosenPacked.orient.faceW),
+        h: round2(remainingDepth),
+      };
     } else {
-      // Fall back: biggest 2D space in last layer
-      bestLastSpaces.forEach((space) => {
+      chosenPacked.lastSpaces.forEach((space) => {
         if (!biggest || space.w * space.h > biggest.l * biggest.w) {
-          biggest = { l: round2(space.w), w: round2(space.h), h: round2(bestOrient!.depth) };
+          biggest = { l: round2(space.w), w: round2(space.h), h: round2(chosenPacked!.orient!.depth) };
         }
       });
     }
 
     plan.push({
       blk: {
-        id: bestBlock.id,
-        stone: bestBlock.stone,
-        yard: toNum(bestBlock.yard, 1),
-        quality: bestBlock.quality || null,
-        l: round2(bestOrient.faceL),
-        w: round2(bestOrient.faceW),
-        h: round2(bestOrient.depth),
-        orient: bestOrient.label,
+        id: chosenBlock.id,
+        stone: chosenBlock.stone,
+        yard: toNum(chosenBlock.yard, 1),
+        quality: chosenBlock.quality || null,
+        l: round2(chosenPacked.orient.faceL),
+        w: round2(chosenPacked.orient.faceW),
+        h: round2(chosenPacked.orient.depth),
+        orient: chosenPacked.orient.label,
       },
-      placed: bestAllPlaced,
-      spaces: bestLastSpaces,
+      placed: chosenPacked.allPlaced,
+      spaces: chosenPacked.lastSpaces,
       ua: round2(placedVol),
       ka: round2(kerfVol),
       ba: round2(blockVol),
@@ -374,7 +439,13 @@ function runOptimization(blocks: BlockRow[], slabs: SlabRow[], kerfMm: number): 
 
   return {
     plan,
-    unmet: remaining.map((s) => ({ id: s.id, label: s.label, temple: s.temple })),
+    unmet: [...remaining, ...unfittable].map((s) => ({ id: s.id, label: s.label, temple: s.temple })),
+    unfittableLong: unfittable.map((s) => ({
+      id: s.id,
+      label: s.label,
+      temple: s.temple,
+      maxDim: round2(Math.max(s.sl, s.sw)),
+    })),
     totalWaste: round2(plan.reduce((sum, b) => sum + Math.max(0, b.ba - b.ua - b.ka), 0)),
   };
 }
@@ -747,6 +818,8 @@ export function PlanningWorkbench({
   const [kerfMm, setKerfMm] = useState(20);
   const [result, setResult] = useState<PlanResult | null>(null);
   const [yardFilter, setYardFilter] = useState<number | null>(null);
+  const [ackUnmet, setAckUnmet] = useState(false);
+  const [originalSelectedCount, setOriginalSelectedCount] = useState(0);
 
   const allUsableBlocks = blocks.filter((block) => block.status === "available" || block.status === "reserved");
   const yards = [...new Set(allUsableBlocks.map(b => Number(b.yard)))].sort((a, b) => a - b);
@@ -782,6 +855,8 @@ export function PlanningWorkbench({
   function generatePlan() {
     const filteredBlocks = usableBlocks.filter((b) => selectedBlockIds.has(b.id));
     const filteredSlabs = openSlabs.filter((s) => selectedSlabIds.has(s.id));
+    setAckUnmet(false);
+    setOriginalSelectedCount(filteredSlabs.length);
     if (filteredSlabs.length === 0) {
       setResult({ plan: [], unmet: [], totalWaste: 0 });
       return;
@@ -1044,11 +1119,44 @@ export function PlanningWorkbench({
                   })}
                 </div>
 
-                {result.unmet.length ? (
-                  <div className="banner" style={{ marginTop: 16 }}>
-                    Unfit slabs: {result.unmet.map((item) => item.id).join(", ")}
+                {/* LOUD red banner: generic unmet slabs (can't be missed) */}
+                {result.unmet.length > 0 && (
+                  <div style={{
+                    marginTop: 16,
+                    padding: "14px 18px",
+                    background: "#fef2f2",
+                    border: "2px solid #dc2626",
+                    borderRadius: 8,
+                  }}>
+                    <p style={{ margin: 0, fontWeight: 800, fontSize: 14, color: "#991b1b" }}>
+                      ⚠ {result.unmet.length} of {originalSelectedCount} selected slab{result.unmet.length > 1 ? "s" : ""} could NOT be placed in this plan
+                    </p>
+                    <p style={{ margin: "6px 0 0", fontSize: 12, color: "#991b1b", wordBreak: "break-word" }}>
+                      <strong>Unplaced:</strong> {result.unmet.map((u) => u.id).join(", ")}
+                    </p>
+                    <p className="muted" style={{ margin: "4px 0 0", fontSize: 11 }}>
+                      These will stay as <strong>open</strong> and need to be re-planned or assigned to different blocks later.
+                    </p>
                   </div>
-                ) : null}
+                )}
+
+                {/* Amber banner: specifically long slabs that no block can physically hold */}
+                {result.unfittableLong && result.unfittableLong.length > 0 && (
+                  <div style={{
+                    marginTop: 12,
+                    padding: "12px 16px",
+                    background: "#fef3c7",
+                    border: "1px solid #f59e0b",
+                    borderRadius: 8,
+                  }}>
+                    <p style={{ margin: 0, fontWeight: 700, color: "#92400e", fontSize: 13 }}>
+                      ⚠ {result.unfittableLong.length} long slab{result.unfittableLong.length > 1 ? "s need" : " needs"} a longer block than you have
+                    </p>
+                    <p className="muted" style={{ margin: "4px 0 0", fontSize: 12 }}>
+                      {result.unfittableLong.map((s) => `${s.id} (${s.maxDim}″)`).join(", ")} — procure longer blocks or split the requirement.
+                    </p>
+                  </div>
+                )}
 
                 {result.plan.length ? (
                   <form action={approveAction} style={{ marginTop: 18 }}>
@@ -1076,7 +1184,27 @@ export function PlanningWorkbench({
                       type="hidden"
                       value={[...new Set(result.plan.flatMap(pb => pb.placed.map(s => s.id)))].join(",")}
                     />
-                    <button className="primary-button" type="submit">
+
+                    {/* Acknowledgement gate — user cannot approve until they check this when there are unmet slabs */}
+                    {result.unmet.length > 0 && (
+                      <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13, margin: "4px 0 14px", cursor: "pointer", padding: "10px 14px", background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 6 }}>
+                        <input
+                          type="checkbox"
+                          checked={ackUnmet}
+                          onChange={(e) => setAckUnmet(e.target.checked)}
+                          style={{ marginTop: 2 }}
+                        />
+                        <span style={{ color: "#991b1b", fontWeight: 600 }}>
+                          I understand {result.unmet.length} slab{result.unmet.length > 1 ? "s" : ""} will remain open and will need a new plan later.
+                        </span>
+                      </label>
+                    )}
+
+                    <button
+                      className="primary-button"
+                      type="submit"
+                      disabled={result.unmet.length > 0 && !ackUnmet}
+                    >
                       Approve Plan and Create Cutting Session
                     </button>
                   </form>

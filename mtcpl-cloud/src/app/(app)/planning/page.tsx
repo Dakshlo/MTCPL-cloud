@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth";
 import { createDataClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { approvePlanAction } from "./actions";
+import { ProcurementHeadsUp } from "./procurement-heads-up";
 
 export default async function PlanningPage({
   searchParams,
@@ -30,7 +31,14 @@ export default async function PlanningPage({
   }
 
   const admin = createAdminSupabaseClient();
-  const [{ data: blocks, error: blockError }, { data: slabs, error: slabError }, { data: stoneTypes }] = await Promise.all([
+  const sinceIso = new Date(Date.now() - 180 * 24 * 3600 * 1000).toISOString();
+  const [
+    { data: blocks, error: blockError },
+    { data: slabs, error: slabError },
+    { data: stoneTypes },
+    { data: historySlabs },
+    { data: availableBlocks },
+  ] = await Promise.all([
     supabase
       .from("blocks")
       .select("id, stone, yard, category, quality, length_ft, width_ft, height_ft, status")
@@ -38,10 +46,50 @@ export default async function PlanningPage({
       .order("created_at", { ascending: false }),
     slabQuery,
     admin.from("stone_types").select("id, name, color_top, color_front, color_side").order("sort_order").order("name"),
+    admin
+      .from("slab_requirements")
+      .select("length_ft, width_ft, stone")
+      .in("status", ["cut_done", "completed"])
+      .gte("updated_at", sinceIso)
+      .limit(2000),
+    admin
+      .from("blocks")
+      .select("stone, length_ft, width_ft, height_ft")
+      .in("status", ["available", "reserved"]),
   ]);
 
   if (blockError) throw new Error(blockError.message);
   if (slabError)  throw new Error(slabError.message);
+
+  // Procurement heads-up: per-stone p90 historical slab length vs. longest block in stock.
+  const stoneLengths = new Map<string, number[]>();
+  for (const s of historySlabs ?? []) {
+    const stone = s.stone ?? "Unknown";
+    const maxDim = Math.max(Number(s.length_ft), Number(s.width_ft));
+    if (!stoneLengths.has(stone)) stoneLengths.set(stone, []);
+    stoneLengths.get(stone)!.push(maxDim);
+  }
+  const longestInStock = new Map<string, number>();
+  for (const b of availableBlocks ?? []) {
+    const stone = b.stone ?? "Unknown";
+    const maxDim = Math.max(Number(b.length_ft), Number(b.width_ft), Number(b.height_ft));
+    if (maxDim > (longestInStock.get(stone) ?? 0)) longestInStock.set(stone, maxDim);
+  }
+  const procurementAlerts: Array<{ stone: string; p90: number; longestAvailable: number; sampleCount: number }> = [];
+  for (const [stone, arr] of stoneLengths) {
+    if (arr.length < 10) continue; // too little signal
+    arr.sort((a, b) => a - b);
+    const p90 = arr[Math.min(arr.length - 1, Math.floor(arr.length * 0.9))];
+    const longestAvailable = longestInStock.get(stone) ?? 0;
+    if (p90 > longestAvailable - 2) {
+      procurementAlerts.push({
+        stone,
+        p90: Math.round(p90),
+        longestAvailable: Math.round(longestAvailable),
+        sampleCount: arr.length,
+      });
+    }
+  }
 
   const ErrorBanner = errorMsg ? (
     <div style={{
@@ -71,6 +119,7 @@ export default async function PlanningPage({
     return (
       <>
         {ErrorBanner}
+        <ProcurementHeadsUp alerts={procurementAlerts} />
         <div className="page-content" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "60vh", textAlign: "center", gap: 16 }}>
           <div style={{ fontSize: 56, lineHeight: 1 }}>⌘</div>
           <h2 style={{ margin: 0 }}>No Slabs Selected</h2>
@@ -88,6 +137,7 @@ export default async function PlanningPage({
   return (
     <>
       {ErrorBanner}
+      <ProcurementHeadsUp alerts={procurementAlerts} />
       <PlanningWorkbench approveAction={approvePlanAction} blocks={blocks ?? []} slabs={slabs ?? []} stoneTypes={stoneTypes ?? undefined} />
     </>
   );
