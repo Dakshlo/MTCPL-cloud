@@ -113,14 +113,14 @@ export function BlockCardPreview({ stone, l = 60, w = 40, h = 24, stoneTypes }: 
       style={{ width: "100%", height: "100%", maxHeight: 88 }}
       aria-hidden="true"
     >
-      {/* Front face */}
+      {/* Left face (y=W — visible in this projection, appears on screen-left) */}
       <polygon
-        points={[ptn(0,0,0), ptn(L,0,0), ptn(L,0,H), ptn(0,0,H)].join(" ")}
+        points={[ptn(0,W,0), ptn(L,W,0), ptn(L,W,H), ptn(0,W,H)].join(" ")}
         fill={pal.front}
         stroke={pal.stroke}
         strokeWidth="0.6"
       />
-      {/* Right face */}
+      {/* Right face (x=L — visible in this projection, appears on screen-right) */}
       <polygon
         points={[ptn(L,0,0), ptn(L,W,0), ptn(L,W,H), ptn(L,0,H)].join(" ")}
         fill={pal.side}

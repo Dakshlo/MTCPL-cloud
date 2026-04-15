@@ -386,9 +386,25 @@ export function IsoBlockPreview({ block, placed, stoneTypes }: { block: PlanBloc
   const [zoom, setZoom] = useState(1.0);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
+  const [activeLayerIdx, setActiveLayerIdx] = useState<number | null>(null);
   const dragRef = useRef({ active: false, lastX: 0 });
   const svgRef = useRef<SVGSVGElement>(null);
   const hoveredSlab = placed.find(p => p.id === hoveredId) ?? null;
+
+  // Build layer list from placed slabs (group by zBot–zTop range)
+  const layers = (() => {
+    const map = new Map<string, { zBot: number; zTop: number; ids: Set<string> }>();
+    for (const s of placed) {
+      if (s.zTop == null) continue;
+      const zTop = s.zTop;
+      const zBot = s.zBot ?? 0;
+      const key = `${zBot.toFixed(2)}_${zTop.toFixed(2)}`;
+      if (!map.has(key)) map.set(key, { zBot, zTop, ids: new Set() });
+      map.get(key)!.ids.add(s.id);
+    }
+    return [...map.values()].sort((a, b) => b.zTop - a.zTop);
+  })();
+  const activeLayerIds = activeLayerIdx !== null ? layers[activeLayerIdx]?.ids : null;
 
   // Non-passive wheel & touchmove listeners to enable preventDefault
   useEffect(() => {
@@ -559,9 +575,11 @@ export function IsoBlockPreview({ block, placed, stoneTypes }: { block: PlanBloc
         {/* Slab 3D boxes — sorted back-to-front */}
         {sortedSlabs.map((item) => {
           const isHovered = hoveredId === item.id;
-          const dimmed = hoveredId !== null && !isHovered;
-          const topAlpha = dimmed ? 0.15 : 0.88;
-          const sideAlpha = dimmed ? 0.10 : 0.70;
+          const layerDimmed = activeLayerIds !== null && !activeLayerIds.has(item.id);
+          const hoverDimmed = hoveredId !== null && !isHovered;
+          const dimmed = layerDimmed || hoverDimmed;
+          const topAlpha = dimmed ? 0.10 : 0.88;
+          const sideAlpha = dimmed ? 0.07 : 0.70;
           const color = sclr(item.id);
 
           // Use annotated Z positions from multilayer algorithm; fall back for old data
@@ -650,6 +668,57 @@ export function IsoBlockPreview({ block, placed, stoneTypes }: { block: PlanBloc
         drag to rotate · scroll to zoom · hover slab for details
       </text>
     </svg>
+
+    {/* Layer selector — only shown when multiple layers exist */}
+    {layers.length > 1 && (
+      <div style={{
+        display: "flex", flexWrap: "wrap", gap: 5, marginTop: 8,
+        justifyContent: "center", alignItems: "center",
+      }}>
+        <span style={{ fontSize: 10, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginRight: 2 }}>
+          Layer:
+        </span>
+        <button
+          onClick={() => setActiveLayerIdx(null)}
+          style={{
+            fontSize: 11, padding: "3px 10px", borderRadius: 12,
+            border: `1.5px solid ${activeLayerIdx === null ? "var(--gold)" : "var(--border)"}`,
+            background: activeLayerIdx === null ? "var(--gold)" : "transparent",
+            color: activeLayerIdx === null ? "#fff" : "var(--muted)",
+            fontWeight: activeLayerIdx === null ? 700 : 500,
+            cursor: "pointer", transition: "all 0.12s",
+          }}
+        >
+          All
+        </button>
+        {layers.map((layer, li) => {
+          const isActive = activeLayerIdx === li;
+          const layerSlabIds = [...layer.ids];
+          const sampleColor = sclr(layerSlabIds[0] ?? "1");
+          return (
+            <button
+              key={li}
+              onClick={() => setActiveLayerIdx(isActive ? null : li)}
+              style={{
+                fontSize: 11, padding: "3px 10px", borderRadius: 12,
+                border: `1.5px solid ${isActive ? sampleColor : "var(--border)"}`,
+                background: isActive ? sampleColor + "22" : "transparent",
+                color: isActive ? "var(--text)" : "var(--muted)",
+                fontWeight: isActive ? 700 : 500,
+                cursor: "pointer", transition: "all 0.12s",
+                display: "flex", alignItems: "center", gap: 4,
+              }}
+            >
+              <span style={{ width: 7, height: 7, borderRadius: 2, background: sampleColor, display: "inline-block", flexShrink: 0 }} />
+              L{li + 1} &nbsp;
+              <span style={{ fontSize: 9, opacity: 0.75, fontFamily: "ui-monospace, monospace" }}>
+                {layer.zBot.toFixed(0)}–{layer.zTop.toFixed(0)}&Prime;
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    )}
     </div>
   );
 }
