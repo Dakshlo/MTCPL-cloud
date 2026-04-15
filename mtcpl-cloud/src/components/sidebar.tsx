@@ -63,6 +63,24 @@ const navEntries: NavEntry[] = [
     icon: "✦",
     roles: ["developer", "owner", "team_head", "block_slab_entry"],
   },
+  // — Phase 2 dev-only carving module —
+  {
+    type: "divider",
+    label: "CARVING (DEV)",
+    roles: ["developer", "vendor"],
+  },
+  {
+    href: "/carving",
+    label: "Carving Jobs",
+    icon: "🎨",
+    roles: ["developer"],
+  },
+  {
+    href: "/vendor",
+    label: "My Jobs",
+    icon: "👤",
+    roles: ["developer", "vendor"],
+  },
 ];
 
 function roleLabel(role: AppRole): string {

@@ -147,9 +147,20 @@ export function NowBand({ initial }: { initial: NowBandData }) {
               </div>
             ) : (
               data.alerts.map((a, i) => {
-                const icon = a.kind === "rejection" ? "🚫" : a.kind === "deviation" ? "↔️" : a.kind === "overdue" ? "⏰" : "📉";
-                const border = a.kind === "rejection" ? "rgba(220,38,38,0.2)" : a.kind === "lowstock" ? "rgba(220,38,38,0.2)" : "rgba(217,119,6,0.2)";
-                const bg = a.kind === "rejection" || a.kind === "lowstock" ? "rgba(220,38,38,0.04)" : "rgba(217,119,6,0.04)";
+                const icon =
+                  a.kind === "rejection" ? "🚫"
+                  : a.kind === "deviation" ? "↔️"
+                  : a.kind === "overdue" ? "⏰"
+                  : a.kind === "carving_review" ? "🎨"
+                  : "📉";
+                const border =
+                  a.kind === "rejection" || a.kind === "lowstock" ? "rgba(220,38,38,0.2)"
+                  : a.kind === "carving_review" ? "rgba(124,58,237,0.2)"
+                  : "rgba(217,119,6,0.2)";
+                const bg =
+                  a.kind === "rejection" || a.kind === "lowstock" ? "rgba(220,38,38,0.04)"
+                  : a.kind === "carving_review" ? "rgba(124,58,237,0.04)"
+                  : "rgba(217,119,6,0.04)";
                 return (
                   <Link key={i} href={a.href} style={{ textDecoration: "none", display: "flex", gap: 8, padding: "7px 10px", background: bg, border: `1px solid ${border}`, borderRadius: 6 }}>
                     <span style={{ fontSize: 14, flexShrink: 0 }}>{icon}</span>

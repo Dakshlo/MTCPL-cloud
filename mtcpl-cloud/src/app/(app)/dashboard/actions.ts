@@ -16,7 +16,7 @@ export type NowOperator = {
 };
 
 export type NowAlert = {
-  kind: "rejection" | "deviation" | "overdue" | "lowstock";
+  kind: "rejection" | "deviation" | "overdue" | "lowstock" | "carving_review";
   title: string;
   subtitle: string;
   timeAgo: string;
@@ -84,7 +84,7 @@ export async function getNowBandData(): Promise<NowBandData> {
     admin.from("cut_session_blocks").select("layout, updated_at").eq("status", "done").gte("updated_at", thirtyAgo),
     admin.from("profiles").select("id, full_name, last_seen_at").gte("last_seen_at", fiveMinAgo),
     admin.from("cut_session_blocks").select("id, block_id, updated_at, updated_by").eq("status", "cutting"),
-    admin.from("audit_logs").select("id, action, entity_id, details, created_at").in("action", ["block_rejected", "cutting_done_with_deviation"]).order("created_at", { ascending: false }).limit(8),
+    admin.from("audit_logs").select("id, action, entity_id, details, created_at").in("action", ["block_rejected", "cutting_done_with_deviation", "carving_completed_by_vendor"]).order("created_at", { ascending: false }).limit(8),
     admin.from("slab_requirements").select("id, label, temple, deadline").eq("priority", true).in("status", ["open", "planned"]).not("deadline", "is", null).lte("deadline", new Date(Date.now() + 2 * 24 * 3600 * 1000).toISOString()),
     admin.from("blocks").select("stone, length_ft, width_ft, height_ft").eq("status", "available"),
     admin.from("cut_session_blocks").select("layout").eq("status", "done").gte("updated_at", thirtyAgo),
@@ -188,6 +188,14 @@ export async function getNowBandData(): Promise<NowBandData> {
         subtitle: `${extras} unplanned slab${extras !== 1 ? "s" : ""} cut from this block`,
         timeAgo: timeAgo(ev.created_at),
         href: `/cutting/${ev.entity_id}`,
+      });
+    } else if (ev.action === "carving_completed_by_vendor") {
+      alerts.push({
+        kind: "carving_review",
+        title: `Carving job awaiting review`,
+        subtitle: `Vendor marked a job complete — inspect and approve or reject`,
+        timeAgo: timeAgo(ev.created_at),
+        href: `/carving/${ev.entity_id}`,
       });
     }
   }
