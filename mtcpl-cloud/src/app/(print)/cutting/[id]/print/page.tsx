@@ -76,18 +76,6 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
     day: "numeric", month: "long", year: "numeric",
   });
 
-  // Side elevation scale (view looking along X axis — shows W × H plane with layer depths)
-  const sideElevSvg = (() => {
-    if (!blk || placed.length === 0) return null;
-    const PAD = 14;
-    const MAX_W = 220;
-    const MAX_H = 220;
-    const sc = Math.min((MAX_W - PAD * 2) / blk.w, (MAX_H - PAD * 2) / blk.h, 6);
-    const svgW = blk.w * sc + PAD * 2;
-    const svgH = blk.h * sc + PAD * 2;
-    return { sc, PAD, svgW, svgH };
-  })();
-
   // Build 2D top-down layout SVG inline
   const topDownSvg = (() => {
     if (!blk || placed.length === 0) return null;
@@ -216,10 +204,10 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
         }
         .meta-val.mono { font-family: ui-monospace, monospace; }
 
-        /* 3D + 2D + Elevation Views */
+        /* 3D + 2D Views */
         .views-row {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+          grid-template-columns: 1fr 1fr;
           gap: 14px;
           align-items: start;
         }
@@ -565,103 +553,6 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
                 </div>
               )}
 
-              {/* Right: Side Elevation (view along X axis — shows W × H with layer depths) */}
-              {sideElevSvg && placed.some(s => s.zTop != null) && (
-                <div className="view-card">
-                  <svg
-                    viewBox={`0 0 ${sideElevSvg.svgW.toFixed(1)} ${sideElevSvg.svgH.toFixed(1)}`}
-                    style={{ width: "100%", display: "block" }}
-                    xmlns="http://www.w3.org/2000/svg"
-                  >
-                    {/* Block outline */}
-                    <rect
-                      x={sideElevSvg.PAD} y={sideElevSvg.PAD}
-                      width={blk.w * sideElevSvg.sc} height={blk.h * sideElevSvg.sc}
-                      fill="#f8f8f8" stroke="#888" strokeWidth="1.5" strokeDasharray="4 2"
-                    />
-                    {/* Dimension labels */}
-                    <text x={sideElevSvg.PAD + (blk.w * sideElevSvg.sc) / 2} y={sideElevSvg.PAD - 4}
-                      textAnchor="middle" fill="#666" fontSize={8} fontFamily="ui-monospace,monospace">
-                      {blk.w}&quot; W
-                    </text>
-                    <text
-                      x={sideElevSvg.PAD - 4}
-                      y={sideElevSvg.PAD + (blk.h * sideElevSvg.sc) / 2}
-                      textAnchor="middle" dominantBaseline="middle" fill="#666" fontSize={8}
-                      transform={`rotate(-90,${sideElevSvg.PAD - 4},${sideElevSvg.PAD + (blk.h * sideElevSvg.sc) / 2})`}
-                      fontFamily="ui-monospace,monospace">
-                      {blk.h}&quot; H
-                    </text>
-                    {/* Draw unique layers as horizontal bands across full width */}
-                    {layers.map((layer, li) => {
-                      const bandY = sideElevSvg.PAD + (blk.h - layer.zTop) * sideElevSvg.sc;
-                      const bandH = (layer.zTop - layer.zBot) * sideElevSvg.sc;
-                      const firstId = [...layer.slabs][0]?.id;
-                      const col = slabColor(firstId ?? "1");
-                      const cx = sideElevSvg.PAD + (blk.w * sideElevSvg.sc) / 2;
-                      const cy = bandY + bandH / 2;
-                      return (
-                        <g key={li}>
-                          <rect
-                            x={sideElevSvg.PAD} y={bandY}
-                            width={blk.w * sideElevSvg.sc} height={Math.max(bandH, 1)}
-                            fill={col} fillOpacity={0.22}
-                            stroke={col} strokeWidth="1"
-                          />
-                          {/* Layer label */}
-                          {bandH > 10 && (
-                            <text x={cx} y={cy} textAnchor="middle" dominantBaseline="middle"
-                              fill="#333" fontSize={7} fontWeight={700} fontFamily="ui-monospace,monospace">
-                              L{li + 1} · {layer.zBot.toFixed(0)}–{layer.zTop.toFixed(0)}&quot;
-                            </text>
-                          )}
-                        </g>
-                      );
-                    })}
-                    {/* Slab footprints (Y direction visible from side) */}
-                    {placed.filter(s => s.zTop != null && s.py != null).map((s) => {
-                      const col = slabColor(s.id);
-                      const zTop = s.zTop!;
-                      const zBot = s.zBot ?? 0;
-                      const x = sideElevSvg.PAD + (s.py ?? 0) * sideElevSvg.sc;
-                      const y = sideElevSvg.PAD + (blk.h - zTop) * sideElevSvg.sc;
-                      const w = (s.ph ?? 0) * sideElevSvg.sc;
-                      const h = (zTop - zBot) * sideElevSvg.sc;
-                      return (
-                        <rect key={s.id} x={x} y={y} width={Math.max(w, 1)} height={Math.max(h, 1)}
-                          fill={col} fillOpacity={0.45}
-                          stroke={col} strokeWidth="0.8"
-                        />
-                      );
-                    })}
-                    {/* Depth tick marks on right edge */}
-                    {layers.map((layer, li) => {
-                      const tickY = sideElevSvg.PAD + (blk.h - layer.zBot) * sideElevSvg.sc;
-                      const rightX = sideElevSvg.PAD + blk.w * sideElevSvg.sc;
-                      return (
-                        <g key={`tick-${li}`}>
-                          <line x1={rightX} y1={tickY} x2={rightX + 4} y2={tickY} stroke="#999" strokeWidth="0.8" />
-                          <text x={rightX + 6} y={tickY} dominantBaseline="middle"
-                            fill="#888" fontSize={7} fontFamily="ui-monospace,monospace">
-                            {layer.zBot.toFixed(0)}&quot;
-                          </text>
-                        </g>
-                      );
-                    })}
-                    {/* Top tick (z=H) */}
-                    <g>
-                      <line x1={sideElevSvg.PAD + blk.w * sideElevSvg.sc} y1={sideElevSvg.PAD}
-                        x2={sideElevSvg.PAD + blk.w * sideElevSvg.sc + 4} y2={sideElevSvg.PAD}
-                        stroke="#999" strokeWidth="0.8" />
-                      <text x={sideElevSvg.PAD + blk.w * sideElevSvg.sc + 6} y={sideElevSvg.PAD}
-                        dominantBaseline="middle" fill="#888" fontSize={7} fontFamily="ui-monospace,monospace">
-                        {blk.h}&quot;
-                      </text>
-                    </g>
-                  </svg>
-                  <div className="view-lbl">Side Elevation — layer depths (W × H)</div>
-                </div>
-              )}
             </div>
           </>
         )}
@@ -670,10 +561,15 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
         {blk && layers.length > 1 && (
           <>
             <div className="section-head">Layer-by-Layer Cutting Guide ({layers.length} layers — cut top to bottom)</div>
-            <div className="layer-grid">
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: layers.length <= 2 ? "1fr 1fr" : layers.length <= 3 ? "1fr 1fr 1fr" : "repeat(auto-fill, minmax(180px, 1fr))",
+              gap: 12,
+              marginBottom: 4,
+            }}>
               {layers.map((layer, li) => {
                 const PAD = 8;
-                const MAX_SIZE = 150;
+                const MAX_SIZE = layers.length <= 2 ? 320 : layers.length <= 3 ? 240 : 170;
                 const sc = Math.min((MAX_SIZE - PAD * 2) / blk.l, (MAX_SIZE - PAD * 2) / blk.w, 5);
                 const svgW = blk.l * sc + PAD * 2;
                 const svgH = blk.w * sc + PAD * 2;

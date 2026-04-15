@@ -381,7 +381,7 @@ function runOptimization(blocks: BlockRow[], slabs: SlabRow[], kerfMm: number): 
 
 // ─── 3D Isometric Block Preview ────────────────────────────────────────────────
 
-export function IsoBlockPreview({ block, placed, stoneTypes }: { block: PlanBlock["blk"]; placed: PlacedSlab[]; stoneTypes?: StoneTypeDef[] }) {
+export function IsoBlockPreview({ block, placed, stoneTypes, onHoverSlab }: { block: PlanBlock["blk"]; placed: PlacedSlab[]; stoneTypes?: StoneTypeDef[]; onHoverSlab?: (id: string | null) => void }) {
   const [az, setAz] = useState(Math.PI * 0.25);
   const [zoom, setZoom] = useState(1.0);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -594,9 +594,17 @@ export function IsoBlockPreview({ block, placed, stoneTypes }: { block: PlanBloc
           return (
             <g
               key={item.id}
-              style={{ cursor: "pointer" }}
-              onMouseEnter={() => setHoveredId(item.id)}
-              onMouseLeave={() => { setHoveredId(null); setTooltipPos(null); }}
+              style={{ cursor: activeLayerIds !== null && !activeLayerIds.has(item.id) ? "default" : "pointer" }}
+              onMouseEnter={() => {
+                if (activeLayerIds !== null && !activeLayerIds.has(item.id)) return;
+                setHoveredId(item.id);
+                onHoverSlab?.(item.id);
+              }}
+              onMouseLeave={() => {
+                setHoveredId(null);
+                setTooltipPos(null);
+                onHoverSlab?.(null);
+              }}
             >
               {/* Y-direction side face */}
               <polygon

@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
-import { IsoBlockPreview } from "@/components/planning-workbench";
+import { CuttingDetailPreview } from "../cutting-detail-preview";
 import { FinishBlockForm } from "../finish-block-form";
 import { UndoButton } from "../undo-button";
 import { RejectButton } from "../reject-button";
@@ -62,7 +62,10 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
 
   const blk = layout?.blk;
   const placed = layout?.placed ?? [];
-  const profilesMap = await getProfilesMap();
+  const [profilesMap, { data: stoneTypes }] = await Promise.all([
+    getProfilesMap(),
+    createAdminSupabaseClient().from("stone_types").select("id, name, color_top, color_front, color_side").order("name"),
+  ]);
 
   const session = block.cut_sessions as unknown as {
     id: string;
@@ -149,11 +152,9 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
         </div>
       </div>
 
-      {/* 3D block preview */}
+      {/* 3D preview + slab chip list (cross-highlighted on hover) */}
       {blk && placed.length > 0 && (
-        <div style={{ margin: "0 0 20px" }}>
-          <IsoBlockPreview block={blk as any} placed={placed as any} />
-        </div>
+        <CuttingDetailPreview blk={blk} placed={placed as any} stoneTypes={stoneTypes ?? undefined} />
       )}
 
       {/* Info cards row */}
@@ -243,33 +244,7 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
         </div>
       </div>
 
-      {/* Planned slab chips */}
-      {placed.length > 0 && (
-        <div style={{ marginBottom: 20 }}>
-          <p
-            style={{
-              fontSize: 11,
-              fontWeight: 700,
-              color: "var(--muted)",
-              textTransform: "uppercase",
-              letterSpacing: "0.06em",
-              marginBottom: 8,
-            }}
-          >
-            Planned Slabs
-          </p>
-          <div className="chip-row">
-            {placed.map((s) => (
-              <span className="plan-chip" key={s.id} style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}>
-                {s.id}
-                {s.temple ? ` · ${s.temple}` : ""}
-                {` · ${s.sw}×${s.sh}${s.sd ? `×${s.sd}` : ""} in`}
-                {s.rot ? " ↻" : ""}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* Slab chips now rendered inside CuttingDetailPreview above */}
 
       {/* ── Layer-by-Layer Guide (when multiple layers exist) ── */}
       {blk && placed.length > 0 && (() => {
