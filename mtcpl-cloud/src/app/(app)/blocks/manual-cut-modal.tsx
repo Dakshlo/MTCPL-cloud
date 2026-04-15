@@ -159,18 +159,19 @@ export function ManualCutModal({
               </p>
             ) : (
               <>
-                <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
                   <input
                     type="text"
                     placeholder="Filter by ID, temple, label…"
                     value={filter}
                     onChange={(e) => setFilter(e.target.value)}
                     style={{
-                      flex: 1,
+                      width: "100%",
+                      boxSizing: "border-box",
                       fontSize: 13,
                       border: "1px solid var(--border)",
                       borderRadius: 5,
-                      padding: "6px 10px",
+                      padding: "7px 10px",
                       background: "var(--bg)",
                       color: "var(--text)",
                       outline: "none",
@@ -181,11 +182,12 @@ export function ManualCutModal({
                       value={templeFilter}
                       onChange={(e) => setTempleFilter(e.target.value)}
                       style={{
+                        width: "100%",
+                        boxSizing: "border-box",
                         fontSize: 13,
-                        minWidth: 120,
                         border: "1px solid var(--border)",
                         borderRadius: 5,
-                        padding: "6px 8px",
+                        padding: "7px 8px",
                         background: "var(--bg)",
                         color: "var(--text)",
                       }}
