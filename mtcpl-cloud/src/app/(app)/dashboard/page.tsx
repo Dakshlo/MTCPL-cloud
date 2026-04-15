@@ -3,6 +3,10 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { DateFilter } from "./date-filter";
 import { PushPanel } from "./push-panel";
+import { NowBand } from "./now-band";
+import { PastBand } from "./past-band";
+import { NextBand } from "./next-band";
+import { getNowBandData } from "./actions";
 
 type SearchParams = Promise<{ date?: string; pushed?: string }>;
 
@@ -112,6 +116,192 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
 
   const { data: pushableSlabs } = await pushQuery.limit(1000);
 
+  // ── Dashboard 2.0 bands ──
+  const thirtyAgoIso = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+  const sevenAgoIso = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+  const twentyeightAgoIso = new Date(Date.now() - 28 * 24 * 3600 * 1000).toISOString();
+
+  const [
+    nowBandInitial,
+    { data: last30CutBlocks },
+    { data: last30AuditDone },
+    { data: last30AuditRejected },
+    { data: last7CutBlocks },
+    { data: plannedSlabCount },
+    { data: availableBlocksAll },
+    { data: priorityDeadlineSlabs },
+  ] = await Promise.all([
+    getNowBandData(),
+    admin.from("cut_session_blocks").select("layout, updated_at, updated_by").eq("status", "done").gte("updated_at", thirtyAgoIso),
+    admin.from("audit_logs").select("user_id, action").in("action", ["cutting_done", "cutting_done_with_deviation"]).gte("created_at", thirtyAgoIso),
+    admin.from("audit_logs").select("id, action").eq("action", "block_rejected").gte("created_at", thirtyAgoIso),
+    admin.from("cut_session_blocks").select("layout").eq("status", "done").gte("updated_at", sevenAgoIso),
+    admin.from("slab_requirements").select("id", { count: "exact", head: true }).eq("status", "planned"),
+    admin.from("blocks").select("stone, length_ft, width_ft, height_ft").eq("status", "available"),
+    admin.from("slab_requirements").select("id, label, temple, deadline").eq("priority", true).in("status", ["open", "planned"]).not("deadline", "is", null).order("deadline", { ascending: true }).limit(10),
+  ]);
+
+  // ── PAST band: Sparkline (30 days of daily CFT) ──
+  const dailyCft = new Map<string, number>();
+  const dailyBlockVol = new Map<string, number>(); // for waste calc
+  const dailyUsefulVol = new Map<string, number>();
+  const stoneCft = new Map<string, number>();
+  for (const b of last30CutBlocks ?? []) {
+    const day = new Date(b.updated_at).toISOString().slice(0, 10);
+    const layout = b.layout as { blk?: { stone?: string; l?: number; w?: number; h?: number }; placed?: Array<{ sw?: number; sh?: number; sd?: number }> } | null;
+    let slabCft = 0;
+    for (const s of layout?.placed ?? []) {
+      if (s.sw && s.sh && s.sd) slabCft += cft(s.sw, s.sh, s.sd);
+    }
+    dailyCft.set(day, (dailyCft.get(day) ?? 0) + slabCft);
+    dailyUsefulVol.set(day, (dailyUsefulVol.get(day) ?? 0) + slabCft);
+    if (layout?.blk) {
+      const bv = cft(layout.blk.l ?? 0, layout.blk.w ?? 0, layout.blk.h ?? 0);
+      dailyBlockVol.set(day, (dailyBlockVol.get(day) ?? 0) + bv);
+    }
+    const stone = layout?.blk?.stone ?? "Unknown";
+    stoneCft.set(stone, (stoneCft.get(stone) ?? 0) + slabCft);
+  }
+
+  // Build sparkline: 30 days worth (oldest → newest)
+  const sparklinePoints: Array<{ label: string; value: number }> = [];
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 24 * 3600 * 1000);
+    const iso = d.toISOString().slice(0, 10);
+    const label = d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+    sparklinePoints.push({ label, value: Number((dailyCft.get(iso) ?? 0).toFixed(1)) });
+  }
+
+  // Stone mix donut slices
+  const stoneColors: Record<string, string> = {
+    PinkStone: "#C87A60",
+    WhiteStone: "#B8B6AC",
+    Jaisalmer: "#E8C572",
+    Unknown: "#9CA3AF",
+  };
+  const paletteFallback = ["#D4A94A", "#C87A60", "#2563EB", "#16A34A", "#DC2626", "#D97706"];
+  const stoneMixSlices = [...stoneCft.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([label, value], i) => ({
+      label,
+      value: Number(value.toFixed(1)),
+      color: stoneColors[label] ?? paletteFallback[i % paletteFallback.length],
+    }));
+
+  // Top operators (by slab count from last 30d done blocks)
+  const opStats = new Map<string, { slabs: number; cftv: number }>();
+  for (const b of last30CutBlocks ?? []) {
+    const uid = b.updated_by;
+    if (!uid) continue;
+    const layout = b.layout as { placed?: Array<{ sw?: number; sh?: number; sd?: number }> } | null;
+    const placed = layout?.placed ?? [];
+    let cftv = 0;
+    for (const s of placed) {
+      if (s.sw && s.sh && s.sd) cftv += cft(s.sw, s.sh, s.sd);
+    }
+    const prev = opStats.get(uid) ?? { slabs: 0, cftv: 0 };
+    prev.slabs += placed.length;
+    prev.cftv += cftv;
+    opStats.set(uid, prev);
+  }
+  const opIds = [...opStats.keys()];
+  const { data: opProfiles } = opIds.length > 0
+    ? await admin.from("profiles").select("id, full_name").in("id", opIds)
+    : { data: [] };
+  const nameById = new Map<string, string>();
+  for (const p of opProfiles ?? []) nameById.set(p.id, p.full_name || "—");
+  const topOperators = [...opStats.entries()]
+    .map(([uid, s]) => ({
+      name: nameById.get(uid) ?? "Unknown",
+      slabs: s.slabs,
+      cft: Number(s.cftv.toFixed(1)),
+      waste: 0,
+    }))
+    .sort((a, b) => b.slabs - a.slabs);
+
+  // Deviation stats
+  const totalApproved = (last30AuditDone ?? []).length;
+  const deviations = (last30AuditDone ?? []).filter((a) => a.action === "cutting_done_with_deviation").length;
+  const rejections = (last30AuditRejected ?? []).length;
+
+  // Waste % this week + 7-day sparkline
+  let wasteSlabCft = 0;
+  let wasteBlockCft = 0;
+  for (const b of last7CutBlocks ?? []) {
+    const layout = b.layout as { blk?: { l?: number; w?: number; h?: number }; placed?: Array<{ sw?: number; sh?: number; sd?: number }> } | null;
+    for (const s of layout?.placed ?? []) {
+      if (s.sw && s.sh && s.sd) wasteSlabCft += cft(s.sw, s.sh, s.sd);
+    }
+    if (layout?.blk) wasteBlockCft += cft(layout.blk.l ?? 0, layout.blk.w ?? 0, layout.blk.h ?? 0);
+  }
+  const wasteWeekPct = wasteBlockCft > 0 ? Math.round(((wasteBlockCft - wasteSlabCft) / wasteBlockCft) * 100) : 0;
+
+  // Build 4-week waste trend (by week, last 28 days)
+  const weekBuckets = new Map<number, { useful: number; total: number }>();
+  for (const b of last30CutBlocks ?? []) {
+    if (b.updated_at < twentyeightAgoIso) continue;
+    const weekIdx = Math.floor((Date.now() - new Date(b.updated_at).getTime()) / (7 * 24 * 3600 * 1000));
+    if (weekIdx < 0 || weekIdx >= 4) continue;
+    const layout = b.layout as { blk?: { l?: number; w?: number; h?: number }; placed?: Array<{ sw?: number; sh?: number; sd?: number }> } | null;
+    let useful = 0;
+    let total = 0;
+    for (const s of layout?.placed ?? []) {
+      if (s.sw && s.sh && s.sd) useful += cft(s.sw, s.sh, s.sd);
+    }
+    if (layout?.blk) total = cft(layout.blk.l ?? 0, layout.blk.w ?? 0, layout.blk.h ?? 0);
+    const prev = weekBuckets.get(weekIdx) ?? { useful: 0, total: 0 };
+    prev.useful += useful;
+    prev.total += total;
+    weekBuckets.set(weekIdx, prev);
+  }
+  const wasteTrend = [3, 2, 1, 0].map((i) => {
+    const w = weekBuckets.get(i);
+    const pct = w && w.total > 0 ? Math.round(((w.total - w.useful) / w.total) * 100) : 0;
+    return { label: i === 0 ? "This wk" : `${i}wk ago`, value: pct };
+  });
+
+  // ── NEXT band: Runway per stone ──
+  const availCftByStone = new Map<string, number>();
+  for (const b of availableBlocksAll ?? []) {
+    const stone = b.stone ?? "Unknown";
+    availCftByStone.set(stone, (availCftByStone.get(stone) ?? 0) + cft(b.length_ft, b.width_ft, b.height_ft));
+  }
+  const burnByStone = new Map<string, number>();
+  for (const [stone, c] of stoneCft) {
+    burnByStone.set(stone, c / 30); // CFT/day over last 30 days
+  }
+  const runways = [...availCftByStone.entries()]
+    .map(([stone, availableCft]) => {
+      const burnPerDay = burnByStone.get(stone) ?? 0;
+      const daysLeft = burnPerDay > 0.1 ? availableCft / burnPerDay : 999;
+      return {
+        stone,
+        availableCft: Number(availableCft.toFixed(1)),
+        burnPerDay: Number(burnPerDay.toFixed(2)),
+        daysLeft,
+      };
+    })
+    .sort((a, b) => a.daysLeft - b.daysLeft);
+
+  // Planned backlog forecast
+  const backlogCount = (plannedSlabCount as unknown as { count: number } | null)?.count ?? 0;
+  let slabsLast7 = 0;
+  for (const b of last7CutBlocks ?? []) {
+    const layout = b.layout as { placed?: unknown[] } | null;
+    slabsLast7 += (layout?.placed ?? []).length;
+  }
+  const slabsPerDay7 = slabsLast7 / 7;
+  const backlogDays = slabsPerDay7 > 0.1 ? backlogCount / slabsPerDay7 : null;
+
+  // Priority deadlines
+  const priorityDeadlines = (priorityDeadlineSlabs ?? []).slice(0, 5).map((p) => ({
+    id: p.id,
+    temple: p.temple,
+    label: p.label,
+    deadline: p.deadline,
+    daysLeft: p.deadline ? Math.ceil((new Date(p.deadline).getTime() - Date.now()) / 86400000) : null,
+  }));
+
   // ── Block stats ──
   const bs: Record<string, { count: number; cft: number }> = {
     available: { count: 0, cft: 0 }, reserved: { count: 0, cft: 0 },
@@ -220,6 +410,27 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
           )}
         </div>
       </div>
+
+      {/* ── NOW BAND (real-time, auto-refresh 45s) ── */}
+      <NowBand initial={nowBandInitial} />
+
+      {/* ── PAST BAND (last 30 days) ── */}
+      <PastBand
+        sparkline={sparklinePoints}
+        stoneMix={stoneMixSlices}
+        topOperators={topOperators}
+        deviationStats={{ totalApproved, deviations, rejections }}
+        wasteWeekPct={wasteWeekPct}
+        wasteTrend={wasteTrend}
+      />
+
+      {/* ── NEXT BAND (forecast) ── */}
+      <NextBand
+        runways={runways}
+        backlogCount={backlogCount}
+        backlogDays={backlogDays}
+        priorityDeadlines={priorityDeadlines}
+      />
 
       {/* ── TOP KPI ROW ── */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
