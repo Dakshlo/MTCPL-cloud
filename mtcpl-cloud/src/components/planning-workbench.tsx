@@ -443,7 +443,7 @@ export function IsoBlockPreview({ block, placed, stoneTypes }: { block: PlanBloc
   const pal = getStonePalette(block.stone, stoneTypes);
   const showFrontY = Sa >= 0;
   const showRightX = Ca >= 0;
-  const bY = showFrontY ? 0 : W;
+  const bY = showFrontY ? W : 0;   // show far Y face when viewer is on +y side
   const bX = showRightX ? L : 0;
 
   // Sort slabs back-to-front: larger projected Y = farther away = draw first
@@ -568,7 +568,7 @@ export function IsoBlockPreview({ block, placed, stoneTypes }: { block: PlanBloc
           const slabZTop = item.zTop ?? H;
           const slabZBot = item.zBot ?? Math.max(0, H - (item.sd > 0 ? item.sd : H * 0.4));
 
-          const sy = showFrontY ? item.py : item.py + item.ph;
+          const sy = showFrontY ? item.py + item.ph : item.py;
           const sx = showRightX ? item.px + item.pw : item.px;
           const center = ptObj(item.px + item.pw / 2, item.py + item.ph / 2, slabZTop);
           const showLabel = Math.min(item.pw, item.ph) * scale > 14;

@@ -23,8 +23,21 @@ type PlacedSlab = {
   sw: number;
   sh: number;
   sd?: number;
+  px?: number;
+  py?: number;
+  pw?: number;
+  ph?: number;
   rot?: boolean;
+  zTop?: number;
+  zBot?: number;
 };
+
+const SLAB_COLORS = ["#D85A30","#378ADD","#1D9E75","#7F77DD","#BA7517","#639922","#D4537E","#E24B4A","#5F5E5A","#0F6E56"];
+function slabColor(id: string) {
+  const num = parseInt(String(id || "").replace(/\D/g, ""), 10);
+  if (!num || Number.isNaN(num)) return SLAB_COLORS[0];
+  return SLAB_COLORS[(num - 1) % SLAB_COLORS.length];
+}
 
 export default async function CuttingDetailPage({ params }: { params: Params }) {
   const { profile } = await requireAuth(["owner", "team_head", "cutting_operator"]);
@@ -257,6 +270,85 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
           </div>
         </div>
       )}
+
+      {/* ── Layer-by-Layer Guide (when multiple layers exist) ── */}
+      {blk && placed.length > 0 && (() => {
+        const slabsWithZ = placed.filter(s => s.zTop != null && s.px != null);
+        if (slabsWithZ.length === 0) return null;
+        const map = new Map<string, { zBot: number; zTop: number; slabs: PlacedSlab[] }>();
+        for (const s of slabsWithZ) {
+          const zTop = s.zTop!;
+          const zBot = s.zBot ?? 0;
+          const key = `${zBot.toFixed(2)}_${zTop.toFixed(2)}`;
+          if (!map.has(key)) map.set(key, { zBot, zTop, slabs: [] });
+          map.get(key)!.slabs.push(s);
+        }
+        const layers = [...map.values()].sort((a, b) => b.zTop - a.zTop);
+        if (layers.length < 2) return null;
+        const PAD = 8;
+        const MAX_SIZE = 130;
+        const sc = Math.min((MAX_SIZE - PAD * 2) / blk.l, (MAX_SIZE - PAD * 2) / blk.w, 5);
+        const svgW = blk.l * sc + PAD * 2;
+        const svgH = blk.w * sc + PAD * 2;
+        return (
+          <div style={{ marginBottom: 20 }}>
+            <p style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>
+              Layer Cutting Guide — {layers.length} layers (cut top → bottom)
+            </p>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 10 }}>
+              {layers.map((layer, li) => (
+                <div key={li} style={{ border: "1px solid var(--border)", borderRadius: 6, padding: "6px 6px 4px", background: "var(--bg)" }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "center", marginBottom: 4 }}>
+                    Layer {li + 1}
+                  </div>
+                  <svg viewBox={`0 0 ${svgW.toFixed(1)} ${svgH.toFixed(1)}`} style={{ width: "100%", display: "block" }}>
+                    <rect x={PAD} y={PAD} width={blk.l * sc} height={blk.w * sc}
+                      fill="var(--surface-alt,#f5f5f0)" stroke="var(--border,#ccc)" strokeWidth="0.8" strokeDasharray="3 2" />
+                    {slabsWithZ.map((s) => {
+                      const inLayer = layer.slabs.some(ls => ls.id === s.id);
+                      const col = slabColor(s.id);
+                      const x = PAD + (s.px ?? 0) * sc;
+                      const y = PAD + (s.py ?? 0) * sc;
+                      const w = (s.pw ?? 0) * sc;
+                      const h = (s.ph ?? 0) * sc;
+                      return (
+                        <g key={s.id}>
+                          <rect x={x} y={y} width={w} height={h}
+                            fill={inLayer ? col : "#d0d0d0"}
+                            fillOpacity={inLayer ? 0.55 : 0.2}
+                            stroke={inLayer ? col : "#bbb"}
+                            strokeWidth={inLayer ? "1.2" : "0.4"}
+                          />
+                          {inLayer && Math.min(w, h) > 12 && (
+                            <text x={x + w / 2} y={y + h / 2}
+                              textAnchor="middle" dominantBaseline="middle"
+                              fill="#1a1a1a" fontSize={7} fontWeight={700}
+                              fontFamily="ui-monospace,monospace">
+                              {s.id}
+                            </text>
+                          )}
+                        </g>
+                      );
+                    })}
+                  </svg>
+                  <div style={{ fontSize: 9, color: "var(--muted)", textAlign: "center", marginTop: 3, fontFamily: "ui-monospace, monospace" }}>
+                    {layer.zBot.toFixed(1)}″ – {layer.zTop.toFixed(1)}″ deep
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 4, justifyContent: "center" }}>
+                    {layer.slabs.map(s => (
+                      <span key={s.id} style={{ fontSize: 9, fontFamily: "ui-monospace, monospace", fontWeight: 700,
+                        background: slabColor(s.id) + "33", color: "#1a1a1a",
+                        padding: "1px 5px", borderRadius: 3, border: `1px solid ${slabColor(s.id)}66` }}>
+                        {s.id}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── PENDING: Approve / Reject ── */}
       {isPending && (

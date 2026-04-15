@@ -90,6 +90,20 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
     return { sc, PAD, svgW, svgH };
   })();
 
+  // Group slabs by layer (unique zBot–zTop range) for layer-by-layer guide
+  const layers = (() => {
+    if (!blk || placed.length === 0) return [];
+    const map = new Map<string, { zBot: number; zTop: number; slabs: PlacedSlab[] }>();
+    for (const s of placed) {
+      const zTop = s.zTop ?? blk.h;
+      const zBot = s.zBot ?? 0;
+      const key = `${zBot.toFixed(2)}_${zTop.toFixed(2)}`;
+      if (!map.has(key)) map.set(key, { zBot, zTop, slabs: [] });
+      map.get(key)!.slabs.push(s);
+    }
+    return [...map.values()].sort((a, b) => b.zTop - a.zTop); // top layer first
+  })();
+
   // Volume in CFT (values stored in inches, 1728 in³ = 1 ft³)
   const volCft = blk ? ((blk.l * blk.w * blk.h) / 1728).toFixed(2) : null;
 
@@ -247,6 +261,37 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
           flex-shrink: 0;
         }
         .slab-code { font-family: ui-monospace, monospace; font-weight: 700; }
+
+        /* Layer-by-layer guide grid */
+        .layer-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+          gap: 10px;
+          margin-bottom: 4px;
+        }
+        .layer-card {
+          border: 1px solid #ddd;
+          border-radius: 6px;
+          padding: 6px 6px 4px;
+          background: #fafafa;
+          page-break-inside: avoid;
+        }
+        .layer-lbl {
+          font-size: 8px;
+          font-weight: 700;
+          color: #555;
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+          text-align: center;
+          margin-bottom: 3px;
+        }
+        .layer-depth {
+          font-size: 8px;
+          color: #888;
+          text-align: center;
+          margin-top: 3px;
+          font-family: ui-monospace, monospace;
+        }
 
         /* ─── MANUAL ENTRY SECTION ─────────────────────────── */
         .manual-section {
@@ -507,6 +552,62 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
                   <div className="view-lbl">Top-Down Layout Plan (L × W)</div>
                 </div>
               )}
+            </div>
+          </>
+        )}
+
+        {/* ── Layer-by-Layer Cutting Guide ── */}
+        {blk && layers.length > 1 && (
+          <>
+            <div className="section-head">Layer-by-Layer Cutting Guide ({layers.length} layers — cut top to bottom)</div>
+            <div className="layer-grid">
+              {layers.map((layer, li) => {
+                const PAD = 8;
+                const MAX_SIZE = 150;
+                const sc = Math.min((MAX_SIZE - PAD * 2) / blk.l, (MAX_SIZE - PAD * 2) / blk.w, 5);
+                const svgW = blk.l * sc + PAD * 2;
+                const svgH = blk.w * sc + PAD * 2;
+                return (
+                  <div key={li} className="layer-card">
+                    <div className="layer-lbl">Layer {li + 1}</div>
+                    <svg viewBox={`0 0 ${svgW.toFixed(1)} ${svgH.toFixed(1)}`} style={{ width: "100%", display: "block" }} xmlns="http://www.w3.org/2000/svg">
+                      {/* Block outline */}
+                      <rect x={PAD} y={PAD} width={blk.l * sc} height={blk.w * sc}
+                        fill="#f0f0f0" stroke="#aaa" strokeWidth="0.8" strokeDasharray="3 2" />
+                      {/* All slabs: dim those not in this layer, highlight current layer */}
+                      {placed.map((s) => {
+                        const inLayer = layer.slabs.some(ls => ls.id === s.id);
+                        const col = slabColor(s.id);
+                        const x = PAD + s.px * sc;
+                        const y = PAD + s.py * sc;
+                        const w = s.pw * sc;
+                        const h = s.ph * sc;
+                        return (
+                          <g key={s.id}>
+                            <rect x={x} y={y} width={w} height={h}
+                              fill={inLayer ? col : "#e0e0e0"}
+                              fillOpacity={inLayer ? 0.55 : 0.25}
+                              stroke={inLayer ? col : "#bbb"}
+                              strokeWidth={inLayer ? "1.2" : "0.4"}
+                            />
+                            {inLayer && Math.min(w, h) > 12 && (
+                              <text x={x + w / 2} y={y + h / 2}
+                                textAnchor="middle" dominantBaseline="middle"
+                                fill="#1a1a1a" fontSize={7} fontWeight={700}
+                                fontFamily="ui-monospace,monospace">
+                                {s.id}
+                              </text>
+                            )}
+                          </g>
+                        );
+                      })}
+                    </svg>
+                    <div className="layer-depth">
+                      depth {layer.zBot.toFixed(1)}″ – {layer.zTop.toFixed(1)}″
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </>
         )}
