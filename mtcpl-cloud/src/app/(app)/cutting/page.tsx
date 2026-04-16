@@ -53,7 +53,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
     supabase
       .from("cut_session_blocks")
       .select("*", { count: "exact", head: true })
-      .in("status", ["done", "rejected"]),
+      .eq("status", "done"),
   ]);
 
   let statusFilter: string[];
@@ -78,7 +78,9 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
     .order("updated_at", { ascending: activeTab !== "done" })
     .limit(100);
 
-  const rows = (blocks ?? []) as unknown as BlockRow[];
+  const allRows = (blocks ?? []) as unknown as BlockRow[];
+  const rows = activeTab === "done" ? allRows.filter(b => b.status !== "rejected") : allRows;
+  const rejectedRows = activeTab === "done" ? allRows.filter(b => b.status === "rejected") : [];
 
   const tabs: { key: Tab; label: string; count: number | null }[] = [
     { key: "pending",     label: "Pending Approval", count: pendingCount },
@@ -160,7 +162,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
 
       {/* Block cards */}
       <div className="records-stack" style={{ marginTop: 18 }}>
-        {rows.length === 0 ? (
+        {rows.length === 0 && rejectedRows.length === 0 ? (
           <div className="banner">{emptyMessages[activeTab]}</div>
         ) : (
           rows.map((block) => {
@@ -389,6 +391,60 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
               </div>
             );
           })
+        )}
+
+        {/* Rejected blocks — collapsed dropdown at bottom of Done tab */}
+        {activeTab === "done" && rejectedRows.length > 0 && (
+          <details style={{ marginTop: 12 }}>
+            <summary style={{
+              cursor: "pointer",
+              fontSize: 12,
+              fontWeight: 600,
+              color: "var(--muted)",
+              padding: "8px 4px",
+              userSelect: "none",
+              listStyle: "none",
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+            }}>
+              <span style={{ fontSize: 11 }}>▶</span>
+              {rejectedRows.length} Rejected block{rejectedRows.length !== 1 ? "s" : ""}
+            </summary>
+            <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+              {rejectedRows.map((block) => {
+                const blk = block.layout?.blk;
+                const slabCount = block.cut_session_slabs.length;
+                return (
+                  <div key={block.id} className="plan-card" style={{ opacity: 0.65 }}>
+                    <div className="record-head" style={{ flexWrap: "wrap", gap: 10 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <strong style={{ fontFamily: "ui-monospace, monospace", fontSize: 14 }}>
+                          {block.block_id}
+                        </strong>
+                        <p className="muted" style={{ margin: "2px 0 0", fontSize: 12 }}>
+                          {block.cut_sessions?.session_code}
+                          {blk ? ` · ${blk.stone} · Yard ${blk.yard}` : ""}
+                          {block.updated_at ? ` · ${new Date(block.updated_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}` : ""}
+                        </p>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                        <span className="role-pill">{slabCount} slab{slabCount !== 1 ? "s" : ""}</span>
+                        <Link href={`/cutting/${block.id}`} style={{ textDecoration: "none", fontSize: 12, padding: "4px 12px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)", fontWeight: 500 }}>
+                          View →
+                        </Link>
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 8 }}>
+                      <span className="role-pill badge-discarded" style={{ fontSize: 11 }}>
+                        Rejected — block returned to inventory
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </details>
         )}
       </div>
     </section>
