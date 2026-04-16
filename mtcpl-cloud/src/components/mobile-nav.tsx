@@ -6,10 +6,10 @@ type NavItem = { href: string; label: string; icon: string; roles: AppRole[] };
 const items: NavItem[] = [
   { href: "/dashboard",   label: "Home",      icon: "◈", roles: ["developer","owner"] },
   { href: "/blocks",      label: "Blocks",    icon: "▣", roles: ["developer","owner","team_head","block_slab_entry","block_entry"] },
-  { href: "/slabs",       label: "Slabs",     icon: "▤", roles: ["developer","owner","team_head","slab_entry","block_slab_entry"] },
+  { href: "/slabs",       label: "Req. Sizes", icon: "▤", roles: ["developer","owner","team_head","slab_entry","block_slab_entry"] },
   { href: "/slabs/view",  label: "Plan Gen",  icon: "⌘", roles: ["developer","owner","team_head"] },
   { href: "/cutting",     label: "Cutting",   icon: "✂", roles: ["developer","owner","cutting_operator","team_head"] },
-  { href: "/slabs/ready", label: "Ready",     icon: "✦", roles: ["developer","owner","team_head","slab_entry","block_slab_entry"] },
+  { href: "/slabs/ready", label: "Ready",      icon: "✦", roles: ["developer","owner","team_head","slab_entry","block_slab_entry"] },
 ];
 
 export function MobileNav({ role }: { role: AppRole }) {

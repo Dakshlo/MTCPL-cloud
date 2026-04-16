@@ -35,7 +35,7 @@ const navEntries: NavEntry[] = [
   },
   {
     href: "/slabs",
-    label: "Slabs",
+    label: "Required Sizes",
     icon: "▤",
     roles: ["developer", "owner", "team_head", "slab_entry", "block_slab_entry"],
   },
@@ -59,7 +59,7 @@ const navEntries: NavEntry[] = [
   },
   {
     href: "/slabs/ready",
-    label: "Ready Slabs",
+    label: "Ready Sizes",
     icon: "✦",
     roles: ["developer", "owner", "team_head", "block_slab_entry"],
   },

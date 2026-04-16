@@ -43,8 +43,8 @@ export default async function SlabsPage() {
     <>
       <div className="page-header">
         <div>
-          <h1>Slab Requirements</h1>
-          <p className="muted">Track slab orders by temple. Use View Inventory to select and send to planning.</p>
+          <h1>Required Sizes</h1>
+          <p className="muted">Track required sizes by temple. Use View Inventory to select and send to planning.</p>
         </div>
         <Link href="/slabs/view" className="secondary-button">
           View Inventory →
@@ -68,7 +68,7 @@ export default async function SlabsPage() {
       {/* Inventory */}
       <div className="section-heading">
         <div>
-          <h2>{slabList.length} Slabs</h2>
+          <h2>{slabList.length} Required Sizes</h2>
           <p>Priority first · Click to edit · Or use View Inventory to send to Plan Generator</p>
         </div>
       </div>
