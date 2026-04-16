@@ -106,14 +106,22 @@ Return ONLY this JSON — no markdown, no explanation outside the JSON:
 
     const message = await anthropic.messages.create({
       model: "claude-haiku-4-5",
-      max_tokens: 2048,
+      max_tokens: 4096,
       messages: [{ role: "user", content: prompt }],
     });
 
     const raw = message.content[0].type === "text" ? message.content[0].text.trim() : "";
 
-    // Strip markdown code fences if Claude adds them
-    const jsonText = raw.replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/i, "").trim();
+    // Strip markdown code fences if model adds them
+    let jsonText = raw.replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/i, "").trim();
+
+    // If there's text before the JSON object, extract just the JSON
+    const jsonStart = jsonText.indexOf("{");
+    const jsonEnd = jsonText.lastIndexOf("}");
+    if (jsonStart !== -1 && jsonEnd !== -1) {
+      jsonText = jsonText.slice(jsonStart, jsonEnd + 1);
+    }
+
     const parsed = JSON.parse(jsonText) as AIplanResponse;
     return parsed;
   } catch (err) {
