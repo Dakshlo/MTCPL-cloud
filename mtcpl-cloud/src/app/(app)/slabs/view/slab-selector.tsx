@@ -65,9 +65,24 @@ export function SlabSelector({
 
   const ALL_STONES = stoneNames && stoneNames.length > 0 ? stoneNames : ["PinkStone", "WhiteStone"];
 
-  // Client-side filtering + sorting
+  // Split priority slabs out — they are ALWAYS shown at the top, immune to all filters except search
+  const allPriority = useMemo(() => slabs.filter(s => s.priority), [slabs]);
+  const allNormal   = useMemo(() => slabs.filter(s => !s.priority), [slabs]);
+
+  // Priority section: only search can narrow it (stone/temple/quality/priority filters don't hide these)
+  const filteredPriority = useMemo(() => {
+    if (!q.trim()) return allPriority;
+    const lower = q.toLowerCase();
+    return allPriority.filter(s =>
+      s.id.toLowerCase().includes(lower) ||
+      s.label.toLowerCase().includes(lower) ||
+      s.temple.toLowerCase().includes(lower)
+    );
+  }, [allPriority, q]);
+
+  // Normal section: filtered by everything
   const filtered = useMemo(() => {
-    let rows = [...slabs];
+    let rows = [...allNormal];
 
     if (q.trim()) {
       const lower = q.toLowerCase();
@@ -82,13 +97,9 @@ export function SlabSelector({
     if (qualityFilter === "A") rows = rows.filter(s => s.quality === "A");
     else if (qualityFilter === "B") rows = rows.filter(s => s.quality === "B");
     else if (qualityFilter === "none") rows = rows.filter(s => !s.quality);
-    if (priorityFilter === "true") rows = rows.filter(s => s.priority);
-    else if (priorityFilter === "false") rows = rows.filter(s => !s.priority);
+    // priorityFilter "true" → already handled above; "false" → normal rows only (already split)
 
     rows.sort((a, b) => {
-      // Always put priority first
-      if (a.priority !== b.priority) return a.priority ? -1 : 1;
-
       let av: string | number = "";
       let bv: string | number = "";
       if (sortBy === "cft") {
@@ -104,7 +115,7 @@ export function SlabSelector({
     });
 
     return rows;
-  }, [slabs, q, stoneFilter, templeFilter, qualityFilter, priorityFilter, sortBy, sortDir]);
+  }, [allNormal, q, stoneFilter, templeFilter, qualityFilter, sortBy, sortDir]);
 
   // Status filter still goes via URL (server re-fetch)
   function setStatusFilter(value: string) {
@@ -133,11 +144,13 @@ export function SlabSelector({
     });
   }
 
+  const allVisible = useMemo(() => [...filteredPriority, ...filtered], [filteredPriority, filtered]);
+
   function toggleAll() {
-    if (selected.size === filtered.length && filtered.length > 0) {
+    if (selected.size === allVisible.length && allVisible.length > 0) {
       setSelected(new Set());
     } else {
-      setSelected(new Set(filtered.map(s => s.id)));
+      setSelected(new Set(allVisible.map(s => s.id)));
     }
   }
 
@@ -154,9 +167,8 @@ export function SlabSelector({
     setPriorityFilter("all");
   }
 
-  const allChecked = filtered.length > 0 && selected.size === filtered.length;
-  const someChecked = selected.size > 0 && selected.size < filtered.length;
-  const priorityCount = filtered.filter(s => s.priority).length;
+  const allChecked = allVisible.length > 0 && selected.size === allVisible.length;
+  const someChecked = selected.size > 0 && selected.size < allVisible.length;
   const currentStatus = activeFilters.status ?? "open";
 
   return (
@@ -166,7 +178,8 @@ export function SlabSelector({
           <h1>Plan Generator</h1>
           <p className="muted">
             Select sizes to send to the Plan Generator.{" "}
-            <strong>{filtered.length}</strong> shown
+            {filteredPriority.length > 0 && <><strong style={{ color: "#DC2626" }}>⚡ {filteredPriority.length} urgent</strong> · </>}
+            <strong>{filtered.length}</strong> normal shown
             {selected.size > 0 && <> · <strong style={{ color: "var(--gold-dark)" }}>{selected.size} selected</strong></>}
           </p>
         </div>
@@ -279,7 +292,7 @@ export function SlabSelector({
         </div>
 
         {/* Quick actions */}
-        {priorityCount > 0 && (
+        {allPriority.length > 0 && (
           <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
             <span className="muted" style={{ fontSize: 12 }}>Quick:</span>
             <button
@@ -287,15 +300,14 @@ export function SlabSelector({
               className="ghost-button"
               style={{ fontSize: 11, padding: "2px 9px", color: "#DC2626", borderColor: "rgba(220,38,38,0.3)" }}
               onClick={() => {
-                const priorityIds = filtered.filter(s => s.priority).map(s => s.id);
                 setSelected(prev => {
                   const next = new Set(prev);
-                  priorityIds.forEach(id => next.add(id));
+                  allPriority.forEach(s => next.add(s.id));
                   return next;
                 });
               }}
             >
-              ⚡ Select all {priorityCount} urgent
+              ⚡ Select all {allPriority.length} urgent
             </button>
           </div>
         )}
@@ -304,7 +316,8 @@ export function SlabSelector({
       {/* Summary bar */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
         <p className="muted" style={{ fontSize: 13 }}>
-          Showing <strong style={{ color: "var(--text)" }}>{filtered.length}</strong> of {slabs.length} sizes
+          {filteredPriority.length > 0 && <><strong style={{ color: "#DC2626" }}>⚡ {filteredPriority.length} urgent</strong> · </>}
+          <strong style={{ color: "var(--text)" }}>{filtered.length}</strong> normal · {allVisible.length} total shown
           {selected.size > 0 && <> · <strong style={{ color: "var(--gold-dark)" }}>{selected.size} selected</strong></>}
         </p>
         {selected.size > 0 && (
@@ -319,7 +332,6 @@ export function SlabSelector({
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
             <tr style={{ background: "var(--surface-alt)", borderBottom: "2px solid var(--border)" }}>
-              {/* Checkbox col */}
               <th style={{ padding: "10px 12px", width: 36 }}>
                 <input
                   type="checkbox"
@@ -362,10 +374,90 @@ export function SlabSelector({
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? (
+            {/* ── PRIORITY SECTION — always visible, never filtered away ── */}
+            {filteredPriority.length > 0 && (
+              <>
+                <tr>
+                  <td colSpan={10} style={{
+                    padding: "7px 14px",
+                    background: "rgba(220,38,38,0.07)",
+                    borderBottom: "1px solid rgba(220,38,38,0.2)",
+                    borderTop: "1px solid rgba(220,38,38,0.2)",
+                  }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#DC2626", textTransform: "uppercase", letterSpacing: "0.07em" }}>
+                      ⚡ Urgent / Pushed — {filteredPriority.length} {filteredPriority.length === 1 ? "size" : "sizes"} · Always shown regardless of filters
+                    </span>
+                  </td>
+                </tr>
+                {filteredPriority.map((s, i) => {
+                  const cft = ((Number(s.length_ft) * Number(s.width_ft) * Number(s.thickness_ft)) / 1728).toFixed(2);
+                  const isChecked = selected.has(s.id);
+                  return (
+                    <tr
+                      key={s.id}
+                      onClick={() => toggleOne(s.id)}
+                      style={{
+                        borderBottom: "1px solid rgba(220,38,38,0.12)",
+                        background: isChecked ? "rgba(184,115,51,0.12)" : i % 2 === 0 ? "rgba(220,38,38,0.04)" : "rgba(220,38,38,0.07)",
+                        cursor: "pointer",
+                        outline: isChecked ? "1.5px solid rgba(184,115,51,0.35)" : "none",
+                        outlineOffset: -1,
+                      }}
+                    >
+                      <td style={{ padding: "9px 12px" }} onClick={e => e.stopPropagation()}>
+                        <input type="checkbox" checked={isChecked} onChange={() => toggleOne(s.id)} style={{ cursor: "pointer" }} />
+                      </td>
+                      <td style={{ padding: "9px 12px", fontFamily: "ui-monospace, monospace", fontWeight: 700, whiteSpace: "nowrap", color: "#DC2626" }}>
+                        {s.id} <span style={{ fontSize: 12 }}>⚡</span>
+                      </td>
+                      <td style={{ padding: "9px 12px", fontSize: 12 }}>{s.temple}</td>
+                      <td style={{ padding: "9px 12px", fontSize: 12, color: "var(--muted)" }}>{s.label}</td>
+                      <td style={{ padding: "9px 12px" }}>
+                        {s.stone ? <span className={`role-pill ${s.stone === "PinkStone" ? "badge-pink" : s.stone === "WhiteStone" ? "badge-white-stone" : "badge-open"}`}>{stoneLabel(s.stone)}</span> : <span className="muted">—</span>}
+                      </td>
+                      <td style={{ padding: "9px 12px" }}>
+                        {s.quality ? <span className={`role-pill ${s.quality === "A" ? "badge-available" : "badge-reserved"}`}>Grade {s.quality}</span> : <span className="muted">—</span>}
+                      </td>
+                      <td style={{ padding: "9px 12px", whiteSpace: "nowrap", fontFamily: "ui-monospace, monospace", fontSize: 12 }}>
+                        {Number(s.length_ft)}" × {Number(s.width_ft)}" × {Number(s.thickness_ft)}"
+                      </td>
+                      <td style={{ padding: "9px 12px", fontFamily: "ui-monospace, monospace", fontSize: 12 }}>{cft}</td>
+                      <td style={{ padding: "9px 12px" }}>
+                        <span className={`role-pill ${s.status === "open" ? "badge-open" : "badge-planned"}`}>{s.status}</span>
+                      </td>
+                      <td style={{ padding: "9px 12px", whiteSpace: "nowrap", color: "var(--muted)", fontSize: 12 }}>{fmtDate(s.created_at)}</td>
+                    </tr>
+                  );
+                })}
+              </>
+            )}
+
+            {/* ── NORMAL SECTION — filtered by all controls ── */}
+            {filteredPriority.length > 0 && filtered.length > 0 && (
+              <tr>
+                <td colSpan={10} style={{
+                  padding: "7px 14px",
+                  background: "var(--surface-alt)",
+                  borderBottom: "1px solid var(--border)",
+                  borderTop: "2px solid var(--border)",
+                }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>
+                    Normal — {filtered.length} {filtered.length === 1 ? "size" : "sizes"}
+                  </span>
+                </td>
+              </tr>
+            )}
+
+            {filtered.length === 0 && filteredPriority.length === 0 ? (
               <tr>
                 <td colSpan={10} style={{ padding: 32, textAlign: "center", color: "var(--muted)" }}>
                   No sizes match your filters.
+                </td>
+              </tr>
+            ) : filtered.length === 0 ? (
+              <tr>
+                <td colSpan={10} style={{ padding: 20, textAlign: "center", color: "var(--muted)", fontSize: 12 }}>
+                  No normal sizes match the current filters.
                 </td>
               </tr>
             ) : (
@@ -378,11 +470,7 @@ export function SlabSelector({
                     onClick={() => toggleOne(s.id)}
                     style={{
                       borderBottom: "1px solid var(--border)",
-                      background: isChecked
-                        ? "rgba(184,115,51,0.10)"
-                        : s.priority
-                        ? i % 2 === 0 ? "rgba(220,38,38,0.04)" : "rgba(220,38,38,0.07)"
-                        : i % 2 === 0 ? "var(--surface)" : "var(--surface-alt)",
+                      background: isChecked ? "rgba(184,115,51,0.10)" : i % 2 === 0 ? "var(--surface)" : "var(--surface-alt)",
                       cursor: "pointer",
                       outline: isChecked ? "1.5px solid rgba(184,115,51,0.35)" : "none",
                       outlineOffset: -1,
@@ -390,41 +478,23 @@ export function SlabSelector({
                     }}
                   >
                     <td style={{ padding: "9px 12px" }} onClick={e => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        onChange={() => toggleOne(s.id)}
-                        style={{ cursor: "pointer" }}
-                      />
+                      <input type="checkbox" checked={isChecked} onChange={() => toggleOne(s.id)} style={{ cursor: "pointer" }} />
                     </td>
-                    <td style={{ padding: "9px 12px", fontFamily: "ui-monospace, monospace", fontWeight: 600, whiteSpace: "nowrap" }}>
-                      {s.id}
-                      {s.priority && <span style={{ marginLeft: 6, fontSize: 12 }}>⚡</span>}
-                    </td>
+                    <td style={{ padding: "9px 12px", fontFamily: "ui-monospace, monospace", fontWeight: 600, whiteSpace: "nowrap" }}>{s.id}</td>
                     <td style={{ padding: "9px 12px", fontSize: 12 }}>{s.temple}</td>
                     <td style={{ padding: "9px 12px", fontSize: 12, color: "var(--muted)" }}>{s.label}</td>
                     <td style={{ padding: "9px 12px" }}>
-                      {s.stone ? (
-                        <span className={`role-pill ${s.stone === "PinkStone" ? "badge-pink" : s.stone === "WhiteStone" ? "badge-white-stone" : "badge-open"}`}>
-                          {stoneLabel(s.stone)}
-                        </span>
-                      ) : <span className="muted">—</span>}
+                      {s.stone ? <span className={`role-pill ${s.stone === "PinkStone" ? "badge-pink" : s.stone === "WhiteStone" ? "badge-white-stone" : "badge-open"}`}>{stoneLabel(s.stone)}</span> : <span className="muted">—</span>}
                     </td>
                     <td style={{ padding: "9px 12px" }}>
-                      {s.quality ? (
-                        <span className={`role-pill ${s.quality === "A" ? "badge-available" : "badge-reserved"}`}>
-                          Grade {s.quality}
-                        </span>
-                      ) : <span className="muted">—</span>}
+                      {s.quality ? <span className={`role-pill ${s.quality === "A" ? "badge-available" : "badge-reserved"}`}>Grade {s.quality}</span> : <span className="muted">—</span>}
                     </td>
                     <td style={{ padding: "9px 12px", whiteSpace: "nowrap", fontFamily: "ui-monospace, monospace", fontSize: 12 }}>
                       {Number(s.length_ft)}" × {Number(s.width_ft)}" × {Number(s.thickness_ft)}"
                     </td>
                     <td style={{ padding: "9px 12px", fontFamily: "ui-monospace, monospace", fontSize: 12 }}>{cft}</td>
                     <td style={{ padding: "9px 12px" }}>
-                      <span className={`role-pill ${s.status === "open" ? "badge-open" : "badge-planned"}`}>
-                        {s.status}
-                      </span>
+                      <span className={`role-pill ${s.status === "open" ? "badge-open" : "badge-planned"}`}>{s.status}</span>
                     </td>
                     <td style={{ padding: "9px 12px", whiteSpace: "nowrap", color: "var(--muted)", fontSize: 12 }}>{fmtDate(s.created_at)}</td>
                   </tr>
