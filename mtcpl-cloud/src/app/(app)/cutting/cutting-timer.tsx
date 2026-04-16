@@ -2,23 +2,24 @@
 
 import { useEffect, useState } from "react";
 
-function elapsed(startIso: string): string {
+function timeAgo(startIso: string): string {
   const diff = Math.floor((Date.now() - new Date(startIso).getTime()) / 1000);
-  if (diff < 0) return "0s";
-  const h = Math.floor(diff / 3600);
-  const m = Math.floor((diff % 3600) / 60);
-  const s = diff % 60;
-  if (h > 0) return `${h}h ${m.toString().padStart(2, "0")}m`;
-  if (m > 0) return `${m}m ${s.toString().padStart(2, "0")}s`;
-  return `${s}s`;
+  if (diff < 60) return "just now";
+  const m = Math.floor(diff / 60);
+  if (m < 60) return `${m} min ago`;
+  const h = Math.floor(m / 60);
+  const rem = m % 60;
+  if (rem === 0) return `${h}h ago`;
+  return `${h}h ${rem}m ago`;
 }
 
 export function CuttingTimer({ startedAt }: { startedAt: string }) {
-  const [display, setDisplay] = useState(() => elapsed(startedAt));
+  const [display, setDisplay] = useState(() => timeAgo(startedAt));
 
   useEffect(() => {
-    setDisplay(elapsed(startedAt));
-    const id = setInterval(() => setDisplay(elapsed(startedAt)), 1000);
+    setDisplay(timeAgo(startedAt));
+    // Update every minute — no need to tick every second for "X min ago"
+    const id = setInterval(() => setDisplay(timeAgo(startedAt)), 60_000);
     return () => clearInterval(id);
   }, [startedAt]);
 
@@ -31,7 +32,6 @@ export function CuttingTimer({ startedAt }: { startedAt: string }) {
         gap: 4,
         fontSize: 11,
         fontWeight: 700,
-        fontFamily: "ui-monospace, monospace",
         color: "var(--gold-dark)",
         background: "rgba(184,115,51,0.10)",
         border: "1px solid rgba(184,115,51,0.25)",
