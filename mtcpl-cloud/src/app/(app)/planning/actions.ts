@@ -101,7 +101,7 @@ Return ONLY this JSON — no markdown, no explanation outside the JSON:
     const anthropic = new Anthropic({ apiKey });
 
     const message = await anthropic.messages.create({
-      model: "claude-3-5-haiku-20241022",
+      model: "claude-3-haiku-20240307",
       max_tokens: 2048,
       messages: [{ role: "user", content: prompt }],
     });
