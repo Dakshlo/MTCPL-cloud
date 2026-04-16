@@ -20,7 +20,7 @@ export default async function SlabsPage() {
       .limit(200),
     supabase.from("temples").select("id, name, code_prefix, default_stone").eq("is_active", true).order("name"),
     supabase.from("slab_requirements").select("id"),
-    admin.from("stone_types").select("id, name").order("sort_order").order("name"),
+    admin.from("stone_types").select("id, name").order("name"),
   ]);
 
   if (error) throw new Error(error.message);
@@ -29,7 +29,10 @@ export default async function SlabsPage() {
   const canEdit = ["developer", "owner", "team_head", "slab_entry"].includes(profile.role);
   const slabList = slabs ?? [];
   const templeList = temples ?? [];
-  const stoneList = stoneTypes ?? [];
+  // Fallback: if stone_types query failed, use hardcoded defaults so form still works
+  const stoneList = (stoneTypes && stoneTypes.length > 0)
+    ? stoneTypes
+    : [{ id: "pink", name: "PinkStone" }, { id: "white", name: "WhiteStone" }];
   const existingIds = (allIds ?? []).map(r => r.id);
 
   const totalOpen = slabList.filter(s => s.status === "open").length;
