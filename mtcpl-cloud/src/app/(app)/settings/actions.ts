@@ -211,22 +211,26 @@ export async function deleteUserAction(formData: FormData) {
   const { data: target } = await admin.from("profiles").select("role").eq("id", id).single();
   if (target?.role === "developer") redirect("/settings?toast=Developer+account+is+protected");
 
-  // Try hard delete first — works for users with no linked data (new accounts)
-  const { error: deleteError } = await admin.from("profiles").delete().eq("id", id);
+  // NULL out every FK column that references this user across all tables.
+  // These columns have no ON DELETE clause (defaults to RESTRICT), so we must
+  // clear them before the profile row can be removed.
+  await Promise.all([
+    admin.from("blocks").update({ created_by: null }).eq("created_by", id),
+    admin.from("blocks").update({ updated_by: null }).eq("updated_by", id),
+    admin.from("slab_requirements").update({ created_by: null }).eq("created_by", id),
+    admin.from("slab_requirements").update({ updated_by: null }).eq("updated_by", id),
+    admin.from("cut_sessions").update({ planned_by: null }).eq("planned_by", id),
+    admin.from("cut_sessions").update({ approved_by: null }).eq("approved_by", id),
+    admin.from("carving_items").update({ assigned_by: null }).eq("assigned_by", id),
+    admin.from("carving_items").update({ review_approved_by: null }).eq("review_approved_by", id),
+    admin.from("dispatch_logs").update({ dispatched_by: null }).eq("dispatched_by", id),
+    admin.from("carving_job_events").update({ user_id: null }).eq("user_id", id),
+  ]);
 
-  if (!deleteError) {
-    // Fully deleted
-    revalidatePath("/settings");
-    redirect("/settings?toast=User+removed");
-  }
+  // Delete from auth.users — cascades automatically to profiles
+  const { error: authError } = await admin.auth.admin.deleteUser(id);
+  if (authError) redirect(`/settings?toast=${encodeURIComponent(authError.message)}`);
 
-  // FK constraint (code 23503) means this user has linked records — soft-delete instead
-  if (deleteError.code === "23503") {
-    const { error: deactivateError } = await admin.from("profiles").update({ is_active: false }).eq("id", id);
-    if (deactivateError) redirect(`/settings?toast=${encodeURIComponent(deactivateError.message)}`);
-    revalidatePath("/settings");
-    redirect("/settings?toast=User+deactivated+(has+linked+data)");
-  }
-
-  redirect(`/settings?toast=${encodeURIComponent(deleteError.message)}`);
+  revalidatePath("/settings");
+  redirect("/settings?toast=User+permanently+deleted");
 }
