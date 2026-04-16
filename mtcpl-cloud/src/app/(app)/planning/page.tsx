@@ -138,7 +138,7 @@ export default async function PlanningPage({
     <>
       {ErrorBanner}
       <ProcurementHeadsUp alerts={procurementAlerts} />
-      <PlanningWorkbench approveAction={approvePlanAction} aiPlanAction={generateAIPlanAction} blocks={blocks ?? []} slabs={slabs ?? []} stoneTypes={stoneTypes ?? undefined} />
+      <PlanningWorkbench approveAction={approvePlanAction} aiPlanAction={profile.role === "developer" ? generateAIPlanAction : undefined} blocks={blocks ?? []} slabs={slabs ?? []} stoneTypes={stoneTypes ?? undefined} />
     </>
   );
 }

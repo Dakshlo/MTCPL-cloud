@@ -48,7 +48,7 @@ export async function generateAIPlanAction(payload: {
   }>;
   kerfMm: number;
 }): Promise<AIplanResponse> {
-  await requireAuth(["owner", "team_head", "developer"]);
+  await requireAuth(["developer"]);
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
