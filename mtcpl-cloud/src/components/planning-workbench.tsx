@@ -761,8 +761,6 @@ export function IsoBlockPreview({ block, placed, stoneTypes, onHoverSlab }: { bl
           const sy = showFrontY ? item.py + item.ph : item.py;
           const sx = showRightX ? item.px + item.pw : item.px;
           const center = ptObj(item.px + item.pw / 2, item.py + item.ph / 2, slabZTop);
-          const showLabel = Math.min(item.pw, item.ph) * scale > 14;
-
           return (
             <g
               key={item.id}
@@ -817,20 +815,6 @@ export function IsoBlockPreview({ block, placed, stoneTypes, onHoverSlab }: { bl
                 stroke={isHovered ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.6)"}
                 strokeWidth={isHovered ? "2" : "0.8"}
               />
-              {showLabel && (
-                <text
-                  x={center.x}
-                  y={center.y}
-                  textAnchor="middle"
-                  dominantBaseline="middle"
-                  fill="#fff"
-                  fontSize={10}
-                  fontWeight={700}
-                  style={{ pointerEvents: "none" }}
-                >
-                  {item.id}
-                </text>
-              )}
             </g>
           );
         })}
