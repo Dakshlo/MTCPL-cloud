@@ -58,8 +58,8 @@ export function AuthForm() {
         type: "sms",
       });
       if (err) throw err;
-      router.push("/");
-      router.refresh();
+      // Hard navigation ensures server sees the new auth cookie immediately
+      window.location.href = "/";
     } catch (err) {
       setError(err instanceof Error ? err.message : "Invalid or expired code. Try again.");
     } finally {
