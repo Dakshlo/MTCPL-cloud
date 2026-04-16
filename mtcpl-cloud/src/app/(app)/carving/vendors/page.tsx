@@ -63,11 +63,9 @@ export default async function VendorDirectoryPage() {
               const mCount = machineCountByVendor.get(v.id) ?? 0;
               const activeCount = activeJobsByVendor.get(v.id) ?? 0;
               return (
-                <Link
+                <div
                   key={v.id}
-                  href={`/carving/vendors/${v.id}`}
                   style={{
-                    textDecoration: "none",
                     display: "flex",
                     flexDirection: "column",
                     gap: 6,
@@ -98,7 +96,13 @@ export default async function VendorDirectoryPage() {
                   {!v.is_active && (
                     <span style={{ fontSize: 10, color: "#DC2626", fontWeight: 600 }}>INACTIVE</span>
                   )}
-                </Link>
+                  <Link
+                    href={`/carving/vendors/${v.id}`}
+                    style={{ marginTop: 4, fontSize: 11, fontWeight: 600, color: "var(--gold-dark)", textDecoration: "none" }}
+                  >
+                    Edit vendor →
+                  </Link>
+                </div>
               );
             })}
           </div>

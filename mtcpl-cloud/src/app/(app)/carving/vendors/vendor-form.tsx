@@ -140,33 +140,42 @@ export function VendorForm({
               {machines.map((m, idx) => {
                 if (m._delete) return null;
                 return (
-                  <div key={idx} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", background: "var(--bg)", border: "1px solid var(--border-light)", borderRadius: 6 }}>
-                    <input
-                      type="text"
-                      placeholder="Machine code (e.g. CNC-01)"
-                      value={m.machine_code}
-                      onChange={(e) => updateMachine(idx, { machine_code: e.target.value })}
-                      style={{ flex: 1, fontSize: 12, padding: "5px 9px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--bg)", color: "var(--text)" }}
-                    />
-                    <input
-                      type="text"
-                      placeholder="Operator name (optional)"
-                      value={m.operator_name ?? ""}
-                      onChange={(e) => updateMachine(idx, { operator_name: e.target.value })}
-                      style={{ flex: 1, fontSize: 12, padding: "5px 9px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--bg)", color: "var(--text)" }}
-                    />
-                    <select
-                      value={String(m.is_active ?? true)}
-                      onChange={(e) => updateMachine(idx, { is_active: e.target.value === "true" })}
-                      style={{ fontSize: 11, padding: "5px 7px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--bg)", color: "var(--text)" }}
-                    >
-                      <option value="true">Active</option>
-                      <option value="false">Inactive</option>
-                    </select>
+                  <div key={idx} style={{ display: "flex", alignItems: "flex-end", gap: 8, padding: "8px 10px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 6 }}>
+                    <label style={{ display: "flex", flexDirection: "column", gap: 3, flex: "0 0 140px" }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Machine code</span>
+                      <input
+                        type="text"
+                        placeholder="e.g. CNC-01"
+                        value={m.machine_code}
+                        onChange={(e) => updateMachine(idx, { machine_code: e.target.value })}
+                        style={{ fontSize: 12, padding: "5px 9px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--surface)", color: "var(--text)", width: "100%" }}
+                      />
+                    </label>
+                    <label style={{ display: "flex", flexDirection: "column", gap: 3, flex: 1 }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Operator <span style={{ fontWeight: 400 }}>(optional)</span></span>
+                      <input
+                        type="text"
+                        placeholder="Operator name"
+                        value={m.operator_name ?? ""}
+                        onChange={(e) => updateMachine(idx, { operator_name: e.target.value })}
+                        style={{ fontSize: 12, padding: "5px 9px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--surface)", color: "var(--text)", width: "100%" }}
+                      />
+                    </label>
+                    <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Status</span>
+                      <select
+                        value={String(m.is_active ?? true)}
+                        onChange={(e) => updateMachine(idx, { is_active: e.target.value === "true" })}
+                        style={{ fontSize: 12, padding: "5px 7px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--surface)", color: "var(--text)" }}
+                      >
+                        <option value="true">Active</option>
+                        <option value="false">Inactive</option>
+                      </select>
+                    </label>
                     <button
                       type="button"
                       onClick={() => removeMachine(idx)}
-                      style={{ fontSize: 12, padding: "4px 9px", border: "1px solid #fca5a5", borderRadius: 5, background: "#fef2f2", color: "#dc2626", cursor: "pointer" }}
+                      style={{ fontSize: 13, padding: "5px 10px", border: "1px solid #fca5a5", borderRadius: 5, background: "#fef2f2", color: "#dc2626", cursor: "pointer", marginBottom: 1 }}
                     >
                       ×
                     </button>
