@@ -22,6 +22,7 @@ type Slab = {
 };
 
 type Temple = { id: string; name: string; code_prefix: string };
+type StoneType = { id: string; name: string };
 
 function stoneBadge(stone: string | null) {
   if (stone === "PinkStone") return "badge-pink";
@@ -51,7 +52,7 @@ function fmtDate(iso: string | null) {
   return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
 }
 
-export function SlabGrid({ slabs, temples, canEdit, profilesMap = {} }: { slabs: Slab[]; temples: Temple[]; canEdit: boolean; profilesMap?: Record<string, string> }) {
+export function SlabGrid({ slabs, temples, stoneTypes = [], canEdit, profilesMap = {} }: { slabs: Slab[]; temples: Temple[]; stoneTypes?: StoneType[]; canEdit: boolean; profilesMap?: Record<string, string> }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = slabs.find(s => s.id === selectedId) ?? null;
 
@@ -146,8 +147,13 @@ export function SlabGrid({ slabs, temples, canEdit, profilesMap = {} }: { slabs:
                     <span>Stone</span>
                     <select name="stone" defaultValue={selected.stone ?? ""}>
                       <option value="">— Not specified —</option>
-                      <option value="PinkStone">PinkStone</option>
-                      <option value="WhiteStone">WhiteStone</option>
+                      {stoneTypes.length > 0
+                        ? stoneTypes.map(st => <option key={st.id} value={st.name}>{st.name}</option>)
+                        : <>
+                            <option value="PinkStone">PinkStone</option>
+                            <option value="WhiteStone">WhiteStone</option>
+                          </>
+                      }
                     </select>
                   </label>
                 </div>

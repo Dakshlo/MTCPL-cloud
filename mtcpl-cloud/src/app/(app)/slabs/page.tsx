@@ -8,7 +8,7 @@ export default async function SlabsPage() {
   const { profile } = await requireAuth(["owner", "team_head", "slab_entry", "block_slab_entry"]);
   const supabase = await createDataClient(profile.role);
 
-  const [{ data: slabs, error }, { data: temples }, { data: allIds }] = await Promise.all([
+  const [{ data: slabs, error }, { data: temples }, { data: allIds }, { data: stoneTypes }] = await Promise.all([
     supabase
       .from("slab_requirements")
       .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority, created_at, updated_at, created_by")
@@ -18,6 +18,7 @@ export default async function SlabsPage() {
       .limit(200),
     supabase.from("temples").select("id, name, code_prefix, default_stone").eq("is_active", true).order("name"),
     supabase.from("slab_requirements").select("id"),
+    supabase.from("stone_types").select("id, name").order("sort_order").order("name"),
   ]);
 
   if (error) throw new Error(error.message);
@@ -26,6 +27,7 @@ export default async function SlabsPage() {
   const canEdit = ["developer", "owner", "team_head", "slab_entry"].includes(profile.role);
   const slabList = slabs ?? [];
   const templeList = temples ?? [];
+  const stoneList = stoneTypes ?? [];
   const existingIds = (allIds ?? []).map(r => r.id);
 
   const totalOpen = slabList.filter(s => s.status === "open").length;
@@ -46,7 +48,7 @@ export default async function SlabsPage() {
 
       {/* Add form */}
       {canEdit && templeList.length > 0 && (
-        <AddSlabForm temples={templeList} existingIds={existingIds} />
+        <AddSlabForm temples={templeList} existingIds={existingIds} stoneTypes={stoneList} />
       )}
       {canEdit && templeList.length === 0 && (
         <div className="banner">
@@ -69,7 +71,7 @@ export default async function SlabsPage() {
       {slabList.length === 0 ? (
         <div className="banner">No open slabs yet. Add your first slab requirement above.</div>
       ) : (
-        <SlabGrid slabs={slabList} temples={templeList} canEdit={canEdit} profilesMap={profilesMap} />
+        <SlabGrid slabs={slabList} temples={templeList} stoneTypes={stoneList} canEdit={canEdit} profilesMap={profilesMap} />
       )}
     </>
   );
