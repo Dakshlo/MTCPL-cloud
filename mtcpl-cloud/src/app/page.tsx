@@ -10,6 +10,11 @@ export default async function HomePage() {
     redirect(getDefaultRouteForProfile(profile));
   }
 
+  // User authenticated but no profile row yet (trigger race condition) — send to pending
+  if (user && !profile) {
+    redirect("/pending");
+  }
+
   return (
     <main className="landing-shell">
       <div className="landing-glow" />

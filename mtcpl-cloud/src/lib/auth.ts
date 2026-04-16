@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import type { AppRole, Profile } from "@/lib/types";
 
 export function getDefaultRouteForRole(role?: AppRole | null) {
@@ -22,6 +23,8 @@ export function getDefaultRouteForRole(role?: AppRole | null) {
       return "/dashboard";
     case "vendor":
       return "/cutting";
+    case "worker":
+      return "/pending";
     default:
       return "/login";
   }
@@ -63,7 +66,10 @@ export async function getAuthContext() {
     return { user: null, profile: null as Profile | null };
   }
 
-  const { data: profile } = await supabase
+  // Use admin client for profile lookup — RLS should never block a user from seeing their own profile,
+  // but using admin eliminates any policy edge-cases (e.g. new users with unusual roles)
+  const admin = createAdminSupabaseClient();
+  const { data: profile } = await admin
     .from("profiles")
     .select("id, full_name, phone, role, vendor_id, is_active")
     .eq("id", user.id)
@@ -71,7 +77,7 @@ export async function getAuthContext() {
 
   let vendorName: string | null = null;
   if (profile?.vendor_id) {
-    const { data: vendor } = await supabase.from("vendors").select("name").eq("id", profile.vendor_id).single();
+    const { data: vendor } = await admin.from("vendors").select("name").eq("id", profile.vendor_id).single();
     vendorName = vendor?.name ?? null;
   }
 

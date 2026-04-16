@@ -14,6 +14,11 @@ export default async function LoginPage({
     redirect(getDefaultRouteForProfile(profile));
   }
 
+  // User authenticated but profile missing or inactive — send to pending
+  if (user && !profile) {
+    redirect("/pending");
+  }
+
   const params = await searchParams;
   const justConfirmed = params.confirmed === "1";
 

@@ -6,11 +6,11 @@ import { getAuthContext } from "@/lib/auth";
 export default async function PendingAccessPage() {
   const { user, profile } = await getAuthContext();
 
-  if (!user || !profile) {
+  if (!user) {
     redirect("/login");
   }
 
-  if (profile.is_active) {
+  if (profile?.is_active) {
     redirect("/");
   }
 
