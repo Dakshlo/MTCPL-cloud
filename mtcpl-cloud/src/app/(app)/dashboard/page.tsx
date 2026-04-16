@@ -742,6 +742,59 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
         </div>
       </div>
 
+      {/* ── QUICK REPORTS ── */}
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <Link
+          href="/blocks/report"
+          style={{
+            flex: "1 1 220px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "14px 20px",
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+            borderRadius: 10,
+            textDecoration: "none",
+            gap: 12,
+            transition: "border-color 0.15s",
+          }}
+        >
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 13, color: "var(--text)" }}>📊 Block Report</div>
+            <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
+              All blocks — filter by stone, yard, vendor · Export to Excel
+            </div>
+          </div>
+          <span style={{ fontSize: 12, color: "var(--gold-dark)", fontWeight: 600, flexShrink: 0 }}>Open →</span>
+        </Link>
+
+        <Link
+          href="/slabs/ready"
+          style={{
+            flex: "1 1 220px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "14px 20px",
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+            borderRadius: 10,
+            textDecoration: "none",
+            gap: 12,
+            transition: "border-color 0.15s",
+          }}
+        >
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 13, color: "var(--text)" }}>📋 Ready Sizes Report</div>
+            <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
+              Cut-done sizes — filter by temple, stone, grade · Export to Excel
+            </div>
+          </div>
+          <span style={{ fontSize: 12, color: "var(--gold-dark)", fontWeight: 600, flexShrink: 0 }}>Open →</span>
+        </Link>
+      </div>
+
       {/* ── PUSH ALERT PANEL ── */}
       <PushPanel slabs={pushList} pushed={pushed} todayLabel={today.label} />
 
