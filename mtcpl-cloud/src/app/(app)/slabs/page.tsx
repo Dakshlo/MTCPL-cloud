@@ -1,12 +1,14 @@
 import Link from "next/link";
 import { requireAuth } from "@/lib/auth";
 import { createDataClient } from "@/lib/supabase/server";
+import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
 import { AddSlabForm } from "./add-slab-form";
 import { SlabGrid } from "./slab-grid";
 export default async function SlabsPage() {
   const { profile } = await requireAuth(["owner", "team_head", "slab_entry", "block_slab_entry"]);
   const supabase = await createDataClient(profile.role);
+  const admin = createAdminSupabaseClient();
 
   const [{ data: slabs, error }, { data: temples }, { data: allIds }, { data: stoneTypes }] = await Promise.all([
     supabase
@@ -18,7 +20,7 @@ export default async function SlabsPage() {
       .limit(200),
     supabase.from("temples").select("id, name, code_prefix, default_stone").eq("is_active", true).order("name"),
     supabase.from("slab_requirements").select("id"),
-    supabase.from("stone_types").select("id, name").order("sort_order").order("name"),
+    admin.from("stone_types").select("id, name").order("sort_order").order("name"),
   ]);
 
   if (error) throw new Error(error.message);

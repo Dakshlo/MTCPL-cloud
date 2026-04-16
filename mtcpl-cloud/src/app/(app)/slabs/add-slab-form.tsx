@@ -121,8 +121,19 @@ export function AddSlabForm({ temples, existingIds, stoneTypes = [] }: { temples
             )}
           </label>
 
-          {/* Stone is derived from temple — sent as hidden field, not shown */}
-          <input type="hidden" name="stone" value={stone} />
+          {/* Stone — auto-set from temple but can be overridden */}
+          <label className="stack" style={{ flex: "1 1 120px" }}>
+            <span>Stone Type</span>
+            <select name="stone" value={stone} onChange={e => setStone(e.target.value)}>
+              {stoneTypes.length > 0
+                ? stoneTypes.map(st => <option key={st.id} value={st.name}>{st.name}</option>)
+                : <>
+                    <option value="PinkStone">PinkStone</option>
+                    <option value="WhiteStone">WhiteStone</option>
+                  </>
+              }
+            </select>
+          </label>
 
           <div className="stack" style={{ flex: "0 0 auto" }}>
             <span>Quality</span>
