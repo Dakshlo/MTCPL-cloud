@@ -32,7 +32,6 @@ function stoneBadge(stone: string | null) {
 
 function stoneLabel(stone: string | null) {
   if (!stone) return "";
-  // Strip "Stone" suffix for display: "PinkStone" → "Pink", "RedStone" → "Red"
   return stone.replace(/Stone$/i, "") || stone;
 }
 
@@ -58,7 +57,19 @@ function fmtDate(iso: string | null) {
   return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
 }
 
-export function SlabGrid({ slabs, temples, stoneTypes = [], canEdit, profilesMap = {} }: { slabs: Slab[]; temples: Temple[]; stoneTypes?: StoneType[]; canEdit: boolean; profilesMap?: Record<string, string> }) {
+export function SlabGrid({
+  slabs,
+  temples,
+  stoneTypes = [],
+  canEdit,
+  profilesMap = {},
+}: {
+  slabs: Slab[];
+  temples: Temple[];
+  stoneTypes?: StoneType[];
+  canEdit: boolean;
+  profilesMap?: Record<string, string>;
+}) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = slabs.find(s => s.id === selectedId) ?? null;
 
@@ -68,59 +79,125 @@ export function SlabGrid({ slabs, temples, stoneTypes = [], canEdit, profilesMap
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // Group by temple, sort groups by most-recently-added slab (so new additions bubble up)
+  const grouped: Array<{ temple: string; slabs: Slab[]; latestAt: string }> = [];
+  const templeMap = new Map<string, Slab[]>();
+
+  for (const s of slabs) {
+    const list = templeMap.get(s.temple) ?? [];
+    list.push(s);
+    templeMap.set(s.temple, list);
+  }
+
+  for (const [temple, list] of templeMap) {
+    // Sort slabs within group: priority first, then newest created_at first
+    const sorted = [...list].sort((a, b) => {
+      if (a.priority !== b.priority) return a.priority ? -1 : 1;
+      return (b.created_at ?? "") > (a.created_at ?? "") ? 1 : -1;
+    });
+    const latestAt = list.reduce((max, s) => (s.created_at ?? "") > max ? (s.created_at ?? "") : max, "");
+    grouped.push({ temple, slabs: sorted, latestAt });
+  }
+
+  // Sort temple groups by latest added slab (most recent group first)
+  grouped.sort((a, b) => (b.latestAt > a.latestAt ? 1 : -1));
+
   return (
     <>
-      <div className="slab-card-grid">
-        {slabs.map(slab => {
-          const cft = ((Number(slab.length_ft) * Number(slab.width_ft) * Number(slab.thickness_ft)) / 1728).toFixed(2);
-          const isSelected = selectedId === slab.id;
-
-          const isNotOpen = slab.status !== "open";
+      <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+        {grouped.map(({ temple, slabs: groupSlabs, latestAt }) => {
+          const priorityCount = groupSlabs.filter(s => s.priority).length;
+          const latestLabel = latestAt ? fmtDate(latestAt) : null;
 
           return (
-            <div
-              key={slab.id}
-              className={`slab-card${slab.priority ? " slab-card-priority" : ""}${isSelected ? " slab-card-active" : ""}`}
-              style={isNotOpen ? { filter: "grayscale(0.85)", opacity: 0.6 } : undefined}
-              onClick={() => setSelectedId(isSelected ? null : slab.id)}
-              role="button"
-              tabIndex={0}
-              onKeyDown={e => { if (e.key === "Enter" || e.key === " ") setSelectedId(isSelected ? null : slab.id); }}
-            >
-              {slab.priority && <div className="slab-priority-bar" />}
-              <div className="slab-card-top">
-                <code className="slab-card-code">{slab.id}</code>
-                {slab.priority && <span className="slab-priority-dot">⚡</span>}
-              </div>
-              <div className="slab-card-temple">{slab.temple}</div>
-              <div className="slab-card-label">{slab.label}</div>
-              <div className="slab-card-dims">
-                {Number(slab.length_ft)}" × {Number(slab.width_ft)}" × {Number(slab.thickness_ft)}"
-              </div>
-              <div className="slab-card-footer">
-                {slab.stone && <span className={`role-pill ${stoneBadge(slab.stone)}`}>{stoneLabel(slab.stone)}</span>}
-                {slab.quality && (
-                  <span className={`role-pill ${slab.quality === "A" ? "badge-available" : "badge-reserved"}`}>
-                    Grade {slab.quality}
+            <div key={temple}>
+              {/* Temple group header */}
+              <div style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "8px 0",
+                borderBottom: "2px solid var(--border)",
+                marginBottom: 12,
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontWeight: 700, fontSize: 14, color: "var(--text)" }}>{temple}</span>
+                  {priorityCount > 0 && (
+                    <span style={{
+                      fontSize: 11, fontWeight: 700, color: "#DC2626",
+                      background: "rgba(220,38,38,0.10)", padding: "2px 8px", borderRadius: 10,
+                    }}>
+                      ⚡ {priorityCount} urgent
+                    </span>
+                  )}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  {latestLabel && (
+                    <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                      Last added: <strong style={{ color: "var(--text)" }}>{latestLabel}</strong>
+                    </span>
+                  )}
+                  <span style={{ fontSize: 12, color: "var(--muted)", fontWeight: 600 }}>
+                    {groupSlabs.length} {groupSlabs.length === 1 ? "size" : "sizes"}
                   </span>
-                )}
-                <span className={`role-pill ${statusBadge(slab.status)}`}>{slab.status}</span>
-                <span className="slab-card-area">{cft} CFT</span>
+                </div>
               </div>
-              <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
-                {slab.created_at && <>Added {fmtDate(slab.created_at)}</>}
-                {slab.created_by && (
-                  <> · <span style={{ color: "var(--gold-dark)", fontWeight: 600 }}>by {profilesMap[slab.created_by] ?? "Unknown"}</span></>
-                )}
-                {slab.status === "cut_done" && slab.updated_at && (
-                  <> · Cut {fmtDate(slab.updated_at)}</>
-                )}
+
+              {/* Cards for this temple */}
+              <div className="slab-card-grid">
+                {groupSlabs.map(slab => {
+                  const cft = ((Number(slab.length_ft) * Number(slab.width_ft) * Number(slab.thickness_ft)) / 1728).toFixed(2);
+                  const isSelected = selectedId === slab.id;
+                  const isNotOpen = slab.status !== "open";
+
+                  return (
+                    <div
+                      key={slab.id}
+                      className={`slab-card${slab.priority ? " slab-card-priority" : ""}${isSelected ? " slab-card-active" : ""}`}
+                      style={isNotOpen ? { filter: "grayscale(0.85)", opacity: 0.6 } : undefined}
+                      onClick={() => setSelectedId(isSelected ? null : slab.id)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={e => { if (e.key === "Enter" || e.key === " ") setSelectedId(isSelected ? null : slab.id); }}
+                    >
+                      {slab.priority && <div className="slab-priority-bar" />}
+                      <div className="slab-card-top">
+                        <code className="slab-card-code">{slab.id}</code>
+                        {slab.priority && <span className="slab-priority-dot">⚡</span>}
+                      </div>
+                      <div className="slab-card-label">{slab.label}</div>
+                      <div className="slab-card-dims">
+                        {Number(slab.length_ft)}" × {Number(slab.width_ft)}" × {Number(slab.thickness_ft)}"
+                      </div>
+                      <div className="slab-card-footer">
+                        {slab.stone && <span className={`role-pill ${stoneBadge(slab.stone)}`}>{stoneLabel(slab.stone)}</span>}
+                        {slab.quality && (
+                          <span className={`role-pill ${slab.quality === "A" ? "badge-available" : "badge-reserved"}`}>
+                            Grade {slab.quality}
+                          </span>
+                        )}
+                        <span className={`role-pill ${statusBadge(slab.status)}`}>{slab.status}</span>
+                        <span className="slab-card-area">{cft} CFT</span>
+                      </div>
+                      <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                        {slab.created_at && <>Added {fmtDate(slab.created_at)}</>}
+                        {slab.created_by && (
+                          <> · <span style={{ color: "var(--gold-dark)", fontWeight: 600 }}>by {profilesMap[slab.created_by] ?? "Unknown"}</span></>
+                        )}
+                        {slab.status === "cut_done" && slab.updated_at && (
+                          <> · Cut {fmtDate(slab.updated_at)}</>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           );
         })}
       </div>
 
+      {/* Edit drawer — unchanged */}
       {selected && canEdit && (
         <>
           <div className="drawer-backdrop" onClick={() => setSelectedId(null)} />
