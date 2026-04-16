@@ -81,12 +81,12 @@ export default async function VendorDirectoryPage() {
                     <span
                       className="role-pill"
                       style={{
-                        background: v.vendor_type === "CNC" ? "rgba(37,99,235,0.1)" : "rgba(217,119,6,0.1)",
-                        color: v.vendor_type === "CNC" ? "#2563EB" : "#D97706",
+                        background: v.vendor_type === "CNC" ? "rgba(37,99,235,0.1)" : v.vendor_type === "Outsource" ? "rgba(124,58,237,0.1)" : "rgba(217,119,6,0.1)",
+                        color: v.vendor_type === "CNC" ? "#2563EB" : v.vendor_type === "Outsource" ? "#7c3aed" : "#D97706",
                         fontSize: 10,
                       }}
                     >
-                      {v.vendor_type}
+                      {v.vendor_type === "Outsource" ? "Outsource" : v.vendor_type}
                     </span>
                   </div>
                   <div style={{ fontSize: 11, color: "var(--muted)" }}>

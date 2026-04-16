@@ -48,11 +48,11 @@ export async function createVendorAction(formData: FormData) {
   const admin = createAdminSupabaseClient();
 
   const name = txt(formData, "name");
-  const vendorType = txt(formData, "vendor_type") as "CNC" | "Manual";
+  const vendorType = txt(formData, "vendor_type") as "CNC" | "Manual" | "Outsource";
   const machinesJson = txt(formData, "machines_json");
 
   if (!name) redirect("/carving/vendors?toast=Vendor+name+is+required");
-  if (!["CNC", "Manual"].includes(vendorType)) {
+  if (!["CNC", "Manual", "Outsource"].includes(vendorType)) {
     redirect("/carving/vendors?toast=Invalid+vendor+type");
   }
 
@@ -99,7 +99,7 @@ export async function updateVendorAction(formData: FormData) {
 
   const vendorId = txt(formData, "vendor_id");
   const name = txt(formData, "name");
-  const vendorType = txt(formData, "vendor_type") as "CNC" | "Manual";
+  const vendorType = txt(formData, "vendor_type") as "CNC" | "Manual" | "Outsource";
   const isActive = txt(formData, "is_active") === "true";
   const machinesJson = txt(formData, "machines_json");
 
