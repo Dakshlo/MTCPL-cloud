@@ -288,7 +288,7 @@ export async function pushSlabAlertAction(formData: FormData) {
   revalidatePath("/dashboard");
   revalidatePath("/slabs");
   revalidatePath("/cutting");
-  redirect("/dashboard?pushed=1");
+  redirect("/dashboard?pushed=1#push");
 }
 
 export async function clearSlabAlertAction(formData: FormData) {

@@ -400,19 +400,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
           ) : (
             <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>No other users online</div>
           )}
-          {liveList.length > 0 && (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(220,38,38,0.15)", border: "1px solid rgba(220,38,38,0.3)", borderRadius: 20, padding: "6px 12px" }}>
-              <span className="live-dot" style={{ width: 7, height: 7 }} />
-              <span style={{ fontSize: 12, color: "#fca5a5", fontWeight: 600 }}>
-                {liveList.length} block{liveList.length !== 1 ? "s" : ""} being cut live
-              </span>
-            </div>
-          )}
         </div>
       </div>
-
-      {/* ── NOW BAND (real-time, auto-refresh 45s) ── */}
-      <NowBand initial={nowBandInitial} />
 
       {/* ── PAST BAND (last 30 days) ── */}
       <PastBand
@@ -796,7 +785,12 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
       </div>
 
       {/* ── PUSH ALERT PANEL ── */}
-      <PushPanel slabs={pushList} pushed={pushed} todayLabel={today.label} />
+      <div id="push">
+        <PushPanel slabs={pushList} pushed={pushed} todayLabel={today.label} />
+      </div>
+
+      {/* ── NOW BAND (open alerts — very bottom, auto-refresh 45s) ── */}
+      <NowBand initial={nowBandInitial} />
 
     </div>
   );
