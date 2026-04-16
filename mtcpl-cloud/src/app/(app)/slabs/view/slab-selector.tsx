@@ -276,8 +276,8 @@ export function SlabSelector({
                             <code className="slab-row-code">{slab.id}</code>
                             {slab.priority && <span className="slab-priority-badge">⚡ Urgent</span>}
                             {slab.stone && (
-                              <span className={`role-pill ${slab.stone === "PinkStone" ? "badge-pink" : "badge-white-stone"}`}>
-                                {slab.stone === "PinkStone" ? "Pink" : "White"}
+                              <span className={`role-pill ${slab.stone === "PinkStone" ? "badge-pink" : slab.stone === "WhiteStone" ? "badge-white-stone" : "badge-open"}`}>
+                                {slab.stone.replace(/Stone$/i, "") || slab.stone}
                               </span>
                             )}
                             {slab.quality && (

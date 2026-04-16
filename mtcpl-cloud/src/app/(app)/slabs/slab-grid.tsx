@@ -27,7 +27,13 @@ type StoneType = { id: string; name: string };
 function stoneBadge(stone: string | null) {
   if (stone === "PinkStone") return "badge-pink";
   if (stone === "WhiteStone") return "badge-white-stone";
-  return "";
+  return "badge-open";
+}
+
+function stoneLabel(stone: string | null) {
+  if (!stone) return "";
+  // Strip "Stone" suffix for display: "PinkStone" → "Pink", "RedStone" → "Red"
+  return stone.replace(/Stone$/i, "") || stone;
 }
 
 function statusBadge(status: string) {
@@ -92,7 +98,7 @@ export function SlabGrid({ slabs, temples, stoneTypes = [], canEdit, profilesMap
                 {Number(slab.length_ft)}" × {Number(slab.width_ft)}" × {Number(slab.thickness_ft)}"
               </div>
               <div className="slab-card-footer">
-                {slab.stone && <span className={`role-pill ${stoneBadge(slab.stone)}`}>{slab.stone === "PinkStone" ? "Pink" : "White"}</span>}
+                {slab.stone && <span className={`role-pill ${stoneBadge(slab.stone)}`}>{stoneLabel(slab.stone)}</span>}
                 {slab.quality && (
                   <span className={`role-pill ${slab.quality === "A" ? "badge-available" : "badge-reserved"}`}>
                     Grade {slab.quality}
