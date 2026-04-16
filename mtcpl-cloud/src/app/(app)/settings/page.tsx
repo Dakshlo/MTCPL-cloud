@@ -153,14 +153,15 @@ export default async function SettingsPage() {
 
       {/* User Management — owner, team_head, developer */}
       {(currentUser.role === "owner" || currentUser.role === "developer" || currentUser.role === "team_head") && (
-        <details className="settings-section" open>
-          <summary style={{ cursor: "pointer", listStyle: "none", userSelect: "none" }}>
-            <div className="settings-section-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div>
-                <h2>Users ({userList.length})</h2>
-                <p>Manage registered users — edit name, role and activate or deactivate accounts.</p>
+        <details className="settings-section">
+          <summary style={{ cursor: "pointer", listStyle: "none", userSelect: "none", padding: "16px 0" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontSize: 16 }}>👥</span>
+                <span style={{ fontWeight: 700, fontSize: 15, color: "var(--text)" }}>Users</span>
+                <span style={{ fontSize: 12, color: "var(--muted)", background: "var(--surface-alt)", padding: "2px 8px", borderRadius: 10, fontWeight: 600 }}>{userList.length}</span>
               </div>
-              <span className="muted" style={{ fontSize: 12, flexShrink: 0 }}>▾ Click to collapse</span>
+              <span className="muted" style={{ fontSize: 12 }}>▸</span>
             </div>
           </summary>
 
@@ -344,13 +345,14 @@ export default async function SettingsPage() {
 
       {/* Stone Type Configuration — developer, owner, team_head */}
       <details className="settings-section">
-        <summary style={{ cursor: "pointer", listStyle: "none", userSelect: "none" }}>
-          <div className="settings-section-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div>
-              <h2>Stone Types ({stoneList.length})</h2>
-              <p>Add custom stone types (e.g. Red Stone). They appear automatically in block entry, filters, and 3D views.</p>
+        <summary style={{ cursor: "pointer", listStyle: "none", userSelect: "none", padding: "16px 0" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ fontSize: 16 }}>🪨</span>
+              <span style={{ fontWeight: 700, fontSize: 15, color: "var(--text)" }}>Stone Types</span>
+              <span style={{ fontSize: 12, color: "var(--muted)", background: "var(--surface-alt)", padding: "2px 8px", borderRadius: 10, fontWeight: 600 }}>{stoneList.length}</span>
             </div>
-            <span className="muted" style={{ fontSize: 12, flexShrink: 0 }}>▾ Click to expand</span>
+            <span className="muted" style={{ fontSize: 12 }}>▸</span>
           </div>
         </summary>
 
@@ -443,13 +445,14 @@ export default async function SettingsPage() {
 
       {/* Temple Code Configuration */}
       <details className="settings-section">
-        <summary style={{ cursor: "pointer", listStyle: "none", userSelect: "none" }}>
-          <div className="settings-section-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div>
-              <h2>Temple Codes ({templeList.length})</h2>
-              <p>Each temple gets a unique code prefix used to auto-generate slab IDs (e.g. RM → RM-0001).</p>
+        <summary style={{ cursor: "pointer", listStyle: "none", userSelect: "none", padding: "16px 0" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ fontSize: 16 }}>🛕</span>
+              <span style={{ fontWeight: 700, fontSize: 15, color: "var(--text)" }}>Temple Codes</span>
+              <span style={{ fontSize: 12, color: "var(--muted)", background: "var(--surface-alt)", padding: "2px 8px", borderRadius: 10, fontWeight: 600 }}>{templeList.length}</span>
             </div>
-            <span className="muted" style={{ fontSize: 12, flexShrink: 0 }}>▾ Click to expand</span>
+            <span className="muted" style={{ fontSize: 12 }}>▸</span>
           </div>
         </summary>
 
