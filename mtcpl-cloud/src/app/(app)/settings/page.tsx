@@ -100,7 +100,7 @@ export default async function SettingsPage() {
 
   // Screen time data (developer only)
   let screenTimeData: Array<{ name: string; role: string; minutes: number; lastSeen: string | null }> = [];
-  if (currentUser.role === "developer") {
+  if (currentUser.role === "developer" || currentUser.role === "owner") {
     const { data: pings } = await admin
       .from("heartbeat_log")
       .select("user_id, created_at")
@@ -583,8 +583,8 @@ export default async function SettingsPage() {
         </div>
       )}
 
-      {/* Screen Time Today — developer only */}
-      {currentUser.role === "developer" && (
+      {/* Screen Time Today — developer + owner */}
+      {(currentUser.role === "developer" || currentUser.role === "owner") && (
         <div className="settings-section">
           <div className="settings-section-header">
             <h2>Screen Time — Today</h2>
