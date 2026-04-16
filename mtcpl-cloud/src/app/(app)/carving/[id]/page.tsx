@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { EventTimeline } from "../event-timeline";
+import { ConfirmButton } from "@/components/confirm-button";
 import {
   approveCarvingJobAction,
   rejectCarvingJobAction,
@@ -235,14 +236,15 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
               )}
 
               {!inReview && !approved && !dispatched && (
-                <form
-                  action={cancelCarvingJobAction}
-                  onSubmit={(e) => { if (!confirm("Cancel this assignment? Slab returns to cut_done.")) e.preventDefault(); }}
-                >
+                <form action={cancelCarvingJobAction}>
                   <input type="hidden" name="job_id" value={job.id} />
-                  <button type="submit" className="ghost-button danger-ghost" style={{ fontSize: 12 }}>
+                  <ConfirmButton
+                    message="Cancel this assignment? Slab returns to cut_done."
+                    className="ghost-button danger-ghost"
+                    style={{ fontSize: 12 }}
+                  >
                     Cancel assignment
-                  </button>
+                  </ConfirmButton>
                 </form>
               )}
             </div>

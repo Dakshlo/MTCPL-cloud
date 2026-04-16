@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { EventTimeline } from "../../carving/event-timeline";
+import { ConfirmButton } from "@/components/confirm-button";
 import {
   startCarvingJobAction,
   updateCarvingProgressAction,
@@ -204,14 +205,15 @@ export default async function VendorJobDetailPage({ params }: { params: Promise<
                 )}
 
                 {inProgress && (
-                  <form
-                    action={markCarvingCompleteAction}
-                    onSubmit={(e) => { if (!confirm("Mark this job as complete? Team will inspect and approve.")) e.preventDefault(); }}
-                  >
+                  <form action={markCarvingCompleteAction}>
                     <input type="hidden" name="job_id" value={job.id} />
-                    <button type="submit" className="primary-button" style={{ width: "100%", background: "#16A34A", borderColor: "#16A34A" }}>
+                    <ConfirmButton
+                      message="Mark this job as complete? Team will inspect and approve."
+                      className="primary-button"
+                      style={{ width: "100%", background: "#16A34A", borderColor: "#16A34A" }}
+                    >
                       ✅ Mark Complete
-                    </button>
+                    </ConfirmButton>
                   </form>
                 )}
 

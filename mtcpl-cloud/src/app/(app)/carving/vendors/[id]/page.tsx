@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { VendorForm } from "../vendor-form";
+import { ConfirmButton } from "@/components/confirm-button";
 import { deactivateVendorAction } from "../../actions";
 
 export default async function VendorDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -101,11 +102,14 @@ export default async function VendorDetailPage({ params }: { params: Promise<{ i
 
       <section className="page-card">
         <h3 style={{ margin: "0 0 10px", fontSize: 13, color: "#991b1b" }}>Danger zone</h3>
-        <form action={deactivateVendorAction} onSubmit={(e) => { if (!confirm(`Deactivate ${vendor.name}? Existing jobs stay intact.`)) e.preventDefault(); }}>
+        <form action={deactivateVendorAction}>
           <input type="hidden" name="vendor_id" value={vendor.id} />
-          <button type="submit" className="ghost-button danger-ghost">
+          <ConfirmButton
+            message={`Deactivate ${vendor.name}? Existing jobs stay intact.`}
+            className="ghost-button danger-ghost"
+          >
             Deactivate vendor
-          </button>
+          </ConfirmButton>
         </form>
       </section>
     </div>
