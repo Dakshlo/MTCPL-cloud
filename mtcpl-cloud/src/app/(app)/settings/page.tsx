@@ -153,11 +153,16 @@ export default async function SettingsPage() {
 
       {/* User Management — owner, team_head, developer */}
       {(currentUser.role === "owner" || currentUser.role === "developer" || currentUser.role === "team_head") && (
-        <div className="settings-section">
-          <div className="settings-section-header">
-            <h2>Users</h2>
-            <p>Manage registered users — edit name, role and activate or deactivate accounts.</p>
-          </div>
+        <details className="settings-section" open>
+          <summary style={{ cursor: "pointer", listStyle: "none", userSelect: "none" }}>
+            <div className="settings-section-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div>
+                <h2>Users ({userList.length})</h2>
+                <p>Manage registered users — edit name, role and activate or deactivate accounts.</p>
+              </div>
+              <span className="muted" style={{ fontSize: 12, flexShrink: 0 }}>▾ Click to collapse</span>
+            </div>
+          </summary>
 
           {userList.length === 0 ? (
             <div className="banner">No users found.</div>
@@ -334,15 +339,20 @@ export default async function SettingsPage() {
               })}
             </div>
           )}
-        </div>
+        </details>
       )}
 
       {/* Stone Type Configuration — developer, owner, team_head */}
-      <div className="settings-section">
-        <div className="settings-section-header">
-          <h2>Stone Types</h2>
-          <p>Add custom stone types (e.g. Red Stone). They appear automatically in block entry, filters, and 3D views.</p>
-        </div>
+      <details className="settings-section">
+        <summary style={{ cursor: "pointer", listStyle: "none", userSelect: "none" }}>
+          <div className="settings-section-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div>
+              <h2>Stone Types ({stoneList.length})</h2>
+              <p>Add custom stone types (e.g. Red Stone). They appear automatically in block entry, filters, and 3D views.</p>
+            </div>
+            <span className="muted" style={{ fontSize: 12, flexShrink: 0 }}>▾ Click to expand</span>
+          </div>
+        </summary>
 
         <div className="settings-card">
           <h3 className="settings-card-title">Add Stone Type</h3>
@@ -429,14 +439,19 @@ export default async function SettingsPage() {
             <div className="banner">No stone types found. Run the database setup SQL first.</div>
           )}
         </div>
-      </div>
+      </details>
 
       {/* Temple Code Configuration */}
-      <div className="settings-section">
-        <div className="settings-section-header">
-          <h2>Temple Codes</h2>
-          <p>Each temple gets a unique code prefix used to auto-generate slab IDs (e.g. RM → RM-0001).</p>
-        </div>
+      <details className="settings-section">
+        <summary style={{ cursor: "pointer", listStyle: "none", userSelect: "none" }}>
+          <div className="settings-section-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div>
+              <h2>Temple Codes ({templeList.length})</h2>
+              <p>Each temple gets a unique code prefix used to auto-generate slab IDs (e.g. RM → RM-0001).</p>
+            </div>
+            <span className="muted" style={{ fontSize: 12, flexShrink: 0 }}>▾ Click to expand</span>
+          </div>
+        </summary>
 
         <div className="settings-card">
           <h3 className="settings-card-title">Add Temple</h3>
@@ -559,7 +574,7 @@ export default async function SettingsPage() {
             ))}
           </div>
         )}
-      </div>
+      </details>
 
       {/* Full System Backup — developer only */}
       {currentUser.role === "developer" && (
