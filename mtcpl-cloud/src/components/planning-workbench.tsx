@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { BlockMiniPreview, SlabMiniPreview } from "@/components/stone-previews";
 import { getStonePalette } from "@/lib/stone-utils";
 import type { StoneTypeDef } from "@/lib/stone-utils";
+import type { AIAssignment, AIplanResponse } from "@/app/(app)/planning/actions";
 
 export type BlockRow = {
   id: string;
@@ -450,6 +451,106 @@ function runOptimization(blocks: BlockRow[], slabs: SlabRow[], kerfMm: number): 
   };
 }
 
+// ─── AI-assisted optimisation ──────────────────────────────────────────────────
+// Uses Claude's block-slab groupings, then runs the same geometry engine.
+
+function runOptimizationWithAIGroups(
+  blocks: BlockRow[],
+  slabs: SlabRow[],
+  kerfMm: number,
+  assignments: AIAssignment[],
+): PlanResult {
+  const kerfFt = kerfMm / 25.4;
+  const plan: PlanBlock[] = [];
+  const usedBlockIds = new Set<string>();
+  const placedSlabIds = new Set<string>();
+
+  const blockMap = new Map(blocks.map((b) => [b.id, b]));
+  const slabMap = new Map(slabs.map((s) => [s.id, s]));
+
+  for (const assignment of assignments) {
+    const block = blockMap.get(assignment.block_id);
+    if (!block || usedBlockIds.has(block.id)) continue;
+
+    const assignedSlabs = assignment.slab_ids
+      .map((id) => slabMap.get(id))
+      .filter((s): s is SlabRow => !!s && !placedSlabIds.has(s.id));
+    if (!assignedSlabs.length) continue;
+
+    const remainingForBlock: RemainingSlab[] = assignedSlabs
+      .filter((s) => s.status === "open" || s.status === "planned")
+      .map((s) => ({
+        id: s.id, label: s.label, temple: s.temple,
+        stone: s.stone || null, quality: s.quality || null,
+        sl: toNum(s.length_ft), sw: toNum(s.width_ft), sd: toNum(s.thickness_ft),
+      }));
+    if (!remainingForBlock.length) continue;
+
+    const packed = tryPackBlock(block, remainingForBlock, kerfFt);
+    if (!packed.allPlaced.length || !packed.orient) continue;
+
+    usedBlockIds.add(block.id);
+    for (const p of packed.allPlaced) placedSlabIds.add(p.id);
+
+    const bl = toNum(block.length_ft);
+    const bw = toNum(block.width_ft);
+    const bh = toNum(block.height_ft);
+    const blockVol = bl * bw * bh;
+    const placedVol = packed.allPlaced.reduce((sum, p) => sum + p.pw * p.ph * p.sd, 0);
+    const kerfVol = packed.allPlaced.reduce((sum, p) => sum + (p.aw * p.ah - p.pw * p.ph) * p.sd, 0);
+
+    const remainingDepth = Math.max(0, packed.orient.depth - packed.depthUsed);
+    let biggest: { l: number; w: number; h: number } | null = null;
+    if (remainingDepth > 0.05) {
+      biggest = { l: round2(packed.orient.faceL), w: round2(packed.orient.faceW), h: round2(remainingDepth) };
+    } else {
+      packed.lastSpaces.forEach((space) => {
+        if (!biggest || space.w * space.h > biggest!.l * biggest!.w) {
+          biggest = { l: round2(space.w), w: round2(space.h), h: round2(packed.orient!.depth) };
+        }
+      });
+    }
+
+    plan.push({
+      blk: {
+        id: block.id, stone: block.stone,
+        yard: toNum(block.yard, 1), quality: block.quality || null,
+        l: round2(packed.orient.faceL), w: round2(packed.orient.faceW), h: round2(packed.orient.depth),
+        orient: packed.orient.label,
+      },
+      placed: packed.allPlaced,
+      spaces: packed.lastSpaces,
+      ua: round2(placedVol),
+      ka: round2(kerfVol),
+      ba: round2(blockVol),
+      eff: Math.min(99, Math.round((placedVol / blockVol) * 100)),
+      biggest,
+    });
+  }
+
+  // Fall back to regular algorithm for any slabs the AI didn't assign
+  const remainingSlabs = slabs.filter((s) => !placedSlabIds.has(s.id));
+  const remainingBlocks = blocks.filter((b) => !usedBlockIds.has(b.id));
+
+  if (remainingSlabs.length > 0 && remainingBlocks.length > 0) {
+    const fallback = runOptimization(remainingBlocks, remainingSlabs, kerfMm);
+    plan.push(...fallback.plan);
+    return {
+      plan,
+      unmet: fallback.unmet,
+      unfittableLong: fallback.unfittableLong,
+      totalWaste: round2(plan.reduce((sum, b) => sum + Math.max(0, b.ba - b.ua - b.ka), 0)),
+    };
+  }
+
+  const unmetSlabs = slabs.filter((s) => !placedSlabIds.has(s.id) && (s.status === "open" || s.status === "planned"));
+  return {
+    plan,
+    unmet: unmetSlabs.map((s) => ({ id: s.id, label: s.label, temple: s.temple })),
+    totalWaste: round2(plan.reduce((sum, b) => sum + Math.max(0, b.ba - b.ua - b.ka), 0)),
+  };
+}
+
 // ─── 3D Isometric Block Preview ────────────────────────────────────────────────
 
 export function IsoBlockPreview({ block, placed, stoneTypes, onHoverSlab }: { block: PlanBlock["blk"]; placed: PlacedSlab[]; stoneTypes?: StoneTypeDef[]; onHoverSlab?: (id: string | null) => void }) {
@@ -808,11 +909,17 @@ export function PlanningWorkbench({
   blocks,
   slabs,
   approveAction,
+  aiPlanAction,
   stoneTypes,
 }: {
   blocks: BlockRow[];
   slabs: SlabRow[];
   approveAction: (formData: FormData) => void | Promise<void>;
+  aiPlanAction?: (payload: {
+    blocks: Array<{ id: string; stone: string; yard: number; length_ft: number; width_ft: number; height_ft: number; quality: string | null }>;
+    slabs: Array<{ id: string; label: string; temple: string; stone: string | null; length_ft: number; width_ft: number; thickness_ft: number; priority: boolean; quality: string | null }>;
+    kerfMm: number;
+  }) => Promise<AIplanResponse>;
   stoneTypes?: StoneTypeDef[];
 }) {
   const [kerfMm, setKerfMm] = useState(20);
@@ -820,6 +927,9 @@ export function PlanningWorkbench({
   const [yardFilter, setYardFilter] = useState<number | null>(null);
   const [ackUnmet, setAckUnmet] = useState(false);
   const [originalSelectedCount, setOriginalSelectedCount] = useState(0);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiStrategy, setAiStrategy] = useState<string | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
 
   const allUsableBlocks = blocks.filter((block) => block.status === "available" || block.status === "reserved");
   const yards = [...new Set(allUsableBlocks.map(b => Number(b.yard)))].sort((a, b) => a - b);
@@ -856,12 +966,59 @@ export function PlanningWorkbench({
     const filteredBlocks = usableBlocks.filter((b) => selectedBlockIds.has(b.id));
     const filteredSlabs = openSlabs.filter((s) => selectedSlabIds.has(s.id));
     setAckUnmet(false);
+    setAiStrategy(null);
+    setAiError(null);
     setOriginalSelectedCount(filteredSlabs.length);
     if (filteredSlabs.length === 0) {
       setResult({ plan: [], unmet: [], totalWaste: 0 });
       return;
     }
     setResult(runOptimization(filteredBlocks, filteredSlabs, kerfMm));
+  }
+
+  async function handleAIGenerate() {
+    if (!aiPlanAction) return;
+    const filteredBlocks = usableBlocks.filter((b) => selectedBlockIds.has(b.id));
+    const filteredSlabs = openSlabs.filter((s) => selectedSlabIds.has(s.id));
+
+    if (filteredSlabs.length === 0) {
+      setResult({ plan: [], unmet: [], totalWaste: 0 });
+      return;
+    }
+
+    setAiLoading(true);
+    setAiError(null);
+    setAiStrategy(null);
+    setAckUnmet(false);
+    setOriginalSelectedCount(filteredSlabs.length);
+
+    try {
+      const response = await aiPlanAction({
+        blocks: filteredBlocks.map((b) => ({
+          id: b.id, stone: b.stone, yard: toNum(b.yard, 1),
+          length_ft: toNum(b.length_ft), width_ft: toNum(b.width_ft), height_ft: toNum(b.height_ft),
+          quality: b.quality,
+        })),
+        slabs: filteredSlabs.map((s) => ({
+          id: s.id, label: s.label, temple: s.temple, stone: s.stone,
+          length_ft: toNum(s.length_ft), width_ft: toNum(s.width_ft), thickness_ft: toNum(s.thickness_ft),
+          priority: s.priority ?? false, quality: s.quality,
+        })),
+        kerfMm,
+      });
+
+      if (response.error) {
+        setAiError(response.error);
+        return;
+      }
+
+      setAiStrategy(response.strategy ?? null);
+      setResult(runOptimizationWithAIGroups(filteredBlocks, filteredSlabs, kerfMm, response.assignments ?? []));
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : "AI generation failed. Try again.");
+    } finally {
+      setAiLoading(false);
+    }
   }
 
   const totalPlaced = result?.plan.reduce((sum, block) => sum + block.placed.length, 0) ?? 0;
@@ -1025,11 +1182,44 @@ export function PlanningWorkbench({
             <strong>{selectedBlockIds.size}</strong>/{usableBlocks.length} blocks · <strong>{selectedSlabIds.size}</strong>/{openSlabs.length} slabs selected · multilayer cuts, all 3 block orientations
           </div>
 
-          <button className="primary-button" onClick={generatePlan} type="button">
-            Generate 3D Cut Plan
-          </button>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <button className="primary-button" onClick={generatePlan} type="button">
+              Generate 3D Cut Plan
+            </button>
+            {aiPlanAction && (
+              <button
+                className="ghost-button"
+                onClick={handleAIGenerate}
+                type="button"
+                disabled={aiLoading}
+                style={{ display: "flex", alignItems: "center", gap: 6, opacity: aiLoading ? 0.7 : 1 }}
+              >
+                <span style={{ fontSize: 15 }}>✨</span>
+                {aiLoading ? "AI thinking…" : "Generate with AI"}
+              </button>
+            )}
+          </div>
+          {aiError && (
+            <div style={{ fontSize: 12, color: "#DC2626", marginTop: 4, padding: "6px 10px", background: "rgba(220,38,38,0.05)", borderRadius: 6 }}>
+              ⚠ {aiError}
+            </div>
+          )}
         </div>
       </section>
+
+      {aiStrategy && (
+        <section className="page-card" style={{ background: "rgba(124,58,237,0.04)", border: "1px solid rgba(124,58,237,0.2)" }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+            <span style={{ fontSize: 20, flexShrink: 0, lineHeight: 1.3 }}>✨</span>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#7c3aed", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 5 }}>
+                AI Strategy
+              </div>
+              <p style={{ margin: 0, fontSize: 13, color: "var(--text)", lineHeight: 1.6 }}>{aiStrategy}</p>
+            </div>
+          </div>
+        </section>
+      )}
 
       {result ? (
         <>

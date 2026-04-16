@@ -7,6 +7,117 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
 
+// ── Types shared with planning-workbench ────────────────────────────────────
+
+export type AIAssignment = {
+  block_id: string;
+  slab_ids: string[];
+  reasoning: string;
+};
+
+export type AIplanResponse = {
+  assignments: AIAssignment[];
+  unassigned_slab_ids: string[];
+  unassigned_reason: string;
+  strategy: string;
+  error?: string;
+};
+
+// ── AI Plan Generation ──────────────────────────────────────────────────────
+
+export async function generateAIPlanAction(payload: {
+  blocks: Array<{
+    id: string;
+    stone: string;
+    yard: number;
+    length_ft: number;
+    width_ft: number;
+    height_ft: number;
+    quality: string | null;
+  }>;
+  slabs: Array<{
+    id: string;
+    label: string;
+    temple: string;
+    stone: string | null;
+    length_ft: number;
+    width_ft: number;
+    thickness_ft: number;
+    priority: boolean;
+    quality: string | null;
+  }>;
+  kerfMm: number;
+}): Promise<AIplanResponse> {
+  await requireAuth(["owner", "team_head", "developer"]);
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    return { assignments: [], unassigned_slab_ids: [], unassigned_reason: "", strategy: "", error: "ANTHROPIC_API_KEY is not set in environment variables." };
+  }
+
+  const { blocks, slabs, kerfMm } = payload;
+
+  const blockLines = blocks.map(b =>
+    `${b.id}: ${b.stone} | ${b.length_ft}"L × ${b.width_ft}"W × ${b.height_ft}"H | quality: ${b.quality ?? "standard"}`
+  ).join("\n");
+
+  const slabLines = slabs.map(s =>
+    `${s.id}${s.priority ? " ⚠PRIORITY" : ""}: ${s.temple} | ${s.stone ?? "any"} | ${s.length_ft}"L × ${s.width_ft}"W × ${s.thickness_ft}"T | ${s.label}${s.quality ? ` | quality:${s.quality}` : ""}`
+  ).join("\n");
+
+  const prompt = `You are an expert stone-cutting planner at a marble fabrication company.
+Your job: assign stone slabs to blocks for CNC/manual cutting to maximise efficiency and meet deadlines.
+
+AVAILABLE BLOCKS (${blocks.length}):
+${blockLines}
+
+SLABS TO CUT (${slabs.length}):
+${slabLines}
+
+Blade kerf: ${kerfMm}mm of stone wasted per cut line.
+
+RULES (must follow all):
+1. Same stone type only — PinkStone slabs on PinkStone blocks, etc.
+2. A slab's two face dimensions must fit within some face of the block (the machine can orient the block 3 ways)
+3. Multiple slabs CAN share one block (cut from different layers or placed side-by-side on the same face)
+4. Each block can only appear once in assignments
+5. ⚠PRIORITY slabs must be placed — never leave them in unassigned_slab_ids if a valid block exists
+6. Group slabs going to the same temple on the same block where possible (reduces handling)
+7. Prefer using the SMALLEST block that fits (saves larger blocks for future beam-size slabs)
+8. If a slab is larger than ALL available blocks in that stone type, put it in unassigned_slab_ids
+
+Return ONLY this JSON — no markdown, no explanation outside the JSON:
+{
+  "strategy": "2-3 sentences: your approach, any beam-size risks, key decisions made",
+  "assignments": [
+    { "block_id": "B-xxx", "slab_ids": ["SR-001", "SR-003"], "reasoning": "one sentence" }
+  ],
+  "unassigned_slab_ids": [],
+  "unassigned_reason": ""
+}`;
+
+  try {
+    const Anthropic = (await import("@anthropic-ai/sdk")).default;
+    const anthropic = new Anthropic({ apiKey });
+
+    const message = await anthropic.messages.create({
+      model: "claude-3-5-haiku-20241022",
+      max_tokens: 2048,
+      messages: [{ role: "user", content: prompt }],
+    });
+
+    const raw = message.content[0].type === "text" ? message.content[0].text.trim() : "";
+
+    // Strip markdown code fences if Claude adds them
+    const jsonText = raw.replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/i, "").trim();
+    const parsed = JSON.parse(jsonText) as AIplanResponse;
+    return parsed;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unknown error";
+    return { assignments: [], unassigned_slab_ids: [], unassigned_reason: "", strategy: "", error: `AI call failed: ${msg}` };
+  }
+}
+
 function errUrl(msg: string, slabIds?: string) {
   const base = `/planning?err=${encodeURIComponent(msg)}`;
   return slabIds ? `${base}&slabs=${encodeURIComponent(slabIds)}` : base;
