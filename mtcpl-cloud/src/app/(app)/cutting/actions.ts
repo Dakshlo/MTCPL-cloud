@@ -172,7 +172,7 @@ export async function finishBlockAction(formData: FormData) {
 
   await supabase
     .from("cut_session_blocks")
-    .update({ status: "done", restocked_block_id: restockedBlockId })
+    .update({ status: "done", restocked_block_id: restockedBlockId, updated_by: profile.id, updated_at: new Date().toISOString() })
     .eq("id", sessionBlockId);
 
   await logAudit(
