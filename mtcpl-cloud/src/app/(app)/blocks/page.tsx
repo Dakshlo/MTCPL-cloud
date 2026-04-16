@@ -54,7 +54,11 @@ export default async function BlocksPage() {
   const stoneList = stoneTypes ?? [];
 
   const totalBlocks = blockList.length;
-  const pinkCount = blockList.filter(b => b.stone === "PinkStone").length;
+  // Per-stone block counts (works for any custom stone type)
+  const stoneCountMap = blockList.reduce<Record<string, number>>((acc, b) => {
+    if (b.stone) acc[b.stone] = (acc[b.stone] ?? 0) + 1;
+    return acc;
+  }, {});
   const totalCft = blockList.reduce(
     (sum, b) => sum + (Number(b.length_ft) * Number(b.width_ft) * Number(b.height_ft)) / 1728,
     0

@@ -29,7 +29,12 @@ function fmtSmartDate(iso: string | null) {
 function stoneBadgeClass(stone: string | null) {
   if (stone === "PinkStone") return "badge-pink";
   if (stone === "WhiteStone") return "badge-white-stone";
-  return "";
+  return "badge-open";
+}
+
+function stoneLabel(stone: string | null) {
+  if (!stone) return "";
+  return stone.replace(/Stone$/i, "") || stone;
 }
 
 export function ReadySlabsClient({ slabs }: { slabs: Slab[] }) {
@@ -85,7 +90,7 @@ export function ReadySlabsClient({ slabs }: { slabs: Slab[] }) {
                       {slab.priority && <span style={{ fontSize: 11 }}>⚡</span>}
                       {slab.stone && (
                         <span className={`role-pill ${stoneBadgeClass(slab.stone)}`}>
-                          {slab.stone === "PinkStone" ? "Pink" : "White"}
+                          {stoneLabel(slab.stone)}
                         </span>
                       )}
                       {slab.quality && (
