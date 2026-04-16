@@ -157,11 +157,10 @@ export default async function SettingsPage() {
           <summary style={{ cursor: "pointer", listStyle: "none", userSelect: "none", padding: "16px 0" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <span style={{ fontSize: 16 }}>👥</span>
                 <span style={{ fontWeight: 700, fontSize: 15, color: "var(--text)" }}>Users</span>
                 <span style={{ fontSize: 12, color: "var(--muted)", background: "var(--surface-alt)", padding: "2px 8px", borderRadius: 10, fontWeight: 600 }}>{userList.length}</span>
               </div>
-              <span className="muted" style={{ fontSize: 12 }}>▸</span>
+              <span style={{ fontSize: 11, color: "var(--muted)", transition: "transform 0.2s" }}>▼</span>
             </div>
           </summary>
 
@@ -348,11 +347,10 @@ export default async function SettingsPage() {
         <summary style={{ cursor: "pointer", listStyle: "none", userSelect: "none", padding: "16px 0" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ fontSize: 16 }}>🪨</span>
               <span style={{ fontWeight: 700, fontSize: 15, color: "var(--text)" }}>Stone Types</span>
               <span style={{ fontSize: 12, color: "var(--muted)", background: "var(--surface-alt)", padding: "2px 8px", borderRadius: 10, fontWeight: 600 }}>{stoneList.length}</span>
             </div>
-            <span className="muted" style={{ fontSize: 12 }}>▸</span>
+            <span style={{ fontSize: 11, color: "var(--muted)", transition: "transform 0.2s" }}>▼</span>
           </div>
         </summary>
 
@@ -448,11 +446,10 @@ export default async function SettingsPage() {
         <summary style={{ cursor: "pointer", listStyle: "none", userSelect: "none", padding: "16px 0" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ fontSize: 16 }}>🛕</span>
               <span style={{ fontWeight: 700, fontSize: 15, color: "var(--text)" }}>Temple Codes</span>
               <span style={{ fontSize: 12, color: "var(--muted)", background: "var(--surface-alt)", padding: "2px 8px", borderRadius: 10, fontWeight: 600 }}>{templeList.length}</span>
             </div>
-            <span className="muted" style={{ fontSize: 12 }}>▸</span>
+            <span style={{ fontSize: 11, color: "var(--muted)", transition: "transform 0.2s" }}>▼</span>
           </div>
         </summary>
 
