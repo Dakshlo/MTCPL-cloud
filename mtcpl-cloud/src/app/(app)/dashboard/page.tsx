@@ -116,6 +116,39 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
 
   const { data: pushableSlabs } = await pushQuery.limit(1000);
 
+  // Screen time today (heartbeat pings)
+  const todayStartIST = new Date(`${today.label}T00:00:00+05:30`).toISOString();
+  const todayEndIST = new Date(`${today.label}T23:59:59.999+05:30`).toISOString();
+  const hbRes = await admin
+    .from("heartbeat_log")
+    .select("user_id, created_at")
+    .gte("created_at", todayStartIST)
+    .lte("created_at", todayEndIST);
+  const heartbeatPings = hbRes.error ? [] : (hbRes.data ?? []);
+
+  const screenTimeMap = new Map<string, number>();
+  const screenTimeLastSeen = new Map<string, string>();
+  for (const p of heartbeatPings) {
+    screenTimeMap.set(p.user_id, (screenTimeMap.get(p.user_id) ?? 0) + 1);
+    const prev = screenTimeLastSeen.get(p.user_id) ?? "";
+    if (p.created_at > prev) screenTimeLastSeen.set(p.user_id, p.created_at);
+  }
+
+  let screenTimeRows: Array<{ name: string; minutes: number; isOnline: boolean }> = [];
+  if (screenTimeMap.size > 0) {
+    const stUids = [...screenTimeMap.keys()];
+    const { data: stProfiles } = await admin.from("profiles").select("id, full_name, phone").in("id", stUids);
+    const stNameMap = new Map<string, string>();
+    for (const p of stProfiles ?? []) stNameMap.set(p.id, p.full_name || p.phone || "Unknown");
+
+    screenTimeRows = stUids.map(uid => {
+      const pings = screenTimeMap.get(uid) ?? 0;
+      const last = screenTimeLastSeen.get(uid) ?? "";
+      const isOnline = last ? (Date.now() - new Date(last).getTime()) < 5 * 60 * 1000 : false;
+      return { name: stNameMap.get(uid) ?? "Unknown", minutes: pings * 2, isOnline };
+    }).sort((a, b) => b.minutes - a.minutes);
+  }
+
   // ── Dashboard 2.0 bands ──
   const thirtyAgoIso = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
   const sevenAgoIso = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
@@ -669,6 +702,44 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
               )}
             </div>
           </div>
+
+          {/* Screen Time Today */}
+          {screenTimeRows.length > 0 && (
+            <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
+              <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <span style={{ fontWeight: 700, fontSize: 13 }}>🕐 Screen Time Today</span>
+                <Link href="/settings" style={{ fontSize: 11, color: "var(--gold-dark)", fontWeight: 600, textDecoration: "none" }}>Details →</Link>
+              </div>
+              <div style={{ padding: "12px 18px", display: "flex", flexDirection: "column", gap: 8 }}>
+                {screenTimeRows.slice(0, 6).map((row, i) => {
+                  const hours = Math.floor(row.minutes / 60);
+                  const mins = row.minutes % 60;
+                  const label = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+                  const maxMin = screenTimeRows[0]?.minutes ?? 1;
+                  const barW = Math.max(8, Math.round((row.minutes / maxMin) * 100));
+                  return (
+                    <div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 90, flex: "0 0 90px" }}>
+                        {row.isOnline && (
+                          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#22c55e", flexShrink: 0, boxShadow: "0 0 0 2px rgba(34,197,94,0.25)" }} />
+                        )}
+                        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.name}</span>
+                      </div>
+                      <div style={{ flex: 1, height: 5, background: "var(--border)", borderRadius: 3, overflow: "hidden" }}>
+                        <div style={{ width: `${barW}%`, height: "100%", background: "var(--gold)", borderRadius: 3 }} />
+                      </div>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", minWidth: 44, textAlign: "right" }}>{label}</span>
+                    </div>
+                  );
+                })}
+                {screenTimeRows.length > 6 && (
+                  <div style={{ fontSize: 11, color: "var(--muted)", textAlign: "center", paddingTop: 2 }}>
+                    +{screenTimeRows.length - 6} more — <Link href="/settings" style={{ color: "var(--gold-dark)", textDecoration: "none" }}>view all</Link>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
