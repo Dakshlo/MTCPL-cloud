@@ -66,7 +66,7 @@ export async function generateAIPlanAction(payload: {
   ).join("\n");
 
   const prompt = `You are an expert stone-cutting planner at a marble fabrication company.
-Your job: assign stone slabs to blocks for CNC/manual cutting to maximise efficiency and meet deadlines.
+Your job: pack as many slabs as possible into as few blocks as possible, matching stone types.
 
 AVAILABLE BLOCKS (${blocks.length}):
 ${blockLines}
@@ -74,23 +74,27 @@ ${blockLines}
 SLABS TO CUT (${slabs.length}):
 ${slabLines}
 
-Blade kerf: ${kerfMm}mm of stone wasted per cut line.
+Blade kerf: ${kerfMm}mm wasted per cut line.
 
-RULES (must follow all):
-1. Same stone type only — PinkStone slabs on PinkStone blocks, etc.
-2. A slab's two face dimensions must fit within some face of the block (the machine can orient the block 3 ways)
-3. Multiple slabs CAN share one block (cut from different layers or placed side-by-side on the same face)
-4. Each block can only appear once in assignments
-5. ⚠PRIORITY slabs must be placed — never leave them in unassigned_slab_ids if a valid block exists
-6. Group slabs going to the same temple on the same block where possible (reduces handling)
-7. Prefer using the SMALLEST block that fits (saves larger blocks for future beam-size slabs)
-8. If a slab is larger than ALL available blocks in that stone type, put it in unassigned_slab_ids
+PRIMARY GOAL: MINIMISE BLOCKS USED. A large block can yield many slabs cut from different layers (depth axis). Always try to fill one block completely before moving to the next.
+
+RULES:
+1. Stone must match — PinkStone slabs only on PinkStone blocks, etc.
+2. A slab fits a block if its two face dimensions fit within ANY face of the block (3 orientations possible). The block depth provides multiple cut layers.
+3. PACK MULTIPLE SLABS PER BLOCK — this is the most important rule. A single block can hold 4-10 slabs cut from different depth layers. Do NOT assign one slab per block.
+4. To check if multiple slabs fit one block: sum their thickness_ft values plus kerf gaps — if total ≤ block depth (or width or height depending on cut axis), they all fit.
+5. Each block appears only once in assignments.
+6. ⚠PRIORITY slabs must always be assigned if any valid block exists.
+7. Group same-temple slabs on the same block (reduces handling).
+8. Only put a slab in unassigned_slab_ids if it is physically larger than every available block of its stone type.
+
+EXAMPLE of good packing: Block 4ft×3ft×2ft can hold slabs of thickness 0.25ft each → up to 8 slabs stacked in depth. Always do this.
 
 Return ONLY this JSON — no markdown, no explanation outside the JSON:
 {
-  "strategy": "2-3 sentences: your approach, any beam-size risks, key decisions made",
+  "strategy": "2-3 sentences: how many slabs per block on average, which blocks you used and why",
   "assignments": [
-    { "block_id": "B-xxx", "slab_ids": ["SR-001", "SR-003"], "reasoning": "one sentence" }
+    { "block_id": "B-xxx", "slab_ids": ["SR-001", "SR-002", "SR-003", "SR-004"], "reasoning": "one sentence" }
   ],
   "unassigned_slab_ids": [],
   "unassigned_reason": ""
