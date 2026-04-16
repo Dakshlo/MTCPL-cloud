@@ -22,9 +22,22 @@ type Slab = {
 type ActiveFilters = { temple?: string; stone?: string; priority?: string; status?: string; q?: string; quality?: string };
 
 function fmtDate(iso: string | null) {
-  if (!iso) return null;
-  return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
+  if (!iso) return "—";
+  const d = new Date(iso);
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  if (isToday) return d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+  const yest = new Date(now); yest.setDate(yest.getDate() - 1);
+  if (d.toDateString() === yest.toDateString()) return "Yesterday";
+  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
 }
+
+function stoneLabel(stone: string | null) {
+  if (!stone) return "—";
+  return stone.replace(/Stone$/i, "") || stone;
+}
+
+type SortCol = "id" | "temple" | "stone" | "cft" | "status" | "created_at";
 
 export function SlabSelector({
   slabs,
@@ -42,36 +55,73 @@ export function SlabSelector({
   const searchParams = useSearchParams();
 
   const [q, setQ] = useState(activeFilters.q ?? "");
+  const [stoneFilter, setStoneFilter] = useState(activeFilters.stone ?? "all");
+  const [templeFilter, setTempleFilter] = useState(activeFilters.temple ?? "all");
+  const [qualityFilter, setQualityFilter] = useState(activeFilters.quality ?? "all");
+  const [priorityFilter, setPriorityFilter] = useState(activeFilters.priority ?? "all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [sortBy, setSortBy] = useState<SortCol>("created_at");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
+  const ALL_STONES = stoneNames && stoneNames.length > 0 ? stoneNames : ["PinkStone", "WhiteStone"];
+
+  // Client-side filtering + sorting
   const filtered = useMemo(() => {
-    return slabs.filter(s => {
-      if (q.trim()) {
-        const lower = q.toLowerCase();
-        if (!s.id.toLowerCase().includes(lower) && !s.label.toLowerCase().includes(lower) && !s.temple.toLowerCase().includes(lower)) return false;
-      }
-      if (activeFilters.quality === "A" && s.quality !== "A") return false;
-      if (activeFilters.quality === "B" && s.quality !== "B") return false;
-      if (activeFilters.quality === "none" && s.quality !== null && s.quality !== "") return false;
-      return true;
-    });
-  }, [slabs, q, activeFilters.quality]);
+    let rows = [...slabs];
 
-  const grouped = useMemo(() => {
-    const map = new Map<string, Slab[]>();
-    for (const s of filtered) {
-      const group = map.get(s.temple) ?? [];
-      group.push(s);
-      map.set(s.temple, group);
+    if (q.trim()) {
+      const lower = q.toLowerCase();
+      rows = rows.filter(s =>
+        s.id.toLowerCase().includes(lower) ||
+        s.label.toLowerCase().includes(lower) ||
+        s.temple.toLowerCase().includes(lower)
+      );
     }
-    return map;
-  }, [filtered]);
+    if (stoneFilter !== "all") rows = rows.filter(s => s.stone === stoneFilter);
+    if (templeFilter !== "all") rows = rows.filter(s => s.temple === templeFilter);
+    if (qualityFilter === "A") rows = rows.filter(s => s.quality === "A");
+    else if (qualityFilter === "B") rows = rows.filter(s => s.quality === "B");
+    else if (qualityFilter === "none") rows = rows.filter(s => !s.quality);
+    if (priorityFilter === "true") rows = rows.filter(s => s.priority);
+    else if (priorityFilter === "false") rows = rows.filter(s => !s.priority);
 
-  function setFilter(key: string, value: string) {
+    rows.sort((a, b) => {
+      // Always put priority first
+      if (a.priority !== b.priority) return a.priority ? -1 : 1;
+
+      let av: string | number = "";
+      let bv: string | number = "";
+      if (sortBy === "cft") {
+        av = Number(a.length_ft) * Number(a.width_ft) * Number(a.thickness_ft);
+        bv = Number(b.length_ft) * Number(b.width_ft) * Number(b.thickness_ft);
+      } else {
+        av = String((a as Record<string, unknown>)[sortBy] ?? "");
+        bv = String((b as Record<string, unknown>)[sortBy] ?? "");
+      }
+      if (av < bv) return sortDir === "asc" ? -1 : 1;
+      if (av > bv) return sortDir === "asc" ? 1 : -1;
+      return 0;
+    });
+
+    return rows;
+  }, [slabs, q, stoneFilter, templeFilter, qualityFilter, priorityFilter, sortBy, sortDir]);
+
+  // Status filter still goes via URL (server re-fetch)
+  function setStatusFilter(value: string) {
     const params = new URLSearchParams(searchParams.toString());
-    if (value) params.set(key, value);
-    else params.delete(key);
+    if (value) params.set("status", value);
+    else params.delete("status");
     router.push(`${pathname}?${params.toString()}`);
+  }
+
+  function toggleSort(col: SortCol) {
+    if (sortBy === col) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortBy(col); setSortDir("asc"); }
+  }
+
+  function SortIcon({ col }: { col: SortCol }) {
+    if (sortBy !== col) return <span style={{ opacity: 0.25, fontSize: 10 }}>↕</span>;
+    return <span style={{ color: "var(--gold)" }}>{sortDir === "asc" ? "↑" : "↓"}</span>;
   }
 
   function toggleOne(id: string) {
@@ -83,18 +133,8 @@ export function SlabSelector({
     });
   }
 
-  function toggleGroup(ids: string[]) {
-    const allSelected = ids.every(id => selected.has(id));
-    setSelected(prev => {
-      const next = new Set(prev);
-      if (allSelected) ids.forEach(id => next.delete(id));
-      else ids.forEach(id => next.add(id));
-      return next;
-    });
-  }
-
   function toggleAll() {
-    if (selected.size === filtered.length) {
+    if (selected.size === filtered.length && filtered.length > 0) {
       setSelected(new Set());
     } else {
       setSelected(new Set(filtered.map(s => s.id)));
@@ -103,25 +143,35 @@ export function SlabSelector({
 
   function sendToPlanning() {
     if (selected.size === 0) return;
-    const ids = [...selected].join(",");
-    router.push(`/planning?slabs=${ids}`);
+    router.push(`/planning?slabs=${[...selected].join(",")}`);
   }
 
+  function clearFilters() {
+    setQ("");
+    setStoneFilter("all");
+    setTempleFilter("all");
+    setQualityFilter("all");
+    setPriorityFilter("all");
+  }
+
+  const allChecked = filtered.length > 0 && selected.size === filtered.length;
+  const someChecked = selected.size > 0 && selected.size < filtered.length;
   const priorityCount = filtered.filter(s => s.priority).length;
+  const currentStatus = activeFilters.status ?? "open";
 
   return (
     <>
       <div className="page-header">
         <div>
-          <h1>Slab Inventory</h1>
+          <h1>Plan Generator</h1>
           <p className="muted">
-            Select slabs to send to the Plan Generator.{" "}
-            <strong>{filtered.length}</strong> slabs shown
+            Select sizes to send to the Plan Generator.{" "}
+            <strong>{filtered.length}</strong> shown
             {selected.size > 0 && <> · <strong style={{ color: "var(--gold-dark)" }}>{selected.size} selected</strong></>}
           </p>
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          <Link href="/slabs" className="secondary-button">← Slab Entry</Link>
+          <Link href="/slabs" className="secondary-button">← Required Sizes</Link>
           <button
             className="primary-button"
             onClick={sendToPlanning}
@@ -132,190 +182,264 @@ export function SlabSelector({
         </div>
       </div>
 
-      {/* Filter Bar */}
-      <div className="filter-bar">
-        <input
-          className="filter-search"
-          type="search"
-          placeholder="Search by code, label, temple…"
-          value={q}
-          onChange={e => setQ(e.target.value)}
-        />
+      {/* Filter Panel */}
+      <div style={{
+        background: "var(--surface)",
+        border: "1px solid var(--border)",
+        borderRadius: 8,
+        padding: "16px 18px",
+        marginBottom: 14,
+      }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "flex-end" }}>
 
-        <select
-          className="filter-select"
-          value={activeFilters.temple ?? ""}
-          onChange={e => setFilter("temple", e.target.value)}
-        >
-          <option value="">All Temples</option>
-          {temples.map(t => <option key={t} value={t}>{t}</option>)}
-        </select>
+          {/* Status toggles */}
+          <div className="stack" style={{ flex: "0 0 auto" }}>
+            <span>Status</span>
+            <div style={{ display: "flex", gap: 6 }}>
+              {[
+                { value: "open", label: "Open" },
+                { value: "planned", label: "Planned" },
+                { value: "all", label: "Both" },
+              ].map(opt => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setStatusFilter(opt.value)}
+                  style={{
+                    fontSize: 12,
+                    padding: "4px 11px",
+                    borderRadius: 20,
+                    border: "1px solid var(--border)",
+                    cursor: "pointer",
+                    fontWeight: currentStatus === opt.value ? 700 : 400,
+                    background: currentStatus === opt.value ? "var(--gold)" : "transparent",
+                    color: currentStatus === opt.value ? "#fff" : "var(--text)",
+                    transition: "background 0.15s",
+                  }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
 
-        <select
-          className="filter-select"
-          value={activeFilters.stone ?? ""}
-          onChange={e => setFilter("stone", e.target.value)}
-        >
-          <option value="">All Stones</option>
-          {(stoneNames && stoneNames.length > 0
-            ? stoneNames
-            : ["PinkStone", "WhiteStone"]
-          ).map(n => <option key={n} value={n}>{n}</option>)}
-        </select>
+          {/* Stone */}
+          <label className="stack" style={{ flex: "0 0 auto" }}>
+            <span>Stone</span>
+            <select value={stoneFilter} onChange={e => setStoneFilter(e.target.value)}>
+              <option value="all">All Stones</option>
+              {ALL_STONES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </label>
 
-        <select
-          className="filter-select"
-          value={activeFilters.quality ?? ""}
-          onChange={e => setFilter("quality", e.target.value)}
-        >
-          <option value="">All Quality</option>
-          <option value="A">Grade A only</option>
-          <option value="B">Grade B only</option>
-          <option value="none">Unspecified only</option>
-        </select>
+          {/* Temple */}
+          <label className="stack" style={{ flex: "1 1 160px" }}>
+            <span>Temple</span>
+            <select value={templeFilter} onChange={e => setTempleFilter(e.target.value)}>
+              <option value="all">All Temples</option>
+              {temples.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </label>
 
-        <select
-          className="filter-select"
-          value={activeFilters.priority ?? ""}
-          onChange={e => setFilter("priority", e.target.value)}
-        >
-          <option value="">All Priority</option>
-          <option value="true">⚡ Priority only</option>
-          <option value="false">Normal only</option>
-        </select>
+          {/* Quality */}
+          <label className="stack" style={{ flex: "0 0 auto" }}>
+            <span>Quality</span>
+            <select value={qualityFilter} onChange={e => setQualityFilter(e.target.value)}>
+              <option value="all">All Grades</option>
+              <option value="A">Grade A</option>
+              <option value="B">Grade B</option>
+              <option value="none">Unspecified</option>
+            </select>
+          </label>
 
-        {/* Status: default "open", "all" shows open+planned */}
-        <select
-          className="filter-select"
-          value={activeFilters.status ?? "open"}
-          onChange={e => setFilter("status", e.target.value)}
-        >
-          <option value="open">Open only</option>
-          <option value="planned">Planned only</option>
-          <option value="all">Open + Planned</option>
-        </select>
+          {/* Priority */}
+          <label className="stack" style={{ flex: "0 0 auto" }}>
+            <span>Priority</span>
+            <select value={priorityFilter} onChange={e => setPriorityFilter(e.target.value)}>
+              <option value="all">All</option>
+              <option value="true">⚡ Urgent only</option>
+              <option value="false">Normal only</option>
+            </select>
+          </label>
 
+          {/* Search */}
+          <label className="stack" style={{ flex: "1 1 160px" }}>
+            <span>Search</span>
+            <input
+              value={q}
+              onChange={e => setQ(e.target.value)}
+              placeholder="Code, label, temple…"
+            />
+          </label>
+
+          <div className="stack" style={{ flex: "0 0 auto" }}>
+            <span style={{ visibility: "hidden", fontSize: 12 }}>·</span>
+            <button type="button" className="ghost-button" onClick={clearFilters}>Clear All</button>
+          </div>
+        </div>
+
+        {/* Quick actions */}
         {priorityCount > 0 && (
-          <button
-            className="filter-tag filter-tag-priority"
-            onClick={() => {
-              const priorityIds = filtered.filter(s => s.priority).map(s => s.id);
-              setSelected(prev => {
-                const next = new Set(prev);
-                priorityIds.forEach(id => next.add(id));
-                return next;
-              });
-            }}
-          >
-            ⚡ Select all {priorityCount} urgent
+          <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+            <span className="muted" style={{ fontSize: 12 }}>Quick:</span>
+            <button
+              type="button"
+              className="ghost-button"
+              style={{ fontSize: 11, padding: "2px 9px", color: "#DC2626", borderColor: "rgba(220,38,38,0.3)" }}
+              onClick={() => {
+                const priorityIds = filtered.filter(s => s.priority).map(s => s.id);
+                setSelected(prev => {
+                  const next = new Set(prev);
+                  priorityIds.forEach(id => next.add(id));
+                  return next;
+                });
+              }}
+            >
+              ⚡ Select all {priorityCount} urgent
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Summary bar */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+        <p className="muted" style={{ fontSize: 13 }}>
+          Showing <strong style={{ color: "var(--text)" }}>{filtered.length}</strong> of {slabs.length} sizes
+          {selected.size > 0 && <> · <strong style={{ color: "var(--gold-dark)" }}>{selected.size} selected</strong></>}
+        </p>
+        {selected.size > 0 && (
+          <button type="button" className="ghost-button" style={{ fontSize: 12 }} onClick={() => setSelected(new Set())}>
+            Clear selection
           </button>
         )}
       </div>
 
-      {/* Select All bar */}
-      {filtered.length > 0 && (
-        <div className="slab-select-bar">
-          <label className="slab-select-all">
-            <input
-              type="checkbox"
-              checked={selected.size === filtered.length && filtered.length > 0}
-              onChange={toggleAll}
-            />
-            <span>Select all {filtered.length} visible</span>
-          </label>
-          {selected.size > 0 && (
-            <button className="ghost-button" onClick={() => setSelected(new Set())}>
-              Clear selection
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Grouped Slab List */}
-      {filtered.length === 0 ? (
-        <div className="banner">No slabs match your filters.</div>
-      ) : (
-        <div className="slab-view-list">
-          {[...grouped.entries()].map(([temple, groupSlabs]) => {
-            const groupIds = groupSlabs.map(s => s.id);
-            const allGroupSelected = groupIds.every(id => selected.has(id));
-            const someGroupSelected = groupIds.some(id => selected.has(id));
-
-            return (
-              <div key={temple} className="slab-group">
-                <div className="slab-group-header">
-                  <label className="slab-group-check">
-                    <input
-                      type="checkbox"
-                      checked={allGroupSelected}
-                      ref={el => { if (el) el.indeterminate = someGroupSelected && !allGroupSelected; }}
-                      onChange={() => toggleGroup(groupIds)}
-                    />
-                    <span className="slab-group-name">{temple}</span>
-                  </label>
-                  <span className="slab-group-count">{groupSlabs.length} slabs</span>
-                </div>
-
-                <div className="slab-group-rows">
-                  {groupSlabs.map(slab => {
-                    const cft = ((Number(slab.length_ft) * Number(slab.width_ft) * Number(slab.thickness_ft)) / 1728).toFixed(2);
-                    const isChecked = selected.has(slab.id);
-
-                    return (
-                      <label
-                        key={slab.id}
-                        className={`slab-row${isChecked ? " slab-row-selected" : ""}${slab.priority ? " slab-row-priority" : ""}`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={() => toggleOne(slab.id)}
-                        />
-                        <div className="slab-row-main">
-                          <div className="slab-row-top">
-                            <code className="slab-row-code">{slab.id}</code>
-                            {slab.priority && <span className="slab-priority-badge">⚡ Urgent</span>}
-                            {slab.stone && (
-                              <span className={`role-pill ${slab.stone === "PinkStone" ? "badge-pink" : slab.stone === "WhiteStone" ? "badge-white-stone" : "badge-open"}`}>
-                                {slab.stone.replace(/Stone$/i, "") || slab.stone}
-                              </span>
-                            )}
-                            {slab.quality && (
-                              <span className={`role-pill ${slab.quality === "A" ? "badge-available" : "badge-reserved"}`}>
-                                {slab.quality === "A" ? "A" : "B"}
-                              </span>
-                            )}
-                            <span className={`role-pill ${slab.status === "open" ? "badge-open" : "badge-planned"}`}>
-                              {slab.status}
-                            </span>
-                          </div>
-                          <div className="slab-row-label">{slab.label}</div>
-                          {slab.priority && slab.priority_note && (
-                            <div style={{ fontSize: 11, color: "#DC2626", fontStyle: "italic", marginTop: 2 }}>
-                              &ldquo;{slab.priority_note}&rdquo;
-                            </div>
-                          )}
-                        </div>
-                        <div className="slab-row-dims">
-                          <span>{Number(slab.length_ft)}" × {Number(slab.width_ft)}" × {Number(slab.thickness_ft)}"</span>
-                          <span className="muted">{cft} CFT</span>
-                          {slab.created_at && <span className="muted" style={{ fontSize: 11 }}>Added {fmtDate(slab.created_at)}</span>}
-                        </div>
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+      {/* Table */}
+      <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: 8 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <thead>
+            <tr style={{ background: "var(--surface-alt)", borderBottom: "2px solid var(--border)" }}>
+              {/* Checkbox col */}
+              <th style={{ padding: "10px 12px", width: 36 }}>
+                <input
+                  type="checkbox"
+                  checked={allChecked}
+                  ref={el => { if (el) el.indeterminate = someChecked; }}
+                  onChange={toggleAll}
+                  style={{ cursor: "pointer" }}
+                />
+              </th>
+              {([
+                { label: "Size Code",  col: "id" as SortCol },
+                { label: "Temple",     col: "temple" as SortCol },
+                { label: "Label",      col: null },
+                { label: "Stone",      col: "stone" as SortCol },
+                { label: "Quality",    col: null },
+                { label: "Dimensions", col: null },
+                { label: "CFT",        col: "cft" as SortCol },
+                { label: "Status",     col: "status" as SortCol },
+                { label: "Added",      col: "created_at" as SortCol },
+              ] as { label: string; col: SortCol | null }[]).map(({ label, col }) => (
+                <th
+                  key={label}
+                  onClick={col ? () => toggleSort(col) : undefined}
+                  style={{
+                    padding: "10px 12px",
+                    textAlign: "left",
+                    fontWeight: 600,
+                    fontSize: 11,
+                    color: "var(--muted)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.05em",
+                    cursor: col ? "pointer" : "default",
+                    whiteSpace: "nowrap",
+                    userSelect: "none",
+                  }}
+                >
+                  {label} {col && <SortIcon col={col} />}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 ? (
+              <tr>
+                <td colSpan={10} style={{ padding: 32, textAlign: "center", color: "var(--muted)" }}>
+                  No sizes match your filters.
+                </td>
+              </tr>
+            ) : (
+              filtered.map((s, i) => {
+                const cft = ((Number(s.length_ft) * Number(s.width_ft) * Number(s.thickness_ft)) / 1728).toFixed(2);
+                const isChecked = selected.has(s.id);
+                return (
+                  <tr
+                    key={s.id}
+                    onClick={() => toggleOne(s.id)}
+                    style={{
+                      borderBottom: "1px solid var(--border)",
+                      background: isChecked
+                        ? "rgba(184,115,51,0.10)"
+                        : s.priority
+                        ? i % 2 === 0 ? "rgba(220,38,38,0.04)" : "rgba(220,38,38,0.07)"
+                        : i % 2 === 0 ? "var(--surface)" : "var(--surface-alt)",
+                      cursor: "pointer",
+                      outline: isChecked ? "1.5px solid rgba(184,115,51,0.35)" : "none",
+                      outlineOffset: -1,
+                      transition: "background 0.1s",
+                    }}
+                  >
+                    <td style={{ padding: "9px 12px" }} onClick={e => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => toggleOne(s.id)}
+                        style={{ cursor: "pointer" }}
+                      />
+                    </td>
+                    <td style={{ padding: "9px 12px", fontFamily: "ui-monospace, monospace", fontWeight: 600, whiteSpace: "nowrap" }}>
+                      {s.id}
+                      {s.priority && <span style={{ marginLeft: 6, fontSize: 12 }}>⚡</span>}
+                    </td>
+                    <td style={{ padding: "9px 12px", fontSize: 12 }}>{s.temple}</td>
+                    <td style={{ padding: "9px 12px", fontSize: 12, color: "var(--muted)" }}>{s.label}</td>
+                    <td style={{ padding: "9px 12px" }}>
+                      {s.stone ? (
+                        <span className={`role-pill ${s.stone === "PinkStone" ? "badge-pink" : s.stone === "WhiteStone" ? "badge-white-stone" : "badge-open"}`}>
+                          {stoneLabel(s.stone)}
+                        </span>
+                      ) : <span className="muted">—</span>}
+                    </td>
+                    <td style={{ padding: "9px 12px" }}>
+                      {s.quality ? (
+                        <span className={`role-pill ${s.quality === "A" ? "badge-available" : "badge-reserved"}`}>
+                          Grade {s.quality}
+                        </span>
+                      ) : <span className="muted">—</span>}
+                    </td>
+                    <td style={{ padding: "9px 12px", whiteSpace: "nowrap", fontFamily: "ui-monospace, monospace", fontSize: 12 }}>
+                      {Number(s.length_ft)}" × {Number(s.width_ft)}" × {Number(s.thickness_ft)}"
+                    </td>
+                    <td style={{ padding: "9px 12px", fontFamily: "ui-monospace, monospace", fontSize: 12 }}>{cft}</td>
+                    <td style={{ padding: "9px 12px" }}>
+                      <span className={`role-pill ${s.status === "open" ? "badge-open" : "badge-planned"}`}>
+                        {s.status}
+                      </span>
+                    </td>
+                    <td style={{ padding: "9px 12px", whiteSpace: "nowrap", color: "var(--muted)", fontSize: 12 }}>{fmtDate(s.created_at)}</td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
 
       {/* Sticky Send Button */}
       {selected.size > 0 && (
         <div className="slab-send-sticky">
           <div className="slab-send-sticky-inner">
-            <span><strong>{selected.size}</strong> slabs selected</span>
+            <span><strong>{selected.size}</strong> sizes selected</span>
             <button className="primary-button" onClick={sendToPlanning}>
               Send to Plan Generator →
             </button>
