@@ -66,6 +66,12 @@ export default async function SettingsPage() {
   const { profile: currentUser } = await requireAuth(["owner", "team_head", "developer"]);
   const admin = createAdminSupabaseClient();
 
+  // Screen time — developer only
+  const istNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+  const todayIST = `${istNow.getFullYear()}-${String(istNow.getMonth() + 1).padStart(2, "0")}-${String(istNow.getDate()).padStart(2, "0")}`;
+  const todayStart = new Date(`${todayIST}T00:00:00+05:30`).toISOString();
+  const todayEnd = new Date(`${todayIST}T23:59:59.999+05:30`).toISOString();
+
   const [{ data: temples }, { data: users }, { data: stoneTypes }, { data: blockStones }, { data: slabStones }, { data: templeSlabCounts }] = await Promise.all([
     admin.from("temples").select("*").order("name"),
     // Admin client needed — RLS on profiles only returns the current user's own row
@@ -91,6 +97,39 @@ export default async function SettingsPage() {
     if (s.temple) acc[s.temple] = (acc[s.temple] ?? 0) + 1;
     return acc;
   }, {});
+
+  // Screen time data (developer only)
+  let screenTimeData: Array<{ name: string; role: string; minutes: number; lastSeen: string | null }> = [];
+  if (currentUser.role === "developer") {
+    const { data: pings } = await admin
+      .from("heartbeat_log")
+      .select("user_id, created_at")
+      .gte("created_at", todayStart)
+      .lte("created_at", todayEnd);
+
+    if (pings && pings.length > 0) {
+      const pingsByUser = new Map<string, string[]>();
+      for (const p of pings) {
+        const list = pingsByUser.get(p.user_id) ?? [];
+        list.push(p.created_at);
+        pingsByUser.set(p.user_id, list);
+      }
+
+      screenTimeData = [...pingsByUser.entries()].map(([uid, timestamps]) => {
+        const user = userList.find(u => u.id === uid);
+        // Each ping ≈ 2 minutes of activity
+        const minutes = timestamps.length * 2;
+        const sorted = timestamps.sort();
+        const lastSeen = sorted[sorted.length - 1] ?? null;
+        return {
+          name: user?.full_name || user?.phone || "Unknown",
+          role: user?.role ?? "unknown",
+          minutes,
+          lastSeen,
+        };
+      }).sort((a, b) => b.minutes - a.minutes);
+    }
+  }
 
   // Admin client needed — profiles join in audit log returns null names for non-self users under RLS
   const { data: recentAudit } = await admin
@@ -540,6 +579,76 @@ export default async function SettingsPage() {
             >
               ↓ Download Backup
             </a>
+          </div>
+        </div>
+      )}
+
+      {/* Screen Time Today — developer only */}
+      {currentUser.role === "developer" && (
+        <div className="settings-section">
+          <div className="settings-section-header">
+            <h2>Screen Time — Today</h2>
+            <p>How long each user has been active in the system today ({todayIST}). Based on heartbeat pings every 2 minutes.</p>
+          </div>
+          <div className="settings-card" style={{ padding: 0, overflow: "hidden" }}>
+            {screenTimeData.length === 0 ? (
+              <p className="muted" style={{ padding: 16 }}>No activity recorded today yet.</p>
+            ) : (
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: "var(--surface-alt)" }}>
+                    <th style={{ padding: "10px 16px", textAlign: "left", fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>User</th>
+                    <th style={{ padding: "10px 16px", textAlign: "left", fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Role</th>
+                    <th style={{ padding: "10px 16px", textAlign: "left", fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Time Today</th>
+                    <th style={{ padding: "10px 16px", textAlign: "left", fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Last Active</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {screenTimeData.map((row, i) => {
+                    const hours = Math.floor(row.minutes / 60);
+                    const mins = row.minutes % 60;
+                    const timeLabel = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+                    const maxMinutes = screenTimeData[0]?.minutes ?? 1;
+                    const barWidth = Math.max(4, Math.round((row.minutes / maxMinutes) * 100));
+                    const fiveMinAgo = Date.now() - 5 * 60 * 1000;
+                    const isOnline = row.lastSeen && new Date(row.lastSeen).getTime() > fiveMinAgo;
+
+                    return (
+                      <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}>
+                        <td style={{ padding: "10px 16px", fontWeight: 600 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            {isOnline && (
+                              <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#22c55e", flexShrink: 0, boxShadow: "0 0 0 2px rgba(34,197,94,0.25)" }} />
+                            )}
+                            {row.name}
+                          </div>
+                        </td>
+                        <td style={{ padding: "10px 16px" }}>
+                          <span className="role-pill" style={{ fontSize: 11 }}>{roleLabel(row.role)}</span>
+                        </td>
+                        <td style={{ padding: "10px 16px" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                            <div style={{ width: 100, height: 6, background: "var(--border)", borderRadius: 3, overflow: "hidden" }}>
+                              <div style={{ width: `${barWidth}%`, height: "100%", background: hours >= 1 ? "var(--gold)" : "rgba(184,115,51,0.4)", borderRadius: 3 }} />
+                            </div>
+                            <span style={{ fontWeight: 700, fontSize: 13, color: "var(--text)", minWidth: 50 }}>{timeLabel}</span>
+                          </div>
+                        </td>
+                        <td style={{ padding: "10px 16px", color: "var(--muted)", fontSize: 12 }}>
+                          {row.lastSeen ? (
+                            isOnline ? (
+                              <span style={{ color: "#22c55e", fontWeight: 600 }}>Online now</span>
+                            ) : (
+                              new Date(row.lastSeen).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" })
+                            )
+                          ) : "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
       )}

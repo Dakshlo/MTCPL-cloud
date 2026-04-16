@@ -9,9 +9,13 @@ export async function POST() {
     if (!user) return NextResponse.json({ ok: false }, { status: 401 });
 
     const admin = createAdminSupabaseClient();
+    const now = new Date().toISOString();
     await admin.from("profiles")
-      .update({ last_seen_at: new Date().toISOString() })
+      .update({ last_seen_at: now })
       .eq("id", user.id);
+
+    // Log ping for screen-time tracking (fire-and-forget)
+    admin.from("heartbeat_log").insert({ user_id: user.id, created_at: now }).then(() => {});
 
     return NextResponse.json({ ok: true });
   } catch {
