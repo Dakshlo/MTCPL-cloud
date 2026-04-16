@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
+import { notify } from "@/lib/notifications";
 
 async function refreshPaths() {
   revalidatePath("/cutting");
@@ -52,6 +53,12 @@ export async function approveBlockAction(formData: FormData) {
     session_id: sessionId,
   });
 
+  await notify("cut_started", `Block cutting started`, {
+    entityType: "cut_session_block",
+    entityId: sessionBlockId,
+    actorId: profile.id,
+  });
+
   await refreshPaths();
 }
 
@@ -84,6 +91,13 @@ export async function rejectBlockAction(formData: FormData) {
     session_id: sessionId,
     block_id: blockId,
     slabs_released: slabIds,
+  });
+
+  await notify("block_rejected", `Block ${blockId} rejected — returned to inventory`, {
+    message: `${slabIds.length} slab(s) released`,
+    entityType: "cut_session_block",
+    entityId: sessionBlockId,
+    actorId: profile.id,
   });
 
   await syncSessionStatus(sessionId);
@@ -190,6 +204,13 @@ export async function finishBlockAction(formData: FormData) {
       ...(extraSlabIds.length > 0 ? { extra_slabs: extraSlabIds } : {}),
     }
   );
+
+  await notify("cut_done", `Block ${blockId} cutting completed`, {
+    message: `${cutSlabIds.length} slab(s) cut${restockedIds.length > 0 ? ` · ${restockedIds.length} restocked` : ""}${extraSlabIds.length > 0 ? " · with deviation" : ""}`,
+    entityType: "cut_session_block",
+    entityId: sessionBlockId,
+    actorId: profile.id,
+  });
 
   await syncSessionStatus(sessionId);
   await refreshPaths();

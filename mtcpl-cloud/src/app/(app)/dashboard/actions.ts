@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { notify } from "@/lib/notifications";
 
 // ── Shared types for the NOW band (kept in sync with now-band.tsx) ──
 export type NowOperator = {
@@ -284,6 +285,12 @@ export async function pushSlabAlertAction(formData: FormData) {
     .eq("id", id);
 
   if (error) redirect(`/dashboard?toast=${encodeURIComponent(error.message)}`);
+
+  await notify("priority_pushed", `Slab ${id} marked urgent`, {
+    message: note ?? undefined,
+    entityType: "slab",
+    entityId: id,
+  });
 
   revalidatePath("/dashboard");
   revalidatePath("/slabs");

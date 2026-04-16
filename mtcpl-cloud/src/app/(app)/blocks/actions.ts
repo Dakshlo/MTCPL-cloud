@@ -7,6 +7,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { generateNextCode } from "./utils";
 import { logAudit } from "@/lib/audit";
+import { notify } from "@/lib/notifications";
 
 
 function numValue(formData: FormData, key: string, fallback = 0) {
@@ -67,6 +68,12 @@ export async function addBlockAction(formData: FormData) {
 
     if (!error) {
       await logAudit(profile.id, "create", "block", nextId, { stone: payload.stone, yard: payload.yard, status: payload.status });
+      await notify("blocks_added", `New block ${nextId} added (${payload.stone})`, {
+        message: `Yard ${payload.yard} · ${payload.length_ft}" × ${payload.width_ft}" × ${payload.height_ft}"`,
+        entityType: "block",
+        entityId: nextId,
+        actorId: profile.id,
+      });
       revalidatePath("/blocks");
       revalidatePath("/dashboard");
       redirect("/blocks?toast=Block+added+successfully");
@@ -159,6 +166,11 @@ export async function deleteBlockAction(formData: FormData) {
   if (error) redirectWithToast("/blocks", error.message);
 
   await logAudit(profile.id, "delete", "block", id, { status: "discarded" });
+  await notify("block_deleted", `Block ${id} archived/deleted`, {
+    entityType: "block",
+    entityId: id,
+    actorId: profile.id,
+  });
   revalidatePath("/blocks");
   revalidatePath("/dashboard");
   redirectWithToast("/blocks", "Block removed and archived in history");

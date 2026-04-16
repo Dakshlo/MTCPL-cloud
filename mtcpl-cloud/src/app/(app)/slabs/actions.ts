@@ -6,6 +6,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { generateSlabCode } from "./utils";
 import { logAudit } from "@/lib/audit";
+import { notify } from "@/lib/notifications";
 
 
 function num(fd: FormData, key: string, fallback = 0) {
@@ -122,6 +123,11 @@ export async function deleteSlabAction(formData: FormData) {
   }
 
   await logAudit(profile.id, "delete", "slab", id);
+  await notify("slab_deleted", `Slab ${id} was deleted`, {
+    entityType: "slab",
+    entityId: id,
+    actorId: profile.id,
+  });
   revalidatePath("/slabs");
   redirect("/slabs?toast=Slab+deleted");
 }

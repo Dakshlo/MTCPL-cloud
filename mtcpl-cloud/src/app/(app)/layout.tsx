@@ -3,6 +3,7 @@ import Link from "next/link";
 
 import { LogoutButton } from "@/components/logout-button";
 import { MobileNav } from "@/components/mobile-nav";
+import { NotificationBell } from "@/components/notification-bell";
 import { RealtimeRefresh } from "@/components/realtime-refresh";
 import { Sidebar } from "@/components/sidebar";
 import { Toast } from "@/components/toast";
@@ -10,6 +11,7 @@ import { Heartbeat } from "@/components/heartbeat";
 import { requireAuth } from "@/lib/auth";
 
 const SETTINGS_ROLES = ["developer", "owner", "team_head"];
+const NOTIFICATION_ROLES = ["developer"]; // flip to include "team_head" at rollout
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const { profile } = await requireAuth();
@@ -51,6 +53,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                 cutting_operator: "CUTTING OPERATOR",
               } as Record<string, string>)[profile.role] ?? profile.role.replace(/_/g, " ").toUpperCase()}
             </span>
+            {NOTIFICATION_ROLES.includes(profile.role) && (
+              <NotificationBell userId={profile.id} role={profile.role} />
+            )}
             {SETTINGS_ROLES.includes(profile.role) && (
               <Link href="/settings" className="topbar-settings-btn" title="Settings">
                 ⚙

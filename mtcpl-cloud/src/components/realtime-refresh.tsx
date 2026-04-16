@@ -12,7 +12,8 @@ const WATCHED_TABLES = [
   "cut_session_blocks",
   "cut_session_slabs",
   "carving_items",
-  "dispatch_logs"
+  "dispatch_logs",
+  "notifications"
 ] as const;
 
 export function RealtimeRefresh() {
