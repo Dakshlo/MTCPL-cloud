@@ -8,7 +8,8 @@ export type AppRole =
   | "cutting_operator"
   | "carving_assigner"
   | "dispatch"
-  | "vendor";
+  | "vendor"
+  | "worker";
 
 export type StoneType = "PinkStone" | "WhiteStone";
 
