@@ -69,11 +69,31 @@ export async function getAuthContext() {
   // Use admin client for profile lookup — RLS should never block a user from seeing their own profile,
   // but using admin eliminates any policy edge-cases (e.g. new users with unusual roles)
   const admin = createAdminSupabaseClient();
-  const { data: profile } = await admin
+  let { data: profile } = await admin
     .from("profiles")
     .select("id, full_name, phone, role, vendor_id, is_active")
     .eq("id", user.id)
     .single();
+
+  // Auto-create profile if missing (trigger failed, or profile was deleted while auth user remains)
+  if (!profile) {
+    const phone = user.phone ?? null;
+    const fullName = user.user_metadata?.full_name ?? "";
+    await admin.from("profiles").insert({
+      id: user.id,
+      full_name: fullName,
+      phone,
+      role: "worker",
+      is_active: false,
+    }).single();
+
+    const { data: newProfile } = await admin
+      .from("profiles")
+      .select("id, full_name, phone, role, vendor_id, is_active")
+      .eq("id", user.id)
+      .single();
+    profile = newProfile;
+  }
 
   let vendorName: string | null = null;
   if (profile?.vendor_id) {
