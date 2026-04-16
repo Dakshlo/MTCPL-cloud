@@ -4,6 +4,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
 import { approveBlockAction, rejectBlockAction } from "./actions";
 import { RejectButton } from "./reject-button";
+import { CuttingTimer } from "./cutting-timer";
 
 type Tab = "pending" | "in_progress" | "done";
 type SearchParams = Promise<{ tab?: string }>;
@@ -226,7 +227,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                     </div>
                   </div>
 
-                  {/* Slab count + detail link */}
+                  {/* Slab count + timer + detail link */}
                   <div
                     style={{
                       display: "flex",
@@ -235,6 +236,9 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                       flexShrink: 0,
                     }}
                   >
+                    {(isLive || block.status === "done_prompt") && block.updated_at && (
+                      <CuttingTimer startedAt={block.updated_at} />
+                    )}
                     <span className="role-pill">
                       {slabCount} slab{slabCount !== 1 ? "s" : ""}
                     </span>

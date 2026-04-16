@@ -39,7 +39,7 @@ export async function approveBlockAction(formData: FormData) {
 
   const { error } = await supabase
     .from("cut_session_blocks")
-    .update({ status: "cutting" })
+    .update({ status: "cutting", updated_at: new Date().toISOString() })
     .eq("id", sessionBlockId);
   if (error) throw new Error(error.message);
 
