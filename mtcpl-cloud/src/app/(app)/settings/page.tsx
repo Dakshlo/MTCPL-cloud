@@ -83,6 +83,7 @@ export default async function SettingsPage() {
     admin.from("slab_requirements").select("temple"),
   ]);
   const stoneList = stoneTypes ?? [];
+  const userList = users ?? [];
 
   // Pre-compute usage counts so delete guards are visible in UI
   const blockStoneCount = (blockStones ?? []).reduce<Record<string, number>>((acc, b) => {
@@ -98,14 +99,15 @@ export default async function SettingsPage() {
     return acc;
   }, {});
 
-  // Screen time data (developer only)
+  // Screen time data (developer + owner)
   let screenTimeData: Array<{ name: string; role: string; minutes: number; lastSeen: string | null }> = [];
   if (currentUser.role === "developer" || currentUser.role === "owner") {
-    const { data: pings } = await admin
+    const res = await admin
       .from("heartbeat_log")
       .select("user_id, created_at")
       .gte("created_at", todayStart)
       .lte("created_at", todayEnd);
+    const pings = res.error ? null : res.data;
 
     if (pings && pings.length > 0) {
       const pingsByUser = new Map<string, string[]>();
@@ -139,7 +141,6 @@ export default async function SettingsPage() {
     .limit(50);
 
   const templeList = temples ?? [];
-  const userList = users ?? [];
 
   return (
     <>
