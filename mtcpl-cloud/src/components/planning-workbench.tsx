@@ -16,6 +16,7 @@ export type BlockRow = {
   height_ft: number | string;
   status: string;
   quality: string | null;
+  cut_direction: "width" | "length" | null;
 };
 
 export type SlabRow = {
@@ -74,6 +75,7 @@ export type PlanResult = {
   unmet: Array<{ id: string; label: string; temple: string }>;
   unfittableLong?: Array<{ id: string; label: string; temple: string; maxDim: number }>;
   totalWaste: number;
+  noCutDirBlocks?: Array<{ id: string; stone: string; yard: number }>;
 };
 
 const SLAB_COLORS = ["#D85A30", "#378ADD", "#1D9E75", "#7F77DD", "#BA7517", "#639922", "#D4537E", "#E24B4A", "#5F5E5A", "#0F6E56"];
@@ -245,14 +247,23 @@ function tryPackBlock(
 
   // All 3 ways to orient the block under the saw
   const blockAxes: BlockAxis[] = [
-    { faceL: bl, faceW: bw, depth: bh, label: "L×W face" },
-    { faceL: bl, faceW: bh, depth: bw, label: "L×H face" },
-    { faceL: bw, faceW: bh, depth: bl, label: "W×H face" },
+    { faceL: bl, faceW: bw, depth: bh, label: "L×W face" },  // axis 0: cut through H (unused in practice)
+    { faceL: bl, faceW: bh, depth: bw, label: "L×H face" },  // axis 1: cut through W (cut_direction = 'width')
+    { faceL: bw, faceW: bh, depth: bl, label: "W×H face" },  // axis 2: cut through L (cut_direction = 'length')
   ];
+
+  // Restrict to the one valid axis determined by the block's vein/cut direction.
+  // 'width'  → blade passes through Width  → face = L×H (axis 1)
+  // 'length' → blade passes through Length → face = W×H (axis 2)
+  // null     → no direction set; skip this block entirely (filtered upstream)
+  const CUT_AXIS_INDEX: Record<string, number> = { width: 1, length: 2 };
+  const allowedAxes = block.cut_direction
+    ? blockAxes.filter((_, i) => i === CUT_AXIS_INDEX[block.cut_direction!])
+    : blockAxes; // fallback: shouldn't reach here — unset blocks filtered in runOptimization
 
   let best: PackedResult = { allPlaced: [], orient: null, lastSpaces: [], depthUsed: 0 };
 
-  for (const axis of blockAxes) {
+  for (const axis of allowedAxes) {
     let depthUsed = 0;
     const allPlaced: PlacedSlab[] = [];
     let lastSpaces: Array<{ x: number; y: number; w: number; h: number }> = [];
@@ -334,7 +345,11 @@ function runOptimization(blocks: BlockRow[], slabs: SlabRow[], kerfMm: number): 
       return (b.sl * b.sw) - (a.sl * a.sw);                   // tiebreak: bigger face
     });
 
-  const usableBlocks = blocks.filter((block) => block.status === "available" || block.status === "reserved");
+  // Only include blocks that have cut_direction set — those without are excluded from planning.
+  const allActiveBlocks = blocks.filter((block) => block.status === "available" || block.status === "reserved");
+  const usableBlocks = allActiveBlocks.filter((block) => block.cut_direction != null);
+  const noCutDirBlocks = allActiveBlocks.filter((block) => block.cut_direction == null);
+
   const plan: PlanBlock[] = [];
   const usedBlockIds = new Set<string>();
   const unfittable: RemainingSlab[] = [];
@@ -448,6 +463,11 @@ function runOptimization(blocks: BlockRow[], slabs: SlabRow[], kerfMm: number): 
       maxDim: round2(Math.max(s.sl, s.sw)),
     })),
     totalWaste: round2(plan.reduce((sum, b) => sum + Math.max(0, b.ba - b.ua - b.ka), 0)),
+    noCutDirBlocks: noCutDirBlocks.map((b) => ({
+      id: b.id,
+      stone: b.stone,
+      yard: toNum(b.yard, 1),
+    })),
   };
 }
 
@@ -1328,6 +1348,24 @@ export function PlanningWorkbench({
                     </p>
                     <p className="muted" style={{ margin: "4px 0 0", fontSize: 12 }}>
                       {result.unfittableLong.map((s) => `${s.id} (${s.maxDim}″)`).join(", ")} — procure longer blocks or split the requirement.
+                    </p>
+                  </div>
+                )}
+
+                {/* Amber banner: blocks skipped because cut direction is not set */}
+                {result.noCutDirBlocks && result.noCutDirBlocks.length > 0 && (
+                  <div style={{
+                    marginTop: 12,
+                    padding: "12px 16px",
+                    background: "#fef3c7",
+                    border: "1px solid #f59e0b",
+                    borderRadius: 8,
+                  }}>
+                    <p style={{ margin: 0, fontWeight: 700, color: "#92400e", fontSize: 13 }}>
+                      ⚠ {result.noCutDirBlocks.length} block{result.noCutDirBlocks.length > 1 ? "s were" : " was"} skipped — cut direction not set
+                    </p>
+                    <p className="muted" style={{ margin: "4px 0 0", fontSize: 12 }}>
+                      {result.noCutDirBlocks.map((b) => b.id).join(", ")} — go to Blocks and set the cut direction before planning.
                     </p>
                   </div>
                 )}
