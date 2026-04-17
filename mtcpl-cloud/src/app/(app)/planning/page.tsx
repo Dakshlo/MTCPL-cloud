@@ -41,7 +41,7 @@ export default async function PlanningPage({
   ] = await Promise.all([
     supabase
       .from("blocks")
-      .select("id, stone, yard, category, quality, cut_direction, length_ft, width_ft, height_ft, status")
+      .select("id, stone, yard, category, quality, length_ft, width_ft, height_ft, status")
       .eq("status", "available")
       .order("created_at", { ascending: false }),
     slabQuery,

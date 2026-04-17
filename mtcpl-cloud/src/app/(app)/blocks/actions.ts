@@ -39,14 +39,11 @@ export async function addBlockAction(formData: FormData) {
 
   const quality = textValue(formData, "quality") || null;
 
-  const cut_direction = (textValue(formData, "cut_direction") || null) as "width" | "length" | null;
-
   const payload = {
     stone: textValue(formData, "stone") || "PinkStone",
     yard: numValue(formData, "yard", 1),
     category: "Fresh" as const,
     quality,
-    cut_direction,
     length_ft: numValue(formData, "length_in", 0),
     width_ft: numValue(formData, "width_in", 0),
     height_ft: numValue(formData, "height_in", 0),
@@ -107,14 +104,11 @@ export async function updateBlockAction(formData: FormData) {
   const vendor_name = textValue(formData, "vendor_name") || null;
   const bill_no = textValue(formData, "bill_no") || null;
 
-  const cut_direction = (textValue(formData, "cut_direction") || null) as "width" | "length" | null;
-
   const payload = {
     id: nextId,
     stone: textValue(formData, "stone") || "PinkStone",
     yard: numValue(formData, "yard", 1),
     quality: textValue(formData, "quality") || null,
-    cut_direction,
     length_ft: numValue(formData, "length_in", 0),
     width_ft: numValue(formData, "width_in", 0),
     height_ft: numValue(formData, "height_in", 0),
@@ -180,30 +174,6 @@ export async function deleteBlockAction(formData: FormData) {
   revalidatePath("/blocks");
   revalidatePath("/dashboard");
   redirectWithToast("/blocks", "Block removed and archived in history");
-}
-
-export async function setCutDirectionAction(formData: FormData) {
-  const { profile } = await requireAuth(["owner", "team_head", "block_slab_entry", "block_entry"]);
-  const supabase = createAdminSupabaseClient();
-
-  const blockId = textValue(formData, "block_id");
-  const cut_direction = (textValue(formData, "cut_direction") || null) as "width" | "length" | null;
-
-  if (!blockId) throw new Error("Block ID is required.");
-  if (cut_direction && cut_direction !== "width" && cut_direction !== "length") {
-    throw new Error("Invalid cut direction.");
-  }
-
-  const { error } = await supabase
-    .from("blocks")
-    .update({ cut_direction, updated_by: profile.id, updated_at: new Date().toISOString() })
-    .eq("id", blockId);
-
-  if (error) throw new Error(error.message);
-
-  await logAudit(profile.id, "update", "block", blockId, { cut_direction });
-  revalidatePath("/blocks");
-  revalidatePath("/planning");
 }
 
 export async function manualCutBlockAction(formData: FormData) {

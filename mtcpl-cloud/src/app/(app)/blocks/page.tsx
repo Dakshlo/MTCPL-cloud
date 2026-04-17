@@ -15,7 +15,7 @@ export default async function BlocksPage() {
   const [{ data: blocks, error }, { data: allIds }, { data: consumed }, { data: vendorRows }, { data: stoneTypes }, { data: openSlabs }] = await Promise.all([
     supabase
       .from("blocks")
-      .select("id, stone, yard, category, length_ft, width_ft, height_ft, status, quality, cut_direction, truck_no, vendor_name, bill_no, created_at, created_by")
+      .select("id, stone, yard, category, length_ft, width_ft, height_ft, status, quality, truck_no, vendor_name, bill_no, created_at, created_by")
       .in("status", ["available", "reserved"])
       .order("created_at", { ascending: false })
       .limit(500),

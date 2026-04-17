@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { BlockCardPreview } from "@/components/stone-previews";
-import { updateBlockAction, deleteBlockAction, setCutDirectionAction } from "./actions";
+import { updateBlockAction, deleteBlockAction } from "./actions";
 import { VendorSelect } from "./vendor-select";
 import { stoneDisplayName } from "@/lib/stone-utils";
 import type { StoneTypeDef } from "@/lib/stone-utils";
@@ -68,7 +68,6 @@ type Block = {
   height_ft: number;
   status: string;
   quality: string | null;
-  cut_direction: "width" | "length" | null;
   truck_no: string | null;
   vendor_name: string | null;
   bill_no: string | null;
@@ -128,15 +127,6 @@ export function BlockGrid({ blocks, canEdit, vendors, profilesMap = {}, stoneTyp
                   {block.quality && (
                     <span className={`role-pill ${block.quality === "A" ? "badge-available" : "badge-reserved"}`}>
                       {block.quality === "A" ? "Grade A" : "Grade B"}
-                    </span>
-                  )}
-                  {block.cut_direction ? (
-                    <span className="role-pill" style={{ background: "var(--surface)", border: "1px solid var(--border)", color: "var(--muted)" }}>
-                      {block.cut_direction === "width" ? "↔ Width" : "↕ Length"}
-                    </span>
-                  ) : (
-                    <span className="role-pill" style={{ background: "#FFF3CD", border: "1px solid #FFCA2C", color: "#7A5800", fontSize: 10 }}>
-                      No cut dir
                     </span>
                   )}
                 </div>
@@ -233,15 +223,6 @@ export function BlockGrid({ blocks, canEdit, vendors, profilesMap = {}, stoneTyp
                     <input name="height_in" type="number" min="0" step="0.5" defaultValue={String(selected.height_ft)} />
                   </label>
                 </div>
-
-                <label className="stack">
-                  <span>Cut Direction</span>
-                  <select name="cut_direction" defaultValue={selected.cut_direction ?? ""}>
-                    <option value="">Not set</option>
-                    <option value="width">Through Width (blade enters Height face → slabs up to L×H)</option>
-                    <option value="length">Through Length (blade enters Height face → slabs up to W×H)</option>
-                  </select>
-                </label>
 
                 <details style={{ marginTop: 4 }}>
                   <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--muted)", padding: "4px 0", userSelect: "none" }}>

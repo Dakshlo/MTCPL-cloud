@@ -53,7 +53,6 @@ export function AddBlockForm({ suggestedId, vendors, stoneTypes }: { suggestedId
   const stones = stoneTypes && stoneTypes.length > 0 ? stoneTypes : FALLBACK_STONES;
   const [stone, setStone] = useState<string>(stones[0]?.name ?? "PinkStone");
   const [quality, setQuality] = useState<"" | "A" | "B">("");
-  const [cutDir, setCutDir] = useState<"" | "width" | "length">("");
   const [l, setL] = useState("");
   const [w, setW] = useState("");
   const [h, setH] = useState("");
@@ -189,31 +188,6 @@ export function AddBlockForm({ suggestedId, vendors, stoneTypes }: { suggestedId
             <span style={{ visibility: "hidden", fontSize: 12 }}>·</span>
             <button className="primary-button" type="submit">Add Block</button>
           </div>
-        </div>
-
-        {/* Row 3: Cut Direction */}
-        <div className="add-panel-row" style={{ alignItems: "flex-end" }}>
-          <div className="stack" style={{ flex: "0 0 auto" }}>
-            <span>Cut Direction <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}>(which side does the blade pass through?)</span></span>
-            <div className="stone-toggle">
-              {(["", "width", "length"] as const).map(d => (
-                <button key={d} type="button"
-                  className={`stone-toggle-btn${cutDir === d ? " active-pink" : ""}`}
-                  onClick={() => setCutDir(d)}
-                >
-                  {d === "" ? "Not set" : d === "width" ? "Through Width" : "Through Length"}
-                </button>
-              ))}
-            </div>
-            <input type="hidden" name="cut_direction" value={cutDir} />
-          </div>
-          {cutDir !== "" && (
-            <div className="muted" style={{ fontSize: 12, paddingBottom: 6, flex: "1 1 auto" }}>
-              {cutDir === "width"
-                ? "Blade enters from Height face · slabs face up to L × H"
-                : "Blade enters from Height face · slabs face up to W × H"}
-            </div>
-          )}
         </div>
 
         {/* Logistics Info — collapsible, internal tracking only */}
