@@ -7,7 +7,7 @@ import { CuttingDetailPreview } from "../cutting-detail-preview";
 import { FinishBlockForm } from "../finish-block-form";
 import { UndoButton } from "../undo-button";
 import { RejectButton } from "../reject-button";
-import { IsoBlockStaticSVG } from "@/components/iso-block-static";
+import { PrimarySlabPreview } from "../primary-slab-preview";
 import {
   approveBlockAction,
   rejectBlockAction,
@@ -326,16 +326,15 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
                     </div>
                     {/* 3D Iso (big) + 2D top-down (small) side by side */}
                     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 220px", gap: 14, alignItems: "center" }}>
-                      {/* 3D Isometric */}
+                      {/* 3D Isometric — rotatable */}
                       <div>
-                        <IsoBlockStaticSVG
+                        <PrimarySlabPreview
                           block={{ l: blk.l, w: blk.w, h: thicknessNum, stone: blk.stone }}
                           placed={slabsForIso}
-                          size={440}
                           stoneTypes={stoneTypes ?? undefined}
                         />
                         <div style={{ fontSize: 9, color: "var(--muted)", textAlign: "center", marginTop: 4, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700 }}>
-                          3D Isometric View
+                          3D Isometric · drag to rotate
                         </div>
                       </div>
                       {/* 2D Top-down (small reference) */}

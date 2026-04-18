@@ -293,37 +293,105 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
           font-family: ui-monospace, monospace;
         }
 
-        /* Primary slab views */
+        /* Primary slab views — each slab is a fully bounded section */
         .prim-slab-block {
           page-break-inside: avoid;
+          border: 2px solid #1a1a1a;
+          border-radius: 6px;
+          margin: 16px 0;
+          overflow: hidden;
         }
         .prim-slab-block + .prim-slab-block {
           page-break-before: always;
         }
-        .prim-slab-view-card {
-          border: 1px solid #ddd;
-          border-radius: 6px;
-          padding: 10px 10px 6px;
-          background: #fafafa;
-          margin-bottom: 10px;
-        }
-        .prim-slab-list {
+        /* Dark header banner */
+        .prim-slab-banner {
+          background: #1a1a1a;
+          color: #fff;
+          padding: 10px 16px;
           display: flex;
+          justify-content: space-between;
+          align-items: center;
           flex-wrap: wrap;
-          gap: 12px;
-          margin-top: 8px;
-          padding-top: 8px;
-          border-top: 1px solid #eee;
-          font-family: ui-monospace, monospace;
-          font-size: 12px;
+          gap: 8px;
         }
-        .prim-slab-chip {
-          display: inline-block;
-          padding: 2px 8px;
-          border-radius: 3px;
+        .prim-slab-banner-title {
+          font-size: 13px;
+          font-weight: 700;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+        }
+        .prim-slab-banner-dims {
+          font-size: 11px;
+          opacity: 0.8;
+          font-family: ui-monospace, monospace;
+        }
+        .prim-slab-body {
+          padding: 14px 16px 16px;
+        }
+        /* Color legend grid */
+        .prim-legend {
+          background: #f8f8f3;
+          border: 1px solid #ccc;
+          border-radius: 4px;
+          padding: 10px 12px;
+          margin-bottom: 12px;
+        }
+        .prim-legend-title {
           font-size: 10px;
           font-weight: 700;
+          color: #555;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          margin-bottom: 7px;
+        }
+        .prim-legend-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+          gap: 6px 14px;
+        }
+        .prim-legend-row {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 11px;
           font-family: ui-monospace, monospace;
+        }
+        .prim-legend-badge {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 18px;
+          height: 18px;
+          border-radius: 4px;
+          color: #fff;
+          font-size: 11px;
+          font-weight: 800;
+          font-family: ui-monospace, monospace;
+          flex-shrink: 0;
+        }
+        .prim-view-card {
+          border: 1px solid #ccc;
+          border-radius: 4px;
+          padding: 10px;
+          background: #fafafa;
+          margin-bottom: 12px;
+        }
+        .prim-view-head {
+          font-size: 10px;
+          font-weight: 700;
+          color: #555;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          margin-bottom: 6px;
+        }
+        .prim-table-head {
+          font-size: 10px;
+          font-weight: 700;
+          color: #555;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          margin-bottom: 6px;
         }
 
         /* ─── MANUAL ENTRY SECTION ─────────────────────────── */
@@ -680,142 +748,182 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
                   zBot: 0,
                   zTop: thicknessNum,
                 }));
+                // Build id → badge-number map for THIS primary slab (1..N)
+                const idToNum = new Map<string, number>();
+                layer.slabs.forEach((s, i) => idToNum.set(s.id, i + 1));
                 return (
                   <div key={li} className="prim-slab-block">
-                    {/* Sub-heading per slab */}
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
+                    {/* Dark banner */}
+                    <div className="prim-slab-banner">
                       <div>
-                        <span style={{ fontWeight: 700, fontSize: 14, fontFamily: "ui-monospace, monospace" }}>
+                        <span className="prim-slab-banner-title">
                           Primary Slab {li + 1}{pLayers.length > 1 ? ` of ${pLayers.length}` : ""}
                         </span>
-                        <span style={{ fontSize: 12, color: "#666", marginLeft: 12, fontFamily: "ui-monospace, monospace" }}>
+                        <span className="prim-slab-banner-dims" style={{ marginLeft: 14 }}>
                           {blk.l}″ L × {blk.w}″ W × {thickness}″ thick
                         </span>
-                        {pLayers.length > 1 && (
-                          <span style={{ fontSize: 11, color: "#888", marginLeft: 10 }}>
-                            depth {layer.zBot.toFixed(1)}″ – {layer.zTop.toFixed(1)}″
-                          </span>
-                        )}
                       </div>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-                        {layer.slabs.map(s => (
-                          <span key={s.id} className="prim-slab-chip"
-                            style={{ background: slabColor(s.id) + "28", border: `1px solid ${slabColor(s.id)}55` }}>
-                            {s.id}
-                          </span>
-                        ))}
-                      </div>
+                      {pLayers.length > 1 && (
+                        <span className="prim-slab-banner-dims">
+                          depth {layer.zBot.toFixed(1)}″ – {layer.zTop.toFixed(1)}″
+                        </span>
+                      )}
                     </div>
 
-                    {/* 3D Isometric view of primary slab */}
-                    <div className="prim-slab-view-card" style={{ marginBottom: 10 }}>
-                      <IsoBlockStaticSVG
-                        block={{ l: blk.l, w: blk.w, h: thicknessNum, stone: blk.stone }}
-                        placed={slabsForIso}
-                        size={560}
-                        stoneTypes={stoneTypes ?? undefined}
-                      />
-                      <div style={{ fontSize: 9, color: "#aaa", textAlign: "center", marginTop: 4, fontFamily: "ui-monospace, monospace" }}>
-                        3D isometric view — Primary Slab {li + 1} ({blk.l}″ × {blk.w}″ × {thickness}″)
+                    {/* Body */}
+                    <div className="prim-slab-body">
+                      {/* Color legend — # → color → ID → dimensions */}
+                      <div className="prim-legend">
+                        <div className="prim-legend-title">
+                          Cut list — {layer.slabs.length} {layer.slabs.length === 1 ? "piece" : "pieces"} from this slab
+                        </div>
+                        <div className="prim-legend-grid">
+                          {layer.slabs.map((s, idx) => {
+                            const col = slabColor(s.id);
+                            return (
+                              <div key={s.id} className="prim-legend-row">
+                                <span className="prim-legend-badge" style={{ background: col }}>
+                                  {idx + 1}
+                                </span>
+                                <span style={{ fontWeight: 700 }}>{s.id}</span>
+                                <span style={{ color: "#666" }}>{s.sw}×{s.sh}″</span>
+                                {s.temple && <span style={{ color: "#888", fontFamily: "-apple-system,Arial,sans-serif" }}>· {s.temple}</span>}
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
 
-                    {/* Large 2D layout SVG */}
-                    <div className="prim-slab-view-card">
-                      <svg viewBox={`0 0 ${svgW2.toFixed(1)} ${svgH2.toFixed(1)}`} style={{ width: "100%", display: "block" }} xmlns="http://www.w3.org/2000/svg">
-                        {/* Slab face */}
-                        <rect x={PL} y={PT} width={blk.l * sc2} height={blk.w * sc2}
-                          fill="#f5f5f0" stroke="#999" strokeWidth="1.2" strokeDasharray="5 3" />
-                        {/* L dimension */}
-                        <line x1={PL} y1={PT - 8} x2={PL + blk.l * sc2} y2={PT - 8} stroke="#bbb" strokeWidth="0.8" />
-                        <line x1={PL} y1={PT - 12} x2={PL} y2={PT - 4} stroke="#bbb" strokeWidth="0.8" />
-                        <line x1={PL + blk.l * sc2} y1={PT - 12} x2={PL + blk.l * sc2} y2={PT - 4} stroke="#bbb" strokeWidth="0.8" />
-                        <text x={PL + (blk.l * sc2) / 2} y={PT - 10} textAnchor="middle" fill="#777" fontSize={9} fontFamily="ui-monospace,monospace">
-                          {blk.l}&quot; L
-                        </text>
-                        {/* W dimension */}
-                        <line x1={PL - 8} y1={PT} x2={PL - 8} y2={PT + blk.w * sc2} stroke="#bbb" strokeWidth="0.8" />
-                        <line x1={PL - 12} y1={PT} x2={PL - 4} y2={PT} stroke="#bbb" strokeWidth="0.8" />
-                        <line x1={PL - 12} y1={PT + blk.w * sc2} x2={PL - 4} y2={PT + blk.w * sc2} stroke="#bbb" strokeWidth="0.8" />
-                        <text x={PL - 15} y={PT + (blk.w * sc2) / 2} textAnchor="middle" dominantBaseline="middle" fill="#777" fontSize={9}
-                          fontFamily="ui-monospace,monospace"
-                          transform={`rotate(-90,${PL - 15},${PT + (blk.w * sc2) / 2})`}>
-                          {blk.w}&quot; W
-                        </text>
-                        {/* All slabs: bright = this layer, dimmed = other layers */}
-                        {placed.map(s => {
-                          const inLayer = layer.slabs.some(ls => ls.id === s.id);
-                          const col = slabColor(s.id);
-                          const x = PL + s.px * sc2;
-                          const y = PT + s.py * sc2;
-                          const w = s.pw * sc2;
-                          const h = s.ph * sc2;
-                          const cx = x + w / 2; const cy = y + h / 2;
-                          const minDim = Math.min(w, h);
-                          return (
-                            <g key={s.id}>
-                              <rect x={x} y={y} width={w} height={h}
-                                fill={col} fillOpacity={inLayer ? 0.42 : 0.08}
-                                stroke={col} strokeWidth={inLayer ? "1.5" : "0.5"}
-                                strokeOpacity={inLayer ? 1 : 0.25} />
-                              {inLayer && minDim > 18 && (
-                                <text x={cx} y={minDim > 42 ? cy - 7 : cy} textAnchor="middle" dominantBaseline="middle"
-                                  fill="#1a1a1a" fontSize={minDim > 38 ? 10 : 8} fontWeight={700} fontFamily="ui-monospace,monospace">
-                                  {s.id}
-                                </text>
-                              )}
-                              {inLayer && minDim > 42 && (
-                                <text x={cx} y={cy + 6} textAnchor="middle" dominantBaseline="middle"
-                                  fill="#333" fontSize={8} fontFamily="ui-monospace,monospace">
-                                  {s.sw}×{s.sh}″
-                                </text>
-                              )}
-                              {inLayer && minDim > 64 && s.temple && (
-                                <text x={cx} y={cy + 16} textAnchor="middle" dominantBaseline="middle"
-                                  fill="#666" fontSize={7} fontFamily="-apple-system,Arial,sans-serif">
-                                  {s.temple}
-                                </text>
-                              )}
-                            </g>
-                          );
-                        })}
-                      </svg>
-                      <div style={{ fontSize: 9, color: "#aaa", textAlign: "center", marginTop: 4, fontFamily: "ui-monospace, monospace" }}>
-                        Top-down view · Primary Slab {li + 1} face (L × W) · dimmed = other layers
+                      {/* 3D Isometric */}
+                      <div className="prim-view-card">
+                        <div className="prim-view-head">3D Isometric View</div>
+                        <IsoBlockStaticSVG
+                          block={{ l: blk.l, w: blk.w, h: thicknessNum, stone: blk.stone }}
+                          placed={slabsForIso}
+                          size={560}
+                          stoneTypes={stoneTypes ?? undefined}
+                        />
                       </div>
-                    </div>
 
-                    {/* Required sizes table for this slab */}
-                    <table className="slab-table" style={{ marginBottom: li < pLayers.length - 1 ? 0 : 4 }}>
-                      <thead>
-                        <tr>
-                          <th style={{ width: 24 }}>#</th>
-                          <th>Slab ID</th>
-                          <th>Temple</th>
-                          <th>Label</th>
-                          <th>W × H (in)</th>
-                          <th>Thickness (in)</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {layer.slabs.map((s, i) => {
-                          const color = slabColor(s.id);
-                          return (
-                            <tr key={s.id}>
-                              <td style={{ color: "#999" }}>{i + 1}</td>
-                              <td>
-                                <span className="color-dot" style={{ background: color }} />
-                                <span className="slab-code">{s.id}</span>
-                              </td>
-                              <td>{s.temple ?? "—"}</td>
-                              <td style={{ color: "#555" }}>{s.label ?? "—"}</td>
-                              <td style={{ fontFamily: "ui-monospace, monospace" }}>{s.sw} × {s.sh}</td>
-                              <td style={{ fontFamily: "ui-monospace, monospace" }}>{s.sd ?? "—"}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+                      {/* Big 2D Top-down */}
+                      <div className="prim-view-card">
+                        <div className="prim-view-head">Top-down Cutting Layout</div>
+                        <svg viewBox={`0 0 ${svgW2.toFixed(1)} ${svgH2.toFixed(1)}`} style={{ width: "100%", display: "block" }} xmlns="http://www.w3.org/2000/svg">
+                          {/* Slab face */}
+                          <rect x={PL} y={PT} width={blk.l * sc2} height={blk.w * sc2}
+                            fill="#f5f5f0" stroke="#999" strokeWidth="1.2" strokeDasharray="5 3" />
+                          {/* L dimension */}
+                          <line x1={PL} y1={PT - 8} x2={PL + blk.l * sc2} y2={PT - 8} stroke="#bbb" strokeWidth="0.8" />
+                          <line x1={PL} y1={PT - 12} x2={PL} y2={PT - 4} stroke="#bbb" strokeWidth="0.8" />
+                          <line x1={PL + blk.l * sc2} y1={PT - 12} x2={PL + blk.l * sc2} y2={PT - 4} stroke="#bbb" strokeWidth="0.8" />
+                          <text x={PL + (blk.l * sc2) / 2} y={PT - 10} textAnchor="middle" fill="#777" fontSize={9} fontFamily="ui-monospace,monospace">
+                            {blk.l}&quot; L
+                          </text>
+                          {/* W dimension */}
+                          <line x1={PL - 8} y1={PT} x2={PL - 8} y2={PT + blk.w * sc2} stroke="#bbb" strokeWidth="0.8" />
+                          <line x1={PL - 12} y1={PT} x2={PL - 4} y2={PT} stroke="#bbb" strokeWidth="0.8" />
+                          <line x1={PL - 12} y1={PT + blk.w * sc2} x2={PL - 4} y2={PT + blk.w * sc2} stroke="#bbb" strokeWidth="0.8" />
+                          <text x={PL - 15} y={PT + (blk.w * sc2) / 2} textAnchor="middle" dominantBaseline="middle" fill="#777" fontSize={9}
+                            fontFamily="ui-monospace,monospace"
+                            transform={`rotate(-90,${PL - 15},${PT + (blk.w * sc2) / 2})`}>
+                            {blk.w}&quot; W
+                          </text>
+                          {/* All slabs: bright = this layer, dimmed = other layers */}
+                          {placed.map(s => {
+                            const badge = idToNum.get(s.id);
+                            const inLayer = badge != null;
+                            const col = slabColor(s.id);
+                            const x = PL + s.px * sc2;
+                            const y = PT + s.py * sc2;
+                            const w = s.pw * sc2;
+                            const h = s.ph * sc2;
+                            const cx = x + w / 2; const cy = y + h / 2;
+                            const minDim = Math.min(w, h);
+                            return (
+                              <g key={s.id}>
+                                <rect x={x} y={y} width={w} height={h}
+                                  fill={col} fillOpacity={inLayer ? 0.38 : 0.06}
+                                  stroke={col} strokeWidth={inLayer ? "1.6" : "0.5"}
+                                  strokeOpacity={inLayer ? 1 : 0.2} />
+                                {inLayer && minDim > 9 && (() => {
+                                  // Badge in centre (always visible when rect has room for it)
+                                  const badgeR = Math.min(10, Math.max(5, minDim * 0.22));
+                                  const hasRoomForText = minDim > 36;
+                                  const cyBadge = hasRoomForText ? cy - badgeR - 2 : cy;
+                                  return (
+                                    <>
+                                      <circle cx={cx} cy={cyBadge} r={badgeR} fill="#1a1a1a" stroke="#fff" strokeWidth="1.2" />
+                                      <text x={cx} y={cyBadge} textAnchor="middle" dominantBaseline="middle"
+                                        fill="#fff" fontSize={badgeR * 1.2} fontWeight={800}
+                                        fontFamily="ui-monospace,monospace">
+                                        {badge}
+                                      </text>
+                                      {hasRoomForText && (
+                                        <>
+                                          <text x={cx} y={cy + badgeR - 1} textAnchor="middle" dominantBaseline="middle"
+                                            stroke="#fff" strokeWidth="3" paintOrder="stroke"
+                                            fill="#1a1a1a" fontSize={minDim > 60 ? 9 : 7.5} fontWeight={700}
+                                            fontFamily="ui-monospace,monospace">
+                                            {s.id}
+                                          </text>
+                                          {minDim > 52 && (
+                                            <text x={cx} y={cy + badgeR + 10} textAnchor="middle" dominantBaseline="middle"
+                                              stroke="#fff" strokeWidth="2.5" paintOrder="stroke"
+                                              fill="#555" fontSize={7}
+                                              fontFamily="ui-monospace,monospace">
+                                              {s.sw}×{s.sh}″
+                                            </text>
+                                          )}
+                                        </>
+                                      )}
+                                    </>
+                                  );
+                                })()}
+                              </g>
+                            );
+                          })}
+                        </svg>
+                        <div style={{ fontSize: 9, color: "#aaa", textAlign: "center", marginTop: 4, fontFamily: "ui-monospace, monospace" }}>
+                          Numbered badges match the cut-list above · dimmed pieces = other primary slabs
+                        </div>
+                      </div>
+
+                      {/* Required sizes table */}
+                      <div className="prim-table-head">Required Sizes — this primary slab</div>
+                      <table className="slab-table">
+                        <thead>
+                          <tr>
+                            <th style={{ width: 28 }}>#</th>
+                            <th>Slab ID</th>
+                            <th>Temple</th>
+                            <th>Label</th>
+                            <th>W × H (in)</th>
+                            <th>Thickness (in)</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {layer.slabs.map((s, i) => {
+                            const color = slabColor(s.id);
+                            return (
+                              <tr key={s.id}>
+                                <td>
+                                  <span className="prim-legend-badge" style={{ background: color, width: 16, height: 16, fontSize: 10 }}>
+                                    {i + 1}
+                                  </span>
+                                </td>
+                                <td>
+                                  <span className="slab-code">{s.id}</span>
+                                </td>
+                                <td>{s.temple ?? "—"}</td>
+                                <td style={{ color: "#555" }}>{s.label ?? "—"}</td>
+                                <td style={{ fontFamily: "ui-monospace, monospace" }}>{s.sw} × {s.sh}</td>
+                                <td style={{ fontFamily: "ui-monospace, monospace" }}>{s.sd ?? "—"}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 );
               })}
