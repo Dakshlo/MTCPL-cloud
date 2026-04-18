@@ -1,5 +1,4 @@
 import { requireAuth } from "@/lib/auth";
-import { createDataClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
 import { AddBlockForm } from "./add-block-form";
@@ -10,23 +9,22 @@ import { generateNextCode } from "./utils";
 export default async function BlocksPage() {
   const { profile } = await requireAuth(["owner", "team_head", "block_slab_entry", "slab_entry", "block_entry"]);
 
-  const supabase = await createDataClient(profile.role);
   const admin = createAdminSupabaseClient();
   const [{ data: blocks, error }, { data: allIds }, { data: consumed }, { data: vendorRows }, { data: stoneTypes }, { data: openSlabs }] = await Promise.all([
-    supabase
+    admin
       .from("blocks")
       .select("id, stone, yard, category, length_ft, width_ft, height_ft, status, quality, truck_no, vendor_name, bill_no, created_at, created_by")
       .in("status", ["available", "reserved"])
       .order("created_at", { ascending: false })
       .limit(500),
-    supabase.from("blocks").select("id"),
-    supabase
+    admin.from("blocks").select("id"),
+    admin
       .from("blocks")
       .select("id, stone, yard, length_ft, width_ft, height_ft, updated_at")
       .eq("status", "consumed")
       .order("updated_at", { ascending: false })
       .limit(30),
-    supabase
+    admin
       .from("vendors")
       .select("name")
       .eq("vendor_type", "block_vendor")
