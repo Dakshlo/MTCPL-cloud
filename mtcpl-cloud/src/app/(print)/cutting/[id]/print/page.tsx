@@ -5,6 +5,7 @@ import { getProfilesMap } from "@/lib/profiles";
 import { IsoBlockStaticSVG } from "@/components/iso-block-static";
 import { PrintBtn } from "./print-btn";
 import { computeCutEfficiency, toCFT } from "@/lib/cut-efficiency";
+import { yardLabel } from "@/lib/yards";
 
 type Params = Promise<{ id: string }>;
 
@@ -549,7 +550,7 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
           </div>
           <div>
             <div className="meta-label">Yard</div>
-            <div className="meta-val">Yard {blk?.yard ?? "—"}</div>
+            <div className="meta-val">{blk?.yard != null ? yardLabel(blk.yard) : "—"}</div>
           </div>
           <div>
             <div className="meta-label">Dimensions (in)</div>

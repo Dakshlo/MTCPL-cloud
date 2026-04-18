@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { manualCutBlockAction } from "./actions";
+import { yardLabel } from "@/lib/yards";
 
 type OpenSlab = {
   id: string;
@@ -129,7 +130,7 @@ export function ManualCutModal({
             <div className="drawer-title">✂ Manual Cut Entry</div>
             <code className="drawer-subtitle">{block.id}</code>
             <p className="muted" style={{ margin: "4px 0 0", fontSize: 12 }}>
-              {block.stone} · Yard {block.yard} · {block.length_ft} × {block.width_ft} × {block.height_ft} in
+              {block.stone} · {yardLabel(block.yard)} · {block.length_ft} × {block.width_ft} × {block.height_ft} in
             </p>
           </div>
           <button className="drawer-close" onClick={onClose}>✕</button>

@@ -7,6 +7,7 @@ import { RejectButton } from "./reject-button";
 import { UndoApproveButton } from "./undo-approve-button";
 import { CuttingTimer } from "./cutting-timer";
 import { computeCutEfficiency } from "@/lib/cut-efficiency";
+import { yardLabel } from "@/lib/yards";
 
 type Tab = "pending" | "in_progress" | "done";
 type SearchParams = Promise<{ tab?: string }>;
@@ -266,7 +267,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                       <p className="muted" style={{ margin: "2px 0 0", fontSize: 12 }}>
                         {block.cut_sessions?.session_code}
                         {blk
-                          ? ` · ${blk.stone} · Yard ${blk.yard} · ${blk.l} × ${blk.w} × ${blk.h} in`
+                          ? ` · ${blk.stone} · ${yardLabel(blk.yard)} · ${blk.l} × ${blk.w} × ${blk.h} in`
                           : ""}
                         {block.cut_sessions?.kerf_mm
                           ? ` · Kerf ${block.cut_sessions.kerf_mm} mm`
@@ -506,7 +507,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                         </strong>
                         <p className="muted" style={{ margin: "2px 0 0", fontSize: 12 }}>
                           {block.cut_sessions?.session_code}
-                          {blk ? ` · ${blk.stone} · Yard ${blk.yard} · ${blk.l} × ${blk.w} × ${blk.h} in` : ""}
+                          {blk ? ` · ${blk.stone} · ${yardLabel(blk.yard)} · ${blk.l} × ${blk.w} × ${blk.h} in` : ""}
                           {block.cut_sessions?.kerf_mm ? ` · Kerf ${block.cut_sessions.kerf_mm} mm` : ""}
                         </p>
                         {block.cut_sessions?.planned_by && profilesMap[block.cut_sessions.planned_by] && (
@@ -601,7 +602,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                         </strong>
                         <p className="muted" style={{ margin: "2px 0 0", fontSize: 12 }}>
                           {block.cut_sessions?.session_code}
-                          {blk ? ` · ${blk.stone} · Yard ${blk.yard}` : ""}
+                          {blk ? ` · ${blk.stone} · ${yardLabel(blk.yard)}` : ""}
                           {block.updated_at ? ` · ${new Date(block.updated_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}` : ""}
                         </p>
                       </div>

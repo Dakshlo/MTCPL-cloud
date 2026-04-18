@@ -4,10 +4,11 @@ import { useState, useEffect } from "react";
 import { addBlockAction } from "./actions";
 import { VendorSelect } from "./vendor-select";
 import { stoneDisplayName } from "@/lib/stone-utils";
+import { ALLOWED_YARDS, yardLabel } from "@/lib/yards";
 
 type StoneType = { name: string; color_top: string };
 
-const YARDS = [1, 2, 3, 4, 5, 6] as const;
+const YARDS = ALLOWED_YARDS;
 type UnitMode = "inches" | "feetinches";
 
 function toInches(ft: string, ino: string): string {
@@ -129,7 +130,7 @@ export function AddBlockForm({ suggestedId, vendors, stoneTypes }: { suggestedId
           <label className="stack" style={{ flex: "0 0 100px" }}>
             <span>Yard</span>
             <select name="yard" defaultValue="1">
-              {YARDS.map(y => <option key={y} value={y}>Yard {y}</option>)}
+              {YARDS.map(y => <option key={y} value={y}>{yardLabel(y)}</option>)}
             </select>
           </label>
 

@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import Link from "next/link";
+import { ALLOWED_YARDS, yardLabel, yardShortLabel } from "@/lib/yards";
 
 type Block = {
   id: string;
@@ -232,7 +233,7 @@ export function ReportClient({ blocks, stoneNames }: { blocks: Block[]; stoneNam
             <span>Yard</span>
             <select value={yardFilter} onChange={e => setYardFilter(e.target.value)}>
               <option value="all">All Yards</option>
-              {[1,2,3,4,5,6].map(y => <option key={y} value={String(y)}>Yard {y}</option>)}
+              {ALLOWED_YARDS.map(y => <option key={y} value={String(y)}>{yardLabel(y)}</option>)}
             </select>
           </label>
 
@@ -380,7 +381,7 @@ export function ReportClient({ blocks, stoneNames }: { blocks: Block[]; stoneNam
                       {b.id}
                     </td>
                     <td style={{ padding: "9px 12px", whiteSpace: "nowrap" }}>{b.stone}</td>
-                    <td style={{ padding: "9px 12px" }}>Y{b.yard}</td>
+                    <td style={{ padding: "9px 12px" }}>{yardShortLabel(b.yard)}</td>
                     <td style={{ padding: "9px 12px", whiteSpace: "nowrap" }}>
                       {Number(b.length_ft)} × {Number(b.width_ft)} × {Number(b.height_ft)}
                     </td>

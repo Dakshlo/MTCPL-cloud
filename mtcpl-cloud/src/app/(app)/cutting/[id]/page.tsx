@@ -10,6 +10,7 @@ import { RejectButton } from "../reject-button";
 import { PrimarySlabPreview } from "../primary-slab-preview";
 import { computeCutEfficiency, toCFT } from "@/lib/cut-efficiency";
 import { EfficiencyBar } from "@/components/efficiency-bar";
+import { yardLabel } from "@/lib/yards";
 import {
   approveBlockAction,
   rejectBlockAction,
@@ -126,7 +127,7 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
           <p className="muted" style={{ marginTop: 4 }}>
             {session?.session_code ?? "—"}
             {blk
-              ? ` · ${blk.stone} · Yard ${blk.yard} · ${blk.l} × ${blk.w} × ${blk.h} in`
+              ? ` · ${blk.stone} · ${yardLabel(blk.yard)} · ${blk.l} × ${blk.w} × ${blk.h} in`
               : ""}
             {session?.kerf_mm ? ` · Kerf ${session.kerf_mm} mm` : ""}
           </p>

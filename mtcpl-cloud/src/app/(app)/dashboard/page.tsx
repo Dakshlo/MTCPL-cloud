@@ -7,6 +7,7 @@ import { NowBand } from "./now-band";
 import { PastBand } from "./past-band";
 import { NextBand } from "./next-band";
 import { getNowBandData } from "./actions";
+import { yardShortLabel } from "@/lib/yards";
 
 type SearchParams = Promise<{ date?: string; pushed?: string }>;
 
@@ -688,7 +689,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
                       const maxCft = Math.max(...yardEntries.map(([, s]) => s.cft), 1);
                       return (
                         <div key={yard} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span style={{ fontSize: 11, color: "var(--muted)", width: 44, flexShrink: 0 }}>Yard {yard}</span>
+                          <span style={{ fontSize: 11, color: "var(--muted)", width: 78, flexShrink: 0 }}>{yardShortLabel(yard)}</span>
                           <div style={{ flex: 1, height: 6, background: "var(--border)", borderRadius: 3, overflow: "hidden" }}>
                             <div style={{ width: `${(stat.cft / maxCft) * 100}%`, height: "100%", background: "var(--gold)", borderRadius: 3 }} />
                           </div>

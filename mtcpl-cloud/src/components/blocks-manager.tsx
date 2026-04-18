@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { BlockCardPreview } from "@/components/stone-previews";
 import type { StoneType as Stone } from "@/lib/types";
+import { yardLabel } from "@/lib/yards";
 
 type BlockRecord = {
   id: string;
@@ -170,7 +171,7 @@ export function BlocksManager({
                     <strong>{block.id}</strong>
                     <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
                       <span className={`stone-badge ${isPink ? "stone-badge-pink" : "stone-badge-white"}`}>{block.stone}</span>
-                      <span className="yard-badge">Yard {block.yard}</span>
+                      <span className="yard-badge">{yardLabel(block.yard)}</span>
                       <span className={statusClass(block.status)}>{block.status.replaceAll("_", " ")}</span>
                     </div>
                   </div>

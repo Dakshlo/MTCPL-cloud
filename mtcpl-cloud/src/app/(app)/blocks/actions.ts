@@ -8,6 +8,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { generateNextCode } from "./utils";
 import { logAudit } from "@/lib/audit";
 import { notify } from "@/lib/notifications";
+import { ALLOWED_YARDS, isAllowedYard, yardLabel } from "@/lib/yards";
 
 
 function numValue(formData: FormData, key: string, fallback = 0) {
@@ -25,9 +26,6 @@ function redirectWithToast(path: string, message: string): never {
   redirect(`${path}?toast=${encodeURIComponent(message)}`);
 }
 
-// Keep in sync with the blocks_yard_check CHECK constraint in the DB.
-const ALLOWED_YARDS = [1, 2, 3, 4, 5, 6] as const;
-
 export async function addBlockAction(formData: FormData) {
   const { profile } = await requireAuth(["owner", "team_head", "block_slab_entry", "block_entry"]);
   const supabase = createAdminSupabaseClient();
@@ -43,10 +41,10 @@ export async function addBlockAction(formData: FormData) {
   const quality = textValue(formData, "quality") || null;
 
   const yardRaw = numValue(formData, "yard", 1);
-  if (!(ALLOWED_YARDS as readonly number[]).includes(yardRaw)) {
+  if (!isAllowedYard(yardRaw)) {
     redirectWithToast(
       "/blocks",
-      `Yard ${yardRaw} is not allowed. Please pick one of: ${ALLOWED_YARDS.join(", ")}.`,
+      `Yard ${yardRaw} is not allowed. Please pick one of: ${ALLOWED_YARDS.map(yardLabel).join(", ")}.`,
     );
   }
 
@@ -80,7 +78,7 @@ export async function addBlockAction(formData: FormData) {
     if (!error) {
       await logAudit(profile.id, "create", "block", nextId, { stone: payload.stone, yard: payload.yard, status: payload.status });
       await notify("blocks_added", `New block ${nextId} added (${payload.stone})`, {
-        message: `Yard ${payload.yard} · ${payload.length_ft}" × ${payload.width_ft}" × ${payload.height_ft}"`,
+        message: `${yardLabel(payload.yard)} · ${payload.length_ft}" × ${payload.width_ft}" × ${payload.height_ft}"`,
         entityType: "block",
         entityId: nextId,
         actorId: profile.id,

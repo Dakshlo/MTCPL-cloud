@@ -7,6 +7,7 @@ import type { StoneTypeDef } from "@/lib/stone-utils";
 import type { AIAssignment, AIplanResponse } from "@/app/(app)/planning/actions";
 import { computeCutEfficiency, toCFT, type CutEfficiency } from "@/lib/cut-efficiency";
 import { EfficiencyBar } from "@/components/efficiency-bar";
+import { yardLabel, yardShortLabel } from "@/lib/yards";
 
 export type BlockRow = {
   id: string;
@@ -1062,7 +1063,7 @@ export function PlanningWorkbench({
                   onClick={() => setYardFilter(y)}
                   style={{ fontSize: 11, padding: "3px 10px", borderRadius: 20, border: "1px solid var(--border)", background: yardFilter === y ? "var(--gold)" : "var(--bg)", color: yardFilter === y ? "#fff" : "var(--muted)", fontWeight: 600, cursor: "pointer" }}
                 >
-                  Yard {y}
+                  {yardLabel(y)}
                 </button>
               ))}
             </div>
@@ -1090,7 +1091,7 @@ export function PlanningWorkbench({
                       <div className="record-title-row">
                         <strong>{block.id}</strong>
                         <span className="role-pill">{block.category}</span>
-                        <span className="role-pill">Yard {block.yard}</span>
+                        <span className="role-pill">{yardShortLabel(block.yard)}</span>
                         {block.quality ? (
                           <span className={`role-pill ${block.quality === "A" ? "badge-available" : "badge-reserved"}`}>
                             Grade {block.quality}
@@ -1283,7 +1284,7 @@ export function PlanningWorkbench({
                           <div>
                             <strong>{item.blk.id}</strong>
                             <p className="muted">
-                              {item.blk.stone} | Yard {item.blk.yard} | {item.blk.l} × {item.blk.w} × {item.blk.h} in
+                              {item.blk.stone} | {yardLabel(item.blk.yard)} | {item.blk.l} × {item.blk.w} × {item.blk.h} in
                               {item.blk.orient ? <> · <span className="role-pill">{item.blk.orient}</span></> : null}
                               {layerCount > 1 ? <> · <span className="role-pill">{layerCount} layers</span></> : null}
                             </p>

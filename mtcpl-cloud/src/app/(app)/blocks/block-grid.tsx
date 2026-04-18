@@ -7,6 +7,7 @@ import { VendorSelect } from "./vendor-select";
 import { stoneDisplayName } from "@/lib/stone-utils";
 import type { StoneTypeDef } from "@/lib/stone-utils";
 import { ManualCutModal } from "./manual-cut-modal";
+import { ALLOWED_YARDS, yardLabel, yardShortLabel } from "@/lib/yards";
 
 type StoneType = StoneTypeDef;
 type OpenSlab = {
@@ -24,7 +25,7 @@ const FALLBACK_STONES: StoneType[] = [
   { name: "PinkStone",  color_top: "#EDCFC2", color_front: "#C87A60", color_side: "#DDA88A" },
   { name: "WhiteStone", color_top: "#E8E6DC", color_front: "#B8B6AC", color_side: "#D0CEC4" },
 ];
-const YARDS = [1, 2, 3, 4, 5, 6] as const;
+const YARDS = ALLOWED_YARDS;
 const STATUSES = ["available", "reserved", "consumed", "discarded"] as const;
 
 function calcCft(l: number, w: number, h: number) {
@@ -122,7 +123,7 @@ export function BlockGrid({ blocks, canEdit, vendors, profilesMap = {}, stoneTyp
                 <div className="block-card-code">{block.id}</div>
                 <div className="block-card-badges">
                   <span className="role-pill" style={{ background: stoneColor + "55", color: "#1a1a1a", border: `1px solid ${stoneColor}` }}>{stoneDisplayName(block.stone)}</span>
-                  <span className="role-pill">Y{block.yard}</span>
+                  <span className="role-pill">{yardShortLabel(block.yard)}</span>
                   <span className={`role-pill ${statusBadgeClass(block.status)}`}>{STATUS_LABELS[block.status] ?? block.status}</span>
                   {block.quality && (
                     <span className={`role-pill ${block.quality === "A" ? "badge-available" : "badge-reserved"}`}>
@@ -188,7 +189,7 @@ export function BlockGrid({ blocks, canEdit, vendors, profilesMap = {}, stoneTyp
                   <label className="stack">
                     <span>Yard</span>
                     <select name="yard" defaultValue={String(selected.yard)}>
-                      {YARDS.map(y => <option key={y} value={y}>Yard {y}</option>)}
+                      {YARDS.map(y => <option key={y} value={y}>{yardLabel(y)}</option>)}
                     </select>
                   </label>
                 </div>
