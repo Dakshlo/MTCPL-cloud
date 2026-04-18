@@ -7,7 +7,7 @@ import type { StoneTypeDef } from "@/lib/stone-utils";
 import type { AIAssignment, AIplanResponse } from "@/app/(app)/planning/actions";
 import { computeCutEfficiency, toCFT, type CutEfficiency } from "@/lib/cut-efficiency";
 import { EfficiencyBar } from "@/components/efficiency-bar";
-import { yardLabel, yardShortLabel } from "@/lib/yards";
+import { yardLabel, yardShortLabel, FACILITIES, YARDS_BY_FACILITY, facilityLabel, facilityOfYard, type Facility } from "@/lib/yards";
 
 export type BlockRow = {
   id: string;
@@ -911,7 +911,14 @@ export function PlanningWorkbench({
 }) {
   const [kerfMm, setKerfMm] = useState(20);
   const [result, setResult] = useState<PlanResult | null>(null);
-  const [yardFilter, setYardFilter] = useState<number | null>(null);
+  // Facility = hard separation between MTCPL and RIICO sites. A plan can only
+  // ever use blocks from the active facility — switching facility wipes prior
+  // selections to prevent cross-site mixing.
+  const [facility, setFacility] = useState<Facility>("mtcpl");
+  // Yards within the active facility that are currently ticked. Starts full.
+  const [selectedYards, setSelectedYards] = useState<Set<number>>(
+    () => new Set(YARDS_BY_FACILITY["mtcpl"]),
+  );
   const [ackUnmet, setAckUnmet] = useState(false);
   const [originalSelectedCount, setOriginalSelectedCount] = useState(0);
   const [aiLoading, setAiLoading] = useState(false);
@@ -919,12 +926,38 @@ export function PlanningWorkbench({
   const [aiError, setAiError] = useState<string | null>(null);
 
   const allUsableBlocks = blocks.filter((block) => block.status === "available" || block.status === "reserved");
-  const yards = [...new Set(allUsableBlocks.map(b => Number(b.yard)))].sort((a, b) => a - b);
-  const usableBlocks = yardFilter !== null ? allUsableBlocks.filter(b => Number(b.yard) === yardFilter) : allUsableBlocks;
+  // Blocks restricted to active facility first, then to ticked yards within it.
+  const facilityBlocks = allUsableBlocks.filter((b) => facilityOfYard(b.yard) === facility);
+  const usableBlocks = facilityBlocks.filter((b) => selectedYards.has(Number(b.yard)));
   const openSlabs = slabs.filter((slab) => slab.status === "open" || slab.status === "planned");
 
-  const [selectedBlockIds, setSelectedBlockIds] = useState<Set<string>>(() => new Set(allUsableBlocks.map((b) => b.id)));
+  const [selectedBlockIds, setSelectedBlockIds] = useState<Set<string>>(
+    () => new Set(allUsableBlocks.filter((b) => facilityOfYard(b.yard) === "mtcpl").map((b) => b.id)),
+  );
   const [selectedSlabIds, setSelectedSlabIds] = useState<Set<string>>(() => new Set(openSlabs.map((s) => s.id)));
+
+  function pickFacility(f: Facility) {
+    if (f === facility) return;
+    setFacility(f);
+    // Auto-tick every yard of the new facility so the user starts with
+    // "everything in this site" rather than nothing.
+    setSelectedYards(new Set(YARDS_BY_FACILITY[f]));
+    // Re-seed block selection to include every available block in the new
+    // facility. Any previously-selected MTCPL block can never survive into a
+    // RIICO plan (and vice versa) — this enforces the no-mixing rule.
+    setSelectedBlockIds(
+      new Set(allUsableBlocks.filter((b) => facilityOfYard(b.yard) === f).map((b) => b.id)),
+    );
+  }
+
+  function toggleYard(y: number) {
+    setSelectedYards((prev) => {
+      const next = new Set(prev);
+      if (next.has(y)) next.delete(y);
+      else next.add(y);
+      return next;
+    });
+  }
 
   const slabsByTemple = openSlabs.reduce<Record<string, SlabRow[]>>((acc, slab) => {
     if (!acc[slab.temple]) acc[slab.temple] = [];
@@ -1046,28 +1079,82 @@ export function PlanningWorkbench({
             <h2 style={{ margin: 0 }}>Stock Blocks ({usableBlocks.length})</h2>
             <p className="muted">Available and reserved blocks for cutting</p>
           </div>
-          {/* Yard filter */}
-          {yards.length > 1 && (
-            <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
-              <button
-                type="button"
-                onClick={() => setYardFilter(null)}
-                style={{ fontSize: 11, padding: "3px 10px", borderRadius: 20, border: "1px solid var(--border)", background: yardFilter === null ? "var(--gold)" : "var(--bg)", color: yardFilter === null ? "#fff" : "var(--muted)", fontWeight: 600, cursor: "pointer" }}
-              >
-                All Yards
-              </button>
-              {yards.map(y => (
+          {/* Facility selector — hard split between MTCPL and RIICO sites.
+              Switching wipes block selection so a plan can never mix sites. */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              Facility:
+            </span>
+            {FACILITIES.map(f => {
+              const isActive = facility === f;
+              return (
+                <button
+                  key={f}
+                  type="button"
+                  onClick={() => pickFacility(f)}
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 700,
+                    padding: "5px 14px",
+                    borderRadius: 6,
+                    border: `1.5px solid ${isActive ? "var(--gold)" : "var(--border)"}`,
+                    background: isActive ? "var(--gold)" : "var(--bg)",
+                    color: isActive ? "#fff" : "var(--muted)",
+                    cursor: "pointer",
+                    letterSpacing: "0.04em",
+                  }}
+                >
+                  {facilityLabel(f)}
+                </button>
+              );
+            })}
+            <span style={{ fontSize: 10, color: "var(--muted)", fontStyle: "italic" }}>
+              (can't mix — different physical sites)
+            </span>
+          </div>
+
+          {/* Yard checkboxes — scoped to active facility */}
+          <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginRight: 4 }}>
+              Yards:
+            </span>
+            {YARDS_BY_FACILITY[facility].map(y => {
+              const ticked = selectedYards.has(y);
+              return (
                 <button
                   key={y}
                   type="button"
-                  onClick={() => setYardFilter(y)}
-                  style={{ fontSize: 11, padding: "3px 10px", borderRadius: 20, border: "1px solid var(--border)", background: yardFilter === y ? "var(--gold)" : "var(--bg)", color: yardFilter === y ? "#fff" : "var(--muted)", fontWeight: 600, cursor: "pointer" }}
+                  onClick={() => toggleYard(y)}
+                  style={{
+                    fontSize: 11, padding: "3px 10px", borderRadius: 20,
+                    border: `1px solid ${ticked ? "var(--gold-dark)" : "var(--border)"}`,
+                    background: ticked ? "rgba(184,115,51,0.15)" : "var(--bg)",
+                    color: ticked ? "var(--gold-dark)" : "var(--muted)",
+                    fontWeight: 600, cursor: "pointer",
+                    display: "inline-flex", alignItems: "center", gap: 5,
+                  }}
                 >
+                  <span style={{ fontSize: 10 }}>{ticked ? "✓" : "○"}</span>
                   {yardLabel(y)}
                 </button>
-              ))}
-            </div>
-          )}
+              );
+            })}
+            <button
+              type="button"
+              onClick={() => setSelectedYards(new Set(YARDS_BY_FACILITY[facility]))}
+              style={{ fontSize: 10, padding: "3px 8px", borderRadius: 10, border: "1px dashed var(--border)", background: "transparent", color: "var(--muted)", cursor: "pointer", marginLeft: 4 }}
+            >
+              All
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedYards(new Set())}
+              style={{ fontSize: 10, padding: "3px 8px", borderRadius: 10, border: "1px dashed var(--border)", background: "transparent", color: "var(--muted)", cursor: "pointer" }}
+            >
+              None
+            </button>
+          </div>
+
           <div className="plan-select-row" style={{ marginBottom: 8 }}>
             <button className="ghost-button" style={{ fontSize: 12, padding: "2px 10px" }} type="button" onClick={() => setSelectedBlockIds(new Set(usableBlocks.map((b) => b.id)))}>Select All</button>
             <button className="ghost-button" style={{ fontSize: 12, padding: "2px 10px" }} type="button" onClick={() => setSelectedBlockIds(new Set())}>Deselect All</button>

@@ -7,7 +7,7 @@ import { VendorSelect } from "./vendor-select";
 import { stoneDisplayName } from "@/lib/stone-utils";
 import type { StoneTypeDef } from "@/lib/stone-utils";
 import { ManualCutModal } from "./manual-cut-modal";
-import { ALLOWED_YARDS, yardLabel, yardShortLabel } from "@/lib/yards";
+import { FACILITIES, YARDS_BY_FACILITY, facilityLabel, facilityOfYard, yardLabel, yardShortLabel, type Facility } from "@/lib/yards";
 
 type StoneType = StoneTypeDef;
 type OpenSlab = {
@@ -25,7 +25,6 @@ const FALLBACK_STONES: StoneType[] = [
   { name: "PinkStone",  color_top: "#EDCFC2", color_front: "#C87A60", color_side: "#DDA88A" },
   { name: "WhiteStone", color_top: "#E8E6DC", color_front: "#B8B6AC", color_side: "#D0CEC4" },
 ];
-const YARDS = ALLOWED_YARDS;
 const STATUSES = ["available", "reserved", "consumed", "discarded"] as const;
 
 function calcCft(l: number, w: number, h: number) {
@@ -82,6 +81,41 @@ export function BlockGrid({ blocks, canEdit, vendors, profilesMap = {}, stoneTyp
   const [manualCutOpen, setManualCutOpen] = useState(false);
   const selected = blocks.find(b => b.id === selectedId) ?? null;
 
+  // Drawer facility/yard — synced whenever a different block is opened so the
+  // picker starts on that block's actual facility and yard.
+  const [drawerFacility, setDrawerFacility] = useState<Facility>("mtcpl");
+  const [drawerYard, setDrawerYard] = useState<number>(1);
+  useEffect(() => {
+    if (selected) {
+      setDrawerFacility(facilityOfYard(selected.yard));
+      setDrawerYard(Number(selected.yard));
+    }
+  }, [selected?.id, selected?.yard]);
+  function pickDrawerFacility(f: Facility) {
+    if (f === drawerFacility) return;
+    setDrawerFacility(f);
+    setDrawerYard(YARDS_BY_FACILITY[f][0]);
+  }
+
+  // Section-level collapse per facility. Default = expanded.
+  const [collapsed, setCollapsed] = useState<Record<Facility, boolean>>({ mtcpl: false, riico: false });
+  function toggleCollapsed(f: Facility) {
+    setCollapsed(prev => ({ ...prev, [f]: !prev[f] }));
+  }
+
+  // Group blocks by facility, remember latest-added in each group so we can
+  // float the just-updated section to the top.
+  const byFacility: Record<Facility, Block[]> = { mtcpl: [], riico: [] };
+  const latestAt: Record<Facility, string> = { mtcpl: "", riico: "" };
+  for (const b of blocks) {
+    const f = facilityOfYard(b.yard);
+    byFacility[f].push(b);
+    if ((b.created_at ?? "") > latestAt[f]) latestAt[f] = b.created_at ?? "";
+  }
+  const orderedFacilities: Facility[] = [...FACILITIES].sort(
+    (a, b) => (latestAt[b] > latestAt[a] ? 1 : -1),
+  );
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
@@ -95,55 +129,112 @@ export function BlockGrid({ blocks, canEdit, vendors, profilesMap = {}, stoneTyp
 
   return (
     <>
-      <div className="block-card-grid">
-        {blocks.map(block => {
-          const L = Number(block.length_ft);
-          const W = Number(block.width_ft);
-          const H = Number(block.height_ft);
-          const cft = calcCft(L, W, H);
-          const stoneColor = stones.find(s => s.name === block.stone)?.color_top ?? "#D8D4CC";
-          const isSelected = selectedId === block.id;
-
-          const isUnavailable = block.status !== "available";
-
+      <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+        {orderedFacilities.map(f => {
+          const list = byFacility[f];
+          if (list.length === 0) return null;
+          const isCollapsed = collapsed[f];
           return (
-            <div
-              key={block.id}
-              className={`block-card${isSelected ? " block-card-active" : ""}`}
-              style={isUnavailable ? { filter: "grayscale(0.9)", opacity: 0.65 } : undefined}
-              onClick={() => setSelectedId(isSelected ? null : block.id)}
-              role="button"
-              tabIndex={0}
-              onKeyDown={e => { if (e.key === "Enter" || e.key === " ") setSelectedId(isSelected ? null : block.id); }}
-            >
-              <div className="block-card-preview">
-                <BlockCardPreview stone={block.stone} l={L} w={W} h={H} stoneTypes={stones} />
-              </div>
-              <div className="block-card-info">
-                <div className="block-card-code">{block.id}</div>
-                <div className="block-card-badges">
-                  <span className="role-pill" style={{ background: stoneColor + "55", color: "#1a1a1a", border: `1px solid ${stoneColor}` }}>{stoneDisplayName(block.stone)}</span>
-                  <span className="role-pill">{yardShortLabel(block.yard)}</span>
-                  <span className={`role-pill ${statusBadgeClass(block.status)}`}>{STATUS_LABELS[block.status] ?? block.status}</span>
-                  {block.quality && (
-                    <span className={`role-pill ${block.quality === "A" ? "badge-available" : "badge-reserved"}`}>
-                      {block.quality === "A" ? "Grade A" : "Grade B"}
-                    </span>
-                  )}
+            <section key={f}>
+              {/* Facility header — click to collapse/expand */}
+              <button
+                type="button"
+                onClick={() => toggleCollapsed(f)}
+                style={{
+                  width: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "10px 0",
+                  borderBottom: "2px solid var(--border)",
+                  marginBottom: 12,
+                  background: "transparent",
+                  border: 0,
+                  borderBottomWidth: 2,
+                  borderBottomStyle: "solid",
+                  borderBottomColor: "var(--border)",
+                  cursor: "pointer",
+                  textAlign: "left",
+                }}
+                aria-expanded={!isCollapsed}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{
+                    fontSize: 11, fontWeight: 700, letterSpacing: "0.05em",
+                    padding: "2px 9px", borderRadius: 4,
+                    background: f === "riico" ? "rgba(124,58,237,0.12)" : "rgba(184,115,51,0.12)",
+                    color: f === "riico" ? "#7c3aed" : "var(--gold-dark)",
+                    border: `1px solid ${f === "riico" ? "rgba(124,58,237,0.3)" : "rgba(184,115,51,0.3)"}`,
+                  }}>
+                    {facilityLabel(f)}
+                  </span>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}>
+                    {list.length} block{list.length === 1 ? "" : "s"}
+                  </span>
                 </div>
-                <div className="block-card-dims">{L} × {W} × {H} in</div>
-                <div className="block-card-cft">{cft} CFT</div>
-                {block.created_at && (
-                  <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
-                    Added {fmtDate(block.created_at)}
-                    {block.created_by && (
-                      <> · <span style={{ color: "var(--gold-dark)", fontWeight: 600 }}>by {profilesMap[block.created_by] ?? "Unknown"}</span></>
-                    )}
-                  </div>
-                )}
-              </div>
-              {canEdit && <div className="block-card-edit-hint">{isSelected ? "✕ Close" : "Edit"}</div>}
-            </div>
+                <span style={{
+                  fontSize: 11, color: "var(--muted)",
+                  display: "flex", alignItems: "center", gap: 6,
+                }}>
+                  {isCollapsed ? "Show" : "Hide"}
+                  <span style={{ fontSize: 10 }}>{isCollapsed ? "▶" : "▼"}</span>
+                </span>
+              </button>
+
+              {!isCollapsed && (
+                <div className="block-card-grid">
+                  {list.map(block => {
+                    const L = Number(block.length_ft);
+                    const W = Number(block.width_ft);
+                    const H = Number(block.height_ft);
+                    const cft = calcCft(L, W, H);
+                    const stoneColor = stones.find(s => s.name === block.stone)?.color_top ?? "#D8D4CC";
+                    const isSelected = selectedId === block.id;
+                    const isUnavailable = block.status !== "available";
+
+                    return (
+                      <div
+                        key={block.id}
+                        className={`block-card${isSelected ? " block-card-active" : ""}`}
+                        style={isUnavailable ? { filter: "grayscale(0.9)", opacity: 0.65 } : undefined}
+                        onClick={() => setSelectedId(isSelected ? null : block.id)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={e => { if (e.key === "Enter" || e.key === " ") setSelectedId(isSelected ? null : block.id); }}
+                      >
+                        <div className="block-card-preview">
+                          <BlockCardPreview stone={block.stone} l={L} w={W} h={H} stoneTypes={stones} />
+                        </div>
+                        <div className="block-card-info">
+                          <div className="block-card-code">{block.id}</div>
+                          <div className="block-card-badges">
+                            <span className="role-pill" style={{ background: stoneColor + "55", color: "#1a1a1a", border: `1px solid ${stoneColor}` }}>{stoneDisplayName(block.stone)}</span>
+                            <span className="role-pill">{yardShortLabel(block.yard)}</span>
+                            <span className={`role-pill ${statusBadgeClass(block.status)}`}>{STATUS_LABELS[block.status] ?? block.status}</span>
+                            {block.quality && (
+                              <span className={`role-pill ${block.quality === "A" ? "badge-available" : "badge-reserved"}`}>
+                                {block.quality === "A" ? "Grade A" : "Grade B"}
+                              </span>
+                            )}
+                          </div>
+                          <div className="block-card-dims">{L} × {W} × {H} in</div>
+                          <div className="block-card-cft">{cft} CFT</div>
+                          {block.created_at && (
+                            <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+                              Added {fmtDate(block.created_at)}
+                              {block.created_by && (
+                                <> · <span style={{ color: "var(--gold-dark)", fontWeight: 600 }}>by {profilesMap[block.created_by] ?? "Unknown"}</span></>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        {canEdit && <div className="block-card-edit-hint">{isSelected ? "✕ Close" : "Edit"}</div>}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
           );
         })}
       </div>
@@ -186,13 +277,29 @@ export function BlockGrid({ blocks, canEdit, vendors, profilesMap = {}, stoneTyp
                       {stones.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
                     </select>
                   </label>
-                  <label className="stack">
-                    <span>Yard</span>
-                    <select name="yard" defaultValue={String(selected.yard)}>
-                      {YARDS.map(y => <option key={y} value={y}>{yardLabel(y)}</option>)}
-                    </select>
-                  </label>
+                  <div className="stack">
+                    <span>Facility</span>
+                    <div className="stone-toggle">
+                      {FACILITIES.map(f => (
+                        <button
+                          key={f}
+                          type="button"
+                          className={`stone-toggle-btn${drawerFacility === f ? " active-pink" : ""}`}
+                          onClick={() => pickDrawerFacility(f)}
+                        >
+                          {facilityLabel(f)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
+
+                <label className="stack">
+                  <span>Yard</span>
+                  <select name="yard" value={drawerYard} onChange={e => setDrawerYard(Number(e.target.value))}>
+                    {YARDS_BY_FACILITY[drawerFacility].map(y => <option key={y} value={y}>{yardLabel(y)}</option>)}
+                  </select>
+                </label>
 
                 <label className="stack">
                   <span>Status</span>

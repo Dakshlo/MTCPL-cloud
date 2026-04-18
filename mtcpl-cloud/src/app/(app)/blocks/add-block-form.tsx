@@ -4,11 +4,10 @@ import { useState, useEffect } from "react";
 import { addBlockAction } from "./actions";
 import { VendorSelect } from "./vendor-select";
 import { stoneDisplayName } from "@/lib/stone-utils";
-import { ALLOWED_YARDS, yardLabel } from "@/lib/yards";
+import { FACILITIES, YARDS_BY_FACILITY, facilityLabel, yardLabel, type Facility } from "@/lib/yards";
 
 type StoneType = { name: string; color_top: string };
 
-const YARDS = ALLOWED_YARDS;
 type UnitMode = "inches" | "feetinches";
 
 function toInches(ft: string, ino: string): string {
@@ -54,10 +53,20 @@ export function AddBlockForm({ suggestedId, vendors, stoneTypes }: { suggestedId
   const stones = stoneTypes && stoneTypes.length > 0 ? stoneTypes : FALLBACK_STONES;
   const [stone, setStone] = useState<string>(stones[0]?.name ?? "PinkStone");
   const [quality, setQuality] = useState<"" | "A" | "B">("");
+  const [facility, setFacility] = useState<Facility>("mtcpl");
+  const [yard, setYard] = useState<number>(YARDS_BY_FACILITY["mtcpl"][0]);
   const [l, setL] = useState("");
   const [w, setW] = useState("");
   const [h, setH] = useState("");
   const [unitMode, setUnitMode] = useState<UnitMode>("inches");
+
+  const yardsForFacility = YARDS_BY_FACILITY[facility];
+
+  function pickFacility(f: Facility) {
+    if (f === facility) return;
+    setFacility(f);
+    setYard(YARDS_BY_FACILITY[f][0]);
+  }
 
   useEffect(() => {
     const saved = localStorage.getItem("mtcpl_unit") as UnitMode | null;
@@ -127,10 +136,26 @@ export function AddBlockForm({ suggestedId, vendors, stoneTypes }: { suggestedId
             <input type="hidden" name="stone" value={stone} />
           </div>
 
-          <label className="stack" style={{ flex: "0 0 100px" }}>
+          <div className="stack" style={{ flex: "0 0 auto" }}>
+            <span>Facility</span>
+            <div className="stone-toggle">
+              {FACILITIES.map(f => (
+                <button
+                  key={f}
+                  type="button"
+                  className={`stone-toggle-btn${facility === f ? " active-pink" : ""}`}
+                  onClick={() => pickFacility(f)}
+                >
+                  {facilityLabel(f)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <label className="stack" style={{ flex: "0 0 auto", minWidth: 140 }}>
             <span>Yard</span>
-            <select name="yard" defaultValue="1">
-              {YARDS.map(y => <option key={y} value={y}>{yardLabel(y)}</option>)}
+            <select name="yard" value={yard} onChange={e => setYard(Number(e.target.value))}>
+              {yardsForFacility.map(y => <option key={y} value={y}>{yardLabel(y)}</option>)}
             </select>
           </label>
 
