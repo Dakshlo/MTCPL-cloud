@@ -25,6 +25,9 @@ function redirectWithToast(path: string, message: string): never {
   redirect(`${path}?toast=${encodeURIComponent(message)}`);
 }
 
+// Keep in sync with the blocks_yard_check CHECK constraint in the DB.
+const ALLOWED_YARDS = [1, 2, 3, 4, 5, 6] as const;
+
 export async function addBlockAction(formData: FormData) {
   const { profile } = await requireAuth(["owner", "team_head", "block_slab_entry", "block_entry"]);
   const supabase = createAdminSupabaseClient();
@@ -39,9 +42,17 @@ export async function addBlockAction(formData: FormData) {
 
   const quality = textValue(formData, "quality") || null;
 
+  const yardRaw = numValue(formData, "yard", 1);
+  if (!(ALLOWED_YARDS as readonly number[]).includes(yardRaw)) {
+    redirectWithToast(
+      "/blocks",
+      `Yard ${yardRaw} is not allowed. Please pick one of: ${ALLOWED_YARDS.join(", ")}.`,
+    );
+  }
+
   const payload = {
     stone: textValue(formData, "stone") || "PinkStone",
-    yard: numValue(formData, "yard", 1),
+    yard: yardRaw,
     category: "Fresh" as const,
     quality,
     length_ft: numValue(formData, "length_in", 0),
