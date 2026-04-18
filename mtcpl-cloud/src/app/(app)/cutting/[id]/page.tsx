@@ -255,80 +255,111 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
 
       {/* Slab chips now rendered inside CuttingDetailPreview above */}
 
-      {/* ── Layer-by-Layer Guide (when multiple layers exist) ── */}
+      {/* ── Primary Slab Views ── */}
       {blk && placed.length > 0 && (() => {
-        const slabsWithZ = placed.filter(s => s.zTop != null && s.px != null);
-        if (slabsWithZ.length === 0) return null;
+        const slabsWithPos = placed.filter(s => s.px != null && s.pw != null);
+        if (slabsWithPos.length === 0) return null;
         const map = new Map<string, { zBot: number; zTop: number; slabs: PlacedSlab[] }>();
-        for (const s of slabsWithZ) {
-          const zTop = s.zTop!;
+        for (const s of slabsWithPos) {
+          const zTop = s.zTop ?? blk.h;
           const zBot = s.zBot ?? 0;
           const key = `${zBot.toFixed(2)}_${zTop.toFixed(2)}`;
           if (!map.has(key)) map.set(key, { zBot, zTop, slabs: [] });
           map.get(key)!.slabs.push(s);
         }
         const layers = [...map.values()].sort((a, b) => b.zTop - a.zTop);
-        if (layers.length < 2) return null;
-        const PAD = 8;
-        const MAX_SIZE = 130;
-        const sc = Math.min((MAX_SIZE - PAD * 2) / blk.l, (MAX_SIZE - PAD * 2) / blk.w, 5);
-        const svgW = blk.l * sc + PAD * 2;
-        const svgH = blk.w * sc + PAD * 2;
+        const PL = 30; const PT = 20; const PR = 12; const PB = 10;
+        const sc = Math.min(560 / Math.max(blk.l, 1), 380 / Math.max(blk.w, 1), 12);
+        const svgW = PL + blk.l * sc + PR;
+        const svgH = PT + blk.w * sc + PB;
         return (
           <div style={{ marginBottom: 20 }}>
-            <p style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>
-              Layer Cutting Guide — {layers.length} layers (cut top → bottom)
+            <p style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 12 }}>
+              Primary Slab Views — {layers.length} {layers.length === 1 ? "slab" : "slabs"}{layers.length > 1 ? " (cut top → bottom)" : ""}
             </p>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 10 }}>
-              {layers.map((layer, li) => (
-                <div key={li} style={{ border: "1px solid var(--border)", borderRadius: 6, padding: "6px 6px 4px", background: "var(--bg)" }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "center", marginBottom: 4 }}>
-                    Layer {li + 1}
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {layers.map((layer, li) => {
+                const thickness = (layer.zTop - layer.zBot).toFixed(1);
+                return (
+                  <div key={li} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "12px 14px", background: "var(--bg)" }}>
+                    {/* Header */}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+                      <div>
+                        <span style={{ fontWeight: 700, fontSize: 13 }}>Primary Slab {li + 1}</span>
+                        <span style={{ fontSize: 11, color: "var(--muted)", marginLeft: 10, fontFamily: "ui-monospace, monospace" }}>
+                          {blk.l}″ × {blk.w}″ × {thickness}″ thick
+                        </span>
+                        {layers.length > 1 && (
+                          <span style={{ fontSize: 11, color: "var(--muted)", marginLeft: 8 }}>
+                            · depth {layer.zBot.toFixed(1)}″–{layer.zTop.toFixed(1)}″
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                        {layer.slabs.map(s => (
+                          <span key={s.id} style={{
+                            fontSize: 10, padding: "2px 7px", borderRadius: 3,
+                            background: slabColor(s.id) + "28", border: `1px solid ${slabColor(s.id)}55`,
+                            fontFamily: "ui-monospace, monospace", fontWeight: 700
+                          }}>{s.id}</span>
+                        ))}
+                      </div>
+                    </div>
+                    {/* 2D Layout SVG */}
+                    <svg viewBox={`0 0 ${svgW.toFixed(1)} ${svgH.toFixed(1)}`} style={{ width: "100%", display: "block" }} xmlns="http://www.w3.org/2000/svg">
+                      {/* Slab face */}
+                      <rect x={PL} y={PT} width={blk.l * sc} height={blk.w * sc}
+                        fill="var(--surface-alt,#f5f5f0)" stroke="#bbb" strokeWidth="1.2" strokeDasharray="5 3" />
+                      {/* L dimension */}
+                      <line x1={PL} y1={PT - 7} x2={PL + blk.l * sc} y2={PT - 7} stroke="#aaa" strokeWidth="0.8" />
+                      <line x1={PL} y1={PT - 10} x2={PL} y2={PT - 4} stroke="#aaa" strokeWidth="0.8" />
+                      <line x1={PL + blk.l * sc} y1={PT - 10} x2={PL + blk.l * sc} y2={PT - 4} stroke="#aaa" strokeWidth="0.8" />
+                      <text x={PL + (blk.l * sc) / 2} y={PT - 9} textAnchor="middle" fill="#888" fontSize={8} fontFamily="ui-monospace,monospace">{blk.l}&quot; L</text>
+                      {/* W dimension */}
+                      <line x1={PL - 7} y1={PT} x2={PL - 7} y2={PT + blk.w * sc} stroke="#aaa" strokeWidth="0.8" />
+                      <line x1={PL - 10} y1={PT} x2={PL - 4} y2={PT} stroke="#aaa" strokeWidth="0.8" />
+                      <line x1={PL - 10} y1={PT + blk.w * sc} x2={PL - 4} y2={PT + blk.w * sc} stroke="#aaa" strokeWidth="0.8" />
+                      <text x={PL - 12} y={PT + (blk.w * sc) / 2} textAnchor="middle" dominantBaseline="middle" fill="#888" fontSize={8} fontFamily="ui-monospace,monospace"
+                        transform={`rotate(-90,${PL - 12},${PT + (blk.w * sc) / 2})`}>{blk.w}&quot; W</text>
+                      {/* Slabs */}
+                      {slabsWithPos.map(s => {
+                        const inLayer = layer.slabs.some(ls => ls.id === s.id);
+                        const col = slabColor(s.id);
+                        const x = PL + (s.px ?? 0) * sc;
+                        const y = PT + (s.py ?? 0) * sc;
+                        const w = (s.pw ?? 0) * sc;
+                        const h = (s.ph ?? 0) * sc;
+                        const cx = x + w / 2; const cy = y + h / 2;
+                        const minDim = Math.min(w, h);
+                        return (
+                          <g key={s.id}>
+                            <rect x={x} y={y} width={w} height={h}
+                              fill={col} fillOpacity={inLayer ? 0.4 : 0.1}
+                              stroke={col} strokeWidth={inLayer ? "1.5" : "0.5"} strokeOpacity={inLayer ? 1 : 0.35} />
+                            {inLayer && minDim > 16 && (
+                              <text x={cx} y={minDim > 34 ? cy - 5 : cy} textAnchor="middle" dominantBaseline="middle"
+                                fill="#1a1a1a" fontSize={minDim > 30 ? 9 : 8} fontWeight={700} fontFamily="ui-monospace,monospace">{s.id}</text>
+                            )}
+                            {inLayer && minDim > 34 && (
+                              <text x={cx} y={cy + 6} textAnchor="middle" dominantBaseline="middle"
+                                fill="#444" fontSize={7} fontFamily="ui-monospace,monospace">{s.sw}×{s.sh}″</text>
+                            )}
+                          </g>
+                        );
+                      })}
+                    </svg>
+                    {/* Slab list */}
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--border)" }}>
+                      {layer.slabs.map(s => (
+                        <span key={s.id} style={{ fontSize: 11, fontFamily: "ui-monospace, monospace" }}>
+                          <span style={{ fontWeight: 700 }}>{s.id}</span>
+                          <span style={{ color: "var(--muted)", marginLeft: 4 }}>({s.sw}×{s.sh}″{s.temple ? ` · ${s.temple}` : ""})</span>
+                        </span>
+                      ))}
+                    </div>
                   </div>
-                  <svg viewBox={`0 0 ${svgW.toFixed(1)} ${svgH.toFixed(1)}`} style={{ width: "100%", display: "block" }}>
-                    <rect x={PAD} y={PAD} width={blk.l * sc} height={blk.w * sc}
-                      fill="var(--surface-alt,#f5f5f0)" stroke="var(--border,#ccc)" strokeWidth="0.8" strokeDasharray="3 2" />
-                    {slabsWithZ.map((s) => {
-                      const inLayer = layer.slabs.some(ls => ls.id === s.id);
-                      const col = slabColor(s.id);
-                      const x = PAD + (s.px ?? 0) * sc;
-                      const y = PAD + (s.py ?? 0) * sc;
-                      const w = (s.pw ?? 0) * sc;
-                      const h = (s.ph ?? 0) * sc;
-                      return (
-                        <g key={s.id}>
-                          <rect x={x} y={y} width={w} height={h}
-                            fill={inLayer ? col : "#d0d0d0"}
-                            fillOpacity={inLayer ? 0.55 : 0.2}
-                            stroke={inLayer ? col : "#bbb"}
-                            strokeWidth={inLayer ? "1.2" : "0.4"}
-                          />
-                          {inLayer && Math.min(w, h) > 12 && (
-                            <text x={x + w / 2} y={y + h / 2}
-                              textAnchor="middle" dominantBaseline="middle"
-                              fill="#1a1a1a" fontSize={7} fontWeight={700}
-                              fontFamily="ui-monospace,monospace">
-                              {s.id}
-                            </text>
-                          )}
-                        </g>
-                      );
-                    })}
-                  </svg>
-                  <div style={{ fontSize: 9, color: "var(--muted)", textAlign: "center", marginTop: 3, fontFamily: "ui-monospace, monospace" }}>
-                    {layer.zBot.toFixed(1)}″ – {layer.zTop.toFixed(1)}″ deep
-                  </div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 4, justifyContent: "center" }}>
-                    {layer.slabs.map(s => (
-                      <span key={s.id} style={{ fontSize: 9, fontFamily: "ui-monospace, monospace", fontWeight: 700,
-                        background: slabColor(s.id) + "33", color: "#1a1a1a",
-                        padding: "1px 5px", borderRadius: 3, border: `1px solid ${slabColor(s.id)}66` }}>
-                        {s.id}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         );
