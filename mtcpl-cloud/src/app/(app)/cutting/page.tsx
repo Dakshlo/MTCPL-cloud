@@ -30,6 +30,19 @@ function defaultTab(role: string): Tab {
   return "in_progress";
 }
 
+/** IST (Asia/Kolkata) midnight window for "today" — returns UTC ISO strings for DB range queries. */
+function istTodayBounds() {
+  const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const nowMs = Date.now();
+  // Shift to IST wall-clock, floor to midnight, shift back to UTC
+  const todayIstMidnightMs = Math.floor((nowMs + IST_OFFSET_MS) / DAY_MS) * DAY_MS - IST_OFFSET_MS;
+  return {
+    todayStartIso: new Date(todayIstMidnightMs).toISOString(),
+    tomorrowStartIso: new Date(todayIstMidnightMs + DAY_MS).toISOString(),
+  };
+}
+
 export default async function CuttingPage({ searchParams }: { searchParams: SearchParams }) {
   const { profile } = await requireAuth(["owner", "team_head", "cutting_operator"]);
   const params = await searchParams;
@@ -37,11 +50,13 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
   const supabase = createAdminSupabaseClient();
   const profilesMap = await getProfilesMap();
 
-  // Count per individual block status — each block handled independently
+  const { todayStartIso, tomorrowStartIso } = istTodayBounds();
+
+  // Count per individual block status — "done" badge shows TODAY only
   const [
     { count: pendingCount },
     { count: inProgressCount },
-    { count: doneCount },
+    { count: doneTodayCount },
   ] = await Promise.all([
     supabase
       .from("cut_session_blocks")
@@ -54,7 +69,9 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
     supabase
       .from("cut_session_blocks")
       .select("*", { count: "exact", head: true })
-      .eq("status", "done"),
+      .eq("status", "done")
+      .gte("updated_at", todayStartIso)
+      .lt("updated_at", tomorrowStartIso),
   ]);
 
   let statusFilter: string[];
@@ -83,10 +100,18 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
   const rows = activeTab === "done" ? allRows.filter(b => b.status !== "rejected") : allRows;
   const rejectedRows = activeTab === "done" ? allRows.filter(b => b.status === "rejected") : [];
 
+  // Split done rows into today vs earlier (based on updated_at falling in the IST "today" window)
+  const todayRows = activeTab === "done"
+    ? rows.filter(b => b.updated_at && b.updated_at >= todayStartIso && b.updated_at < tomorrowStartIso)
+    : [];
+  const earlierRows = activeTab === "done"
+    ? rows.filter(b => !b.updated_at || b.updated_at < todayStartIso || b.updated_at >= tomorrowStartIso)
+    : [];
+
   const tabs: { key: Tab; label: string; count: number | null }[] = [
     { key: "pending",     label: "Pending Approval", count: pendingCount },
     { key: "in_progress", label: "In Progress",      count: inProgressCount },
-    { key: "done",        label: "Done",              count: doneCount },
+    { key: "done",        label: "Done today",        count: doneTodayCount },
   ];
 
   const emptyMessages: Record<Tab, string> = {
@@ -163,18 +188,43 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
 
       {/* Block cards */}
       <div className="records-stack" style={{ marginTop: 18 }}>
-        {rows.length === 0 && rejectedRows.length === 0 ? (
+        {rows.length === 0 && rejectedRows.length === 0 && (
           <div className="banner">{emptyMessages[activeTab]}</div>
-        ) : (
-          rows.map((block) => {
-            const blk = block.layout?.blk;
-            const placed = block.layout?.placed ?? [];
-            const slabCount = block.cut_session_slabs.length;
-            const isLive = block.status === "cutting";
-            const isUrgent = block.cut_session_slabs.some(s => urgentSlabIds.has(s.slab_requirement_id));
+        )}
 
-            return (
-              <div className="plan-card" key={block.id} style={isUrgent ? { borderLeft: "4px solid #DC2626", background: "rgba(220,38,38,0.10)" } : {}}>
+        {/* Done tab: "Today" heading */}
+        {activeTab === "done" && (todayRows.length > 0 || earlierRows.length > 0) && (
+          <div style={{
+            display: "flex",
+            alignItems: "baseline",
+            justifyContent: "space-between",
+            margin: "4px 0 10px",
+            paddingBottom: 6,
+            borderBottom: "1px solid var(--border)",
+          }}>
+            <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: "var(--text)" }}>
+              Today
+              <span style={{ marginLeft: 8, fontWeight: 500, color: "var(--muted)", fontSize: 12 }}>
+                · {doneTodayCount ?? 0} completed
+              </span>
+            </h3>
+          </div>
+        )}
+        {activeTab === "done" && todayRows.length === 0 && earlierRows.length > 0 && (
+          <p className="muted" style={{ fontSize: 12, margin: "0 0 14px", padding: "8px 12px", background: "var(--surface)", border: "1px dashed var(--border)", borderRadius: 6 }}>
+            No cuts completed today yet.
+          </p>
+        )}
+
+        {(activeTab === "done" ? todayRows : rows).map((block) => {
+          const blk = block.layout?.blk;
+          const placed = block.layout?.placed ?? [];
+          const slabCount = block.cut_session_slabs.length;
+          const isLive = block.status === "cutting";
+          const isUrgent = block.cut_session_slabs.some(s => urgentSlabIds.has(s.slab_requirement_id));
+
+          return (
+            <div className="plan-card" key={block.id} style={isUrgent ? { borderLeft: "4px solid #DC2626", background: "rgba(220,38,38,0.10)" } : {}}>
                 <div
                   className="record-head"
                   style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-start" }}
@@ -245,7 +295,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                     <span className="role-pill">
                       {slabCount} slab{slabCount !== 1 ? "s" : ""}
                     </span>
-                    {(block.status === "pending_worker" || isLive || block.status === "done_prompt") && (
+                    {(block.status === "pending_worker" || isLive || block.status === "done_prompt" || block.status === "done") && (
                       <Link
                         href={`/cutting/${block.id}/print`}
                         target="_blank"
@@ -398,7 +448,104 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                 </div>
               </div>
             );
-          })
+          })}
+
+        {/* Done tab: "Earlier" collapsed section for previous days */}
+        {activeTab === "done" && earlierRows.length > 0 && (
+          <details style={{ marginTop: 16 }}>
+            <summary style={{
+              cursor: "pointer",
+              fontSize: 13,
+              fontWeight: 600,
+              color: "var(--muted)",
+              padding: "8px 4px",
+              userSelect: "none",
+              listStyle: "none",
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              borderTop: "1px solid var(--border)",
+              paddingTop: 14,
+            }}>
+              <span style={{ fontSize: 11 }}>▶</span>
+              Earlier — {earlierRows.length} block{earlierRows.length !== 1 ? "s" : ""}
+            </summary>
+            <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 10 }}>
+              {earlierRows.map((block) => {
+                const blk = block.layout?.blk;
+                const placed = block.layout?.placed ?? [];
+                const slabCount = block.cut_session_slabs.length;
+                return (
+                  <div className="plan-card" key={block.id}>
+                    <div className="record-head" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-start" }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <strong style={{ fontFamily: "ui-monospace, monospace", fontSize: 15 }}>
+                          {block.block_id}
+                        </strong>
+                        <p className="muted" style={{ margin: "2px 0 0", fontSize: 12 }}>
+                          {block.cut_sessions?.session_code}
+                          {blk ? ` · ${blk.stone} · Yard ${blk.yard} · ${blk.l} × ${blk.w} × ${blk.h} in` : ""}
+                          {block.cut_sessions?.kerf_mm ? ` · Kerf ${block.cut_sessions.kerf_mm} mm` : ""}
+                        </p>
+                        {block.cut_sessions?.planned_by && profilesMap[block.cut_sessions.planned_by] && (
+                          <p style={{ margin: "3px 0 0", fontSize: 11, color: "var(--muted)" }}>
+                            Plan by <span style={{ color: "var(--gold-dark)", fontWeight: 600 }}>
+                              {profilesMap[block.cut_sessions.planned_by]}
+                            </span>
+                          </p>
+                        )}
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                        <span className="role-pill">{slabCount} slab{slabCount !== 1 ? "s" : ""}</span>
+                        <Link
+                          href={`/cutting/${block.id}/print`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{
+                            textDecoration: "none", fontSize: 12, padding: "4px 12px",
+                            background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 6,
+                            color: "var(--muted)", fontWeight: 500, whiteSpace: "nowrap",
+                          }}
+                        >
+                          🖨 Print
+                        </Link>
+                        <Link
+                          href={`/cutting/${block.id}`}
+                          style={{
+                            textDecoration: "none", fontSize: 12, padding: "4px 12px",
+                            background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 6,
+                            color: "var(--text)", fontWeight: 500, whiteSpace: "nowrap",
+                          }}
+                        >
+                          View →
+                        </Link>
+                      </div>
+                    </div>
+                    {placed.length > 0 && (
+                      <div className="chip-row" style={{ marginTop: 8 }}>
+                        {placed.map((s) => (
+                          <span className="plan-chip" key={s.id}>
+                            {s.id}{s.temple ? ` · ${s.temple}` : ""}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <div className="record-actions" style={{ marginTop: 12, gap: 8 }}>
+                      <span className="role-pill badge-available" style={{ fontSize: 12 }}>
+                        ✓ Done
+                        {block.restocked_block_id
+                          ? ` · Restocked ${block.restocked_block_id.split(",").length} piece(s)`
+                          : " · Block discarded"}
+                        {block.updated_at
+                          ? ` · ${new Date(block.updated_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}`
+                          : ""}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </details>
         )}
 
         {/* Rejected blocks — collapsed dropdown at bottom of Done tab */}
