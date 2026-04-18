@@ -346,8 +346,11 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                       flexShrink: 0,
                     }}
                   >
-                    {(isLive || block.status === "done_prompt") && block.updated_at && (
-                      <CuttingTimer startedAt={block.updated_at} />
+                    {block.updated_at && block.status === "pending_worker" && (
+                      <CuttingTimer startedAt={block.updated_at} prefix="Pending from last" />
+                    )}
+                    {block.updated_at && (isLive || block.status === "done_prompt") && (
+                      <CuttingTimer startedAt={block.updated_at} prefix="Cutting from last" />
                     )}
                     <span className="role-pill">
                       {slabCount} slab{slabCount !== 1 ? "s" : ""}
