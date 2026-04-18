@@ -92,8 +92,23 @@ export function BlockGrid({ blocks, canEdit, vendors, profilesMap = {}, stoneTyp
     setDrawerYard(YARDS_BY_FACILITY[f][0]);
   }
 
-  // Section-level collapse per facility. Default = expanded.
-  const [collapsed, setCollapsed] = useState<Record<Facility, boolean>>({ mtcpl: false, riico: false });
+  // Section-level collapse per facility.
+  // Default = both COLLAPSED for a clean overview, then auto-EXPAND any
+  // facility whose latest block was added in the last 10 minutes so the
+  // just-added block is visible without the user having to click "Show".
+  const [collapsed, setCollapsed] = useState<Record<Facility, boolean>>(() => {
+    const RECENT_MS = 10 * 60 * 1000;
+    const now = Date.now();
+    const out: Record<Facility, boolean> = { mtcpl: true, riico: true };
+    for (const b of blocks) {
+      if (!b.created_at) continue;
+      const age = now - new Date(b.created_at).getTime();
+      if (age >= 0 && age < RECENT_MS) {
+        out[facilityOfYard(b.yard)] = false;
+      }
+    }
+    return out;
+  });
   function toggleCollapsed(f: Facility) {
     setCollapsed(prev => ({ ...prev, [f]: !prev[f] }));
   }

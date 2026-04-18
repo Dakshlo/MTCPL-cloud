@@ -87,6 +87,29 @@ export function SlabGrid({
   const [selectedBatchIds, setSelectedBatchIds] = useState<Set<string>>(new Set());
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
 
+  // Temple-level collapse. Default = ALL collapsed for a quick overview,
+  // then auto-EXPAND any temple whose newest slab was added in the last
+  // 10 minutes so the just-added entry is immediately visible.
+  const [collapsedTemples, setCollapsedTemples] = useState<Record<string, boolean>>(() => {
+    const RECENT_MS = 10 * 60 * 1000;
+    const now = Date.now();
+    const out: Record<string, boolean> = {};
+    for (const s of slabs) {
+      if (!(s.temple in out)) out[s.temple] = true;
+    }
+    for (const s of slabs) {
+      if (!s.created_at) continue;
+      const age = now - new Date(s.created_at).getTime();
+      if (age >= 0 && age < RECENT_MS) {
+        out[s.temple] = false;
+      }
+    }
+    return out;
+  });
+  function toggleTempleCollapse(temple: string) {
+    setCollapsedTemples(prev => ({ ...prev, [temple]: !prev[temple] }));
+  }
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
@@ -165,18 +188,32 @@ export function SlabGrid({
         {grouped.map(({ temple, slabs: groupSlabs, latestAt }) => {
           const priorityCount = groupSlabs.filter((s) => s.priority).length;
           const latestLabel = latestAt ? fmtDate(latestAt) : null;
+          const isCollapsed = collapsedTemples[temple] ?? false;
 
           return (
             <div key={temple}>
-              {/* Temple group header */}
-              <div style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "8px 0",
-                borderBottom: "2px solid var(--border)",
-                marginBottom: 12,
-              }}>
+              {/* Temple group header — click to collapse/expand */}
+              <button
+                type="button"
+                onClick={() => toggleTempleCollapse(temple)}
+                aria-expanded={!isCollapsed}
+                style={{
+                  width: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "8px 0",
+                  borderBottom: "2px solid var(--border)",
+                  marginBottom: isCollapsed ? 0 : 12,
+                  background: "transparent",
+                  border: 0,
+                  borderBottomWidth: 2,
+                  borderBottomStyle: "solid",
+                  borderBottomColor: "var(--border)",
+                  cursor: "pointer",
+                  textAlign: "left",
+                }}
+              >
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <span style={{ fontWeight: 700, fontSize: 14, color: "var(--text)" }}>{temple}</span>
                   {priorityCount > 0 && (
@@ -197,10 +234,18 @@ export function SlabGrid({
                   <span style={{ fontSize: 12, color: "var(--muted)", fontWeight: 600 }}>
                     {groupSlabs.length} {groupSlabs.length === 1 ? "size" : "sizes"}
                   </span>
+                  <span style={{
+                    fontSize: 11, color: "var(--muted)",
+                    display: "inline-flex", alignItems: "center", gap: 5,
+                  }}>
+                    {isCollapsed ? "Show" : "Hide"}
+                    <span style={{ fontSize: 10 }}>{isCollapsed ? "▶" : "▼"}</span>
+                  </span>
                 </div>
-              </div>
+              </button>
 
-              {/* Cards for this temple */}
+              {/* Cards for this temple — hidden when collapsed */}
+              {!isCollapsed && (
               <div className="slab-card-grid">
                 {groupSlabs.map((slab) => {
                   const cft = ((Number(slab.length_ft) * Number(slab.width_ft) * Number(slab.thickness_ft)) / 1728).toFixed(2);
@@ -302,6 +347,7 @@ export function SlabGrid({
                   );
                 })}
               </div>
+              )}
             </div>
           );
         })}
