@@ -33,10 +33,12 @@ export default async function BlocksPage() {
       .eq("status", "consumed")
       .order("updated_at", { ascending: false })
       .limit(30),
+    // Block suppliers are shared with the vendors directory — show all active
+    // vendors here rather than filtering by a bogus 'block_vendor' type that
+    // isn't in the vendor_type enum.
     admin
       .from("vendors")
       .select("name")
-      .eq("vendor_type", "block_vendor")
       .eq("is_active", true)
       .order("name"),
     admin.from("stone_types").select("id, name, color_top, color_front, color_side").order("sort_order").order("name"),

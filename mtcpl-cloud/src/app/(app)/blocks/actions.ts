@@ -80,14 +80,19 @@ export async function addBlockAction(formData: FormData) {
     }
 
     lastError = error.message;
-    if (error.code !== "23505") throw new Error(error.message);
-
-    existingIds.push(nextId);
-    nextId = generateNextCode(existingIds);
-    attempt++;
+    // Duplicate-ID (unique-constraint): auto-retry with next generated code
+    if (error.code === "23505") {
+      existingIds.push(nextId);
+      nextId = generateNextCode(existingIds);
+      attempt++;
+      continue;
+    }
+    // Any other error: surface the real message to the user via toast
+    console.error("[addBlockAction] insert failed:", { code: error.code, message: error.message, details: error.details, payload });
+    redirectWithToast("/blocks", `Could not add block: ${error.message}`);
   }
 
-  throw new Error(lastError || "Unable to generate a unique block ID. Please try again.");
+  redirectWithToast("/blocks", lastError || "Unable to generate a unique block ID. Please try again.");
 }
 
 export async function updateBlockAction(formData: FormData) {
@@ -121,7 +126,10 @@ export async function updateBlockAction(formData: FormData) {
   };
 
   const { error } = await supabase.from("blocks").update(payload).eq("id", originalId);
-  if (error) throw new Error(error.message);
+  if (error) {
+    console.error("[updateBlockAction] update failed:", { code: error.code, message: error.message, details: error.details, payload });
+    redirectWithToast("/blocks", `Could not update block: ${error.message}`);
+  }
 
   await logAudit(profile.id, "update", "block", originalId, { new_id: nextId, status: payload.status });
   revalidatePath("/blocks");
@@ -136,9 +144,12 @@ export async function addBlockVendorAction(name: string): Promise<{ error: strin
   const trimmed = name.trim();
   if (!trimmed) return { error: "Vendor name is required" };
 
+  // vendor_type enum accepts 'CNC' | 'Manual' | 'Outsource'. Block suppliers
+  // don't have a dedicated type yet, so save them as 'Outsource' (jobwork)
+  // — the blocks page now shows all active vendors regardless of type.
   const { error } = await admin
     .from("vendors")
-    .insert({ name: trimmed, vendor_type: "block_vendor", is_active: true });
+    .insert({ name: trimmed, vendor_type: "Outsource", is_active: true });
 
   if (error) {
     if (error.code === "23505") return { error: "Vendor already exists" };
