@@ -673,7 +673,13 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
                 Primary Slab Cutting Guide — {pLayers.length} {pLayers.length === 1 ? "slab" : "slabs"}
               </div>
               {pLayers.map((layer, li) => {
-                const thickness = (layer.zTop - layer.zBot).toFixed(1);
+                const thicknessNum = layer.zTop - layer.zBot;
+                const thickness = thicknessNum.toFixed(1);
+                const slabsForIso = layer.slabs.map(s => ({
+                  ...s,
+                  zBot: 0,
+                  zTop: thicknessNum,
+                }));
                 return (
                   <div key={li} className="prim-slab-block">
                     {/* Sub-heading per slab */}
@@ -698,6 +704,19 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
                             {s.id}
                           </span>
                         ))}
+                      </div>
+                    </div>
+
+                    {/* 3D Isometric view of primary slab */}
+                    <div className="prim-slab-view-card" style={{ marginBottom: 10 }}>
+                      <IsoBlockStaticSVG
+                        block={{ l: blk.l, w: blk.w, h: thicknessNum, stone: blk.stone }}
+                        placed={slabsForIso}
+                        size={560}
+                        stoneTypes={stoneTypes ?? undefined}
+                      />
+                      <div style={{ fontSize: 9, color: "#aaa", textAlign: "center", marginTop: 4, fontFamily: "ui-monospace, monospace" }}>
+                        3D isometric view — Primary Slab {li + 1} ({blk.l}″ × {blk.w}″ × {thickness}″)
                       </div>
                     </div>
 

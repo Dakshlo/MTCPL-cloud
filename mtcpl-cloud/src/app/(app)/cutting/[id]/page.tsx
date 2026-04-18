@@ -7,6 +7,7 @@ import { CuttingDetailPreview } from "../cutting-detail-preview";
 import { FinishBlockForm } from "../finish-block-form";
 import { UndoButton } from "../undo-button";
 import { RejectButton } from "../reject-button";
+import { IsoBlockStaticSVG } from "@/components/iso-block-static";
 import {
   approveBlockAction,
   rejectBlockAction,
@@ -268,8 +269,9 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
           map.get(key)!.slabs.push(s);
         }
         const layers = [...map.values()].sort((a, b) => b.zTop - a.zTop);
-        const PL = 30; const PT = 20; const PR = 12; const PB = 10;
-        const sc = Math.min(560 / Math.max(blk.l, 1), 380 / Math.max(blk.w, 1), 12);
+        // Small top-down SVG dimensions
+        const PL = 16; const PT = 12; const PR = 8; const PB = 8;
+        const sc = Math.min(200 / Math.max(blk.l, 1), 140 / Math.max(blk.w, 1), 5);
         const svgW = PL + blk.l * sc + PR;
         const svgH = PT + blk.w * sc + PB;
         return (
@@ -279,7 +281,24 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
             </p>
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               {layers.map((layer, li) => {
-                const thickness = (layer.zTop - layer.zBot).toFixed(1);
+                const thicknessNum = layer.zTop - layer.zBot;
+                const thickness = thicknessNum.toFixed(1);
+                // Build slabs scoped to this primary slab (z rebased to 0–thickness)
+                const slabsForIso = layer.slabs.map(s => ({
+                  id: s.id,
+                  label: s.label,
+                  temple: s.temple,
+                  sw: s.sw,
+                  sh: s.sh,
+                  sd: s.sd,
+                  px: s.px ?? 0,
+                  py: s.py ?? 0,
+                  pw: s.pw ?? 0,
+                  ph: s.ph ?? 0,
+                  rot: s.rot,
+                  zBot: 0,
+                  zTop: thicknessNum,
+                }));
                 return (
                   <div key={li} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "12px 14px", background: "var(--bg)" }}>
                     {/* Header */}
@@ -305,51 +324,49 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
                         ))}
                       </div>
                     </div>
-                    {/* 2D Layout SVG */}
-                    <svg viewBox={`0 0 ${svgW.toFixed(1)} ${svgH.toFixed(1)}`} style={{ width: "100%", display: "block" }} xmlns="http://www.w3.org/2000/svg">
-                      {/* Slab face */}
-                      <rect x={PL} y={PT} width={blk.l * sc} height={blk.w * sc}
-                        fill="var(--surface-alt,#f5f5f0)" stroke="#bbb" strokeWidth="1.2" strokeDasharray="5 3" />
-                      {/* L dimension */}
-                      <line x1={PL} y1={PT - 7} x2={PL + blk.l * sc} y2={PT - 7} stroke="#aaa" strokeWidth="0.8" />
-                      <line x1={PL} y1={PT - 10} x2={PL} y2={PT - 4} stroke="#aaa" strokeWidth="0.8" />
-                      <line x1={PL + blk.l * sc} y1={PT - 10} x2={PL + blk.l * sc} y2={PT - 4} stroke="#aaa" strokeWidth="0.8" />
-                      <text x={PL + (blk.l * sc) / 2} y={PT - 9} textAnchor="middle" fill="#888" fontSize={8} fontFamily="ui-monospace,monospace">{blk.l}&quot; L</text>
-                      {/* W dimension */}
-                      <line x1={PL - 7} y1={PT} x2={PL - 7} y2={PT + blk.w * sc} stroke="#aaa" strokeWidth="0.8" />
-                      <line x1={PL - 10} y1={PT} x2={PL - 4} y2={PT} stroke="#aaa" strokeWidth="0.8" />
-                      <line x1={PL - 10} y1={PT + blk.w * sc} x2={PL - 4} y2={PT + blk.w * sc} stroke="#aaa" strokeWidth="0.8" />
-                      <text x={PL - 12} y={PT + (blk.w * sc) / 2} textAnchor="middle" dominantBaseline="middle" fill="#888" fontSize={8} fontFamily="ui-monospace,monospace"
-                        transform={`rotate(-90,${PL - 12},${PT + (blk.w * sc) / 2})`}>{blk.w}&quot; W</text>
-                      {/* Slabs */}
-                      {slabsWithPos.map(s => {
-                        const inLayer = layer.slabs.some(ls => ls.id === s.id);
-                        const col = slabColor(s.id);
-                        const x = PL + (s.px ?? 0) * sc;
-                        const y = PT + (s.py ?? 0) * sc;
-                        const w = (s.pw ?? 0) * sc;
-                        const h = (s.ph ?? 0) * sc;
-                        const cx = x + w / 2; const cy = y + h / 2;
-                        const minDim = Math.min(w, h);
-                        return (
-                          <g key={s.id}>
-                            <rect x={x} y={y} width={w} height={h}
-                              fill={col} fillOpacity={inLayer ? 0.4 : 0.1}
-                              stroke={col} strokeWidth={inLayer ? "1.5" : "0.5"} strokeOpacity={inLayer ? 1 : 0.35} />
-                            {inLayer && minDim > 16 && (
-                              <text x={cx} y={minDim > 34 ? cy - 5 : cy} textAnchor="middle" dominantBaseline="middle"
-                                fill="#1a1a1a" fontSize={minDim > 30 ? 9 : 8} fontWeight={700} fontFamily="ui-monospace,monospace">{s.id}</text>
-                            )}
-                            {inLayer && minDim > 34 && (
-                              <text x={cx} y={cy + 6} textAnchor="middle" dominantBaseline="middle"
-                                fill="#444" fontSize={7} fontFamily="ui-monospace,monospace">{s.sw}×{s.sh}″</text>
-                            )}
-                          </g>
-                        );
-                      })}
-                    </svg>
+                    {/* 3D Iso (big) + 2D top-down (small) side by side */}
+                    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 220px", gap: 14, alignItems: "center" }}>
+                      {/* 3D Isometric */}
+                      <div>
+                        <IsoBlockStaticSVG
+                          block={{ l: blk.l, w: blk.w, h: thicknessNum, stone: blk.stone }}
+                          placed={slabsForIso}
+                          size={440}
+                          stoneTypes={stoneTypes ?? undefined}
+                        />
+                        <div style={{ fontSize: 9, color: "var(--muted)", textAlign: "center", marginTop: 4, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700 }}>
+                          3D Isometric View
+                        </div>
+                      </div>
+                      {/* 2D Top-down (small reference) */}
+                      <div>
+                        <svg viewBox={`0 0 ${svgW.toFixed(1)} ${svgH.toFixed(1)}`} style={{ width: "100%", display: "block" }} xmlns="http://www.w3.org/2000/svg">
+                          <rect x={PL} y={PT} width={blk.l * sc} height={blk.w * sc}
+                            fill="var(--surface-alt,#f5f5f0)" stroke="#aaa" strokeWidth="0.7" strokeDasharray="3 2" />
+                          <text x={PL + (blk.l * sc) / 2} y={PT - 3} textAnchor="middle" fill="#888" fontSize={5} fontFamily="ui-monospace,monospace">{blk.l}&quot;</text>
+                          <text x={PL - 3} y={PT + (blk.w * sc) / 2} textAnchor="middle" dominantBaseline="middle" fill="#888" fontSize={5} fontFamily="ui-monospace,monospace"
+                            transform={`rotate(-90,${PL - 3},${PT + (blk.w * sc) / 2})`}>{blk.w}&quot;</text>
+                          {slabsWithPos.map(s => {
+                            const inLayer = layer.slabs.some(ls => ls.id === s.id);
+                            const col = slabColor(s.id);
+                            const x = PL + (s.px ?? 0) * sc;
+                            const y = PT + (s.py ?? 0) * sc;
+                            const w = (s.pw ?? 0) * sc;
+                            const h = (s.ph ?? 0) * sc;
+                            return (
+                              <rect key={s.id} x={x} y={y} width={w} height={h}
+                                fill={col} fillOpacity={inLayer ? 0.5 : 0.08}
+                                stroke={col} strokeWidth={inLayer ? "0.8" : "0.3"} strokeOpacity={inLayer ? 1 : 0.3} />
+                            );
+                          })}
+                        </svg>
+                        <div style={{ fontSize: 9, color: "var(--muted)", textAlign: "center", marginTop: 4, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700 }}>
+                          Top-down
+                        </div>
+                      </div>
+                    </div>
                     {/* Slab list */}
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--border)" }}>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 10, paddingTop: 8, borderTop: "1px solid var(--border)" }}>
                       {layer.slabs.map(s => (
                         <span key={s.id} style={{ fontSize: 11, fontFamily: "ui-monospace, monospace" }}>
                           <span style={{ fontWeight: 700 }}>{s.id}</span>
