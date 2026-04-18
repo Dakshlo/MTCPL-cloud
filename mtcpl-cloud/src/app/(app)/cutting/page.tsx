@@ -4,6 +4,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
 import { approveBlockAction, rejectBlockAction, undoApproveAction } from "./actions";
 import { RejectButton } from "./reject-button";
+import { UndoApproveButton } from "./undo-approve-button";
 import { CuttingTimer } from "./cutting-timer";
 
 type Tab = "pending" | "in_progress" | "done";
@@ -353,30 +354,10 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                       >
                         Cutting Done →
                       </Link>
-                      <form
-                        action={undoApproveAction}
-                        onSubmit={(e) => {
-                          if (!confirm("Undo approval? This will move the block back to Pending Approval.")) e.preventDefault();
-                        }}
-                      >
+                      <form action={undoApproveAction}>
                         <input type="hidden" name="session_block_id" value={block.id} />
                         <input type="hidden" name="session_id" value={block.cut_session_id} />
-                        <button
-                          type="submit"
-                          style={{
-                            fontSize: 12,
-                            padding: "5px 14px",
-                            borderRadius: 6,
-                            cursor: "pointer",
-                            background: "var(--bg)",
-                            border: "1px solid var(--border)",
-                            color: "var(--muted)",
-                            fontWeight: 500,
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          ↩ Undo Approve
-                        </button>
+                        <UndoApproveButton />
                       </form>
                     </>
                   )}
