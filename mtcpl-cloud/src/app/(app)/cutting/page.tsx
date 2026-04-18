@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
-import { approveBlockAction, rejectBlockAction } from "./actions";
+import { approveBlockAction, rejectBlockAction, undoApproveAction } from "./actions";
 import { RejectButton } from "./reject-button";
 import { CuttingTimer } from "./cutting-timer";
 
@@ -244,7 +244,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                     <span className="role-pill">
                       {slabCount} slab{slabCount !== 1 ? "s" : ""}
                     </span>
-                    {block.status === "pending_worker" && (
+                    {(block.status === "pending_worker" || isLive || block.status === "done_prompt") && (
                       <Link
                         href={`/cutting/${block.id}/print`}
                         target="_blank"
@@ -345,13 +345,40 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                   )}
 
                   {isLive && (
-                    <Link
-                      href={`/cutting/${block.id}`}
-                      className="primary-button"
-                      style={{ textDecoration: "none" }}
-                    >
-                      Cutting Done →
-                    </Link>
+                    <>
+                      <Link
+                        href={`/cutting/${block.id}`}
+                        className="primary-button"
+                        style={{ textDecoration: "none" }}
+                      >
+                        Cutting Done →
+                      </Link>
+                      <form
+                        action={undoApproveAction}
+                        onSubmit={(e) => {
+                          if (!confirm("Undo approval? This will move the block back to Pending Approval.")) e.preventDefault();
+                        }}
+                      >
+                        <input type="hidden" name="session_block_id" value={block.id} />
+                        <input type="hidden" name="session_id" value={block.cut_session_id} />
+                        <button
+                          type="submit"
+                          style={{
+                            fontSize: 12,
+                            padding: "5px 14px",
+                            borderRadius: 6,
+                            cursor: "pointer",
+                            background: "var(--bg)",
+                            border: "1px solid var(--border)",
+                            color: "var(--muted)",
+                            fontWeight: 500,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          ↩ Undo Approve
+                        </button>
+                      </form>
+                    </>
                   )}
 
                   {block.status === "done_prompt" && (

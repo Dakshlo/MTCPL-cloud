@@ -217,6 +217,31 @@ export async function finishBlockAction(formData: FormData) {
   redirect("/cutting?tab=done");
 }
 
+export async function undoApproveAction(formData: FormData) {
+  const { profile } = await requireAuth(["owner", "team_head", "cutting_operator"]);
+  const supabase = createAdminSupabaseClient();
+  const sessionBlockId = String(formData.get("session_block_id") || "");
+  const sessionId = String(formData.get("session_id") || "");
+
+  // Only undo if still in cutting state (not done/done_prompt)
+  const { data, error } = await supabase
+    .from("cut_session_blocks")
+    .update({ status: "pending_worker", updated_at: new Date().toISOString() })
+    .eq("id", sessionBlockId)
+    .eq("status", "cutting") // guard: only revert if actually still in cutting
+    .select("id");
+
+  if (error) throw new Error(error.message);
+  if (!data?.length) throw new Error("Block is no longer in cutting state — cannot undo.");
+
+  await logAudit(profile.id, "cutting_undo_approve", "cut_session_block", sessionBlockId, {
+    session_id: sessionId,
+  });
+
+  await syncSessionStatus(sessionId);
+  await refreshPaths();
+}
+
 export async function undoDoneAction(formData: FormData) {
   const { profile } = await requireAuth(["owner"]);
   const supabase = createAdminSupabaseClient();
