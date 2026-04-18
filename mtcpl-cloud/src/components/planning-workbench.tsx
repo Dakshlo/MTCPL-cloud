@@ -5,6 +5,8 @@ import { BlockMiniPreview, SlabMiniPreview } from "@/components/stone-previews";
 import { getStonePalette } from "@/lib/stone-utils";
 import type { StoneTypeDef } from "@/lib/stone-utils";
 import type { AIAssignment, AIplanResponse } from "@/app/(app)/planning/actions";
+import { computeCutEfficiency, toCFT, type CutEfficiency } from "@/lib/cut-efficiency";
+import { EfficiencyBar } from "@/components/efficiency-bar";
 
 export type BlockRow = {
   id: string;
@@ -1006,10 +1008,23 @@ export function PlanningWorkbench({
   }
 
   const totalPlaced = result?.plan.reduce((sum, block) => sum + block.placed.length, 0) ?? 0;
-  const avgEff =
-    result && result.plan.length
-      ? Math.round(result.plan.reduce((sum, block) => sum + block.eff, 0) / result.plan.length)
-      : 0;
+  // Aggregate efficiency across all plan blocks, weighted by block volume.
+  const planTotals = (() => {
+    if (!result || !result.plan.length) return null;
+    let totalBlockVol = 0, totalSlabVol = 0, totalRestockVol = 0;
+    for (const pb of result.plan) {
+      const e = computeCutEfficiency(pb.blk, pb.placed, pb.biggest);
+      if (!e) continue;
+      totalBlockVol += e.blockVol;
+      totalSlabVol += e.slabVol;
+      totalRestockVol += e.restockVol;
+    }
+    if (totalBlockVol <= 0) return null;
+    const slabPct = Math.round((totalSlabVol / totalBlockVol) * 100);
+    const restockPct = Math.round((totalRestockVol / totalBlockVol) * 100);
+    return { slabPct, restockPct, wastePct: Math.max(0, 100 - slabPct - restockPct) };
+  })();
+  const avgEff = planTotals?.slabPct ?? 0;
 
   return (
     <>
@@ -1232,9 +1247,19 @@ export function PlanningWorkbench({
                   <span>Blocks used</span>
                   <strong>{result.plan.length}</strong>
                 </div>
-                <div className="metric-card">
-                  <span>Avg vol. efficiency</span>
+                <div className="metric-card" title="Volume of block that becomes actual slabs — excludes kerf, scrap, and any reusable remainder piece.">
+                  <span>Slab yield</span>
                   <strong>{avgEff}%</strong>
+                </div>
+                {planTotals && planTotals.restockPct > 0 && (
+                  <div className="metric-card" title="Volume recovered as restockable remainder piece (not waste).">
+                    <span>Restockable</span>
+                    <strong>{planTotals.restockPct}%</strong>
+                  </div>
+                )}
+                <div className="metric-card" title="True waste = block − slabs − restockable. Includes kerf loss and small scraps.">
+                  <span>True waste</span>
+                  <strong>{planTotals?.wastePct ?? 0}%</strong>
                 </div>
                 <div className="metric-card">
                   <span>Unfit slabs</span>
@@ -1251,6 +1276,7 @@ export function PlanningWorkbench({
                   {result.plan.map((item) => {
                     // Count distinct layers by unique zTop values
                     const layerCount = new Set(item.placed.map((p) => p.zTop?.toFixed(3) ?? "0")).size;
+                    const eff = computeCutEfficiency(item.blk, item.placed, item.biggest);
                     return (
                       <article className="plan-card" key={item.blk.id}>
                         <div className="record-head">
@@ -1262,7 +1288,7 @@ export function PlanningWorkbench({
                               {layerCount > 1 ? <> · <span className="role-pill">{layerCount} layers</span></> : null}
                             </p>
                           </div>
-                          <span className="role-pill">Vol. eff. {item.eff}%</span>
+                          <span className="role-pill">Slab yield {eff?.slabPct ?? item.eff}%</span>
                         </div>
 
                         <IsoBlockPreview block={item.blk} placed={item.placed} stoneTypes={stoneTypes} />
@@ -1279,13 +1305,14 @@ export function PlanningWorkbench({
                           ))}
                         </div>
 
-                        <p className="muted" style={{ marginTop: 10 }}>
-                          Used {(item.ua / 1728).toFixed(3)} CFT | Kerf {(item.ka / 1728).toFixed(3)} CFT | Block vol. {(item.ba / 1728).toFixed(3)} CFT | Waste {(Math.max(0, item.ba - item.ua - item.ka) / 1728).toFixed(3)} CFT
-                        </p>
+                        {eff && <EfficiencyBar eff={eff} />}
 
                         {item.biggest ? (
-                          <p className="muted">
-                            Largest remainder {item.biggest.l} × {item.biggest.w} × {item.biggest.h} in
+                          <p className="muted" style={{ marginTop: 6, fontSize: 11 }}>
+                            Restockable piece: {item.biggest.l} × {item.biggest.w} × {item.biggest.h} in
+                            <span style={{ marginLeft: 6, color: "#888" }}>
+                              ({toCFT(item.biggest.l * item.biggest.w * item.biggest.h).toFixed(2)} CFT)
+                            </span>
                           </p>
                         ) : null}
                       </article>

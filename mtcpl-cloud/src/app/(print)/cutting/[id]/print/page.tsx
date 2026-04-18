@@ -4,6 +4,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
 import { IsoBlockStaticSVG } from "@/components/iso-block-static";
 import { PrintBtn } from "./print-btn";
+import { computeCutEfficiency, toCFT } from "@/lib/cut-efficiency";
 
 type Params = Promise<{ id: string }>;
 
@@ -581,6 +582,56 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
             </div>
           )}
         </div>
+
+        {/* Block utilisation breakdown — slab yield / restockable / waste */}
+        {(() => {
+          const eff = computeCutEfficiency(blk, placed, layout?.biggest ?? null);
+          if (!eff) return null;
+          const slabPct = eff.slabPct;
+          const restockPct = eff.restockPct;
+          const wastePct = Math.max(0, 100 - slabPct - restockPct);
+          return (
+            <>
+              <div className="section-head">Block Utilisation</div>
+              <div style={{ marginBottom: 14 }}>
+                {/* Stacked bar */}
+                <div style={{ display: "flex", height: 14, borderRadius: 3, overflow: "hidden", border: "1px solid #999" }}>
+                  <div style={{ width: `${slabPct}%`, background: "#15803d" }} />
+                  <div style={{ width: `${restockPct}%`, background: "#b45309" }} />
+                  <div style={{ width: `${wastePct}%`, background: "#b91c1c" }} />
+                </div>
+                {/* Legend */}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginTop: 8, fontSize: 11, fontFamily: "ui-monospace, monospace" }}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ width: 11, height: 11, background: "#15803d", borderRadius: 2 }} />
+                    <strong>{slabPct}%</strong>
+                    <span style={{ color: "#555" }}>slabs · {toCFT(eff.slabVol).toFixed(2)} CFT</span>
+                  </span>
+                  {restockPct > 0 && (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ width: 11, height: 11, background: "#b45309", borderRadius: 2 }} />
+                      <strong>{restockPct}%</strong>
+                      <span style={{ color: "#555" }}>restockable · {toCFT(eff.restockVol).toFixed(2)} CFT</span>
+                    </span>
+                  )}
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ width: 11, height: 11, background: "#b91c1c", borderRadius: 2 }} />
+                    <strong>{wastePct}%</strong>
+                    <span style={{ color: "#555" }}>waste · {toCFT(eff.wasteVol).toFixed(2)} CFT</span>
+                  </span>
+                  <span style={{ color: "#888", fontFamily: "-apple-system,Arial,sans-serif" }}>
+                    Total block: {toCFT(eff.blockVol).toFixed(2)} CFT
+                  </span>
+                </div>
+                {layout?.biggest && (
+                  <p style={{ margin: "6px 0 0", fontSize: 10, color: "#888", fontStyle: "italic" }}>
+                    Restockable piece (largest remainder) is counted as recovered — not waste.
+                  </p>
+                )}
+              </div>
+            </>
+          );
+        })()}
 
         {/* ── 3D Isometric + 2D Top Layout ── */}
         {blk && placed.length > 0 && (

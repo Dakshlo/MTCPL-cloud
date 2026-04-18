@@ -6,6 +6,7 @@ import { approveBlockAction, rejectBlockAction, undoApproveAction } from "./acti
 import { RejectButton } from "./reject-button";
 import { UndoApproveButton } from "./undo-approve-button";
 import { CuttingTimer } from "./cutting-timer";
+import { computeCutEfficiency } from "@/lib/cut-efficiency";
 
 type Tab = "pending" | "in_progress" | "done";
 type SearchParams = Promise<{ tab?: string }>;
@@ -17,7 +18,8 @@ type BlockRow = {
   restocked_block_id: string | null;
   layout: {
     blk?: { id: string; stone: string; yard: number; l: number; w: number; h: number };
-    placed?: Array<{ id: string; label?: string; temple?: string; sw?: number; sh?: number }>;
+    placed?: Array<{ id: string; label?: string; temple?: string; sw?: number; sh?: number; sd?: number }>;
+    biggest?: { l: number; w: number; h: number } | null;
   } | null;
   updated_at: string | null;
   cut_session_id: string;
@@ -222,6 +224,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
           const slabCount = block.cut_session_slabs.length;
           const isLive = block.status === "cutting";
           const isUrgent = block.cut_session_slabs.some(s => urgentSlabIds.has(s.slab_requirement_id));
+          const eff = computeCutEfficiency(blk, placed, block.layout?.biggest ?? null);
 
           return (
             <div className="plan-card" key={block.id} style={isUrgent ? { borderLeft: "4px solid #DC2626", background: "rgba(220,38,38,0.10)" } : {}}>
@@ -295,6 +298,25 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                     <span className="role-pill">
                       {slabCount} slab{slabCount !== 1 ? "s" : ""}
                     </span>
+                    {eff && (
+                      <span
+                        title={`Slabs ${eff.slabPct}% · Restockable ${eff.restockPct}% · Waste ${Math.max(0, 100 - eff.slabPct - eff.restockPct)}%`}
+                        style={{
+                          display: "inline-flex", alignItems: "center", gap: 6,
+                          fontSize: 11, padding: "3px 8px", borderRadius: 12,
+                          background: "var(--bg)", border: "1px solid var(--border)",
+                          fontFamily: "ui-monospace, monospace", fontWeight: 600,
+                          color: "var(--muted)",
+                        }}
+                      >
+                        <span style={{ display: "inline-flex", width: 36, height: 5, borderRadius: 2, overflow: "hidden", background: "var(--border)" }}>
+                          <span style={{ width: `${eff.slabPct}%`, background: "#15803d" }} />
+                          <span style={{ width: `${eff.restockPct}%`, background: "#b45309" }} />
+                          <span style={{ width: `${Math.max(0, 100 - eff.slabPct - eff.restockPct)}%`, background: "#b91c1c" }} />
+                        </span>
+                        <span style={{ color: "#15803d", fontWeight: 700 }}>{eff.slabPct}%</span>
+                      </span>
+                    )}
                     {(block.status === "pending_worker" || isLive || block.status === "done_prompt" || block.status === "done") && (
                       <Link
                         href={`/cutting/${block.id}/print`}

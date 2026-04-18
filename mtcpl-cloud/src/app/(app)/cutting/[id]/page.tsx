@@ -8,6 +8,8 @@ import { FinishBlockForm } from "../finish-block-form";
 import { UndoButton } from "../undo-button";
 import { RejectButton } from "../reject-button";
 import { PrimarySlabPreview } from "../primary-slab-preview";
+import { computeCutEfficiency, toCFT } from "@/lib/cut-efficiency";
+import { EfficiencyBar } from "@/components/efficiency-bar";
 import {
   approveBlockAction,
   rejectBlockAction,
@@ -166,6 +168,32 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
       {blk && placed.length > 0 && (
         <CuttingDetailPreview blk={blk} placed={placed as any} stoneTypes={stoneTypes ?? undefined} />
       )}
+
+      {/* Block efficiency breakdown */}
+      {(() => {
+        const eff = computeCutEfficiency(blk, placed, layout?.biggest ?? null);
+        if (!eff) return null;
+        return (
+          <div style={{
+            margin: "0 0 18px",
+            padding: "14px 16px",
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+          }}>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
+              <p style={{ margin: 0, fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                Block Utilisation
+              </p>
+              <p className="muted" style={{ margin: 0, fontSize: 11, fontFamily: "ui-monospace, monospace" }}>
+                Total {toCFT(eff.blockVol).toFixed(2)} CFT
+                {layout?.biggest ? " · restockable piece counted as recovered, not waste" : ""}
+              </p>
+            </div>
+            <EfficiencyBar eff={eff} />
+          </div>
+        );
+      })()}
 
       {/* Info cards row */}
       <div
