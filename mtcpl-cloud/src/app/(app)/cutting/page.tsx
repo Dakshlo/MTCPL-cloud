@@ -7,7 +7,7 @@ import { RejectButton } from "./reject-button";
 import { UndoApproveButton } from "./undo-approve-button";
 import { CuttingTimer } from "./cutting-timer";
 import { computeCutEfficiency } from "@/lib/cut-efficiency";
-import { yardLabel } from "@/lib/yards";
+import { yardLabel, facilityOfYard, facilityLabel, FACILITIES, type Facility } from "@/lib/yards";
 
 type Tab = "pending" | "in_progress" | "done";
 type SearchParams = Promise<{ tab?: string }>;
@@ -31,6 +31,49 @@ type BlockRow = {
 function defaultTab(role: string): Tab {
   if (role === "team_head") return "pending";
   return "in_progress";
+}
+
+/** Split a list of cutting rows into { mtcpl: [...], riico: [...] } by each
+ * block's yard. Preserves the input order within each facility. */
+function splitRowsByFacility(rows: BlockRow[]): Record<Facility, BlockRow[]> {
+  const out: Record<Facility, BlockRow[]> = { mtcpl: [], riico: [] };
+  for (const r of rows) {
+    out[facilityOfYard(r.layout?.blk?.yard)].push(r);
+  }
+  return out;
+}
+
+/** Small header strip that sits above each facility's rows. Same visual
+ * language as the one used on the Block Inventory page so they feel linked. */
+function FacilityHeader({ facility, count, compact = false }: { facility: Facility; count: number; compact?: boolean }) {
+  const isRiico = facility === "riico";
+  return (
+    <div style={{
+      display: "flex",
+      alignItems: "center",
+      gap: 10,
+      padding: compact ? "4px 0 2px" : "10px 0 6px",
+      borderBottom: compact ? "1px dashed var(--border)" : "1px solid var(--border)",
+      marginBottom: compact ? 6 : 10,
+      marginTop: compact ? 4 : 8,
+    }}>
+      <span style={{
+        fontSize: compact ? 10 : 11,
+        fontWeight: 700,
+        letterSpacing: "0.05em",
+        padding: compact ? "2px 8px" : "3px 10px",
+        borderRadius: 4,
+        background: isRiico ? "rgba(124,58,237,0.12)" : "rgba(184,115,51,0.12)",
+        color: isRiico ? "#7c3aed" : "var(--gold-dark)",
+        border: `1px solid ${isRiico ? "rgba(124,58,237,0.3)" : "rgba(184,115,51,0.3)"}`,
+      }}>
+        {facilityLabel(facility)}
+      </span>
+      <span style={{ fontSize: compact ? 11 : 12, color: "var(--muted)", fontWeight: 600 }}>
+        {count} {count === 1 ? "block" : "blocks"}
+      </span>
+    </div>
+  );
 }
 
 /** IST (Asia/Kolkata) midnight window for "today" — returns UTC ISO strings for DB range queries. */
@@ -219,16 +262,26 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
           </p>
         )}
 
-        {(activeTab === "done" ? todayRows : rows).map((block) => {
-          const blk = block.layout?.blk;
-          const placed = block.layout?.placed ?? [];
-          const slabCount = block.cut_session_slabs.length;
-          const isLive = block.status === "cutting";
-          const isUrgent = block.cut_session_slabs.some(s => urgentSlabIds.has(s.slab_requirement_id));
-          const eff = computeCutEfficiency(blk, placed, block.layout?.biggest ?? null);
+        {(() => {
+          const source = activeTab === "done" ? todayRows : rows;
+          const grouped = splitRowsByFacility(source);
+          // Always render in a consistent order; skip sections that are empty.
+          return FACILITIES.map((f) => {
+            const list = grouped[f];
+            if (list.length === 0) return null;
+            return (
+              <div key={`active-${f}`}>
+                <FacilityHeader facility={f} count={list.length} />
+                {list.map((block) => {
+                  const blk = block.layout?.blk;
+                  const placed = block.layout?.placed ?? [];
+                  const slabCount = block.cut_session_slabs.length;
+                  const isLive = block.status === "cutting";
+                  const isUrgent = block.cut_session_slabs.some((s) => urgentSlabIds.has(s.slab_requirement_id));
+                  const eff = computeCutEfficiency(blk, placed, block.layout?.biggest ?? null);
 
-          return (
-            <div className="plan-card" key={block.id} style={isUrgent ? { borderLeft: "4px solid #DC2626", background: "rgba(220,38,38,0.10)" } : {}}>
+                  return (
+                    <div className="plan-card" key={block.id} style={isUrgent ? { borderLeft: "4px solid #DC2626", background: "rgba(220,38,38,0.10)" } : {}}>
                 <div
                   className="record-head"
                   style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-start" }}
@@ -470,8 +523,12 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                   )}
                 </div>
               </div>
+                  );
+                })}
+              </div>
             );
-          })}
+          });
+        })()}
 
         {/* Done tab: "Earlier" collapsed section for previous days */}
         {activeTab === "done" && earlierRows.length > 0 && (
@@ -494,79 +551,91 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
               Earlier — {earlierRows.length} block{earlierRows.length !== 1 ? "s" : ""}
             </summary>
             <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 10 }}>
-              {earlierRows.map((block) => {
-                const blk = block.layout?.blk;
-                const placed = block.layout?.placed ?? [];
-                const slabCount = block.cut_session_slabs.length;
-                return (
-                  <div className="plan-card" key={block.id}>
-                    <div className="record-head" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-start" }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <strong style={{ fontFamily: "ui-monospace, monospace", fontSize: 15 }}>
-                          {block.block_id}
-                        </strong>
-                        <p className="muted" style={{ margin: "2px 0 0", fontSize: 12 }}>
-                          {block.cut_sessions?.session_code}
-                          {blk ? ` · ${blk.stone} · ${yardLabel(blk.yard)} · ${blk.l} × ${blk.w} × ${blk.h} in` : ""}
-                          {block.cut_sessions?.kerf_mm ? ` · Kerf ${block.cut_sessions.kerf_mm} mm` : ""}
-                        </p>
-                        {block.cut_sessions?.planned_by && profilesMap[block.cut_sessions.planned_by] && (
-                          <p style={{ margin: "3px 0 0", fontSize: 11, color: "var(--muted)" }}>
-                            Plan by <span style={{ color: "var(--gold-dark)", fontWeight: 600 }}>
-                              {profilesMap[block.cut_sessions.planned_by]}
-                            </span>
-                          </p>
-                        )}
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                        <span className="role-pill">{slabCount} slab{slabCount !== 1 ? "s" : ""}</span>
-                        <Link
-                          href={`/cutting/${block.id}/print`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          style={{
-                            textDecoration: "none", fontSize: 12, padding: "4px 12px",
-                            background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 6,
-                            color: "var(--muted)", fontWeight: 500, whiteSpace: "nowrap",
-                          }}
-                        >
-                          🖨 Print
-                        </Link>
-                        <Link
-                          href={`/cutting/${block.id}`}
-                          style={{
-                            textDecoration: "none", fontSize: 12, padding: "4px 12px",
-                            background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 6,
-                            color: "var(--text)", fontWeight: 500, whiteSpace: "nowrap",
-                          }}
-                        >
-                          View →
-                        </Link>
-                      </div>
+              {(() => {
+                const grouped = splitRowsByFacility(earlierRows);
+                return FACILITIES.map((f) => {
+                  const list = grouped[f];
+                  if (list.length === 0) return null;
+                  return (
+                    <div key={`earlier-${f}`}>
+                      <FacilityHeader facility={f} count={list.length} compact />
+                      {list.map((block) => {
+                        const blk = block.layout?.blk;
+                        const placed = block.layout?.placed ?? [];
+                        const slabCount = block.cut_session_slabs.length;
+                        return (
+                          <div className="plan-card" key={block.id} style={{ marginBottom: 8 }}>
+                            <div className="record-head" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-start" }}>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <strong style={{ fontFamily: "ui-monospace, monospace", fontSize: 15 }}>
+                                  {block.block_id}
+                                </strong>
+                                <p className="muted" style={{ margin: "2px 0 0", fontSize: 12 }}>
+                                  {block.cut_sessions?.session_code}
+                                  {blk ? ` · ${blk.stone} · ${yardLabel(blk.yard)} · ${blk.l} × ${blk.w} × ${blk.h} in` : ""}
+                                  {block.cut_sessions?.kerf_mm ? ` · Kerf ${block.cut_sessions.kerf_mm} mm` : ""}
+                                </p>
+                                {block.cut_sessions?.planned_by && profilesMap[block.cut_sessions.planned_by] && (
+                                  <p style={{ margin: "3px 0 0", fontSize: 11, color: "var(--muted)" }}>
+                                    Plan by <span style={{ color: "var(--gold-dark)", fontWeight: 600 }}>
+                                      {profilesMap[block.cut_sessions.planned_by]}
+                                    </span>
+                                  </p>
+                                )}
+                              </div>
+                              <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                                <span className="role-pill">{slabCount} slab{slabCount !== 1 ? "s" : ""}</span>
+                                <Link
+                                  href={`/cutting/${block.id}/print`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  style={{
+                                    textDecoration: "none", fontSize: 12, padding: "4px 12px",
+                                    background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 6,
+                                    color: "var(--muted)", fontWeight: 500, whiteSpace: "nowrap",
+                                  }}
+                                >
+                                  🖨 Print
+                                </Link>
+                                <Link
+                                  href={`/cutting/${block.id}`}
+                                  style={{
+                                    textDecoration: "none", fontSize: 12, padding: "4px 12px",
+                                    background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 6,
+                                    color: "var(--text)", fontWeight: 500, whiteSpace: "nowrap",
+                                  }}
+                                >
+                                  View →
+                                </Link>
+                              </div>
+                            </div>
+                            {placed.length > 0 && (
+                              <div className="chip-row" style={{ marginTop: 8 }}>
+                                {placed.map((s) => (
+                                  <span className="plan-chip" key={s.id}>
+                                    {s.id}{s.temple ? ` · ${s.temple}` : ""}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                            <div className="record-actions" style={{ marginTop: 12, gap: 8 }}>
+                              <span className="role-pill badge-available" style={{ fontSize: 12 }}>
+                                ✓ Done
+                                {block.restocked_block_id
+                                  ? ` · Restocked ${block.restocked_block_id.split(",").length} piece(s)`
+                                  : " · Block discarded"}
+                                {block.updated_at
+                                  ? ` · ${new Date(block.updated_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}`
+                                  : ""}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                    {placed.length > 0 && (
-                      <div className="chip-row" style={{ marginTop: 8 }}>
-                        {placed.map((s) => (
-                          <span className="plan-chip" key={s.id}>
-                            {s.id}{s.temple ? ` · ${s.temple}` : ""}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    <div className="record-actions" style={{ marginTop: 12, gap: 8 }}>
-                      <span className="role-pill badge-available" style={{ fontSize: 12 }}>
-                        ✓ Done
-                        {block.restocked_block_id
-                          ? ` · Restocked ${block.restocked_block_id.split(",").length} piece(s)`
-                          : " · Block discarded"}
-                        {block.updated_at
-                          ? ` · ${new Date(block.updated_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}`
-                          : ""}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                });
+              })()}
             </div>
           </details>
         )}
@@ -590,37 +659,49 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
               {rejectedRows.length} Rejected block{rejectedRows.length !== 1 ? "s" : ""}
             </summary>
             <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
-              {rejectedRows.map((block) => {
-                const blk = block.layout?.blk;
-                const slabCount = block.cut_session_slabs.length;
-                return (
-                  <div key={block.id} className="plan-card" style={{ opacity: 0.65 }}>
-                    <div className="record-head" style={{ flexWrap: "wrap", gap: 10 }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <strong style={{ fontFamily: "ui-monospace, monospace", fontSize: 14 }}>
-                          {block.block_id}
-                        </strong>
-                        <p className="muted" style={{ margin: "2px 0 0", fontSize: 12 }}>
-                          {block.cut_sessions?.session_code}
-                          {blk ? ` · ${blk.stone} · ${yardLabel(blk.yard)}` : ""}
-                          {block.updated_at ? ` · ${new Date(block.updated_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}` : ""}
-                        </p>
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                        <span className="role-pill">{slabCount} slab{slabCount !== 1 ? "s" : ""}</span>
-                        <Link href={`/cutting/${block.id}`} style={{ textDecoration: "none", fontSize: 12, padding: "4px 12px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)", fontWeight: 500 }}>
-                          View →
-                        </Link>
-                      </div>
+              {(() => {
+                const grouped = splitRowsByFacility(rejectedRows);
+                return FACILITIES.map((f) => {
+                  const list = grouped[f];
+                  if (list.length === 0) return null;
+                  return (
+                    <div key={`rejected-${f}`}>
+                      <FacilityHeader facility={f} count={list.length} compact />
+                      {list.map((block) => {
+                        const blk = block.layout?.blk;
+                        const slabCount = block.cut_session_slabs.length;
+                        return (
+                          <div key={block.id} className="plan-card" style={{ opacity: 0.65, marginBottom: 8 }}>
+                            <div className="record-head" style={{ flexWrap: "wrap", gap: 10 }}>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <strong style={{ fontFamily: "ui-monospace, monospace", fontSize: 14 }}>
+                                  {block.block_id}
+                                </strong>
+                                <p className="muted" style={{ margin: "2px 0 0", fontSize: 12 }}>
+                                  {block.cut_sessions?.session_code}
+                                  {blk ? ` · ${blk.stone} · ${yardLabel(blk.yard)}` : ""}
+                                  {block.updated_at ? ` · ${new Date(block.updated_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}` : ""}
+                                </p>
+                              </div>
+                              <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                                <span className="role-pill">{slabCount} slab{slabCount !== 1 ? "s" : ""}</span>
+                                <Link href={`/cutting/${block.id}`} style={{ textDecoration: "none", fontSize: 12, padding: "4px 12px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)", fontWeight: 500 }}>
+                                  View →
+                                </Link>
+                              </div>
+                            </div>
+                            <div style={{ marginTop: 8 }}>
+                              <span className="role-pill badge-discarded" style={{ fontSize: 11 }}>
+                                Rejected — block returned to inventory
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                    <div style={{ marginTop: 8 }}>
-                      <span className="role-pill badge-discarded" style={{ fontSize: 11 }}>
-                        Rejected — block returned to inventory
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                });
+              })()}
             </div>
           </details>
         )}
