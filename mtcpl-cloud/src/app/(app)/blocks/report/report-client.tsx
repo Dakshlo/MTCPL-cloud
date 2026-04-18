@@ -3,6 +3,7 @@
 import { useState, useMemo } from "react";
 import Link from "next/link";
 import { ALLOWED_YARDS, yardLabel, yardShortLabel } from "@/lib/yards";
+import { blockStatusLabel, blockStatusBadge, isReusedBlock } from "@/lib/blocks";
 
 type Block = {
   id: string;
@@ -38,22 +39,15 @@ function calcCft(l: number, w: number, h: number) {
   return (l * w * h) / 1728;
 }
 
+// Filter-button labels — intentionally status-only so the filter chips match
+// the raw status you can set on a block. The table cell uses blockStatusLabel
+// which adds Fresh vs Used based on category.
 const STATUS_LABELS: Record<string, string> = {
-  available: "fresh",
-  reserved: "in-progress",
-  consumed: "used",
-  discarded: "deleted",
+  available: "Available",
+  reserved: "In Progress",
+  consumed: "Consumed",
+  discarded: "Deleted",
 };
-
-function statusBadgeClass(status: string) {
-  const map: Record<string, string> = {
-    available: "badge-available",
-    reserved: "badge-reserved",
-    consumed: "badge-consumed",
-    discarded: "badge-discarded",
-  };
-  return map[status] || "";
-}
 
 type SortCol = "id" | "stone" | "yard" | "cft" | "status" | "vendor_name" | "created_at" | "updated_at";
 
@@ -61,8 +55,10 @@ export function ReportClient({ blocks, stoneNames }: { blocks: Block[]; stoneNam
   const ALL_STONES = stoneNames && stoneNames.length > 0 ? stoneNames : ["PinkStone", "WhiteStone"];
   const today = new Date().toISOString().slice(0, 10);
 
-  // Filters
-  const [statusFilter, setStatusFilter] = useState<string[]>([]);  // empty = all
+  // Filters. Default = only 'available' — when the report loads, people need
+  // to see what's actually in the yard right now, not historical totals that
+  // get confusing ("why is our stock so huge?"). Other filters are additive.
+  const [statusFilter, setStatusFilter] = useState<string[]>(["available"]);
   const [stoneFilter, setStoneFilter] = useState("all");
   const [yardFilter, setYardFilter] = useState("all");
   const [qualityFilter, setQualityFilter] = useState("all");
@@ -131,7 +127,10 @@ export function ReportClient({ blocks, stoneNames }: { blocks: Block[]; stoneNam
   }
 
   function clearAll() {
-    setStatusFilter([]);
+    // Snap back to the opening view: show only available blocks, no other
+    // filters. If someone genuinely wants everything they can un-tick
+    // Available after this.
+    setStatusFilter(["available"]);
     setStoneFilter("all");
     setYardFilter("all");
     setQualityFilter("all");
@@ -288,9 +287,10 @@ export function ReportClient({ blocks, stoneNames }: { blocks: Block[]; stoneNam
         <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
           <span className="muted" style={{ fontSize: 12, alignSelf: "center" }}>Quick:</span>
           {[
-            { label: "Active only", fn: () => setStatusFilter(["available", "reserved"]) },
+            { label: "Available only", fn: () => setStatusFilter(["available"]) },
+            { label: "Active (available + in progress)", fn: () => setStatusFilter(["available", "reserved"]) },
+            { label: "Consumed only", fn: () => setStatusFilter(["consumed"]) },
             { label: "Deleted only", fn: () => setStatusFilter(["discarded"]) },
-            { label: "Used only", fn: () => setStatusFilter(["consumed"]) },
             { label: "Last 7 days", fn: () => { setDateFrom(new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10)); setDateTo(today); } },
             { label: "Last 30 days", fn: () => { setDateFrom(new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10)); setDateTo(today); } },
             { label: "Last 90 days", fn: () => { setDateFrom(new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10)); setDateTo(today); } },
@@ -394,7 +394,13 @@ export function ReportClient({ blocks, stoneNames }: { blocks: Block[]; stoneNam
                       ) : <span className="muted">—</span>}
                     </td>
                     <td style={{ padding: "9px 12px" }}>
-                      <span className={`role-pill ${statusBadgeClass(b.status)}`}>{STATUS_LABELS[b.status] ?? b.status}</span>
+                      <span
+                        className={`role-pill ${blockStatusBadge(b.status, b.category)}`}
+                        title={isReusedBlock(b.category) ? "Re-stocked from a previous cut — available but not brand-new" : undefined}
+                      >
+                        {isReusedBlock(b.category) && b.status === "available" ? "↻ " : ""}
+                        {blockStatusLabel(b.status, b.category)}
+                      </span>
                     </td>
                     <td style={{ padding: "9px 12px", color: "var(--muted)" }}>{b.truck_no || "—"}</td>
                     <td style={{ padding: "9px 12px", color: "var(--muted)" }}>{b.vendor_name || "—"}</td>

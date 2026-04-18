@@ -8,6 +8,7 @@ import { stoneDisplayName } from "@/lib/stone-utils";
 import type { StoneTypeDef } from "@/lib/stone-utils";
 import { ManualCutModal } from "./manual-cut-modal";
 import { FACILITIES, YARDS_BY_FACILITY, facilityLabel, facilityOfYard, yardLabel, yardShortLabel, type Facility } from "@/lib/yards";
+import { blockStatusLabel, blockStatusBadge, isReusedBlock } from "@/lib/blocks";
 
 type StoneType = StoneTypeDef;
 type OpenSlab = {
@@ -31,22 +32,15 @@ function calcCft(l: number, w: number, h: number) {
   return ((l * w * h) / 1728).toFixed(2);
 }
 
+// Labels used in the edit drawer's Status dropdown (raw status values).
+// The card pill uses blockStatusLabel() which also factors in category so
+// Reused remainders read as "Used" instead of "Fresh".
 const STATUS_LABELS: Record<string, string> = {
-  available: "fresh",
-  reserved: "in-progress",
-  consumed: "used",
-  discarded: "deleted",
+  available: "Available",
+  reserved: "In Progress",
+  consumed: "Consumed",
+  discarded: "Deleted",
 };
-
-function statusBadgeClass(status: string) {
-  const map: Record<string, string> = {
-    available: "badge-available",
-    reserved: "badge-reserved",
-    consumed: "badge-consumed",
-    discarded: "badge-discarded",
-  };
-  return map[status] || "";
-}
 
 function fmtDate(iso: string | null) {
   if (!iso) return null;
@@ -63,6 +57,7 @@ type Block = {
   id: string;
   stone: string;
   yard: number;
+  category: string | null;
   length_ft: number;
   width_ft: number;
   height_ft: number;
@@ -210,7 +205,10 @@ export function BlockGrid({ blocks, canEdit, vendors, profilesMap = {}, stoneTyp
                           <div className="block-card-badges">
                             <span className="role-pill" style={{ background: stoneColor + "55", color: "#1a1a1a", border: `1px solid ${stoneColor}` }}>{stoneDisplayName(block.stone)}</span>
                             <span className="role-pill">{yardShortLabel(block.yard)}</span>
-                            <span className={`role-pill ${statusBadgeClass(block.status)}`}>{STATUS_LABELS[block.status] ?? block.status}</span>
+                            <span className={`role-pill ${blockStatusBadge(block.status, block.category)}`}>
+                            {isReusedBlock(block.category) && block.status === "available" ? "↻ " : ""}
+                            {blockStatusLabel(block.status, block.category)}
+                          </span>
                             {block.quality && (
                               <span className={`role-pill ${block.quality === "A" ? "badge-available" : "badge-reserved"}`}>
                                 {block.quality === "A" ? "Grade A" : "Grade B"}
