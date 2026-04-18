@@ -16,7 +16,7 @@ export default async function SlabsPage() {
 
   let slabQuery = admin
     .from("slab_requirements")
-    .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority, created_at, updated_at, created_by")
+    .select("id, label, description, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority, batch_id, created_at, updated_at, created_by")
     .in("status", ["open", "planned"])
     .order("priority", { ascending: false })
     .order("created_at", { ascending: false })
@@ -25,11 +25,12 @@ export default async function SlabsPage() {
   // Entry roles see only what they personally added
   if (isEntryRole) slabQuery = slabQuery.eq("created_by", profile.id);
 
-  const [{ data: slabs, error }, { data: temples }, { data: allIds }, { data: stoneTypes }] = await Promise.all([
+  const [{ data: slabs, error }, { data: temples }, { data: allIds }, { data: stoneTypes }, { data: labelRows }] = await Promise.all([
     slabQuery,
     admin.from("temples").select("id, name, code_prefix, default_stone").eq("is_active", true).order("name"),
     admin.from("slab_requirements").select("id"),
     admin.from("stone_types").select("id, name").order("name"),
+    admin.from("slab_labels").select("name").eq("is_active", true).order("name"),
   ]);
 
   if (error) throw new Error(error.message);
@@ -43,6 +44,7 @@ export default async function SlabsPage() {
     ? stoneTypes
     : [{ id: "pink", name: "PinkStone" }, { id: "white", name: "WhiteStone" }];
   const existingIds = (allIds ?? []).map(r => r.id);
+  const labels = (labelRows ?? []).map(r => r.name);
 
   const totalOpen = slabList.filter(s => s.status === "open").length;
   const priorityCount = slabList.filter(s => s.priority).length;
@@ -62,7 +64,7 @@ export default async function SlabsPage() {
 
       {/* Add form */}
       {canEdit && templeList.length > 0 && (
-        <AddSlabForm temples={templeList} existingIds={existingIds} stoneTypes={stoneList} />
+        <AddSlabForm temples={templeList} existingIds={existingIds} stoneTypes={stoneList} labels={labels} />
       )}
       {canEdit && templeList.length === 0 && (
         <div className="banner">
@@ -93,7 +95,7 @@ export default async function SlabsPage() {
             : "No open slabs yet. Add your first slab requirement above."}
         </div>
       ) : (
-        <SlabGrid slabs={slabList} temples={templeList} stoneTypes={stoneList} canEdit={canEdit} profilesMap={profilesMap} />
+        <SlabGrid slabs={slabList} temples={templeList} stoneTypes={stoneList} canEdit={canEdit} profilesMap={profilesMap} labels={labels} />
       )}
     </>
   );

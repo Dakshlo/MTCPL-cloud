@@ -1,5 +1,6 @@
 "use server";
 
+import { randomUUID } from "crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
@@ -41,8 +42,16 @@ export async function addSlabAction(formData: FormData) {
   const stone = text(formData, "stone");
   if (!stone) toast("/slabs", "Stone type is required");
 
+  // Batch grouping: only when creating >1 rows in one submit. Singletons stay
+  // batch_id=null so the UI never multi-selects them with other singletons.
+  const batchId = qty > 1 ? randomUUID() : null;
+
+  const label = text(formData, "label");
+  const description = text(formData, "description") || null;
+
   const common = {
-    label: text(formData, "label") || temple,
+    label: label || temple,
+    description,
     temple,
     stone,
     quality: text(formData, "quality") || null,
@@ -51,6 +60,7 @@ export async function addSlabAction(formData: FormData) {
     thickness_ft: num(formData, "thickness_in"),
     priority: text(formData, "priority") === "true",
     status: "open" as const,
+    batch_id: batchId,
     created_by: profile.id,
     updated_by: profile.id,
   };
@@ -64,7 +74,7 @@ export async function addSlabAction(formData: FormData) {
   const { error } = await supabase.from("slab_requirements").insert(rows);
   if (error) toast("/slabs", error.message);
 
-  await logAudit(profile.id, "create", "slab", baseId, { temple, qty, stone: common.stone });
+  await logAudit(profile.id, "create", "slab", baseId, { temple, qty, stone: common.stone, batch_id: batchId });
   revalidatePath("/slabs");
   revalidatePath("/planning");
   redirect(`/slabs?toast=${qty > 1 ? `${qty}+slabs+added` : "Slab+added"}`);
@@ -82,6 +92,7 @@ export async function updateSlabAction(formData: FormData) {
 
   const payload = {
     label: text(formData, "label"),
+    description: text(formData, "description") || null,
     temple: text(formData, "temple"),
     stone,
     quality: text(formData, "quality") || null,
@@ -139,4 +150,165 @@ export async function deleteSlabAction(formData: FormData) {
   });
   revalidatePath("/slabs");
   redirect("/slabs?toast=Slab+deleted");
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Slab Labels (reusable dropdown options for the "label" field)
+// ────────────────────────────────────────────────────────────────────────────
+
+export async function addSlabLabelAction(name: string): Promise<{ error: string } | undefined> {
+  await requireAuth(["owner", "team_head", "slab_entry", "block_slab_entry"]);
+  const admin = createAdminSupabaseClient();
+
+  const trimmed = name.trim();
+  if (!trimmed) return { error: "Label is required" };
+  if (trimmed.length > 80) return { error: "Label must be under 80 characters" };
+
+  const { error } = await admin
+    .from("slab_labels")
+    .insert({ name: trimmed, is_active: true });
+
+  if (error) {
+    if (error.code === "23505") return { error: "Label already exists" };
+    return { error: error.message };
+  }
+
+  revalidatePath("/slabs");
+  return undefined;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Bulk actions — scoped to ONE batch_id at a time, so the UI can never select
+// across unrelated slabs. The server re-verifies every target row actually
+// shares the batch_id before touching it.
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Delete multiple slabs that belong to the SAME batch_id. */
+export async function bulkDeleteSlabsAction(formData: FormData) {
+  const { profile } = await requireAuth(["owner", "team_head", "slab_entry", "block_slab_entry"]);
+  const supabase = createAdminSupabaseClient();
+
+  const batchId = text(formData, "batch_id");
+  const idsRaw = text(formData, "ids");
+  if (!batchId) toast("/slabs", "Missing batch ID");
+  if (!idsRaw) toast("/slabs", "No slabs selected");
+
+  let ids: string[];
+  try {
+    ids = JSON.parse(idsRaw);
+    if (!Array.isArray(ids) || ids.some((x) => typeof x !== "string")) throw new Error();
+  } catch {
+    toast("/slabs", "Invalid selection");
+    return;
+  }
+  if (ids.length === 0) toast("/slabs", "No slabs selected");
+
+  // Server-side guard: every id must belong to the same batch_id, and entry
+  // roles can only touch their own slabs.
+  const { data: rows, error: readErr } = await supabase
+    .from("slab_requirements")
+    .select("id, batch_id, created_by")
+    .in("id", ids);
+  if (readErr) toast("/slabs", readErr.message);
+  if (!rows || rows.length !== ids.length) toast("/slabs", "Some slabs no longer exist");
+
+  const ENTRY_ROLES = ["slab_entry", "block_slab_entry"];
+  const isEntry = ENTRY_ROLES.includes(profile.role);
+
+  for (const r of rows!) {
+    if (r.batch_id !== batchId) {
+      toast("/slabs", "Selection crosses batches — refresh and try again");
+    }
+    if (isEntry && r.created_by !== profile.id) {
+      toast("/slabs", "You can only delete slabs you added.");
+    }
+  }
+
+  const { error: delErr } = await supabase.from("slab_requirements").delete().in("id", ids);
+  if (delErr) {
+    if (delErr.code === "23503") {
+      // At least one is referenced — soft-archive all targets instead.
+      await supabase
+        .from("slab_requirements")
+        .update({ status: "rejected", updated_by: profile.id, updated_at: new Date().toISOString() })
+        .in("id", ids);
+      await logAudit(profile.id, "archive_bulk", "slab", batchId, { ids, reason: "referenced_bulk_delete" });
+      revalidatePath("/slabs");
+      toast("/slabs", `${ids.length} slabs were referenced — archived as rejected`);
+    }
+    toast("/slabs", delErr.message);
+  }
+
+  await logAudit(profile.id, "delete_bulk", "slab", batchId, { ids });
+  await notify("slab_deleted", `${ids.length} slabs deleted from batch`, {
+    entityType: "slab",
+    entityId: batchId,
+    actorId: profile.id,
+  });
+  revalidatePath("/slabs");
+  revalidatePath("/planning");
+  redirect(`/slabs?toast=${ids.length}+slabs+deleted`);
+}
+
+/** Bulk-update fields on multiple slabs that share ONE batch_id. */
+export async function bulkUpdateSlabsAction(formData: FormData) {
+  const { profile } = await requireAuth(["owner", "team_head", "slab_entry", "block_slab_entry"]);
+  const supabase = createAdminSupabaseClient();
+
+  const batchId = text(formData, "batch_id");
+  const idsRaw = text(formData, "ids");
+  if (!batchId) toast("/slabs", "Missing batch ID");
+  if (!idsRaw) toast("/slabs", "No slabs selected");
+
+  let ids: string[];
+  try {
+    ids = JSON.parse(idsRaw);
+    if (!Array.isArray(ids) || ids.some((x) => typeof x !== "string")) throw new Error();
+  } catch {
+    toast("/slabs", "Invalid selection");
+    return;
+  }
+  if (ids.length === 0) toast("/slabs", "No slabs selected");
+
+  // Same batch guard + ownership guard as bulkDelete
+  const { data: rows, error: readErr } = await supabase
+    .from("slab_requirements")
+    .select("id, batch_id, created_by")
+    .in("id", ids);
+  if (readErr) toast("/slabs", readErr.message);
+  if (!rows || rows.length !== ids.length) toast("/slabs", "Some slabs no longer exist");
+
+  const ENTRY_ROLES = ["slab_entry", "block_slab_entry"];
+  const isEntry = ENTRY_ROLES.includes(profile.role);
+  for (const r of rows!) {
+    if (r.batch_id !== batchId) toast("/slabs", "Selection crosses batches — refresh and try again");
+    if (isEntry && r.created_by !== profile.id) toast("/slabs", "You can only edit slabs you added.");
+  }
+
+  // Shared fields — every one applies to every selected row.
+  const stone = text(formData, "stone");
+  if (!stone) toast("/slabs", "Stone type is required");
+
+  const payload = {
+    label: text(formData, "label"),
+    description: text(formData, "description") || null,
+    temple: text(formData, "temple"),
+    stone,
+    quality: text(formData, "quality") || null,
+    length_ft: num(formData, "length_in"),
+    width_ft: num(formData, "width_in"),
+    thickness_ft: num(formData, "thickness_in"),
+    priority: text(formData, "priority") === "true",
+    status: text(formData, "status") || "open",
+    updated_by: profile.id,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { error: upErr } = await supabase.from("slab_requirements").update(payload).in("id", ids);
+  if (upErr) toast("/slabs", upErr.message);
+
+  await logAudit(profile.id, "update_bulk", "slab", batchId, { ids, fields: Object.keys(payload) });
+  revalidatePath("/slabs");
+  revalidatePath("/planning");
+  redirect(`/slabs?toast=${ids.length}+slabs+updated`);
 }

@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { addSlabAction } from "./actions";
 import { generateSlabCode } from "./utils";
+import { LabelSelect } from "./label-select";
 
 type Temple = { id: string; name: string; code_prefix: string; default_stone?: string | null };
 type StoneType = { id: string; name: string };
@@ -49,7 +50,7 @@ function FtInInput({ label, inchValue, onInchChange }: { label: string; inchValu
   );
 }
 
-export function AddSlabForm({ temples, existingIds, stoneTypes = [] }: { temples: Temple[]; existingIds: string[]; stoneTypes?: StoneType[] }) {
+export function AddSlabForm({ temples, existingIds, stoneTypes = [], labels = [] }: { temples: Temple[]; existingIds: string[]; stoneTypes?: StoneType[]; labels?: string[] }) {
   const [quality, setQuality] = useState<"" | "A" | "B">("");
   const [selectedTemple, setSelectedTemple] = useState<Temple | null>(temples[0] ?? null);
   const [stone, setStone] = useState<string>(temples[0]?.default_stone ?? "PinkStone");
@@ -153,11 +154,15 @@ export function AddSlabForm({ temples, existingIds, stoneTypes = [] }: { temples
           </div>
         </div>
 
-        {/* Row 2: Label */}
+        {/* Row 2: Label (dropdown) + Description (free text) */}
         <div className="add-panel-row">
-          <label className="stack" style={{ flex: 1 }}>
-            <span>Label / Description</span>
-            <input name="label" placeholder="e.g. Main Hall Floor Panel" required />
+          <label className="stack" style={{ flex: "1 1 240px" }}>
+            <span>Label</span>
+            <LabelSelect labels={labels} name="label" />
+          </label>
+          <label className="stack" style={{ flex: "2 1 320px" }}>
+            <span>Description <span className="muted" style={{ fontWeight: 400 }}>(optional — text + numbers)</span></span>
+            <input name="description" placeholder="e.g. north-east corner, set 2, 1200mm" />
           </label>
         </div>
 
