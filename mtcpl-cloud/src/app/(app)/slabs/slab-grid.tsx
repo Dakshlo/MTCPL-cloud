@@ -411,7 +411,7 @@ export function SlabGrid({
 
                 <label className="stack">
                   <span>Description</span>
-                  <input name="description" defaultValue={bulkSeed.description ?? ""} placeholder="Optional — applies to all selected" />
+                  <input name="description" defaultValue={bulkSeed.description ?? ""} placeholder="Type description" />
                 </label>
 
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -508,7 +508,7 @@ export function SlabGrid({
 
                 <label className="stack">
                   <span>Description</span>
-                  <input name="description" defaultValue={selected.description ?? ""} placeholder="Optional — text + numbers" />
+                  <input name="description" defaultValue={selected.description ?? ""} placeholder="Type description" />
                 </label>
 
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>

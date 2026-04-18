@@ -161,8 +161,8 @@ export function AddSlabForm({ temples, existingIds, stoneTypes = [], labels = []
             <LabelSelect labels={labels} name="label" />
           </label>
           <label className="stack" style={{ flex: "2 1 320px" }}>
-            <span>Description <span className="muted" style={{ fontWeight: 400 }}>(optional — text + numbers)</span></span>
-            <input name="description" placeholder="e.g. north-east corner, set 2, 1200mm" />
+            <span>Description</span>
+            <input name="description" placeholder="Type description" />
           </label>
         </div>
 
