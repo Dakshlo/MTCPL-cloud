@@ -6,17 +6,26 @@ import { BlockGrid } from "./block-grid";
 import { BlockExport } from "./block-export";
 import { generateNextCode } from "./utils";
 
+// Entry roles see only their own additions
+const BLOCK_ENTRY_ROLES = ["block_entry", "block_slab_entry"] as const;
+
 export default async function BlocksPage() {
   const { profile } = await requireAuth(["owner", "team_head", "block_slab_entry", "slab_entry", "block_entry"]);
 
   const admin = createAdminSupabaseClient();
+  const isEntryRole = (BLOCK_ENTRY_ROLES as readonly string[]).includes(profile.role);
+
+  let blocksQuery = admin
+    .from("blocks")
+    .select("id, stone, yard, category, length_ft, width_ft, height_ft, status, quality, truck_no, vendor_name, bill_no, created_at, created_by")
+    .in("status", ["available", "reserved"])
+    .order("created_at", { ascending: false })
+    .limit(500);
+
+  if (isEntryRole) blocksQuery = blocksQuery.eq("created_by", profile.id);
+
   const [{ data: blocks, error }, { data: allIds }, { data: consumed }, { data: vendorRows }, { data: stoneTypes }, { data: openSlabs }] = await Promise.all([
-    admin
-      .from("blocks")
-      .select("id, stone, yard, category, length_ft, width_ft, height_ft, status, quality, truck_no, vendor_name, bill_no, created_at, created_by")
-      .in("status", ["available", "reserved"])
-      .order("created_at", { ascending: false })
-      .limit(500),
+    blocksQuery,
     admin.from("blocks").select("id"),
     admin
       .from("blocks")
@@ -97,12 +106,14 @@ export default async function BlocksPage() {
       <div className="section-heading">
         <div>
           <h2>{totalBlocks} Blocks</h2>
-          <p>Click any card to edit · Esc to close</p>
+          <p>{isEntryRole ? "Showing only blocks you added · Click to edit" : "Click any card to edit · Esc to close"}</p>
         </div>
       </div>
 
       {blockList.length === 0 ? (
-        <div className="banner">No blocks yet. Add your first block above.</div>
+        <div className="banner">
+          {isEntryRole ? "You haven't added any blocks yet. Add your first block above." : "No blocks yet. Add your first block above."}
+        </div>
       ) : (
         <BlockGrid blocks={blockList} canEdit={canEdit} vendors={vendors} profilesMap={profilesMap} stoneTypes={stoneList} openSlabs={openSlabs ?? []} />
       )}

@@ -157,6 +157,15 @@ export async function deleteBlockAction(formData: FormData) {
 
   if (!id) redirectWithToast("/blocks", "Block ID is missing");
 
+  // Entry roles can only delete blocks they personally added
+  const ENTRY_ROLES = ["block_entry", "block_slab_entry"];
+  if (ENTRY_ROLES.includes(profile.role)) {
+    const { data: block } = await supabase.from("blocks").select("created_by").eq("id", id).single();
+    if (block?.created_by !== profile.id) {
+      redirectWithToast("/blocks", "You can only delete blocks you added.");
+    }
+  }
+
   // Always soft-delete: mark as discarded so the block stays in history/export
   const { error } = await supabase
     .from("blocks")

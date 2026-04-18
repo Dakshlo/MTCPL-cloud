@@ -1,32 +1,41 @@
 import Link from "next/link";
 import { requireAuth } from "@/lib/auth";
-import { createDataClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
 import { AddSlabForm } from "./add-slab-form";
 import { SlabGrid } from "./slab-grid";
+
+// Entry roles see only their own additions; senior roles see everything
+const ENTRY_ROLES = ["slab_entry", "block_slab_entry"] as const;
+
 export default async function SlabsPage() {
   const { profile } = await requireAuth(["owner", "team_head", "slab_entry", "block_slab_entry"]);
-  const supabase = await createDataClient(profile.role);
   const admin = createAdminSupabaseClient();
 
+  const isEntryRole = (ENTRY_ROLES as readonly string[]).includes(profile.role);
+
+  let slabQuery = admin
+    .from("slab_requirements")
+    .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority, created_at, updated_at, created_by")
+    .in("status", ["open", "planned"])
+    .order("priority", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(200);
+
+  // Entry roles see only what they personally added
+  if (isEntryRole) slabQuery = slabQuery.eq("created_by", profile.id);
+
   const [{ data: slabs, error }, { data: temples }, { data: allIds }, { data: stoneTypes }] = await Promise.all([
-    supabase
-      .from("slab_requirements")
-      .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority, created_at, updated_at, created_by")
-      .in("status", ["open", "planned"])
-      .order("priority", { ascending: false })
-      .order("created_at", { ascending: false })
-      .limit(200),
-    supabase.from("temples").select("id, name, code_prefix, default_stone").eq("is_active", true).order("name"),
-    supabase.from("slab_requirements").select("id"),
+    slabQuery,
+    admin.from("temples").select("id, name, code_prefix, default_stone").eq("is_active", true).order("name"),
+    admin.from("slab_requirements").select("id"),
     admin.from("stone_types").select("id, name").order("name"),
   ]);
 
   if (error) throw new Error(error.message);
 
   const profilesMap = await getProfilesMap();
-  const canEdit = ["developer", "owner", "team_head", "slab_entry"].includes(profile.role);
+  const canEdit = ["developer", "owner", "team_head", "slab_entry", "block_slab_entry"].includes(profile.role);
   const slabList = slabs ?? [];
   const templeList = temples ?? [];
   // Fallback: if stone_types query failed, use hardcoded defaults so form still works
@@ -69,12 +78,20 @@ export default async function SlabsPage() {
       <div className="section-heading">
         <div>
           <h2>{slabList.length} Required Sizes</h2>
-          <p>Priority first · Click to edit · Or use View Inventory to send to Plan Generator</p>
+          <p>
+            {isEntryRole
+              ? "Showing only sizes you added · Click to edit"
+              : "Priority first · Click to edit · Or use View Inventory to send to Plan Generator"}
+          </p>
         </div>
       </div>
 
       {slabList.length === 0 ? (
-        <div className="banner">No open slabs yet. Add your first slab requirement above.</div>
+        <div className="banner">
+          {isEntryRole
+            ? "You haven't added any slab requirements yet. Add your first one above."
+            : "No open slabs yet. Add your first slab requirement above."}
+        </div>
       ) : (
         <SlabGrid slabs={slabList} temples={templeList} stoneTypes={stoneList} canEdit={canEdit} profilesMap={profilesMap} />
       )}

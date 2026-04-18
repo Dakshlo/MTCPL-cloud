@@ -104,12 +104,21 @@ export async function updateSlabAction(formData: FormData) {
 }
 
 export async function deleteSlabAction(formData: FormData) {
-  const { profile } = await requireAuth(["owner", "team_head", "slab_entry"]);
+  const { profile } = await requireAuth(["owner", "team_head", "slab_entry", "block_slab_entry"]);
   const supabase = createAdminSupabaseClient();
 
   const id = text(formData, "id");
 
   if (!id) toast("/slabs", "Missing ID");
+
+  // Entry roles can only delete slabs they personally added
+  const ENTRY_ROLES = ["slab_entry", "block_slab_entry"];
+  if (ENTRY_ROLES.includes(profile.role)) {
+    const { data: slab } = await supabase.from("slab_requirements").select("created_by").eq("id", id).single();
+    if (slab?.created_by !== profile.id) {
+      toast("/slabs", "You can only delete slabs you added.");
+    }
+  }
 
   const { error } = await supabase.from("slab_requirements").delete().eq("id", id);
   if (error) {
