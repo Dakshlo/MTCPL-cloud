@@ -377,7 +377,7 @@ export function AskAiChat({
           }}
         >
           <span style={{ fontSize: 15, fontWeight: 600, color: C.text, letterSpacing: "-0.2px" }}>
-            ✨ Templ-AI
+            ✨ MTCPL-AI
           </span>
 
           {/* Sidebar toggle moves to the right since the sidebar lives there now */}
@@ -603,7 +603,7 @@ export function AskAiChat({
           </form>
 
           <div style={{ fontSize: 12, color: C.textDim, textAlign: "center", marginTop: 10 }}>
-            Templ-AI can make mistakes — verify anything important.
+            MTCPL-AI can make mistakes — verify anything important.
           </div>
         </footer>
       </div>

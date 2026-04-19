@@ -111,6 +111,18 @@ export const AI_TOOLS = [
     },
   },
   {
+    name: "get_live_cutting_status",
+    description:
+      "Current IN-PROGRESS cutting snapshot (not historical). Returns blocks currently on the machine (status=cutting), blocks approved and waiting to start (status=pending_worker), and blocks cut but awaiting slab recording (status=done_prompt). Use this whenever the user asks 'what's happening right now', 'live status', 'current cutting', 'any blocks on the machine', 'which blocks are in progress', or 'which temple's blocks are being cut now'. Separate from get_cutting_activity (that one counts COMPLETED cuts over a date range).",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        facility: { type: "string", enum: ["mtcpl", "riico"], description: "Filter to one facility. Omit for both." },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
     name: "list_blocks",
     description:
       "List individual block records with their exact dimensions (L×W×H), CFT, stone, yard, facility, quality, status, and category. Use this whenever the user asks about specific blocks, the biggest/smallest blocks, newest/oldest blocks, blocks in a particular yard, or details of a block by ID. Complements get_inventory_snapshot (which only returns aggregates).",
@@ -156,6 +168,8 @@ export async function runTool(name: string, input: Record<string, unknown>): Pro
         return JSON.stringify(await runPlanSimulation(input));
       case "list_blocks":
         return JSON.stringify(await listBlocks(input));
+      case "get_live_cutting_status":
+        return JSON.stringify(await getLiveCuttingStatus(input));
       default:
         return JSON.stringify({ error: `Unknown tool: ${name}` });
     }
@@ -530,5 +544,83 @@ async function listBlocks(input: Record<string, unknown>) {
     note: rows.length === 200 && (sortBy === "volume_desc" || sortBy === "volume_asc")
       ? "More than 200 matches exist — volume-sorted result is approximate across the most-recent 200."
       : undefined,
+  };
+}
+
+// ─── get_live_cutting_status ─────────────────────────────────────────────────
+
+async function getLiveCuttingStatus(input: Record<string, unknown>) {
+  const admin = createAdminSupabaseClient();
+  const facilityFilter = input.facility === "mtcpl" || input.facility === "riico"
+    ? (input.facility as Facility)
+    : undefined;
+
+  const { data, error } = await admin
+    .from("cut_session_blocks")
+    .select(
+      "id, block_id, status, updated_at, layout, cut_sessions(session_code, planned_by)",
+    )
+    .in("status", ["pending_worker", "cutting", "done_prompt"])
+    .order("updated_at", { ascending: true });
+  if (error) throw new Error(error.message);
+
+  type Row = {
+    id: string;
+    block_id: string;
+    status: "pending_worker" | "cutting" | "done_prompt";
+    updated_at: string;
+    layout: { blk?: { stone?: string; yard?: number; l?: number; w?: number; h?: number }; placed?: Array<{ sw?: number; sh?: number; sd?: number }> } | null;
+    cut_sessions: { session_code: string | null } | null;
+  };
+  const rows = (data ?? []) as unknown as Row[];
+
+  // Optional facility filter via layout.blk.yard (facility is derived)
+  const filtered = facilityFilter
+    ? rows.filter((r) => {
+        const y = r.layout?.blk?.yard;
+        return typeof y === "number" && facilityOfYard(y) === facilityFilter;
+      })
+    : rows;
+
+  const byStatus = { pending_worker: 0, cutting: 0, done_prompt: 0 };
+  const live: Array<{ blockId: string; sessionCode: string | null; stone: string | null; yard: number | null; facility: Facility; dimensions: string; slabCount: number; elapsedMinutes: number }> = [];
+  const pending: Array<{ blockId: string; sessionCode: string | null; stone: string | null; yard: number | null; facility: Facility; waitingMinutes: number }> = [];
+  const donePrompt: Array<{ blockId: string; sessionCode: string | null; stone: string | null; yard: number | null; facility: Facility; waitingMinutes: number }> = [];
+
+  const now = Date.now();
+
+  for (const r of filtered) {
+    byStatus[r.status]++;
+
+    const blk = r.layout?.blk;
+    const yard = typeof blk?.yard === "number" ? blk.yard : null;
+    const fac = yard != null ? facilityOfYard(yard) : "mtcpl";
+    const elapsedMinutes = Math.max(0, Math.floor((now - new Date(r.updated_at).getTime()) / 60000));
+    const slabCount = (r.layout?.placed ?? []).length;
+    const sessionCode = r.cut_sessions?.session_code ?? null;
+    const dimensions = blk && blk.l != null ? `${blk.l} × ${blk.w} × ${blk.h} in` : "";
+
+    if (r.status === "cutting") {
+      live.push({ blockId: r.block_id, sessionCode, stone: blk?.stone ?? null, yard, facility: fac, dimensions, slabCount, elapsedMinutes });
+    } else if (r.status === "pending_worker") {
+      pending.push({ blockId: r.block_id, sessionCode, stone: blk?.stone ?? null, yard, facility: fac, waitingMinutes: elapsedMinutes });
+    } else if (r.status === "done_prompt") {
+      donePrompt.push({ blockId: r.block_id, sessionCode, stone: blk?.stone ?? null, yard, facility: fac, waitingMinutes: elapsedMinutes });
+    }
+  }
+
+  const summaryParts: string[] = [];
+  summaryParts.push(`${byStatus.cutting} block${byStatus.cutting === 1 ? "" : "s"} being cut right now`);
+  summaryParts.push(`${byStatus.pending_worker} approved & waiting to start`);
+  summaryParts.push(`${byStatus.done_prompt} cut, awaiting slab record`);
+
+  return {
+    total: filtered.length,
+    breakdown: byStatus,
+    summary: summaryParts.join(" · "),
+    filters: { facility: facilityFilter ?? "any" },
+    liveBlocks: live.slice(0, 30),
+    pendingBlocks: pending.slice(0, 30),
+    donePromptBlocks: donePrompt.slice(0, 30),
   };
 }

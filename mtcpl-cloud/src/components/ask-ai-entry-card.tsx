@@ -48,7 +48,7 @@ export function AskAiEntryCard() {
             ✨ New
           </div>
           <div style={{ fontSize: 22, fontWeight: 700, color: "#fff", letterSpacing: "-0.2px", marginBottom: 4 }}>
-            Templ-AI
+            MTCPL-AI
           </div>
           <div style={{ fontSize: 14, color: "rgba(255,255,255,0.7)", lineHeight: 1.5 }}>
             Ask anything about blocks, slabs, cutting, or planning — in English or Hindi.
