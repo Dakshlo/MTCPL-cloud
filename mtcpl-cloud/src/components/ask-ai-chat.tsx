@@ -1312,23 +1312,46 @@ function MessageBubble({
         {content && !isStreaming && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
             <SpeakButton text={content} />
-            {typeof costInr === "number" && (
+            {typeof costInr === "number" ? (
               <span
                 title={`This reply cost ~₹${costInr.toFixed(2)} in AI tokens`}
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
                   gap: 4,
-                  padding: "4px 8px",
-                  fontSize: 11,
-                  color: "rgba(255,255,255,0.45)",
+                  padding: "5px 10px",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: "#E8C572",
+                  background: "rgba(232,197,114,0.12)",
+                  border: "1px solid rgba(232,197,114,0.35)",
+                  borderRadius: 999,
+                  fontFamily: "ui-monospace, monospace",
+                  letterSpacing: "-0.01em",
+                }}
+              >
+                💰 ₹{costInr.toFixed(2)}
+              </span>
+            ) : (
+              // Older chats loaded from history don't have a cost — show a
+              // placeholder so the feature is still discoverable.
+              <span
+                title="Cost tracking not available for older chats"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                  padding: "5px 10px",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  color: "rgba(255,255,255,0.4)",
                   background: "transparent",
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  borderRadius: 6,
+                  border: "1px dashed rgba(255,255,255,0.18)",
+                  borderRadius: 999,
                   fontFamily: "ui-monospace, monospace",
                 }}
               >
-                ₹{costInr.toFixed(2)}
+                💰 ₹—
               </span>
             )}
           </div>
