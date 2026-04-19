@@ -25,6 +25,19 @@ import {
   type ChatSessionSummary,
 } from "@/lib/ai/chat-sessions";
 import { ChatMarkdown } from "./chat-markdown";
+import { SpeakButton } from "./chat-widgets/speak-button";
+
+// Friendly labels shown while a Claude tool runs. Keyed by tool name —
+// must match the schema names in src/lib/ai/tools.ts.
+const TOOL_LABELS: Record<string, string> = {
+  list_temples: "📋 Listing temples…",
+  get_inventory_snapshot: "📊 Checking inventory…",
+  list_blocks: "🧱 Looking up blocks…",
+  get_live_cutting_status: "🔪 Checking live cutting…",
+  get_temple_requirements: "🏛️ Loading temple requirements…",
+  get_cutting_activity: "📅 Loading cutting activity…",
+  run_plan_simulation: "📐 Running plan simulation…",
+};
 
 type Msg = { role: "user" | "assistant"; content: string };
 
@@ -94,6 +107,7 @@ export function AskAiChat({
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [activeTool, setActiveTool] = useState<string | null>(null);
   const [voiceLang, setVoiceLang] = useState<"en-IN" | "hi-IN">("en-IN");
   const [listening, setListening] = useState(false);
   const [sessions, setSessions] = useState<ChatSessionSummary[]>(initialRecentSessions);
@@ -200,6 +214,7 @@ export function AskAiChat({
     if (!trimmed || streaming) return;
 
     setError(null);
+    setActiveTool(null);
     const nextMessages: Msg[] = [
       ...messages,
       { role: "user", content: trimmed },
@@ -264,6 +279,14 @@ export function AskAiChat({
             if (data && data !== activeSessionId) setActiveSessionId(data);
             continue;
           }
+          if (eventName === "tool_start") {
+            setActiveTool(data);
+            continue;
+          }
+          if (eventName === "tool_end") {
+            setActiveTool(null);
+            continue;
+          }
           if (eventName === "error") {
             setError(data || "AI returned an error");
             continue;
@@ -271,6 +294,8 @@ export function AskAiChat({
           if (eventName === "done" || data === "[DONE]") {
             continue;
           }
+          // First text chunk arriving — clear any tool-progress indicator
+          if (activeTool) setActiveTool(null);
           const chunk = data.replace(/\\n/g, "\n");
           setMessages((prev) => {
             const copy = prev.slice();
@@ -289,6 +314,7 @@ export function AskAiChat({
       setMessages((prev) => prev.slice(0, -1));
     } finally {
       setStreaming(false);
+      setActiveTool(null);
       abortRef.current = null;
       if (wasNewChat || activeSessionId) refreshSessionList();
     }
@@ -419,7 +445,12 @@ export function AskAiChat({
           {isEmpty ? (
             <EmptyHero greeting={greeting} userName={userName} onPick={handlePreset} disabled={streaming} />
           ) : (
-            <MessageList messages={messages} streaming={streaming} onFollowUp={handlePreset} />
+            <MessageList
+              messages={messages}
+              streaming={streaming}
+              onFollowUp={handlePreset}
+              activeTool={activeTool}
+            />
           )}
         </main>
 
@@ -911,10 +942,12 @@ function MessageList({
   messages,
   streaming,
   onFollowUp,
+  activeTool,
 }: {
   messages: Msg[];
   streaming: boolean;
   onFollowUp: (q: string) => void;
+  activeTool: string | null;
 }) {
   return (
     <div
@@ -936,6 +969,8 @@ function MessageList({
             role={m.role}
             content={m.content}
             isStreaming={streaming && isLastAssistant}
+            // Tool-progress indicator only on the currently-generating assistant message
+            activeTool={isLastAssistant && streaming ? activeTool : null}
             // Follow-up chips only render on the latest assistant message once
             // it's fully streamed — stale chips from earlier in the thread
             // would be confusing and cross-topic.
@@ -952,12 +987,14 @@ function MessageBubble({
   role,
   content,
   isStreaming,
+  activeTool,
   onFollowUp,
   followUpsDisabled,
 }: {
   role: "user" | "assistant";
   content: string;
   isStreaming: boolean;
+  activeTool?: string | null;
   onFollowUp?: (q: string) => void;
   followUpsDisabled?: boolean;
 }) {
@@ -1023,6 +1060,8 @@ function MessageBubble({
             onFollowUp={onFollowUp}
             followUpsDisabled={followUpsDisabled}
           />
+        ) : activeTool ? (
+          <ToolProgress toolName={activeTool} />
         ) : (isStreaming ? <ThinkingDots /> : null)}
         {isStreaming && content && (
           <span
@@ -1037,7 +1076,37 @@ function MessageBubble({
             }}
           />
         )}
+        {/* Read-aloud button — only on completed assistant replies */}
+        {content && !isStreaming && <SpeakButton text={content} />}
       </div>
+    </div>
+  );
+}
+
+/**
+ * "🔍 Looking up today's cuts…" indicator while a Claude tool runs.
+ * Fades between bouncing dots and the tool-specific label so the user
+ * knows what the AI is doing instead of just seeing generic dots.
+ */
+function ToolProgress({ toolName }: { toolName: string }) {
+  const label = TOOL_LABELS[toolName] || "⚙️ Working…";
+  return (
+    <div
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "6px 12px",
+        background: "rgba(232,197,114,0.08)",
+        border: "1px solid rgba(232,197,114,0.25)",
+        borderRadius: 999,
+        fontSize: 13,
+        color: "rgba(255,255,255,0.8)",
+        fontWeight: 500,
+      }}
+    >
+      <span>{label}</span>
+      <ThinkingDots />
     </div>
   );
 }

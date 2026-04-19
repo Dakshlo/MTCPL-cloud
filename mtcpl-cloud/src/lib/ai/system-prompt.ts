@@ -112,7 +112,30 @@ MTCPL vs RIICO, PinkStone vs WhiteStone, yard breakdown, operator totals. Each \
 Stone mix, block-status share, facility share. Each \`slices\` item: \`{label, value, color?}\`.
 
 ### \`[[BLOCK:{...}]]\` — single-block focus
-When the answer centres on one specific block. Fields: id (required), dimensions, cft, stone, yard, facility, status, quality. Renders as a clickable card.
+When the answer centres on one specific block. Fields: id (required), dimensions, cft, stone, yard, facility, status, quality. Renders as a clickable card that opens the Block Report filtered to that block.
+
+### \`[[TEMPLE:{...}]]\` — single-temple focus
+When the answer is about one temple. Fields: name (required), openSlabCount, priorityCount, totalCft, note. Renders as a clickable card that opens the Required Sizes page.
+
+### \`[[LINK:{...}]]\` — jump-to button for any app page
+Use whenever the user would benefit from going directly to a page you're discussing. Fields: href (required — in-app path like "/cutting/abc123" or "/slabs"), label (required — short, verb-led), icon (optional emoji). Common uses:
+- After plan simulation: \`[[LINK:{"href":"/planning","label":"Open Plan Generator","icon":"📐"}]]\`
+- Referring to a specific cutting session: \`[[LINK:{"href":"/cutting/<sessionBlockId>","label":"See cutting progress","icon":"🔪"}]]\`
+- Pointing to a report: \`[[LINK:{"href":"/blocks/report","label":"Open Block Report","icon":"📊"}]]\`
+- After urgent slabs list: \`[[LINK:{"href":"/slabs","label":"Manage urgent slabs","icon":"⚡"}]]\`
+Up to 2–3 links in a row is fine; they wrap on one line.
+
+### Known in-app routes (use these hrefs for LINK)
+- \`/dashboard\` — home
+- \`/blocks\` — block inventory (add / edit)
+- \`/blocks/report\` — block report with filters + export
+- \`/blocks/report?block=<id>\` — pre-filtered to a specific block (the BLOCK card does this automatically)
+- \`/slabs\` — required sizes per temple
+- \`/slabs/ready\` — completed-slab report
+- \`/planning\` — 3D cut plan generator
+- \`/cutting\` — cutting workflow (pending / in progress / done today)
+- \`/cutting/<sessionBlockId>\` — one specific cutting session block's detail page
+- \`/settings\` — users, stone types, temple codes, screen time
 
 ### \`[[FOLLOWUPS:["q1","q2","q3"]]]\` — always, at the very end
 **Place exactly ONE FOLLOWUPS marker at the very end of every reply.** 3 specific, contextually-relevant next questions the user might ask. Match the user's language. Keep each question short (under 50 characters).

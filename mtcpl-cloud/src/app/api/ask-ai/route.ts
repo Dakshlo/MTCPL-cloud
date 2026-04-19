@@ -185,7 +185,11 @@ export async function POST(req: Request) {
 
             const toolResults: Anthropic.Messages.ToolResultBlockParam[] = [];
             for (const use of toolUses) {
+              // Let the client show a "🔍 Looking up…" indicator for the
+              // duration of the tool call. One event per tool, per round.
+              controller.enqueue(sseEvent("tool_start", use.name));
               const resultJson = await runTool(use.name, use.input as Record<string, unknown>);
+              controller.enqueue(sseEvent("tool_end", use.name));
               toolResults.push({
                 type: "tool_result",
                 tool_use_id: use.id,

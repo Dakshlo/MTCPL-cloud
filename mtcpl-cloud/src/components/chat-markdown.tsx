@@ -20,14 +20,17 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
+import { useRef, useState } from "react";
 
 import { ChartBar, type ChartBarItem } from "./chat-widgets/chart-bar";
 import { ChartDonut, type DonutSlice } from "./chat-widgets/chart-donut";
 import { BlockCard, type BlockCardProps } from "./chat-widgets/block-card";
 import { StatsTiles, type StatTile } from "./chat-widgets/stats-tiles";
 import { FollowUps } from "./chat-widgets/follow-ups";
+import { TempleCard, type TempleCardProps } from "./chat-widgets/temple-card";
+import { LinkButton, type LinkButtonProps } from "./chat-widgets/link-button";
 
-const START_RE = /\[\[(CHART|BLOCK|STATS|FOLLOWUPS):/g;
+const START_RE = /\[\[(CHART|BLOCK|STATS|FOLLOWUPS|TEMPLE|LINK):/g;
 
 type Part =
   | { kind: "md"; text: string }
@@ -36,6 +39,8 @@ type Part =
   | { kind: "block"; props: BlockCardProps }
   | { kind: "stats"; tiles: StatTile[] }
   | { kind: "followups"; questions: string[] }
+  | { kind: "temple"; props: TempleCardProps }
+  | { kind: "link"; props: LinkButtonProps }
   | { kind: "err"; text: string }; // marker present but JSON bad → show as-is
 
 /**
@@ -126,6 +131,17 @@ function splitByMarkers(src: string): Part[] {
             ? ((data as { questions: string[] }).questions)
             : [];
         parts.push({ kind: "followups", questions: questions.filter((q) => typeof q === "string") });
+      } else if (kind === "TEMPLE") {
+        parts.push({ kind: "temple", props: data as TempleCardProps });
+      } else if (kind === "LINK") {
+        const p = data as LinkButtonProps;
+        // Only accept safe hrefs — in-app paths or http(s) URLs
+        if (typeof p.href === "string" && typeof p.label === "string" &&
+            (p.href.startsWith("/") || /^https?:\/\//.test(p.href))) {
+          parts.push({ kind: "link", props: p });
+        } else {
+          parts.push({ kind: "err", text: src.slice(startIdx, endIdx) });
+        }
       }
     } catch {
       // JSON didn't parse — keep the raw marker text so it's visible for debug
@@ -184,20 +200,7 @@ const mdComponents: Components = {
       </pre>
     );
   },
-  table: ({ children }) => (
-    <div style={{ overflowX: "auto", margin: "0.8em 0" }}>
-      <table style={{
-        width: "100%",
-        borderCollapse: "collapse",
-        fontSize: 13,
-        border: "1px solid rgba(255,255,255,0.1)",
-        borderRadius: 8,
-        overflow: "hidden",
-      }}>
-        {children}
-      </table>
-    </div>
-  ),
+  table: ({ children }) => <TableWithCopy>{children}</TableWithCopy>,
   thead: ({ children }) => <thead style={{ background: "rgba(255,255,255,0.06)" }}>{children}</thead>,
   th: ({ children }) => (
     <th style={{
@@ -247,6 +250,78 @@ const mdComponents: Components = {
   hr: () => <hr style={{ border: "none", borderTop: "1px solid rgba(255,255,255,0.1)", margin: "0.8em 0" }} />,
 };
 
+/**
+ * Wraps a rendered markdown table with a subtle copy-to-clipboard button.
+ * On click, reads the table's DOM text, converts to tab-separated rows
+ * (Excel / WhatsApp friendly) and writes to the clipboard.
+ */
+function TableWithCopy({ children }: { children: React.ReactNode }) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [copied, setCopied] = useState(false);
+
+  function handleCopy() {
+    const tbl = wrapRef.current?.querySelector("table");
+    if (!tbl) return;
+    const rows = tbl.querySelectorAll("tr");
+    const lines: string[] = [];
+    rows.forEach((tr) => {
+      const cells = tr.querySelectorAll("th, td");
+      const cols: string[] = [];
+      cells.forEach((c) => cols.push((c.textContent || "").trim()));
+      lines.push(cols.join("\t"));
+    });
+    const text = lines.join("\n");
+    navigator.clipboard?.writeText(text).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      },
+      () => {
+        /* clipboard API denied — silently no-op */
+      },
+    );
+  }
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative", margin: "0.8em 0" }}>
+      <button
+        type="button"
+        onClick={handleCopy}
+        title={copied ? "Copied!" : "Copy table"}
+        style={{
+          position: "absolute",
+          top: 6,
+          right: 6,
+          zIndex: 2,
+          padding: "3px 8px",
+          fontSize: 10,
+          fontWeight: 600,
+          background: copied ? "rgba(22,163,74,0.2)" : "rgba(255,255,255,0.06)",
+          color: copied ? "#4ade80" : "rgba(255,255,255,0.6)",
+          border: `1px solid ${copied ? "rgba(22,163,74,0.5)" : "rgba(255,255,255,0.15)"}`,
+          borderRadius: 5,
+          cursor: "pointer",
+          transition: "all 0.15s",
+        }}
+      >
+        {copied ? "Copied ✓" : "📋 Copy"}
+      </button>
+      <div style={{ overflowX: "auto" }}>
+        <table style={{
+          width: "100%",
+          borderCollapse: "collapse",
+          fontSize: 13,
+          border: "1px solid rgba(255,255,255,0.1)",
+          borderRadius: 8,
+          overflow: "hidden",
+        }}>
+          {children}
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export function ChatMarkdown({
   content,
   onFollowUp,
@@ -257,9 +332,26 @@ export function ChatMarkdown({
   followUpsDisabled?: boolean;
 }) {
   const parts = splitByMarkers(content);
+
+  // Group consecutive LINK markers so they lay out in one row (Claude often
+  // emits 2-3 links together and we want them to wrap on one line, not stack).
+  const renderable: Array<Part | { kind: "link-group"; links: LinkButtonProps[] }> = [];
+  for (const p of parts) {
+    if (p.kind === "link") {
+      const last = renderable[renderable.length - 1];
+      if (last && (last as { kind: string }).kind === "link-group") {
+        (last as { kind: "link-group"; links: LinkButtonProps[] }).links.push(p.props);
+      } else {
+        renderable.push({ kind: "link-group", links: [p.props] });
+      }
+    } else {
+      renderable.push(p);
+    }
+  }
+
   return (
     <>
-      {parts.map((p, i) => {
+      {renderable.map((p, i) => {
         if (p.kind === "md") {
           return (
             <ReactMarkdown key={i} remarkPlugins={[remarkGfm]} components={mdComponents}>
@@ -267,21 +359,19 @@ export function ChatMarkdown({
             </ReactMarkdown>
           );
         }
-        if (p.kind === "chart-bar") {
-          return <ChartBar key={i} title={p.title} bars={p.bars} />;
-        }
-        if (p.kind === "chart-donut") {
-          return <ChartDonut key={i} title={p.title} slices={p.slices} />;
-        }
-        if (p.kind === "block") {
-          return <BlockCard key={i} {...p.props} />;
-        }
-        if (p.kind === "stats") {
-          return <StatsTiles key={i} tiles={p.tiles} />;
+        if (p.kind === "chart-bar") return <ChartBar key={i} title={p.title} bars={p.bars} />;
+        if (p.kind === "chart-donut") return <ChartDonut key={i} title={p.title} slices={p.slices} />;
+        if (p.kind === "block") return <BlockCard key={i} {...p.props} />;
+        if (p.kind === "temple") return <TempleCard key={i} {...p.props} />;
+        if (p.kind === "stats") return <StatsTiles key={i} tiles={p.tiles} />;
+        if (p.kind === "link-group") {
+          return (
+            <div key={i} style={{ display: "flex", flexWrap: "wrap", gap: 4, margin: "6px 0" }}>
+              {p.links.map((l, j) => <LinkButton key={j} {...l} />)}
+            </div>
+          );
         }
         if (p.kind === "followups") {
-          // Only render chips when we have a handler; otherwise silently drop
-          // (e.g. re-rendering a stored message where onFollowUp wasn't passed).
           if (!onFollowUp) return null;
           return (
             <FollowUps
@@ -291,6 +381,10 @@ export function ChatMarkdown({
               disabled={followUpsDisabled}
             />
           );
+        }
+        if (p.kind === "link") {
+          // Stray — normally grouped above. Render inline as a safety fallback.
+          return <LinkButton key={i} {...p.props} />;
         }
         // err — show the broken marker so it's visible
         return (
