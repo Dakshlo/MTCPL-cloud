@@ -111,6 +111,16 @@ export const AI_TOOLS = [
     },
   },
   {
+    name: "get_watchdog_alerts",
+    description:
+      "Scan the system for operational issues the user should know about RIGHT NOW: blocks that have been cutting longer than 24 hours, urgent slabs whose deadline has passed, and blocks rejected in the last 48 hours. Use this ONCE at the START of a fresh conversation (first user message) so you can proactively flag anything critical at the end of your reply. Do not call repeatedly within the same chat.",
+    input_schema: {
+      type: "object" as const,
+      properties: {},
+      additionalProperties: false,
+    },
+  },
+  {
     name: "get_live_cutting_status",
     description:
       "Current IN-PROGRESS cutting snapshot (not historical). Returns blocks currently on the machine (status=cutting), blocks approved and waiting to start (status=pending_worker), and blocks cut but awaiting slab recording (status=done_prompt). Use this whenever the user asks 'what's happening right now', 'live status', 'current cutting', 'any blocks on the machine', 'which blocks are in progress', or 'which temple's blocks are being cut now'. Separate from get_cutting_activity (that one counts COMPLETED cuts over a date range).",
@@ -118,6 +128,75 @@ export const AI_TOOLS = [
       type: "object" as const,
       properties: {
         facility: { type: "string", enum: ["mtcpl", "riico"], description: "Filter to one facility. Omit for both." },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "get_user_activity",
+    description:
+      "Count and summarise what each user has done (added / updated / deleted / cut / approved etc.) in a time range. Use for questions like 'how many blocks did Rajesh add today?', 'who added the most slabs this week?', 'what did the team do today?'. Reads from the audit_logs table + resolves user IDs to names.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        user_name: { type: "string", description: "Optional — filter to users whose full_name contains this substring (case-insensitive)." },
+        action: { type: "string", description: "Optional — filter by action: 'create', 'update', 'delete', 'manual_cut_block', 'cutting_started', 'cutting_undo_approve', 'plan_approved', 'block_rejected', 'carving_started', 'carving_completed_by_vendor', etc." },
+        entity_type: {
+          type: "string",
+          enum: ["block", "slab", "cut_session", "cut_session_block", "carving_item"],
+          description: "Optional — filter to one entity type.",
+        },
+        range: {
+          type: "string",
+          enum: ["today", "yesterday", "this_week", "this_month"],
+          description: "Time window in IST. Default: today.",
+        },
+        limit: { type: "number", description: "Max sample events to return alongside the count summary. Default 20, max 50." },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "list_users",
+    description:
+      "List system users with their role, online status (based on last_seen_at), and today's screen-time minutes. Use for 'who is online?', 'what is Rajesh's role?', 'show all operators', 'team list'.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        role: { type: "string", description: "Optional — filter to one role (owner / team_head / slab_entry / block_entry / block_slab_entry / cutting_operator / developer)." },
+        online_only: { type: "boolean", description: "Optional — only users seen in the last 5 minutes." },
+        name_contains: { type: "string", description: "Optional — filter users whose name contains this substring." },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "get_audit_trail",
+    description:
+      "Chronological activity log — every create / update / delete / cutting action across the system in a time window, with user names resolved. Use for 'what happened today?', 'recent activity', 'activity log'. For user-specific counts use get_user_activity instead.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        range: { type: "string", enum: ["today", "yesterday", "this_week", "this_month"], description: "Time window in IST. Default: today." },
+        limit: { type: "number", description: "Max events to return, newest first. Default 30, max 100." },
+        entity_type: {
+          type: "string",
+          enum: ["block", "slab", "cut_session", "cut_session_block", "carving_item"],
+          description: "Optional — filter to one entity type.",
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "list_vendors",
+    description:
+      "List vendors with their type (CNC / Manual / Outsource) and active status. Use for 'vendor directory', 'how many vendors', 'Outsource vendors list'.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        type: { type: "string", enum: ["CNC", "Manual", "Outsource"], description: "Filter by vendor type." },
+        active_only: { type: "boolean", description: "Only active vendors. Default true." },
       },
       additionalProperties: false,
     },
@@ -170,6 +249,16 @@ export async function runTool(name: string, input: Record<string, unknown>): Pro
         return JSON.stringify(await listBlocks(input));
       case "get_live_cutting_status":
         return JSON.stringify(await getLiveCuttingStatus(input));
+      case "get_watchdog_alerts":
+        return JSON.stringify(await getWatchdogAlerts());
+      case "get_user_activity":
+        return JSON.stringify(await getUserActivity(input));
+      case "list_users":
+        return JSON.stringify(await listUsers(input));
+      case "get_audit_trail":
+        return JSON.stringify(await getAuditTrail(input));
+      case "list_vendors":
+        return JSON.stringify(await listVendors(input));
       default:
         return JSON.stringify({ error: `Unknown tool: ${name}` });
     }
@@ -622,5 +711,340 @@ async function getLiveCuttingStatus(input: Record<string, unknown>) {
     liveBlocks: live.slice(0, 30),
     pendingBlocks: pending.slice(0, 30),
     donePromptBlocks: donePrompt.slice(0, 30),
+  };
+}
+
+// ─── get_watchdog_alerts ─────────────────────────────────────────────────────
+
+async function getWatchdogAlerts() {
+  const admin = createAdminSupabaseClient();
+  const now = new Date();
+  const dayAgo = new Date(now.getTime() - 24 * 3600 * 1000).toISOString();
+  const twoDaysAgo = new Date(now.getTime() - 48 * 3600 * 1000).toISOString();
+  const nowIso = now.toISOString();
+
+  const [longCutsRes, overdueRes, rejectedRes] = await Promise.all([
+    admin
+      .from("cut_session_blocks")
+      .select("id, block_id, updated_at")
+      .eq("status", "cutting")
+      .lt("updated_at", dayAgo)
+      .order("updated_at", { ascending: true }),
+    admin
+      .from("slab_requirements")
+      .select("id, temple, label, deadline")
+      .eq("priority", true)
+      .in("status", ["open", "planned"])
+      .not("deadline", "is", null)
+      .lt("deadline", nowIso)
+      .order("deadline", { ascending: true }),
+    admin
+      .from("cut_session_blocks")
+      .select("id, block_id, updated_at")
+      .eq("status", "rejected")
+      .gte("updated_at", twoDaysAgo)
+      .order("updated_at", { ascending: false }),
+  ]);
+
+  type Alert = {
+    kind: "long_cut" | "overdue_slab" | "rejected_cut";
+    severity: "warn" | "bad";
+    title: string;
+    detail: string;
+    href: string;
+    count: number;
+  };
+
+  const alerts: Alert[] = [];
+
+  const longCuts = longCutsRes.data ?? [];
+  if (longCuts.length > 0) {
+    const blockIds = longCuts.slice(0, 3).map((b) => b.block_id).join(", ");
+    const oldest = longCuts[0];
+    const hoursOldest = oldest?.updated_at
+      ? Math.round((Date.now() - new Date(oldest.updated_at).getTime()) / 3600000)
+      : null;
+    alerts.push({
+      kind: "long_cut",
+      severity: "warn",
+      title: `${longCuts.length} block${longCuts.length > 1 ? "s" : ""} cutting for over 24 hours`,
+      detail: hoursOldest
+        ? `Oldest: ${oldest.block_id} (${hoursOldest}h). Others: ${blockIds}.`
+        : `${blockIds}`,
+      href: "/cutting",
+      count: longCuts.length,
+    });
+  }
+
+  const overdue = overdueRes.data ?? [];
+  if (overdue.length > 0) {
+    const head = overdue.slice(0, 3).map((s) => `${s.id} (${s.temple})`).join(", ");
+    alerts.push({
+      kind: "overdue_slab",
+      severity: "bad",
+      title: `${overdue.length} urgent slab${overdue.length > 1 ? "s" : ""} past deadline`,
+      detail: head + (overdue.length > 3 ? ` + ${overdue.length - 3} more` : ""),
+      href: "/slabs",
+      count: overdue.length,
+    });
+  }
+
+  const rejected = rejectedRes.data ?? [];
+  if (rejected.length > 0) {
+    const head = rejected.slice(0, 3).map((r) => r.block_id).join(", ");
+    alerts.push({
+      kind: "rejected_cut",
+      severity: "bad",
+      title: `${rejected.length} block${rejected.length > 1 ? "s" : ""} rejected in the last 48h`,
+      detail: head + (rejected.length > 3 ? ` + ${rejected.length - 3} more` : ""),
+      href: "/cutting?tab=done",
+      count: rejected.length,
+    });
+  }
+
+  return {
+    checkedAt: nowIso,
+    alertCount: alerts.length,
+    alerts,
+    summary: alerts.length === 0
+      ? "All clear — no operational issues detected."
+      : `${alerts.length} alert${alerts.length > 1 ? "s" : ""} need attention.`,
+  };
+}
+
+// ─── get_user_activity ───────────────────────────────────────────────────────
+
+async function getUserActivity(input: Record<string, unknown>) {
+  const admin = createAdminSupabaseClient();
+  const range = input.range === "today" || input.range === "yesterday" || input.range === "this_week" || input.range === "this_month"
+    ? input.range
+    : "today";
+  const { from, to } = istRange(range);
+  const userNameFilter = typeof input.user_name === "string" ? input.user_name.trim().toLowerCase() : null;
+  const actionFilter = typeof input.action === "string" ? input.action : null;
+  const entityFilter = typeof input.entity_type === "string" ? input.entity_type : null;
+  const limit = Math.max(1, Math.min(50, typeof input.limit === "number" ? input.limit : 20));
+
+  // Fetch audit logs in the window
+  let q = admin
+    .from("audit_logs")
+    .select("id, user_id, action, entity_type, entity_id, details, created_at")
+    .gte("created_at", from)
+    .lt("created_at", to)
+    .order("created_at", { ascending: false });
+  if (actionFilter) q = q.eq("action", actionFilter);
+  if (entityFilter) q = q.eq("entity_type", entityFilter);
+  const { data: logs, error } = await q.limit(1000);
+  if (error) throw new Error(error.message);
+
+  // Resolve user_ids to names
+  const userIds = [...new Set((logs ?? []).map((l) => l.user_id).filter(Boolean))];
+  let profileMap = new Map<string, { name: string; role: string | null }>();
+  if (userIds.length > 0) {
+    const { data: profiles } = await admin
+      .from("profiles")
+      .select("id, full_name, role")
+      .in("id", userIds);
+    for (const p of profiles ?? []) {
+      profileMap.set(p.id, { name: p.full_name || "Unknown", role: p.role ?? null });
+    }
+  }
+
+  // Apply user_name filter after we have profiles
+  const filtered = (logs ?? []).filter((l) => {
+    if (!userNameFilter) return true;
+    const name = profileMap.get(l.user_id)?.name?.toLowerCase() ?? "";
+    return name.includes(userNameFilter);
+  });
+
+  // Group by user, then by action:entity
+  type Bucket = { userId: string; name: string; role: string | null; total: number; byAction: Record<string, number> };
+  const byUser = new Map<string, Bucket>();
+  for (const l of filtered) {
+    const prof = profileMap.get(l.user_id);
+    const bucket: Bucket = byUser.get(l.user_id) ?? {
+      userId: l.user_id,
+      name: prof?.name ?? "Unknown",
+      role: prof?.role ?? null,
+      total: 0,
+      byAction: {} as Record<string, number>,
+    };
+    bucket.total++;
+    const key = `${l.action}:${l.entity_type}`;
+    bucket.byAction[key] = (bucket.byAction[key] ?? 0) + 1;
+    byUser.set(l.user_id, bucket);
+  }
+
+  const summary = [...byUser.values()]
+    .sort((a, b) => b.total - a.total)
+    .map((b) => ({
+      name: b.name,
+      role: b.role,
+      total: b.total,
+      breakdown: b.byAction,
+    }));
+
+  const samples = filtered.slice(0, limit).map((l) => ({
+    at: l.created_at,
+    user: profileMap.get(l.user_id)?.name ?? "Unknown",
+    action: l.action,
+    entity_type: l.entity_type,
+    entity_id: l.entity_id,
+    details: l.details,
+  }));
+
+  return {
+    range,
+    totalEvents: filtered.length,
+    filters: {
+      userNameFilter: userNameFilter ?? "any",
+      action: actionFilter ?? "any",
+      entityType: entityFilter ?? "any",
+    },
+    byUser: summary,
+    recentEvents: samples,
+    note: filtered.length === 0 ? "No matching activity in the selected window." : undefined,
+  };
+}
+
+// ─── list_users ──────────────────────────────────────────────────────────────
+
+async function listUsers(input: Record<string, unknown>) {
+  const admin = createAdminSupabaseClient();
+  const roleFilter = typeof input.role === "string" ? input.role : null;
+  const onlineOnly = input.online_only === true;
+  const nameContains = typeof input.name_contains === "string" ? input.name_contains.trim().toLowerCase() : null;
+
+  let q = admin
+    .from("profiles")
+    .select("id, full_name, phone, role, is_active, last_seen_at")
+    .eq("is_active", true);
+  if (roleFilter) q = q.eq("role", roleFilter);
+  const { data: profiles, error } = await q;
+  if (error) throw new Error(error.message);
+
+  // Pull today's heartbeat counts for screen time (2-min ping interval → minutes = pings × 2)
+  const { from: todayFrom, to: todayTo } = istRange("today");
+  const { data: pings } = await admin
+    .from("heartbeat_log")
+    .select("user_id")
+    .gte("created_at", todayFrom)
+    .lt("created_at", todayTo);
+  const pingMap = new Map<string, number>();
+  for (const p of pings ?? []) pingMap.set(p.user_id, (pingMap.get(p.user_id) ?? 0) + 1);
+
+  const fiveMinAgo = Date.now() - 5 * 60 * 1000;
+
+  const rows = (profiles ?? [])
+    .filter((p) => {
+      if (nameContains && !(p.full_name || "").toLowerCase().includes(nameContains)) return false;
+      if (onlineOnly) {
+        const seen = p.last_seen_at ? new Date(p.last_seen_at).getTime() : 0;
+        if (seen < fiveMinAgo) return false;
+      }
+      return true;
+    })
+    .map((p) => {
+      const seen = p.last_seen_at ? new Date(p.last_seen_at).getTime() : 0;
+      const isOnline = seen >= fiveMinAgo;
+      const screenMinutes = (pingMap.get(p.id) ?? 0) * 2;
+      return {
+        id: p.id,
+        name: p.full_name || p.phone || "Unknown",
+        role: p.role,
+        isOnline,
+        lastSeenAt: p.last_seen_at,
+        screenMinutesToday: screenMinutes,
+      };
+    })
+    .sort((a, b) => (b.isOnline ? 1 : 0) - (a.isOnline ? 1 : 0) || b.screenMinutesToday - a.screenMinutesToday);
+
+  return {
+    totalUsers: rows.length,
+    onlineCount: rows.filter((r) => r.isOnline).length,
+    filters: { role: roleFilter ?? "any", onlineOnly, nameContains: nameContains ?? null },
+    users: rows,
+  };
+}
+
+// ─── get_audit_trail ─────────────────────────────────────────────────────────
+
+async function getAuditTrail(input: Record<string, unknown>) {
+  const admin = createAdminSupabaseClient();
+  const range = input.range === "today" || input.range === "yesterday" || input.range === "this_week" || input.range === "this_month"
+    ? input.range
+    : "today";
+  const limit = Math.max(1, Math.min(100, typeof input.limit === "number" ? input.limit : 30));
+  const entityFilter = typeof input.entity_type === "string" ? input.entity_type : null;
+  const { from, to } = istRange(range);
+
+  let q = admin
+    .from("audit_logs")
+    .select("id, user_id, action, entity_type, entity_id, details, created_at")
+    .gte("created_at", from)
+    .lt("created_at", to)
+    .order("created_at", { ascending: false });
+  if (entityFilter) q = q.eq("entity_type", entityFilter);
+  const { data: logs, error } = await q.limit(limit);
+  if (error) throw new Error(error.message);
+
+  // Resolve users
+  const userIds = [...new Set((logs ?? []).map((l) => l.user_id).filter(Boolean))];
+  const nameMap = new Map<string, string>();
+  if (userIds.length > 0) {
+    const { data: profiles } = await admin
+      .from("profiles")
+      .select("id, full_name")
+      .in("id", userIds);
+    for (const p of profiles ?? []) nameMap.set(p.id, p.full_name || "Unknown");
+  }
+
+  const events = (logs ?? []).map((l) => ({
+    at: l.created_at,
+    user: nameMap.get(l.user_id) || "Unknown",
+    action: l.action,
+    entity_type: l.entity_type,
+    entity_id: l.entity_id,
+    details: l.details,
+  }));
+
+  return {
+    range,
+    totalEvents: events.length,
+    filters: { entityType: entityFilter ?? "any" },
+    events,
+    note: events.length === 0 ? "No activity in the selected window." : undefined,
+  };
+}
+
+// ─── list_vendors ────────────────────────────────────────────────────────────
+
+async function listVendors(input: Record<string, unknown>) {
+  const admin = createAdminSupabaseClient();
+  const typeFilter = typeof input.type === "string" ? input.type : null;
+  const activeOnly = input.active_only !== false; // default true
+
+  let q = admin.from("vendors").select("id, name, vendor_type, is_active, created_at");
+  if (activeOnly) q = q.eq("is_active", true);
+  if (typeFilter) q = q.eq("vendor_type", typeFilter);
+  const { data, error } = await q.order("name", { ascending: true });
+  if (error) throw new Error(error.message);
+
+  const vendors = (data ?? []).map((v) => ({
+    id: v.id,
+    name: v.name,
+    type: v.vendor_type,
+    active: v.is_active,
+    createdAt: v.created_at,
+  }));
+
+  const countsByType: Record<string, number> = {};
+  for (const v of vendors) countsByType[v.type] = (countsByType[v.type] ?? 0) + 1;
+
+  return {
+    totalVendors: vendors.length,
+    countsByType,
+    filters: { type: typeFilter ?? "any", activeOnly },
+    vendors,
   };
 }

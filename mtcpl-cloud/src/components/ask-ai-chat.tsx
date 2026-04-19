@@ -39,7 +39,44 @@ const TOOL_LABELS: Record<string, string> = {
   run_plan_simulation: "📐 Running plan simulation…",
 };
 
-type Msg = { role: "user" | "assistant"; content: string };
+type Msg = {
+  role: "user" | "assistant";
+  content: string;
+  /** Base64 data URLs — user-uploaded photos attached to this message */
+  images?: string[];
+  /** Cost in INR, attached to the assistant reply when the stream finishes */
+  costInr?: number;
+};
+
+/** Max concurrent image attachments per message. Cost control — each image
+ *  is roughly 1,500 tokens sent to Claude. */
+const MAX_ATTACHMENTS = 3;
+/** Max pre-resize size. Larger files are rejected with a friendly toast. */
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
+
+/** Resize an image client-side to ≤1024 px JPEG 0.8 to keep payloads small. */
+function resizeToDataUrl(file: File, maxDim = 1024, quality = 0.8): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const ratio = Math.min(maxDim / img.width, maxDim / img.height, 1);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * ratio);
+        canvas.height = Math.round(img.height * ratio);
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return reject(new Error("canvas unavailable"));
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.onerror = () => reject(new Error("invalid image"));
+      img.src = e.target?.result as string;
+    };
+    reader.onerror = () => reject(new Error("read failed"));
+    reader.readAsDataURL(file);
+  });
+}
 
 const PRESET_QUESTIONS = [
   "आज का काम क्या हुआ?",
@@ -108,6 +145,8 @@ export function AskAiChat({
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTool, setActiveTool] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<string[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [voiceLang, setVoiceLang] = useState<"en-IN" | "hi-IN">("en-IN");
   const [listening, setListening] = useState(false);
   const [sessions, setSessions] = useState<ChatSessionSummary[]>(initialRecentSessions);
@@ -177,7 +216,11 @@ export function AskAiChat({
     setLoadingSession(sessionId);
     try {
       const rows = await loadSessionMessages(sessionId);
-      setMessages(rows.map((r) => ({ role: r.role, content: r.content })));
+      setMessages(rows.map((r) => ({
+        role: r.role,
+        content: r.content,
+        images: r.images && r.images.length > 0 ? r.images : undefined,
+      })));
       setActiveSessionId(sessionId);
       setError(null);
     } catch {
@@ -209,19 +252,27 @@ export function AskAiChat({
 
   // ── Send message ─────────────────────────────────────────────────────────
 
-  async function sendMessage(text: string) {
+  async function sendMessage(text: string, imagesOverride?: string[]) {
     const trimmed = text.trim();
-    if (!trimmed || streaming) return;
+    // Allow "image-only" messages (e.g. dad pastes a photo without typing)
+    const images = imagesOverride ?? attachments;
+    if (!trimmed && images.length === 0) return;
+    if (streaming) return;
 
     setError(null);
     setActiveTool(null);
     const nextMessages: Msg[] = [
       ...messages,
-      { role: "user", content: trimmed },
+      {
+        role: "user",
+        content: trimmed,
+        images: images.length > 0 ? images : undefined,
+      },
       { role: "assistant", content: "" },
     ];
     setMessages(nextMessages);
     setInput("");
+    setAttachments([]);
     setStreaming(true);
 
     const controller = new AbortController();
@@ -234,7 +285,11 @@ export function AskAiChat({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: nextMessages.slice(0, -1).map((m) => ({ role: m.role, content: m.content })),
+          messages: nextMessages.slice(0, -1).map((m) => ({
+            role: m.role,
+            content: m.content,
+            ...(m.images && m.images.length > 0 ? { images: m.images } : {}),
+          })),
           sessionId: activeSessionId,
         }),
         signal: controller.signal,
@@ -287,6 +342,20 @@ export function AskAiChat({
             setActiveTool(null);
             continue;
           }
+          if (eventName === "cost") {
+            const n = Number(data);
+            if (Number.isFinite(n)) {
+              setMessages((prev) => {
+                const copy = prev.slice();
+                const last = copy[copy.length - 1];
+                if (last?.role === "assistant") {
+                  copy[copy.length - 1] = { ...last, costInr: n };
+                }
+                return copy;
+              });
+            }
+            continue;
+          }
           if (eventName === "error") {
             setError(data || "AI returned an error");
             continue;
@@ -335,6 +404,42 @@ export function AskAiChat({
   function handlePreset(text: string) {
     if (streaming) return;
     sendMessage(text);
+  }
+
+  async function handleFiles(fileList: FileList | null) {
+    if (!fileList || fileList.length === 0) return;
+    const slotsLeft = MAX_ATTACHMENTS - attachments.length;
+    if (slotsLeft <= 0) {
+      setError(`Max ${MAX_ATTACHMENTS} images per message. Send these first, then add more.`);
+      return;
+    }
+    const files = [...fileList].slice(0, slotsLeft);
+    const added: string[] = [];
+    for (const f of files) {
+      if (!f.type.startsWith("image/")) {
+        setError(`${f.name} is not an image.`);
+        continue;
+      }
+      if (f.size > MAX_UPLOAD_BYTES) {
+        setError(`${f.name} is too large (max 10 MB).`);
+        continue;
+      }
+      try {
+        const dataUrl = await resizeToDataUrl(f);
+        added.push(dataUrl);
+      } catch {
+        setError(`Could not read ${f.name}.`);
+      }
+    }
+    if (added.length > 0) {
+      setAttachments((prev) => [...prev, ...added].slice(0, MAX_ATTACHMENTS));
+      setError(null);
+    }
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  function removeAttachment(idx: number) {
+    setAttachments((prev) => prev.filter((_, i) => i !== idx));
   }
 
   function toggleVoice() {
@@ -532,13 +637,80 @@ export function AskAiChat({
               e.currentTarget.style.boxShadow = "0 2px 20px rgba(0,0,0,0.25)";
             }}
           >
+            {/* Hidden file input (triggered by the paperclip button) */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              style={{ display: "none" }}
+              onChange={(e) => handleFiles(e.target.files)}
+            />
+
+            {/* Attachment thumbnails row */}
+            {attachments.length > 0 && (
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", padding: "4px 4px 0" }}>
+                {attachments.map((url, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      position: "relative",
+                      width: 56,
+                      height: 56,
+                      borderRadius: 8,
+                      overflow: "hidden",
+                      border: "1px solid rgba(255,255,255,0.18)",
+                      background: "rgba(0,0,0,0.3)",
+                    }}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={url}
+                      alt={`attachment ${i + 1}`}
+                      style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeAttachment(i)}
+                      title="Remove"
+                      style={{
+                        position: "absolute",
+                        top: 2,
+                        right: 2,
+                        width: 20,
+                        height: 20,
+                        borderRadius: "50%",
+                        border: "none",
+                        background: "rgba(0,0,0,0.7)",
+                        color: "#fff",
+                        fontSize: 13,
+                        lineHeight: 1,
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <textarea
               ref={textareaRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               disabled={streaming}
-              placeholder={isEmpty ? "Ask me anything about blocks, slabs, cutting..." : "Reply..."}
+              placeholder={
+                attachments.length > 0
+                  ? "Ask about these photos... (or send with no text)"
+                  : isEmpty
+                  ? "Ask me anything about blocks, slabs, cutting..."
+                  : "Reply..."
+              }
               rows={1}
               style={{
                 width: "100%",
@@ -558,6 +730,32 @@ export function AskAiChat({
 
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={streaming || attachments.length >= MAX_ATTACHMENTS}
+                  title={
+                    attachments.length >= MAX_ATTACHMENTS
+                      ? `Max ${MAX_ATTACHMENTS} images per message`
+                      : "Attach photos"
+                  }
+                  style={{
+                    padding: "7px 12px",
+                    fontSize: 17,
+                    background: attachments.length > 0 ? "rgba(232,197,114,0.12)" : "transparent",
+                    color: attachments.length > 0 ? "#E8C572" : C.textMuted,
+                    border: `1px solid ${attachments.length > 0 ? "rgba(232,197,114,0.4)" : C.border}`,
+                    borderRadius: 8,
+                    cursor: streaming || attachments.length >= MAX_ATTACHMENTS ? "not-allowed" : "pointer",
+                    opacity: streaming || attachments.length >= MAX_ATTACHMENTS ? 0.5 : 1,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                  }}
+                >
+                  📎{attachments.length > 0 ? <span style={{ fontSize: 11, fontWeight: 700 }}>{attachments.length}</span> : null}
+                </button>
+
                 <button
                   type="button"
                   onClick={() => setVoiceLang((l) => (l === "en-IN" ? "hi-IN" : "en-IN"))}
@@ -976,6 +1174,8 @@ function MessageList({
             key={i}
             role={m.role}
             content={m.content}
+            images={m.images}
+            costInr={m.costInr}
             isStreaming={streaming && isLastAssistant}
             // Tool-progress indicator only on the currently-generating assistant message
             activeTool={isLastAssistant && streaming ? activeTool : null}
@@ -994,6 +1194,8 @@ function MessageList({
 function MessageBubble({
   role,
   content,
+  images,
+  costInr,
   isStreaming,
   activeTool,
   onFollowUp,
@@ -1001,6 +1203,8 @@ function MessageBubble({
 }: {
   role: "user" | "assistant";
   content: string;
+  images?: string[];
+  costInr?: number;
   isStreaming: boolean;
   activeTool?: string | null;
   onFollowUp?: (q: string) => void;
@@ -1014,7 +1218,7 @@ function MessageBubble({
         <div
           style={{
             maxWidth: "82%",
-            padding: "13px 18px",
+            padding: images && images.length > 0 ? "10px 10px 13px" : "13px 18px",
             borderRadius: 18,
             background: C.userBubble,
             color: C.text,
@@ -1024,7 +1228,27 @@ function MessageBubble({
             wordBreak: "break-word",
           }}
         >
-          {content}
+          {images && images.length > 0 && (
+            <div style={{ display: "grid", gap: 6, gridTemplateColumns: `repeat(${Math.min(images.length, 3)}, minmax(0, 1fr))`, marginBottom: content ? 10 : 0 }}>
+              {images.map((url, i) => (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img
+                  key={i}
+                  src={url}
+                  alt={`attachment ${i + 1}`}
+                  style={{
+                    width: "100%",
+                    maxHeight: 220,
+                    objectFit: "cover",
+                    borderRadius: 10,
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    display: "block",
+                  }}
+                />
+              ))}
+            </div>
+          )}
+          {content && <div style={{ padding: images && images.length > 0 ? "0 6px" : 0 }}>{content}</div>}
         </div>
       </div>
     );
@@ -1084,8 +1308,31 @@ function MessageBubble({
             }}
           />
         )}
-        {/* Read-aloud button — only on completed assistant replies */}
-        {content && !isStreaming && <SpeakButton text={content} />}
+        {/* Read-aloud + cost pill — only on completed assistant replies */}
+        {content && !isStreaming && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+            <SpeakButton text={content} />
+            {typeof costInr === "number" && (
+              <span
+                title={`This reply cost ~₹${costInr.toFixed(2)} in AI tokens`}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                  padding: "4px 8px",
+                  fontSize: 11,
+                  color: "rgba(255,255,255,0.45)",
+                  background: "transparent",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  borderRadius: 6,
+                  fontFamily: "ui-monospace, monospace",
+                }}
+              >
+                ₹{costInr.toFixed(2)}
+              </span>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

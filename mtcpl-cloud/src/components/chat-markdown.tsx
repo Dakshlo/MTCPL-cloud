@@ -21,6 +21,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
 import { useRef, useState } from "react";
+import * as XLSX from "xlsx";
 
 import { ChartBar, type ChartBarItem } from "./chat-widgets/chart-bar";
 import { ChartDonut, type DonutSlice } from "./chat-widgets/chart-donut";
@@ -29,8 +30,9 @@ import { StatsTiles, type StatTile } from "./chat-widgets/stats-tiles";
 import { FollowUps } from "./chat-widgets/follow-ups";
 import { TempleCard, type TempleCardProps } from "./chat-widgets/temple-card";
 import { LinkButton, type LinkButtonProps } from "./chat-widgets/link-button";
+import { SlabCard, type SlabCardProps } from "./chat-widgets/slab-card";
 
-const START_RE = /\[\[(CHART|BLOCK|STATS|FOLLOWUPS|TEMPLE|LINK):/g;
+const START_RE = /\[\[(CHART|BLOCK|STATS|FOLLOWUPS|TEMPLE|LINK|SLAB):/g;
 
 type Part =
   | { kind: "md"; text: string }
@@ -40,6 +42,7 @@ type Part =
   | { kind: "stats"; tiles: StatTile[] }
   | { kind: "followups"; questions: string[] }
   | { kind: "temple"; props: TempleCardProps }
+  | { kind: "slab"; props: SlabCardProps }
   | { kind: "link"; props: LinkButtonProps }
   | { kind: "err"; text: string }; // marker present but JSON bad → show as-is
 
@@ -133,6 +136,8 @@ function splitByMarkers(src: string): Part[] {
         parts.push({ kind: "followups", questions: questions.filter((q) => typeof q === "string") });
       } else if (kind === "TEMPLE") {
         parts.push({ kind: "temple", props: data as TempleCardProps });
+      } else if (kind === "SLAB") {
+        parts.push({ kind: "slab", props: data as SlabCardProps });
       } else if (kind === "LINK") {
         const p = data as LinkButtonProps;
         // Only accept safe hrefs — in-app paths or http(s) URLs
@@ -259,18 +264,23 @@ function TableWithCopy({ children }: { children: React.ReactNode }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
 
-  function handleCopy() {
+  function readRows(): string[][] {
     const tbl = wrapRef.current?.querySelector("table");
-    if (!tbl) return;
-    const rows = tbl.querySelectorAll("tr");
-    const lines: string[] = [];
-    rows.forEach((tr) => {
+    if (!tbl) return [];
+    const rows: string[][] = [];
+    tbl.querySelectorAll("tr").forEach((tr) => {
       const cells = tr.querySelectorAll("th, td");
       const cols: string[] = [];
       cells.forEach((c) => cols.push((c.textContent || "").trim()));
-      lines.push(cols.join("\t"));
+      rows.push(cols);
     });
-    const text = lines.join("\n");
+    return rows;
+  }
+
+  function handleCopy() {
+    const rows = readRows();
+    if (rows.length === 0) return;
+    const text = rows.map((r) => r.join("\t")).join("\n");
     navigator.clipboard?.writeText(text).then(
       () => {
         setCopied(true);
@@ -282,30 +292,62 @@ function TableWithCopy({ children }: { children: React.ReactNode }) {
     );
   }
 
+  function handleExcel() {
+    const rows = readRows();
+    if (rows.length === 0) return;
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    // Widen each column a bit so dimensions / long labels aren't clipped
+    ws["!cols"] = rows[0].map(() => ({ wch: 18 }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "MTCPL-AI");
+    const ts = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, `mtcpl-ai-${ts}.xlsx`);
+  }
+
+  const btnBase: React.CSSProperties = {
+    padding: "3px 8px",
+    fontSize: 10,
+    fontWeight: 600,
+    border: "1px solid rgba(255,255,255,0.15)",
+    background: "rgba(255,255,255,0.06)",
+    color: "rgba(255,255,255,0.6)",
+    borderRadius: 5,
+    cursor: "pointer",
+    transition: "all 0.15s",
+  };
+
   return (
     <div ref={wrapRef} style={{ position: "relative", margin: "0.8em 0" }}>
-      <button
-        type="button"
-        onClick={handleCopy}
-        title={copied ? "Copied!" : "Copy table"}
-        style={{
-          position: "absolute",
-          top: 6,
-          right: 6,
-          zIndex: 2,
-          padding: "3px 8px",
-          fontSize: 10,
-          fontWeight: 600,
-          background: copied ? "rgba(22,163,74,0.2)" : "rgba(255,255,255,0.06)",
-          color: copied ? "#4ade80" : "rgba(255,255,255,0.6)",
-          border: `1px solid ${copied ? "rgba(22,163,74,0.5)" : "rgba(255,255,255,0.15)"}`,
-          borderRadius: 5,
-          cursor: "pointer",
-          transition: "all 0.15s",
-        }}
-      >
-        {copied ? "Copied ✓" : "📋 Copy"}
-      </button>
+      <div style={{
+        position: "absolute",
+        top: 6,
+        right: 6,
+        zIndex: 2,
+        display: "flex",
+        gap: 4,
+      }}>
+        <button
+          type="button"
+          onClick={handleCopy}
+          title={copied ? "Copied!" : "Copy table as tab-separated"}
+          style={{
+            ...btnBase,
+            background: copied ? "rgba(22,163,74,0.2)" : btnBase.background,
+            color: copied ? "#4ade80" : btnBase.color,
+            border: copied ? "1px solid rgba(22,163,74,0.5)" : (btnBase.border as string),
+          }}
+        >
+          {copied ? "Copied ✓" : "📋 Copy"}
+        </button>
+        <button
+          type="button"
+          onClick={handleExcel}
+          title="Download as Excel"
+          style={btnBase}
+        >
+          ⬇ Excel
+        </button>
+      </div>
       <div style={{ overflowX: "auto" }}>
         <table style={{
           width: "100%",
@@ -363,6 +405,7 @@ export function ChatMarkdown({
         if (p.kind === "chart-donut") return <ChartDonut key={i} title={p.title} slices={p.slices} />;
         if (p.kind === "block") return <BlockCard key={i} {...p.props} />;
         if (p.kind === "temple") return <TempleCard key={i} {...p.props} />;
+        if (p.kind === "slab") return <SlabCard key={i} {...p.props} />;
         if (p.kind === "stats") return <StatsTiles key={i} tiles={p.tiles} />;
         if (p.kind === "link-group") {
           return (

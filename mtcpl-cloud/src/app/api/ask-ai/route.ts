@@ -1,7 +1,8 @@
 /**
  * POST /api/ask-ai
  *
- * Streaming chat endpoint with persistent session history.
+ * Streaming chat endpoint with persistent session history, image attachments,
+ * tool progress events, and a per-response cost readout in INR.
  *
  * Request body:
  *   {
@@ -9,11 +10,18 @@
  *     sessionId?: string | null    // null/omitted on the very first message of a new chat
  *   }
  *
+ *   InMessage = { role, content, images?: string[] }
+ *     images: array of base64 data URLs (e.g. "data:image/jpeg;base64,…"),
+ *             resized client-side to ≤1024 px before upload.
+ *
  * Response: Server-Sent Events (SSE).
- *   event: session   data: <uuid>     // always fires first — current session id
- *   data: <text chunk>                // assistant tokens as they arrive
- *   event: done      data: [DONE]     // end of stream
- *   event: error     data: <message>  // on failure
+ *   event: session    data: <uuid>         // always fires first — current session id
+ *   event: tool_start data: <toolName>     // when a Claude tool call begins
+ *   event: tool_end   data: <toolName>     // when the tool call returns
+ *   data: <text chunk>                     // assistant tokens as they arrive
+ *   event: cost       data: <INR>          // total cost of this reply in rupees (2 decimals)
+ *   event: done       data: [DONE]         // end of stream
+ *   event: error      data: <message>      // on failure
  */
 
 import Anthropic from "@anthropic-ai/sdk";
@@ -25,10 +33,43 @@ import { checkAndIncrement } from "@/lib/ai/rate-limit";
 
 const MAX_TOOL_ROUNDS = 5;
 const MODEL = process.env.ASK_AI_MODEL || "claude-sonnet-4-5";
+const USD_TO_INR = Number(process.env.USD_TO_INR) || 84; // rough conversion — set exact value via env
+
+/**
+ * Published per-million-token prices (USD). Prompt caching splits input into
+ * "cache write" (full price + 25%) and "cache read" (10% of base). We accumulate
+ * each bucket separately from finalMessage.usage and sum.
+ *
+ * Keys match the Anthropic model names (not versioned aliases). If a new model
+ * lands we fall back to Sonnet-4.5 rates so the counter still displays something.
+ */
+const PRICES_USD_PER_MTOK: Record<string, { in: number; out: number; cacheRead: number; cacheWrite: number }> = {
+  "claude-sonnet-4-5": { in: 3, out: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+  "claude-haiku-4-5":  { in: 1, out: 5,  cacheRead: 0.1, cacheWrite: 1.25 },
+  "claude-opus-4-5":   { in: 15, out: 75, cacheRead: 1.5, cacheWrite: 18.75 },
+};
+
+type TokenBudget = {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+};
+
+function costInr(model: string, u: TokenBudget): number {
+  const p = PRICES_USD_PER_MTOK[model] ?? PRICES_USD_PER_MTOK["claude-sonnet-4-5"];
+  const usd =
+    (u.input * p.in +
+      u.output * p.out +
+      u.cacheRead * p.cacheRead +
+      u.cacheWrite * p.cacheWrite) / 1_000_000;
+  return usd * USD_TO_INR;
+}
 
 type InMessage = {
   role: "user" | "assistant";
   content: string;
+  images?: string[];
 };
 
 /** Encode a text chunk as one SSE `data:` line (plus trailing blank line). */
@@ -42,10 +83,39 @@ function sseEvent(name: string, data: string): Uint8Array {
 }
 
 /** Derive a short title from the user's first message. */
-function deriveTitle(firstUserMessage: string): string {
+function deriveTitle(firstUserMessage: string, hasImages: boolean): string {
   const cleaned = firstUserMessage.replace(/\s+/g, " ").trim();
-  if (cleaned.length <= 60) return cleaned;
+  if (!cleaned && hasImages) return "📸 Photo question";
+  if (cleaned.length <= 60) return cleaned || "Untitled chat";
   return cleaned.slice(0, 57) + "…";
+}
+
+/** Parse a data URL into { media_type, data } for Claude's base64 image source. */
+function parseDataUrl(url: string): { mediaType: string; data: string } | null {
+  const m = url.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (!m) return null;
+  return { mediaType: m[1], data: m[2] };
+}
+
+/** Map our InMessage to Claude's MessageParam content. */
+function toClaudeContent(m: InMessage): Anthropic.Messages.MessageParam["content"] {
+  if (!m.images || m.images.length === 0) return m.content;
+  const blocks: Anthropic.Messages.ContentBlockParam[] = [];
+  for (const url of m.images) {
+    const parsed = parseDataUrl(url);
+    if (!parsed) continue;
+    blocks.push({
+      type: "image",
+      source: {
+        type: "base64",
+        media_type: parsed.mediaType as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
+        data: parsed.data,
+      },
+    });
+  }
+  if (m.content) blocks.push({ type: "text", text: m.content });
+  if (blocks.length === 0) return m.content; // fell through — treat as plain text
+  return blocks;
 }
 
 export async function POST(req: Request) {
@@ -96,14 +166,14 @@ export async function POST(req: Request) {
   }
 
   // ── Session bootstrap ──
-  // If no sessionId: create one and derive its title from the first user
-  // message. If sessionId is provided: verify the caller owns it.
   let activeSessionId = sessionId;
   if (!activeSessionId) {
-    const firstUserMessage = messages.find((m) => m.role === "user")?.content ?? lastUserMessage.content;
+    const firstUser = messages.find((m) => m.role === "user");
+    const firstText = firstUser?.content ?? lastUserMessage.content;
+    const firstHasImages = !!(firstUser?.images && firstUser.images.length > 0);
     const { data: created, error: createErr } = await admin
       .from("chat_sessions")
-      .insert({ user_id: profile.id, title: deriveTitle(firstUserMessage) })
+      .insert({ user_id: profile.id, title: deriveTitle(firstText, firstHasImages) })
       .select("id")
       .single();
     if (createErr || !created) {
@@ -131,6 +201,7 @@ export async function POST(req: Request) {
     session_id: activeSessionId,
     role: "user",
     content: lastUserMessage.content,
+    images: lastUserMessage.images && lastUserMessage.images.length > 0 ? lastUserMessage.images : null,
   });
 
   const anthropic = new Anthropic({ apiKey });
@@ -138,17 +209,17 @@ export async function POST(req: Request) {
 
   const conversation: Anthropic.Messages.MessageParam[] = messages.map((m) => ({
     role: m.role,
-    content: m.content,
+    content: toClaudeContent(m),
   }));
 
   // ── Streaming setup ──
   const stream = new ReadableStream({
     async start(controller) {
-      // Always announce the session id first so the client can store it.
       controller.enqueue(sseEvent("session", activeSessionId as string));
 
       let rounds = 0;
       let accumulatedAssistantText = "";
+      const totalUsage: TokenBudget = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 
       try {
         while (rounds < MAX_TOOL_ROUNDS) {
@@ -175,6 +246,15 @@ export async function POST(req: Request) {
 
           const finalMessage = await modelStream.finalMessage();
 
+          // Accumulate token usage for cost display
+          const u = finalMessage.usage;
+          if (u) {
+            totalUsage.input += u.input_tokens ?? 0;
+            totalUsage.output += u.output_tokens ?? 0;
+            totalUsage.cacheRead += u.cache_read_input_tokens ?? 0;
+            totalUsage.cacheWrite += u.cache_creation_input_tokens ?? 0;
+          }
+
           conversation.push({ role: "assistant", content: finalMessage.content });
 
           if (finalMessage.stop_reason === "tool_use") {
@@ -185,8 +265,6 @@ export async function POST(req: Request) {
 
             const toolResults: Anthropic.Messages.ToolResultBlockParam[] = [];
             for (const use of toolUses) {
-              // Let the client show a "🔍 Looking up…" indicator for the
-              // duration of the tool call. One event per tool, per round.
               controller.enqueue(sseEvent("tool_start", use.name));
               const resultJson = await runTool(use.name, use.input as Record<string, unknown>);
               controller.enqueue(sseEvent("tool_end", use.name));
@@ -211,18 +289,18 @@ export async function POST(req: Request) {
             content: accumulatedAssistantText,
           });
         }
-        // Bump the session's updated_at so recent-chats list re-orders.
         await admin
           .from("chat_sessions")
           .update({ updated_at: new Date().toISOString() })
           .eq("id", activeSessionId);
 
+        // Report cost last so the client displays it only on a clean finish
+        const costRupees = costInr(MODEL, totalUsage);
+        controller.enqueue(sseEvent("cost", costRupees.toFixed(2)));
         controller.enqueue(sseEvent("done", "[DONE]"));
         controller.close();
       } catch (err) {
         const msg = err instanceof Error ? err.message : "AI request failed";
-        // Best-effort: still persist whatever assistant text we managed to
-        // produce before the error.
         if (accumulatedAssistantText.trim()) {
           await admin.from("chat_messages").insert({
             session_id: activeSessionId,

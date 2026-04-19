@@ -23,6 +23,7 @@ export type ChatMessageRow = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  images?: string[] | null;
   createdAt: string;
 };
 
@@ -75,7 +76,7 @@ export async function loadSessionMessages(sessionId: string): Promise<ChatMessag
 
   const { data: msgs, error } = await admin
     .from("chat_messages")
-    .select("id, role, content, created_at")
+    .select("id, role, content, images, created_at")
     .eq("session_id", sessionId)
     .order("created_at", { ascending: true });
   if (error || !msgs) return [];
@@ -84,6 +85,7 @@ export async function loadSessionMessages(sessionId: string): Promise<ChatMessag
     id: m.id,
     role: m.role as "user" | "assistant",
     content: m.content,
+    images: (m as { images?: string[] | null }).images ?? null,
     createdAt: m.created_at,
   }));
 }
