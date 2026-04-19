@@ -1,22 +1,31 @@
 "use client";
 
 /**
- * Full-viewport dark chat — modeled after Claude.ai's new-tab look.
+ * Full-viewport dark chat — modeled after Claude.ai's new-tab look, now
+ * with a recent-chats sidebar.
  *
- * Layout states:
- *   - Empty (no messages yet)  → centered greeting, suggestion chips below,
- *                                input pinned at the bottom.
- *   - Populated                → messages scroll, input stays pinned, chips
- *                                move above the input as a compact row.
+ * Three layout regions:
+ *   - Sidebar (left, ~260px, collapsible on mobile): "New chat" button +
+ *     scrollable list of this user's recent sessions, newest first. Click
+ *     any session to load its messages.
+ *   - Main (right, flex-1): empty hero when `messages.length === 0`, else
+ *     the scrolling message list.
+ *   - Footer (pinned bottom of main): input box + compact chip row once
+ *     the conversation has started.
  *
- * The whole thing is a fixed overlay (`position: fixed; inset: 0`) so it
- * covers the app sidebar and uses a dark palette without affecting the rest
- * of the app's light theme. A small "Back to Dashboard" link in the header
- * is the only way out.
+ * Sessions persist to the DB — see src/lib/ai/chat-sessions.ts for reads /
+ * deletes / renames, and src/app/api/ask-ai/route.ts for writes (it emits
+ * the session id on its first SSE event so the client can latch onto it).
  */
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import {
+  deleteSession as deleteSessionAction,
+  loadSessionMessages,
+  listRecentSessions,
+  type ChatSessionSummary,
+} from "@/lib/ai/chat-sessions";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
@@ -45,6 +54,7 @@ type SRCtor = new () => SRType;
 // ── Palette ────────────────────────────────────────────────────────────────
 const C = {
   bg: "#1a1a1a",
+  sidebar: "#141414",
   surface: "#242424",
   surfaceHi: "#2e2e2e",
   border: "rgba(255,255,255,0.1)",
@@ -55,18 +65,43 @@ const C = {
   textMuted: "rgba(255,255,255,0.55)",
   textDim: "rgba(255,255,255,0.35)",
   userBubble: "rgba(255,255,255,0.07)",
+  sessionActive: "rgba(232,197,114,0.15)",
   errorBg: "rgba(220,38,38,0.12)",
   errorBorder: "rgba(220,38,38,0.4)",
   errorText: "#fca5a5",
 };
 
-export function AskAiChat({ userName }: { userName: string }) {
+// ── Helpers ───────────────────────────────────────────────────────────────
+function relativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const min = Math.floor(diff / 60_000);
+  if (min < 1) return "just now";
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 7) return `${day}d ago`;
+  return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+}
+
+export function AskAiChat({
+  userName,
+  initialRecentSessions,
+}: {
+  userName: string;
+  initialRecentSessions: ChatSessionSummary[];
+}) {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [voiceLang, setVoiceLang] = useState<"en-IN" | "hi-IN">("en-IN");
   const [listening, setListening] = useState(false);
+  const [sessions, setSessions] = useState<ChatSessionSummary[]>(initialRecentSessions);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [loadingSession, setLoadingSession] = useState<string | null>(null);
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const recognitionRef = useRef<SRType | null>(null);
@@ -74,7 +109,6 @@ export function AskAiChat({ userName }: { userName: string }) {
 
   const isEmpty = messages.length === 0;
 
-  // Time-based greeting to match the dashboard's greeting tone
   const greeting = useMemo(() => {
     const hr = new Date().getHours();
     if (hr < 12) return "Good morning";
@@ -82,19 +116,23 @@ export function AskAiChat({ userName }: { userName: string }) {
     return "Good evening";
   }, []);
 
-  // Detect Web Speech API availability once
   const speechSupported = useMemo(() => {
     if (typeof window === "undefined") return false;
     const w = window as unknown as { SpeechRecognition?: SRCtor; webkitSpeechRecognition?: SRCtor };
     return !!(w.SpeechRecognition || w.webkitSpeechRecognition);
   }, []);
 
-  // Auto-scroll to newest
+  // Collapse sidebar on mobile on first mount
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.innerWidth < 768) {
+      setSidebarOpen(false);
+    }
+  }, []);
+
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, streaming]);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       abortRef.current?.abort();
@@ -102,13 +140,61 @@ export function AskAiChat({ userName }: { userName: string }) {
     };
   }, []);
 
-  // Auto-grow textarea
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = "auto";
     el.style.height = Math.min(el.scrollHeight, 180) + "px";
   }, [input]);
+
+  // ── Session actions ──────────────────────────────────────────────────────
+
+  function startNewChat() {
+    if (streaming) return;
+    abortRef.current?.abort();
+    setMessages([]);
+    setActiveSessionId(null);
+    setInput("");
+    setError(null);
+  }
+
+  async function selectSession(sessionId: string) {
+    if (streaming) return;
+    if (activeSessionId === sessionId) return;
+    setLoadingSession(sessionId);
+    try {
+      const rows = await loadSessionMessages(sessionId);
+      setMessages(rows.map((r) => ({ role: r.role, content: r.content })));
+      setActiveSessionId(sessionId);
+      setError(null);
+    } catch {
+      setError("Could not load that chat.");
+    } finally {
+      setLoadingSession(null);
+    }
+  }
+
+  async function handleDeleteSession(sessionId: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    if (streaming) return;
+    if (!confirm("Delete this chat?")) return;
+    const result = await deleteSessionAction(sessionId);
+    if ("error" in result) {
+      setError(result.error);
+      return;
+    }
+    setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+    if (activeSessionId === sessionId) startNewChat();
+  }
+
+  async function refreshSessionList() {
+    try {
+      const next = await listRecentSessions(30);
+      setSessions(next);
+    } catch { /* non-critical */ }
+  }
+
+  // ── Send message ─────────────────────────────────────────────────────────
 
   async function sendMessage(text: string) {
     const trimmed = text.trim();
@@ -127,12 +213,16 @@ export function AskAiChat({ userName }: { userName: string }) {
     const controller = new AbortController();
     abortRef.current = controller;
 
+    // Capture pre-request session id — server may return a new one for a fresh chat
+    const wasNewChat = activeSessionId === null;
+
     try {
       const res = await fetch("/api/ask-ai", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           messages: nextMessages.slice(0, -1).map((m) => ({ role: m.role, content: m.content })),
+          sessionId: activeSessionId,
         }),
         signal: controller.signal,
       });
@@ -172,6 +262,11 @@ export function AskAiChat({ userName }: { userName: string }) {
           }
           const data = dataLines.join("\n");
 
+          if (eventName === "session") {
+            // Server tells us which session this chat is in (new chat → fresh id)
+            if (data && data !== activeSessionId) setActiveSessionId(data);
+            continue;
+          }
           if (eventName === "error") {
             setError(data || "AI returned an error");
             continue;
@@ -198,6 +293,10 @@ export function AskAiChat({ userName }: { userName: string }) {
     } finally {
       setStreaming(false);
       abortRef.current = null;
+      // After either a brand-new chat or an existing chat, refresh the
+      // sidebar so the session moves/appears at the top with the updated
+      // timestamp. Fire and forget.
+      if (wasNewChat || activeSessionId) refreshSessionList();
     }
   }
 
@@ -218,21 +317,12 @@ export function AskAiChat({ userName }: { userName: string }) {
     sendMessage(text);
   }
 
-  function clearChat() {
-    if (streaming) return;
-    if (!confirm("Clear this conversation?")) return;
-    setMessages([]);
-    setError(null);
-    setInput("");
-  }
-
   function toggleVoice() {
     if (!speechSupported) return;
     if (listening) {
       recognitionRef.current?.stop();
       return;
     }
-
     const w = window as unknown as { SpeechRecognition?: SRCtor; webkitSpeechRecognition?: SRCtor };
     const Ctor = w.SpeechRecognition || w.webkitSpeechRecognition;
     if (!Ctor) return;
@@ -270,285 +360,448 @@ export function AskAiChat({ userName }: { userName: string }) {
         background: C.bg,
         zIndex: 50,
         display: "flex",
-        flexDirection: "column",
         color: C.text,
         fontFamily: "inherit",
       }}
     >
-      {/* ── Top bar ─────────────────────────────────────────────────── */}
-      <header
-        style={{
-          flexShrink: 0,
-          padding: "14px 22px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          borderBottom: `1px solid ${C.border}`,
-        }}
-      >
-        <Link
-          href="/dashboard"
+      {/* ── Sidebar ────────────────────────────────────────────────── */}
+      {sidebarOpen && (
+        <aside
           style={{
-            color: C.textMuted,
-            textDecoration: "none",
-            fontSize: 13,
-            fontWeight: 500,
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            padding: "6px 10px",
-            borderRadius: 8,
-            transition: "background 0.15s",
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.05)")}
-          onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-        >
-          ← Dashboard
-        </Link>
-
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: C.text, letterSpacing: "-0.2px" }}>
-            ✨ MTCPL AI
-          </span>
-          {messages.length > 0 && (
-            <button
-              type="button"
-              onClick={clearChat}
-              disabled={streaming}
-              style={{
-                fontSize: 11,
-                padding: "5px 10px",
-                background: "transparent",
-                color: C.textMuted,
-                border: `1px solid ${C.border}`,
-                borderRadius: 6,
-                cursor: streaming ? "not-allowed" : "pointer",
-                fontWeight: 500,
-              }}
-              title="Clear conversation"
-            >
-              New chat
-            </button>
-          )}
-        </div>
-      </header>
-
-      {/* ── Scrollable content ─────────────────────────────────────── */}
-      <main
-        ref={scrollRef}
-        style={{
-          flex: 1,
-          overflowY: "auto",
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: isEmpty ? "center" : "flex-start",
-        }}
-      >
-        {isEmpty ? (
-          <EmptyHero greeting={greeting} userName={userName} onPick={handlePreset} disabled={streaming} />
-        ) : (
-          <MessageList messages={messages} streaming={streaming} />
-        )}
-      </main>
-
-      {/* ── Error banner (floats above input) ──────────────────────── */}
-      {error && (
-        <div
-          style={{
-            margin: "0 auto 10px",
-            maxWidth: 760,
-            width: "calc(100% - 32px)",
-            padding: "10px 14px",
-            background: C.errorBg,
-            border: `1px solid ${C.errorBorder}`,
-            borderRadius: 8,
-            fontSize: 12,
-            color: C.errorText,
+            width: 260,
             flexShrink: 0,
-          }}
-        >
-          {error}
-          <button
-            onClick={() => setError(null)}
-            style={{
-              float: "right",
-              background: "transparent",
-              border: "none",
-              color: C.errorText,
-              cursor: "pointer",
-              fontSize: 14,
-              padding: 0,
-              marginLeft: 10,
-            }}
-          >
-            ×
-          </button>
-        </div>
-      )}
-
-      {/* ── Input area (pinned) ────────────────────────────────────── */}
-      <footer
-        style={{
-          flexShrink: 0,
-          padding: "0 16px 16px",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-        }}
-      >
-        {/* Compact chips row when populated (full hero handles empty-state chips) */}
-        {!isEmpty && (
-          <div
-            style={{
-              display: "flex",
-              gap: 6,
-              flexWrap: "wrap",
-              justifyContent: "center",
-              maxWidth: 760,
-              width: "100%",
-              marginBottom: 10,
-            }}
-          >
-            {PRESET_QUESTIONS.slice(0, 4).map((q) => (
-              <Chip key={q} label={q} onClick={() => handlePreset(q)} disabled={streaming} compact />
-            ))}
-          </div>
-        )}
-
-        <form
-          onSubmit={handleSubmit}
-          style={{
-            width: "100%",
-            maxWidth: 760,
-            background: C.surface,
-            border: `1px solid ${C.border}`,
-            borderRadius: 18,
-            padding: "10px 12px",
+            background: C.sidebar,
+            borderRight: `1px solid ${C.border}`,
             display: "flex",
             flexDirection: "column",
-            gap: 8,
-            transition: "border-color 0.15s, box-shadow 0.15s",
-            boxShadow: "0 2px 20px rgba(0,0,0,0.25)",
-          }}
-          onFocus={(e) => {
-            e.currentTarget.style.borderColor = "rgba(232,197,114,0.5)";
-            e.currentTarget.style.boxShadow = "0 2px 20px rgba(0,0,0,0.35), 0 0 0 3px rgba(232,197,114,0.08)";
-          }}
-          onBlur={(e) => {
-            e.currentTarget.style.borderColor = C.border;
-            e.currentTarget.style.boxShadow = "0 2px 20px rgba(0,0,0,0.25)";
+            overflow: "hidden",
           }}
         >
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            disabled={streaming}
-            placeholder={isEmpty ? "Ask me anything about blocks, slabs, cutting..." : "Reply..."}
-            rows={1}
+          <div
             style={{
-              width: "100%",
-              background: "transparent",
-              border: "none",
-              outline: "none",
-              color: C.text,
-              fontSize: 15,
-              lineHeight: 1.5,
-              resize: "none",
-              fontFamily: "inherit",
-              padding: "8px 10px 4px",
-              minHeight: 36,
-              maxHeight: 180,
+              padding: "14px 14px 10px",
+              borderBottom: `1px solid ${C.border}`,
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
             }}
-          />
-
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-            {/* Left: voice controls */}
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <button
-                type="button"
-                onClick={() => setVoiceLang((l) => (l === "en-IN" ? "hi-IN" : "en-IN"))}
-                title="Toggle voice input language"
-                style={{
-                  padding: "6px 10px",
-                  fontSize: 11,
-                  fontWeight: 700,
-                  background: "transparent",
-                  color: C.textMuted,
-                  border: `1px solid ${C.border}`,
-                  borderRadius: 8,
-                  cursor: "pointer",
-                  minWidth: 46,
-                }}
-              >
-                {voiceLang === "hi-IN" ? "हिं" : "EN"}
-              </button>
-
-              <button
-                type="button"
-                onClick={toggleVoice}
-                disabled={!speechSupported || streaming}
-                title={
-                  !speechSupported
-                    ? "Voice input not supported on this browser — try Chrome"
-                    : listening
-                    ? "Stop listening"
-                    : `Speak in ${voiceLang === "hi-IN" ? "Hindi" : "English"}`
-                }
-                style={{
-                  padding: "6px 10px",
-                  fontSize: 15,
-                  background: listening ? "rgba(220,38,38,0.15)" : "transparent",
-                  border: `1px solid ${listening ? "rgba(220,38,38,0.5)" : C.border}`,
-                  borderRadius: 8,
-                  color: speechSupported ? (listening ? "#fca5a5" : C.textMuted) : C.textDim,
-                  cursor: !speechSupported ? "not-allowed" : "pointer",
-                  opacity: speechSupported ? 1 : 0.4,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 4,
-                }}
-              >
-                {listening && (
-                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#ef4444", animation: "ask-ai-pulse 1.2s ease-in-out infinite" }} />
-                )}
-                🎤
-              </button>
-            </div>
-
-            {/* Right: send */}
-            <button
-              type="submit"
-              disabled={streaming || !input.trim()}
+          >
+            <Link
+              href="/dashboard"
               style={{
-                width: 36,
-                height: 36,
-                borderRadius: "50%",
-                border: "none",
-                background: streaming || !input.trim() ? "rgba(255,255,255,0.08)" : C.accent,
-                color: streaming || !input.trim() ? C.textDim : "#1a1a1a",
-                cursor: streaming || !input.trim() ? "not-allowed" : "pointer",
-                fontSize: 18,
-                fontWeight: 700,
+                fontSize: 12,
+                color: C.textMuted,
+                textDecoration: "none",
+                padding: "4px 8px",
+                borderRadius: 6,
+                fontWeight: 500,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                alignSelf: "flex-start",
+              }}
+            >
+              ← Dashboard
+            </Link>
+
+            <button
+              type="button"
+              onClick={startNewChat}
+              disabled={streaming || isEmpty}
+              style={{
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                transition: "background 0.15s",
+                gap: 7,
+                padding: "9px 12px",
+                background: isEmpty ? "rgba(255,255,255,0.04)" : C.accent,
+                color: isEmpty ? C.textMuted : "#1a1a1a",
+                border: `1px solid ${isEmpty ? C.border : C.accent}`,
+                borderRadius: 10,
+                fontWeight: 700,
+                fontSize: 13,
+                cursor: streaming || isEmpty ? "not-allowed" : "pointer",
+                opacity: streaming && !isEmpty ? 0.6 : 1,
+                transition: "all 0.15s",
               }}
-              title={streaming ? "Generating…" : "Send message"}
+              title={isEmpty ? "Already on a new chat" : "Start a new conversation"}
             >
-              {streaming ? <ThinkingDots /> : "↑"}
+              <span style={{ fontSize: 15, lineHeight: 1 }}>+</span>
+              New chat
             </button>
           </div>
-        </form>
 
-        <div style={{ fontSize: 11, color: C.textDim, textAlign: "center", marginTop: 10 }}>
-          MTCPL AI can make mistakes — verify anything important.
-        </div>
-      </footer>
+          <div
+            className="ask-ai-scroll"
+            style={{
+              flex: 1,
+              overflowY: "auto",
+              padding: "10px 8px",
+            }}
+          >
+            {sessions.length === 0 ? (
+              <div style={{ padding: "20px 12px", fontSize: 12, color: C.textDim, textAlign: "center" }}>
+                No past chats yet.
+              </div>
+            ) : (
+              <>
+                <div
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: C.textDim,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                    padding: "4px 10px 8px",
+                  }}
+                >
+                  Recent
+                </div>
+                {sessions.map((s) => {
+                  const isActive = s.id === activeSessionId;
+                  const isLoading = s.id === loadingSession;
+                  return (
+                    <div
+                      key={s.id}
+                      onClick={() => selectSession(s.id)}
+                      style={{
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: 6,
+                        padding: "8px 10px",
+                        borderRadius: 8,
+                        cursor: streaming ? "not-allowed" : "pointer",
+                        background: isActive ? C.sessionActive : "transparent",
+                        opacity: isLoading ? 0.6 : 1,
+                        marginBottom: 2,
+                        transition: "background 0.12s",
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!isActive && !streaming) e.currentTarget.style.background = "rgba(255,255,255,0.04)";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = isActive ? C.sessionActive : "transparent";
+                        const x = e.currentTarget.querySelector<HTMLButtonElement>("[data-delete]");
+                        if (x) x.style.opacity = "0";
+                      }}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          selectSession(s.id);
+                        }
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div
+                          style={{
+                            fontSize: 12.5,
+                            fontWeight: 500,
+                            color: isActive ? C.text : "rgba(255,255,255,0.78)",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            lineHeight: 1.4,
+                          }}
+                        >
+                          {s.title}
+                        </div>
+                        <div style={{ fontSize: 10, color: C.textDim, marginTop: 2 }}>
+                          {relativeTime(s.updatedAt)}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        data-delete
+                        onClick={(e) => handleDeleteSession(s.id, e)}
+                        title="Delete this chat"
+                        style={{
+                          opacity: 0,
+                          background: "transparent",
+                          border: "none",
+                          color: C.textMuted,
+                          cursor: "pointer",
+                          fontSize: 16,
+                          lineHeight: 1,
+                          padding: "2px 6px",
+                          borderRadius: 4,
+                          transition: "opacity 0.1s",
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.color = "#fca5a5"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.color = C.textMuted; }}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  );
+                })}
+              </>
+            )}
+          </div>
+        </aside>
+      )}
 
-      {/* Animations */}
+      {/* ── Main column ────────────────────────────────────────────── */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+        {/* Top bar — sidebar toggle + title */}
+        <header
+          style={{
+            flexShrink: 0,
+            padding: "14px 22px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            borderBottom: `1px solid ${C.border}`,
+            gap: 10,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button
+              type="button"
+              onClick={() => setSidebarOpen((v) => !v)}
+              style={{
+                background: "transparent",
+                border: `1px solid ${C.border}`,
+                color: C.textMuted,
+                padding: "6px 10px",
+                borderRadius: 8,
+                cursor: "pointer",
+                fontSize: 14,
+                lineHeight: 1,
+              }}
+              title={sidebarOpen ? "Hide sidebar" : "Show recent chats"}
+            >
+              ☰
+            </button>
+            {!sidebarOpen && (
+              <Link
+                href="/dashboard"
+                style={{
+                  color: C.textMuted,
+                  textDecoration: "none",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  padding: "6px 10px",
+                  borderRadius: 8,
+                }}
+              >
+                ← Dashboard
+              </Link>
+            )}
+          </div>
+
+          <span style={{ fontSize: 13, fontWeight: 600, color: C.text, letterSpacing: "-0.2px" }}>
+            ✨ MTCPL AI
+          </span>
+        </header>
+
+        {/* Scrollable content */}
+        <main
+          ref={scrollRef}
+          className="ask-ai-scroll"
+          style={{
+            flex: 1,
+            overflowY: "auto",
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: isEmpty ? "center" : "flex-start",
+          }}
+        >
+          {isEmpty ? (
+            <EmptyHero greeting={greeting} userName={userName} onPick={handlePreset} disabled={streaming} />
+          ) : (
+            <MessageList messages={messages} streaming={streaming} />
+          )}
+        </main>
+
+        {/* Error banner */}
+        {error && (
+          <div
+            style={{
+              margin: "0 auto 10px",
+              maxWidth: 760,
+              width: "calc(100% - 32px)",
+              padding: "10px 14px",
+              background: C.errorBg,
+              border: `1px solid ${C.errorBorder}`,
+              borderRadius: 8,
+              fontSize: 12,
+              color: C.errorText,
+              flexShrink: 0,
+            }}
+          >
+            {error}
+            <button
+              onClick={() => setError(null)}
+              style={{ float: "right", background: "transparent", border: "none", color: C.errorText, cursor: "pointer", fontSize: 14, padding: 0, marginLeft: 10 }}
+            >
+              ×
+            </button>
+          </div>
+        )}
+
+        {/* Input area */}
+        <footer
+          style={{
+            flexShrink: 0,
+            padding: "0 16px 16px",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+          }}
+        >
+          {!isEmpty && (
+            <div
+              style={{
+                display: "flex",
+                gap: 6,
+                flexWrap: "wrap",
+                justifyContent: "center",
+                maxWidth: 760,
+                width: "100%",
+                marginBottom: 10,
+              }}
+            >
+              {PRESET_QUESTIONS.slice(0, 4).map((q) => (
+                <Chip key={q} label={q} onClick={() => handlePreset(q)} disabled={streaming} compact />
+              ))}
+            </div>
+          )}
+
+          <form
+            onSubmit={handleSubmit}
+            style={{
+              width: "100%",
+              maxWidth: 760,
+              background: C.surface,
+              border: `1px solid ${C.border}`,
+              borderRadius: 18,
+              padding: "10px 12px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+              transition: "border-color 0.15s, box-shadow 0.15s",
+              boxShadow: "0 2px 20px rgba(0,0,0,0.25)",
+            }}
+            onFocus={(e) => {
+              e.currentTarget.style.borderColor = "rgba(232,197,114,0.5)";
+              e.currentTarget.style.boxShadow = "0 2px 20px rgba(0,0,0,0.35), 0 0 0 3px rgba(232,197,114,0.08)";
+            }}
+            onBlur={(e) => {
+              e.currentTarget.style.borderColor = C.border;
+              e.currentTarget.style.boxShadow = "0 2px 20px rgba(0,0,0,0.25)";
+            }}
+          >
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              disabled={streaming}
+              placeholder={isEmpty ? "Ask me anything about blocks, slabs, cutting..." : "Reply..."}
+              rows={1}
+              style={{
+                width: "100%",
+                background: "transparent",
+                border: "none",
+                outline: "none",
+                color: C.text,
+                fontSize: 15,
+                lineHeight: 1.5,
+                resize: "none",
+                fontFamily: "inherit",
+                padding: "8px 10px 4px",
+                minHeight: 36,
+                maxHeight: 180,
+              }}
+            />
+
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <button
+                  type="button"
+                  onClick={() => setVoiceLang((l) => (l === "en-IN" ? "hi-IN" : "en-IN"))}
+                  title="Toggle voice input language"
+                  style={{
+                    padding: "6px 10px",
+                    fontSize: 11,
+                    fontWeight: 700,
+                    background: "transparent",
+                    color: C.textMuted,
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 8,
+                    cursor: "pointer",
+                    minWidth: 46,
+                  }}
+                >
+                  {voiceLang === "hi-IN" ? "हिं" : "EN"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={toggleVoice}
+                  disabled={!speechSupported || streaming}
+                  title={
+                    !speechSupported
+                      ? "Voice input not supported on this browser — try Chrome"
+                      : listening
+                      ? "Stop listening"
+                      : `Speak in ${voiceLang === "hi-IN" ? "Hindi" : "English"}`
+                  }
+                  style={{
+                    padding: "6px 10px",
+                    fontSize: 15,
+                    background: listening ? "rgba(220,38,38,0.15)" : "transparent",
+                    border: `1px solid ${listening ? "rgba(220,38,38,0.5)" : C.border}`,
+                    borderRadius: 8,
+                    color: speechSupported ? (listening ? "#fca5a5" : C.textMuted) : C.textDim,
+                    cursor: !speechSupported ? "not-allowed" : "pointer",
+                    opacity: speechSupported ? 1 : 0.4,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                  }}
+                >
+                  {listening && (
+                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#ef4444", animation: "ask-ai-pulse 1.2s ease-in-out infinite" }} />
+                  )}
+                  🎤
+                </button>
+              </div>
+
+              <button
+                type="submit"
+                disabled={streaming || !input.trim()}
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: "50%",
+                  border: "none",
+                  background: streaming || !input.trim() ? "rgba(255,255,255,0.08)" : C.accent,
+                  color: streaming || !input.trim() ? C.textDim : "#1a1a1a",
+                  cursor: streaming || !input.trim() ? "not-allowed" : "pointer",
+                  fontSize: 18,
+                  fontWeight: 700,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  transition: "background 0.15s",
+                }}
+                title={streaming ? "Generating…" : "Send message"}
+              >
+                {streaming ? <ThinkingDots /> : "↑"}
+              </button>
+            </div>
+          </form>
+
+          <div style={{ fontSize: 11, color: C.textDim, textAlign: "center", marginTop: 10 }}>
+            MTCPL AI can make mistakes — verify anything important.
+          </div>
+        </footer>
+      </div>
+
+      {/* Animations + custom scrollbar */}
       <style>{`
         @keyframes ask-ai-pulse {
           0%, 100% { opacity: 1; }
@@ -562,7 +815,6 @@ export function AskAiChat({ userName }: { userName: string }) {
           from { opacity: 0; transform: translateY(6px); }
           to { opacity: 1; transform: translateY(0); }
         }
-        /* Override the app's global scrollbar for this page only */
         .ask-ai-scroll::-webkit-scrollbar { width: 8px; }
         .ask-ai-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 4px; }
         .ask-ai-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
@@ -609,27 +861,10 @@ function EmptyHero({
       >
         {greeting}, <span style={{ color: C.accent }}>{userName}</span>.
       </div>
-      <div
-        style={{
-          fontSize: 17,
-          color: C.textMuted,
-          marginBottom: 32,
-          textAlign: "center",
-          fontWeight: 400,
-        }}
-      >
+      <div style={{ fontSize: 17, color: C.textMuted, marginBottom: 32, textAlign: "center", fontWeight: 400 }}>
         How can I help today?
       </div>
-
-      <div
-        style={{
-          display: "flex",
-          gap: 8,
-          flexWrap: "wrap",
-          justifyContent: "center",
-          maxWidth: 640,
-        }}
-      >
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", maxWidth: 640 }}>
         {PRESET_QUESTIONS.map((q) => (
           <Chip key={q} label={q} onClick={() => onPick(q)} disabled={disabled} />
         ))}
@@ -691,7 +926,6 @@ function Chip({
 function MessageList({ messages, streaming }: { messages: Msg[]; streaming: boolean }) {
   return (
     <div
-      className="ask-ai-scroll"
       style={{
         width: "100%",
         maxWidth: 760,
@@ -739,7 +973,6 @@ function MessageBubble({ role, content, isStreaming }: { role: "user" | "assista
     );
   }
 
-  // Assistant: no bubble, just text flowing full-width
   return (
     <div style={{ display: "flex", gap: 12, animation: "ask-ai-fade-in 0.25s ease-out" }}>
       <div
@@ -791,8 +1024,6 @@ function MessageBubble({ role, content, isStreaming }: { role: "user" | "assista
     </div>
   );
 }
-
-// ─── Thinking dots (used in send button while streaming, and as assistant placeholder) ─
 
 function ThinkingDots() {
   return (
