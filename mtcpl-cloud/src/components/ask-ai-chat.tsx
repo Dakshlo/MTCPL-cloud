@@ -24,6 +24,7 @@ import {
   listRecentSessions,
   type ChatSessionSummary,
 } from "@/lib/ai/chat-sessions";
+import { ChatMarkdown } from "./chat-markdown";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
@@ -984,12 +985,11 @@ function MessageBubble({ role, content, isStreaming }: { role: "user" | "assista
           color: C.text,
           fontSize: 17,
           lineHeight: 1.65,
-          whiteSpace: "pre-wrap",
           wordBreak: "break-word",
           paddingTop: 4,
         }}
       >
-        {content || (isStreaming ? <ThinkingDots /> : null)}
+        {content ? <ChatMarkdown content={content} /> : (isStreaming ? <ThinkingDots /> : null)}
         {isStreaming && content && (
           <span
             style={{
