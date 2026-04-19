@@ -737,8 +737,6 @@ export function AskAiChat({
                       }}
                       onMouseLeave={(e) => {
                         e.currentTarget.style.background = isActive ? C.sessionActive : "transparent";
-                        const x = e.currentTarget.querySelector<HTMLButtonElement>("[data-delete]");
-                        if (x) x.style.opacity = "0";
                       }}
                       role="button"
                       tabIndex={0}
@@ -769,23 +767,33 @@ export function AskAiChat({
                       </div>
                       <button
                         type="button"
-                        data-delete
                         onClick={(e) => handleDeleteSession(s.id, e)}
                         title="Delete this chat"
                         style={{
-                          opacity: 0,
+                          // Always visible so the button is reachable on touch
+                          // devices too — subtle at rest, bright red on hover.
+                          opacity: 0.45,
                           background: "transparent",
                           border: "none",
                           color: C.textMuted,
                           cursor: "pointer",
-                          fontSize: 16,
+                          fontSize: 18,
                           lineHeight: 1,
-                          padding: "2px 6px",
-                          borderRadius: 4,
-                          transition: "opacity 0.1s",
+                          padding: "4px 8px",
+                          borderRadius: 6,
+                          flexShrink: 0,
+                          transition: "opacity 0.12s, color 0.12s, background 0.12s",
                         }}
-                        onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.color = "#fca5a5"; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.color = C.textMuted; }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.opacity = "1";
+                          e.currentTarget.style.color = "#fca5a5";
+                          e.currentTarget.style.background = "rgba(220,38,38,0.12)";
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.opacity = "0.45";
+                          e.currentTarget.style.color = C.textMuted;
+                          e.currentTarget.style.background = "transparent";
+                        }}
                       >
                         ×
                       </button>
