@@ -1,21 +1,19 @@
 "use client";
 
 /**
- * Full-viewport dark chat — modeled after Claude.ai's new-tab look, now
- * with a recent-chats sidebar.
+ * Dark chat inside the normal app shell.
  *
- * Three layout regions:
- *   - Sidebar (left, ~260px, collapsible on mobile): "New chat" button +
- *     scrollable list of this user's recent sessions, newest first. Click
- *     any session to load its messages.
- *   - Main (right, flex-1): empty hero when `messages.length === 0`, else
- *     the scrolling message list.
- *   - Footer (pinned bottom of main): input box + compact chip row once
- *     the conversation has started.
+ * Layout:
+ *   [ App sidebar (untouched) | CHAT main (flex 1) | Recent chats (260px, right) ]
  *
- * Sessions persist to the DB — see src/lib/ai/chat-sessions.ts for reads /
- * deletes / renames, and src/app/api/ask-ai/route.ts for writes (it emits
- * the session id on its first SSE event so the client can latch onto it).
+ * We break out of the default `.page-content` padding via negative margins so
+ * the dark background hits the edges of the content area. Height is locked to
+ * `calc(100vh - 56px)` (viewport minus the app's 56px sticky topbar) so the
+ * chat has a fixed bottom edge that the input sits on.
+ *
+ * This replaces the earlier `position: fixed; inset: 0` overlay, which fought
+ * the app topbar's z-index and hid the main navigation — keeping the app
+ * sidebar visible means navigation stays accessible from the chat.
  */
 
 import Link from "next/link";
@@ -122,9 +120,9 @@ export function AskAiChat({
     return !!(w.SpeechRecognition || w.webkitSpeechRecognition);
   }, []);
 
-  // Collapse sidebar on mobile on first mount
+  // Collapse sidebar on narrow screens
   useEffect(() => {
-    if (typeof window !== "undefined" && window.innerWidth < 768) {
+    if (typeof window !== "undefined" && window.innerWidth < 1024) {
       setSidebarOpen(false);
     }
   }, []);
@@ -213,7 +211,6 @@ export function AskAiChat({
     const controller = new AbortController();
     abortRef.current = controller;
 
-    // Capture pre-request session id — server may return a new one for a fresh chat
     const wasNewChat = activeSessionId === null;
 
     try {
@@ -263,7 +260,6 @@ export function AskAiChat({
           const data = dataLines.join("\n");
 
           if (eventName === "session") {
-            // Server tells us which session this chat is in (new chat → fresh id)
             if (data && data !== activeSessionId) setActiveSessionId(data);
             continue;
           }
@@ -293,9 +289,6 @@ export function AskAiChat({
     } finally {
       setStreaming(false);
       abortRef.current = null;
-      // After either a brand-new chat or an existing chat, refresh the
-      // sidebar so the session moves/appears at the top with the updated
-      // timestamp. Fire and forget.
       if (wasNewChat || activeSessionId) refreshSessionList();
     }
   }
@@ -355,196 +348,23 @@ export function AskAiChat({
   return (
     <div
       style={{
-        position: "fixed",
-        inset: 0,
-        background: C.bg,
-        zIndex: 50,
+        // Break out of .page-content padding so the dark skin hits the edges
+        // of the content area. The app sidebar on the left stays untouched.
+        marginTop: -24,
+        marginLeft: -28,
+        marginRight: -28,
+        marginBottom: -40,
+        height: "calc(100vh - 56px)",
         display: "flex",
+        flexDirection: "row",
+        background: C.bg,
         color: C.text,
+        overflow: "hidden",
         fontFamily: "inherit",
       }}
     >
-      {/* ── Sidebar ────────────────────────────────────────────────── */}
-      {sidebarOpen && (
-        <aside
-          style={{
-            width: 260,
-            flexShrink: 0,
-            background: C.sidebar,
-            borderRight: `1px solid ${C.border}`,
-            display: "flex",
-            flexDirection: "column",
-            overflow: "hidden",
-          }}
-        >
-          <div
-            style={{
-              padding: "14px 14px 10px",
-              borderBottom: `1px solid ${C.border}`,
-              display: "flex",
-              flexDirection: "column",
-              gap: 10,
-            }}
-          >
-            <Link
-              href="/dashboard"
-              style={{
-                fontSize: 13,
-                color: C.textMuted,
-                textDecoration: "none",
-                padding: "4px 8px",
-                borderRadius: 6,
-                fontWeight: 500,
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                alignSelf: "flex-start",
-              }}
-            >
-              ← Dashboard
-            </Link>
-
-            <button
-              type="button"
-              onClick={startNewChat}
-              disabled={streaming || isEmpty}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 8,
-                padding: "11px 14px",
-                background: isEmpty ? "rgba(255,255,255,0.04)" : C.accent,
-                color: isEmpty ? C.textMuted : "#1a1a1a",
-                border: `1px solid ${isEmpty ? C.border : C.accent}`,
-                borderRadius: 10,
-                fontWeight: 700,
-                fontSize: 14,
-                cursor: streaming || isEmpty ? "not-allowed" : "pointer",
-                opacity: streaming && !isEmpty ? 0.6 : 1,
-                transition: "all 0.15s",
-              }}
-              title={isEmpty ? "Already on a new chat" : "Start a new conversation"}
-            >
-              <span style={{ fontSize: 16, lineHeight: 1 }}>+</span>
-              New chat
-            </button>
-          </div>
-
-          <div
-            className="ask-ai-scroll"
-            style={{
-              flex: 1,
-              overflowY: "auto",
-              padding: "10px 8px",
-            }}
-          >
-            {sessions.length === 0 ? (
-              <div style={{ padding: "20px 12px", fontSize: 12, color: C.textDim, textAlign: "center" }}>
-                No past chats yet.
-              </div>
-            ) : (
-              <>
-                <div
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    color: C.textDim,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.08em",
-                    padding: "4px 10px 8px",
-                  }}
-                >
-                  Recent
-                </div>
-                {sessions.map((s) => {
-                  const isActive = s.id === activeSessionId;
-                  const isLoading = s.id === loadingSession;
-                  return (
-                    <div
-                      key={s.id}
-                      onClick={() => selectSession(s.id)}
-                      style={{
-                        display: "flex",
-                        alignItems: "flex-start",
-                        gap: 6,
-                        padding: "8px 10px",
-                        borderRadius: 8,
-                        cursor: streaming ? "not-allowed" : "pointer",
-                        background: isActive ? C.sessionActive : "transparent",
-                        opacity: isLoading ? 0.6 : 1,
-                        marginBottom: 2,
-                        transition: "background 0.12s",
-                      }}
-                      onMouseEnter={(e) => {
-                        if (!isActive && !streaming) e.currentTarget.style.background = "rgba(255,255,255,0.04)";
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.background = isActive ? C.sessionActive : "transparent";
-                        const x = e.currentTarget.querySelector<HTMLButtonElement>("[data-delete]");
-                        if (x) x.style.opacity = "0";
-                      }}
-                      role="button"
-                      tabIndex={0}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          selectSession(s.id);
-                        }
-                      }}
-                    >
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div
-                          style={{
-                            fontSize: 14,
-                            fontWeight: 500,
-                            color: isActive ? C.text : "rgba(255,255,255,0.78)",
-                            whiteSpace: "nowrap",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            lineHeight: 1.4,
-                          }}
-                        >
-                          {s.title}
-                        </div>
-                        <div style={{ fontSize: 11, color: C.textDim, marginTop: 3 }}>
-                          {relativeTime(s.updatedAt)}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        data-delete
-                        onClick={(e) => handleDeleteSession(s.id, e)}
-                        title="Delete this chat"
-                        style={{
-                          opacity: 0,
-                          background: "transparent",
-                          border: "none",
-                          color: C.textMuted,
-                          cursor: "pointer",
-                          fontSize: 16,
-                          lineHeight: 1,
-                          padding: "2px 6px",
-                          borderRadius: 4,
-                          transition: "opacity 0.1s",
-                        }}
-                        onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.color = "#fca5a5"; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.color = C.textMuted; }}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  );
-                })}
-              </>
-            )}
-          </div>
-        </aside>
-      )}
-
-      {/* ── Main column ────────────────────────────────────────────── */}
+      {/* ── Main chat column (left) ────────────────────────────────── */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-        {/* Top bar — sidebar toggle + title */}
         <header
           style={{
             flexShrink: 0,
@@ -556,44 +376,31 @@ export function AskAiChat({
             gap: 10,
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <button
-              type="button"
-              onClick={() => setSidebarOpen((v) => !v)}
-              style={{
-                background: "transparent",
-                border: `1px solid ${C.border}`,
-                color: C.textMuted,
-                padding: "6px 10px",
-                borderRadius: 8,
-                cursor: "pointer",
-                fontSize: 14,
-                lineHeight: 1,
-              }}
-              title={sidebarOpen ? "Hide sidebar" : "Show recent chats"}
-            >
-              ☰
-            </button>
-            {!sidebarOpen && (
-              <Link
-                href="/dashboard"
-                style={{
-                  color: C.textMuted,
-                  textDecoration: "none",
-                  fontSize: 13,
-                  fontWeight: 500,
-                  padding: "6px 10px",
-                  borderRadius: 8,
-                }}
-              >
-                ← Dashboard
-              </Link>
-            )}
-          </div>
-
           <span style={{ fontSize: 15, fontWeight: 600, color: C.text, letterSpacing: "-0.2px" }}>
             ✨ Templ-AI
           </span>
+
+          {/* Sidebar toggle moves to the right since the sidebar lives there now */}
+          <button
+            type="button"
+            onClick={() => setSidebarOpen((v) => !v)}
+            style={{
+              background: "transparent",
+              border: `1px solid ${C.border}`,
+              color: C.textMuted,
+              padding: "6px 12px",
+              borderRadius: 8,
+              cursor: "pointer",
+              fontSize: 13,
+              fontWeight: 500,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+            title={sidebarOpen ? "Hide recent chats" : "Show recent chats"}
+          >
+            {sidebarOpen ? "Hide" : "Recent"} chats {sidebarOpen ? "→" : "←"}
+          </button>
         </header>
 
         {/* Scrollable content */}
@@ -801,7 +608,183 @@ export function AskAiChat({
         </footer>
       </div>
 
-      {/* Animations + custom scrollbar */}
+      {/* ── Right-side sidebar: recent chats ──────────────────────── */}
+      {sidebarOpen && (
+        <aside
+          style={{
+            width: 260,
+            flexShrink: 0,
+            background: C.sidebar,
+            borderLeft: `1px solid ${C.border}`,
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              padding: "14px 14px 12px",
+              borderBottom: `1px solid ${C.border}`,
+            }}
+          >
+            <button
+              type="button"
+              onClick={startNewChat}
+              disabled={streaming || isEmpty}
+              style={{
+                width: "100%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                padding: "11px 14px",
+                background: isEmpty ? "rgba(255,255,255,0.04)" : C.accent,
+                color: isEmpty ? C.textMuted : "#1a1a1a",
+                border: `1px solid ${isEmpty ? C.border : C.accent}`,
+                borderRadius: 10,
+                fontWeight: 700,
+                fontSize: 14,
+                cursor: streaming || isEmpty ? "not-allowed" : "pointer",
+                opacity: streaming && !isEmpty ? 0.6 : 1,
+                transition: "all 0.15s",
+              }}
+              title={isEmpty ? "Already on a new chat" : "Start a new conversation"}
+            >
+              <span style={{ fontSize: 16, lineHeight: 1 }}>+</span>
+              New chat
+            </button>
+          </div>
+
+          <div
+            className="ask-ai-scroll"
+            style={{
+              flex: 1,
+              overflowY: "auto",
+              padding: "10px 8px",
+            }}
+          >
+            {sessions.length === 0 ? (
+              <div style={{ padding: "20px 12px", fontSize: 13, color: C.textDim, textAlign: "center" }}>
+                No past chats yet.
+              </div>
+            ) : (
+              <>
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: C.textDim,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                    padding: "4px 10px 8px",
+                  }}
+                >
+                  Recent
+                </div>
+                {sessions.map((s) => {
+                  const isActive = s.id === activeSessionId;
+                  const isLoading = s.id === loadingSession;
+                  return (
+                    <div
+                      key={s.id}
+                      onClick={() => selectSession(s.id)}
+                      style={{
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: 6,
+                        padding: "8px 10px",
+                        borderRadius: 8,
+                        cursor: streaming ? "not-allowed" : "pointer",
+                        background: isActive ? C.sessionActive : "transparent",
+                        opacity: isLoading ? 0.6 : 1,
+                        marginBottom: 2,
+                        transition: "background 0.12s",
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!isActive && !streaming) e.currentTarget.style.background = "rgba(255,255,255,0.04)";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = isActive ? C.sessionActive : "transparent";
+                        const x = e.currentTarget.querySelector<HTMLButtonElement>("[data-delete]");
+                        if (x) x.style.opacity = "0";
+                      }}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          selectSession(s.id);
+                        }
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div
+                          style={{
+                            fontSize: 14,
+                            fontWeight: 500,
+                            color: isActive ? C.text : "rgba(255,255,255,0.78)",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            lineHeight: 1.4,
+                          }}
+                        >
+                          {s.title}
+                        </div>
+                        <div style={{ fontSize: 11, color: C.textDim, marginTop: 3 }}>
+                          {relativeTime(s.updatedAt)}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        data-delete
+                        onClick={(e) => handleDeleteSession(s.id, e)}
+                        title="Delete this chat"
+                        style={{
+                          opacity: 0,
+                          background: "transparent",
+                          border: "none",
+                          color: C.textMuted,
+                          cursor: "pointer",
+                          fontSize: 16,
+                          lineHeight: 1,
+                          padding: "2px 6px",
+                          borderRadius: 4,
+                          transition: "opacity 0.1s",
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.color = "#fca5a5"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.color = C.textMuted; }}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  );
+                })}
+              </>
+            )}
+          </div>
+
+          <div style={{ padding: "10px 12px", borderTop: `1px solid ${C.border}` }}>
+            <Link
+              href="/dashboard"
+              style={{
+                display: "block",
+                textAlign: "center",
+                fontSize: 12,
+                color: C.textMuted,
+                textDecoration: "none",
+                padding: "6px 10px",
+                borderRadius: 6,
+                fontWeight: 500,
+              }}
+            >
+              ← Back to Dashboard
+            </Link>
+          </div>
+        </aside>
+      )}
+
+      {/* Animations + scrollbar */}
       <style>{`
         @keyframes ask-ai-pulse {
           0%, 100% { opacity: 1; }

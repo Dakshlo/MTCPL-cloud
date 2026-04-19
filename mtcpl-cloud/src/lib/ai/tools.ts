@@ -110,6 +110,33 @@ export const AI_TOOLS = [
       additionalProperties: false,
     },
   },
+  {
+    name: "list_blocks",
+    description:
+      "List individual block records with their exact dimensions (L×W×H), CFT, stone, yard, facility, quality, status, and category. Use this whenever the user asks about specific blocks, the biggest/smallest blocks, newest/oldest blocks, blocks in a particular yard, or details of a block by ID. Complements get_inventory_snapshot (which only returns aggregates).",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        stone: { type: "string", description: "Filter to a stone type (e.g. 'PinkStone')." },
+        facility: { type: "string", enum: ["mtcpl", "riico"], description: "Filter by facility." },
+        yard: { type: "number", description: "Filter to a specific yard number (1-9)." },
+        status: {
+          type: "string",
+          enum: ["available", "reserved", "consumed", "discarded"],
+          description: "Filter by block status. Defaults to 'available' if not specified.",
+        },
+        quality: { type: "string", enum: ["A", "B"], description: "Filter by quality grade." },
+        sort_by: {
+          type: "string",
+          enum: ["volume_desc", "volume_asc", "newest", "oldest"],
+          description: "How to sort the result. Default: volume_desc (biggest first).",
+        },
+        limit: { type: "number", description: "Max blocks to return. Default 20, max 50." },
+        id_contains: { type: "string", description: "Substring match on the block id (e.g. '042' matches 'MT-B-042')." },
+      },
+      additionalProperties: false,
+    },
+  },
 ];
 
 // ─── Tool handler dispatcher ─────────────────────────────────────────────────
@@ -127,6 +154,8 @@ export async function runTool(name: string, input: Record<string, unknown>): Pro
         return JSON.stringify(await getCuttingActivity(input));
       case "run_plan_simulation":
         return JSON.stringify(await runPlanSimulation(input));
+      case "list_blocks":
+        return JSON.stringify(await listBlocks(input));
       default:
         return JSON.stringify({ error: `Unknown tool: ${name}` });
     }
@@ -412,5 +441,94 @@ async function runPlanSimulation(input: Record<string, unknown>) {
       efficiencyPct: p.eff,
       hasRestockableRemainder: !!p.biggest,
     })),
+  };
+}
+
+// ─── list_blocks ─────────────────────────────────────────────────────────────
+
+async function listBlocks(input: Record<string, unknown>) {
+  const admin = createAdminSupabaseClient();
+
+  const stone = typeof input.stone === "string" ? input.stone : undefined;
+  const facility = input.facility === "mtcpl" || input.facility === "riico" ? (input.facility as Facility) : undefined;
+  const yard = typeof input.yard === "number" ? input.yard : undefined;
+  const status = typeof input.status === "string" ? input.status : "available"; // default: only in-yard stock
+  const quality = input.quality === "A" || input.quality === "B" ? input.quality : undefined;
+  const idContains = typeof input.id_contains === "string" ? input.id_contains : undefined;
+  const sortBy = (typeof input.sort_by === "string" && ["volume_desc", "volume_asc", "newest", "oldest"].includes(input.sort_by))
+    ? (input.sort_by as "volume_desc" | "volume_asc" | "newest" | "oldest")
+    : "volume_desc";
+  const rawLimit = typeof input.limit === "number" ? input.limit : 20;
+  const limit = Math.max(1, Math.min(50, rawLimit));
+
+  let query = admin
+    .from("blocks")
+    .select("id, stone, yard, category, length_ft, width_ft, height_ft, status, quality, created_at, updated_at");
+
+  if (stone) query = query.eq("stone", stone);
+  if (typeof yard === "number") query = query.eq("yard", yard);
+  if (quality) query = query.eq("quality", quality);
+  if (idContains) query = query.ilike("id", `%${idContains}%`);
+  if (facility) query = query.in("yard", YARDS_BY_FACILITY[facility] as unknown as number[]);
+  // status: accept "any" to opt out of the default available-only filter
+  if (status && status !== "any") query = query.eq("status", status);
+
+  // For volume sorts we need to compute CFT per row, so fetch a generous
+  // slice and sort in JS. For recency sorts we can use the DB index.
+  if (sortBy === "newest") query = query.order("created_at", { ascending: false }).limit(limit);
+  else if (sortBy === "oldest") query = query.order("created_at", { ascending: true }).limit(limit);
+  else query = query.order("created_at", { ascending: false }).limit(200);
+
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+
+  type Row = {
+    id: string;
+    stone: string | null;
+    yard: number;
+    category: string | null;
+    length_ft: number;
+    width_ft: number;
+    height_ft: number;
+    status: string;
+    quality: string | null;
+    created_at: string | null;
+    updated_at: string | null;
+  };
+
+  const rows = (data ?? []) as Row[];
+
+  let shaped = rows.map((b) => {
+    const L = Number(b.length_ft);
+    const W = Number(b.width_ft);
+    const H = Number(b.height_ft);
+    const cft = toCFT(L * W * H);
+    return {
+      id: b.id,
+      dimensions: `${L} × ${W} × ${H} in`,
+      cft: Number(cft.toFixed(2)),
+      stone: b.stone,
+      yard: b.yard,
+      facility: facilityOfYard(b.yard),
+      status: b.status,
+      category: b.category,
+      quality: b.quality,
+      addedAt: b.created_at,
+    };
+  });
+
+  if (sortBy === "volume_desc") shaped.sort((a, b) => b.cft - a.cft);
+  else if (sortBy === "volume_asc") shaped.sort((a, b) => a.cft - b.cft);
+
+  shaped = shaped.slice(0, limit);
+
+  return {
+    count: shaped.length,
+    totalCft: Number(shaped.reduce((sum, b) => sum + b.cft, 0).toFixed(2)),
+    filters: { stone: stone ?? "any", facility: facility ?? "any", yard: yard ?? "any", status, quality: quality ?? "any", sortBy, idContains: idContains ?? null },
+    blocks: shaped,
+    note: rows.length === 200 && (sortBy === "volume_desc" || sortBy === "volume_asc")
+      ? "More than 200 matches exist — volume-sorted result is approximate across the most-recent 200."
+      : undefined,
   };
 }
