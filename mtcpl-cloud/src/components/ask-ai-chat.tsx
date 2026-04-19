@@ -419,7 +419,7 @@ export function AskAiChat({
           {isEmpty ? (
             <EmptyHero greeting={greeting} userName={userName} onPick={handlePreset} disabled={streaming} />
           ) : (
-            <MessageList messages={messages} streaming={streaming} />
+            <MessageList messages={messages} streaming={streaming} onFollowUp={handlePreset} />
           )}
         </main>
 
@@ -907,7 +907,15 @@ function Chip({
 
 // ─── Message list ────────────────────────────────────────────────────────────
 
-function MessageList({ messages, streaming }: { messages: Msg[]; streaming: boolean }) {
+function MessageList({
+  messages,
+  streaming,
+  onFollowUp,
+}: {
+  messages: Msg[];
+  streaming: boolean;
+  onFollowUp: (q: string) => void;
+}) {
   return (
     <div
       style={{
@@ -920,19 +928,39 @@ function MessageList({ messages, streaming }: { messages: Msg[]; streaming: bool
         gap: 20,
       }}
     >
-      {messages.map((m, i) => (
-        <MessageBubble
-          key={i}
-          role={m.role}
-          content={m.content}
-          isStreaming={streaming && i === messages.length - 1 && m.role === "assistant"}
-        />
-      ))}
+      {messages.map((m, i) => {
+        const isLastAssistant = m.role === "assistant" && i === messages.length - 1;
+        return (
+          <MessageBubble
+            key={i}
+            role={m.role}
+            content={m.content}
+            isStreaming={streaming && isLastAssistant}
+            // Follow-up chips only render on the latest assistant message once
+            // it's fully streamed — stale chips from earlier in the thread
+            // would be confusing and cross-topic.
+            onFollowUp={isLastAssistant && !streaming ? onFollowUp : undefined}
+            followUpsDisabled={streaming}
+          />
+        );
+      })}
     </div>
   );
 }
 
-function MessageBubble({ role, content, isStreaming }: { role: "user" | "assistant"; content: string; isStreaming: boolean }) {
+function MessageBubble({
+  role,
+  content,
+  isStreaming,
+  onFollowUp,
+  followUpsDisabled,
+}: {
+  role: "user" | "assistant";
+  content: string;
+  isStreaming: boolean;
+  onFollowUp?: (q: string) => void;
+  followUpsDisabled?: boolean;
+}) {
   const isUser = role === "user";
 
   if (isUser) {
@@ -989,7 +1017,13 @@ function MessageBubble({ role, content, isStreaming }: { role: "user" | "assista
           paddingTop: 4,
         }}
       >
-        {content ? <ChatMarkdown content={content} /> : (isStreaming ? <ThinkingDots /> : null)}
+        {content ? (
+          <ChatMarkdown
+            content={content}
+            onFollowUp={onFollowUp}
+            followUpsDisabled={followUpsDisabled}
+          />
+        ) : (isStreaming ? <ThinkingDots /> : null)}
         {isStreaming && content && (
           <span
             style={{

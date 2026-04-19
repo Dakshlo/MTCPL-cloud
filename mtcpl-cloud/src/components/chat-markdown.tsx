@@ -24,14 +24,18 @@ import type { Components } from "react-markdown";
 import { ChartBar, type ChartBarItem } from "./chat-widgets/chart-bar";
 import { ChartDonut, type DonutSlice } from "./chat-widgets/chart-donut";
 import { BlockCard, type BlockCardProps } from "./chat-widgets/block-card";
+import { StatsTiles, type StatTile } from "./chat-widgets/stats-tiles";
+import { FollowUps } from "./chat-widgets/follow-ups";
 
-const MARKER_RE = /\[\[(CHART|BLOCK):((?:(?!\]\])[\s\S])*?)\]\]/g;
+const MARKER_RE = /\[\[(CHART|BLOCK|STATS|FOLLOWUPS):((?:(?!\]\])[\s\S])*?)\]\]/g;
 
 type Part =
   | { kind: "md"; text: string }
   | { kind: "chart-bar"; title?: string; bars: ChartBarItem[] }
   | { kind: "chart-donut"; title?: string; slices: DonutSlice[] }
   | { kind: "block"; props: BlockCardProps }
+  | { kind: "stats"; tiles: StatTile[] }
+  | { kind: "followups"; questions: string[] }
   | { kind: "err"; text: string }; // marker present but JSON bad → show as-is
 
 function splitByMarkers(src: string): Part[] {
@@ -44,19 +48,36 @@ function splitByMarkers(src: string): Part[] {
     const kind = match[1];
     const rawJson = match[2];
     try {
-      const data = JSON.parse(rawJson) as Record<string, unknown>;
+      const data = JSON.parse(rawJson);
       if (kind === "CHART") {
-        const type = (data.type as string) || "bar";
-        const title = typeof data.title === "string" ? data.title : undefined;
+        const d = data as Record<string, unknown>;
+        const type = (d.type as string) || "bar";
+        const title = typeof d.title === "string" ? d.title : undefined;
         if (type === "donut") {
-          const slices = Array.isArray(data.slices) ? (data.slices as DonutSlice[]) : [];
+          const slices = Array.isArray(d.slices) ? (d.slices as DonutSlice[]) : [];
           parts.push({ kind: "chart-donut", title, slices });
         } else {
-          const bars = Array.isArray(data.bars) ? (data.bars as ChartBarItem[]) : [];
+          const bars = Array.isArray(d.bars) ? (d.bars as ChartBarItem[]) : [];
           parts.push({ kind: "chart-bar", title, bars });
         }
       } else if (kind === "BLOCK") {
         parts.push({ kind: "block", props: data as BlockCardProps });
+      } else if (kind === "STATS") {
+        // Accept both { "tiles": [...] } and a bare [...] for robustness.
+        const tiles = Array.isArray(data)
+          ? (data as StatTile[])
+          : Array.isArray((data as { tiles?: unknown }).tiles)
+            ? ((data as { tiles: StatTile[] }).tiles)
+            : [];
+        parts.push({ kind: "stats", tiles });
+      } else if (kind === "FOLLOWUPS") {
+        // Accept either a bare array of strings or { "questions": [...] }.
+        const questions = Array.isArray(data)
+          ? (data as string[])
+          : Array.isArray((data as { questions?: unknown }).questions)
+            ? ((data as { questions: string[] }).questions)
+            : [];
+        parts.push({ kind: "followups", questions: questions.filter((q) => typeof q === "string") });
       }
     } catch {
       // Bad JSON → keep the raw marker text so it's at least visible
@@ -176,7 +197,15 @@ const mdComponents: Components = {
   hr: () => <hr style={{ border: "none", borderTop: "1px solid rgba(255,255,255,0.1)", margin: "0.8em 0" }} />,
 };
 
-export function ChatMarkdown({ content }: { content: string }) {
+export function ChatMarkdown({
+  content,
+  onFollowUp,
+  followUpsDisabled,
+}: {
+  content: string;
+  onFollowUp?: (q: string) => void;
+  followUpsDisabled?: boolean;
+}) {
   const parts = splitByMarkers(content);
   return (
     <>
@@ -196,6 +225,22 @@ export function ChatMarkdown({ content }: { content: string }) {
         }
         if (p.kind === "block") {
           return <BlockCard key={i} {...p.props} />;
+        }
+        if (p.kind === "stats") {
+          return <StatsTiles key={i} tiles={p.tiles} />;
+        }
+        if (p.kind === "followups") {
+          // Only render chips when we have a handler; otherwise silently drop
+          // (e.g. re-rendering a stored message where onFollowUp wasn't passed).
+          if (!onFollowUp) return null;
+          return (
+            <FollowUps
+              key={i}
+              questions={p.questions}
+              onPick={onFollowUp}
+              disabled={followUpsDisabled}
+            />
+          );
         }
         // err — show the broken marker so it's visible
         return (
