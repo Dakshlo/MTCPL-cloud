@@ -27,7 +27,7 @@ import { BlockCard, type BlockCardProps } from "./chat-widgets/block-card";
 import { StatsTiles, type StatTile } from "./chat-widgets/stats-tiles";
 import { FollowUps } from "./chat-widgets/follow-ups";
 
-const MARKER_RE = /\[\[(CHART|BLOCK|STATS|FOLLOWUPS):((?:(?!\]\])[\s\S])*?)\]\]/g;
+const START_RE = /\[\[(CHART|BLOCK|STATS|FOLLOWUPS):/g;
 
 type Part =
   | { kind: "md"; text: string }
@@ -38,15 +38,65 @@ type Part =
   | { kind: "followups"; questions: string[] }
   | { kind: "err"; text: string }; // marker present but JSON bad → show as-is
 
+/**
+ * Walk forward from `start` tracking bracket depth and string state to find
+ * the matching `]]` that closes the marker. Returns the index ONE PAST `]]`
+ * (i.e. where the next character after the marker begins), or -1 if we
+ * never find a valid close (marker still streaming).
+ *
+ * Regex-only solutions break when the payload itself contains `]]` — e.g.
+ * a JSON array ending with `...}]]]` where the first two `]]` belong to the
+ * array and the third belongs to the marker. This scanner skips `]` inside
+ * strings, counts `[…]` depth, and only ends when it sees `]]` at depth 0.
+ */
+function findMarkerEnd(src: string, start: number): number {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < src.length; i++) {
+    const c = src[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (inString) {
+      if (c === "\\") escaped = true;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') { inString = true; continue; }
+    if (c === "[") { depth++; continue; }
+    if (c === "]") {
+      if (depth > 0) { depth--; continue; }
+      // depth 0: this `]` can only belong to the marker close. Check for `]]`.
+      if (src[i + 1] === "]") return i + 2;
+      // Stray `]` at depth 0 is malformed — keep scanning, regex would never
+      // have matched a close here either.
+    }
+  }
+  return -1;
+}
+
 function splitByMarkers(src: string): Part[] {
   const parts: Part[] = [];
   let lastIdx = 0;
-  for (const match of src.matchAll(MARKER_RE)) {
-    const idx = match.index ?? 0;
-    if (idx > lastIdx) parts.push({ kind: "md", text: src.slice(lastIdx, idx) });
+  START_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = START_RE.exec(src)) !== null) {
+    const startIdx = m.index;
+    const kind = m[1];
+    const contentStart = startIdx + m[0].length;
 
-    const kind = match[1];
-    const rawJson = match[2];
+    const endIdx = findMarkerEnd(src, contentStart);
+    if (endIdx === -1) {
+      // Incomplete marker (streaming mid-way) — leave the rest as text; the
+      // next chunk will complete it and the parser will re-run.
+      break;
+    }
+
+    if (startIdx > lastIdx) parts.push({ kind: "md", text: src.slice(lastIdx, startIdx) });
+
+    const rawJson = src.slice(contentStart, endIdx - 2);
     try {
       const data = JSON.parse(rawJson);
       if (kind === "CHART") {
@@ -63,7 +113,6 @@ function splitByMarkers(src: string): Part[] {
       } else if (kind === "BLOCK") {
         parts.push({ kind: "block", props: data as BlockCardProps });
       } else if (kind === "STATS") {
-        // Accept both { "tiles": [...] } and a bare [...] for robustness.
         const tiles = Array.isArray(data)
           ? (data as StatTile[])
           : Array.isArray((data as { tiles?: unknown }).tiles)
@@ -71,7 +120,6 @@ function splitByMarkers(src: string): Part[] {
             : [];
         parts.push({ kind: "stats", tiles });
       } else if (kind === "FOLLOWUPS") {
-        // Accept either a bare array of strings or { "questions": [...] }.
         const questions = Array.isArray(data)
           ? (data as string[])
           : Array.isArray((data as { questions?: unknown }).questions)
@@ -80,10 +128,12 @@ function splitByMarkers(src: string): Part[] {
         parts.push({ kind: "followups", questions: questions.filter((q) => typeof q === "string") });
       }
     } catch {
-      // Bad JSON → keep the raw marker text so it's at least visible
-      parts.push({ kind: "err", text: match[0] });
+      // JSON didn't parse — keep the raw marker text so it's visible for debug
+      parts.push({ kind: "err", text: src.slice(startIdx, endIdx) });
     }
-    lastIdx = idx + match[0].length;
+
+    lastIdx = endIdx;
+    START_RE.lastIndex = endIdx;
   }
   if (lastIdx < src.length) parts.push({ kind: "md", text: src.slice(lastIdx) });
   return parts;
