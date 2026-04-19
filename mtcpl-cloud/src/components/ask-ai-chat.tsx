@@ -144,7 +144,7 @@ export function AskAiChat({
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = Math.min(el.scrollHeight, 180) + "px";
+    el.style.height = Math.min(el.scrollHeight, 200) + "px";
   }, [input]);
 
   // ── Session actions ──────────────────────────────────────────────────────
@@ -389,7 +389,7 @@ export function AskAiChat({
             <Link
               href="/dashboard"
               style={{
-                fontSize: 12,
+                fontSize: 13,
                 color: C.textMuted,
                 textDecoration: "none",
                 padding: "4px 8px",
@@ -412,21 +412,21 @@ export function AskAiChat({
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                gap: 7,
-                padding: "9px 12px",
+                gap: 8,
+                padding: "11px 14px",
                 background: isEmpty ? "rgba(255,255,255,0.04)" : C.accent,
                 color: isEmpty ? C.textMuted : "#1a1a1a",
                 border: `1px solid ${isEmpty ? C.border : C.accent}`,
                 borderRadius: 10,
                 fontWeight: 700,
-                fontSize: 13,
+                fontSize: 14,
                 cursor: streaming || isEmpty ? "not-allowed" : "pointer",
                 opacity: streaming && !isEmpty ? 0.6 : 1,
                 transition: "all 0.15s",
               }}
               title={isEmpty ? "Already on a new chat" : "Start a new conversation"}
             >
-              <span style={{ fontSize: 15, lineHeight: 1 }}>+</span>
+              <span style={{ fontSize: 16, lineHeight: 1 }}>+</span>
               New chat
             </button>
           </div>
@@ -447,7 +447,7 @@ export function AskAiChat({
               <>
                 <div
                   style={{
-                    fontSize: 10,
+                    fontSize: 11,
                     fontWeight: 700,
                     color: C.textDim,
                     textTransform: "uppercase",
@@ -496,7 +496,7 @@ export function AskAiChat({
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div
                           style={{
-                            fontSize: 12.5,
+                            fontSize: 14,
                             fontWeight: 500,
                             color: isActive ? C.text : "rgba(255,255,255,0.78)",
                             whiteSpace: "nowrap",
@@ -507,7 +507,7 @@ export function AskAiChat({
                         >
                           {s.title}
                         </div>
-                        <div style={{ fontSize: 10, color: C.textDim, marginTop: 2 }}>
+                        <div style={{ fontSize: 11, color: C.textDim, marginTop: 3 }}>
                           {relativeTime(s.updatedAt)}
                         </div>
                       </div>
@@ -591,8 +591,8 @@ export function AskAiChat({
             )}
           </div>
 
-          <span style={{ fontSize: 13, fontWeight: 600, color: C.text, letterSpacing: "-0.2px" }}>
-            ✨ MTCPL AI
+          <span style={{ fontSize: 15, fontWeight: 600, color: C.text, letterSpacing: "-0.2px" }}>
+            ✨ Templ-AI
           </span>
         </header>
 
@@ -707,13 +707,13 @@ export function AskAiChat({
                 border: "none",
                 outline: "none",
                 color: C.text,
-                fontSize: 15,
+                fontSize: 17,
                 lineHeight: 1.5,
                 resize: "none",
                 fontFamily: "inherit",
-                padding: "8px 10px 4px",
-                minHeight: 36,
-                maxHeight: 180,
+                padding: "10px 10px 6px",
+                minHeight: 44,
+                maxHeight: 200,
               }}
             />
 
@@ -724,15 +724,15 @@ export function AskAiChat({
                   onClick={() => setVoiceLang((l) => (l === "en-IN" ? "hi-IN" : "en-IN"))}
                   title="Toggle voice input language"
                   style={{
-                    padding: "6px 10px",
-                    fontSize: 11,
+                    padding: "7px 12px",
+                    fontSize: 13,
                     fontWeight: 700,
                     background: "transparent",
                     color: C.textMuted,
                     border: `1px solid ${C.border}`,
                     borderRadius: 8,
                     cursor: "pointer",
-                    minWidth: 46,
+                    minWidth: 52,
                   }}
                 >
                   {voiceLang === "hi-IN" ? "हिं" : "EN"}
@@ -750,8 +750,8 @@ export function AskAiChat({
                       : `Speak in ${voiceLang === "hi-IN" ? "Hindi" : "English"}`
                   }
                   style={{
-                    padding: "6px 10px",
-                    fontSize: 15,
+                    padding: "7px 12px",
+                    fontSize: 17,
                     background: listening ? "rgba(220,38,38,0.15)" : "transparent",
                     border: `1px solid ${listening ? "rgba(220,38,38,0.5)" : C.border}`,
                     borderRadius: 8,
@@ -774,14 +774,14 @@ export function AskAiChat({
                 type="submit"
                 disabled={streaming || !input.trim()}
                 style={{
-                  width: 36,
-                  height: 36,
+                  width: 42,
+                  height: 42,
                   borderRadius: "50%",
                   border: "none",
                   background: streaming || !input.trim() ? "rgba(255,255,255,0.08)" : C.accent,
                   color: streaming || !input.trim() ? C.textDim : "#1a1a1a",
                   cursor: streaming || !input.trim() ? "not-allowed" : "pointer",
-                  fontSize: 18,
+                  fontSize: 20,
                   fontWeight: 700,
                   display: "flex",
                   alignItems: "center",
@@ -795,8 +795,8 @@ export function AskAiChat({
             </div>
           </form>
 
-          <div style={{ fontSize: 11, color: C.textDim, textAlign: "center", marginTop: 10 }}>
-            MTCPL AI can make mistakes — verify anything important.
+          <div style={{ fontSize: 12, color: C.textDim, textAlign: "center", marginTop: 10 }}>
+            Templ-AI can make mistakes — verify anything important.
           </div>
         </footer>
       </div>
@@ -851,17 +851,17 @@ function EmptyHero({
     >
       <div
         style={{
-          fontSize: 34,
+          fontSize: 40,
           fontWeight: 500,
-          letterSpacing: "-0.5px",
+          letterSpacing: "-0.6px",
           color: C.text,
-          marginBottom: 8,
+          marginBottom: 10,
           textAlign: "center",
         }}
       >
         {greeting}, <span style={{ color: C.accent }}>{userName}</span>.
       </div>
-      <div style={{ fontSize: 17, color: C.textMuted, marginBottom: 32, textAlign: "center", fontWeight: 400 }}>
+      <div style={{ fontSize: 20, color: C.textMuted, marginBottom: 36, textAlign: "center", fontWeight: 400 }}>
         How can I help today?
       </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", maxWidth: 640 }}>
@@ -892,8 +892,8 @@ function Chip({
       onClick={onClick}
       disabled={disabled}
       style={{
-        fontSize: compact ? 11 : 13,
-        padding: compact ? "6px 11px" : "8px 14px",
+        fontSize: compact ? 13 : 15,
+        padding: compact ? "7px 13px" : "10px 18px",
         borderRadius: 999,
         border: `1px solid ${C.border}`,
         background: "transparent",
@@ -957,11 +957,11 @@ function MessageBubble({ role, content, isStreaming }: { role: "user" | "assista
         <div
           style={{
             maxWidth: "82%",
-            padding: "11px 16px",
+            padding: "13px 18px",
             borderRadius: 18,
             background: C.userBubble,
             color: C.text,
-            fontSize: 15,
+            fontSize: 17,
             lineHeight: 1.55,
             whiteSpace: "pre-wrap",
             wordBreak: "break-word",
@@ -979,15 +979,15 @@ function MessageBubble({ role, content, isStreaming }: { role: "user" | "assista
         aria-hidden
         style={{
           flexShrink: 0,
-          width: 28,
-          height: 28,
+          width: 32,
+          height: 32,
           borderRadius: "50%",
           background: `linear-gradient(135deg, ${C.accent} 0%, ${C.accentDark} 100%)`,
           color: "#1a1a1a",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          fontSize: 14,
+          fontSize: 16,
           fontWeight: 700,
           boxShadow: "0 2px 8px rgba(232,197,114,0.2)",
         }}
@@ -999,11 +999,11 @@ function MessageBubble({ role, content, isStreaming }: { role: "user" | "assista
           flex: 1,
           minWidth: 0,
           color: C.text,
-          fontSize: 15,
+          fontSize: 17,
           lineHeight: 1.65,
           whiteSpace: "pre-wrap",
           wordBreak: "break-word",
-          paddingTop: 3,
+          paddingTop: 4,
         }}
       >
         {content || (isStreaming ? <ThinkingDots /> : null)}

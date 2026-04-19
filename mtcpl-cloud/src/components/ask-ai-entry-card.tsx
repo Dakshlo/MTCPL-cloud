@@ -47,10 +47,10 @@ export function AskAiEntryCard() {
           }}>
             ✨ New
           </div>
-          <div style={{ fontSize: 20, fontWeight: 700, color: "#fff", letterSpacing: "-0.2px", marginBottom: 4 }}>
-            Ask AI
+          <div style={{ fontSize: 22, fontWeight: 700, color: "#fff", letterSpacing: "-0.2px", marginBottom: 4 }}>
+            Templ-AI
           </div>
-          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.7)", lineHeight: 1.5 }}>
+          <div style={{ fontSize: 14, color: "rgba(255,255,255,0.7)", lineHeight: 1.5 }}>
             Ask anything about blocks, slabs, cutting, or planning — in English or Hindi.
             <span style={{ color: "rgba(255,255,255,0.45)" }}> &nbsp;e.g. &quot;How many blocks for Aasta Temple?&quot;</span>
           </div>
