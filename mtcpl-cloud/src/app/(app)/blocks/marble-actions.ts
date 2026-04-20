@@ -16,7 +16,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
 import { isAllowedYard } from "@/lib/yards";
-import { marbleBlockPrefix, nextBlockIdWithPrefix } from "@/lib/stone-categories";
+import { generateNextCode } from "./utils";
 
 export async function createMarbleTruckAction(formData: FormData) {
   const { profile } = await requireAuth([
@@ -89,7 +89,11 @@ export async function createMarbleTruckAction(formData: FormData) {
   // ── Generate N unique block IDs using stone-specific prefix ─────────────
   const { data: existingBlocks } = await supabase.from("blocks").select("id");
   const existingIds = (existingBlocks ?? []).map((r) => r.id as string);
-  const prefix = marbleBlockPrefix(stone);
+  // Marble blocks share the same MT-B-XXX series as sandstone so the
+  // owner sees one continuous ID sequence across the whole inventory.
+  // The stone type itself (WhiteMarble / YellowMarble) already
+  // distinguishes marble blocks from sandstone — a separate prefix was
+  // unnecessary.
 
   const tonnesPerBlock = Math.round((totalTonnes / numBlocks) * 1000) / 1000; // 3 decimals
 
@@ -109,7 +113,7 @@ export async function createMarbleTruckAction(formData: FormData) {
   }> = [];
   const idPool = [...existingIds];
   for (let i = 0; i < numBlocks; i++) {
-    const nextId = nextBlockIdWithPrefix(idPool, prefix);
+    const nextId = generateNextCode(idPool);
     idPool.push(nextId);
     newRows.push({
       id: nextId,

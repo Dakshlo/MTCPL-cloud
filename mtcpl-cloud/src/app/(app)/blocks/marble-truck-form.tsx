@@ -15,7 +15,7 @@ import { createMarbleTruckAction } from "./marble-actions";
 import { VendorSelect } from "./vendor-select";
 import { stoneDisplayName } from "@/lib/stone-utils";
 import { FACILITIES, YARDS_BY_FACILITY, facilityLabel, yardLabel, type Facility } from "@/lib/yards";
-import { cftEquivFromTonnes, marbleBlockPrefix } from "@/lib/stone-categories";
+import { cftEquivFromTonnes } from "@/lib/stone-categories";
 
 type StoneType = { name: string; color_top: string };
 
@@ -52,9 +52,8 @@ export function MarbleTruckForm({
       perTonnes: per,
       perCftEquiv: cftEquivFromTonnes(per),
       totalCftEquiv: cftEquivFromTonnes(t),
-      prefix: marbleBlockPrefix(stone),
     };
-  }, [totalTonnes, numBlocks, stone]);
+  }, [totalTonnes, numBlocks]);
 
   if (marbleStones.length === 0) {
     // Shouldn't render at all — the parent component gates on this — but
@@ -206,8 +205,7 @@ export function MarbleTruckForm({
               </span>
             </div>
             <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
-              IDs: {preview.prefix}001 to {preview.prefix}
-              {String(parseInt(numBlocks, 10)).padStart(3, "0")} (sequential from existing)
+              IDs auto-assigned in the shared MT-B-XXX series
             </div>
           </div>
         )}

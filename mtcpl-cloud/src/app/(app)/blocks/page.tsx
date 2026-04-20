@@ -17,8 +17,11 @@ type SearchParams = Promise<{ cat?: string; marble_toast?: string; marble_error?
 export default async function BlocksPage({ searchParams }: { searchParams: SearchParams }) {
   const { profile } = await requireAuth(["owner", "team_head", "block_slab_entry", "slab_entry", "block_entry"]);
   const { cat: catParam, marble_toast: marbleToast, marble_error: marbleError } = await searchParams;
+  // Default landing = Sandstone (the everyday tab). "All" and "Marble"
+  // need an explicit URL param. Users who want the combined view can
+  // either click "All" in the tab strip or hit /blocks?cat=all.
   const activeCat: "all" | "sandstone" | "marble" =
-    catParam === "sandstone" || catParam === "marble" ? catParam : "all";
+    catParam === "all" || catParam === "marble" ? catParam : "sandstone";
 
   const admin = createAdminSupabaseClient();
   const isEntryRole = (BLOCK_ENTRY_ROLES as readonly string[]).includes(profile.role);
@@ -179,7 +182,7 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
             return (
               <a
                 key={tab.key}
-                href={tab.key === "all" ? "/blocks" : `/blocks?cat=${tab.key}`}
+                href={tab.key === "sandstone" ? "/blocks" : `/blocks?cat=${tab.key}`}
                 style={{
                   textDecoration: "none",
                   padding: "10px 20px",
