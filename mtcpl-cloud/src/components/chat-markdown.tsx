@@ -31,8 +31,9 @@ import { FollowUps } from "./chat-widgets/follow-ups";
 import { TempleCard, type TempleCardProps } from "./chat-widgets/temple-card";
 import { LinkButton, type LinkButtonProps } from "./chat-widgets/link-button";
 import { SlabCard, type SlabCardProps } from "./chat-widgets/slab-card";
+import { TimelineCard, type TimelineCardProps } from "./chat-widgets/timeline-card";
 
-const START_RE = /\[\[(CHART|BLOCK|STATS|FOLLOWUPS|TEMPLE|LINK|SLAB):/g;
+const START_RE = /\[\[(CHART|BLOCK|STATS|FOLLOWUPS|TEMPLE|LINK|SLAB|TIMELINE):/g;
 
 type Part =
   | { kind: "md"; text: string }
@@ -44,6 +45,7 @@ type Part =
   | { kind: "temple"; props: TempleCardProps }
   | { kind: "slab"; props: SlabCardProps }
   | { kind: "link"; props: LinkButtonProps }
+  | { kind: "timeline"; props: TimelineCardProps }
   | { kind: "err"; text: string }; // marker present but JSON bad → show as-is
 
 /**
@@ -144,6 +146,13 @@ function splitByMarkers(src: string): Part[] {
         if (typeof p.href === "string" && typeof p.label === "string" &&
             (p.href.startsWith("/") || /^https?:\/\//.test(p.href))) {
           parts.push({ kind: "link", props: p });
+        } else {
+          parts.push({ kind: "err", text: src.slice(startIdx, endIdx) });
+        }
+      } else if (kind === "TIMELINE") {
+        const d = data as TimelineCardProps;
+        if (Array.isArray(d.items) && d.items.length > 0) {
+          parts.push({ kind: "timeline", props: d });
         } else {
           parts.push({ kind: "err", text: src.slice(startIdx, endIdx) });
         }
@@ -406,6 +415,7 @@ export function ChatMarkdown({
         if (p.kind === "block") return <BlockCard key={i} {...p.props} />;
         if (p.kind === "temple") return <TempleCard key={i} {...p.props} />;
         if (p.kind === "slab") return <SlabCard key={i} {...p.props} />;
+        if (p.kind === "timeline") return <TimelineCard key={i} {...p.props} />;
         if (p.kind === "stats") return <StatsTiles key={i} tiles={p.tiles} />;
         if (p.kind === "link-group") {
           return (

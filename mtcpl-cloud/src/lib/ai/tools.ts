@@ -202,6 +202,22 @@ export const AI_TOOLS = [
     },
   },
   {
+    name: "get_block_journey",
+    description:
+      "Full lifecycle / timeline for a single block — when it was added (and by whom), every cut plan it appeared in, who approved it, who completed the cut, how many slabs were cut, and what remainder pieces got restocked. Use this whenever the user asks about the 'journey', 'history', 'timeline', 'flow', 'story', 'सफर', 'इतिहास' of a specific block id. Returns a chronological event list ready to render as a vertical timeline ([[TIMELINE:...]] marker).",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        block_id: {
+          type: "string",
+          description: "The block id to trace — e.g. 'MT-B-039' or 'RC-B-012'. Use the exact id as shown in the app.",
+        },
+      },
+      required: ["block_id"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "list_blocks",
     description:
       "List individual block records with their exact dimensions (L×W×H), CFT, stone, yard, facility, quality, status, and category. Use this whenever the user asks about specific blocks, the biggest/smallest blocks, newest/oldest blocks, blocks in a particular yard, or details of a block by ID. Complements get_inventory_snapshot (which only returns aggregates).",
@@ -247,6 +263,8 @@ export async function runTool(name: string, input: Record<string, unknown>): Pro
         return JSON.stringify(await runPlanSimulation(input));
       case "list_blocks":
         return JSON.stringify(await listBlocks(input));
+      case "get_block_journey":
+        return JSON.stringify(await getBlockJourney(input));
       case "get_live_cutting_status":
         return JSON.stringify(await getLiveCuttingStatus(input));
       case "get_watchdog_alerts":
@@ -1046,5 +1064,242 @@ async function listVendors(input: Record<string, unknown>) {
     countsByType,
     filters: { type: typeFilter ?? "any", activeOnly },
     vendors,
+  };
+}
+
+// ─── get_block_journey ───────────────────────────────────────────────────────
+// Reconstructs the full lifecycle of a block — added, planned, approved,
+// cut, remaindered — by stitching together the blocks / cut_session_blocks
+// / cut_sessions / audit_logs tables and resolving user ids to names.
+
+async function getBlockJourney(input: Record<string, unknown>) {
+  const admin = createAdminSupabaseClient();
+  const blockId = String(input.block_id || "").trim();
+  if (!blockId) return { error: "block_id is required" };
+
+  // 1. Block itself
+  const { data: block, error: blockErr } = await admin
+    .from("blocks")
+    .select(
+      "id, stone, yard, category, length_ft, width_ft, height_ft, status, quality, created_at, created_by, updated_at, updated_by",
+    )
+    .eq("id", blockId)
+    .maybeSingle();
+  if (blockErr) throw new Error(blockErr.message);
+  if (!block) return { error: `Block ${blockId} not found.` };
+
+  // 2. All cut_session_blocks that ever touched this block (retries + past rejects)
+  const { data: csbs } = await admin
+    .from("cut_session_blocks")
+    .select(
+      "id, status, layout, restocked_block_id, created_at, updated_at, cut_session_id, " +
+      "cut_sessions(session_code, kerf_mm, planned_by, created_at)",
+    )
+    .eq("block_id", blockId)
+    .order("created_at", { ascending: true });
+
+  type CsbRow = {
+    id: string;
+    status: string;
+    layout: { placed?: Array<{ id: string; sw?: number; sh?: number; sd?: number; temple?: string }> } | null;
+    restocked_block_id: string | null;
+    created_at: string | null;
+    updated_at: string | null;
+    cut_session_id: string;
+    cut_sessions: { session_code: string; kerf_mm: number; planned_by: string | null; created_at: string } | null;
+  };
+  const csbRows = (csbs ?? []) as unknown as CsbRow[];
+  const csbIds = csbRows.map(c => c.id);
+
+  // 3. Audit events — block-level + per-cut_session_block
+  const blockAuditsQ = admin
+    .from("audit_logs")
+    .select("user_id, action, entity_type, entity_id, details, created_at")
+    .eq("entity_type", "block")
+    .eq("entity_id", blockId)
+    .order("created_at", { ascending: true });
+  const csbAuditsQ = csbIds.length > 0
+    ? admin
+        .from("audit_logs")
+        .select("user_id, action, entity_type, entity_id, details, created_at")
+        .eq("entity_type", "cut_session_block")
+        .in("entity_id", csbIds)
+        .order("created_at", { ascending: true })
+    : Promise.resolve({ data: [] as AuditRow[], error: null });
+
+  // 4. Remainder children (blocks with id like 'MT-B-039-%' and category Reused)
+  const remaindersQ = admin
+    .from("blocks")
+    .select("id, length_ft, width_ft, height_ft, status, category, created_at")
+    .like("id", `${blockId}-%`)
+    .eq("category", "Reused")
+    .order("id", { ascending: true });
+
+  type AuditRow = {
+    user_id: string;
+    action: string;
+    entity_type: string;
+    entity_id: string;
+    details: Record<string, unknown> | null;
+    created_at: string;
+  };
+  type RemainderRow = {
+    id: string;
+    length_ft: number;
+    width_ft: number;
+    height_ft: number;
+    status: string;
+    category: string | null;
+    created_at: string | null;
+  };
+
+  const [blockAuditsR, csbAuditsR, remaindersR] = await Promise.all([blockAuditsQ, csbAuditsQ, remaindersQ]);
+  const blockAudits = (blockAuditsR.data ?? []) as AuditRow[];
+  const csbAudits = (csbAuditsR.data ?? []) as AuditRow[];
+  const remainders = (remaindersR.data ?? []) as RemainderRow[];
+
+  // 5. Resolve user ids → names. Fetch only the profiles we need.
+  const userIds = new Set<string>();
+  if (block.created_by) userIds.add(block.created_by);
+  if (block.updated_by) userIds.add(block.updated_by);
+  for (const c of csbRows) if (c.cut_sessions?.planned_by) userIds.add(c.cut_sessions.planned_by);
+  for (const a of blockAudits) if (a.user_id) userIds.add(a.user_id);
+  for (const a of csbAudits) if (a.user_id) userIds.add(a.user_id);
+
+  const nameOf = new Map<string, string>();
+  if (userIds.size > 0) {
+    const { data: profs } = await admin
+      .from("profiles")
+      .select("id, full_name, phone")
+      .in("id", [...userIds]);
+    for (const p of profs ?? []) {
+      nameOf.set(p.id, p.full_name || p.phone || "Unknown");
+    }
+  }
+  const who = (uid: string | null | undefined) => (uid ? (nameOf.get(uid) || "Unknown") : null);
+
+  // Build the chronological event list
+  type Ev = { icon: string; at: string; title: string; by?: string | null; details?: string };
+  const events: Ev[] = [];
+
+  // 📦 Added
+  const cft = toCFT(Number(block.length_ft) * Number(block.width_ft) * Number(block.height_ft));
+  events.push({
+    icon: "📦",
+    at: block.created_at || new Date(0).toISOString(),
+    title: "Added to inventory",
+    by: who(block.created_by),
+    details: `${block.stone ?? "—"} · Yard ${block.yard} · ${block.length_ft}×${block.width_ft}×${block.height_ft} in · ${cft.toFixed(2)} CFT${block.category ? ` · ${block.category}` : ""}${block.quality ? ` · Grade ${block.quality}` : ""}`,
+  });
+
+  // 📋 Planned (for each cut session block)
+  for (const csb of csbRows) {
+    const s = csb.cut_sessions;
+    const placedCount = csb.layout?.placed?.length ?? 0;
+    events.push({
+      icon: "📋",
+      at: (s?.created_at || csb.created_at) ?? new Date(0).toISOString(),
+      title: placedCount > 0
+        ? `Planned for cutting — ${placedCount} slab${placedCount !== 1 ? "s" : ""}`
+        : "Planned for cutting",
+      by: who(s?.planned_by),
+      details: s ? `Session ${s.session_code}${s.kerf_mm ? ` · Kerf ${s.kerf_mm} mm` : ""}` : undefined,
+    });
+  }
+
+  // Audit events on the cut session blocks
+  for (const a of csbAudits) {
+    const byName = who(a.user_id);
+    const details = (a.details ?? {}) as Record<string, unknown>;
+    if (a.action === "cutting_started") {
+      events.push({ icon: "▶️", at: a.created_at, title: "Cutting approved & started", by: byName });
+    } else if (a.action === "cutting_done" || a.action === "cutting_done_with_deviation") {
+      const cutSlabs = Array.isArray(details.cut_slabs) ? (details.cut_slabs as string[]) : [];
+      const notCutSlabs = Array.isArray(details.not_cut_slabs) ? (details.not_cut_slabs as string[]) : [];
+      const restocked = Array.isArray(details.restocked_blocks) ? (details.restocked_blocks as string[]) : [];
+      const extra = Array.isArray(details.extra_slabs) ? (details.extra_slabs as string[]) : [];
+      const parts: string[] = [];
+      parts.push(`${cutSlabs.length} slab${cutSlabs.length !== 1 ? "s" : ""} cut${cutSlabs.length > 0 ? ` (${cutSlabs.join(", ")})` : ""}`);
+      if (notCutSlabs.length > 0) parts.push(`${notCutSlabs.length} not cut`);
+      if (extra.length > 0) parts.push(`+${extra.length} unplanned (${extra.join(", ")})`);
+      if (restocked.length > 0) parts.push(`${restocked.length} remainder piece${restocked.length !== 1 ? "s" : ""} restocked`);
+      events.push({
+        icon: "🔪",
+        at: a.created_at,
+        title: a.action === "cutting_done_with_deviation" ? "Cutting completed (with deviation)" : "Cutting completed",
+        by: byName,
+        details: parts.join(" · "),
+      });
+    } else if (a.action === "block_rejected") {
+      events.push({ icon: "❌", at: a.created_at, title: "Block rejected", by: byName });
+    } else if (a.action === "cutting_undo_approve") {
+      events.push({ icon: "↩️", at: a.created_at, title: "Approval reverted", by: byName });
+    } else if (a.action === "cutting_undo_done") {
+      events.push({ icon: "↩️", at: a.created_at, title: "Cutting un-done", by: byName });
+    }
+  }
+
+  // Audit events on the block itself (skip 'create' — already covered by the 📦 row)
+  for (const a of blockAudits) {
+    if (a.action === "create") continue;
+    const byName = who(a.user_id);
+    const details = (a.details ?? {}) as Record<string, unknown>;
+    if (a.action === "update") {
+      const newStatus = typeof details.status === "string" ? (details.status as string) : null;
+      events.push({
+        icon: "✏️",
+        at: a.created_at,
+        title: "Block updated",
+        by: byName,
+        details: newStatus ? `Status → ${newStatus}` : undefined,
+      });
+    } else if (a.action === "delete") {
+      events.push({ icon: "🗑️", at: a.created_at, title: "Block discarded", by: byName });
+    } else if (a.action === "manual_cut_block") {
+      events.push({ icon: "✂️", at: a.created_at, title: "Manually cut", by: byName });
+    }
+  }
+
+  // ♻️ Remainders created — all from the same cutting event typically
+  if (remainders.length > 0) {
+    const rDetails = remainders
+      .map(r => `${r.id} (${r.length_ft}×${r.width_ft}×${r.height_ft}")`)
+      .join(", ");
+    events.push({
+      icon: "♻️",
+      at: remainders[0].created_at ?? new Date().toISOString(),
+      title: `${remainders.length} remainder piece${remainders.length !== 1 ? "s" : ""} added to inventory`,
+      details: rDetails,
+    });
+  }
+
+  // Sort chronologically, stable by original order within same timestamp
+  events.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+
+  return {
+    blockId: block.id,
+    currentState: {
+      stone: block.stone,
+      yard: block.yard,
+      facility: facilityOfYard(block.yard),
+      dimensions: `${block.length_ft}×${block.width_ft}×${block.height_ft} in`,
+      cft: Number(cft.toFixed(2)),
+      status: block.status,
+      category: block.category,
+      quality: block.quality ?? null,
+      lastUpdatedBy: who(block.updated_by),
+      lastUpdatedAt: block.updated_at,
+    },
+    totalCutAttempts: csbRows.length,
+    events,
+    remainders: remainders.map(r => {
+      const rcft = toCFT(Number(r.length_ft) * Number(r.width_ft) * Number(r.height_ft));
+      return {
+        id: r.id,
+        dimensions: `${r.length_ft}×${r.width_ft}×${r.height_ft} in`,
+        cft: Number(rcft.toFixed(2)),
+        status: r.status,
+      };
+    }),
   };
 }
