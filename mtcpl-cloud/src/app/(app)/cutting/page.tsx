@@ -345,14 +345,24 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                   const isDoneStatus = block.status === "done";
                   const isUrgent = block.cut_session_slabs.some((s) => urgentSlabIds.has(s.slab_requirement_id));
                   // Done blocks: use REAL post-cut data (actually-cut slabs
-                  // + actually-restocked blocks). Pending/in-progress stays
-                  // on the planner's projection — that's still the best
-                  // guess until the cut is finished.
+                  // + actually-restocked blocks). For any slab data the
+                  // query didn't return (e.g. older cuts where
+                  // source_block_id wasn't set on the planned slab, or
+                  // rows blocked by some legacy constraint), fall back
+                  // to the planner's `placed` list so the bar still
+                  // reflects the cut rather than silently dropping to
+                  // the projection. Pending/in-progress stays on the
+                  // projection — that's still the best guess until the
+                  // cut is finished.
                   const actualSlabs = isDoneStatus ? actualSlabsByParent.get(block.block_id) : undefined;
                   const actualRemainders = isDoneStatus ? actualRemaindersByParent.get(block.block_id) : undefined;
-                  const eff = (isDoneStatus && actualSlabs)
-                    ? computeActualCutEfficiency(blk, actualSlabs, actualRemainders ?? [])
+                  const slabsForEff = (actualSlabs && actualSlabs.length > 0)
+                    ? actualSlabs
+                    : placed.map((p) => ({ sw: Number(p.sw ?? 0), sh: Number(p.sh ?? 0), sd: Number(p.sd ?? 0) }));
+                  const eff = isDoneStatus
+                    ? computeActualCutEfficiency(blk, slabsForEff, actualRemainders ?? [])
                     : computeCutEfficiency(blk, placed, block.layout?.biggest ?? null);
+                  const useActual = isDoneStatus && ((actualSlabs?.length ?? 0) > 0 || (actualRemainders?.length ?? 0) > 0);
 
                   return (
                     <div className="plan-card" key={block.id} style={isUrgent ? { borderLeft: "4px solid #DC2626", background: "rgba(220,38,38,0.10)" } : {}}>
@@ -630,21 +640,65 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                   )}
 
                   {block.status === "done" && (
-                    <span
-                      className="role-pill badge-available"
-                      style={{ fontSize: 12 }}
-                    >
-                      ✓ Done
-                      {block.restocked_block_id
-                        ? ` · Restocked ${block.restocked_block_id.split(",").length} piece(s)`
-                        : " · Block discarded"}
-                      {block.updated_at
-                        ? ` · ${new Date(block.updated_at).toLocaleDateString(
-                            "en-IN",
-                            { day: "numeric", month: "short" }
-                          )}`
-                        : ""}
-                    </span>
+                    <>
+                      <span
+                        className="role-pill badge-available"
+                        style={{ fontSize: 12 }}
+                      >
+                        ✓ Done
+                        {block.restocked_block_id
+                          ? ` · Restocked ${block.restocked_block_id.split(",").length} piece(s)`
+                          : " · Block discarded"}
+                        {block.updated_at
+                          ? ` · ${new Date(block.updated_at).toLocaleDateString(
+                              "en-IN",
+                              { day: "numeric", month: "short" }
+                            )}`
+                          : ""}
+                      </span>
+                      {eff && (
+                        <span
+                          title={useActual ? "Real numbers from the completed cut" : "Planner's projection"}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 10,
+                            fontSize: 12,
+                            fontFamily: "ui-monospace, monospace",
+                            padding: "4px 12px",
+                            background: "var(--bg)",
+                            border: "1px solid var(--border)",
+                            borderRadius: 6,
+                            color: "var(--muted)",
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          <span><strong style={{ color: "#15803d" }}>{eff.slabPct}%</strong> slab</span>
+                          <span style={{ color: "var(--border)" }}>·</span>
+                          <span><strong style={{ color: "#b45309" }}>{eff.restockPct}%</strong> restocked</span>
+                          <span style={{ color: "var(--border)" }}>·</span>
+                          <span><strong style={{ color: "#b91c1c" }}>{eff.wastePct}%</strong> waste</span>
+                          <span style={{ color: "var(--border)" }}>·</span>
+                          <span><strong style={{ color: "var(--gold-dark)" }}>{eff.slabPct + eff.restockPct}%</strong> recovered</span>
+                          {useActual && (
+                            <span
+                              style={{
+                                fontSize: 10,
+                                fontWeight: 700,
+                                color: "#15803d",
+                                background: "rgba(22,101,52,0.12)",
+                                padding: "1px 6px",
+                                borderRadius: 3,
+                                fontFamily: "inherit",
+                                marginLeft: 2,
+                              }}
+                            >
+                              ✓ actual
+                            </span>
+                          )}
+                        </span>
+                      )}
+                    </>
                   )}
 
                   {block.status === "rejected" && (
@@ -694,6 +748,14 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                         const blk = block.layout?.blk;
                         const placed = block.layout?.placed ?? [];
                         const slabCount = block.cut_session_slabs.length;
+                        // Same actual-vs-projected logic as the active done list
+                        const actualSlabsEarlier = actualSlabsByParent.get(block.block_id);
+                        const actualRemaindersEarlier = actualRemaindersByParent.get(block.block_id);
+                        const slabsForEffEarlier = (actualSlabsEarlier && actualSlabsEarlier.length > 0)
+                          ? actualSlabsEarlier
+                          : placed.map((p) => ({ sw: Number(p.sw ?? 0), sh: Number(p.sh ?? 0), sd: Number(p.sd ?? 0) }));
+                        const effEarlier = computeActualCutEfficiency(blk, slabsForEffEarlier, actualRemaindersEarlier ?? []);
+                        const useActualEarlier = (actualSlabsEarlier?.length ?? 0) > 0 || (actualRemaindersEarlier?.length ?? 0) > 0;
                         return (
                           <div className="plan-card" key={block.id} style={{ marginBottom: 8 }}>
                             <div className="record-head" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-start" }}>
@@ -813,6 +875,48 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                                   ? ` · ${new Date(block.updated_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}`
                                   : ""}
                               </span>
+                              {effEarlier && (
+                                <span
+                                  title={useActualEarlier ? "Real numbers from the completed cut" : "Planner's projection"}
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: 10,
+                                    fontSize: 12,
+                                    fontFamily: "ui-monospace, monospace",
+                                    padding: "4px 12px",
+                                    background: "var(--bg)",
+                                    border: "1px solid var(--border)",
+                                    borderRadius: 6,
+                                    color: "var(--muted)",
+                                    flexWrap: "wrap",
+                                  }}
+                                >
+                                  <span><strong style={{ color: "#15803d" }}>{effEarlier.slabPct}%</strong> slab</span>
+                                  <span style={{ color: "var(--border)" }}>·</span>
+                                  <span><strong style={{ color: "#b45309" }}>{effEarlier.restockPct}%</strong> restocked</span>
+                                  <span style={{ color: "var(--border)" }}>·</span>
+                                  <span><strong style={{ color: "#b91c1c" }}>{effEarlier.wastePct}%</strong> waste</span>
+                                  <span style={{ color: "var(--border)" }}>·</span>
+                                  <span><strong style={{ color: "var(--gold-dark)" }}>{effEarlier.slabPct + effEarlier.restockPct}%</strong> recovered</span>
+                                  {useActualEarlier && (
+                                    <span
+                                      style={{
+                                        fontSize: 10,
+                                        fontWeight: 700,
+                                        color: "#15803d",
+                                        background: "rgba(22,101,52,0.12)",
+                                        padding: "1px 6px",
+                                        borderRadius: 3,
+                                        fontFamily: "inherit",
+                                        marginLeft: 2,
+                                      }}
+                                    >
+                                      ✓ actual
+                                    </span>
+                                  )}
+                                </span>
+                              )}
                             </div>
                           </div>
                         );
