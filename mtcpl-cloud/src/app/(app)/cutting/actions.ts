@@ -122,138 +122,212 @@ export async function finishBlockAction(formData: FormData) {
   ) as Array<{ id: string; l: number; w: number; h: number }>;
   const extraSlabIds = JSON.parse(String(formData.get("extra_slab_ids") || "[]")) as string[];
 
-  const restockedIds: string[] = [];
+  // Log the incoming request so we can trace failures from Vercel logs.
+  console.log("[finishBlockAction] START", {
+    sessionBlockId, sessionId, blockId, stone, yard,
+    cutSlabIds, notCutSlabIds, extraSlabIds,
+    restock, remainderCount: remainders.length,
+    actor: profile.id,
+  });
 
-  // Remainder block inserts are idempotent — if a previous run of this
-  // action crashed AFTER creating the blocks but BEFORE updating the
-  // session-block to "done", the blocks will already exist. On retry we
-  // detect them and skip instead of blowing up with a duplicate-key
-  // error that would permanently stuck the cut in "cutting" status.
-  if (restock && remainders.length > 0) {
-    const ids = remainders.filter(p => p.l > 0 && p.w > 0 && p.h > 0).map(p => p.id);
-    const { data: existingRows } = await supabase
-      .from("blocks")
-      .select("id")
-      .in("id", ids);
-    const existing = new Set((existingRows ?? []).map(r => r.id));
+  try {
+    // If a previous attempt already marked this block "done" but then
+    // something later failed (and left the UI unable to navigate), this
+    // retry should short-circuit to the redirect. Otherwise we keep
+    // going.
+    const { data: currentState, error: stateErr } = await supabase
+      .from("cut_session_blocks")
+      .select("status, restocked_block_id")
+      .eq("id", sessionBlockId)
+      .maybeSingle();
+    if (stateErr) {
+      console.error("[finishBlockAction] state check error", stateErr);
+      throw new Error(`Could not read cut state: ${stateErr.message}`);
+    }
+    if (!currentState) {
+      throw new Error(`Cut session block ${sessionBlockId} not found.`);
+    }
+    if (currentState.status === "done") {
+      console.log("[finishBlockAction] already done — skipping to redirect");
+      await refreshPaths();
+      redirect("/cutting?tab=done");
+    }
 
-    for (const piece of remainders) {
-      if (piece.l > 0 && piece.w > 0 && piece.h > 0) {
-        if (existing.has(piece.id)) {
-          // Already created on an earlier attempt — reuse.
-          restockedIds.push(piece.id);
-          continue;
-        }
-        const { error } = await supabase.from("blocks").insert({
-          id: piece.id,
-          stone,
-          yard,
-          category: "Reused",
-          length_ft: piece.l,
-          width_ft: piece.w,
-          height_ft: piece.h,
-          status: "available",
-          created_by: profile.id,
-          updated_by: profile.id,
-        });
-        if (error) {
-          // Benign duplicate (race) — treat as already-exists and keep going.
-          if (!/duplicate key/i.test(error.message)) {
-            throw new Error(`Failed to create block ${piece.id}: ${error.message}`);
+    const restockedIds: string[] = [];
+
+    // Remainder block inserts are idempotent. If a previous run crashed
+    // after creating them, we detect and reuse rather than error on
+    // duplicate PK.
+    if (restock && remainders.length > 0) {
+      const ids = remainders.filter(p => p.l > 0 && p.w > 0 && p.h > 0).map(p => p.id);
+      const { data: existingRows } = await supabase
+        .from("blocks")
+        .select("id")
+        .in("id", ids);
+      const existing = new Set((existingRows ?? []).map(r => r.id));
+
+      for (const piece of remainders) {
+        if (piece.l > 0 && piece.w > 0 && piece.h > 0) {
+          if (existing.has(piece.id)) {
+            restockedIds.push(piece.id);
+            continue;
           }
+          const { error } = await supabase.from("blocks").insert({
+            id: piece.id,
+            stone,
+            yard,
+            category: "Reused",
+            length_ft: piece.l,
+            width_ft: piece.w,
+            height_ft: piece.h,
+            status: "available",
+            created_by: profile.id,
+            updated_by: profile.id,
+          });
+          if (error) {
+            if (/duplicate key/i.test(error.message)) {
+              console.warn("[finishBlockAction] duplicate block on insert (benign)", piece.id);
+            } else {
+              console.error("[finishBlockAction] insert remainder failed", { piece, error });
+              throw new Error(`Failed to create block ${piece.id}: ${error.message}`);
+            }
+          }
+          restockedIds.push(piece.id);
         }
-        restockedIds.push(piece.id);
       }
     }
-  }
 
-  const restockedBlockId = restockedIds.length > 0 ? restockedIds.join(",") : null;
+    const restockedBlockId = restockedIds.length > 0 ? restockedIds.join(",") : null;
 
-  // Mark parent block consumed. Failure here is unusual but if it
-  // happens we want to surface it — not silently leave the block
-  // available after it's been cut up.
-  const parentErr = await supabase
-    .from("blocks")
-    .update({ status: "consumed", updated_by: profile.id, updated_at: new Date().toISOString() })
-    .eq("id", blockId);
-  if (parentErr.error) {
-    throw new Error(`Failed to mark parent block ${blockId} consumed: ${parentErr.error.message}`);
-  }
+    // Mark parent block consumed.
+    const parentUpdate = await supabase
+      .from("blocks")
+      .update({ status: "consumed", updated_by: profile.id, updated_at: new Date().toISOString() })
+      .eq("id", blockId);
+    if (parentUpdate.error) {
+      console.error("[finishBlockAction] parent update error", parentUpdate.error);
+      throw new Error(`Failed to mark parent block ${blockId} consumed: ${parentUpdate.error.message}`);
+    }
 
-  if (cutSlabIds.length) {
-    const r = await supabase
-      .from("slab_requirements")
-      .update({ status: "cut_done", updated_by: profile.id, updated_at: new Date().toISOString() })
-      .in("id", cutSlabIds);
-    if (r.error) throw new Error(`Failed to mark slabs cut_done: ${r.error.message}`);
-  }
+    if (cutSlabIds.length) {
+      const r = await supabase
+        .from("slab_requirements")
+        .update({ status: "cut_done", updated_by: profile.id, updated_at: new Date().toISOString() })
+        .in("id", cutSlabIds);
+      if (r.error) {
+        console.error("[finishBlockAction] cut slabs update error", r.error);
+        throw new Error(`Failed to mark slabs cut_done: ${r.error.message}`);
+      }
+    }
 
-  if (notCutSlabIds.length) {
-    const r = await supabase
-      .from("slab_requirements")
-      .update({ status: "open", source_block_id: null, updated_by: profile.id, updated_at: new Date().toISOString() })
-      .in("id", notCutSlabIds);
-    if (r.error) throw new Error(`Failed to reset uncut slabs: ${r.error.message}`);
-  }
+    if (notCutSlabIds.length) {
+      const r = await supabase
+        .from("slab_requirements")
+        .update({ status: "open", source_block_id: null, updated_by: profile.id, updated_at: new Date().toISOString() })
+        .in("id", notCutSlabIds);
+      if (r.error) {
+        console.error("[finishBlockAction] reset uncut slabs error", r.error);
+        throw new Error(`Failed to reset uncut slabs: ${r.error.message}`);
+      }
+    }
 
-  if (extraSlabIds.length > 0) {
-    const { data: updated, error: extraErr } = await supabase
-      .from("slab_requirements")
+    if (extraSlabIds.length > 0) {
+      const { data: updated, error: extraErr } = await supabase
+        .from("slab_requirements")
+        .update({
+          status: "cut_done",
+          source_block_id: blockId,
+          updated_by: profile.id,
+          updated_at: new Date().toISOString(),
+        })
+        .in("id", extraSlabIds)
+        .eq("status", "open")
+        .select("id");
+      if (extraErr) {
+        console.error("[finishBlockAction] extra slabs error", extraErr);
+        throw new Error(extraErr.message);
+      }
+      if ((updated?.length ?? 0) !== extraSlabIds.length) {
+        throw new Error("One or more unplanned slabs were already taken by another operation. Refresh and try again.");
+      }
+    }
+
+    // Critical: mark the cut as done. Try WITH updated_by first — if the
+    // column doesn't exist on cut_session_blocks (possible given the
+    // schema.sql is out of date with prod), fall back to a minimal
+    // update that just sets the status + restocked_block_id.
+    let doneErr = await supabase
+      .from("cut_session_blocks")
       .update({
-        status: "cut_done",
-        source_block_id: blockId,
+        status: "done",
+        restocked_block_id: restockedBlockId,
         updated_by: profile.id,
         updated_at: new Date().toISOString(),
       })
-      .in("id", extraSlabIds)
-      .eq("status", "open")
-      .select("id");
-    if (extraErr) throw new Error(extraErr.message);
-    if ((updated?.length ?? 0) !== extraSlabIds.length) {
-      throw new Error("One or more unplanned slabs were already taken by another operation. Refresh and try again.");
+      .eq("id", sessionBlockId);
+
+    if (doneErr.error && /updated_by|column/i.test(doneErr.error.message)) {
+      console.warn("[finishBlockAction] updated_by not accepted on cut_session_blocks, retrying without it", doneErr.error.message);
+      doneErr = await supabase
+        .from("cut_session_blocks")
+        .update({
+          status: "done",
+          restocked_block_id: restockedBlockId,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", sessionBlockId);
     }
-  }
 
-  // Critical step — this is what moves the card from "In Progress" to
-  // "Done today". If this fails everything above is wasted, so we check
-  // the error and surface it loudly.
-  const doneResult = await supabase
-    .from("cut_session_blocks")
-    .update({ status: "done", restocked_block_id: restockedBlockId, updated_by: profile.id, updated_at: new Date().toISOString() })
-    .eq("id", sessionBlockId)
-    .select("id");
-  if (doneResult.error) {
-    throw new Error(`Failed to mark cut as done: ${doneResult.error.message}`);
-  }
-  if (!doneResult.data || doneResult.data.length === 0) {
-    throw new Error(`Cut session block ${sessionBlockId} was not updated — it may have been deleted or is no longer in cutting state.`);
-  }
-
-  await logAudit(
-    profile.id,
-    extraSlabIds.length > 0 ? "cutting_done_with_deviation" : "cutting_done",
-    "cut_session_block",
-    sessionBlockId,
-    {
-      session_id: sessionId,
-      block_id: blockId,
-      cut_slabs: cutSlabIds,
-      not_cut_slabs: notCutSlabIds,
-      restocked_blocks: restockedIds,
-      restock,
-      ...(extraSlabIds.length > 0 ? { extra_slabs: extraSlabIds } : {}),
+    if (doneErr.error) {
+      console.error("[finishBlockAction] done update error", doneErr.error);
+      throw new Error(`Failed to mark cut as done: ${doneErr.error.message}`);
     }
-  );
 
-  await notify("cut_done", `Block ${blockId} cutting completed`, {
-    message: `${cutSlabIds.length} slab(s) cut${restockedIds.length > 0 ? ` · ${restockedIds.length} restocked` : ""}${extraSlabIds.length > 0 ? " · with deviation" : ""}`,
-    entityType: "cut_session_block",
-    entityId: sessionBlockId,
-    actorId: profile.id,
-  });
+    await logAudit(
+      profile.id,
+      extraSlabIds.length > 0 ? "cutting_done_with_deviation" : "cutting_done",
+      "cut_session_block",
+      sessionBlockId,
+      {
+        session_id: sessionId,
+        block_id: blockId,
+        cut_slabs: cutSlabIds,
+        not_cut_slabs: notCutSlabIds,
+        restocked_blocks: restockedIds,
+        restock,
+        ...(extraSlabIds.length > 0 ? { extra_slabs: extraSlabIds } : {}),
+      }
+    );
 
-  await syncSessionStatus(sessionId);
-  await refreshPaths();
+    await notify("cut_done", `Block ${blockId} cutting completed`, {
+      message: `${cutSlabIds.length} slab(s) cut${restockedIds.length > 0 ? ` · ${restockedIds.length} restocked` : ""}${extraSlabIds.length > 0 ? " · with deviation" : ""}`,
+      entityType: "cut_session_block",
+      entityId: sessionBlockId,
+      actorId: profile.id,
+    });
+
+    await syncSessionStatus(sessionId);
+    await refreshPaths();
+    console.log("[finishBlockAction] SUCCESS", { sessionBlockId, blockId });
+  } catch (err) {
+    // Don't swallow Next's redirect signal — let it propagate so the
+    // browser actually navigates.
+    if (err && typeof err === "object" && "digest" in err && typeof (err as { digest?: unknown }).digest === "string" && (err as { digest: string }).digest.startsWith("NEXT_REDIRECT")) {
+      throw err;
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[finishBlockAction] FAILED", {
+      sessionBlockId, sessionId, blockId,
+      cutSlabIds, notCutSlabIds, extraSlabIds,
+      restock, remainderCount: remainders.length,
+      error: msg,
+      stack: err instanceof Error ? err.stack : null,
+    });
+    throw err;
+  }
+
+  // redirect() throws NEXT_REDIRECT internally — must live outside the
+  // try/catch above so our catch doesn't swallow it.
   redirect("/cutting?tab=done");
 }
 
