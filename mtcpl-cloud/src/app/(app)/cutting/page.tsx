@@ -8,6 +8,7 @@ import { UndoApproveButton } from "./undo-approve-button";
 import { CuttingTimer } from "./cutting-timer";
 import { computeCutEfficiency } from "@/lib/cut-efficiency";
 import { yardLabel, facilityOfYard, facilityLabel, FACILITIES, type Facility } from "@/lib/yards";
+import { PrintReportButton } from "./print-report-button";
 
 type Tab = "pending" | "in_progress" | "done";
 type SearchParams = Promise<{ tab?: string }>;
@@ -175,6 +176,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
             Each block is handled independently — approve, cut, and record slabs one by one.
           </p>
         </div>
+        <PrintReportButton />
       </div>
 
       {/* Tabs */}
@@ -413,12 +415,18 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                   </div>
                 </div>
 
-                {/* Slab ID chips */}
+                {/* Slab ID chips — include W×H×T so the owner can see the
+                    size without opening the detail view. */}
                 {placed.length > 0 && (
                   <div className="chip-row" style={{ marginTop: 8 }}>
                     {placed.map((s) => (
                       <span className="plan-chip" key={s.id}>
                         {s.id}
+                        {(s.sw != null || s.sh != null || s.sd != null) && (
+                          <> · <span style={{ fontFamily: "ui-monospace, monospace" }}>
+                            {s.sw ?? "—"}×{s.sh ?? "—"}×{s.sd ?? "—"}″
+                          </span></>
+                        )}
                         {s.temple ? ` · ${s.temple}` : ""}
                       </span>
                     ))}
@@ -616,7 +624,13 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                               <div className="chip-row" style={{ marginTop: 8 }}>
                                 {placed.map((s) => (
                                   <span className="plan-chip" key={s.id}>
-                                    {s.id}{s.temple ? ` · ${s.temple}` : ""}
+                                    {s.id}
+                                    {(s.sw != null || s.sh != null || s.sd != null) && (
+                                      <> · <span style={{ fontFamily: "ui-monospace, monospace" }}>
+                                        {s.sw ?? "—"}×{s.sh ?? "—"}×{s.sd ?? "—"}″
+                                      </span></>
+                                    )}
+                                    {s.temple ? ` · ${s.temple}` : ""}
                                   </span>
                                 ))}
                               </div>
