@@ -124,9 +124,26 @@ export async function finishBlockAction(formData: FormData) {
 
   const restockedIds: string[] = [];
 
+  // Remainder block inserts are idempotent — if a previous run of this
+  // action crashed AFTER creating the blocks but BEFORE updating the
+  // session-block to "done", the blocks will already exist. On retry we
+  // detect them and skip instead of blowing up with a duplicate-key
+  // error that would permanently stuck the cut in "cutting" status.
   if (restock && remainders.length > 0) {
+    const ids = remainders.filter(p => p.l > 0 && p.w > 0 && p.h > 0).map(p => p.id);
+    const { data: existingRows } = await supabase
+      .from("blocks")
+      .select("id")
+      .in("id", ids);
+    const existing = new Set((existingRows ?? []).map(r => r.id));
+
     for (const piece of remainders) {
       if (piece.l > 0 && piece.w > 0 && piece.h > 0) {
+        if (existing.has(piece.id)) {
+          // Already created on an earlier attempt — reuse.
+          restockedIds.push(piece.id);
+          continue;
+        }
         const { error } = await supabase.from("blocks").insert({
           id: piece.id,
           stone,
@@ -139,7 +156,12 @@ export async function finishBlockAction(formData: FormData) {
           created_by: profile.id,
           updated_by: profile.id,
         });
-        if (error) throw new Error(`Failed to create block ${piece.id}: ${error.message}`);
+        if (error) {
+          // Benign duplicate (race) — treat as already-exists and keep going.
+          if (!/duplicate key/i.test(error.message)) {
+            throw new Error(`Failed to create block ${piece.id}: ${error.message}`);
+          }
+        }
         restockedIds.push(piece.id);
       }
     }
@@ -147,23 +169,31 @@ export async function finishBlockAction(formData: FormData) {
 
   const restockedBlockId = restockedIds.length > 0 ? restockedIds.join(",") : null;
 
-  await supabase
+  // Mark parent block consumed. Failure here is unusual but if it
+  // happens we want to surface it — not silently leave the block
+  // available after it's been cut up.
+  const parentErr = await supabase
     .from("blocks")
     .update({ status: "consumed", updated_by: profile.id, updated_at: new Date().toISOString() })
     .eq("id", blockId);
+  if (parentErr.error) {
+    throw new Error(`Failed to mark parent block ${blockId} consumed: ${parentErr.error.message}`);
+  }
 
   if (cutSlabIds.length) {
-    await supabase
+    const r = await supabase
       .from("slab_requirements")
       .update({ status: "cut_done", updated_by: profile.id, updated_at: new Date().toISOString() })
       .in("id", cutSlabIds);
+    if (r.error) throw new Error(`Failed to mark slabs cut_done: ${r.error.message}`);
   }
 
   if (notCutSlabIds.length) {
-    await supabase
+    const r = await supabase
       .from("slab_requirements")
       .update({ status: "open", source_block_id: null, updated_by: profile.id, updated_at: new Date().toISOString() })
       .in("id", notCutSlabIds);
+    if (r.error) throw new Error(`Failed to reset uncut slabs: ${r.error.message}`);
   }
 
   if (extraSlabIds.length > 0) {
@@ -184,10 +214,20 @@ export async function finishBlockAction(formData: FormData) {
     }
   }
 
-  await supabase
+  // Critical step — this is what moves the card from "In Progress" to
+  // "Done today". If this fails everything above is wasted, so we check
+  // the error and surface it loudly.
+  const doneResult = await supabase
     .from("cut_session_blocks")
     .update({ status: "done", restocked_block_id: restockedBlockId, updated_by: profile.id, updated_at: new Date().toISOString() })
-    .eq("id", sessionBlockId);
+    .eq("id", sessionBlockId)
+    .select("id");
+  if (doneResult.error) {
+    throw new Error(`Failed to mark cut as done: ${doneResult.error.message}`);
+  }
+  if (!doneResult.data || doneResult.data.length === 0) {
+    throw new Error(`Cut session block ${sessionBlockId} was not updated — it may have been deleted or is no longer in cutting state.`);
+  }
 
   await logAudit(
     profile.id,
