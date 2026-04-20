@@ -153,12 +153,13 @@ export async function addBlockVendorAction(name: string): Promise<{ error: strin
   const trimmed = name.trim();
   if (!trimmed) return { error: "Vendor name is required" };
 
-  // vendor_type enum accepts 'CNC' | 'Manual' | 'Outsource'. Block suppliers
-  // don't have a dedicated type yet, so save them as 'Outsource' (jobwork)
-  // — the blocks page now shows all active vendors regardless of type.
+  // Block suppliers are a dedicated vendor_type = 'block_vendor' in prod.
+  // Carving vendors use 'CNC' or 'Manual'. Keeping them separate is what
+  // lets the blocks page dropdown show only actual stone suppliers,
+  // not carving workshops.
   const { error } = await admin
     .from("vendors")
-    .insert({ name: trimmed, vendor_type: "Outsource", is_active: true });
+    .insert({ name: trimmed, vendor_type: "block_vendor", is_active: true });
 
   if (error) {
     if (error.code === "23505") return { error: "Vendor already exists" };

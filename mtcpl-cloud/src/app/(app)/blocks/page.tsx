@@ -50,15 +50,16 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
       .eq("status", "consumed")
       .order("updated_at", { ascending: false })
       .limit(30),
-    // Block suppliers are saved as vendor_type = 'Outsource' by
-    // addBlockVendorAction. Carving vendors (CNC / Manual) don't belong
-    // in this dropdown — filter them out so operators don't accidentally
-    // pick a carving vendor as the block's supplier.
+    // Block suppliers are saved as vendor_type = 'block_vendor' in prod.
+    // Carving vendors (CNC / Manual) don't belong in this dropdown —
+    // filter them out so operators don't accidentally pick a carving
+    // vendor as the block's supplier. Accept 'Outsource' too for
+    // compat with older rows if anyone added a vendor that way.
     admin
       .from("vendors")
       .select("name")
       .eq("is_active", true)
-      .eq("vendor_type", "Outsource")
+      .in("vendor_type", ["block_vendor", "Outsource"])
       .order("name"),
     admin
       .from("stone_types")
