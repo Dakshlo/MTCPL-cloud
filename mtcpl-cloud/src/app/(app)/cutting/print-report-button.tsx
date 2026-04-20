@@ -3,22 +3,30 @@
 /**
  * Page-level "Print Report" button for the Cutting page.
  *
- * Opens a small popover asking which facility to include in the report.
- * Each option opens the list-print page in a new tab with the right
- * `?facility=` filter. Kept deliberately plain — the user asked for
- * "not cluttered by giving both options on this page", so the choice
- * lives behind one click.
+ * The report is scoped to whichever tab the owner is currently on —
+ * Pending Approval prints pending-only, In Progress prints in-progress-only,
+ * Done today prints today's completed cuts. The user asked for this:
+ *   "when i do print report on pending approval it will only give pending
+ *    approval list and when i will print report on in progress it will
+ *    only give in progress report."
  *
- * The printed document always includes Pending Approval + In Progress
- * blocks (the two tabs the dad cares about for ongoing work). Done
- * blocks are intentionally excluded.
+ * Clicking the button opens a small popover asking which facility to
+ * include (MTCPL only / RIICO only / Both). The facility choice lives
+ * behind one click to keep the cutting page itself uncluttered.
  */
 
 import { useEffect, useRef, useState } from "react";
 
 type Facility = "mtcpl" | "riico" | "both";
+export type CuttingTab = "pending" | "in_progress" | "done";
 
-export function PrintReportButton() {
+const TAB_LABELS: Record<CuttingTab, string> = {
+  pending: "Pending Approval",
+  in_progress: "In Progress",
+  done: "Done today",
+};
+
+export function PrintReportButton({ tab }: { tab: CuttingTab }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -42,8 +50,14 @@ export function PrintReportButton() {
 
   function handlePick(facility: Facility) {
     setOpen(false);
-    window.open(`/cutting/list-print?facility=${facility}`, "_blank", "noopener,noreferrer");
+    window.open(
+      `/cutting/list-print?facility=${facility}&tab=${tab}`,
+      "_blank",
+      "noopener,noreferrer",
+    );
   }
+
+  const activeLabel = TAB_LABELS[tab];
 
   return (
     <div ref={rootRef} style={{ position: "relative", display: "inline-block" }}>
@@ -64,11 +78,11 @@ export function PrintReportButton() {
           alignItems: "center",
           gap: 6,
         }}
-        title="Print a full report of in-progress + pending approval blocks"
+        title={`Print a report of ${activeLabel.toLowerCase()} blocks`}
         aria-haspopup="menu"
         aria-expanded={open}
       >
-        🖨 Print Report {open ? "▲" : "▼"}
+        🖨 Print {activeLabel} {open ? "▲" : "▼"}
       </button>
 
       {open && (
@@ -79,7 +93,7 @@ export function PrintReportButton() {
             top: "calc(100% + 6px)",
             right: 0,
             zIndex: 50,
-            minWidth: 220,
+            minWidth: 240,
             background: "var(--bg)",
             border: "1px solid var(--border)",
             borderRadius: 8,
@@ -107,7 +121,7 @@ export function PrintReportButton() {
             borderTop: "1px solid var(--border)",
             marginTop: 2,
           }}>
-            Includes: Pending Approval + In Progress
+            Includes: <strong style={{ color: "var(--text)" }}>{activeLabel}</strong> only
           </div>
         </div>
       )}

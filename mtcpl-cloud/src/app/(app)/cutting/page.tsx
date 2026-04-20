@@ -176,7 +176,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
             Each block is handled independently — approve, cut, and record slabs one by one.
           </p>
         </div>
-        <PrintReportButton />
+        <PrintReportButton tab={activeTab} />
       </div>
 
       {/* Tabs */}
