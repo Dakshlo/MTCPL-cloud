@@ -6,7 +6,7 @@ import { approveBlockAction, rejectBlockAction, undoApproveAction } from "./acti
 import { RejectButton } from "./reject-button";
 import { UndoApproveButton } from "./undo-approve-button";
 import { CuttingTimer } from "./cutting-timer";
-import { computeCutEfficiency } from "@/lib/cut-efficiency";
+import { computeCutEfficiency, computeActualCutEfficiency } from "@/lib/cut-efficiency";
 import { yardLabel, facilityOfYard, facilityLabel, FACILITIES, type Facility } from "@/lib/yards";
 import { PrintReportButton } from "./print-report-button";
 import { SelectionProvider } from "./selection-context";
@@ -149,6 +149,66 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
   const rows = activeTab === "done" ? allRows.filter(b => b.status !== "rejected") : allRows;
   const rejectedRows = activeTab === "done" ? allRows.filter(b => b.status === "rejected") : [];
 
+  // For DONE rows, enrich with the real post-cut data: which slabs were
+  // actually cut (from slab_requirements where source_block_id = our
+  // parent block id), and which remainder blocks got restocked (real
+  // dimensions looked up from the blocks table via the comma-separated
+  // restocked_block_id field). The efficiency bar on pending/in-progress
+  // cards keeps using the planner's projection — only done cards flip to
+  // real numbers.
+  type ActualSlab = { sw: number; sh: number; sd: number };
+  type ActualRemainder = { id: string; l: number; w: number; h: number; status: string };
+  const actualSlabsByParent = new Map<string, ActualSlab[]>();
+  const actualRemaindersByParent = new Map<string, ActualRemainder[]>();
+
+  if (activeTab === "done" && rows.length > 0) {
+    const parentBlockIds = [...new Set(rows.map(r => r.block_id).filter(Boolean))];
+
+    // Actually cut slabs for these blocks
+    const { data: realSlabRows } = await supabase
+      .from("slab_requirements")
+      .select("id, length_ft, width_ft, thickness_ft, source_block_id, status")
+      .in("source_block_id", parentBlockIds)
+      .eq("status", "cut_done");
+    for (const s of realSlabRows ?? []) {
+      if (!s.source_block_id) continue;
+      const list = actualSlabsByParent.get(s.source_block_id) ?? [];
+      list.push({ sw: Number(s.length_ft), sh: Number(s.width_ft), sd: Number(s.thickness_ft) });
+      actualSlabsByParent.set(s.source_block_id, list);
+    }
+
+    // Restocked remainder blocks for these rows
+    const restockedIds: string[] = [];
+    for (const r of rows) {
+      if (!r.restocked_block_id) continue;
+      for (const id of r.restocked_block_id.split(",").map(s => s.trim()).filter(Boolean)) {
+        restockedIds.push(id);
+      }
+    }
+    if (restockedIds.length > 0) {
+      const { data: realRemBlocks } = await supabase
+        .from("blocks")
+        .select("id, length_ft, width_ft, height_ft, status")
+        .in("id", restockedIds);
+      const byId = new Map<string, ActualRemainder>();
+      for (const b of realRemBlocks ?? []) {
+        byId.set(b.id, {
+          id: b.id,
+          l: Number(b.length_ft),
+          w: Number(b.width_ft),
+          h: Number(b.height_ft),
+          status: b.status as string,
+        });
+      }
+      for (const row of rows) {
+        if (!row.restocked_block_id) continue;
+        const ids = row.restocked_block_id.split(",").map(s => s.trim()).filter(Boolean);
+        const rems = ids.map(id => byId.get(id)).filter((x): x is ActualRemainder => !!x);
+        if (rems.length > 0) actualRemaindersByParent.set(row.block_id, rems);
+      }
+    }
+  }
+
   // Split done rows into today vs earlier (based on updated_at falling in the IST "today" window)
   const todayRows = activeTab === "done"
     ? rows.filter(b => b.updated_at && b.updated_at >= todayStartIso && b.updated_at < tomorrowStartIso)
@@ -282,8 +342,17 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                   const placed = block.layout?.placed ?? [];
                   const slabCount = block.cut_session_slabs.length;
                   const isLive = block.status === "cutting";
+                  const isDoneStatus = block.status === "done";
                   const isUrgent = block.cut_session_slabs.some((s) => urgentSlabIds.has(s.slab_requirement_id));
-                  const eff = computeCutEfficiency(blk, placed, block.layout?.biggest ?? null);
+                  // Done blocks: use REAL post-cut data (actually-cut slabs
+                  // + actually-restocked blocks). Pending/in-progress stays
+                  // on the planner's projection — that's still the best
+                  // guess until the cut is finished.
+                  const actualSlabs = isDoneStatus ? actualSlabsByParent.get(block.block_id) : undefined;
+                  const actualRemainders = isDoneStatus ? actualRemaindersByParent.get(block.block_id) : undefined;
+                  const eff = (isDoneStatus && actualSlabs)
+                    ? computeActualCutEfficiency(blk, actualSlabs, actualRemainders ?? [])
+                    : computeCutEfficiency(blk, placed, block.layout?.biggest ?? null);
 
                   return (
                     <div className="plan-card" key={block.id} style={isUrgent ? { borderLeft: "4px solid #DC2626", background: "rgba(220,38,38,0.10)" } : {}}>
@@ -363,7 +432,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                     </span>
                     {eff && (
                       <span
-                        title={`Slabs ${eff.slabPct}% · Restockable ${eff.restockPct}% · Waste ${Math.max(0, 100 - eff.slabPct - eff.restockPct)}%`}
+                        title={`${isDoneStatus && actualSlabs ? "Actual" : "Projected"}: Slabs ${eff.slabPct}% · Restockable ${eff.restockPct}% · Waste ${Math.max(0, 100 - eff.slabPct - eff.restockPct)}%`}
                         style={{
                           display: "inline-flex", alignItems: "center", gap: 6,
                           fontSize: 11, padding: "3px 8px", borderRadius: 12,
@@ -434,6 +503,53 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                         {s.temple ? ` · ${s.temple}` : ""}
                       </span>
                     ))}
+                  </div>
+                )}
+
+                {/* Restocked remainder pieces — shown on done cards with
+                    real dimensions + each piece's current status so the
+                    owner can see at a glance what came out of this block. */}
+                {isDoneStatus && actualRemainders && actualRemainders.length > 0 && (
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: "var(--muted)",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.06em",
+                      marginBottom: 5,
+                    }}>
+                      ♻ Restocked {actualRemainders.length} piece{actualRemainders.length !== 1 ? "s" : ""}
+                    </div>
+                    <div className="chip-row">
+                      {actualRemainders.map(r => {
+                        const cft = ((r.l * r.w * r.h) / 1728).toFixed(2);
+                        const stillAvailable = r.status === "available";
+                        return (
+                          <Link
+                            key={r.id}
+                            href={`/blocks/report?block=${encodeURIComponent(r.id)}`}
+                            className="plan-chip"
+                            style={{
+                              textDecoration: "none",
+                              background: stillAvailable ? "rgba(22,101,52,0.12)" : "rgba(255,255,255,0.04)",
+                              border: `1px solid ${stillAvailable ? "rgba(22,101,52,0.35)" : "var(--border)"}`,
+                              color: stillAvailable ? "var(--text)" : "var(--muted)",
+                              fontFamily: "ui-monospace, monospace",
+                            }}
+                            title={`${r.id} · ${r.l}×${r.w}×${r.h} in · ${cft} CFT · ${stillAvailable ? "available" : r.status}`}
+                          >
+                            {r.id}
+                            {" · "}
+                            <span>{r.l}×{r.w}×{r.h}″</span>
+                            {" · "}
+                            <span style={{ fontSize: 10, fontWeight: 600, color: stillAvailable ? "#15803d" : "var(--muted)" }}>
+                              {stillAvailable ? "available" : r.status}
+                            </span>
+                          </Link>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
 
@@ -642,6 +758,51 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                                 ))}
                               </div>
                             )}
+                            {(() => {
+                              const rems = actualRemaindersByParent.get(block.block_id);
+                              if (!rems || rems.length === 0) return null;
+                              return (
+                                <div style={{ marginTop: 10 }}>
+                                  <div style={{
+                                    fontSize: 10,
+                                    fontWeight: 700,
+                                    color: "var(--muted)",
+                                    textTransform: "uppercase",
+                                    letterSpacing: "0.06em",
+                                    marginBottom: 5,
+                                  }}>
+                                    ♻ Restocked {rems.length} piece{rems.length !== 1 ? "s" : ""}
+                                  </div>
+                                  <div className="chip-row">
+                                    {rems.map(r => {
+                                      const stillAvailable = r.status === "available";
+                                      return (
+                                        <Link
+                                          key={r.id}
+                                          href={`/blocks/report?block=${encodeURIComponent(r.id)}`}
+                                          className="plan-chip"
+                                          style={{
+                                            textDecoration: "none",
+                                            background: stillAvailable ? "rgba(22,101,52,0.12)" : "rgba(255,255,255,0.04)",
+                                            border: `1px solid ${stillAvailable ? "rgba(22,101,52,0.35)" : "var(--border)"}`,
+                                            color: stillAvailable ? "var(--text)" : "var(--muted)",
+                                            fontFamily: "ui-monospace, monospace",
+                                          }}
+                                          title={`${r.id} · ${r.l}×${r.w}×${r.h} in · ${stillAvailable ? "available" : r.status}`}
+                                        >
+                                          {r.id}{" · "}
+                                          <span>{r.l}×{r.w}×{r.h}″</span>
+                                          {" · "}
+                                          <span style={{ fontSize: 10, fontWeight: 600, color: stillAvailable ? "#15803d" : "var(--muted)" }}>
+                                            {stillAvailable ? "available" : r.status}
+                                          </span>
+                                        </Link>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              );
+                            })()}
                             <div className="record-actions" style={{ marginTop: 12, gap: 8 }}>
                               <span className="role-pill badge-available" style={{ fontSize: 12 }}>
                                 ✓ Done

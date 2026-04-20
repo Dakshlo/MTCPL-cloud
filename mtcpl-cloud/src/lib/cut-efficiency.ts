@@ -65,3 +65,43 @@ export function computeCutEfficiency(
 export function toCFT(cubicInches: number): number {
   return cubicInches / 1728;
 }
+
+/**
+ * Compute efficiency breakdown using ACTUAL post-cut data instead of the
+ * planner's projection.
+ *
+ *   slabVol    = sum of real cut-done slabs (sw × sh × sd)
+ *   restockVol = sum of ALL restocked remainder block volumes (not just the
+ *                biggest projection — every child block with a real row in
+ *                the `blocks` table that came out of this cut)
+ *   wasteVol   = block - slabs - remainders
+ *
+ * Use this for cards in the "Done today" tab where real numbers are known.
+ * For pending / in-progress cards keep using `computeCutEfficiency` — those
+ * still have only projections to work from.
+ */
+export function computeActualCutEfficiency(
+  block: BlockDims | null | undefined,
+  actualSlabs: PlacedLike[] = [],
+  actualRemainders: RemainderDims[] = [],
+): CutEfficiency | null {
+  if (!block) return null;
+  const blockVol = num(block.l) * num(block.w) * num(block.h);
+  if (blockVol <= 0) return null;
+
+  const slabVol = actualSlabs.reduce(
+    (sum, s) => sum + num(s.sw) * num(s.sh) * num(s.sd),
+    0,
+  );
+  const restockVol = actualRemainders.reduce(
+    (sum, r) => sum + num(r.l) * num(r.w) * num(r.h),
+    0,
+  );
+  const wasteVol = Math.max(0, blockVol - slabVol - restockVol);
+
+  const slabPct = Math.min(100, Math.max(0, Math.round((slabVol / blockVol) * 100)));
+  const restockPct = Math.min(100, Math.max(0, Math.round((restockVol / blockVol) * 100)));
+  const wastePct = Math.min(100, Math.max(0, 100 - slabPct - restockPct));
+
+  return { blockVol, slabVol, restockVol, wasteVol, slabPct, restockPct, wastePct };
+}
