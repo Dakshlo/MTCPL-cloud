@@ -151,6 +151,9 @@ export function AskAiChat({
   const [listening, setListening] = useState(false);
   const [sessions, setSessions] = useState<ChatSessionSummary[]>(initialRecentSessions);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  /** When non-null, the current user is viewing someone else's chat —
+   *  developer-only scenario. The input is locked and a banner appears. */
+  const [viewingAs, setViewingAs] = useState<{ userName: string } | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [loadingSession, setLoadingSession] = useState<string | null>(null);
 
@@ -206,6 +209,7 @@ export function AskAiChat({
     abortRef.current?.abort();
     setMessages([]);
     setActiveSessionId(null);
+    setViewingAs(null);
     setInput("");
     setError(null);
   }
@@ -215,13 +219,16 @@ export function AskAiChat({
     if (activeSessionId === sessionId) return;
     setLoadingSession(sessionId);
     try {
-      const rows = await loadSessionMessages(sessionId);
-      setMessages(rows.map((r) => ({
+      const result = await loadSessionMessages(sessionId);
+      setMessages(result.messages.map((r) => ({
         role: r.role,
         content: r.content,
         images: r.images && r.images.length > 0 ? r.images : undefined,
       })));
       setActiveSessionId(sessionId);
+      // Track whose chat this is — if it's not mine (developer-only
+      // scenario) the input will lock and a banner shows the owner.
+      setViewingAs(result.owner.isMine ? null : { userName: result.owner.userName });
       setError(null);
     } catch {
       setError("Could not load that chat.");
@@ -585,7 +592,7 @@ export function AskAiChat({
           </div>
         )}
 
-        {/* Input area */}
+        {/* Input area — locked when viewing someone else's chat */}
         <footer
           style={{
             flexShrink: 0,
@@ -595,7 +602,49 @@ export function AskAiChat({
             alignItems: "center",
           }}
         >
-          {!isEmpty && (
+          {viewingAs ? (
+            <div
+              style={{
+                width: "100%",
+                maxWidth: 760,
+                padding: "14px 18px",
+                background: "rgba(232,197,114,0.08)",
+                border: "1px solid rgba(232,197,114,0.3)",
+                borderRadius: 12,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                flexWrap: "wrap",
+              }}
+            >
+              <div style={{ fontSize: 13, color: C.text, lineHeight: 1.5 }}>
+                <span style={{ fontSize: 15, marginRight: 6 }}>👤</span>
+                You&rsquo;re viewing <strong style={{ color: C.accent }}>{viewingAs.userName}</strong>&rsquo;s chat.
+                <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>
+                  Read-only — start a new chat to ask your own questions.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={startNewChat}
+                style={{
+                  fontSize: 13,
+                  fontWeight: 600,
+                  padding: "8px 16px",
+                  background: C.accent,
+                  color: "#1a1a1a",
+                  border: "none",
+                  borderRadius: 8,
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                + New chat
+              </button>
+            </div>
+          ) : null}
+          {!viewingAs && !isEmpty && (
             <div
               style={{
                 display: "flex",
@@ -613,7 +662,7 @@ export function AskAiChat({
             </div>
           )}
 
-          <form
+          {!viewingAs && <form
             onSubmit={handleSubmit}
             style={{
               width: "100%",
@@ -830,7 +879,7 @@ export function AskAiChat({
                 {streaming ? <ThinkingDots /> : "↑"}
               </button>
             </div>
-          </form>
+          </form>}
 
           <div style={{ fontSize: 12, color: C.textDim, textAlign: "center", marginTop: 10 }}>
             MTCPL-AI can make mistakes — verify anything important.
@@ -959,8 +1008,36 @@ export function AskAiChat({
                         >
                           {s.title}
                         </div>
-                        <div style={{ fontSize: 11, color: C.textDim, marginTop: 3 }}>
-                          {relativeTime(s.updatedAt)}
+                        <div style={{
+                          fontSize: 11,
+                          color: C.textDim,
+                          marginTop: 3,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          flexWrap: "wrap",
+                        }}>
+                          <span>{relativeTime(s.updatedAt)}</span>
+                          {!s.isMine && (
+                            <span
+                              title={`This chat was started by ${s.userName}`}
+                              style={{
+                                fontSize: 10,
+                                fontWeight: 600,
+                                padding: "1px 7px",
+                                borderRadius: 10,
+                                background: "rgba(232,197,114,0.12)",
+                                color: C.accent,
+                                border: "1px solid rgba(232,197,114,0.3)",
+                                whiteSpace: "nowrap",
+                                maxWidth: 140,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                              }}
+                            >
+                              👤 {s.userName}
+                            </span>
+                          )}
                         </div>
                       </div>
                       <button
