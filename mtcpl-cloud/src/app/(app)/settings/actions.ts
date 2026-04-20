@@ -48,11 +48,13 @@ export async function addStoneTypeAction(formData: FormData) {
   redirect(`/settings?toast=${encodeURIComponent(`${stone_category === "marble" ? "🗿 Marble" : "Sandstone"} "${name}" added`)}`);
 }
 
-/** Toggle a stone's category between sandstone and marble. Use sparingly —
- *  reclassifying a stone that has blocks / slabs already linked to it is
- *  fine at the DB level (category is just a classifier) but the blocks UI
- *  will start showing it differently (tonnes vs CFT). Prefer this over
- *  deleting+recreating. */
+/** Toggle a stone's category between sandstone and marble.
+ *
+ *  HARD-BLOCKED once any block or slab is using the stone — flipping
+ *  PinkStone from sandstone to marble (or vice versa) would break how
+ *  existing rows render (tonnes vs CFT). Safe only before any data
+ *  is attached. The UI enforces this, but the action enforces it too
+ *  in case of a direct POST. */
 export async function setStoneCategoryAction(formData: FormData) {
   await requireAuth(["owner", "team_head", "developer"]);
   const supabase = await createServerSupabaseClient();
@@ -62,6 +64,29 @@ export async function setStoneCategoryAction(formData: FormData) {
   const stone_category = rawCategory === "marble" ? "marble" : "sandstone";
 
   if (!id) redirect("/settings?toast=Stone+id+required");
+
+  // Look up the stone so we can sanity-check by name.
+  const admin = createAdminSupabaseClient();
+  const { data: stoneRow } = await admin
+    .from("stone_types")
+    .select("name")
+    .eq("id", id)
+    .maybeSingle();
+  if (!stoneRow) redirect("/settings?toast=Stone+not+found");
+
+  // Reject if anything is already using this stone.
+  const [{ count: blockCount }, { count: slabCount }] = await Promise.all([
+    admin.from("blocks").select("id", { count: "exact", head: true }).eq("stone", (stoneRow as { name: string }).name),
+    admin.from("slab_requirements").select("id", { count: "exact", head: true }).eq("stone", (stoneRow as { name: string }).name),
+  ]);
+  const total = (blockCount ?? 0) + (slabCount ?? 0);
+  if (total > 0) {
+    redirect(
+      `/settings?toast=${encodeURIComponent(
+        `Cannot change category — ${blockCount ?? 0} block(s) and ${slabCount ?? 0} slab(s) already use "${(stoneRow as { name: string }).name}". Category is locked to preserve their display.`,
+      )}`,
+    );
+  }
 
   const { error } = await supabase
     .from("stone_types")

@@ -411,33 +411,66 @@ export default async function SettingsPage() {
                     {isBuiltIn && <span className="role-pill" style={{ fontSize: 11 }}>Built-in</span>}
                   </span>
                   <span>
-                    <form action={setStoneCategoryAction} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                      <input type="hidden" name="id" value={st.id} />
-                      <select
-                        name="stone_category"
-                        defaultValue={stoneCategory}
-                        style={{
-                          fontSize: 12,
-                          fontWeight: 700,
-                          padding: "3px 8px",
-                          border: `1px solid ${isMarble ? "rgba(180,83,9,0.35)" : "var(--border)"}`,
-                          borderRadius: 4,
-                          background: isMarble ? "rgba(180,83,9,0.1)" : "rgba(22,101,52,0.08)",
-                          color: isMarble ? "#b45309" : "#15803d",
-                        }}
-                      >
-                        <option value="sandstone">Sandstone</option>
-                        <option value="marble">🗿 Marble</option>
-                      </select>
-                      <button
-                        type="submit"
-                        className="ghost-button"
-                        style={{ fontSize: 11, padding: "2px 8px" }}
-                        title="Save category change"
-                      >
-                        Save
-                      </button>
-                    </form>
+                    {(() => {
+                      // Lock the category whenever this stone already has
+                      // blocks or slabs — flipping PinkStone's category
+                      // from sandstone to marble (or vice versa) would
+                      // break how those rows render (dims vs tonnes).
+                      const inUseBlocks = blockStoneCount[st.name] ?? 0;
+                      const inUseSlabs = slabStoneCount[st.name] ?? 0;
+                      const isLocked = inUseBlocks + inUseSlabs > 0;
+                      if (isLocked) {
+                        return (
+                          <span
+                            title={`Locked — ${inUseBlocks} block${inUseBlocks !== 1 ? "s" : ""} and ${inUseSlabs} slab${inUseSlabs !== 1 ? "s" : ""} already use this stone. Category is fixed to preserve their display. To change, first reassign or delete the blocks/slabs.`}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 6,
+                              fontSize: 12,
+                              fontWeight: 700,
+                              padding: "3px 10px",
+                              border: `1px solid ${isMarble ? "rgba(180,83,9,0.35)" : "rgba(22,101,52,0.3)"}`,
+                              borderRadius: 4,
+                              background: isMarble ? "rgba(180,83,9,0.1)" : "rgba(22,101,52,0.08)",
+                              color: isMarble ? "#b45309" : "#15803d",
+                              cursor: "help",
+                            }}
+                          >
+                            🔒 {isMarble ? "🗿 Marble" : "Sandstone"}
+                          </span>
+                        );
+                      }
+                      return (
+                        <form action={setStoneCategoryAction} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          <input type="hidden" name="id" value={st.id} />
+                          <select
+                            name="stone_category"
+                            defaultValue={stoneCategory}
+                            style={{
+                              fontSize: 12,
+                              fontWeight: 700,
+                              padding: "3px 8px",
+                              border: `1px solid ${isMarble ? "rgba(180,83,9,0.35)" : "var(--border)"}`,
+                              borderRadius: 4,
+                              background: isMarble ? "rgba(180,83,9,0.1)" : "rgba(22,101,52,0.08)",
+                              color: isMarble ? "#b45309" : "#15803d",
+                            }}
+                          >
+                            <option value="sandstone">Sandstone</option>
+                            <option value="marble">🗿 Marble</option>
+                          </select>
+                          <button
+                            type="submit"
+                            className="ghost-button"
+                            style={{ fontSize: 11, padding: "2px 8px" }}
+                            title="Save category change"
+                          >
+                            Save
+                          </button>
+                        </form>
+                      );
+                    })()}
                   </span>
                   <span style={{ display: "flex", gap: 4 }}>
                     <span title="Top" style={{ width: 22, height: 22, borderRadius: 4, background: st.color_top, border: "1px solid rgba(0,0,0,0.1)", display: "inline-block" }} />
