@@ -9,6 +9,8 @@ import { CuttingTimer } from "./cutting-timer";
 import { computeCutEfficiency } from "@/lib/cut-efficiency";
 import { yardLabel, facilityOfYard, facilityLabel, FACILITIES, type Facility } from "@/lib/yards";
 import { PrintReportButton } from "./print-report-button";
+import { SelectionProvider } from "./selection-context";
+import { BlockSelector } from "./block-selector";
 
 type Tab = "pending" | "in_progress" | "done";
 type SearchParams = Promise<{ tab?: string }>;
@@ -168,6 +170,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
   };
 
   return (
+    <SelectionProvider>
     <section className="page-card">
       <div className="record-head">
         <div>
@@ -298,6 +301,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                       minWidth: 0,
                     }}
                   >
+                    <BlockSelector id={block.id} />
                     {isLive && (
                       <span
                         className="live-dot"
@@ -577,7 +581,9 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                         return (
                           <div className="plan-card" key={block.id} style={{ marginBottom: 8 }}>
                             <div className="record-head" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-start" }}>
-                              <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ display: "flex", alignItems: "flex-start", gap: 10, flex: 1, minWidth: 0 }}>
+                                <BlockSelector id={block.id} />
+                                <div style={{ flex: 1, minWidth: 0 }}>
                                 <strong style={{ fontFamily: "ui-monospace, monospace", fontSize: 15 }}>
                                   {block.block_id}
                                 </strong>
@@ -593,6 +599,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                                     </span>
                                   </p>
                                 )}
+                                </div>
                               </div>
                               <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
                                 <span className="role-pill">{slabCount} slab{slabCount !== 1 ? "s" : ""}</span>
@@ -724,5 +731,6 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
         )}
       </div>
     </section>
+    </SelectionProvider>
   );
 }

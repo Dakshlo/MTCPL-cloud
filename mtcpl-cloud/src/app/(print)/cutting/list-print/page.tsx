@@ -23,7 +23,7 @@ import { PrintBtn } from "../[id]/print/print-btn";
 
 type Tab = "pending" | "in_progress" | "done";
 type FacilityScope = "mtcpl" | "riico" | "both";
-type SearchParams = Promise<{ facility?: string; tab?: string }>;
+type SearchParams = Promise<{ facility?: string; tab?: string; blocks?: string }>;
 
 type PlacedSlab = {
   id: string;
@@ -86,17 +86,31 @@ function istTodayBounds() {
 
 export default async function CuttingListPrintPage({ searchParams }: { searchParams: SearchParams }) {
   await requireAuth(["owner", "team_head", "cutting_operator"]);
-  const { facility: facilityParam, tab: tabParam } = await searchParams;
+  const { facility: facilityParam, tab: tabParam, blocks: blocksParam } = await searchParams;
 
   const facility: FacilityScope =
     facilityParam === "mtcpl" || facilityParam === "riico" ? facilityParam : "both";
   const tab: Tab =
     tabParam === "pending" || tabParam === "done" ? tabParam : "in_progress";
 
+  // Explicit block filter — when the owner ticked specific cards before
+  // clicking print, those ids land here as a comma-separated list. When
+  // present, it overrides the tab-wide status filter: a selected block
+  // is included even if it would be otherwise outside the current tab
+  // (rare — usually tab and selection align, but we honour the explicit
+  // pick to match what the user saw in the UI).
+  const selectedIds = (blocksParam ?? "")
+    .split(",")
+    .map(s => s.trim())
+    .filter(Boolean);
+  const hasSelection = selectedIds.length > 0;
+
   const supabase = createAdminSupabaseClient();
   const statusFilter = TAB_STATUSES[tab];
 
-  // For the Done tab, only pull today's completions to match the UI.
+  // For the Done tab, only pull today's completions to match the UI —
+  // unless the owner explicitly picked blocks, in which case we honour
+  // the selection regardless of date.
   const { todayStartIso, tomorrowStartIso } = istTodayBounds();
 
   let query = supabase
@@ -105,13 +119,17 @@ export default async function CuttingListPrintPage({ searchParams }: { searchPar
       "id, block_id, status, updated_at, cut_session_id, layout, " +
       "cut_sessions(session_code, kerf_mm, planned_by), " +
       "cut_session_slabs(slab_requirement_id)"
-    )
-    .in("status", statusFilter);
+    );
 
-  if (tab === "done") {
-    query = query
-      .gte("updated_at", todayStartIso)
-      .lt("updated_at", tomorrowStartIso);
+  if (hasSelection) {
+    query = query.in("id", selectedIds);
+  } else {
+    query = query.in("status", statusFilter);
+    if (tab === "done") {
+      query = query
+        .gte("updated_at", todayStartIso)
+        .lt("updated_at", tomorrowStartIso);
+    }
   }
 
   const { data: blocks, error } = await query.order(
@@ -160,7 +178,12 @@ export default async function CuttingListPrintPage({ searchParams }: { searchPar
 
   const scopeFacilities: Facility[] = facility === "both" ? [...FACILITIES] : [facility];
 
-  const tabTitle = TAB_TITLES[tab];
+  // When an explicit selection is passed, the report title reflects that
+  // rather than the tab name — "3 Selected Blocks" is more honest than
+  // "In Progress" when the 3 aren't necessarily all in-progress.
+  const tabTitle = hasSelection
+    ? `${totalBlocks} Selected Block${totalBlocks !== 1 ? "s" : ""}`
+    : TAB_TITLES[tab];
 
   return (
     <>
@@ -297,7 +320,9 @@ export default async function CuttingListPrintPage({ searchParams }: { searchPar
 
         {totalBlocks === 0 && (
           <div className="empty">
-            No {tabTitle.toLowerCase()} blocks for {prettyFacilityScope(facility)}.
+            {hasSelection
+              ? `None of the ${selectedIds.length} selected block${selectedIds.length !== 1 ? "s" : ""} are in ${prettyFacilityScope(facility)}.`
+              : `No ${TAB_TITLES[tab].toLowerCase()} blocks for ${prettyFacilityScope(facility)}.`}
           </div>
         )}
 
