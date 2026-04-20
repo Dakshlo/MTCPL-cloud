@@ -14,13 +14,20 @@ export default async function SlabsPage() {
 
   const isEntryRole = (ENTRY_ROLES as readonly string[]).includes(profile.role);
 
+  // Safety cap — slab_requirements won't realistically exceed this across all
+  // open+planned rows. If it ever does, the section heading will still say
+  // "N Required Sizes" reflecting what's shown, and we add pagination then.
+  // Keep in sync with the planning workbench (`.limit(2000)` in planning/page.tsx)
+  // so both pages see the same universe of slabs.
+  const SLAB_QUERY_LIMIT = 5000;
+
   let slabQuery = admin
     .from("slab_requirements")
     .select("id, label, description, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority, batch_id, created_at, updated_at, created_by")
     .in("status", ["open", "planned"])
     .order("priority", { ascending: false })
     .order("created_at", { ascending: false })
-    .limit(200);
+    .limit(SLAB_QUERY_LIMIT);
 
   // Entry roles see only what they personally added
   if (isEntryRole) slabQuery = slabQuery.eq("created_by", profile.id);
