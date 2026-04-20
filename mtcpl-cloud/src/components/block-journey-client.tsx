@@ -22,18 +22,27 @@ import {
 type Resolution = "all" | "resolved" | "in_progress";
 type SortKey = "eff_desc" | "eff_asc" | "cft_desc" | "cft_asc" | "newest" | "oldest";
 type SizeBucket = "all" | "small" | "medium" | "large";
+type CategoryFilter = "all" | "sandstone" | "marble";
 
 export function BlockJourneyClient({
   lineages,
   profilesMap,
   stoneOptions,
+  stoneCategoryMap = {},
   initialMode,
 }: {
   lineages: Lineage[];
   profilesMap: Record<string, string>;
   stoneOptions: string[];
+  /** Map of stone name → category. Lets the filter dropdown classify
+   *  each stone and power the Category segmented control. */
+  stoneCategoryMap?: Record<string, "sandstone" | "marble">;
   initialMode: ViewMode;
 }) {
+  // Does this dataset contain any marble lineages? Controls whether the
+  // Category toggle is rendered at all.
+  const hasMarble = lineages.some((l) => l.category === "marble");
+  void stoneCategoryMap; // reserved for future stone-filter grouping
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -50,6 +59,7 @@ export function BlockJourneyClient({
 
   // ── Filters (client state) ─────────────────────────────────────────────
   const [search, setSearch] = useState<string>("");
+  const [category, setCategory] = useState<CategoryFilter>("all");
   const [stone, setStone] = useState<string>("all");
   const [facility, setFacility] = useState<"all" | "mtcpl" | "riico">("all");
   const [quality, setQuality] = useState<"all" | "A" | "B">("all");
@@ -63,10 +73,12 @@ export function BlockJourneyClient({
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return lineages.filter((l) => {
+      if (category !== "all" && l.category !== category) return false;
       if (stone !== "all" && l.rootStone !== stone) return false;
       if (facility !== "all" && l.rootFacility !== facility) return false;
       if (quality !== "all" && l.rootQuality !== quality) return false;
-      if (sizeBucket !== "all" && l.sizeBucket !== sizeBucket) return false;
+      // Size bucket only applies to sandstone — marble lineages ignore it.
+      if (sizeBucket !== "all" && l.category === "sandstone" && l.sizeBucket !== sizeBucket) return false;
       if (resolution === "resolved" && !l.isResolved) return false;
       if (resolution === "in_progress" && l.isResolved) return false;
       if (dateFrom && l.rootCreatedAt && l.rootCreatedAt < dateFrom) return false;
@@ -74,20 +86,31 @@ export function BlockJourneyClient({
       if (q && !matchesSearch(l, q)) return false;
       return true;
     });
-  }, [lineages, search, stone, facility, quality, sizeBucket, resolution, dateFrom, dateTo]);
+  }, [lineages, category, search, stone, facility, quality, sizeBucket, resolution, dateFrom, dateTo]);
+
+  /** Efficiency comparator for the sort dropdown. Uses slabPct for
+   *  sandstone, cftPerTonne for marble. */
+  function effOf(l: Lineage): number {
+    if (l.category === "marble") return l.cftPerTonne;
+    return mode === "yield" ? l.slabPct : l.recoveredPct;
+  }
+  function sizeOf(l: Lineage): number {
+    if (l.category === "marble") return l.tonnes;
+    return l.originalCft;
+  }
 
   const sorted = useMemo(() => {
     const copy = [...filtered];
     copy.sort((a, b) => {
       switch (sortKey) {
         case "eff_desc":
-          return (mode === "yield" ? b.slabPct - a.slabPct : b.recoveredPct - a.recoveredPct);
+          return effOf(b) - effOf(a);
         case "eff_asc":
-          return (mode === "yield" ? a.slabPct - b.slabPct : a.recoveredPct - b.recoveredPct);
+          return effOf(a) - effOf(b);
         case "cft_desc":
-          return b.originalCft - a.originalCft;
+          return sizeOf(b) - sizeOf(a);
         case "cft_asc":
-          return a.originalCft - b.originalCft;
+          return sizeOf(a) - sizeOf(b);
         case "newest":
           return (b.rootCreatedAt ?? "").localeCompare(a.rootCreatedAt ?? "");
         case "oldest":
@@ -95,6 +118,8 @@ export function BlockJourneyClient({
       }
     });
     return copy;
+  // effOf depends on mode; intentional
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filtered, sortKey, mode]);
 
   const agg = useMemo(() => aggregateLineages(filtered), [filtered]);
@@ -120,11 +145,64 @@ export function BlockJourneyClient({
           <h1 style={{ margin: 0 }}>Block Journey</h1>
           <p className="muted" style={{ marginTop: 4 }}>
             Track every Fresh block end-to-end — true slab yield across the full cutting lineage, not just one cut.
+            {hasMarble ? " Sandstone CFT yield · Marble CFT per tonne." : ""}
           </p>
         </div>
       </div>
 
-      {/* Mode toggle */}
+      {/* Category segmented control (only when marble lineages exist) */}
+      {hasMarble && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            marginBottom: 12,
+            padding: "10px 14px",
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+            borderRadius: 10,
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>
+            Category
+          </div>
+          <div style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
+            {(["all", "sandstone", "marble"] as const).map((c) => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => setCategory(c)}
+                style={{
+                  padding: "6px 16px",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  background: category === c
+                    ? c === "marble" ? "#b45309" : c === "sandstone" ? "#15803d" : "var(--gold-dark)"
+                    : "transparent",
+                  color: category === c ? "#fff" : "var(--muted)",
+                  border: "none",
+                  cursor: "pointer",
+                  letterSpacing: "0.02em",
+                }}
+              >
+                {c === "all" ? "All" : c === "sandstone" ? "Sandstone" : "🗿 Marble"}
+              </button>
+            ))}
+          </div>
+          <div style={{ fontSize: 11, color: "var(--muted)", flex: 1, minWidth: 240 }}>
+            {category === "marble"
+              ? "Marble blocks use tonnes → CFT (95 kg/CFT)."
+              : category === "sandstone"
+                ? "Sandstone blocks use CFT dimensions + lineage yield."
+                : "Both stone categories mixed together."}
+          </div>
+        </div>
+      )}
+
+      {/* Mode toggle — hidden when only marble is shown (not applicable) */}
+      {category !== "marble" && (
       <div
         style={{
           display: "flex",
@@ -155,6 +233,7 @@ export function BlockJourneyClient({
             : "Recovered = (slabs + live remainders) ÷ original. Optimistic — credits in-inventory restocks as recovered."}
         </div>
       </div>
+      )}
 
       {/* Search bar — its own row so it's always visible and scannable */}
       <div
@@ -338,11 +417,38 @@ export function BlockJourneyClient({
             {agg.resolvedCount} resolved · {agg.inProgressCount} in progress
           </div>
           <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
-            {agg.totalOriginalCft.toFixed(1)} CFT original · {agg.totalSlabCft.toFixed(1)} CFT slabs
+            {category === "marble"
+              ? `${agg.marble.totalTonnes.toFixed(3)} T raw · ${agg.marble.totalSlabCft.toFixed(1)} CFT slabs · ${agg.marble.truckCount} truck${agg.marble.truckCount !== 1 ? "s" : ""}`
+              : `${agg.totalOriginalCft.toFixed(1)} CFT original · ${agg.totalSlabCft.toFixed(1)} CFT slabs`}
           </div>
         </Tile>
 
-        {mode === "yield" ? (
+        {category === "marble" ? (
+          <>
+            <Tile label="Weighted CFT per tonne" accent="warn">
+              <div style={{ fontSize: 26, fontWeight: 700, fontFamily: "ui-monospace, monospace", color: "#b45309" }}>
+                {agg.marble.weightedCftPerTonne.toFixed(2)}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
+                Simple avg: {agg.marble.simpleCftPerTonneAvg.toFixed(2)} CFT/T
+              </div>
+              <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+                Sellable CFT yielded per tonne of marble
+              </div>
+            </Tile>
+            <Tile label="Total slab CFT yielded" accent="good">
+              <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "ui-monospace, monospace", color: "#15803d" }}>
+                {agg.marble.totalSlabCft.toFixed(2)}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
+                from {agg.marble.totalTonnes.toFixed(3)} T raw
+              </div>
+              <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+                95 kg/CFT conversion constant
+              </div>
+            </Tile>
+          </>
+        ) : mode === "yield" ? (
           <>
             <Tile label="Weighted slab yield" accent="good">
               <div style={{ fontSize: 26, fontWeight: 700, fontFamily: "ui-monospace, monospace", color: "#15803d" }}>

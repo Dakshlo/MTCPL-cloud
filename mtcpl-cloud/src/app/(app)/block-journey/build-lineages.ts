@@ -15,6 +15,7 @@
  */
 
 import { facilityOfYard, type Facility } from "@/lib/yards";
+import type { StoneCategory } from "@/lib/stone-categories";
 
 // ─── Raw input row shapes (match what the callers SELECT from Supabase) ──
 
@@ -24,12 +25,29 @@ export type BjBlockRow = {
   yard: number;
   quality: string | null;
   category: string | null;
-  length_ft: number | string;
-  width_ft: number | string;
-  height_ft: number | string;
+  length_ft: number | string | null;
+  width_ft: number | string | null;
+  height_ft: number | string | null;
   status: string;
   created_at: string | null;
   created_by?: string | null;
+  /** Marble blocks carry tonnage instead of dimensions. Null for sandstone. */
+  tonnes?: number | string | null;
+  /** Marble blocks link to their truck entry. Null for sandstone. */
+  truck_entry_id?: string | null;
+};
+
+/** Minimal row shape of a marble_truck_entries record passed into the
+ *  lineage builder. The builder needs these fields to roll up per-truck
+ *  aggregates when the Block Journey client groups by truck. */
+export type BjMarbleTruckRow = {
+  id: string;
+  stone: string;
+  truck_no: string | null;
+  vendor_name: string | null;
+  total_tonnes: number | string;
+  num_blocks: number;
+  created_at?: string | null;
 };
 
 export type BjSlabRow = {
@@ -75,7 +93,8 @@ export type LineageNode = {
   children: LineageNode[];     // DIRECT children only (recursion carries deeper)
 };
 
-export type Lineage = {
+/** Fields shared by every lineage regardless of stone category. */
+type LineageCommon = {
   rootId: string;
   rootStone: string | null;
   rootYard: number;
@@ -83,29 +102,43 @@ export type Lineage = {
   rootQuality: string | null;
   rootCreatedAt: string | null;
   rootCreatedBy: string | null;
+  isResolved: boolean;
+  lastActivityAt: string | null;
+  descendantCount: number;
+  cutCount: number;
+  tree: LineageNode;
+};
 
-  // Aggregated CFT numbers across the whole lineage
+/** Sandstone lineage — the existing shape. CFT-based math throughout. */
+export type SandstoneLineage = LineageCommon & {
+  category: "sandstone";
   originalCft: number;
   slabCft: number;
   liveCft: number;           // available/reserved/cutting descendants
   discardedCft: number;      // explicitly thrown-out descendants
   wasteCft: number;          // original - slabs - live - discarded
-
-  // Percentages (integer, 0-100, clamped)
   slabPct: number;
   livePct: number;
   wastePct: number;
   recoveredPct: number;      // slabPct + livePct
-
-  // Metadata for filtering / sorting / display
-  isResolved: boolean;
-  descendantCount: number;
-  cutCount: number;
-  lastActivityAt: string | null;
   sizeBucket: "small" | "medium" | "large";   // < 30 / 30–80 / > 80 CFT
-
-  tree: LineageNode;
 };
+
+/** Marble lineage — tonnes in, CFT out. No child-tree walk (marble doesn't
+ *  restock). No waste percentage — owner's explicit call. The key metric
+ *  is cftPerTonne = slabCft / tonnes. */
+export type MarbleLineage = LineageCommon & {
+  category: "marble";
+  tonnes: number;
+  slabCft: number;
+  cftPerTonne: number;
+  truckEntryId: string | null;
+  truckNo: string | null;
+  vendorName: string | null;
+  truckTotalTonnes: number | null;
+};
+
+export type Lineage = SandstoneLineage | MarbleLineage;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
@@ -155,10 +188,19 @@ export function buildLineages(
   reusedBlocks: BjBlockRow[],
   cutDoneSlabs: BjSlabRow[],
   doneCsbs: BjCsbRow[],
+  /** Optional stone-name → category map. When omitted every block is
+   *  treated as sandstone (backwards compatible). When present, marble
+   *  blocks get the tonnage-based pipeline. */
+  stoneCategoryMap: Record<string, StoneCategory> = {},
+  /** Optional truck entries — only needed when marble lineages should
+   *  carry truck context for per-truck rollups in the UI. */
+  marbleTruckEntries: BjMarbleTruckRow[] = [],
 ): Lineage[] {
   const freshById = new Map(freshBlocks.map((b) => [b.id, b]));
   const freshIds = new Set(freshById.keys());
   const doneBlockIds = new Set(doneCsbs.map((c) => c.block_id));
+
+  const truckById = new Map(marbleTruckEntries.map((t) => [t.id, t]));
 
   // Index slabs by source_block_id (each block can have 0..n slabs cut from it).
   const slabsByBlock = new Map<string, BjSlabRow[]>();
@@ -179,10 +221,14 @@ export function buildLineages(
     descendantsByRoot.set(rootId, list);
   }
 
-  // A root appears on the page if it has been cut OR has children.
+  // A root appears on the page if it has been cut OR has children OR
+  // (for marble) is marble-category. Marble blocks show up even before
+  // they're cut because the inventory tonnage is the denominator.
   const rootIds = new Set<string>();
   for (const fid of freshIds) {
-    if (doneBlockIds.has(fid) || descendantsByRoot.has(fid)) {
+    const row = freshById.get(fid)!;
+    const isMarble = stoneCategoryMap[row.stone ?? ""] === "marble";
+    if (doneBlockIds.has(fid) || descendantsByRoot.has(fid) || isMarble) {
       rootIds.add(fid);
     }
   }
@@ -191,6 +237,58 @@ export function buildLineages(
 
   for (const rootId of rootIds) {
     const root = freshById.get(rootId)!;
+    const isMarble = stoneCategoryMap[root.stone ?? ""] === "marble";
+
+    // ── Marble path — tonnes in, slab CFT out, no descendant tree. ────────
+    if (isMarble) {
+      const tonnes = num(root.tonnes);
+      if (tonnes <= 0) continue; // bad data — skip
+
+      // Marble blocks never have reused descendants, but defensively sum
+      // slabs cut directly from this block.
+      const ownSlabs = slabsByBlock.get(root.id) ?? [];
+      const slabCft = ownSlabs.reduce(
+        (sum, s) =>
+          sum + toCFT(num(s.length_ft) * num(s.width_ft) * num(s.thickness_ft)),
+        0,
+      );
+
+      const cftPerTonne = tonnes > 0 ? slabCft / tonnes : 0;
+      const truckEntryId = root.truck_entry_id ?? null;
+      const truck = truckEntryId ? truckById.get(truckEntryId) ?? null : null;
+
+      // Marble is "resolved" once the block is consumed — there are no
+      // live descendants to wait on.
+      const isResolved = root.status === "consumed";
+
+      const tree: LineageNode = buildTreeNode(root, true, [], slabsByBlock, doneBlockIds);
+
+      lineages.push({
+        category: "marble",
+        rootId: root.id,
+        rootStone: root.stone,
+        rootYard: root.yard,
+        rootFacility: facilityOfYard(root.yard),
+        rootQuality: root.quality,
+        rootCreatedAt: root.created_at ?? null,
+        rootCreatedBy: root.created_by ?? null,
+        tonnes,
+        slabCft,
+        cftPerTonne: Math.round(cftPerTonne * 100) / 100,
+        truckEntryId,
+        truckNo: truck?.truck_no ?? null,
+        vendorName: truck?.vendor_name ?? null,
+        truckTotalTonnes: truck ? Number(truck.total_tonnes) : null,
+        isResolved,
+        descendantCount: 0,
+        cutCount: doneBlockIds.has(root.id) ? 1 : 0,
+        lastActivityAt: root.created_at ?? null,
+        tree,
+      });
+      continue;
+    }
+
+    // ── Sandstone path — existing CFT-based lineage math. ─────────────────
     const descendants = descendantsByRoot.get(rootId) ?? [];
 
     // Original CFT from the root's dimensions as it was added to inventory.
@@ -251,6 +349,7 @@ export function buildLineages(
     const tree = buildTreeNode(root, true, descendants, slabsByBlock, doneBlockIds);
 
     lineages.push({
+      category: "sandstone",
       rootId: root.id,
       rootStone: root.stone,
       rootYard: root.yard,
@@ -330,6 +429,7 @@ export type LineageAggregate = {
   resolvedCount: number;
   inProgressCount: number;
 
+  // ── Sandstone totals (CFT-based) ──────────────────────────────────────
   totalOriginalCft: number;
   totalSlabCft: number;
   totalLiveCft: number;
@@ -344,10 +444,25 @@ export type LineageAggregate = {
   weightedRecoveredPct: number;
   weightedWastePct: number;
   simpleRecoveredPctAvg: number;
+
+  // ── Marble totals (tonne-based) ───────────────────────────────────────
+  marble: {
+    lineageCount: number;
+    resolvedCount: number;
+    inProgressCount: number;
+    totalTonnes: number;
+    totalSlabCft: number;
+    weightedCftPerTonne: number;    // = totalSlabCft / totalTonnes
+    simpleCftPerTonneAvg: number;
+    truckCount: number;
+  };
 };
 
 export function aggregateLineages(lineages: Lineage[]): LineageAggregate {
+  const sandstone = lineages.filter((l): l is SandstoneLineage => l.category === "sandstone");
+  const marble = lineages.filter((l): l is MarbleLineage => l.category === "marble");
   const n = lineages.length;
+
   if (n === 0) {
     return {
       totalLineages: 0,
@@ -363,6 +478,16 @@ export function aggregateLineages(lineages: Lineage[]): LineageAggregate {
       weightedRecoveredPct: 0,
       weightedWastePct: 0,
       simpleRecoveredPctAvg: 0,
+      marble: {
+        lineageCount: 0,
+        resolvedCount: 0,
+        inProgressCount: 0,
+        totalTonnes: 0,
+        totalSlabCft: 0,
+        weightedCftPerTonne: 0,
+        simpleCftPerTonneAvg: 0,
+        truckCount: 0,
+      },
     };
   }
 
@@ -374,7 +499,7 @@ export function aggregateLineages(lineages: Lineage[]): LineageAggregate {
   let simpleSlabSum = 0;
   let simpleRecoveredSum = 0;
 
-  for (const l of lineages) {
+  for (const l of sandstone) {
     sumOriginal += l.originalCft;
     sumSlab += l.slabCft;
     sumLive += l.liveCft;
@@ -384,6 +509,22 @@ export function aggregateLineages(lineages: Lineage[]): LineageAggregate {
     simpleRecoveredSum += l.recoveredPct;
   }
 
+  // Marble aggregates: tonnes in, CFT out.
+  let marbleTonnes = 0;
+  let marbleSlabCft = 0;
+  let marbleResolved = 0;
+  let marbleSimpleCftPerTonneSum = 0;
+  const marbleTruckIds = new Set<string>();
+  for (const l of marble) {
+    marbleTonnes += l.tonnes;
+    marbleSlabCft += l.slabCft;
+    if (l.isResolved) marbleResolved++;
+    marbleSimpleCftPerTonneSum += l.cftPerTonne;
+    if (l.truckEntryId) marbleTruckIds.add(l.truckEntryId);
+  }
+  const marbleWeightedCftPerTonne = marbleTonnes > 0 ? marbleSlabCft / marbleTonnes : 0;
+  const marbleSimpleCftPerTonneAvg = marble.length > 0 ? marbleSimpleCftPerTonneSum / marble.length : 0;
+
   const weightedSlabPct = sumOriginal > 0 ? (sumSlab / sumOriginal) * 100 : 0;
   const weightedLivePct = sumOriginal > 0 ? (sumLive / sumOriginal) * 100 : 0;
   const weightedWastePct = sumOriginal > 0 ? (sumWaste / sumOriginal) * 100 : 0;
@@ -391,19 +532,37 @@ export function aggregateLineages(lineages: Lineage[]): LineageAggregate {
 
   return {
     totalLineages: n,
-    resolvedCount,
-    inProgressCount: n - resolvedCount,
+    resolvedCount: resolvedCount + marbleResolved,
+    inProgressCount: n - (resolvedCount + marbleResolved),
     totalOriginalCft: sumOriginal,
     totalSlabCft: sumSlab,
     totalLiveCft: sumLive,
     totalWasteCft: sumWaste,
     weightedSlabPct: round1(weightedSlabPct),
     weightedLivePct: round1(weightedLivePct),
-    simpleSlabPctAvg: round1(simpleSlabSum / n),
+    simpleSlabPctAvg: sandstone.length > 0 ? round1(simpleSlabSum / sandstone.length) : 0,
     weightedRecoveredPct: round1(weightedRecoveredPct),
     weightedWastePct: round1(weightedWastePct),
-    simpleRecoveredPctAvg: round1(simpleRecoveredSum / n),
+    simpleRecoveredPctAvg: sandstone.length > 0 ? round1(simpleRecoveredSum / sandstone.length) : 0,
+    marble: {
+      lineageCount: marble.length,
+      resolvedCount: marbleResolved,
+      inProgressCount: marble.length - marbleResolved,
+      totalTonnes: round3(marbleTonnes),
+      totalSlabCft: round2(marbleSlabCft),
+      weightedCftPerTonne: round2(marbleWeightedCftPerTonne),
+      simpleCftPerTonneAvg: round2(marbleSimpleCftPerTonneAvg),
+      truckCount: marbleTruckIds.size,
+    },
   };
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+function round3(n: number): number {
+  return Math.round(n * 1000) / 1000;
 }
 
 function round1(n: number): number {

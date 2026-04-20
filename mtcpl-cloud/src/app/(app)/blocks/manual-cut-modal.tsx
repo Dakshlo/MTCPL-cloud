@@ -23,6 +23,9 @@ type Block = {
   length_ft: number;
   width_ft: number;
   height_ft: number;
+  /** Present only for marble blocks. When set, manual cut hides the
+   *  remainder-pieces UI and the server skips restock creation. */
+  tonnes?: number | null;
 };
 
 type RemainderEntry = { l: string; w: string; h: string };
@@ -31,10 +34,15 @@ export function ManualCutModal({
   block,
   openSlabs,
   onClose,
+  isMarble = false,
 }: {
   block: Block;
   openSlabs: OpenSlab[];
   onClose: () => void;
+  /** When true, the remainder-pieces section is hidden. Marble blocks
+   *  are brittle and don't get restocked — slabs only, rest is implicit
+   *  loss. */
+  isMarble?: boolean;
 }) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState("");
@@ -130,8 +138,24 @@ export function ManualCutModal({
             <div className="drawer-title">✂ Manual Cut Entry</div>
             <code className="drawer-subtitle">{block.id}</code>
             <p className="muted" style={{ margin: "4px 0 0", fontSize: 12 }}>
-              {block.stone} · {yardLabel(block.yard)} · {block.length_ft} × {block.width_ft} × {block.height_ft} in
+              {block.stone} · {yardLabel(block.yard)}
+              {isMarble && block.tonnes != null
+                ? ` · ${Number(block.tonnes).toFixed(3)} T (marble)`
+                : ` · ${block.length_ft} × ${block.width_ft} × ${block.height_ft} in`}
             </p>
+            {isMarble && (
+              <p
+                className="muted"
+                style={{
+                  margin: "4px 0 0",
+                  fontSize: 11,
+                  color: "#b45309",
+                  fontStyle: "italic",
+                }}
+              >
+                Marble blocks: no remainder pieces — slabs only, the rest is implicit yield loss.
+              </p>
+            )}
           </div>
           <button className="drawer-close" onClick={onClose}>✕</button>
         </div>
@@ -239,8 +263,8 @@ export function ManualCutModal({
             )}
           </div>
 
-          {/* Remainder pieces */}
-          <div style={{ marginBottom: 16 }}>
+          {/* Remainder pieces — hidden for marble blocks (brittle, no restock) */}
+          {!isMarble && <div style={{ marginBottom: 16 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: remainders.length ? 8 : 0 }}>
               <p style={{ fontSize: 12, fontWeight: 700, margin: 0, color: "var(--text)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
                 Remaining block pieces{remainders.length > 0 ? ` (${validRemainders.length} valid)` : ""}
@@ -308,11 +332,11 @@ export function ManualCutModal({
                 {validRemainders.length} piece{validRemainders.length > 1 ? "s" : ""} will be added to Blocks inventory when you click &ldquo;Cut &amp; Restock&rdquo;.
               </p>
             )}
-          </div>
+          </div>}
 
           {/* Action buttons */}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {hasValidRemainders ? (
+            {hasValidRemainders && !isMarble ? (
               <>
                 <button
                   className="primary-button"

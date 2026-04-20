@@ -9,6 +9,7 @@ import type { StoneTypeDef } from "@/lib/stone-utils";
 import { ManualCutModal } from "./manual-cut-modal";
 import { FACILITIES, YARDS_BY_FACILITY, facilityLabel, facilityOfYard, yardLabel, yardShortLabel, type Facility } from "@/lib/yards";
 import { blockStatusLabel, blockStatusBadge, isReusedBlock } from "@/lib/blocks";
+import { cftEquivFromTonnes, type StoneCategory } from "@/lib/stone-categories";
 
 type StoneType = StoneTypeDef;
 type OpenSlab = {
@@ -58,9 +59,11 @@ type Block = {
   stone: string;
   yard: number;
   category: string | null;
-  length_ft: number;
-  width_ft: number;
-  height_ft: number;
+  length_ft: number | null;
+  width_ft: number | null;
+  height_ft: number | null;
+  tonnes?: number | string | null;
+  truck_entry_id?: string | null;
   status: string;
   quality: string | null;
   truck_no: string | null;
@@ -70,7 +73,23 @@ type Block = {
   created_by: string | null;
 };
 
-export function BlockGrid({ blocks, canEdit, vendors, profilesMap = {}, stoneTypes, openSlabs = [] }: { blocks: Block[]; canEdit: boolean; vendors: string[]; profilesMap?: Record<string, string>; stoneTypes?: StoneType[]; openSlabs?: OpenSlab[] }) {
+export function BlockGrid({
+  blocks,
+  canEdit,
+  vendors,
+  profilesMap = {},
+  stoneTypes,
+  openSlabs = [],
+  stoneCategoryMap = {},
+}: {
+  blocks: Block[];
+  canEdit: boolean;
+  vendors: string[];
+  profilesMap?: Record<string, string>;
+  stoneTypes?: StoneType[];
+  openSlabs?: OpenSlab[];
+  stoneCategoryMap?: Record<string, StoneCategory>;
+}) {
   const stones = stoneTypes && stoneTypes.length > 0 ? stoneTypes : FALLBACK_STONES;
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [manualCutOpen, setManualCutOpen] = useState(false);
@@ -194,10 +213,15 @@ export function BlockGrid({ blocks, canEdit, vendors, profilesMap = {}, stoneTyp
               {!isCollapsed && (
                 <div className="block-card-grid">
                   {list.map(block => {
-                    const L = Number(block.length_ft);
-                    const W = Number(block.width_ft);
-                    const H = Number(block.height_ft);
+                    const isMarbleBlock = stoneCategoryMap[block.stone] === "marble";
+                    // Marble blocks don't have meaningful L/W/H. Use a small
+                    // placeholder so the 3D preview still renders, but the
+                    // displayed volume reads as tonnes (not CFT).
+                    const L = Number(block.length_ft) || (isMarbleBlock ? 24 : 0);
+                    const W = Number(block.width_ft) || (isMarbleBlock ? 24 : 0);
+                    const H = Number(block.height_ft) || (isMarbleBlock ? 24 : 0);
                     const cft = calcCft(L, W, H);
+                    const tonnesNum = block.tonnes != null ? Number(block.tonnes) : null;
                     const stoneColor = stones.find(s => s.name === block.stone)?.color_top ?? "#D8D4CC";
                     const isSelected = selectedId === block.id;
                     const isUnavailable = block.status !== "available";
@@ -220,6 +244,19 @@ export function BlockGrid({ blocks, canEdit, vendors, profilesMap = {}, stoneTyp
                           <div className="block-card-badges">
                             <span className="role-pill" style={{ background: stoneColor + "55", color: "#1a1a1a", border: `1px solid ${stoneColor}` }}>{stoneDisplayName(block.stone)}</span>
                             <span className="role-pill">{yardShortLabel(block.yard)}</span>
+                            {isMarbleBlock && (
+                              <span
+                                className="role-pill"
+                                style={{
+                                  background: "rgba(180,83,9,0.12)",
+                                  color: "#b45309",
+                                  border: "1px solid rgba(180,83,9,0.35)",
+                                }}
+                                title="Marble — measured in tonnes, cut manually"
+                              >
+                                🗿 Marble
+                              </span>
+                            )}
                             <span className={`role-pill ${blockStatusBadge(block.status, block.category)}`}>
                             {isReusedBlock(block.category) && block.status === "available" ? "↻ " : ""}
                             {blockStatusLabel(block.status, block.category)}
@@ -230,8 +267,26 @@ export function BlockGrid({ blocks, canEdit, vendors, profilesMap = {}, stoneTyp
                               </span>
                             )}
                           </div>
-                          <div className="block-card-dims">{L} × {W} × {H} in</div>
-                          <div className="block-card-cft">{cft} CFT</div>
+                          {isMarbleBlock && tonnesNum ? (
+                            <>
+                              <div className="block-card-dims" style={{ fontFamily: "ui-monospace, monospace" }}>
+                                {tonnesNum.toFixed(3)} T
+                              </div>
+                              <div className="block-card-cft" style={{ color: "var(--muted)" }}>
+                                ≈ {cftEquivFromTonnes(tonnesNum).toFixed(2)} CFT equiv
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <div className="block-card-dims">{L} × {W} × {H} in</div>
+                              <div className="block-card-cft">{cft} CFT</div>
+                            </>
+                          )}
+                          {block.truck_entry_id && block.truck_no && (
+                            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
+                              🚚 Truck {block.truck_no}
+                            </div>
+                          )}
                           {block.created_at && (
                             <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
                               Added {fmtDate(block.created_at)}
@@ -401,10 +456,12 @@ export function BlockGrid({ blocks, canEdit, vendors, profilesMap = {}, stoneTyp
             id: selected.id,
             stone: selected.stone,
             yard: selected.yard,
-            length_ft: Number(selected.length_ft),
-            width_ft: Number(selected.width_ft),
-            height_ft: Number(selected.height_ft),
+            length_ft: Number(selected.length_ft) || 0,
+            width_ft: Number(selected.width_ft) || 0,
+            height_ft: Number(selected.height_ft) || 0,
+            tonnes: selected.tonnes != null ? Number(selected.tonnes) : null,
           }}
+          isMarble={stoneCategoryMap[selected.stone] === "marble"}
           openSlabs={openSlabs.filter(s => s.stone === selected.stone)}
           onClose={() => setManualCutOpen(false)}
         />

@@ -1378,27 +1378,50 @@ async function getStoneEfficiency(input: Record<string, unknown>) {
 
   const agg = aggregateLineages(filtered);
 
-  // Top 3 / bottom 3 by yield for colour context in the AI reply
-  const byYield = [...filtered].sort((a, b) => a.slabPct - b.slabPct);
-  const worst = byYield.slice(0, 3).map((l) => ({
-    id: l.rootId,
-    stone: l.rootStone,
-    originalCft: Number(l.originalCft.toFixed(2)),
-    slabPct: l.slabPct,
-    wastePct: l.wastePct,
-    resolved: l.isResolved,
-  }));
-  const best = byYield
-    .slice(-3)
-    .reverse()
-    .map((l) => ({
+  // Top / bottom 3 — sandstone uses slabPct, marble uses cftPerTonne.
+  // Each gets its own best/worst list so the AI can cite them separately.
+  const sandstoneFiltered = filtered.filter((l): l is import("@/app/(app)/block-journey/build-lineages").SandstoneLineage => l.category === "sandstone");
+  const marbleFiltered = filtered.filter((l): l is import("@/app/(app)/block-journey/build-lineages").MarbleLineage => l.category === "marble");
+
+  const sandstoneByYield = [...sandstoneFiltered].sort((a, b) => a.slabPct - b.slabPct);
+  const marbleByYield = [...marbleFiltered].sort((a, b) => a.cftPerTonne - b.cftPerTonne);
+
+  const worst = [
+    ...sandstoneByYield.slice(0, 3).map((l) => ({
       id: l.rootId,
       stone: l.rootStone,
       originalCft: Number(l.originalCft.toFixed(2)),
       slabPct: l.slabPct,
       wastePct: l.wastePct,
       resolved: l.isResolved,
-    }));
+    })),
+    ...marbleByYield.slice(0, 3).map((l) => ({
+      id: l.rootId,
+      stone: l.rootStone,
+      tonnes: Number(l.tonnes.toFixed(3)),
+      slabCft: Number(l.slabCft.toFixed(2)),
+      cftPerTonne: Number(l.cftPerTonne.toFixed(2)),
+      resolved: l.isResolved,
+    })),
+  ];
+  const best = [
+    ...sandstoneByYield.slice(-3).reverse().map((l) => ({
+      id: l.rootId,
+      stone: l.rootStone,
+      originalCft: Number(l.originalCft.toFixed(2)),
+      slabPct: l.slabPct,
+      wastePct: l.wastePct,
+      resolved: l.isResolved,
+    })),
+    ...marbleByYield.slice(-3).reverse().map((l) => ({
+      id: l.rootId,
+      stone: l.rootStone,
+      tonnes: Number(l.tonnes.toFixed(3)),
+      slabCft: Number(l.slabCft.toFixed(2)),
+      cftPerTonne: Number(l.cftPerTonne.toFixed(2)),
+      resolved: l.isResolved,
+    })),
+  ];
 
   return {
     filters: { stone: stone ?? "all", facility: facility ?? "all", quality: quality ?? "all", resolvedOnly },
@@ -1413,13 +1436,22 @@ async function getStoneEfficiency(input: Record<string, unknown>) {
       weightedSlabPct: agg.weightedSlabPct,
       weightedLivePct: agg.weightedLivePct,
       simpleSlabPctAvg: agg.simpleSlabPctAvg,
-      note: "Conservative. Use this for tender pricing — only counts what actually became sellable slabs.",
+      note: "Conservative. Sandstone-only. Use this for tender pricing — only counts what actually became sellable slabs.",
     },
     recoveredFraming: {
       weightedRecoveredPct: agg.weightedRecoveredPct,
       weightedWastePct: agg.weightedWastePct,
       simpleRecoveredPctAvg: agg.simpleRecoveredPctAvg,
-      note: "Optimistic. Credits in-inventory restocks as recovered. Use for judging single-cut performance.",
+      note: "Optimistic. Sandstone-only. Credits in-inventory restocks as recovered. Use for judging single-cut performance.",
+    },
+    marble: {
+      lineageCount: agg.marble.lineageCount,
+      totalTonnes: agg.marble.totalTonnes,
+      totalSlabCft: agg.marble.totalSlabCft,
+      weightedCftPerTonne: agg.marble.weightedCftPerTonne,
+      simpleCftPerTonneAvg: agg.marble.simpleCftPerTonneAvg,
+      truckCount: agg.marble.truckCount,
+      note: "Marble uses CFT-per-tonne instead of % yield. If you bought marble at ₹X/tonne and weightedCftPerTonne is Y, your effective raw-stone cost per sellable CFT is ₹X/Y.",
     },
     topWastefulLineages: worst,
     topEfficientLineages: best,

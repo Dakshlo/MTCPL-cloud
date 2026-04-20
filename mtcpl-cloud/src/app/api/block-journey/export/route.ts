@@ -76,12 +76,14 @@ export async function GET(req: NextRequest) {
     (doneCsbR.data ?? []) as BjCsbRow[],
   );
 
-  // Apply the same filters the client uses
+  // Apply the same filters the client uses. Sandstone-specific filters
+  // (size) only apply to sandstone lineages; marble lineages are
+  // unaffected.
   const filtered = lineages.filter((l) => {
     if (stone && l.rootStone !== stone) return false;
     if (facility && l.rootFacility !== facility) return false;
     if (quality && l.rootQuality !== quality) return false;
-    if (size && l.sizeBucket !== size) return false;
+    if (size && l.category === "sandstone" && l.sizeBucket !== size) return false;
     if (resolution === "resolved" && !l.isResolved) return false;
     if (resolution === "in_progress" && l.isResolved) return false;
     if (dateFrom && l.rootCreatedAt && l.rootCreatedAt < dateFrom) return false;
@@ -89,26 +91,40 @@ export async function GET(req: NextRequest) {
     return true;
   });
 
+  // Unified export row shape. Sandstone fields are blank for marble rows
+  // and vice versa, so both categories show up in the same sheet.
   const rows = filtered.map((l) => ({
     "Block ID": l.rootId,
+    "Category": l.category === "marble" ? "Marble" : "Sandstone",
     "Stone": l.rootStone ?? "",
     "Yard": l.rootYard,
     "Facility": l.rootFacility.toUpperCase(),
     "Quality": l.rootQuality ?? "",
-    "Size bucket": l.sizeBucket,
-    "Added": l.rootCreatedAt ? new Date(l.rootCreatedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "",
-    "Original CFT": round(l.originalCft),
+    "Size bucket": l.category === "sandstone" ? l.sizeBucket : "",
+    "Added": l.rootCreatedAt
+      ? new Date(l.rootCreatedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+      : "",
+    // Sandstone columns
+    "Original CFT": l.category === "sandstone" ? round(l.originalCft) : "",
     "Slabs CFT": round(l.slabCft),
-    "Slab % (Yield)": l.slabPct,
-    "Live CFT": round(l.liveCft),
-    "Live %": l.livePct,
-    "Waste CFT": round(l.wasteCft),
-    "Waste %": l.wastePct,
-    "Recovered % (Slab + Live)": l.recoveredPct,
+    "Slab % (Yield)": l.category === "sandstone" ? l.slabPct : "",
+    "Live CFT": l.category === "sandstone" ? round(l.liveCft) : "",
+    "Live %": l.category === "sandstone" ? l.livePct : "",
+    "Waste CFT": l.category === "sandstone" ? round(l.wasteCft) : "",
+    "Waste %": l.category === "sandstone" ? l.wastePct : "",
+    "Recovered % (Slab + Live)": l.category === "sandstone" ? l.recoveredPct : "",
+    // Marble columns
+    "Tonnes": l.category === "marble" ? round(l.tonnes) : "",
+    "CFT per Tonne": l.category === "marble" ? round(l.cftPerTonne) : "",
+    "Truck No.": l.category === "marble" ? (l.truckNo ?? "") : "",
+    "Vendor": l.category === "marble" ? (l.vendorName ?? "") : "",
+    // Shared
     "Cuts": l.cutCount,
     "Descendants": l.descendantCount,
     "Resolved": l.isResolved ? "Yes" : "No",
-    "Last activity": l.lastActivityAt ? new Date(l.lastActivityAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "",
+    "Last activity": l.lastActivityAt
+      ? new Date(l.lastActivityAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+      : "",
   }));
 
   const ws = XLSX.utils.json_to_sheet(rows);
