@@ -8,7 +8,7 @@ import { FinishBlockForm } from "../finish-block-form";
 import { UndoButton } from "../undo-button";
 import { RejectButton } from "../reject-button";
 import { PrimarySlabPreview } from "../primary-slab-preview";
-import { computeCutEfficiency, toCFT } from "@/lib/cut-efficiency";
+import { computeCutEfficiency, computeActualCutEfficiency, toCFT } from "@/lib/cut-efficiency";
 import { EfficiencyBar } from "@/components/efficiency-bar";
 import { yardLabel } from "@/lib/yards";
 import {
@@ -96,6 +96,46 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
   const isDone = block.status === "done";
   const isRejected = block.status === "rejected";
 
+  // When the cut is already done, fetch the REAL post-cut data so the
+  // utilisation bar reflects what actually happened instead of the
+  // planner's projection. For pending/in-progress we stick with the
+  // layout-based estimate — that's still the best guess until the cut
+  // is finished.
+  let actualSlabs: Array<{ sw: number; sh: number; sd: number }> | null = null;
+  let actualRemainders: Array<{ id: string; l: number; w: number; h: number; status: string }> | null = null;
+  if (isDone) {
+    const [{ data: cutDoneSlabs }, restockedList] = await Promise.all([
+      supabase
+        .from("slab_requirements")
+        .select("id, length_ft, width_ft, thickness_ft")
+        .eq("source_block_id", block.block_id)
+        .eq("status", "cut_done"),
+      (async () => {
+        const raw = block.restocked_block_id
+          ? String(block.restocked_block_id).split(",").map((s: string) => s.trim()).filter(Boolean)
+          : [];
+        if (raw.length === 0) return [] as Array<{ id: string; l: number; w: number; h: number; status: string }>;
+        const { data: rem } = await supabase
+          .from("blocks")
+          .select("id, length_ft, width_ft, height_ft, status")
+          .in("id", raw);
+        return (rem ?? []).map((b: { id: string; length_ft: number; width_ft: number; height_ft: number; status: string }) => ({
+          id: b.id,
+          l: Number(b.length_ft),
+          w: Number(b.width_ft),
+          h: Number(b.height_ft),
+          status: b.status,
+        }));
+      })(),
+    ]);
+    actualSlabs = (cutDoneSlabs ?? []).map((s: { length_ft: number; width_ft: number; thickness_ft: number }) => ({
+      sw: Number(s.length_ft),
+      sh: Number(s.width_ft),
+      sd: Number(s.thickness_ft),
+    }));
+    actualRemainders = restockedList;
+  }
+
   return (
     <section className="page-card">
       {/* Breadcrumb */}
@@ -170,9 +210,13 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
         <CuttingDetailPreview blk={blk} placed={placed as any} stoneTypes={stoneTypes ?? undefined} />
       )}
 
-      {/* Block efficiency breakdown */}
+      {/* Block efficiency breakdown — REAL post-cut numbers when status=done,
+          planner's projection otherwise. */}
       {(() => {
-        const eff = computeCutEfficiency(blk, placed, layout?.biggest ?? null);
+        const useActual = isDone && actualSlabs && actualSlabs.length > 0;
+        const eff = useActual
+          ? computeActualCutEfficiency(blk, actualSlabs ?? [], actualRemainders ?? [])
+          : computeCutEfficiency(blk, placed, layout?.biggest ?? null);
         if (!eff) return null;
         return (
           <div style={{
@@ -185,10 +229,25 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
             <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
               <p style={{ margin: 0, fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
                 Block Utilisation
+                <span style={{
+                  marginLeft: 8,
+                  fontSize: 10,
+                  fontWeight: 600,
+                  color: useActual ? "#15803d" : "var(--muted)",
+                  background: useActual ? "rgba(22,101,52,0.12)" : "transparent",
+                  padding: useActual ? "1px 7px" : 0,
+                  borderRadius: 4,
+                  letterSpacing: 0,
+                  textTransform: "none",
+                }}>
+                  {useActual ? "✓ Actual" : "Projected"}
+                </span>
               </p>
               <p className="muted" style={{ margin: 0, fontSize: 11, fontFamily: "ui-monospace, monospace" }}>
                 Total {toCFT(eff.blockVol).toFixed(2)} CFT
-                {layout?.biggest ? " · restockable piece counted as recovered, not waste" : ""}
+                {useActual
+                  ? ` · ${actualRemainders?.length ?? 0} remainder piece${(actualRemainders?.length ?? 0) === 1 ? "" : "s"} recovered`
+                  : layout?.biggest ? " · restockable piece counted as recovered, not waste" : ""}
               </p>
             </div>
             <EfficiencyBar eff={eff} />
