@@ -22,9 +22,13 @@ type StoneType = { name: string; color_top: string };
 export function MarbleTruckForm({
   marbleStones,
   vendors,
+  suggestedId,
 }: {
   marbleStones: StoneType[];
   vendors: string[];
+  /** Next free block id in the shared MT-B-XXX series. Used to show a
+   *  live preview of the range of ids the truck's N blocks will get. */
+  suggestedId: string;
 }) {
   const defaultStone = marbleStones[0]?.name ?? "WhiteMarble";
   const [stone, setStone] = useState<string>(defaultStone);
@@ -43,6 +47,21 @@ export function MarbleTruckForm({
     setYard(YARDS_BY_FACILITY[f][0]);
   }
 
+  /** Expand "MT-B-125" + count=10 → ["MT-B-125", "MT-B-134"]. */
+  function idRange(firstId: string, count: number): { first: string; last: string } | null {
+    const m = firstId.match(/^(.+?)(\d+)$/);
+    if (!m) return null;
+    const prefix = m[1];
+    const startNum = parseInt(m[2], 10);
+    if (!Number.isFinite(startNum) || count < 1) return null;
+    const padLen = m[2].length;
+    const pad = (n: number) => String(n).padStart(padLen, "0");
+    return {
+      first: `${prefix}${pad(startNum)}`,
+      last: `${prefix}${pad(startNum + count - 1)}`,
+    };
+  }
+
   const preview = useMemo(() => {
     const t = parseFloat(totalTonnes);
     const n = parseInt(numBlocks, 10);
@@ -52,8 +71,9 @@ export function MarbleTruckForm({
       perTonnes: per,
       perCftEquiv: cftEquivFromTonnes(per),
       totalCftEquiv: cftEquivFromTonnes(t),
+      ids: idRange(suggestedId, n),
     };
-  }, [totalTonnes, numBlocks]);
+  }, [totalTonnes, numBlocks, suggestedId]);
 
   if (marbleStones.length === 0) {
     // Shouldn't render at all — the parent component gates on this — but
@@ -79,7 +99,7 @@ export function MarbleTruckForm({
     <form action={createMarbleTruckAction} className="stack" style={{ gap: 12 }}>
       <div className="section-heading" style={{ marginBottom: 0 }}>
         <div>
-          <h2 style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <h2 style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             🚚 New Marble Truck
             <span
               style={{
@@ -94,6 +114,21 @@ export function MarbleTruckForm({
               }}
             >
               Marble only
+            </span>
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                color: "var(--gold-dark)",
+                background: "rgba(184,115,51,0.1)",
+                padding: "2px 8px",
+                borderRadius: 4,
+                fontFamily: "ui-monospace, monospace",
+                letterSpacing: "0.02em",
+              }}
+              title="The first new block will get this id; the remaining blocks continue in sequence."
+            >
+              Next id: {suggestedId}
             </span>
           </h2>
           <p>
@@ -204,8 +239,20 @@ export function MarbleTruckForm({
                 (≈ {preview.perCftEquiv.toFixed(2)} CFT equiv · 95 kg/CFT)
               </span>
             </div>
-            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
-              IDs auto-assigned in the shared MT-B-XXX series
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3, fontFamily: "ui-monospace, monospace" }}>
+              {preview.ids ? (
+                preview.ids.first === preview.ids.last ? (
+                  <>Id: <strong style={{ color: "var(--gold-dark)" }}>{preview.ids.first}</strong></>
+                ) : (
+                  <>
+                    Ids: <strong style={{ color: "var(--gold-dark)" }}>{preview.ids.first}</strong>
+                    {" → "}
+                    <strong style={{ color: "var(--gold-dark)" }}>{preview.ids.last}</strong>
+                  </>
+                )
+              ) : (
+                <>IDs auto-assigned in the shared MT-B-XXX series</>
+              )}
             </div>
           </div>
         )}

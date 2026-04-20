@@ -224,7 +224,7 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
 
       {/* Add form — flips based on active tab */}
       {canEdit && activeCat === "marble" ? (
-        <MarbleTruckForm marbleStones={marbleStoneList} vendors={vendors} />
+        <MarbleTruckForm marbleStones={marbleStoneList} vendors={vendors} suggestedId={suggestedId} />
       ) : canEdit ? (
         <AddBlockForm
           suggestedId={suggestedId}
