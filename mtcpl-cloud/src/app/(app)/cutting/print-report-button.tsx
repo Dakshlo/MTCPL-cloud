@@ -3,17 +3,20 @@
 /**
  * Page-level "Print Report" button for the Cutting page.
  *
- * Two modes depending on whether any block checkboxes are ticked:
+ * Two stages:
  *
- *   - No selection  → button reads "🖨 Print In Progress" (for example),
- *                     prints every block in the current tab.
- *   - Selection on  → button reads "🖨 Print 4 Selected", prints only
- *                     the ticked blocks regardless of tab.
+ *   Stage 1 (default / normal)
+ *     Button label:   "🖨 Print In Progress ▼"
+ *     Popover shows:  facility options + a bottom link
+ *                     "Or pick specific blocks first →"
+ *     Facility pick → opens the full tab's report.
+ *     Pick-blocks    → closes popover, enters selection mode.
  *
- * Clicking the button opens a popover asking which facility to include
- * (MTCPL / RIICO / Both). A sibling "Clear" button appears when there's
- * an active selection so the owner can reset without un-ticking boxes
- * one by one.
+ *   Stage 2 (selection mode — checkboxes visible on cards)
+ *     Button label:   "🖨 Print 3 Selected ▼"  (disabled if 0 selected)
+ *     Sibling "✕ Cancel" button hides the checkboxes and exits.
+ *     Popover shows:  facility options only (the user already chose
+ *                     which blocks, now they pick where to print).
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -31,8 +34,9 @@ const TAB_LABELS: Record<CuttingTab, string> = {
 export function PrintReportButton({ tab }: { tab: CuttingTab }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  const { selected, clear } = useSelection();
+  const { selected, selectionMode, startSelection, cancelSelection } = useSelection();
   const hasSelection = selected.size > 0;
+  const isDisabled = selectionMode && !hasSelection;
 
   // Close the popover on outside click / Escape
   useEffect(() => {
@@ -55,7 +59,7 @@ export function PrintReportButton({ tab }: { tab: CuttingTab }) {
   function handlePick(facility: Facility) {
     setOpen(false);
     const params = new URLSearchParams({ facility, tab });
-    if (hasSelection) {
+    if (selectionMode && hasSelection) {
       params.set("blocks", Array.from(selected).join(","));
     }
     window.open(
@@ -63,23 +67,40 @@ export function PrintReportButton({ tab }: { tab: CuttingTab }) {
       "_blank",
       "noopener,noreferrer",
     );
+    // If we just printed a selection, exit selection mode — keeping
+    // stale checkboxes around after print is just clutter.
+    if (selectionMode) cancelSelection();
+  }
+
+  function handleStartSelection() {
+    setOpen(false);
+    startSelection();
+  }
+
+  function handleCancelSelection() {
+    cancelSelection();
+    setOpen(false);
   }
 
   const activeLabel = TAB_LABELS[tab];
-  const buttonLabel = hasSelection
+
+  // Button text depends on which stage we're in.
+  const buttonLabel = selectionMode
     ? `Print ${selected.size} Selected`
     : `Print ${activeLabel}`;
-  const scopeDescription = hasSelection
+
+  // Popover footer wording
+  const scopeDescription = selectionMode
     ? (<><strong style={{ color: "var(--text)" }}>{selected.size}</strong> selected block{selected.size !== 1 ? "s" : ""}</>)
     : (<>all <strong style={{ color: "var(--text)" }}>{activeLabel}</strong> blocks</>);
 
   return (
-    <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-      {hasSelection && (
+    <div style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+      {selectionMode && (
         <button
           type="button"
-          onClick={clear}
-          title="Clear all selected blocks"
+          onClick={handleCancelSelection}
+          title="Exit selection mode"
           style={{
             fontSize: 12,
             fontWeight: 500,
@@ -92,33 +113,40 @@ export function PrintReportButton({ tab }: { tab: CuttingTab }) {
             whiteSpace: "nowrap",
           }}
         >
-          ✕ Clear ({selected.size})
+          ✕ Cancel
         </button>
       )}
 
       <div ref={rootRef} style={{ position: "relative", display: "inline-block" }}>
         <button
           type="button"
-          onClick={() => setOpen(v => !v)}
+          onClick={() => { if (!isDisabled) setOpen(v => !v); }}
+          disabled={isDisabled}
           style={{
             fontSize: 13,
             fontWeight: 600,
             padding: "8px 16px",
-            background: "var(--gold)",
-            color: "#fff",
-            border: "1px solid var(--gold-dark)",
+            background: isDisabled ? "var(--surface)" : "var(--gold)",
+            color: isDisabled ? "var(--muted)" : "#fff",
+            border: `1px solid ${isDisabled ? "var(--border)" : "var(--gold-dark)"}`,
             borderRadius: 6,
-            cursor: "pointer",
+            cursor: isDisabled ? "not-allowed" : "pointer",
             whiteSpace: "nowrap",
             display: "inline-flex",
             alignItems: "center",
             gap: 6,
+            opacity: isDisabled ? 0.7 : 1,
           }}
-          title={hasSelection
-            ? `Print a report of the ${selected.size} selected block${selected.size !== 1 ? "s" : ""}`
-            : `Print a report of all ${activeLabel.toLowerCase()} blocks`}
+          title={
+            isDisabled
+              ? "Tick at least one card first"
+              : selectionMode
+                ? `Print a report of the ${selected.size} selected block${selected.size !== 1 ? "s" : ""}`
+                : `Print a report of all ${activeLabel.toLowerCase()} blocks`
+          }
           aria-haspopup="menu"
           aria-expanded={open}
+          aria-disabled={isDisabled}
         >
           🖨 {buttonLabel} {open ? "▲" : "▼"}
         </button>
@@ -131,7 +159,7 @@ export function PrintReportButton({ tab }: { tab: CuttingTab }) {
               top: "calc(100% + 6px)",
               right: 0,
               zIndex: 50,
-              minWidth: 260,
+              minWidth: 270,
               background: "var(--bg)",
               border: "1px solid var(--border)",
               borderRadius: 8,
@@ -152,6 +180,25 @@ export function PrintReportButton({ tab }: { tab: CuttingTab }) {
             <PickItem label="MTCPL only" hint="Yards 1–6 + Open Yard" onClick={() => handlePick("mtcpl")} />
             <PickItem label="RIICO only" hint="Yards 7, 8" onClick={() => handlePick("riico")} />
             <PickItem label="Both facilities" hint="MTCPL + RIICO together" onClick={() => handlePick("both")} />
+
+            {/* The "pick specific blocks" entry appears only in stage 1 —
+                once the user is already in selection mode, there's no
+                reason to offer it again. */}
+            {!selectionMode && (
+              <>
+                <div style={{
+                  borderTop: "1px solid var(--border)",
+                  margin: "4px 0 2px",
+                }} />
+                <PickItem
+                  label="Or pick specific blocks first →"
+                  hint="Show checkboxes on cards, then print only the ticked ones"
+                  onClick={handleStartSelection}
+                  accent
+                />
+              </>
+            )}
+
             <div style={{
               fontSize: 10,
               color: "var(--muted)",
@@ -161,11 +208,6 @@ export function PrintReportButton({ tab }: { tab: CuttingTab }) {
               lineHeight: 1.5,
             }}>
               Includes: {scopeDescription}
-              {!hasSelection && (
-                <div style={{ marginTop: 3, fontSize: 10, color: "var(--muted)", opacity: 0.8 }}>
-                  Tip: tick the boxes on cards to print only those.
-                </div>
-              )}
             </div>
           </div>
         )}
@@ -174,7 +216,14 @@ export function PrintReportButton({ tab }: { tab: CuttingTab }) {
   );
 }
 
-function PickItem({ label, hint, onClick }: { label: string; hint: string; onClick: () => void }) {
+function PickItem({
+  label, hint, onClick, accent = false,
+}: {
+  label: string;
+  hint: string;
+  onClick: () => void;
+  accent?: boolean;
+}) {
   return (
     <button
       type="button"
@@ -189,12 +238,12 @@ function PickItem({ label, hint, onClick }: { label: string; hint: string; onCli
         border: "none",
         borderRadius: 5,
         cursor: "pointer",
-        color: "var(--text)",
+        color: accent ? "var(--gold-dark)" : "var(--text)",
       }}
       onMouseEnter={e => { e.currentTarget.style.background = "var(--surface)"; }}
       onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
     >
-      <div style={{ fontSize: 13, fontWeight: 600 }}>{label}</div>
+      <div style={{ fontSize: 13, fontWeight: accent ? 700 : 600 }}>{label}</div>
       <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 1 }}>{hint}</div>
     </button>
   );

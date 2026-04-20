@@ -1,18 +1,18 @@
 "use client";
 
 /**
- * Inline checkbox that toggles this block's membership in the print
- * selection. Subtle at rest — gold-tinted when checked — so it doesn't
- * visually shout on cards the user isn't actively picking.
- *
- * Clicking the checkbox stops propagation so it doesn't interfere with
- * any card-level click handlers (none today, but future-proof).
+ * Per-card checkbox for picking blocks to print. Renders nothing until
+ * the user enables selection mode from the Print popover — the cards
+ * stay clean during normal work.
  */
 
 import { useSelection } from "./selection-context";
 
 export function BlockSelector({ id }: { id: string }) {
-  const { selected, toggle } = useSelection();
+  const { selected, selectionMode, toggle } = useSelection();
+
+  if (!selectionMode) return null;
+
   const isChecked = selected.has(id);
 
   return (
@@ -33,8 +33,8 @@ export function BlockSelector({ id }: { id: string }) {
         checked={isChecked}
         onChange={() => toggle(id)}
         style={{
-          width: 17,
-          height: 17,
+          width: 18,
+          height: 18,
           cursor: "pointer",
           accentColor: "#b87333",
           margin: 0,
