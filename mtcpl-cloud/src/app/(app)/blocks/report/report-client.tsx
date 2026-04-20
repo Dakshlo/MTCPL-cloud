@@ -4,6 +4,7 @@ import { useState, useMemo } from "react";
 import Link from "next/link";
 import { ALLOWED_YARDS, yardLabel, yardShortLabel } from "@/lib/yards";
 import { blockStatusLabel, blockStatusBadge, isReusedBlock } from "@/lib/blocks";
+import { cftEquivFromTonnes, type StoneCategory } from "@/lib/stone-categories";
 
 type Block = {
   id: string;
@@ -11,9 +12,11 @@ type Block = {
   yard: number;
   category: string | null;
   quality: string | null;
-  length_ft: number;
-  width_ft: number;
-  height_ft: number;
+  length_ft: number | null;
+  width_ft: number | null;
+  height_ft: number | null;
+  tonnes?: number | string | null;
+  truck_entry_id?: string | null;
   status: string;
   truck_no: string | null;
   vendor_name: string | null;
@@ -39,6 +42,16 @@ function calcCft(l: number, w: number, h: number) {
   return (l * w * h) / 1728;
 }
 
+/** CFT for any block — real CFT for sandstone, tonnes→CFT-equiv for
+ *  marble. Lets sorting, totals, and Excel export treat both uniformly. */
+function blockCft(b: Block, isMarble: boolean): number {
+  if (isMarble) {
+    const t = Number(b.tonnes);
+    return Number.isFinite(t) && t > 0 ? cftEquivFromTonnes(t) : 0;
+  }
+  return calcCft(Number(b.length_ft) || 0, Number(b.width_ft) || 0, Number(b.height_ft) || 0);
+}
+
 // Filter-button labels — intentionally status-only so the filter chips match
 // the raw status you can set on a block. The table cell uses blockStatusLabel
 // which adds Fresh vs Used based on category.
@@ -51,7 +64,15 @@ const STATUS_LABELS: Record<string, string> = {
 
 type SortCol = "id" | "stone" | "yard" | "cft" | "status" | "vendor_name" | "created_at" | "updated_at";
 
-export function ReportClient({ blocks, stoneNames }: { blocks: Block[]; stoneNames?: string[] }) {
+export function ReportClient({
+  blocks,
+  stoneNames,
+  stoneCategoryMap = {},
+}: {
+  blocks: Block[];
+  stoneNames?: string[];
+  stoneCategoryMap?: Record<string, StoneCategory>;
+}) {
   const ALL_STONES = stoneNames && stoneNames.length > 0 ? stoneNames : ["PinkStone", "WhiteStone"];
   const today = new Date().toISOString().slice(0, 10);
 
@@ -97,8 +118,8 @@ export function ReportClient({ blocks, stoneNames }: { blocks: Block[]; stoneNam
       let av: string | number = "";
       let bv: string | number = "";
       if (sortBy === "cft") {
-        av = calcCft(Number(a.length_ft), Number(a.width_ft), Number(a.height_ft));
-        bv = calcCft(Number(b.length_ft), Number(b.width_ft), Number(b.height_ft));
+        av = blockCft(a, stoneCategoryMap[a.stone] === "marble");
+        bv = blockCft(b, stoneCategoryMap[b.stone] === "marble");
       } else if (sortBy === "yard") {
         av = a.yard;
         bv = b.yard;
@@ -115,7 +136,7 @@ export function ReportClient({ blocks, stoneNames }: { blocks: Block[]; stoneNam
   }, [blocks, statusFilter, stoneFilter, yardFilter, qualityFilter, vendorSearch, blockSearch, dateFrom, dateTo, sortBy, sortDir]);
 
   const totalCft = filtered.reduce(
-    (sum, b) => sum + calcCft(Number(b.length_ft), Number(b.width_ft), Number(b.height_ft)),
+    (sum, b) => sum + blockCft(b, stoneCategoryMap[b.stone] === "marble"),
     0
   );
 
@@ -368,7 +389,9 @@ export function ReportClient({ blocks, stoneNames }: { blocks: Block[]; stoneNam
               </tr>
             ) : (
               filtered.map((b, i) => {
-                const cft = calcCft(Number(b.length_ft), Number(b.width_ft), Number(b.height_ft));
+                const isMarble = stoneCategoryMap[b.stone] === "marble";
+                const cft = blockCft(b, isMarble);
+                const tonnesNum = b.tonnes != null ? Number(b.tonnes) : null;
                 return (
                   <tr
                     key={b.id}
@@ -380,12 +403,47 @@ export function ReportClient({ blocks, stoneNames }: { blocks: Block[]; stoneNam
                     <td style={{ padding: "9px 12px", fontFamily: "ui-monospace, monospace", fontWeight: 600, whiteSpace: "nowrap" }}>
                       {b.id}
                     </td>
-                    <td style={{ padding: "9px 12px", whiteSpace: "nowrap" }}>{b.stone}</td>
+                    <td style={{ padding: "9px 12px", whiteSpace: "nowrap" }}>
+                      {b.stone}
+                      {isMarble && (
+                        <span
+                          style={{
+                            fontSize: 9,
+                            fontWeight: 700,
+                            color: "#b45309",
+                            background: "rgba(180,83,9,0.12)",
+                            padding: "1px 5px",
+                            borderRadius: 3,
+                            marginLeft: 5,
+                            letterSpacing: "0.04em",
+                          }}
+                        >
+                          🗿 MARBLE
+                        </span>
+                      )}
+                    </td>
                     <td style={{ padding: "9px 12px" }}>{yardShortLabel(b.yard)}</td>
                     <td style={{ padding: "9px 12px", whiteSpace: "nowrap" }}>
-                      {Number(b.length_ft)} × {Number(b.width_ft)} × {Number(b.height_ft)}
+                      {isMarble && tonnesNum != null && tonnesNum > 0 ? (
+                        <span style={{ fontFamily: "ui-monospace, monospace", color: "#b45309", fontWeight: 600 }}>
+                          {tonnesNum.toFixed(3)} T
+                        </span>
+                      ) : b.length_ft && b.width_ft && b.height_ft ? (
+                        <>
+                          {Number(b.length_ft)} × {Number(b.width_ft)} × {Number(b.height_ft)}
+                        </>
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
                     </td>
-                    <td style={{ padding: "9px 12px" }}>{cft.toFixed(2)}</td>
+                    <td style={{ padding: "9px 12px" }}>
+                      {cft > 0 ? cft.toFixed(2) : <span className="muted">—</span>}
+                      {isMarble && cft > 0 && (
+                        <span style={{ fontSize: 10, color: "var(--muted)", marginLeft: 4 }}>
+                          (equiv)
+                        </span>
+                      )}
+                    </td>
                     <td style={{ padding: "9px 12px" }}>
                       {b.quality ? (
                         <span className={`role-pill ${b.quality === "A" ? "badge-available" : "badge-reserved"}`}>

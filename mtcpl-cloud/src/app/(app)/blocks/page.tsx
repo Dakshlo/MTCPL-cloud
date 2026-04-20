@@ -150,21 +150,22 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
       )}
 
       {/* Category tabs — only render if there's at least one marble stone.
-          With marble stones present the dad can switch between the two
-          add-block flows. Sandstone-only deployments see the original UI. */}
+          Each tab gets its own accent colour: gold for All, green for
+          Sandstone, amber for Marble. Active tab has a filled background;
+          inactive tabs are clearly clickable with strong border. */}
       {marbleStoneList.length > 0 && (
         <div
           style={{
             display: "flex",
-            gap: 0,
-            margin: "20px 0 0",
-            borderBottom: "2px solid var(--border)",
+            gap: 8,
+            margin: "20px 0 14px",
+            flexWrap: "wrap",
           }}
         >
           {([
-            { key: "all", label: "All", count: allBlocks.length },
-            { key: "sandstone", label: "Sandstone", count: sandstoneBlocks.length },
-            { key: "marble", label: "🗿 Marble", count: marbleBlocks.length },
+            { key: "all", label: "All", count: allBlocks.length, accent: "#b87333", accentSoft: "rgba(184,115,51,0.12)", accentBorder: "rgba(184,115,51,0.35)" },
+            { key: "sandstone", label: "Sandstone", count: sandstoneBlocks.length, accent: "#15803d", accentSoft: "rgba(22,101,52,0.12)", accentBorder: "rgba(22,101,52,0.35)" },
+            { key: "marble", label: "🗿 Marble", count: marbleBlocks.length, accent: "#b45309", accentSoft: "rgba(180,83,9,0.12)", accentBorder: "rgba(180,83,9,0.35)" },
           ] as const).map((tab) => {
             const isActive = tab.key === activeCat;
             return (
@@ -173,28 +174,33 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
                 href={tab.key === "all" ? "/blocks" : `/blocks?cat=${tab.key}`}
                 style={{
                   textDecoration: "none",
-                  padding: "9px 18px",
-                  fontSize: 13,
-                  fontWeight: isActive ? 700 : 500,
-                  color: isActive ? "var(--gold-dark)" : "var(--muted)",
-                  borderBottom: isActive ? "2px solid var(--gold)" : "2px solid transparent",
-                  marginBottom: -2,
+                  padding: "10px 18px",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  letterSpacing: "0.01em",
+                  color: isActive ? "#fff" : tab.accent,
+                  background: isActive ? tab.accent : tab.accentSoft,
+                  border: `1.5px solid ${isActive ? tab.accent : tab.accentBorder}`,
+                  borderRadius: 8,
                   display: "inline-flex",
                   alignItems: "center",
-                  gap: 7,
+                  gap: 9,
+                  transition: "all 0.12s",
+                  boxShadow: isActive ? `0 2px 8px ${tab.accentSoft}` : "none",
                 }}
               >
                 {tab.label}
                 <span
                   style={{
-                    background: isActive ? "var(--gold)" : "var(--border)",
-                    color: isActive ? "#fff" : "var(--muted)",
-                    borderRadius: 10,
+                    background: isActive ? "rgba(255,255,255,0.25)" : tab.accent,
+                    color: "#fff",
+                    borderRadius: 999,
                     fontSize: 11,
-                    fontWeight: 700,
-                    padding: "1px 7px",
-                    minWidth: 20,
+                    fontWeight: 800,
+                    padding: "1px 9px",
+                    minWidth: 24,
                     textAlign: "center",
+                    fontFamily: "ui-monospace, monospace",
                   }}
                 >
                   {tab.count}

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { ReportClient } from "./report-client";
+import type { StoneCategory } from "@/lib/stone-categories";
 
 export default async function BlockReportPage() {
   await requireAuth(["owner", "team_head", "developer"]);
@@ -11,17 +12,27 @@ export default async function BlockReportPage() {
   const [{ data, error }, { data: stoneTypeRows }] = await Promise.all([
     admin
       .from("blocks")
-      .select("id, stone, yard, category, quality, length_ft, width_ft, height_ft, status, truck_no, vendor_name, bill_no, created_at, updated_at")
+      .select(
+        "id, stone, yard, category, quality, length_ft, width_ft, height_ft, tonnes, truck_entry_id, status, truck_no, vendor_name, bill_no, created_at, updated_at",
+      )
       .order("created_at", { ascending: false }),
     admin
       .from("stone_types")
-      .select("name")
+      .select("name, stone_category")
       .order("name"),
   ]);
 
   if (error) throw new Error(error.message);
 
   const stoneNames = (stoneTypeRows ?? []).map((s) => s.name);
+
+  // Build stone-name → category map so the client can render marble rows
+  // with tonnes instead of dimensions.
+  const stoneCategoryMap: Record<string, StoneCategory> = {};
+  for (const s of stoneTypeRows ?? []) {
+    const cat = (s as { stone_category?: string }).stone_category;
+    stoneCategoryMap[(s as { name: string }).name] = cat === "marble" ? "marble" : "sandstone";
+  }
 
   return (
     <>
@@ -35,7 +46,7 @@ export default async function BlockReportPage() {
         </Link>
       </div>
 
-      <ReportClient blocks={data ?? []} stoneNames={stoneNames} />
+      <ReportClient blocks={data ?? []} stoneNames={stoneNames} stoneCategoryMap={stoneCategoryMap} />
     </>
   );
 }
