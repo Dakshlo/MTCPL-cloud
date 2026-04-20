@@ -154,8 +154,16 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
       </div>
 
       {/* ── ASK AI ENTRY ── */}
-      <AskAiEntryCard />
-      <BlockJourneyEntryCard />
+      {/* Two "insight" entry cards side by side on wide screens; stack
+          on narrow screens thanks to flexWrap. */}
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ flex: "1 1 320px", minWidth: 0 }}>
+          <AskAiEntryCard />
+        </div>
+        <div style={{ flex: "1 1 320px", minWidth: 0 }}>
+          <BlockJourneyEntryCard />
+        </div>
+      </div>
 
       {/* ── REPORT BUTTONS ── */}
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>

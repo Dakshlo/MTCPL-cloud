@@ -33,7 +33,10 @@ export default async function BlockJourneyPage({
 }) {
   await requireAuth(["owner", "developer"]);
   const { mode } = await searchParams;
-  const initialMode = mode === "recovered" ? "recovered" : "yield";
+  // Default is "recovered" (optimistic, judges cutter performance). Users
+  // who prefer the conservative "yield" framing can flip via the toggle —
+  // the URL will carry ?mode=yield for that.
+  const initialMode = mode === "yield" ? "yield" : "recovered";
 
   const admin = createAdminSupabaseClient();
 

@@ -13,7 +13,11 @@ import { useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { facilityLabel, FACILITIES } from "@/lib/yards";
 import { LineageCard, type ViewMode } from "./block-journey-lineage-card";
-import { aggregateLineages, type Lineage } from "@/app/(app)/block-journey/build-lineages";
+import {
+  aggregateLineages,
+  type Lineage,
+  type LineageNode,
+} from "@/app/(app)/block-journey/build-lineages";
 
 type Resolution = "all" | "resolved" | "in_progress";
 type SortKey = "eff_desc" | "eff_asc" | "cft_desc" | "cft_asc" | "newest" | "oldest";
@@ -33,17 +37,19 @@ export function BlockJourneyClient({
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // ── Mode (persisted in URL) ────────────────────────────────────────────
+  // ── Mode (persisted in URL) — default is "recovered" so we only write
+  //     the query param when the user opts into "yield".
   const mode: ViewMode = initialMode;
   function setMode(next: ViewMode) {
     const params = new URLSearchParams(searchParams.toString());
-    if (next === "yield") params.delete("mode");
+    if (next === "recovered") params.delete("mode");
     else params.set("mode", next);
     const q = params.toString();
     router.replace(q ? `/block-journey?${q}` : "/block-journey");
   }
 
   // ── Filters (client state) ─────────────────────────────────────────────
+  const [search, setSearch] = useState<string>("");
   const [stone, setStone] = useState<string>("all");
   const [facility, setFacility] = useState<"all" | "mtcpl" | "riico">("all");
   const [quality, setQuality] = useState<"all" | "A" | "B">("all");
@@ -55,6 +61,7 @@ export function BlockJourneyClient({
 
   // ── Apply filters ──────────────────────────────────────────────────────
   const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
     return lineages.filter((l) => {
       if (stone !== "all" && l.rootStone !== stone) return false;
       if (facility !== "all" && l.rootFacility !== facility) return false;
@@ -64,9 +71,10 @@ export function BlockJourneyClient({
       if (resolution === "in_progress" && l.isResolved) return false;
       if (dateFrom && l.rootCreatedAt && l.rootCreatedAt < dateFrom) return false;
       if (dateTo && l.rootCreatedAt && l.rootCreatedAt > dateTo + "T23:59:59Z") return false;
+      if (q && !matchesSearch(l, q)) return false;
       return true;
     });
-  }, [lineages, stone, facility, quality, sizeBucket, resolution, dateFrom, dateTo]);
+  }, [lineages, search, stone, facility, quality, sizeBucket, resolution, dateFrom, dateTo]);
 
   const sorted = useMemo(() => {
     const copy = [...filtered];
@@ -146,6 +154,55 @@ export function BlockJourneyClient({
             ? "Yield = slabs ÷ original. Conservative — only counts sellable slabs. Use for pricing."
             : "Recovered = (slabs + live remainders) ÷ original. Optimistic — credits in-inventory restocks as recovered."}
         </div>
+      </div>
+
+      {/* Search bar — its own row so it's always visible and scannable */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          padding: "8px 12px",
+          marginBottom: 10,
+          background: "var(--bg)",
+          border: "1px solid var(--border)",
+          borderRadius: 10,
+        }}
+      >
+        <span style={{ fontSize: 14, color: "var(--muted)" }}>🔎</span>
+        <input
+          type="text"
+          placeholder="Search by block ID (e.g. MT-B-039 or MT-B-039-1), stone name…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{
+            flex: 1,
+            padding: "7px 10px",
+            fontSize: 13,
+            background: "var(--surface)",
+            color: "var(--text)",
+            border: "1px solid var(--border)",
+            borderRadius: 6,
+            outline: "none",
+          }}
+        />
+        {search && (
+          <button
+            type="button"
+            onClick={() => setSearch("")}
+            style={{
+              padding: "5px 12px",
+              fontSize: 12,
+              background: "transparent",
+              color: "var(--muted)",
+              border: "1px solid var(--border)",
+              borderRadius: 5,
+              cursor: "pointer",
+            }}
+          >
+            ✕ Clear
+          </button>
+        )}
       </div>
 
       {/* Filters bar */}
@@ -467,3 +524,22 @@ const inputStyle: React.CSSProperties = {
   borderRadius: 5,
   outline: "none",
 };
+
+/** Fuzzy-ish substring match on root id, stone, and every descendant id
+ *  in the lineage tree. Searching "MT-B-039-1" finds its parent lineage
+ *  MT-B-039; searching "Pink" finds every PinkStone lineage; searching
+ *  a stone code or yard number substring works too since we also match
+ *  the stone field. */
+function matchesSearch(lineage: Lineage, q: string): boolean {
+  if (lineage.rootId.toLowerCase().includes(q)) return true;
+  if (lineage.rootStone && lineage.rootStone.toLowerCase().includes(q)) return true;
+  return descendantMatches(lineage.tree, q);
+}
+
+function descendantMatches(node: LineageNode, q: string): boolean {
+  if (node.id.toLowerCase().includes(q)) return true;
+  for (const child of node.children) {
+    if (descendantMatches(child, q)) return true;
+  }
+  return false;
+}
