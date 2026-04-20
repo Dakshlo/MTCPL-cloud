@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { PushPanel } from "./push-panel";
 import { AskAiEntryCard } from "@/components/ask-ai-entry-card";
+import { BlockJourneyEntryCard } from "@/components/block-journey-entry-card";
 
 type SearchParams = Promise<{ pushed?: string }>;
 
@@ -154,6 +155,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
 
       {/* ── ASK AI ENTRY ── */}
       <AskAiEntryCard />
+      <BlockJourneyEntryCard />
 
       {/* ── REPORT BUTTONS ── */}
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>

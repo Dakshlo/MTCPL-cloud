@@ -13,6 +13,13 @@
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { runOptimization, type BlockRow, type SlabRow } from "@/lib/planning/packing";
 import { facilityOfYard, YARDS_BY_FACILITY, type Facility } from "@/lib/yards";
+import {
+  buildLineages,
+  aggregateLineages,
+  type BjBlockRow,
+  type BjSlabRow,
+  type BjCsbRow,
+} from "@/app/(app)/block-journey/build-lineages";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -218,6 +225,24 @@ export const AI_TOOLS = [
     },
   },
   {
+    name: "get_stone_efficiency",
+    description:
+      "Aggregate REAL efficiency across every Fresh block that has been cut at least once, rolled up across the full descendant tree. Returns BOTH framings side-by-side: yield % (slabs only — conservative, use for pricing) and recovered % (slabs + still-live restocks — optimistic). Filterable by stone / facility / quality / resolved-only. Use when the user asks aggregate questions like 'PinkStone की real efficiency kya hai', 'Grade A waste kitna hua?', 'what's our average yield?', 'कुल waste percentage बताओ'. Same data source that powers the /block-journey page.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        stone: { type: "string", description: "Filter to a stone type e.g. 'PinkStone'." },
+        facility: { type: "string", enum: ["mtcpl", "riico"], description: "Filter by facility." },
+        quality: { type: "string", enum: ["A", "B"], description: "Filter by quality grade." },
+        resolved_only: {
+          type: "boolean",
+          description: "If true, only count lineages whose descendants have all finished (no live restocks). Gives the most definitive number for tender pricing. Default false.",
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
     name: "list_blocks",
     description:
       "List individual block records with their exact dimensions (L×W×H), CFT, stone, yard, facility, quality, status, and category. Use this whenever the user asks about specific blocks, the biggest/smallest blocks, newest/oldest blocks, blocks in a particular yard, or details of a block by ID. Complements get_inventory_snapshot (which only returns aggregates).",
@@ -265,6 +290,8 @@ export async function runTool(name: string, input: Record<string, unknown>): Pro
         return JSON.stringify(await listBlocks(input));
       case "get_block_journey":
         return JSON.stringify(await getBlockJourney(input));
+      case "get_stone_efficiency":
+        return JSON.stringify(await getStoneEfficiency(input));
       case "get_live_cutting_status":
         return JSON.stringify(await getLiveCuttingStatus(input));
       case "get_watchdog_alerts":
@@ -1302,4 +1329,103 @@ async function getBlockJourney(input: Record<string, unknown>) {
       };
     }),
   };
+}
+
+// ─── get_stone_efficiency ────────────────────────────────────────────────
+// Reuses the buildLineages() pure function that powers the /block-journey
+// page. Returns BOTH yield and recovered framings plus the top/bottom
+// lineages so the AI can answer "why is PinkStone underperforming" style
+// follow-ups without another tool call.
+
+async function getStoneEfficiency(input: Record<string, unknown>) {
+  const admin = createAdminSupabaseClient();
+  const stone = typeof input.stone === "string" ? input.stone : undefined;
+  const facility = input.facility === "mtcpl" || input.facility === "riico" ? (input.facility as Facility) : undefined;
+  const quality = input.quality === "A" || input.quality === "B" ? input.quality : undefined;
+  const resolvedOnly = input.resolved_only === true;
+
+  const [freshR, reusedR, cutDoneR, doneCsbR] = await Promise.all([
+    admin
+      .from("blocks")
+      .select("id, stone, yard, quality, category, length_ft, width_ft, height_ft, status, created_at, created_by")
+      .eq("category", "Fresh"),
+    admin
+      .from("blocks")
+      .select("id, stone, yard, quality, category, length_ft, width_ft, height_ft, status, created_at, created_by")
+      .eq("category", "Reused"),
+    admin
+      .from("slab_requirements")
+      .select("id, length_ft, width_ft, thickness_ft, source_block_id, label, temple, status")
+      .not("source_block_id", "is", null)
+      .eq("status", "cut_done"),
+    admin.from("cut_session_blocks").select("block_id, status").eq("status", "done"),
+  ]);
+
+  const all = buildLineages(
+    (freshR.data ?? []) as BjBlockRow[],
+    (reusedR.data ?? []) as BjBlockRow[],
+    (cutDoneR.data ?? []) as BjSlabRow[],
+    (doneCsbR.data ?? []) as BjCsbRow[],
+  );
+
+  const filtered = all.filter((l) => {
+    if (stone && l.rootStone !== stone) return false;
+    if (facility && l.rootFacility !== facility) return false;
+    if (quality && l.rootQuality !== quality) return false;
+    if (resolvedOnly && !l.isResolved) return false;
+    return true;
+  });
+
+  const agg = aggregateLineages(filtered);
+
+  // Top 3 / bottom 3 by yield for colour context in the AI reply
+  const byYield = [...filtered].sort((a, b) => a.slabPct - b.slabPct);
+  const worst = byYield.slice(0, 3).map((l) => ({
+    id: l.rootId,
+    stone: l.rootStone,
+    originalCft: Number(l.originalCft.toFixed(2)),
+    slabPct: l.slabPct,
+    wastePct: l.wastePct,
+    resolved: l.isResolved,
+  }));
+  const best = byYield
+    .slice(-3)
+    .reverse()
+    .map((l) => ({
+      id: l.rootId,
+      stone: l.rootStone,
+      originalCft: Number(l.originalCft.toFixed(2)),
+      slabPct: l.slabPct,
+      wastePct: l.wastePct,
+      resolved: l.isResolved,
+    }));
+
+  return {
+    filters: { stone: stone ?? "all", facility: facility ?? "all", quality: quality ?? "all", resolvedOnly },
+    lineagesAnalyzed: agg.totalLineages,
+    resolvedCount: agg.resolvedCount,
+    inProgressCount: agg.inProgressCount,
+    totalOriginalCft: round2(agg.totalOriginalCft),
+    totalSlabCft: round2(agg.totalSlabCft),
+    totalLiveCft: round2(agg.totalLiveCft),
+    totalWasteCft: round2(agg.totalWasteCft),
+    yieldFraming: {
+      weightedSlabPct: agg.weightedSlabPct,
+      weightedLivePct: agg.weightedLivePct,
+      simpleSlabPctAvg: agg.simpleSlabPctAvg,
+      note: "Conservative. Use this for tender pricing — only counts what actually became sellable slabs.",
+    },
+    recoveredFraming: {
+      weightedRecoveredPct: agg.weightedRecoveredPct,
+      weightedWastePct: agg.weightedWastePct,
+      simpleRecoveredPctAvg: agg.simpleRecoveredPctAvg,
+      note: "Optimistic. Credits in-inventory restocks as recovered. Use for judging single-cut performance.",
+    },
+    topWastefulLineages: worst,
+    topEfficientLineages: best,
+  };
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
 }
