@@ -213,46 +213,60 @@ export function MarbleTruckForm({
         )}
       </div>
 
-      {/* Truck metadata row */}
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <label className="stack" style={{ flex: "1 1 140px" }}>
-          <span>Truck No. (optional)</span>
-          <input
-            type="text"
-            name="truck_no"
-            value={truckNo}
-            onChange={(e) => setTruckNo(e.target.value)}
-            placeholder="e.g. RJ-14-AB-1234"
-          />
-        </label>
+      {/* Logistics Info — collapsed by default, same pattern as the
+          sandstone AddBlockForm. Optional metadata; doesn't need to be
+          visible for the fast path. */}
+      <details style={{ marginTop: 4 }}>
+        <summary
+          style={{
+            cursor: "pointer",
+            fontSize: 13,
+            color: "var(--muted)",
+            padding: "4px 0",
+            userSelect: "none",
+          }}
+        >
+          + Logistics Info (Truck No., Vendor, Bill No., Notes)
+        </summary>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+          <label className="stack" style={{ flex: "1 1 140px" }}>
+            <span>Truck No.</span>
+            <input
+              type="text"
+              name="truck_no"
+              value={truckNo}
+              onChange={(e) => setTruckNo(e.target.value)}
+              placeholder="e.g. RJ-14-AB-1234"
+            />
+          </label>
 
-        <div className="stack" style={{ flex: "1 1 180px" }}>
-          <span>Vendor / Supplier (optional)</span>
-          <VendorSelect name="vendor_name" vendors={vendors} />
+          <div className="stack" style={{ flex: "2 1 180px" }}>
+            <span>Vendor / Supplier</span>
+            <VendorSelect name="vendor_name" vendors={vendors} />
+          </div>
+
+          <label className="stack" style={{ flex: "1 1 140px" }}>
+            <span>Bill No.</span>
+            <input
+              type="text"
+              name="bill_no"
+              value={billNo}
+              onChange={(e) => setBillNo(e.target.value)}
+              placeholder="e.g. INV-2042"
+            />
+          </label>
         </div>
-
-        <label className="stack" style={{ flex: "1 1 140px" }}>
-          <span>Bill No. (optional)</span>
+        <label className="stack" style={{ marginTop: 8 }}>
+          <span>Notes</span>
           <input
             type="text"
-            name="bill_no"
-            value={billNo}
-            onChange={(e) => setBillNo(e.target.value)}
-            placeholder="e.g. INV-2042"
+            name="notes"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="e.g. quality variance, delivery note, etc."
           />
         </label>
-      </div>
-
-      <label className="stack">
-        <span>Notes (optional)</span>
-        <input
-          type="text"
-          name="notes"
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          placeholder="e.g. quality variance, delivery note, etc."
-        />
-      </label>
+      </details>
 
       <div style={{ display: "flex", gap: 8 }}>
         <button
