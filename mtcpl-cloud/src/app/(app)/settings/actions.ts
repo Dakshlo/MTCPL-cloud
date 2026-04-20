@@ -27,6 +27,8 @@ export async function addStoneTypeAction(formData: FormData) {
 
   const name = text(formData, "name").replace(/\s+/g, "");
   const base = text(formData, "color") || "#C87A60";
+  const rawCategory = text(formData, "stone_category").toLowerCase();
+  const stone_category = rawCategory === "marble" ? "marble" : "sandstone";
 
   // Auto-derive 3 face colours from one base colour
   const color_top   = adjustHex(base, 1.35);  // lighten for top face
@@ -35,13 +37,42 @@ export async function addStoneTypeAction(formData: FormData) {
 
   if (!name) redirect("/settings?toast=Stone+type+name+required");
 
-  const { error } = await supabase.from("stone_types").insert({ name, color_top, color_front, color_side });
+  const { error } = await supabase
+    .from("stone_types")
+    .insert({ name, color_top, color_front, color_side, stone_category });
   if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
 
   revalidatePath("/settings");
   revalidatePath("/blocks");
   revalidatePath("/slabs");
-  redirect("/settings?toast=Stone+type+added");
+  redirect(`/settings?toast=${encodeURIComponent(`${stone_category === "marble" ? "🗿 Marble" : "Sandstone"} "${name}" added`)}`);
+}
+
+/** Toggle a stone's category between sandstone and marble. Use sparingly —
+ *  reclassifying a stone that has blocks / slabs already linked to it is
+ *  fine at the DB level (category is just a classifier) but the blocks UI
+ *  will start showing it differently (tonnes vs CFT). Prefer this over
+ *  deleting+recreating. */
+export async function setStoneCategoryAction(formData: FormData) {
+  await requireAuth(["owner", "team_head", "developer"]);
+  const supabase = await createServerSupabaseClient();
+
+  const id = text(formData, "id");
+  const rawCategory = text(formData, "stone_category").toLowerCase();
+  const stone_category = rawCategory === "marble" ? "marble" : "sandstone";
+
+  if (!id) redirect("/settings?toast=Stone+id+required");
+
+  const { error } = await supabase
+    .from("stone_types")
+    .update({ stone_category })
+    .eq("id", id);
+  if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
+
+  revalidatePath("/settings");
+  revalidatePath("/blocks");
+  revalidatePath("/block-journey");
+  redirect(`/settings?toast=${encodeURIComponent(`Category set to ${stone_category}`)}`);
 }
 
 export async function deleteStoneTypeAction(formData: FormData) {

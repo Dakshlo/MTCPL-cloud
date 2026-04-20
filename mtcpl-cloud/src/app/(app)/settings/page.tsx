@@ -1,6 +1,6 @@
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { addTempleAction, updateTempleAction, deleteTempleAction, updateUserAction, deleteUserAction, updateOwnNameAction, addStoneTypeAction, deleteStoneTypeAction } from "./actions";
+import { addTempleAction, updateTempleAction, deleteTempleAction, updateUserAction, deleteUserAction, updateOwnNameAction, addStoneTypeAction, deleteStoneTypeAction, setStoneCategoryAction } from "./actions";
 import { stoneDisplayName } from "@/lib/stone-utils";
 import type { AppRole } from "@/lib/types";
 
@@ -76,7 +76,7 @@ export default async function SettingsPage() {
     admin.from("temples").select("*").order("name"),
     // Admin client needed — RLS on profiles only returns the current user's own row
     admin.from("profiles").select("id, full_name, phone, role, is_active, created_at").order("full_name"),
-    admin.from("stone_types").select("id, name, color_top, color_front, color_side, is_active, sort_order").order("sort_order").order("name"),
+    admin.from("stone_types").select("id, name, color_top, color_front, color_side, is_active, sort_order, stone_category").order("sort_order").order("name"),
     // Usage counts for stone types
     admin.from("blocks").select("stone"),
     admin.from("slab_requirements").select("stone, temple"),
@@ -357,9 +357,16 @@ export default async function SettingsPage() {
         <div className="settings-card">
           <h3 className="settings-card-title">Add Stone Type</h3>
           <form action={addStoneTypeAction} className="settings-form-row">
-            <label className="stack" style={{ flex: 2 }}>
+            <label className="stack" style={{ flex: 2, minWidth: 180 }}>
               <span>Name (no spaces, e.g. RedStone)</span>
               <input name="name" placeholder="e.g. RedStone" required style={{ fontFamily: "ui-monospace, monospace", fontWeight: 600 }} />
+            </label>
+            <label className="stack" style={{ flex: "0 0 auto", minWidth: 130 }}>
+              <span>Category</span>
+              <select name="stone_category" defaultValue="sandstone" style={{ fontWeight: 600 }}>
+                <option value="sandstone">Sandstone (CFT)</option>
+                <option value="marble">🗿 Marble (tonnes)</option>
+              </select>
             </label>
             <label className="stack" style={{ flex: "0 0 auto" }}>
               <span>Stone Colour</span>
@@ -370,20 +377,26 @@ export default async function SettingsPage() {
               <button className="primary-button" type="submit">Add Stone</button>
             </div>
           </form>
+          <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+            <strong>Sandstone</strong> = measured in CFT, plan generator works. <strong>Marble</strong> = measured in tonnes per truck, manual cut only. Pick the right one — it affects how the block inventory and Block Journey treat this stone.
+          </p>
         </div>
 
         <div className="settings-table">
-          <div className="settings-table-head" style={{ gridTemplateColumns: "1fr auto auto auto" }}>
+          <div className="settings-table-head" style={{ gridTemplateColumns: "1fr auto auto auto auto" }}>
             <span>Stone Type</span>
+            <span>Category</span>
             <span>3D Colours</span>
             <span>Blocks Use It</span>
             <span></span>
           </div>
           {stoneList.map(st => {
             const isBuiltIn = st.name === "PinkStone" || st.name === "WhiteStone";
+            const stoneCategory: string = (st as { stone_category?: string }).stone_category ?? "sandstone";
+            const isMarble = stoneCategory === "marble";
             return (
               <div key={st.id} className="settings-table-row">
-                <div className="settings-table-row-face" style={{ gridTemplateColumns: "1fr auto auto auto" }}>
+                <div className="settings-table-row-face" style={{ gridTemplateColumns: "1fr auto auto auto auto" }}>
                   <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <span
                       style={{
@@ -396,6 +409,35 @@ export default async function SettingsPage() {
                     <span className="settings-temple-name">{st.name}</span>
                     <span className="muted" style={{ fontSize: 12 }}>({stoneDisplayName(st.name)})</span>
                     {isBuiltIn && <span className="role-pill" style={{ fontSize: 11 }}>Built-in</span>}
+                  </span>
+                  <span>
+                    <form action={setStoneCategoryAction} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      <input type="hidden" name="id" value={st.id} />
+                      <select
+                        name="stone_category"
+                        defaultValue={stoneCategory}
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 700,
+                          padding: "3px 8px",
+                          border: `1px solid ${isMarble ? "rgba(180,83,9,0.35)" : "var(--border)"}`,
+                          borderRadius: 4,
+                          background: isMarble ? "rgba(180,83,9,0.1)" : "rgba(22,101,52,0.08)",
+                          color: isMarble ? "#b45309" : "#15803d",
+                        }}
+                      >
+                        <option value="sandstone">Sandstone</option>
+                        <option value="marble">🗿 Marble</option>
+                      </select>
+                      <button
+                        type="submit"
+                        className="ghost-button"
+                        style={{ fontSize: 11, padding: "2px 8px" }}
+                        title="Save category change"
+                      >
+                        Save
+                      </button>
+                    </form>
                   </span>
                   <span style={{ display: "flex", gap: 4 }}>
                     <span title="Top" style={{ width: 22, height: 22, borderRadius: 4, background: st.color_top, border: "1px solid rgba(0,0,0,0.1)", display: "inline-block" }} />
