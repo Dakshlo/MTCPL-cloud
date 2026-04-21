@@ -2,7 +2,7 @@
 
 /**
  * Carving dashboard client — renders each of the four tabs (Unassigned,
- * Active, Awaiting Review, Approved/Dispatched) as temple-grouped
+ * Active, Awaiting Review, Ready to Dispatch) as temple-grouped
  * sections. Also exposes a Temple filter dropdown to narrow the view
  * to one specific temple.
  *
@@ -229,7 +229,7 @@ export function CarvingDashboardClient({
           jobs={filteredDone}
           machineCodeById={machineCodeById}
           columns={["approved"]}
-          emptyMessage="No approved or dispatched jobs yet."
+          emptyMessage="No slabs ready to dispatch yet."
           fmtDate={fmtDate}
           daysUntil={daysUntil}
         />

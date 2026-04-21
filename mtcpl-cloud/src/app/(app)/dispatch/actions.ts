@@ -37,7 +37,7 @@ export async function createDispatchAction(formData: FormData) {
   const admin = createAdminSupabaseClient();
 
   const temple = String(formData.get("temple") || "").trim();
-  const vehicleNo = String(formData.get("vehicle_no") || "").trim() || null;
+  const vehicleNo = String(formData.get("vehicle_no") || "").trim().toUpperCase() || null;
   const driverName = String(formData.get("driver_name") || "").trim() || null;
   const driverPhone = String(formData.get("driver_phone") || "").trim() || null;
   const expectedDeliveryDate = String(formData.get("expected_delivery_date") || "").trim() || null;

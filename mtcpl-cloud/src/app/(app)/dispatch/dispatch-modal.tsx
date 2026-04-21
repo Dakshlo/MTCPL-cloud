@@ -89,7 +89,23 @@ export function DispatchModal({
                 name="vehicle_no"
                 placeholder="e.g. RJ-14-AB-1234"
                 required
-                style={{ fontFamily: "ui-monospace, monospace", fontWeight: 600 }}
+                autoCapitalize="characters"
+                autoCorrect="off"
+                spellCheck={false}
+                onInput={(e) => {
+                  const el = e.currentTarget;
+                  const start = el.selectionStart;
+                  const end = el.selectionEnd;
+                  el.value = el.value.toUpperCase();
+                  // Restore caret so typing in the middle doesn't jump to end.
+                  if (start !== null && end !== null) el.setSelectionRange(start, end);
+                }}
+                style={{
+                  fontFamily: "ui-monospace, monospace",
+                  fontWeight: 600,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.02em",
+                }}
               />
             </label>
 
