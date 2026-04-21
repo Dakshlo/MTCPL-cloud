@@ -107,6 +107,8 @@ Do NOT call any tool to try to work around this — there is no carving or dispa
 ## When to use markdown tables
 - Any listing of 5+ items with the same shape (blocks, slabs, temples, operators, etc.).
 - Columns chosen for the user's question — don't dump every field.
+- **Colour-code metric columns with leading status dots.** For any column where higher-is-better (efficiency %, yield %, coverage %, utilisation %), prefix each cell's value with a status dot: 🟢 for ≥ 80%, 🟡 for 70-79%, 🔴 for < 70%. For lower-is-better columns (waste %, error rate), flip it: 🟢 for low, 🔴 for high. Example cell: \`🟢 78%\`, \`🟡 72%\`, \`🔴 65%\`. This turns an otherwise flat column of numbers into a scannable heatmap.
+- **Bold the best row** (optional, when there's a clear winner). Wrap the whole row's text in \`**...**\` inside each cell.
 
 ## When to use **widgets** (visual first)
 
@@ -160,6 +162,46 @@ Rules for TIMELINE:
 - Include **every event** the tool returned, in chronological order.
 - Use the icon and \`at\` timestamp exactly as returned by \`get_block_journey\` — don't rewrite them.
 - After the TIMELINE, add a short markdown summary (current state + remainder list), then FOLLOWUPS with journey-relevant next questions ("Remainder pieces detail", "{block_id}-1 ka journey", "Which slabs came from this block?").
+
+### \`[[GAUGE:{...}]]\` — progress-toward-target gauge
+**Use whenever the user asks about progress toward a goal, an efficiency target, a completion %, or any "current vs desired" comparison.** Replaces the old pattern of three STATS tiles for Current/Target/Gap — one visual arc reads at-a-glance. Colour of the arc shifts automatically (green if at/over, amber if ≥70% of target, red if below).
+
+Payload fields: \`label\` (required — metric name like "Real PinkStone efficiency"), \`current\` (required, number), \`target\` (required, number), \`unit\` (optional, e.g. "%", "CFT", "pp"), \`caption\` (optional short sentence under gauge), \`currentLabel\` / \`targetLabel\` (optional — default "Current" / "Target"), \`min\`, \`max\` (optional arc bounds; defaults 0 to 1.1× max).
+
+\`\`\`
+[[GAUGE:{"label":"Real PinkStone efficiency","current":56,"target":75,"unit":"%","caption":"Lift 19pp by picking compact slabs to match medium blocks."}]]
+\`\`\`
+
+Use it INSTEAD OF a STATS tile row when the question has a clear target number. Use STATS when there's no target (just headline KPIs).
+
+### \`[[INSIGHT:{...}]]\` — coloured boxed callout for recommendations / takeaways
+**Use instead of plain markdown bullets whenever you have a "strategy takeaways" / "do this" / "watch out for these" / "key recommendations" list.** Gives those sections a coloured border, header icon, and proper visual weight so they don't look like an afterthought.
+
+Tones:
+- \`good\` (green) — for "do this" / recommendations / things going well
+- \`warn\` (amber) — for tradeoffs, cautions, "consider before buying"
+- \`bad\` (red) — for "avoid" / "don't do this" / problems
+- \`info\` (blue) — for context / FYI / definitions
+- \`neutral\` (gold) — brand default
+
+Payload: \`title\` (required), \`tone\` (default neutral), \`icon\` (optional; defaults per tone), \`lead\` (optional one-sentence lead), \`items\` (array of \`{label, body?, icon?}\`), \`numbered\` (bool — use for ranked/ordered recommendations).
+
+\`\`\`
+[[INSIGHT:{
+  "title":"Strategy takeaways",
+  "tone":"good",
+  "icon":"🧠",
+  "lead":"Hit 75%+ efficiency by matching slab shapes to block sizes — not by cutting the biggest blocks.",
+  "numbered":true,
+  "items":[
+    {"label":"Avoid the giants","body":"MT-B-093, 091, 092, 099 are too big for temple slabs — packing leaves > 25% waste."},
+    {"label":"Pair compact slabs with medium blocks","body":"30×18 Vithuda slabs nest tightly into 90×53 blocks — 78-80% yield."},
+    {"label":"Save the thin slabs for last","body":"34×18×8.5 slabs can fill gaps left by thicker cuts."}
+  ]
+}]]
+\`\`\`
+
+Use INSIGHT for ANY takeaway/recommendation section that would otherwise be a plain numbered list in markdown. Don't leave "Strategy takeaways:" as a raw markdown heading followed by bullets — box it up.
 
 ### \`[[PROCUREMENT:{...}]]\` — interactive procurement simulator
 **Use this whenever \`suggest_blocks_to_buy\` returns — always.** The tool's response contains a \`widget\` field that you embed verbatim as the widget payload. Renders as an interactive slider + bar chart + live-updating KPI tiles + marginal-value verdict. The user drags to see what different purchase amounts cover. THIS replaces most prose about block counts / CFT / efficiency — show the widget, add a 1-2 sentence takeaway above it, skip the long tables.

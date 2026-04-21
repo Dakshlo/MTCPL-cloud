@@ -33,8 +33,10 @@ import { LinkButton, type LinkButtonProps } from "./chat-widgets/link-button";
 import { SlabCard, type SlabCardProps } from "./chat-widgets/slab-card";
 import { TimelineCard, type TimelineCardProps } from "./chat-widgets/timeline-card";
 import { ProcurementSim, type ProcurementSimProps } from "./chat-widgets/procurement-sim";
+import { Gauge, type GaugeProps } from "./chat-widgets/gauge";
+import { InsightBox, type InsightBoxProps } from "./chat-widgets/insight-box";
 
-const START_RE = /\[\[(CHART|BLOCK|STATS|FOLLOWUPS|TEMPLE|LINK|SLAB|TIMELINE|PROCUREMENT):/g;
+const START_RE = /\[\[(CHART|BLOCK|STATS|FOLLOWUPS|TEMPLE|LINK|SLAB|TIMELINE|PROCUREMENT|GAUGE|INSIGHT):/g;
 
 type Part =
   | { kind: "md"; text: string }
@@ -48,6 +50,8 @@ type Part =
   | { kind: "link"; props: LinkButtonProps }
   | { kind: "timeline"; props: TimelineCardProps }
   | { kind: "procurement"; props: ProcurementSimProps }
+  | { kind: "gauge"; props: GaugeProps }
+  | { kind: "insight"; props: InsightBoxProps }
   | { kind: "err"; text: string }; // marker present but JSON bad → show as-is
 
 /**
@@ -162,6 +166,20 @@ function splitByMarkers(src: string): Part[] {
         const d = data as ProcurementSimProps;
         if (Array.isArray(d.trace) && d.trace.length > 0 && d.typicalBlock && typeof d.totalSlabs === "number") {
           parts.push({ kind: "procurement", props: d });
+        } else {
+          parts.push({ kind: "err", text: src.slice(startIdx, endIdx) });
+        }
+      } else if (kind === "GAUGE") {
+        const d = data as GaugeProps;
+        if (typeof d.current === "number" && typeof d.target === "number" && typeof d.label === "string") {
+          parts.push({ kind: "gauge", props: d });
+        } else {
+          parts.push({ kind: "err", text: src.slice(startIdx, endIdx) });
+        }
+      } else if (kind === "INSIGHT") {
+        const d = data as InsightBoxProps;
+        if (typeof d.title === "string" && Array.isArray(d.items) && d.items.length > 0) {
+          parts.push({ kind: "insight", props: d });
         } else {
           parts.push({ kind: "err", text: src.slice(startIdx, endIdx) });
         }
@@ -427,6 +445,8 @@ export function ChatMarkdown({
         if (p.kind === "timeline") return <TimelineCard key={i} {...p.props} />;
         if (p.kind === "stats") return <StatsTiles key={i} tiles={p.tiles} />;
         if (p.kind === "procurement") return <ProcurementSim key={i} {...p.props} />;
+        if (p.kind === "gauge") return <Gauge key={i} {...p.props} />;
+        if (p.kind === "insight") return <InsightBox key={i} {...p.props} />;
         if (p.kind === "link-group") {
           return (
             <div key={i} style={{ display: "flex", flexWrap: "wrap", gap: 4, margin: "6px 0" }}>
