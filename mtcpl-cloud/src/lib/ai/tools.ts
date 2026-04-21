@@ -75,7 +75,11 @@ export const AI_TOOLS = [
     input_schema: {
       type: "object" as const,
       properties: {
-        temple: { type: "string", description: "Exact temple name, or 'all' for the top 10." },
+        temple: {
+          type: "string",
+          description:
+            "Temple name (fuzzy-matched — 'umia mata' resolves to 'UMIYA MATAJI TEMPLE AHMEDABAD'). Pass 'all' for the top 10. If the tool returns error.availableTemples, the name didn't resolve — pick one from that list and retry.",
+        },
       },
       required: ["temple"],
       additionalProperties: false,
@@ -105,7 +109,11 @@ export const AI_TOOLS = [
     input_schema: {
       type: "object" as const,
       properties: {
-        temple: { type: "string", description: "Exact temple name whose open slabs to plan for." },
+        temple: {
+          type: "string",
+          description:
+            "Temple name whose open slabs to plan for (fuzzy-matched — partial names like 'umia' or 'mahakali' resolve fine).",
+        },
         facility: {
           type: "string",
           enum: ["mtcpl", "riico"],
@@ -256,7 +264,8 @@ export const AI_TOOLS = [
         },
         temple: {
           type: "string",
-          description: "Filter to one temple (exact name).",
+          description:
+            "Filter to one temple (fuzzy-matched — 'umia mata' resolves to 'UMIYA MATAJI TEMPLE AHMEDABAD'). If the tool returns error.availableTemples, the name didn't resolve — pick one and retry.",
         },
         limit: {
           type: "number",
@@ -337,6 +346,62 @@ export async function runTool(name: string, input: Record<string, unknown>): Pro
     const msg = err instanceof Error ? err.message : "Unknown error";
     return JSON.stringify({ error: `Tool failed: ${msg}` });
   }
+}
+
+// ─── temple name resolver ────────────────────────────────────────────────────
+//
+// Users / LLMs rarely type the full canonical temple name.
+// e.g. "umia mata" → "UMIYA MATAJI TEMPLE AHMEDABAD"
+//      "aasta"    → "AASTHALAXMI TEMPLE AGROHA"
+//
+// Without this, an .eq("temple", "umia mata") returns zero rows and the
+// calling LLM reads that as "all work done" instead of "name didn't match."
+// This helper normalises + fuzzy-matches, and returns an explicit error
+// (with the full available list) when nothing resolves — so tool output
+// never silently looks like "nothing to do here."
+async function resolveTempleName(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  input: string
+): Promise<
+  | { kind: "resolved"; temple: string }
+  | { kind: "ambiguous"; candidates: string[] }
+  | { kind: "not_found"; available: string[] }
+> {
+  // Pull every distinct temple that has ever had a slab requirement
+  // (any status — otherwise a delivered-only temple wouldn't resolve).
+  const { data } = await admin.from("slab_requirements").select("temple");
+  const all = [...new Set((data ?? []).map((r) => r.temple).filter(Boolean) as string[])];
+
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const needle = norm(input);
+  if (!needle) return { kind: "not_found", available: all };
+
+  // 1. Exact case-insensitive match
+  const exact = all.find((t) => norm(t) === needle);
+  if (exact) return { kind: "resolved", temple: exact };
+
+  // 2. Substring either way — user substring inside temple, or temple inside user text
+  let matches = all.filter((t) => {
+    const hay = norm(t);
+    return hay.includes(needle) || needle.includes(hay);
+  });
+
+  // 3. Token-overlap fallback ("umia mata" → "UMIYA MATAJI …"):
+  //    if any user token is a substring of any temple token, count it a hit.
+  //    This catches "umia" → "umiya", "mata" → "mataji", etc.
+  if (matches.length === 0) {
+    const userTokens = input.toLowerCase().split(/\s+/).map(norm).filter(Boolean);
+    matches = all.filter((t) => {
+      const templeTokens = t.toLowerCase().split(/\s+/).map(norm).filter(Boolean);
+      return userTokens.some((u) =>
+        templeTokens.some((tk) => tk.includes(u) || u.includes(tk))
+      );
+    });
+  }
+
+  if (matches.length === 1) return { kind: "resolved", temple: matches[0] };
+  if (matches.length > 1) return { kind: "ambiguous", candidates: matches };
+  return { kind: "not_found", available: all };
 }
 
 // ─── list_temples ────────────────────────────────────────────────────────────
@@ -453,10 +518,29 @@ async function getTempleRequirements(input: Record<string, unknown>) {
     return { topTemples };
   }
 
+  // Resolve user-provided temple name to its canonical DB form.
+  const resolution = await resolveTempleName(admin, temple);
+  if (resolution.kind === "not_found") {
+    return {
+      error: `No temple matches "${temple}". The name might be spelled differently.`,
+      availableTemples: resolution.available,
+      hint: "Call list_temples to see the canonical names, then retry with one of them.",
+    };
+  }
+  if (resolution.kind === "ambiguous") {
+    return {
+      ambiguous: true,
+      error: `"${temple}" could mean any of ${resolution.candidates.length} temples.`,
+      candidates: resolution.candidates,
+      hint: "Ask the user which one they meant, or retry with the exact name.",
+    };
+  }
+  const canonicalTemple = resolution.temple;
+
   const { data, error } = await admin
     .from("slab_requirements")
     .select("id, label, stone, quality, priority, length_ft, width_ft, thickness_ft, status, deadline")
-    .eq("temple", temple)
+    .eq("temple", canonicalTemple)
     .in("status", ["open", "planned"])
     .order("priority", { ascending: false });
   if (error) throw new Error(error.message);
@@ -483,7 +567,8 @@ async function getTempleRequirements(input: Record<string, unknown>) {
   });
 
   return {
-    temple,
+    temple: canonicalTemple,
+    resolvedFrom: temple !== canonicalTemple ? temple : undefined,
     openSlabCount: rows.length,
     priorityCount,
     uniqueSizes: uniqueSizes.sort((a, b) => b.count - a.count).slice(0, 20),
@@ -563,17 +648,40 @@ async function runPlanSimulation(input: Record<string, unknown>) {
 
   const admin = createAdminSupabaseClient();
 
+  // Resolve user-provided temple name to its canonical DB form.
+  const resolution = await resolveTempleName(admin, temple);
+  if (resolution.kind === "not_found") {
+    return {
+      error: `No temple matches "${temple}".`,
+      availableTemples: resolution.available,
+      hint: "Call list_temples to see the canonical names, then retry.",
+    };
+  }
+  if (resolution.kind === "ambiguous") {
+    return {
+      ambiguous: true,
+      error: `"${temple}" could mean any of ${resolution.candidates.length} temples.`,
+      candidates: resolution.candidates,
+      hint: "Ask the user to clarify.",
+    };
+  }
+  const canonicalTemple = resolution.temple;
+
   // Fetch open slab_requirements for this temple
   const slabsRes = await admin
     .from("slab_requirements")
     .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, status, quality, priority")
-    .eq("temple", temple)
+    .eq("temple", canonicalTemple)
     .in("status", ["open", "planned"]);
   if (slabsRes.error) throw new Error(slabsRes.error.message);
 
   const slabs = (slabsRes.data ?? []) as SlabRow[];
   if (slabs.length === 0) {
-    return { error: `No open slab requirements found for temple "${temple}". Try list_temples to check the exact name.` };
+    return {
+      temple: canonicalTemple,
+      openSlabCount: 0,
+      message: `Temple "${canonicalTemple}" currently has no open or planned slab requirements. All its work is either completed or dispatched.`,
+    };
   }
 
   // Fetch available blocks in the facility
@@ -594,7 +702,8 @@ async function runPlanSimulation(input: Record<string, unknown>) {
   const result = runOptimization(blocks, slabs, kerfMm);
 
   return {
-    temple,
+    temple: canonicalTemple,
+    resolvedFrom: temple !== canonicalTemple ? temple : undefined,
     facility,
     kerfMm,
     blocksNeeded: result.plan.length,
@@ -1496,9 +1605,33 @@ function round2(n: number): number {
 async function getDispatchStatus(input: Record<string, unknown>) {
   const admin = createAdminSupabaseClient();
   const statusFilter = typeof input.status === "string" ? input.status : "all";
-  const templeFilter = typeof input.temple === "string" ? input.temple : undefined;
+  const rawTempleFilter = typeof input.temple === "string" ? input.temple : undefined;
   const rawLimit = typeof input.limit === "number" ? input.limit : 10;
   const limit = Math.max(1, Math.min(50, rawLimit));
+
+  // Resolve user-provided temple name (if any) to its canonical DB form.
+  // Without this a shorthand like "Umia Mata" yields 0 results and the
+  // LLM reports "all work done" when actually the name didn't match.
+  let templeFilter: string | undefined = undefined;
+  if (rawTempleFilter) {
+    const resolution = await resolveTempleName(admin, rawTempleFilter);
+    if (resolution.kind === "not_found") {
+      return {
+        error: `No temple matches "${rawTempleFilter}".`,
+        availableTemples: resolution.available,
+        hint: "Call list_temples to see canonical names, then retry.",
+      };
+    }
+    if (resolution.kind === "ambiguous") {
+      return {
+        ambiguous: true,
+        error: `"${rawTempleFilter}" could mean any of ${resolution.candidates.length} temples.`,
+        candidates: resolution.candidates,
+        hint: "Ask the user to clarify.",
+      };
+    }
+    templeFilter = resolution.temple;
+  }
 
   const wantReady = statusFilter === "all" || statusFilter === "ready";
   const wantOut = statusFilter === "all" || statusFilter === "out_for_delivery";
@@ -1580,7 +1713,11 @@ async function getDispatchStatus(input: Record<string, unknown>) {
   }
 
   return {
-    filters: { status: statusFilter, temple: templeFilter ?? "all" },
+    filters: {
+      status: statusFilter,
+      temple: templeFilter ?? "all",
+      resolvedTempleFrom: rawTempleFilter && rawTempleFilter !== templeFilter ? rawTempleFilter : undefined,
+    },
     readyCount: ready.length,
     readyByTemple: [...readyByTemple.entries()]
       .map(([temple, v]) => ({ temple, count: v.count, slabCft: round2(v.slabCft) }))
