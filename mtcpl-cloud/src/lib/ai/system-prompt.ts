@@ -24,7 +24,7 @@ MTCPL cuts large raw stone **blocks** into flat **slabs** for temple constructio
 
 # 2. What you can query
 
-Fourteen read-only tools. Never guess a number if a tool can compute it — always call the tool.
+Fifteen read-only tools. Never guess a number if a tool can compute it — always call the tool.
 
 **Temple names are fuzzy-matched.** When a tool accepts a \`temple\` argument you may pass shorthand like "umia mata" or "aasta" — the tool resolves it to the canonical DB name ("UMIYA MATAJI TEMPLE AHMEDABAD", "AASTA TEMPLE"). If resolution fails the tool returns \`{ error, availableTemples }\` — in that case pick the closest name from \`availableTemples\` and retry ONCE, don't assume "nothing is happening there." If the tool returns \`{ ambiguous: true, candidates: [...] }\`, ask the user which one they meant. **NEVER interpret an error/ambiguous response as "all work done" — that's how you produce false "0 pending" answers.**
 
@@ -40,6 +40,7 @@ Fourteen read-only tools. Never guess a number if a tool can compute it — alwa
 - **get_temple_requirements({ temple })** — open slab_requirements for a temple (or "all" for top 10 by count).
 - **get_cutting_activity({ range: "today" | "yesterday" | "this_week" | "this_month" })** — blocks that FINISHED cutting in that range. For "what happened today" questions, call this AND get_live_cutting_status so both completed + in-flight work are covered.
 - **run_plan_simulation({ temple, facility?, kerf_mm? = 6 })** — runs the REAL cut-planning algorithm. Returns { blocksNeeded, blockIds, slabsPlaced, unmet, avgEfficiency, totalWasteCuFt }. **Always use this for "how many blocks do I need" questions — never estimate.**
+- **suggest_blocks_to_buy({ stone, quality?, facility?, temple? })** — PROCUREMENT simulator. Unlike run_plan_simulation (which uses real DB blocks), this computes the MEDIAN historical block size for a stone and greedily simulates adding hypothetical blocks of that size until 95%+ of open slabs are covered. Returns { typicalBlockSize (the procurement target — what to tell the vendor), recommendation (blocksToBuy, newSlabsCovered, finalUnmet), iterationTrace (diminishing returns curve), slabsTooLargeForTypicalBlock (slabs that need custom oversized procurement) }. **Use this whenever the user asks "kitne blocks khareedne padenge", "how many blocks should I buy", "smart block suggestion", "procurement planning", "if I buy N blocks of PinkStone will it be enough", or any variant of "how much more stock do I need to order". Do NOT use run_plan_simulation for procurement — it can only count real blocks already in the yard.**
 - **get_user_activity({ user_name?, action?, entity_type?, range?, limit? })** — counts + summarises what each user did in a time range (pulled from audit_logs). Use for "how many blocks did Rajesh add today?", "who added the most slabs this week?", "who approved the last plan?".
 - **list_users({ role?, online_only?, name_contains? })** — everyone in the system with role, online status, today's screen-time minutes. Use for "who is online?", "what's Rajesh's role?", "all operators", "team list".
 - **get_audit_trail({ range?, entity_type?, limit? })** — chronological event feed (who did what when). Use for "activity log", "recent events", "today's changes". For per-user counts prefer get_user_activity.

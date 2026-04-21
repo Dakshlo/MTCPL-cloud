@@ -126,6 +126,36 @@ export const AI_TOOLS = [
     },
   },
   {
+    name: "suggest_blocks_to_buy",
+    description:
+      "Answers 'how many more blocks do I need to buy to fulfil the remaining slabs?' by simulating the cut-planning algorithm with HYPOTHETICAL blocks sized from historical inventory median. Computes the typical block size vendors supply for this stone (median L/W/H across every block ever logged for this stone + quality), then greedily adds one synthetic block of that size at a time, re-runs the packer, and tracks how coverage climbs. Stops when 95%+ of unmet slabs are placed, or when a round adds zero new placements (remaining slabs are bigger than the typical block and need custom procurement). Trigger phrases: 'kitne blocks khareedne padenge', 'how many blocks to buy', 'block suggestion', 'smart suggestion', 'unmet slabs ke liye blocks', 'if I buy X blocks will I be done'.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        stone: {
+          type: "string",
+          description: "Stone type for the analysis (e.g. 'PinkStone', 'WhiteMarble'). Required — each stone has its own typical block size.",
+        },
+        quality: {
+          type: "string",
+          enum: ["A", "B"],
+          description: "Optional — restrict simulation to one quality grade. Omit to include both A and B.",
+        },
+        facility: {
+          type: "string",
+          enum: ["mtcpl", "riico"],
+          description: "Facility where new blocks would be placed. Defaults to MTCPL.",
+        },
+        temple: {
+          type: "string",
+          description: "Optional — scope unmet slabs to one temple (fuzzy-matched). Omit to consider unmet slabs across all temples.",
+        },
+      },
+      required: ["stone"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "get_watchdog_alerts",
     description:
       "Scan the system for operational issues the user should know about RIGHT NOW: blocks that have been cutting longer than 24 hours, urgent slabs whose deadline has passed, and blocks rejected in the last 48 hours. Use this ONCE at the START of a fresh conversation (first user message) so you can proactively flag anything critical at the end of your reply. Do not call repeatedly within the same chat.",
@@ -298,6 +328,8 @@ export async function runTool(name: string, input: Record<string, unknown>): Pro
         return JSON.stringify(await getCuttingActivity(input));
       case "run_plan_simulation":
         return JSON.stringify(await runPlanSimulation(input));
+      case "suggest_blocks_to_buy":
+        return JSON.stringify(await suggestBlocksToBuy(input));
       case "list_blocks":
         return JSON.stringify(await listBlocks(input));
       case "get_block_journey":
@@ -701,6 +733,260 @@ async function runPlanSimulation(input: Record<string, unknown>) {
       efficiencyPct: p.eff,
       hasRestockableRemainder: !!p.biggest,
     })),
+  };
+}
+
+// ─── suggest_blocks_to_buy ───────────────────────────────────────────────────
+// Unlike run_plan_simulation (which only works with real DB blocks), this
+// tool simulates procurement: "if I bought N more blocks of the typical
+// size we usually get, would all the open slabs fit?" Median historical
+// block dims drive the hypothetical size. Greedy add-one-at-a-time loop
+// re-runs the packer each round and stops when coverage stabilises or
+// hits 95%. Remaining-too-large slabs are flagged separately so the user
+// knows which ones need oversized custom blocks vs ordinary stock.
+
+async function suggestBlocksToBuy(input: Record<string, unknown>) {
+  const stone = typeof input.stone === "string" ? input.stone : "";
+  const quality = input.quality === "A" || input.quality === "B" ? (input.quality as "A" | "B") : undefined;
+  const facility: Facility = input.facility === "riico" ? "riico" : "mtcpl";
+  const rawTempleFilter = typeof input.temple === "string" ? input.temple : undefined;
+  const KERF_MM = 6;
+  const MAX_HYPOTHETICAL = 30;
+  const COVERAGE_TARGET = 0.95;
+
+  if (!stone) {
+    return { error: "Specify a stone (e.g. PinkStone, WhiteMarble)." };
+  }
+
+  const admin = createAdminSupabaseClient();
+
+  // Optional temple filter — reuses the fuzzy resolver so 'umia mata'
+  // becomes 'UMIYA MATAJI TEMPLE AHMEDABAD' automatically.
+  let templeFilter: string | undefined = undefined;
+  if (rawTempleFilter) {
+    const resolution = await resolveTempleName(admin, rawTempleFilter);
+    if (resolution.kind === "not_found") {
+      return {
+        error: `No temple matches "${rawTempleFilter}".`,
+        availableTemples: resolution.available,
+      };
+    }
+    if (resolution.kind === "ambiguous") {
+      return {
+        ambiguous: true,
+        error: `"${rawTempleFilter}" could mean any of ${resolution.candidates.length} temples.`,
+        candidates: resolution.candidates,
+      };
+    }
+    templeFilter = resolution.temple;
+  }
+
+  // ── 1. Fetch the slab set we're trying to cover ────────────────────
+  let slabQ = admin
+    .from("slab_requirements")
+    .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, status, quality, priority")
+    .in("status", ["open", "planned"])
+    .eq("stone", stone);
+  if (quality) slabQ = slabQ.eq("quality", quality);
+  if (templeFilter) slabQ = slabQ.eq("temple", templeFilter);
+
+  const slabsRes = await slabQ;
+  if (slabsRes.error) throw new Error(slabsRes.error.message);
+  const slabs = (slabsRes.data ?? []) as SlabRow[];
+
+  if (slabs.length === 0) {
+    return {
+      stone,
+      quality: quality ?? "any",
+      facility,
+      temple: templeFilter ?? "all",
+      message: "No open or planned slabs found for this stone/quality/temple. Nothing to buy blocks for.",
+    };
+  }
+
+  // ── 2. Current live inventory for the starting simulation ──────────
+  const yardList = YARDS_BY_FACILITY[facility] as unknown as number[];
+  let invQ = admin
+    .from("blocks")
+    .select("id, stone, yard, category, length_ft, width_ft, height_ft, status, quality")
+    .eq("stone", stone)
+    .in("status", ["available", "reserved"])
+    .in("yard", yardList);
+  if (quality) invQ = invQ.eq("quality", quality);
+  const invRes = await invQ;
+  if (invRes.error) throw new Error(invRes.error.message);
+  const currentBlocks = (invRes.data ?? []) as BlockRow[];
+
+  // ── 3. Historical dims for the typical-block calculation ───────────
+  // Median of every block ever logged for this stone — available,
+  // reserved, consumed, discarded. This is what the vendor tends to
+  // send you, so it's the most honest baseline for "if I order more
+  // blocks, what size will they actually show up as."
+  const { data: histRows, error: histErr } = await admin
+    .from("blocks")
+    .select("length_ft, width_ft, height_ft, quality")
+    .eq("stone", stone);
+  if (histErr) throw new Error(histErr.message);
+  const histBlocks = (histRows ?? []).filter((b) => !quality || b.quality === quality);
+
+  if (histBlocks.length === 0) {
+    return {
+      error: `No historical blocks for stone "${stone}"${quality ? ` grade ${quality}` : ""}. Cannot compute a typical block size without precedent.`,
+      suggestion: "Log at least a few blocks of this stone first, then retry.",
+    };
+  }
+
+  const median = (arr: number[]): number => {
+    const s = [...arr].sort((a, b) => a - b);
+    return s[Math.floor(s.length / 2)];
+  };
+  const medL = median(histBlocks.map((b) => Number(b.length_ft)));
+  const medW = median(histBlocks.map((b) => Number(b.width_ft)));
+  const medH = median(histBlocks.map((b) => Number(b.height_ft)));
+  // Round to whole inches — procurement dims don't need decimals
+  const typicalL = Math.round(medL);
+  const typicalW = Math.round(medW);
+  const typicalH = Math.round(medH);
+  const typicalCft = Number(((typicalL * typicalW * typicalH) / 1728).toFixed(2));
+
+  // ── 4. Baseline: run the packer against CURRENT inventory alone ────
+  const baseline = runOptimization(currentBlocks, slabs, KERF_MM);
+  const baselinePlaced = baseline.plan.reduce((sum, p) => sum + p.placed.length, 0);
+  const baselineUnmet = baseline.unmet.length;
+
+  if (baselineUnmet === 0) {
+    return {
+      stone,
+      quality: quality ?? "any",
+      facility,
+      temple: templeFilter ?? "all",
+      totalSlabs: slabs.length,
+      currentInventoryBlocks: currentBlocks.length,
+      message: `Current inventory of ${currentBlocks.length} ${stone} block${currentBlocks.length !== 1 ? "s" : ""} already covers every open slab. No new blocks needed.`,
+      typicalBlockSize: { length_ft: typicalL, width_ft: typicalW, height_ft: typicalH, cft: typicalCft, basedOnBlocks: histBlocks.length },
+    };
+  }
+
+  // ── 5. Greedy hypothetical-block loop ──────────────────────────────
+  // Each iteration adds ONE synthetic block of typical size and re-runs.
+  // Stop when we've covered 95% or a round adds no new placements.
+  const workingBlocks: BlockRow[] = [...currentBlocks];
+  const trace: Array<{
+    blocksAdded: number;
+    cumulativePlaced: number;
+    newThisRound: number;
+    remainingUnmet: number;
+    cumulativeEffPct: number;
+  }> = [];
+  let lastPlaced = baselinePlaced;
+  let converged = false;
+
+  for (let i = 1; i <= MAX_HYPOTHETICAL; i++) {
+    workingBlocks.push({
+      id: `HYPOTHETICAL-${i}`,
+      stone,
+      yard: yardList[0],
+      category: "Fresh",
+      length_ft: typicalL,
+      width_ft: typicalW,
+      height_ft: typicalH,
+      status: "available",
+      quality: quality ?? "A",
+    });
+
+    const res = runOptimization(workingBlocks, slabs, KERF_MM);
+    const placed = res.plan.reduce((sum, p) => sum + p.placed.length, 0);
+    const newThisRound = placed - lastPlaced;
+    const cumEffPct = res.plan.length > 0
+      ? Math.round(res.plan.reduce((s, p) => s + p.eff, 0) / res.plan.length)
+      : 0;
+
+    trace.push({
+      blocksAdded: i,
+      cumulativePlaced: placed,
+      newThisRound,
+      remainingUnmet: res.unmet.length,
+      cumulativeEffPct: cumEffPct,
+    });
+
+    if (res.unmet.length === 0 || placed / slabs.length >= COVERAGE_TARGET) {
+      converged = true;
+      break;
+    }
+    if (newThisRound === 0) {
+      // Adding another typical block buys zero new slabs — remaining
+      // slabs exceed typical block size on some axis, nothing more to do.
+      break;
+    }
+    lastPlaced = placed;
+  }
+
+  const final = trace[trace.length - 1];
+  const newSlabsCovered = final.cumulativePlaced - baselinePlaced;
+
+  // ── 6. Flag slabs too big for the typical block ────────────────────
+  // Compare slab L×W (rotation allowed) and thickness vs typical block
+  // L×W×H. Anything that won't fit even in isolation needs a bigger block.
+  const tooLarge = slabs.filter((s) => {
+    const sL = Number(s.length_ft);
+    const sW = Number(s.width_ft);
+    const sT = Number(s.thickness_ft);
+    const fitsFlat = Math.max(sL, sW) <= Math.max(typicalL, typicalW) && Math.min(sL, sW) <= Math.min(typicalL, typicalW);
+    const fitsThickness = sT <= typicalH;
+    return !(fitsFlat && fitsThickness);
+  });
+
+  return {
+    stone,
+    quality: quality ?? "any",
+    facility,
+    temple: templeFilter ?? "all",
+    resolvedTempleFrom: rawTempleFilter && rawTempleFilter !== templeFilter ? rawTempleFilter : undefined,
+
+    totalSlabsConsidered: slabs.length,
+    currentInventoryBlocks: currentBlocks.length,
+    coveredByCurrentInventory: baselinePlaced,
+    unmetAfterCurrentInventory: baselineUnmet,
+
+    typicalBlockSize: {
+      length_ft: typicalL,
+      width_ft: typicalW,
+      height_ft: typicalH,
+      cft: typicalCft,
+      basedOnBlocks: histBlocks.length,
+      note: `Median of all ${histBlocks.length} ${stone}${quality ? ` grade-${quality}` : ""} blocks ever logged — what your vendors typically supply.`,
+    },
+
+    recommendation: {
+      blocksToBuy: trace.length,
+      totalCftToBuy: Number((trace.length * typicalCft).toFixed(2)),
+      newSlabsCovered,
+      finalUnmet: final.remainingUnmet,
+      avgEfficiencyPct: final.cumulativeEffPct,
+      converged,
+      summary: converged
+        ? `Buy ${trace.length} typical block${trace.length !== 1 ? "s" : ""} (~${typicalL}×${typicalW}×${typicalH} in, ${typicalCft} CFT each) → covers ${final.cumulativePlaced}/${slabs.length} slabs at ${final.cumulativeEffPct}% avg efficiency.`
+        : `Adding ${trace.length} typical blocks takes us from ${baselinePlaced} to ${final.cumulativePlaced}/${slabs.length} placed. The remaining ${final.remainingUnmet} slab${final.remainingUnmet !== 1 ? "s" : ""} won't fit in a typical block — see slabsTooLargeForTypicalBlock.`,
+    },
+
+    iterationTrace: trace,
+
+    slabsTooLargeForTypicalBlock: tooLarge.slice(0, 20).map((s) => ({
+      id: s.id,
+      label: s.label,
+      dimensions: `${s.length_ft} × ${s.width_ft} × ${s.thickness_ft} in`,
+      reason:
+        Number(s.thickness_ft) > typicalH
+          ? `thickness ${s.thickness_ft} > typical height ${typicalH}`
+          : `footprint ${s.length_ft}×${s.width_ft} exceeds ${typicalL}×${typicalW}`,
+    })),
+    slabsTooLargeCount: tooLarge.length,
+
+    limits: {
+      maxHypotheticalBlocksEvaluated: MAX_HYPOTHETICAL,
+      coverageTargetPct: Math.round(COVERAGE_TARGET * 100),
+      kerfMm: KERF_MM,
+    },
   };
 }
 
