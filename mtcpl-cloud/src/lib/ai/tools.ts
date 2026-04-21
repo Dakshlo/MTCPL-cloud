@@ -924,6 +924,18 @@ async function suggestBlocksToBuy(input: Record<string, unknown>) {
   const final = trace[trace.length - 1];
   const newSlabsCovered = final.cumulativePlaced - baselinePlaced;
 
+  // Sweet spot = first block where marginal value drops off or coverage
+  // reaches 90%. This is what the interactive slider defaults to so the
+  // user lands on a sensible recommendation before dragging.
+  const sweetSpotIdx = (() => {
+    for (let i = 0; i < trace.length; i++) {
+      const t = trace[i];
+      if (t.cumulativePlaced / slabs.length >= 0.9) return i + 1;
+      if (i > 0 && t.newThisRound <= 1) return i; // the PREVIOUS block was the last high-value buy
+    }
+    return trace.length;
+  })();
+
   // ── 6. Flag slabs too big for the typical block ────────────────────
   // Compare slab L×W (rotation allowed) and thickness vs typical block
   // L×W×H. Anything that won't fit even in isolation needs a bigger block.
@@ -970,6 +982,35 @@ async function suggestBlocksToBuy(input: Record<string, unknown>) {
     },
 
     iterationTrace: trace,
+
+    /**
+     * Widget payload — drop this into a [[PROCUREMENT:...]] marker to
+     * render the interactive slider chart in the chat panel.
+     */
+    widget: {
+      stone,
+      quality: quality ?? undefined,
+      temple: templeFilter ?? undefined,
+      totalSlabs: slabs.length,
+      baselineCovered: baselinePlaced,
+      typicalBlock: {
+        l: typicalL,
+        w: typicalW,
+        h: typicalH,
+        cft: typicalCft,
+        basedOnBlocks: histBlocks.length,
+      },
+      trace: trace.map((t) => ({
+        blocks: t.blocksAdded,
+        placed: t.cumulativePlaced,
+        newlyPlaced: t.newThisRound,
+        unmet: t.remainingUnmet,
+        effPct: t.cumulativeEffPct,
+      })),
+      sweetSpot: sweetSpotIdx,
+      tooLargeCount: tooLarge.length,
+      converged,
+    },
 
     slabsTooLargeForTypicalBlock: tooLarge.slice(0, 20).map((s) => ({
       id: s.id,

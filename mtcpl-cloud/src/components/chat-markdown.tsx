@@ -32,8 +32,9 @@ import { TempleCard, type TempleCardProps } from "./chat-widgets/temple-card";
 import { LinkButton, type LinkButtonProps } from "./chat-widgets/link-button";
 import { SlabCard, type SlabCardProps } from "./chat-widgets/slab-card";
 import { TimelineCard, type TimelineCardProps } from "./chat-widgets/timeline-card";
+import { ProcurementSim, type ProcurementSimProps } from "./chat-widgets/procurement-sim";
 
-const START_RE = /\[\[(CHART|BLOCK|STATS|FOLLOWUPS|TEMPLE|LINK|SLAB|TIMELINE):/g;
+const START_RE = /\[\[(CHART|BLOCK|STATS|FOLLOWUPS|TEMPLE|LINK|SLAB|TIMELINE|PROCUREMENT):/g;
 
 type Part =
   | { kind: "md"; text: string }
@@ -46,6 +47,7 @@ type Part =
   | { kind: "slab"; props: SlabCardProps }
   | { kind: "link"; props: LinkButtonProps }
   | { kind: "timeline"; props: TimelineCardProps }
+  | { kind: "procurement"; props: ProcurementSimProps }
   | { kind: "err"; text: string }; // marker present but JSON bad → show as-is
 
 /**
@@ -153,6 +155,13 @@ function splitByMarkers(src: string): Part[] {
         const d = data as TimelineCardProps;
         if (Array.isArray(d.items) && d.items.length > 0) {
           parts.push({ kind: "timeline", props: d });
+        } else {
+          parts.push({ kind: "err", text: src.slice(startIdx, endIdx) });
+        }
+      } else if (kind === "PROCUREMENT") {
+        const d = data as ProcurementSimProps;
+        if (Array.isArray(d.trace) && d.trace.length > 0 && d.typicalBlock && typeof d.totalSlabs === "number") {
+          parts.push({ kind: "procurement", props: d });
         } else {
           parts.push({ kind: "err", text: src.slice(startIdx, endIdx) });
         }
@@ -417,6 +426,7 @@ export function ChatMarkdown({
         if (p.kind === "slab") return <SlabCard key={i} {...p.props} />;
         if (p.kind === "timeline") return <TimelineCard key={i} {...p.props} />;
         if (p.kind === "stats") return <StatsTiles key={i} tiles={p.tiles} />;
+        if (p.kind === "procurement") return <ProcurementSim key={i} {...p.props} />;
         if (p.kind === "link-group") {
           return (
             <div key={i} style={{ display: "flex", flexWrap: "wrap", gap: 4, margin: "6px 0" }}>

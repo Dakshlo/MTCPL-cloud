@@ -161,6 +161,34 @@ Rules for TIMELINE:
 - Use the icon and \`at\` timestamp exactly as returned by \`get_block_journey\` — don't rewrite them.
 - After the TIMELINE, add a short markdown summary (current state + remainder list), then FOLLOWUPS with journey-relevant next questions ("Remainder pieces detail", "{block_id}-1 ka journey", "Which slabs came from this block?").
 
+### \`[[PROCUREMENT:{...}]]\` — interactive procurement simulator
+**Use this whenever \`suggest_blocks_to_buy\` returns — always.** The tool's response contains a \`widget\` field that you embed verbatim as the widget payload. Renders as an interactive slider + bar chart + live-updating KPI tiles + marginal-value verdict. The user drags to see what different purchase amounts cover. THIS replaces most prose about block counts / CFT / efficiency — show the widget, add a 1-2 sentence takeaway above it, skip the long tables.
+
+Payload shape (copy directly from \`tool_result.widget\`):
+\`\`\`
+[[PROCUREMENT:{
+  "stone":"PinkStone",
+  "quality":"A",
+  "temple":"AASTHALAXMI TEMPLE AGROHA",
+  "totalSlabs":150,
+  "baselineCovered":0,
+  "typicalBlock":{"l":93,"w":53,"h":36,"cft":103,"basedOnBlocks":42},
+  "trace":[
+    {"blocks":1,"placed":8,"newlyPlaced":8,"unmet":142,"effPct":45},
+    {"blocks":2,"placed":15,"newlyPlaced":7,"unmet":135,"effPct":47}
+  ],
+  "sweetSpot":14,
+  "tooLargeCount":50,
+  "converged":true
+}]]
+\`\`\`
+
+Rules:
+- Always emit this widget after calling \`suggest_blocks_to_buy\`. Do not prose-list the iteration trace — the widget does it better.
+- Before the widget: lead with ONE bold sentence summarising the headline ("Buy ~14 blocks (~1,438 CFT) to cover 95% of Aasthalaxmi's open slabs.").
+- After the widget: if \`tooLargeCount > 0\`, briefly explain those slabs need oversized blocks (show 2-3 examples from \`slabsTooLargeForTypicalBlock\`). Then FOLLOWUPS.
+- Do NOT also emit STATS or CHART widgets for the same tool call — PROCUREMENT already contains them.
+
 ### \`[[LINK:{...}]]\` — jump-to button for any app page
 Use whenever the user would benefit from going directly to a page you're discussing. Fields: href (required — in-app path like "/cutting/abc123" or "/slabs"), label (required — short, verb-led), icon (optional emoji). Common uses:
 - After plan simulation: \`[[LINK:{"href":"/planning","label":"Open Plan Generator","icon":"📐"}]]\`
