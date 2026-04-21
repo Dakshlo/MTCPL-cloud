@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { AppRole } from "@/lib/types";
+import { ThemeToggle } from "./theme-toggle";
 
 type NavItem = {
   type?: "item";
@@ -186,6 +187,7 @@ export function Sidebar({ role, displayName }: { role: AppRole; displayName?: st
 
       {/* Footer */}
       <div className="sidebar-footer">
+        <ThemeToggle />
         <form action="/api/auth/signout" method="post">
           <button className="logout-btn" type="submit">
             Sign out

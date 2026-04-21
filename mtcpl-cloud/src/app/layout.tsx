@@ -13,9 +13,20 @@ export const viewport = {
   initialScale: 1,
 };
 
+// Inline pre-hydration script — reads the saved theme from localStorage
+// and sets data-theme on <html> BEFORE React paints. Without this,
+// dark-mode users would briefly see the light theme on every page load
+// (FOUC — flash of unstyled/unthemed content).
+const themeInitScript = `
+(function(){try{var t=localStorage.getItem('mtcpl_theme');if(t==='dark'){document.documentElement.setAttribute('data-theme','dark');}else if(!t&&window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches){/* respect OS preference on first visit */document.documentElement.setAttribute('data-theme','dark');}}catch(e){}})();
+`;
+
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+      </head>
       <body>{children}</body>
     </html>
   );

@@ -47,6 +47,68 @@
   --shadow-lg:0 10px 24px rgba(45,36,16,0.12), 0 4px 8px rgba(45,36,16,0.08);
 }
 
+/* ── Dark theme ─────────────────────────────────────────────── */
+/* Triggered by [data-theme="dark"] on <html>. Set by ThemeToggle +
+ * a pre-hydration inline script in layout.tsx so the first paint
+ * matches the stored preference (no flash of wrong theme).
+ * Warm dark palette — not pure black, follows the brown-charcoal
+ * family of the existing brand. Sidebar stays distinct by going one
+ * shade deeper. Gold + status accents carry over unchanged; their
+ * -bg variants use low alpha so they still read against the dark bg.
+ */
+[data-theme="dark"] {
+  --bg:             #1A1611;
+  --surface:        #242019;
+  --surface-alt:    #2C2720;
+  --border:         #3A3228;
+  --border-light:   #2F2820;
+  --text:           #E8E2D6;
+  --muted:          #A89A84;
+  --muted-light:    #7A705C;
+
+  --sidebar-bg:     #12100A;
+  --sidebar-text:   rgba(255,255,255,0.88);
+  --sidebar-muted:  rgba(255,255,255,0.42);
+  --sidebar-hover:  rgba(255,255,255,0.05);
+  --sidebar-active: rgba(201,151,58,0.22);
+
+  --gold-subtle:    rgba(201,151,58,0.18);
+  --gold-border:    rgba(201,151,58,0.4);
+
+  --success-bg:     rgba(22,163,74,0.18);
+  --danger-bg:      rgba(220,38,38,0.2);
+  --warning-bg:     rgba(217,119,6,0.2);
+  --info-bg:        rgba(37,99,235,0.22);
+
+  /* Shadows are almost-black in dark mode so cards still lift off the page */
+  --shadow:   0 1px 3px rgba(0,0,0,0.5), 0 1px 2px rgba(0,0,0,0.3);
+  --shadow-md:0 4px 10px rgba(0,0,0,0.55), 0 2px 4px rgba(0,0,0,0.35);
+  --shadow-lg:0 10px 30px rgba(0,0,0,0.6), 0 4px 10px rgba(0,0,0,0.4);
+}
+
+/* Dark-mode input surfaces — the default input CSS may assume white
+ * so we give form controls an explicit surface colour. */
+[data-theme="dark"] input,
+[data-theme="dark"] select,
+[data-theme="dark"] textarea {
+  background: var(--surface-alt);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+[data-theme="dark"] input::placeholder,
+[data-theme="dark"] textarea::placeholder {
+  color: var(--muted-light);
+  opacity: 0.6;
+}
+
+/* Native date / number pickers render their indicators very dim on
+ * dark bg by default. Invert them so they stay visible. */
+[data-theme="dark"] input[type="date"]::-webkit-calendar-picker-indicator,
+[data-theme="dark"] input[type="time"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.85);
+}
+
 /* ── Base ───────────────────────────────────────────────────── */
 
 html { font-size: 15px; -webkit-font-smoothing: antialiased; }
@@ -243,6 +305,33 @@ input, select, textarea, button {
 .sidebar-footer {
   padding: 14px 18px;
   border-top: 1px solid rgba(255,255,255,0.07);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Theme toggle button (dark/light mode) — lives in the sidebar footer
+ * above Sign out. Styled like logout-btn so the whole footer reads as
+ * a consistent column of subdued actions. */
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--sidebar-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  width: 100%;
+  text-align: left;
+  transition: color 0.15s, background 0.15s;
+}
+
+.theme-toggle:hover {
+  color: var(--gold-light);
+  background: rgba(255,255,255,0.06);
 }
 
 /* ── Main Shell ─────────────────────────────────────────────── */

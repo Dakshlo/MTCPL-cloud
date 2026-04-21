@@ -96,10 +96,10 @@ export function MarbleTruckForm({
     parseInt(numBlocks, 10) <= 50;
 
   return (
-    <form action={createMarbleTruckAction} className="stack" style={{ gap: 12 }}>
-      <div className="section-heading" style={{ marginBottom: 0 }}>
+    <form action={createMarbleTruckAction} className="add-panel">
+      <div className="add-panel-header" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
         <div>
-          <h2 style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <p className="add-panel-title" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             🚚 New Marble Truck
             <span
               style={{
@@ -130,16 +130,17 @@ export function MarbleTruckForm({
             >
               Next id: {suggestedId}
             </span>
-          </h2>
-          <p>
+          </p>
+          <p className="add-panel-subtitle">
             Log one truck = N blocks. Each block&apos;s tonnage = total ÷ N.
             No dimensions needed — marble is cut manually per piece.
           </p>
         </div>
       </div>
 
+      <div className="add-panel-body">
       {/* Stone + category row */}
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      <div className="add-panel-row">
         <label className="stack" style={{ flex: "1 1 160px" }}>
           <span>Stone</span>
           <select name="stone" value={stone} onChange={(e) => setStone(e.target.value)} required>
@@ -188,7 +189,7 @@ export function MarbleTruckForm({
       </div>
 
       {/* Tonnage + block count row */}
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+      <div className="add-panel-row" style={{ alignItems: "flex-end" }}>
         <label className="stack" style={{ flex: "1 1 150px" }}>
           <span>Total tonnes from this truck</span>
           <input
@@ -324,6 +325,7 @@ export function MarbleTruckForm({
             ? `Add ${parseInt(numBlocks, 10)} blocks from this truck`
             : "Add marble truck"}
         </button>
+      </div>
       </div>
     </form>
   );

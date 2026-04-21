@@ -676,12 +676,20 @@ export default async function SettingsPage() {
 
       {/* Screen Time Today — developer + owner */}
       {(currentUser.role === "developer" || currentUser.role === "owner") && (
-        <div className="settings-section">
-          <div className="settings-section-header">
-            <h2>Screen Time — Today</h2>
-            <p>How long each user has been active in the system today ({todayIST}). Based on heartbeat pings every 2 minutes.</p>
-          </div>
-          <div className="settings-card" style={{ padding: 0, overflow: "hidden" }}>
+        <details className="settings-section">
+          <summary style={{ cursor: "pointer", listStyle: "none", userSelect: "none", padding: "16px 0" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontWeight: 700, fontSize: 15, color: "var(--text)" }}>Screen Time Today</span>
+                <span style={{ fontSize: 12, color: "var(--muted)", background: "var(--surface-alt)", padding: "2px 8px", borderRadius: 10, fontWeight: 600 }}>{screenTimeData.length}</span>
+              </div>
+              <span style={{ fontSize: 11, color: "var(--muted)", transition: "transform 0.2s" }}>▼</span>
+            </div>
+            <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>
+              How long each user has been active today ({todayIST}). Heartbeat pings every 2 minutes.
+            </p>
+          </summary>
+          <div className="settings-card" style={{ padding: 0, overflow: "hidden", marginTop: 10 }}>
             {screenTimeData.length === 0 ? (
               <p className="muted" style={{ padding: 16 }}>No activity recorded today yet.</p>
             ) : (
@@ -741,17 +749,27 @@ export default async function SettingsPage() {
               </table>
             )}
           </div>
-        </div>
+        </details>
       )}
 
-      {/* Audit Log */}
+      {/* Audit Log — collapsible dropdown, closed by default. The audit
+          list can get long; hiding it keeps the settings page scannable
+          but it's one click away when the owner needs to review actions. */}
       {(currentUser.role === "owner" || currentUser.role === "developer") && (
-        <div className="settings-section">
-          <div className="settings-section-header">
-            <h2>Audit Log</h2>
-            <p>Last 50 actions by your team.</p>
-          </div>
-          <div className="settings-card" style={{ padding: 0, overflow: "hidden" }}>
+        <details className="settings-section">
+          <summary style={{ cursor: "pointer", listStyle: "none", userSelect: "none", padding: "16px 0" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontWeight: 700, fontSize: 15, color: "var(--text)" }}>Audit Log</span>
+                <span style={{ fontSize: 12, color: "var(--muted)", background: "var(--surface-alt)", padding: "2px 8px", borderRadius: 10, fontWeight: 600 }}>{(recentAudit ?? []).length}</span>
+              </div>
+              <span style={{ fontSize: 11, color: "var(--muted)", transition: "transform 0.2s" }}>▼</span>
+            </div>
+            <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>
+              Last 50 actions by your team — who did what when.
+            </p>
+          </summary>
+          <div className="settings-card" style={{ padding: 0, overflow: "hidden", marginTop: 10 }}>
             {(recentAudit ?? []).length === 0 ? (
               <p className="muted" style={{ padding: 16 }}>No actions recorded yet.</p>
             ) : (
@@ -771,7 +789,7 @@ export default async function SettingsPage() {
               </table>
             )}
           </div>
-        </div>
+        </details>
       )}
     </>
   );
