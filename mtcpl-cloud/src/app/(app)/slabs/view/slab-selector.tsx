@@ -65,13 +65,15 @@ export function SlabSelector({
 
   const ALL_STONES = stoneNames && stoneNames.length > 0 ? stoneNames : ["PinkStone", "WhiteStone"];
 
-  // Split priority slabs out — pinned section is for urgent slabs that
-  // still need planning, so gate on status='open'. Once planned an
-  // urgent slab leaves the pinned bucket (it still appears below in
-  // the normal list when the Planned / Both tab is active), which
-  // prevents accidentally re-planning a slab that's already assigned.
-  const allPriority = useMemo(() => slabs.filter(s => s.priority && s.status === "open"), [slabs]);
-  const allNormal   = useMemo(() => slabs.filter(s => !(s.priority && s.status === "open")), [slabs]);
+  // Split priority slabs out — pinned at the top of whatever status
+  // view the user is currently on. The server-side urgent fetcher
+  // (page.tsx) restricts urgent slabs to the active status filter, so
+  // the pinned bucket is automatically scoped correctly:
+  //   • Open tab    → pinned = urgent-open
+  //   • Planned tab → pinned = urgent-planned
+  //   • Both tab    → pinned = urgent-open + urgent-planned
+  const allPriority = useMemo(() => slabs.filter(s => s.priority), [slabs]);
+  const allNormal   = useMemo(() => slabs.filter(s => !s.priority), [slabs]);
 
   // Priority section: only search can narrow it (stone/temple/quality/priority filters don't hide these)
   const filteredPriority = useMemo(() => {
