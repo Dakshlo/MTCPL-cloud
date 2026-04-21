@@ -21,7 +21,11 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     <div className="app-shell">
       <RealtimeRefresh />
       <Heartbeat />
-      <Sidebar displayName={displayName} role={profile.role} />
+      <Sidebar
+        displayName={displayName}
+        role={profile.role}
+        themePreference={profile.theme_preference ?? null}
+      />
 
       <main className="main-shell">
         <div className="topbar">

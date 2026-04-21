@@ -106,7 +106,18 @@ function roleLabel(role: AppRole): string {
   return labels[role] ?? role.replace(/_/g, " ").toUpperCase();
 }
 
-export function Sidebar({ role, displayName }: { role: AppRole; displayName?: string }) {
+export function Sidebar({
+  role,
+  displayName,
+  themePreference,
+}: {
+  role: AppRole;
+  displayName?: string;
+  /** User's saved theme preference (from profiles.theme_preference).
+   * Passed down to ThemeToggle so it can reconcile cross-device:
+   * login on a new browser → localStorage empty → DB value wins. */
+  themePreference?: "light" | "dark" | null;
+}) {
   const pathname = usePathname();
   const visibleEntries = navEntries.filter((entry) => entry.roles.includes(role));
 
@@ -187,7 +198,7 @@ export function Sidebar({ role, displayName }: { role: AppRole; displayName?: st
 
       {/* Footer */}
       <div className="sidebar-footer">
-        <ThemeToggle />
+        <ThemeToggle initialFromDB={themePreference ?? null} />
         <form action="/api/auth/signout" method="post">
           <button className="logout-btn" type="submit">
             Sign out

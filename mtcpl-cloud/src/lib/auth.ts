@@ -42,7 +42,7 @@ export function getDefaultRouteForProfile(profile?: Pick<Profile, "role" | "is_a
   return getDefaultRouteForRole(profile.role);
 }
 
-const DEV_MOCK_PROFILE = {
+const DEV_MOCK_PROFILE: Profile = {
   id: "dev-user-id",
   full_name: "Dev Owner",
   phone: null,
@@ -50,6 +50,7 @@ const DEV_MOCK_PROFILE = {
   vendor_id: null,
   vendor_name: null,
   is_active: true,
+  theme_preference: null,
 };
 
 export async function getAuthContext() {
@@ -71,7 +72,7 @@ export async function getAuthContext() {
   const admin = createAdminSupabaseClient();
   let { data: profile } = await admin
     .from("profiles")
-    .select("id, full_name, phone, role, vendor_id, is_active")
+    .select("id, full_name, phone, role, vendor_id, is_active, theme_preference")
     .eq("id", user.id)
     .single();
 
@@ -89,7 +90,7 @@ export async function getAuthContext() {
 
     const { data: newProfile } = await admin
       .from("profiles")
-      .select("id, full_name, phone, role, vendor_id, is_active")
+      .select("id, full_name, phone, role, vendor_id, is_active, theme_preference")
       .eq("id", user.id)
       .single();
     profile = newProfile;

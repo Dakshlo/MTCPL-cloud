@@ -21,6 +21,8 @@ export type Profile = {
   vendor_id: string | null;
   vendor_name?: string | null;
   is_active: boolean;
+  /** User's saved theme preference. NULL = never toggled (treat as 'light'). */
+  theme_preference?: "light" | "dark" | null;
 };
 
 export type Vendor = {

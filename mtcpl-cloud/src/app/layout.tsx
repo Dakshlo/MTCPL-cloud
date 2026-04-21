@@ -17,8 +17,15 @@ export const viewport = {
 // and sets data-theme on <html> BEFORE React paints. Without this,
 // dark-mode users would briefly see the light theme on every page load
 // (FOUC — flash of unstyled/unthemed content).
+//
+// Default is ALWAYS light — we intentionally ignore the OS
+// prefers-color-scheme so first-time visitors land on a consistent
+// baseline. The authoritative theme per user lives in the
+// profiles.theme_preference column; the (app) layout reconciles
+// localStorage to that value on mount, so logging in on a new
+// browser still applies your saved choice.
 const themeInitScript = `
-(function(){try{var t=localStorage.getItem('mtcpl_theme');if(t==='dark'){document.documentElement.setAttribute('data-theme','dark');}else if(!t&&window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches){/* respect OS preference on first visit */document.documentElement.setAttribute('data-theme','dark');}}catch(e){}})();
+(function(){try{var t=localStorage.getItem('mtcpl_theme');if(t==='dark'){document.documentElement.setAttribute('data-theme','dark');}}catch(e){}})();
 `;
 
 export default function RootLayout({ children }: { children: ReactNode }) {
