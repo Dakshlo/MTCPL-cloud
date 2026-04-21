@@ -8,12 +8,13 @@ type Tab = "unassigned" | "active" | "review" | "done";
 export default async function CarvingDashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string; temple?: string }>;
 }) {
   await requireAuth(["developer"]);
   const admin = createAdminSupabaseClient();
   const params = await searchParams;
   const tab: Tab = (params.tab as Tab) || "unassigned";
+  const templeFilter = params.temple ?? "";
 
   // Load everything we need for all tabs in parallel
   const [
@@ -59,6 +60,48 @@ export default async function CarvingDashboardPage({
       .eq("is_active", true),
   ]);
 
+  // Enrich jobs with temple + slab label — job rows on carving_items
+  // don't carry temple, so we join via slab_requirement_id.
+  const allJobSlabReqIds = [
+    ...(activeJobs ?? []).map((j) => j.slab_requirement_id),
+    ...(reviewJobs ?? []).map((j) => j.slab_requirement_id),
+    ...(doneJobs ?? []).map((j) => j.slab_requirement_id),
+  ].filter(Boolean);
+  const uniqueSlabReqIds = [...new Set(allJobSlabReqIds)];
+
+  let slabTempleMap = new Map<string, { temple: string; label: string | null }>();
+  if (uniqueSlabReqIds.length > 0) {
+    const { data: slabRows } = await admin
+      .from("slab_requirements")
+      .select("id, temple, label")
+      .in("id", uniqueSlabReqIds);
+    for (const s of slabRows ?? []) {
+      slabTempleMap.set(s.id, { temple: s.temple ?? "(no temple)", label: s.label });
+    }
+  }
+
+  function enrich<J extends { slab_requirement_id: string; cnc_machine_id?: string | null }>(job: J) {
+    const info = slabTempleMap.get(job.slab_requirement_id);
+    return {
+      ...job,
+      temple: info?.temple ?? "(no temple)",
+      slab_label: info?.label ?? null,
+      vendor_type: (job as unknown as { vendor_type: string }).vendor_type as "CNC" | "Manual",
+    };
+  }
+
+  const activeJobsEnriched = (activeJobs ?? []).map(enrich);
+  const reviewJobsEnriched = (reviewJobs ?? []).map(enrich);
+  const doneJobsEnriched = (doneJobs ?? []).map(enrich);
+
+  // Build list of all temples across every dataset for the filter dropdown.
+  const templeSet = new Set<string>();
+  for (const s of unassignedSlabs ?? []) if (s.temple) templeSet.add(s.temple);
+  for (const j of activeJobsEnriched) if (j.temple) templeSet.add(j.temple);
+  for (const j of reviewJobsEnriched) if (j.temple) templeSet.add(j.temple);
+  for (const j of doneJobsEnriched) if (j.temple) templeSet.add(j.temple);
+  const templeNames = [...templeSet].sort();
+
   // Enrich vendors with their machines
   const vendorsEnriched = (vendors ?? []).map((v) => ({
     id: v.id,
@@ -71,14 +114,14 @@ export default async function CarvingDashboardPage({
   }));
 
   // Build a machine-code map for display
-  const machineCodeById = new Map<string, string>();
-  for (const m of machines ?? []) machineCodeById.set(m.id, m.machine_code);
+  const machineCodeById: Record<string, string> = {};
+  for (const m of machines ?? []) machineCodeById[m.id] = m.machine_code;
 
   const counts = {
     unassigned: (unassignedSlabs ?? []).length,
-    active: (activeJobs ?? []).length,
-    review: (reviewJobs ?? []).length,
-    done: (doneJobs ?? []).length,
+    active: activeJobsEnriched.length,
+    review: reviewJobsEnriched.length,
+    done: doneJobsEnriched.length,
   };
 
   return (
@@ -114,32 +157,38 @@ export default async function CarvingDashboardPage({
           { key: "done", label: "Approved / Dispatched", count: counts.done, color: "#16A34A" },
         ] as Array<{ key: Tab; label: string; count: number; color: string }>).map((t) => {
           const active = tab === t.key;
+          // Preserve temple filter when switching tabs
+          const hrefParams = new URLSearchParams();
+          hrefParams.set("tab", t.key);
+          if (templeFilter) hrefParams.set("temple", templeFilter);
           return (
             <Link
               key={t.key}
-              href={`/carving?tab=${t.key}`}
+              href={`/carving?${hrefParams.toString()}`}
               style={{
-                textDecoration: "none",
-                padding: "10px 18px",
+                padding: "9px 18px",
                 fontSize: 13,
                 fontWeight: active ? 700 : 500,
                 color: active ? t.color : "var(--muted)",
                 borderBottom: active ? `2px solid ${t.color}` : "2px solid transparent",
                 marginBottom: -2,
-                display: "flex",
+                textDecoration: "none",
+                display: "inline-flex",
                 alignItems: "center",
-                gap: 8,
+                gap: 7,
               }}
             >
               {t.label}
               <span
                 style={{
-                  fontSize: 11,
-                  padding: "1px 8px",
+                  background: active ? t.color : "var(--border)",
+                  color: active ? "#fff" : "var(--muted)",
                   borderRadius: 10,
-                  background: active ? `${t.color}15` : "var(--surface-alt)",
-                  color: active ? t.color : "var(--muted)",
+                  fontSize: 11,
                   fontWeight: 700,
+                  padding: "1px 7px",
+                  minWidth: 20,
+                  textAlign: "center",
                 }}
               >
                 {t.count}
@@ -149,15 +198,16 @@ export default async function CarvingDashboardPage({
         })}
       </div>
 
-      {/* Tab content */}
       <CarvingDashboardClient
         tab={tab}
         unassignedSlabs={unassignedSlabs ?? []}
-        activeJobs={activeJobs ?? []}
-        reviewJobs={reviewJobs ?? []}
-        doneJobs={doneJobs ?? []}
+        activeJobs={activeJobsEnriched}
+        reviewJobs={reviewJobsEnriched}
+        doneJobs={doneJobsEnriched}
         vendors={vendorsEnriched}
-        machineCodeById={Object.fromEntries(machineCodeById)}
+        machineCodeById={machineCodeById}
+        templeNames={templeNames}
+        templeFilter={templeFilter}
       />
     </div>
   );

@@ -243,6 +243,30 @@ export const AI_TOOLS = [
     },
   },
   {
+    name: "get_dispatch_status",
+    description:
+      "Current state of the dispatch pipeline — Ready-to-dispatch slabs (grouped by temple), Out-for-delivery truck batches (on the road right now), and recent Delivered batches. Use this whenever the user asks about dispatch — 'कितने slabs dispatch के लिए ready हैं?', 'What's on the road right now?', 'Aasta Temple ko kal kitna bheja?', 'pending deliveries', 'trucks out for delivery'. Same data source that powers the /dispatch station.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        status: {
+          type: "string",
+          enum: ["ready", "out_for_delivery", "delivered", "all"],
+          description: "Which stage of the dispatch pipeline to report on. Default 'all' returns counts for every stage.",
+        },
+        temple: {
+          type: "string",
+          description: "Filter to one temple (exact name).",
+        },
+        limit: {
+          type: "number",
+          description: "Max rows to return for delivered/out_for_delivery. Default 10.",
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
     name: "list_blocks",
     description:
       "List individual block records with their exact dimensions (L×W×H), CFT, stone, yard, facility, quality, status, and category. Use this whenever the user asks about specific blocks, the biggest/smallest blocks, newest/oldest blocks, blocks in a particular yard, or details of a block by ID. Complements get_inventory_snapshot (which only returns aggregates).",
@@ -292,6 +316,8 @@ export async function runTool(name: string, input: Record<string, unknown>): Pro
         return JSON.stringify(await getBlockJourney(input));
       case "get_stone_efficiency":
         return JSON.stringify(await getStoneEfficiency(input));
+      case "get_dispatch_status":
+        return JSON.stringify(await getDispatchStatus(input));
       case "get_live_cutting_status":
         return JSON.stringify(await getLiveCuttingStatus(input));
       case "get_watchdog_alerts":
@@ -1460,4 +1486,126 @@ async function getStoneEfficiency(input: Record<string, unknown>) {
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+// ─── get_dispatch_status ─────────────────────────────────────────────────
+// Queries the dispatch pipeline: Ready slabs (completed, not yet on a
+// dispatch), Out-for-delivery batches (dispatches with delivered_at NULL),
+// and recent Delivered batches. Mirrors what /dispatch shows.
+
+async function getDispatchStatus(input: Record<string, unknown>) {
+  const admin = createAdminSupabaseClient();
+  const statusFilter = typeof input.status === "string" ? input.status : "all";
+  const templeFilter = typeof input.temple === "string" ? input.temple : undefined;
+  const rawLimit = typeof input.limit === "number" ? input.limit : 10;
+  const limit = Math.max(1, Math.min(50, rawLimit));
+
+  const wantReady = statusFilter === "all" || statusFilter === "ready";
+  const wantOut = statusFilter === "all" || statusFilter === "out_for_delivery";
+  const wantDelivered = statusFilter === "all" || statusFilter === "delivered";
+
+  // Fetch in parallel
+  const [readyResp, outResp, deliveredResp, allLogsResp] = await Promise.all([
+    wantReady
+      ? admin
+          .from("slab_requirements")
+          .select("id, temple, stone, length_ft, width_ft, thickness_ft")
+          .eq("status", "completed")
+      : Promise.resolve({ data: [] as Array<{ id: string; temple: string; stone: string | null; length_ft: number; width_ft: number; thickness_ft: number }> }),
+    wantOut
+      ? admin
+          .from("dispatches")
+          .select("id, temple, vehicle_no, driver_name, driver_phone, dispatched_at, expected_delivery_date, dispatched_by, notes")
+          .is("delivered_at", null)
+          .order("dispatched_at", { ascending: false })
+          .limit(limit)
+      : Promise.resolve({ data: [] as Array<{ id: string; temple: string; vehicle_no: string | null; driver_name: string | null; driver_phone: string | null; dispatched_at: string; expected_delivery_date: string | null; dispatched_by: string | null; notes: string | null }> }),
+    wantDelivered
+      ? admin
+          .from("dispatches")
+          .select("id, temple, delivered_at, receiver_name, delivered_by")
+          .not("delivered_at", "is", null)
+          .order("delivered_at", { ascending: false })
+          .limit(limit)
+      : Promise.resolve({ data: [] as Array<{ id: string; temple: string; delivered_at: string; receiver_name: string | null; delivered_by: string | null }> }),
+    admin
+      .from("dispatch_logs")
+      .select("dispatch_id, slab_requirement_id")
+      .not("dispatch_id", "is", null),
+  ]);
+
+  // Apply temple filter at the JS layer
+  const ready = templeFilter
+    ? (readyResp.data ?? []).filter((s) => s.temple === templeFilter)
+    : readyResp.data ?? [];
+  const out = templeFilter
+    ? (outResp.data ?? []).filter((d) => d.temple === templeFilter)
+    : outResp.data ?? [];
+  const delivered = templeFilter
+    ? (deliveredResp.data ?? []).filter((d) => d.temple === templeFilter)
+    : deliveredResp.data ?? [];
+
+  // ── Ready by temple
+  const readyByTemple = new Map<string, { count: number; slabCft: number }>();
+  for (const s of ready) {
+    const key = s.temple ?? "(no temple)";
+    const L = Number(s.length_ft);
+    const W = Number(s.width_ft);
+    const T = Number(s.thickness_ft);
+    const cft = (L * W * T) / 1728;
+    const curr = readyByTemple.get(key) ?? { count: 0, slabCft: 0 };
+    curr.count += 1;
+    curr.slabCft += cft;
+    readyByTemple.set(key, curr);
+  }
+
+  // ── Slab counts per dispatch
+  const slabsByDispatch = new Map<string, number>();
+  for (const log of allLogsResp.data ?? []) {
+    if (!log.dispatch_id) continue;
+    slabsByDispatch.set(log.dispatch_id, (slabsByDispatch.get(log.dispatch_id) ?? 0) + 1);
+  }
+
+  // ── Resolve dispatcher/deliverer names
+  const userIds = new Set<string>();
+  for (const o of out) if (o.dispatched_by) userIds.add(o.dispatched_by);
+  for (const d of delivered) if (d.delivered_by) userIds.add(d.delivered_by);
+  const nameById = new Map<string, string>();
+  if (userIds.size > 0) {
+    const { data: profs } = await admin
+      .from("profiles")
+      .select("id, full_name, phone")
+      .in("id", [...userIds]);
+    for (const p of profs ?? []) nameById.set(p.id, p.full_name || p.phone || "Unknown");
+  }
+
+  return {
+    filters: { status: statusFilter, temple: templeFilter ?? "all" },
+    readyCount: ready.length,
+    readyByTemple: [...readyByTemple.entries()]
+      .map(([temple, v]) => ({ temple, count: v.count, slabCft: round2(v.slabCft) }))
+      .sort((a, b) => b.count - a.count),
+    outForDelivery: out.map((d) => ({
+      id: d.id,
+      temple: d.temple,
+      slabCount: slabsByDispatch.get(d.id) ?? 0,
+      vehicle_no: d.vehicle_no ?? null,
+      driver_name: d.driver_name ?? null,
+      driver_phone: d.driver_phone ?? null,
+      dispatched_at: d.dispatched_at,
+      expected_delivery_date: d.expected_delivery_date,
+      dispatcher: d.dispatched_by ? nameById.get(d.dispatched_by) ?? "Unknown" : null,
+      notes: d.notes ?? null,
+    })),
+    outForDeliveryCount: out.length,
+    recentDelivered: delivered.map((d) => ({
+      id: d.id,
+      temple: d.temple,
+      slabCount: slabsByDispatch.get(d.id) ?? 0,
+      delivered_at: d.delivered_at,
+      receiver: d.receiver_name ?? null,
+      confirmedBy: d.delivered_by ? nameById.get(d.delivered_by) ?? "Unknown" : null,
+    })),
+    recentDeliveredCount: delivered.length,
+  };
 }

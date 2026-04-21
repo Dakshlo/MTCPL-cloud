@@ -76,6 +76,12 @@ const navEntries: NavEntry[] = [
     roles: ["developer"],
   },
   {
+    href: "/dispatch",
+    label: "Dispatch",
+    icon: "🚚",
+    roles: ["developer"],
+  },
+  {
     href: "/vendor",
     label: "My Jobs",
     icon: "👤",
