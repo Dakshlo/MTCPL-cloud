@@ -65,9 +65,13 @@ export function SlabSelector({
 
   const ALL_STONES = stoneNames && stoneNames.length > 0 ? stoneNames : ["PinkStone", "WhiteStone"];
 
-  // Split priority slabs out — they are ALWAYS shown at the top, immune to all filters except search
-  const allPriority = useMemo(() => slabs.filter(s => s.priority), [slabs]);
-  const allNormal   = useMemo(() => slabs.filter(s => !s.priority), [slabs]);
+  // Split priority slabs out — pinned section is for urgent slabs that
+  // still need planning, so gate on status='open'. Once planned an
+  // urgent slab leaves the pinned bucket (it still appears below in
+  // the normal list when the Planned / Both tab is active), which
+  // prevents accidentally re-planning a slab that's already assigned.
+  const allPriority = useMemo(() => slabs.filter(s => s.priority && s.status === "open"), [slabs]);
+  const allNormal   = useMemo(() => slabs.filter(s => !(s.priority && s.status === "open")), [slabs]);
 
   // Priority section: only search can narrow it (stone/temple/quality/priority filters don't hide these)
   const filteredPriority = useMemo(() => {

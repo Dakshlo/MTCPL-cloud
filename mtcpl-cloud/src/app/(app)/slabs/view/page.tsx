@@ -36,12 +36,16 @@ export default async function SlabViewPage({
 
   const { data: slabs } = await query.limit(1000);
 
-  // Always fetch priority slabs regardless of filter so they always appear
+  // Pinned urgent section only pulls status='open' urgent slabs. Once a
+  // slab is planned its urgency has been acted on — leaving it pinned
+  // causes accidental re-selection into a second plan. Planned urgent
+  // slabs still appear when the user switches to the Planned / Both
+  // tabs, just in the normal list rather than the red pinned bucket.
   const { data: urgentSlabs } = await supabase
     .from("slab_requirements")
     .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, status, priority, priority_note, quality, created_at")
     .eq("priority", true)
-    .in("status", ["open", "planned"])
+    .eq("status", "open")
     .order("created_at", { ascending: true });
 
   // Merge urgent slabs into the list (deduplicate by ID)
