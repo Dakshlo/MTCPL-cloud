@@ -193,7 +193,7 @@ export function BlockJourneyClient({
           </div>
           <div style={{ fontSize: 11, color: "var(--muted)", flex: 1, minWidth: 240 }}>
             {category === "marble"
-              ? "Marble blocks use tonnes → CFT (95 kg/CFT)."
+              ? "Marble blocks use tonnes → CFT (8 CFT/tonne)."
               : category === "sandstone"
                 ? "Sandstone blocks use CFT dimensions + lineage yield."
                 : "Both stone categories mixed together."}
@@ -444,7 +444,7 @@ export function BlockJourneyClient({
                 from {agg.marble.totalTonnes.toFixed(3)} T raw
               </div>
               <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
-                95 kg/CFT conversion constant
+                8 CFT/tonne conversion constant
               </div>
             </Tile>
           </>

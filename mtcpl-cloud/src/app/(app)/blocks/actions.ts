@@ -146,12 +146,28 @@ export async function updateBlockAction(formData: FormData) {
   redirect("/blocks?toast=Block+updated");
 }
 
-export async function addBlockVendorAction(name: string): Promise<{ error: string } | undefined> {
+export async function addBlockVendorAction(
+  name: string
+): Promise<{ error: string } | { ok: true; canonicalName: string }> {
   await requireAuth(["owner", "team_head", "block_slab_entry", "block_entry"]);
   const admin = createAdminSupabaseClient(); // bypass RLS — vendors write policy is owner-only
 
   const trimmed = name.trim();
   if (!trimmed) return { error: "Vendor name is required" };
+
+  // Defensive dedup: case + whitespace-insensitive match against existing
+  // vendors. If "ANSU MARBLE" already exists and the user types
+  // "Ansu Marble", reuse the existing row instead of creating a dupe
+  // (which would sneak past the DB unique constraint because the casing
+  // differs at the byte level). Mirrors the migration 010 cleanup for
+  // brand-new rows going forward.
+  const norm = (s: string) => s.replace(/\s+/g, "").toUpperCase();
+  const { data: existing } = await admin.from("vendors").select("name");
+  const match = (existing ?? []).find((v) => norm(v.name) === norm(trimmed));
+  if (match) {
+    revalidatePath("/blocks");
+    return { ok: true, canonicalName: match.name };
+  }
 
   // Block suppliers are a dedicated vendor_type = 'block_vendor' in prod.
   // Carving vendors use 'CNC' or 'Manual'. Keeping them separate is what
@@ -167,7 +183,7 @@ export async function addBlockVendorAction(name: string): Promise<{ error: strin
   }
 
   revalidatePath("/blocks");
-  return undefined;
+  return { ok: true, canonicalName: trimmed };
 }
 
 export async function deleteBlockAction(formData: FormData) {

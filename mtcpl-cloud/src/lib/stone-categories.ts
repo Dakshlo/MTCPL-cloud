@@ -5,25 +5,27 @@
  * Marble    = measured in tonnes at intake (bought by the truck),
  *             cut manually, slabs still come out in CFT+dimensions.
  *
- * Conversion rate comes from the owner: 95 kg of marble = 1 CFT.
+ * Conversion rate comes from the owner: 1 tonne of marble ≈ 8 CFT.
  * Used whenever we need an "equivalent CFT" for a marble tonnage
- * (e.g. displaying "3 tonnes ≈ 31.58 CFT" on a block card).
+ * (e.g. displaying "3 tonnes ≈ 24 CFT" on a block card). Previously
+ * we used a 95 kg/CFT density formula that overstated CFT by ~30%
+ * (1000 / 95 ≈ 10.53 CFT/tonne vs. the correct 8).
  */
 
-export const MARBLE_KG_PER_CFT = 95;
+export const MARBLE_CFT_PER_TONNE = 8;
 
 export type StoneCategory = "sandstone" | "marble";
 
-/** Tonnes → CFT equivalent, using the fixed 95 kg/CFT marble density. */
+/** Tonnes → CFT equivalent. 1 tonne ≈ 8 CFT for marble procurement. */
 export function cftEquivFromTonnes(tonnes: number): number {
   if (!Number.isFinite(tonnes) || tonnes <= 0) return 0;
-  return (tonnes * 1000) / MARBLE_KG_PER_CFT;
+  return tonnes * MARBLE_CFT_PER_TONNE;
 }
 
 /** CFT → tonnes, inverse of the above. */
 export function tonnesFromCft(cft: number): number {
   if (!Number.isFinite(cft) || cft <= 0) return 0;
-  return (cft * MARBLE_KG_PER_CFT) / 1000;
+  return cft / MARBLE_CFT_PER_TONNE;
 }
 
 /** Given a stone-name → category map (built from stone_types rows),

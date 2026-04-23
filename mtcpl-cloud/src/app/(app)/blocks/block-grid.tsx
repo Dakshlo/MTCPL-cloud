@@ -156,6 +156,114 @@ export function BlockGrid({
     return () => window.removeEventListener("keydown", onKey);
   }, [manualCutOpen]);
 
+  // Shared card renderer — used by both the sandstone flat grid and
+  // the marble per-truck sub-grids, so the visual language stays
+  // identical across both branches. Closes over `stones`, `selectedId`,
+  // `setSelectedId`, `profilesMap`, `canEdit`, `stoneCategoryMap` from
+  // the component scope.
+  function renderBlockCard(block: Block) {
+    const isMarbleBlock = stoneCategoryMap[block.stone] === "marble";
+    // Marble blocks don't have meaningful L/W/H. Use a small
+    // placeholder so the 3D preview still renders, but the displayed
+    // volume reads as tonnes (not CFT).
+    const L = Number(block.length_ft) || (isMarbleBlock ? 24 : 0);
+    const W = Number(block.width_ft) || (isMarbleBlock ? 24 : 0);
+    const H = Number(block.height_ft) || (isMarbleBlock ? 24 : 0);
+    const cft = calcCft(L, W, H);
+    const tonnesNum = block.tonnes != null ? Number(block.tonnes) : null;
+    const stoneColor = stones.find((s) => s.name === block.stone)?.color_top ?? "#D8D4CC";
+    const isSelected = selectedId === block.id;
+    const isUnavailable = block.status !== "available";
+
+    return (
+      <div
+        key={block.id}
+        className={`block-card${isSelected ? " block-card-active" : ""}`}
+        style={isUnavailable ? { filter: "grayscale(0.9)", opacity: 0.65 } : undefined}
+        onClick={() => setSelectedId(isSelected ? null : block.id)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") setSelectedId(isSelected ? null : block.id);
+        }}
+      >
+        <div className="block-card-preview">
+          <BlockCardPreview stone={block.stone} l={L} w={W} h={H} stoneTypes={stones} />
+        </div>
+        <div className="block-card-info">
+          <div className="block-card-code">{block.id}</div>
+          <div className="block-card-badges">
+            <span
+              className="role-pill"
+              style={{ background: stoneColor + "55", color: "#1a1a1a", border: `1px solid ${stoneColor}` }}
+            >
+              {stoneDisplayName(block.stone)}
+            </span>
+            <span className="role-pill">{yardShortLabel(block.yard)}</span>
+            {isMarbleBlock && (
+              <span
+                className="role-pill"
+                style={{
+                  background: "rgba(180,83,9,0.12)",
+                  color: "#b45309",
+                  border: "1px solid rgba(180,83,9,0.35)",
+                }}
+                title="Marble — measured in tonnes, cut manually"
+              >
+                🗿 Marble
+              </span>
+            )}
+            <span className={`role-pill ${blockStatusBadge(block.status, block.category)}`}>
+              {isReusedBlock(block.category) && block.status === "available" ? "↻ " : ""}
+              {blockStatusLabel(block.status, block.category)}
+            </span>
+            {block.quality && (
+              <span className={`role-pill ${block.quality === "A" ? "badge-available" : "badge-reserved"}`}>
+                {block.quality === "A" ? "Grade A" : "Grade B"}
+              </span>
+            )}
+          </div>
+          {isMarbleBlock && tonnesNum ? (
+            <>
+              <div className="block-card-dims" style={{ fontFamily: "ui-monospace, monospace" }}>
+                {tonnesNum.toFixed(3)} T
+              </div>
+              <div className="block-card-cft" style={{ color: "var(--muted)" }}>
+                ≈ {cftEquivFromTonnes(tonnesNum).toFixed(2)} CFT equiv
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="block-card-dims">
+                {L} × {W} × {H} in
+              </div>
+              <div className="block-card-cft">{cft} CFT</div>
+            </>
+          )}
+          {block.truck_entry_id && block.truck_no && (
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
+              🚚 Truck {block.truck_no}
+            </div>
+          )}
+          {block.created_at && (
+            <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+              Added {fmtDate(block.created_at)}
+              {block.created_by && (
+                <>
+                  {" "}·{" "}
+                  <span style={{ color: "var(--gold-dark)", fontWeight: 600 }}>
+                    by {profilesMap[block.created_by] ?? "Unknown"}
+                  </span>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+        {canEdit && <div className="block-card-edit-hint">{isSelected ? "✕ Close" : "Edit"}</div>}
+      </div>
+    );
+  }
+
   return (
     <>
       <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
@@ -210,98 +318,111 @@ export function BlockGrid({
                 </span>
               </button>
 
-              {!isCollapsed && (
-                <div className="block-card-grid">
-                  {list.map(block => {
-                    const isMarbleBlock = stoneCategoryMap[block.stone] === "marble";
-                    // Marble blocks don't have meaningful L/W/H. Use a small
-                    // placeholder so the 3D preview still renders, but the
-                    // displayed volume reads as tonnes (not CFT).
-                    const L = Number(block.length_ft) || (isMarbleBlock ? 24 : 0);
-                    const W = Number(block.width_ft) || (isMarbleBlock ? 24 : 0);
-                    const H = Number(block.height_ft) || (isMarbleBlock ? 24 : 0);
-                    const cft = calcCft(L, W, H);
-                    const tonnesNum = block.tonnes != null ? Number(block.tonnes) : null;
-                    const stoneColor = stones.find(s => s.name === block.stone)?.color_top ?? "#D8D4CC";
-                    const isSelected = selectedId === block.id;
-                    const isUnavailable = block.status !== "available";
-
-                    return (
-                      <div
-                        key={block.id}
-                        className={`block-card${isSelected ? " block-card-active" : ""}`}
-                        style={isUnavailable ? { filter: "grayscale(0.9)", opacity: 0.65 } : undefined}
-                        onClick={() => setSelectedId(isSelected ? null : block.id)}
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={e => { if (e.key === "Enter" || e.key === " ") setSelectedId(isSelected ? null : block.id); }}
-                      >
-                        <div className="block-card-preview">
-                          <BlockCardPreview stone={block.stone} l={L} w={W} h={H} stoneTypes={stones} />
-                        </div>
-                        <div className="block-card-info">
-                          <div className="block-card-code">{block.id}</div>
-                          <div className="block-card-badges">
-                            <span className="role-pill" style={{ background: stoneColor + "55", color: "#1a1a1a", border: `1px solid ${stoneColor}` }}>{stoneDisplayName(block.stone)}</span>
-                            <span className="role-pill">{yardShortLabel(block.yard)}</span>
-                            {isMarbleBlock && (
-                              <span
-                                className="role-pill"
-                                style={{
-                                  background: "rgba(180,83,9,0.12)",
-                                  color: "#b45309",
-                                  border: "1px solid rgba(180,83,9,0.35)",
-                                }}
-                                title="Marble — measured in tonnes, cut manually"
-                              >
-                                🗿 Marble
-                              </span>
-                            )}
-                            <span className={`role-pill ${blockStatusBadge(block.status, block.category)}`}>
-                            {isReusedBlock(block.category) && block.status === "available" ? "↻ " : ""}
-                            {blockStatusLabel(block.status, block.category)}
-                          </span>
-                            {block.quality && (
-                              <span className={`role-pill ${block.quality === "A" ? "badge-available" : "badge-reserved"}`}>
-                                {block.quality === "A" ? "Grade A" : "Grade B"}
-                              </span>
-                            )}
-                          </div>
-                          {isMarbleBlock && tonnesNum ? (
-                            <>
-                              <div className="block-card-dims" style={{ fontFamily: "ui-monospace, monospace" }}>
-                                {tonnesNum.toFixed(3)} T
-                              </div>
-                              <div className="block-card-cft" style={{ color: "var(--muted)" }}>
-                                ≈ {cftEquivFromTonnes(tonnesNum).toFixed(2)} CFT equiv
-                              </div>
-                            </>
-                          ) : (
-                            <>
-                              <div className="block-card-dims">{L} × {W} × {H} in</div>
-                              <div className="block-card-cft">{cft} CFT</div>
-                            </>
-                          )}
-                          {block.truck_entry_id && block.truck_no && (
-                            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
-                              🚚 Truck {block.truck_no}
-                            </div>
-                          )}
-                          {block.created_at && (
-                            <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
-                              Added {fmtDate(block.created_at)}
-                              {block.created_by && (
-                                <> · <span style={{ color: "var(--gold-dark)", fontWeight: 600 }}>by {profilesMap[block.created_by] ?? "Unknown"}</span></>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                        {canEdit && <div className="block-card-edit-hint">{isSelected ? "✕ Close" : "Edit"}</div>}
+              {!isCollapsed && (() => {
+                // Split this facility's blocks into sandstone (flat grid) and
+                // marble-by-truck (each truck a labelled sub-section). Marble
+                // blocks without a truck_entry_id (legacy / rare) fall under a
+                // generic "No truck entry" bucket so nothing silently vanishes.
+                const marbleGroups = new Map<string, Block[]>();
+                const sandstone: Block[] = [];
+                for (const b of list) {
+                  const isMarble = stoneCategoryMap[b.stone] === "marble";
+                  if (isMarble) {
+                    const key = b.truck_entry_id ?? "__no_truck__";
+                    const g = marbleGroups.get(key) ?? [];
+                    g.push(b);
+                    marbleGroups.set(key, g);
+                  } else {
+                    sandstone.push(b);
+                  }
+                }
+                // Sort truck groups by their most-recent block's created_at
+                // (newest-first) so the last-added truck surfaces at the top.
+                const orderedGroups = [...marbleGroups.entries()].sort(([, a], [, b]) => {
+                  const ma = a.reduce((m, x) => ((x.created_at ?? "") > m ? (x.created_at ?? "") : m), "");
+                  const mb = b.reduce((m, x) => ((x.created_at ?? "") > m ? (x.created_at ?? "") : m), "");
+                  return mb > ma ? 1 : mb < ma ? -1 : 0;
+                });
+                return (
+                  <>
+                    {sandstone.length > 0 && (
+                      <div className="block-card-grid">
+                        {sandstone.map((block) => renderBlockCard(block))}
                       </div>
-                    );
-                  })}
-                </div>
-              )}
+                    )}
+                    {orderedGroups.map(([groupKey, group]) => {
+                      const sample = group[0];
+                      const totalTonnes = group.reduce((sum, b) => sum + (Number(b.tonnes) || 0), 0);
+                      const totalCftEquiv = cftEquivFromTonnes(totalTonnes);
+                      const newest = group.reduce((m, x) => ((x.created_at ?? "") > m ? (x.created_at ?? "") : m), "");
+                      const hasTruck = groupKey !== "__no_truck__";
+                      return (
+                        <div key={`${f}-${groupKey}`} style={{ marginBottom: 18 }}>
+                          {/* Truck header strip — pulled from the denormalised
+                              truck_no / vendor_name / bill_no on every block row
+                              (marble-actions.ts sets these at insert time). */}
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 10,
+                              flexWrap: "wrap",
+                              padding: "6px 12px",
+                              margin: "0 0 10px",
+                              background: "rgba(184,115,51,0.06)",
+                              border: "1px solid rgba(184,115,51,0.2)",
+                              borderLeft: "3px solid var(--gold-dark)",
+                              borderRadius: 6,
+                              fontSize: 12,
+                            }}
+                          >
+                            <span style={{ fontSize: 13 }}>🚛</span>
+                            {hasTruck ? (
+                              <>
+                                <span style={{ fontWeight: 700, color: "var(--gold-dark)", fontFamily: "ui-monospace, monospace" }}>
+                                  {sample.truck_no || "(no truck no.)"}
+                                </span>
+                                {sample.vendor_name && (
+                                  <span style={{ color: "var(--text)", fontWeight: 600 }}>· {sample.vendor_name}</span>
+                                )}
+                                {sample.bill_no && (
+                                  <span style={{ color: "var(--muted)" }}>· bill {sample.bill_no}</span>
+                                )}
+                                {newest && (
+                                  <span style={{ color: "var(--muted)" }}>· {fmtDate(newest)}</span>
+                                )}
+                              </>
+                            ) : (
+                              <span style={{ fontStyle: "italic", color: "var(--muted)" }}>
+                                No truck entry (legacy rows)
+                              </span>
+                            )}
+                            <span style={{ marginLeft: "auto", color: "var(--muted)" }}>
+                              <strong style={{ color: "var(--text)" }}>
+                                {group.length} block{group.length === 1 ? "" : "s"}
+                              </strong>
+                              {totalTonnes > 0 && (
+                                <>
+                                  {" · "}
+                                  <strong style={{ color: "var(--text)", fontFamily: "ui-monospace, monospace" }}>
+                                    {totalTonnes.toFixed(3)} T
+                                  </strong>
+                                  <span style={{ color: "var(--muted)" }}>
+                                    {" "}(≈ {totalCftEquiv.toFixed(2)} CFT equiv)
+                                  </span>
+                                </>
+                              )}
+                            </span>
+                          </div>
+                          <div className="block-card-grid">
+                            {group.map((block) => renderBlockCard(block))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </>
+                );
+              })()}
             </section>
           );
         })}

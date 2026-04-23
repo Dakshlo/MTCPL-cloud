@@ -14,6 +14,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { yardLabel } from "@/lib/yards";
+import { cftEquivFromTonnes } from "@/lib/stone-categories";
 import type { Lineage, LineageNode } from "@/app/(app)/block-journey/build-lineages";
 
 export type ViewMode = "yield" | "recovered";
@@ -356,7 +357,7 @@ function MarbleLineageCard({
   const [expanded, setExpanded] = useState(false);
   const l = lineage;
   const isResolved = l.isResolved;
-  const cftEquiv = (l.tonnes * 1000) / 95;
+  const cftEquiv = cftEquivFromTonnes(l.tonnes);
 
   return (
     <div
@@ -435,7 +436,7 @@ function MarbleLineageCard({
               {l.tonnes.toFixed(3)} T
             </strong>{" "}
             <span style={{ fontFamily: "ui-monospace, monospace" }}>
-              (≈ {cftEquiv.toFixed(2)} CFT equiv · 95 kg/CFT)
+              (≈ {cftEquiv.toFixed(2)} CFT equiv · 8 CFT/tonne)
             </span>
             {l.rootCreatedAt && (
               <>

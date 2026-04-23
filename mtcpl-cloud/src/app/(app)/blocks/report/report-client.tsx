@@ -94,10 +94,20 @@ export function ReportClient({
 
   const [exporting, setExporting] = useState(false);
 
-  // Unique vendors for quick filter
+  // Unique vendors for quick filter. Dedupe is case + whitespace
+  // insensitive so "Ansu Marble" and "ANSU MARBLE" collapse into one
+  // entry (keeps the first-encountered casing as display). Belt-and-
+  // braces in case migration 010 missed a stray row, or a pre-dedup
+  // action writes a new variant before the admin runs the migration.
   const vendors = useMemo(() => {
-    const set = new Set(blocks.map(b => b.vendor_name).filter(Boolean) as string[]);
-    return Array.from(set).sort();
+    const byKey = new Map<string, string>();
+    for (const b of blocks) {
+      const v = b.vendor_name?.trim();
+      if (!v) continue;
+      const key = v.replace(/\s+/g, "").toUpperCase();
+      if (!byKey.has(key)) byKey.set(key, v);
+    }
+    return [...byKey.values()].sort();
   }, [blocks]);
 
   const filtered = useMemo(() => {
@@ -135,10 +145,24 @@ export function ReportClient({
     return rows;
   }, [blocks, statusFilter, stoneFilter, yardFilter, qualityFilter, vendorSearch, blockSearch, dateFrom, dateTo, sortBy, sortDir]);
 
-  const totalCft = filtered.reduce(
-    (sum, b) => sum + blockCft(b, stoneCategoryMap[b.stone] === "marble"),
-    0
+  // Combined accumulator — CFT (all rows) plus tonnes + marble count
+  // (only marble rows) so the header can show "Total tonnes X.XXX T"
+  // alongside "Total volume Y CFT" whenever marble is in the filtered
+  // view. Sandstone-only filters keep the UI clean (marbleCount === 0).
+  const totals = filtered.reduce(
+    (acc, b) => {
+      const isMarble = stoneCategoryMap[b.stone] === "marble";
+      acc.cft += blockCft(b, isMarble);
+      if (isMarble) {
+        acc.marbleCount += 1;
+        if (b.tonnes != null) acc.tonnes += Number(b.tonnes);
+      }
+      return acc;
+    },
+    { cft: 0, tonnes: 0, marbleCount: 0 }
   );
+  // Keep totalCft around in case other sites in this file reference it.
+  const totalCft = totals.cft;
 
   // Status toggle
   function toggleStatus(s: string) {
@@ -334,6 +358,12 @@ export function ReportClient({
         <p className="muted" style={{ fontSize: 13 }}>
           Showing <strong style={{ color: "var(--text)" }}>{filtered.length}</strong> of {blocks.length} blocks ·{" "}
           Total volume <strong style={{ color: "var(--text)" }}>{totalCft.toFixed(2)} CFT</strong>
+          {totals.marbleCount > 0 && (
+            <>
+              {" · "}
+              Total tonnes <strong style={{ color: "var(--text)" }}>{totals.tonnes.toFixed(3)} T</strong>
+            </>
+          )}
         </p>
         <button className="primary-button" type="button" onClick={handleExport} disabled={exporting} style={{ gap: 6 }}>
           {exporting ? "Exporting…" : "⬇ Export to Excel"}

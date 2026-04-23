@@ -237,7 +237,7 @@ export function MarbleTruckForm({
             <div style={{ fontFamily: "ui-monospace, monospace" }}>
               <strong>{preview.perTonnes.toFixed(3)} T</strong>{" "}
               <span style={{ color: "var(--muted)" }}>
-                (≈ {preview.perCftEquiv.toFixed(2)} CFT equiv · 95 kg/CFT)
+                (≈ {preview.perCftEquiv.toFixed(2)} CFT equiv · 8 CFT/tonne)
               </span>
             </div>
             <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3, fontFamily: "ui-monospace, monospace" }}>
