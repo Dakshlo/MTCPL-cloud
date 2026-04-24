@@ -35,10 +35,6 @@ export async function addSlabAction(formData: FormData) {
   const { data: templeRow } = await supabase.from("temples").select("code_prefix").eq("name", temple).single();
   const prefix = templeRow?.code_prefix ?? "SLB";
 
-  const { data: existing } = await supabase.from("slab_requirements").select("id");
-  const existingIds = (existing ?? []).map(r => r.id);
-  const baseId = generateSlabCode(existingIds, prefix);
-
   const stone = text(formData, "stone");
   if (!stone) toast("/slabs", "Stone type is required");
 
@@ -65,14 +61,37 @@ export async function addSlabAction(formData: FormData) {
     updated_by: profile.id,
   };
 
-  // Build all rows: first gets base code (e.g. RM-0021), rest get RM-0021-1, RM-0021-2…
-  const rows = Array.from({ length: qty }, (_, i) => ({
-    ...common,
-    id: i === 0 ? baseId : `${baseId}-${i}`,
-  }));
+  // Insert with collision retry. generateSlabCode uses MAX(existing)+1
+  // which is normally bulletproof — but it can collide when:
+  //   (a) another user simultaneously submits (race), OR
+  //   (b) a manually-inserted row has an id the parser skipped, OR
+  //   (c) two temples share a code_prefix and the snapshot is stale.
+  // Rather than failing with a cryptic "duplicate key" toast, refetch
+  // and recompute up to 5 times — each attempt is cheap and converges
+  // in one extra hop for any realistic collision.
+  let baseId = "";
+  let lastError: { message: string; code?: string } | null = null;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const { data: existing } = await supabase.from("slab_requirements").select("id");
+    const existingIds = (existing ?? []).map((r) => r.id);
+    baseId = generateSlabCode(existingIds, prefix);
 
-  const { error } = await supabase.from("slab_requirements").insert(rows);
-  if (error) toast("/slabs", error.message);
+    const rows = Array.from({ length: qty }, (_, i) => ({
+      ...common,
+      id: i === 0 ? baseId : `${baseId}-${i}`,
+    }));
+
+    const { error } = await supabase.from("slab_requirements").insert(rows);
+    if (!error) {
+      lastError = null;
+      break;
+    }
+    lastError = { message: error.message, code: error.code };
+    // Non-dup errors are real — bail immediately with the original message.
+    if (error.code !== "23505") break;
+    // 23505 = primary-key collision. Loop will refetch and try again.
+  }
+  if (lastError) toast("/slabs", lastError.message);
 
   await logAudit(profile.id, "create", "slab", baseId, { temple, qty, stone: common.stone, batch_id: batchId });
   revalidatePath("/slabs");
