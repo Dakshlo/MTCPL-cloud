@@ -20,21 +20,48 @@ export default async function PlanningPage({
     ? params.slabs.split(",").map((s) => s.trim()).filter(Boolean)
     : null;
 
-  let slabQuery = supabase
-    .from("slab_requirements")
-    .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority")
-    .eq("status", "open")
-    .order("created_at", { ascending: false });
-
-  if (selectedSlabIds && selectedSlabIds.length > 0) {
-    slabQuery = slabQuery.in("id", selectedSlabIds);
+  // Paginated slab fetch — PostgREST db-max-rows=1000 silently caps
+  // single queries. Without pagination, the planner would miss open
+  // slabs past row 1000 and quietly produce plans that don't cover
+  // them. Loop in 1000-row chunks.
+  type PlanningSlabRow = {
+    id: string; label: string; temple: string; stone: string | null;
+    quality: string | null; length_ft: number; width_ft: number;
+    thickness_ft: number; status: string; priority?: boolean;
+  };
+  async function fetchOpenSlabsForPlanning(): Promise<PlanningSlabRow[]> {
+    const PAGE = 1000;
+    const CAP = 50000;
+    const all: PlanningSlabRow[] = [];
+    for (let offset = 0; offset < CAP; offset += PAGE) {
+      let q = supabase
+        .from("slab_requirements")
+        .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority")
+        .eq("status", "open")
+        .order("created_at", { ascending: false })
+        .range(offset, offset + PAGE - 1);
+      if (selectedSlabIds && selectedSlabIds.length > 0) {
+        q = q.in("id", selectedSlabIds);
+      }
+      const { data, error } = await q;
+      if (error) throw new Error(error.message);
+      if (!data || data.length === 0) break;
+      for (const row of data as Array<PlanningSlabRow & { priority?: boolean | null }>) {
+        all.push({
+          ...row,
+          priority: row.priority ?? undefined,
+        });
+      }
+      if (data.length < PAGE) break;
+    }
+    return all;
   }
 
   const admin = createAdminSupabaseClient();
   const sinceIso = new Date(Date.now() - 180 * 24 * 3600 * 1000).toISOString();
   const [
     { data: blocks, error: blockError },
-    { data: slabs, error: slabError },
+    slabs,
     { data: stoneTypes },
     { data: historySlabs },
     { data: availableBlocks },
@@ -44,7 +71,7 @@ export default async function PlanningPage({
       .select("id, stone, yard, category, quality, length_ft, width_ft, height_ft, status")
       .eq("status", "available")
       .order("created_at", { ascending: false }),
-    slabQuery,
+    fetchOpenSlabsForPlanning(),
     admin.from("stone_types").select("id, name, color_top, color_front, color_side").order("sort_order").order("name"),
     admin
       .from("slab_requirements")
@@ -59,7 +86,6 @@ export default async function PlanningPage({
   ]);
 
   if (blockError) throw new Error(blockError.message);
-  if (slabError)  throw new Error(slabError.message);
 
   // Procurement heads-up: per-stone p90 historical slab length vs. longest block in stock.
   const stoneLengths = new Map<string, number[]>();

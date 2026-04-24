@@ -15,26 +15,47 @@ export default async function SlabViewPage({
   // Default to "open" only; "all" shows open+planned
   const statusParam = params.status ?? "open";
 
-  let query = supabase
-    .from("slab_requirements")
-    .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, status, priority, priority_note, quality, created_at")
-    .order("priority", { ascending: false })
-    .order("created_at", { ascending: true });
+  // Paginated fetch — Supabase's PostgREST enforces a server-side
+  // db-max-rows=1000 cap. Single .limit() calls over that silently
+  // truncate, hiding older temples' slabs. Loop in 1000-row pages.
+  type SlabRow = {
+    id: string; label: string; temple: string; stone: string | null;
+    length_ft: number; width_ft: number; thickness_ft: number;
+    status: string; priority: boolean | null; priority_note: string | null;
+    quality: string | null; created_at: string | null;
+  };
+  async function fetchAllSlabs(): Promise<SlabRow[]> {
+    const PAGE = 1000;
+    const CAP = 50000;
+    const all: SlabRow[] = [];
+    for (let offset = 0; offset < CAP; offset += PAGE) {
+      let q = supabase
+        .from("slab_requirements")
+        .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, status, priority, priority_note, quality, created_at")
+        .order("priority", { ascending: false })
+        .order("created_at", { ascending: true })
+        .range(offset, offset + PAGE - 1);
+      if (statusParam === "all") {
+        q = q.in("status", ["open", "planned"]);
+      } else if (statusParam === "planned") {
+        q = q.eq("status", "planned");
+      } else {
+        q = q.eq("status", "open");
+      }
+      if (params.temple) q = q.eq("temple", params.temple);
+      if (params.stone) q = q.eq("stone", params.stone);
+      if (params.quality === "A" || params.quality === "B") q = q.eq("quality", params.quality);
+      if (params.quality === "none") q = q.is("quality", null);
 
-  if (statusParam === "all") {
-    query = query.in("status", ["open", "planned"]);
-  } else if (statusParam === "planned") {
-    query = query.eq("status", "planned");
-  } else {
-    query = query.eq("status", "open");
+      const { data, error } = await q;
+      if (error) throw new Error(error.message);
+      if (!data || data.length === 0) break;
+      all.push(...(data as SlabRow[]));
+      if (data.length < PAGE) break;
+    }
+    return all;
   }
-
-  if (params.temple) query = query.eq("temple", params.temple);
-  if (params.stone)  query = query.eq("stone", params.stone);
-  if (params.quality === "A" || params.quality === "B") query = query.eq("quality", params.quality);
-  if (params.quality === "none") query = query.is("quality", null);
-
-  const { data: slabs } = await query.limit(1000);
+  const slabs = await fetchAllSlabs();
 
   // Pinned urgent section — respects the currently-active status filter
   // so urgent slabs rise to the top of whatever view the user is in.
