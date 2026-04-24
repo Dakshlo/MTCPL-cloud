@@ -14,36 +14,65 @@ export default async function SlabsPage() {
 
   const isEntryRole = (ENTRY_ROLES as readonly string[]).includes(profile.role);
 
-  // Safety cap — slab_requirements won't realistically exceed this across all
-  // open+planned rows. If it ever does, the section heading will still say
-  // "N Required Sizes" reflecting what's shown, and we add pagination then.
-  // Keep in sync with the planning workbench (`.limit(2000)` in planning/page.tsx)
-  // so both pages see the same universe of slabs.
-  const SLAB_QUERY_LIMIT = 5000;
+  // Safety cap — outer ceiling on the paginated fetcher below. Realistic
+  // open+planned slab count won't approach this; the cap just prevents an
+  // infinite loop if something goes sideways.
+  const SLAB_QUERY_LIMIT = 50000;
 
-  let slabQuery = admin
-    .from("slab_requirements")
-    .select("id, label, description, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority, batch_id, created_at, updated_at, created_by")
-    .in("status", ["open", "planned"])
-    .order("priority", { ascending: false })
-    .order("created_at", { ascending: false })
-    .limit(SLAB_QUERY_LIMIT);
+  // Paginated slab fetch — Supabase's PostgREST enforces a server-side
+  // db-max-rows cap (1000 on this project). Client-side .limit(5000) is
+  // silently truncated to 1000, and since we ORDER BY newest-first, the
+  // oldest temples' slabs fall off the bottom once the total grows. That
+  // broke /slabs: after crossing ~1000 open+planned slabs, older temples
+  // (MAHAKALI, AASTA, AASTHALAXMI, SALASAR, …) vanished from the page
+  // even though their rows still exist in the DB.
+  //
+  // Fix: fetch in 1000-row pages using .range() until we've got everything.
+  type SlabRow = {
+    id: string; label: string; description?: string | null;
+    temple: string; stone: string | null; quality: string | null;
+    length_ft: number; width_ft: number; thickness_ft: number;
+    status: string; priority: boolean; batch_id?: string | null;
+    created_at: string | null; updated_at: string | null; created_by: string | null;
+  };
+  async function fetchAllOpenSlabs(): Promise<SlabRow[]> {
+    const PAGE = 1000;
+    const all: SlabRow[] = [];
+    for (let offset = 0; offset < SLAB_QUERY_LIMIT; offset += PAGE) {
+      let q = admin
+        .from("slab_requirements")
+        .select("id, label, description, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority, batch_id, created_at, updated_at, created_by")
+        .in("status", ["open", "planned"])
+        .order("priority", { ascending: false })
+        .order("created_at", { ascending: false })
+        .range(offset, offset + PAGE - 1);
+      if (isEntryRole) q = q.eq("created_by", profile.id);
+      const { data, error: pageErr } = await q;
+      if (pageErr) throw new Error(pageErr.message);
+      if (!data || data.length === 0) break;
+      // Coerce nullable columns to the non-null shape SlabGrid expects
+      for (const row of data) {
+        all.push({
+          ...(row as SlabRow),
+          label: (row as { label: string | null }).label ?? "",
+          priority: (row as { priority: boolean | null }).priority ?? false,
+        });
+      }
+      if (data.length < PAGE) break; // last page, short
+    }
+    return all;
+  }
 
-  // Entry roles see only what they personally added
-  if (isEntryRole) slabQuery = slabQuery.eq("created_by", profile.id);
-
-  const [{ data: slabs, error }, { data: temples }, { data: stoneTypes }, { data: labelRows }] = await Promise.all([
-    slabQuery,
+  const [slabs, { data: temples }, { data: stoneTypes }, { data: labelRows }] = await Promise.all([
+    fetchAllOpenSlabs(),
     admin.from("temples").select("id, name, code_prefix, default_stone").eq("is_active", true).order("name"),
     admin.from("stone_types").select("id, name").order("name"),
     admin.from("slab_labels").select("name").eq("is_active", true).order("name"),
   ]);
 
-  if (error) throw new Error(error.message);
-
   const profilesMap = await getProfilesMap();
   const canEdit = ["developer", "owner", "team_head", "slab_entry", "block_slab_entry"].includes(profile.role);
-  const slabList = slabs ?? [];
+  const slabList = slabs;
   const templeList = temples ?? [];
   // Fallback: if stone_types query failed, use hardcoded defaults so form still works
   const stoneList = (stoneTypes && stoneTypes.length > 0)
