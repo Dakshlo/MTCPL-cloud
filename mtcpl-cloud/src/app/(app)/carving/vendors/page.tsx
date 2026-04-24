@@ -4,7 +4,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { VendorForm } from "./vendor-form";
 
 export default async function VendorDirectoryPage() {
-  await requireAuth(["developer"]);
+  await requireAuth(["developer", "owner"]);
   const admin = createAdminSupabaseClient();
 
   const [

@@ -7,7 +7,7 @@ import { ConfirmButton } from "@/components/confirm-button";
 import { deactivateVendorAction } from "../../actions";
 
 export default async function VendorDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireAuth(["developer"]);
+  await requireAuth(["developer", "owner"]);
   const { id } = await params;
   const admin = createAdminSupabaseClient();
 

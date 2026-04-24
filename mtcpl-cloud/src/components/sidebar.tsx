@@ -64,17 +64,18 @@ const navEntries: NavEntry[] = [
     icon: "✦",
     roles: ["developer", "owner", "team_head", "block_slab_entry"],
   },
-  // — Phase 2 dev-only carving module —
+  // — Phase 2 carving module. Carving Jobs is now shared with owner
+  //   (Naresh) so he can see the pipeline; dispatch stays developer-only. —
   {
     type: "divider",
-    label: "CARVING (DEV)",
-    roles: ["developer", "vendor"],
+    label: "CARVING",
+    roles: ["developer", "owner", "vendor"],
   },
   {
     href: "/carving",
     label: "Carving Jobs",
     icon: "🎨",
-    roles: ["developer"],
+    roles: ["developer", "owner"],
   },
   {
     href: "/dispatch",
