@@ -154,7 +154,7 @@ export default async function CarvingDashboardPage({
           { key: "unassigned", label: "Unassigned", count: counts.unassigned, color: "#D97706" },
           { key: "active", label: "Active", count: counts.active, color: "#2563EB" },
           { key: "review", label: "Awaiting Review", count: counts.review, color: "#DC2626" },
-          { key: "done", label: "Ready to Dispatch", count: counts.done, color: "#16A34A" },
+          { key: "done", label: "Carving Done", count: counts.done, color: "#16A34A" },
         ] as Array<{ key: Tab; label: string; count: number; color: string }>).map((t) => {
           const active = tab === t.key;
           // Preserve temple filter when switching tabs

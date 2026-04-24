@@ -16,9 +16,17 @@ import { useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { DispatchModal } from "./dispatch-modal";
 import { DeliverModal } from "./deliver-modal";
-import { undoDispatchAction } from "./actions";
+import { EditSlabsModal } from "./edit-slabs-modal";
+import { undoDispatchAction, approveDispatchAction, cancelDispatchAction } from "./actions";
 
-type Tab = "ready" | "out_for_delivery" | "delivered";
+type Tab = "ready" | "provisional" | "out_for_delivery" | "delivered";
+
+/** Format challan number as CHLN-0001. Falls back to UUID prefix if the
+ *  row predates migration 011 (shouldn't happen — migration backfills). */
+function chalanLabel(n: number | null, fallbackId: string): string {
+  if (n != null) return `CHLN-${String(n).padStart(4, "0")}`;
+  return `DISP-${fallbackId.slice(0, 8).toUpperCase()}`;
+}
 
 export type ReadySlab = {
   id: string;
@@ -32,8 +40,24 @@ export type ReadySlab = {
   isMarble: boolean;
 };
 
+export type ProvisionalRow = {
+  id: string;
+  challan_number: number | null;
+  temple: string;
+  vehicle_no: string | null;
+  driver_name: string | null;
+  driver_phone: string | null;
+  dispatched_at: string;
+  expected_delivery_date: string | null;
+  dispatcher: string | null;
+  notes: string | null;
+  slabCount: number;
+  slabCftTotal: number;
+};
+
 export type OutForDeliveryRow = {
   id: string;
+  challan_number: number | null;
   temple: string;
   vehicle_no: string | null;
   driver_name: string | null;
@@ -62,6 +86,8 @@ export type LegacyDispatch = {
 
 export function DispatchClient({
   readySlabs,
+  provisional,
+  provisionalSlabsByDispatch,
   outForDelivery,
   delivered,
   legacyDispatches,
@@ -70,6 +96,9 @@ export function DispatchClient({
   error,
 }: {
   readySlabs: ReadySlab[];
+  provisional: ProvisionalRow[];
+  /** Map dispatch_id → its current slab list. Rendered by EditSlabsModal. */
+  provisionalSlabsByDispatch: Record<string, ReadySlab[]>;
   outForDelivery: OutForDeliveryRow[];
   delivered: DeliveredRow[];
   legacyDispatches: LegacyDispatch[];
@@ -93,6 +122,7 @@ export function DispatchClient({
 
   const counts = {
     ready: readySlabs.length,
+    provisional: provisional.length,
     out_for_delivery: outForDelivery.length,
     delivered: delivered.length,
   };
@@ -162,7 +192,8 @@ export function DispatchClient({
       >
         {(
           [
-            { key: "ready", label: "Ready to dispatch", count: counts.ready, color: "#b87333" },
+            { key: "ready", label: "Make Dispatch", count: counts.ready, color: "#b87333" },
+            { key: "provisional", label: "Provisional", count: counts.provisional, color: "#D97706" },
             { key: "out_for_delivery", label: "Out for delivery", count: counts.out_for_delivery, color: "#2563EB" },
             { key: "delivered", label: "Delivered", count: counts.delivered, color: "#16A34A" },
           ] as const
@@ -209,9 +240,164 @@ export function DispatchClient({
       </div>
 
       {tab === "ready" && <ReadyTab slabs={readySlabs} />}
+      {tab === "provisional" && (
+        <ProvisionalTab rows={provisional} slabsByDispatch={provisionalSlabsByDispatch} readySlabs={readySlabs} />
+      )}
       {tab === "out_for_delivery" && <OutForDeliveryTab rows={outForDelivery} />}
       {tab === "delivered" && <DeliveredTab rows={delivered} legacy={legacyDispatches} />}
     </section>
+  );
+}
+
+// ─── Provisional tab ─────────────────────────────────────────────────────
+// A junior creates a dispatch → lands here → senior reviews + approves.
+// Actions: Edit (modify slab list), Approve & Dispatch (→ Out for Delivery),
+// Cancel (reverts slabs to "completed", deletes the dispatch row).
+
+function ProvisionalTab({
+  rows,
+  slabsByDispatch,
+  readySlabs,
+}: {
+  rows: ProvisionalRow[];
+  slabsByDispatch: Record<string, ReadySlab[]>;
+  readySlabs: ReadySlab[];
+}) {
+  const [editing, setEditing] = useState<ProvisionalRow | null>(null);
+
+  if (rows.length === 0) {
+    return (
+      <div className="muted" style={{ padding: "28px 14px", textAlign: "center", fontSize: 13 }}>
+        No provisional dispatches. Junior employees create dispatches on the <strong>Make Dispatch</strong>{" "}
+        tab — they land here for senior review before the truck leaves.
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <p className="muted" style={{ fontSize: 12, margin: "0 0 12px" }}>
+        <strong>{rows.length}</strong> dispatch{rows.length !== 1 ? "es" : ""} pending senior approval. Review slab
+        list, edit if needed, then approve or cancel. Approving moves the challan to Out for Delivery (truck leaves).
+      </p>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {rows.map((r) => {
+          const dispatchSlabs = slabsByDispatch[r.id] ?? [];
+          // Same-temple completed slabs the senior could add to this dispatch
+          const availableToAdd = readySlabs.filter((s) => s.temple === r.temple);
+          return (
+            <div
+              key={r.id}
+              style={{
+                border: "1px solid var(--border)",
+                borderLeft: "4px solid #D97706",
+                borderRadius: 8,
+                padding: "12px 14px",
+                background: "rgba(217,119,6,0.04)",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, color: "#D97706" }}>
+                      📋 {chalanLabel(r.challan_number, r.id)}
+                    </span>
+                    <span style={{ fontWeight: 700 }}>{r.temple}</span>
+                    <span
+                      className="role-pill"
+                      style={{
+                        background: "rgba(217,119,6,0.15)",
+                        color: "#D97706",
+                        border: "1px solid rgba(217,119,6,0.35)",
+                        fontSize: 10,
+                        fontWeight: 700,
+                      }}
+                    >
+                      PROVISIONAL
+                    </span>
+                  </div>
+                  <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                    {r.vehicle_no ? <>🚛 {r.vehicle_no} · </> : null}
+                    {r.driver_name ?? "No driver"}
+                    {r.driver_phone ? ` (${r.driver_phone})` : ""}
+                    {" · "}
+                    <strong style={{ color: "var(--text)" }}>
+                      {r.slabCount} slab{r.slabCount !== 1 ? "s" : ""} · {r.slabCftTotal.toFixed(2)} CFT
+                    </strong>
+                  </div>
+                  <div className="muted" style={{ fontSize: 11, marginTop: 3 }}>
+                    Created {new Date(r.dispatched_at).toLocaleString("en-IN", {
+                      timeZone: "Asia/Kolkata",
+                      day: "numeric",
+                      month: "short",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                    {r.dispatcher ? ` by ${r.dispatcher}` : ""}
+                    {r.expected_delivery_date ? ` · Expected ${r.expected_delivery_date}` : ""}
+                  </div>
+                  {r.notes && (
+                    <div className="muted" style={{ fontSize: 11, marginTop: 5, fontStyle: "italic" }}>
+                      “{r.notes}”
+                    </div>
+                  )}
+                </div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={() => setEditing(r)}
+                    style={{ fontSize: 12 }}
+                  >
+                    📝 Edit Slabs
+                  </button>
+                  <form action={approveDispatchAction} style={{ display: "inline" }}>
+                    <input type="hidden" name="id" value={r.id} />
+                    <button
+                      type="submit"
+                      className="primary-button"
+                      style={{ fontSize: 12, padding: "6px 12px" }}
+                    >
+                      ✅ Approve & Dispatch
+                    </button>
+                  </form>
+                  <form
+                    action={cancelDispatchAction}
+                    style={{ display: "inline" }}
+                    onSubmit={(e) => {
+                      if (!confirm(`Cancel ${chalanLabel(r.challan_number, r.id)}? Slabs will return to Make Dispatch.`)) {
+                        e.preventDefault();
+                      }
+                    }}
+                  >
+                    <input type="hidden" name="id" value={r.id} />
+                    <button
+                      type="submit"
+                      className="ghost-button danger-ghost"
+                      style={{ fontSize: 12 }}
+                    >
+                      ✕ Cancel
+                    </button>
+                  </form>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {editing && (
+        <EditSlabsModal
+          dispatchId={editing.id}
+          challanLabel={chalanLabel(editing.challan_number, editing.id)}
+          temple={editing.temple}
+          currentSlabs={slabsByDispatch[editing.id] ?? []}
+          availableToAdd={readySlabs.filter((s) => s.temple === editing.temple)}
+          onClose={() => setEditing(null)}
+        />
+      )}
+    </>
   );
 }
 
@@ -499,7 +685,7 @@ function DispatchRow({
   row: OutForDeliveryRow;
   onMarkDelivered: () => void;
 }) {
-  const shortId = row.id.slice(0, 8).toUpperCase();
+  const chalan = chalanLabel(row.challan_number, row.id);
   const dispatchedAt = new Date(row.dispatched_at);
   const expected = row.expected_delivery_date
     ? new Date(row.expected_delivery_date).toLocaleDateString("en-IN", {
@@ -527,7 +713,7 @@ function DispatchRow({
       <div style={{ flex: "1 1 300px", minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
           <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 11, color: "var(--muted)" }}>
-            DISP-{shortId}
+            {chalan}
           </span>
           <span style={{ fontSize: 15, fontWeight: 700 }}>🏛 {row.temple}</span>
           <span className="muted" style={{ fontSize: 12 }}>
@@ -644,7 +830,7 @@ function DeliveredTab({ rows, legacy }: { rows: DeliveredRow[]; legacy: LegacyDi
   return (
     <>
       {rows.map((r) => {
-        const shortId = r.id.slice(0, 8).toUpperCase();
+        const chalan = chalanLabel(r.challan_number, r.id);
         const dispatchedAt = new Date(r.dispatched_at);
         const deliveredAt = new Date(r.delivered_at);
         return (
@@ -666,7 +852,7 @@ function DeliveredTab({ rows, legacy }: { rows: DeliveredRow[]; legacy: LegacyDi
             <div style={{ flex: "1 1 300px", minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
                 <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 11, color: "var(--muted)" }}>
-                  DISP-{shortId}
+                  {chalan}
                 </span>
                 <span style={{ fontSize: 14, fontWeight: 600 }}>🏛 {r.temple}</span>
                 <span className="muted" style={{ fontSize: 12 }}>

@@ -27,7 +27,7 @@ export default async function DispatchChallanPrintPage({ params }: { params: Par
   const { data: dispatch, error } = await admin
     .from("dispatches")
     .select(
-      "id, temple, vehicle_no, driver_name, driver_phone, expected_delivery_date, notes, dispatched_at, dispatched_by, delivered_at, delivered_by, receiver_name, delivery_note",
+      "id, challan_number, temple, vehicle_no, driver_name, driver_phone, expected_delivery_date, notes, dispatched_at, dispatched_by, delivered_at, delivered_by, receiver_name, delivery_note",
     )
     .eq("id", id)
     .maybeSingle();
@@ -76,7 +76,15 @@ export default async function DispatchChallanPrintPage({ params }: { params: Par
   const dispatcherName = dispatch.dispatched_by ? profilesMap[dispatch.dispatched_by] ?? "—" : "—";
   const deliveredByName = dispatch.delivered_by ? profilesMap[dispatch.delivered_by] ?? "—" : null;
 
-  const shortId = String(dispatch.id).slice(0, 8).toUpperCase();
+  // Challan reference — prefer the sequential challan_number column
+  // (added in migration 011, format CHLN-0042). Falls back to the UUID
+  // prefix (DISP-XXXXXXXX) for any pre-migration row that somehow still
+  // has NULL challan_number — shouldn't happen since the migration
+  // backfills everyone, but defensive.
+  const challanNum = (dispatch as { challan_number?: number }).challan_number ?? null;
+  const shortId = challanNum != null
+    ? `CHLN-${String(challanNum).padStart(4, "0")}`
+    : `DISP-${String(dispatch.id).slice(0, 8).toUpperCase()}`;
   const dispatchedDate = new Date(dispatch.dispatched_at);
   const expectedDelivery = dispatch.expected_delivery_date
     ? new Date(dispatch.expected_delivery_date)
@@ -243,7 +251,7 @@ export default async function DispatchChallanPrintPage({ params }: { params: Par
       {/* Screen-only top bar */}
       <div className="screen-bar">
         <span className="screen-bar-title">
-          Dispatch Challan — DISP-{shortId} · {dispatch.temple}
+          Dispatch Challan — {shortId} · {dispatch.temple}
         </span>
         <PrintBtn />
       </div>
@@ -257,7 +265,7 @@ export default async function DispatchChallanPrintPage({ params }: { params: Par
             <div className="doc-sub">Outgoing shipment to {dispatch.temple}</div>
           </div>
           <div className="doc-ref">
-            <div className="doc-ref-num">DISP-{shortId}</div>
+            <div className="doc-ref-num">{shortId}</div>
             <div className="doc-ref-date">
               <div>
                 Dispatched:{" "}
@@ -399,7 +407,7 @@ export default async function DispatchChallanPrintPage({ params }: { params: Par
 
         {/* Footer */}
         <div className="doc-footer">
-          <span>MTCPL · Delivery Challan · DISP-{shortId}</span>
+          <span>MTCPL · Delivery Challan · {shortId}</span>
           <span>
             {slabs.length} slab{slabs.length !== 1 ? "s" : ""} · {totalCft.toFixed(2)} CFT
           </span>

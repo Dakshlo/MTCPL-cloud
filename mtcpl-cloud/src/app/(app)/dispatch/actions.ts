@@ -3,17 +3,21 @@
 /**
  * Dispatch station server actions.
  *
- * Three actions:
- *   - createDispatchAction: creates a dispatches row + N dispatch_logs
- *     rows + flips all N slabs to status=dispatched.
- *   - markDeliveredAction: closes out a dispatch (site engineer reported
- *     receipt via the developer).
- *   - undoDispatchAction: reverts an out-for-delivery dispatch — slabs
- *     return to status=completed, the dispatches row is deleted, and
- *     the dispatch_logs rows go with it.
+ * Lifecycle (v2 — with senior-approval step):
  *
- * All gated to developer role per plan. Roles will widen later when we
- * add site-engineer access for delivery confirmation.
+ *   [junior creates]  createDispatchAction  → row lands in Provisional
+ *                                             (approved_at = NULL)
+ *   [senior reviews]                       → approveDispatchAction    (→ Out for Delivery)
+ *                     OR                    → cancelDispatchAction    (revert, delete)
+ *                     OR                    → editDispatchSlabsAction (modify slab list)
+ *   [driver leaves]                        → row is Out for Delivery
+ *                                             (approved_at set, delivered_at NULL)
+ *   [engineer reports]                     → markDeliveredAction      (→ Delivered)
+ *   [mistake / recall]                     → undoDispatchAction       (revert from OFD)
+ *
+ * All gated to ["developer", "owner"] — the junior/senior split is
+ * organisational, not a system role (the plan notes this as future work
+ * once a real role hierarchy lands).
  */
 
 import { revalidatePath } from "next/cache";
@@ -33,7 +37,7 @@ function fail(path: string, message: string): never {
 // ─── createDispatchAction ────────────────────────────────────────────────
 
 export async function createDispatchAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer"]);
+  const { profile } = await requireAuth(["developer", "owner"]);
   const admin = createAdminSupabaseClient();
 
   const temple = String(formData.get("temple") || "").trim();
@@ -91,7 +95,9 @@ export async function createDispatchAction(formData: FormData) {
     }
   }
 
-  // ── Create the dispatches row
+  // ── Create the dispatches row. approved_at stays NULL → lands in
+  // Provisional tab awaiting senior review. challan_number is auto-
+  // assigned by the sequence default (migration 011).
   const { data: dispatch, error: dispatchErr } = await admin
     .from("dispatches")
     .insert({
@@ -103,12 +109,13 @@ export async function createDispatchAction(formData: FormData) {
       notes,
       dispatched_by: profile.id,
     })
-    .select("id")
+    .select("id, challan_number")
     .single();
   if (dispatchErr || !dispatch) {
     fail("/dispatch", `Failed to create dispatch: ${dispatchErr?.message ?? "unknown"}`);
   }
   const dispatchId = dispatch.id as string;
+  const challanNumber = (dispatch as { challan_number?: number }).challan_number ?? null;
 
   // ── Insert per-slab dispatch_logs
   const logRows = slabIds.map((slabId) => ({
@@ -135,16 +142,20 @@ export async function createDispatchAction(formData: FormData) {
     .update({ status: "dispatched", updated_by: profile.id, updated_at: now })
     .in("id", slabIds);
 
-  // ── Audit + notify
+  // ── Audit + notify. Event name is now "dispatch_created_provisional"
+  // to distinguish from the pre-v2 single-step dispatch.
+  const chalanLabel = challanNumber != null ? `CHLN-${String(challanNumber).padStart(4, "0")}` : dispatchId.slice(0, 8);
   await logAudit(profile.id, "dispatch_created", "dispatch", dispatchId, {
     temple,
     vehicle_no: vehicleNo,
     driver_name: driverName,
     slab_count: slabIds.length,
     slab_ids: slabIds,
+    challan_number: challanNumber,
+    state: "provisional",
   });
-  await notify("dispatch_created", `Dispatch to ${temple}`, {
-    message: `${slabIds.length} slab${slabIds.length !== 1 ? "s" : ""} on vehicle ${vehicleNo ?? "—"}${driverName ? ` · Driver ${driverName}` : ""}`,
+  await notify("dispatch_created", `Provisional dispatch to ${temple} (${chalanLabel})`, {
+    message: `${slabIds.length} slab${slabIds.length !== 1 ? "s" : ""} · awaiting senior approval · vehicle ${vehicleNo ?? "—"}${driverName ? ` · Driver ${driverName}` : ""}`,
     entityType: "dispatch",
     entityId: dispatchId,
     actorId: profile.id,
@@ -154,8 +165,8 @@ export async function createDispatchAction(formData: FormData) {
   revalidatePath("/dispatch");
   revalidatePath("/carving");
   redirect(
-    `/dispatch?tab=out_for_delivery&dispatch_toast=${encodeURIComponent(
-      `✓ Dispatched ${slabIds.length} slab${slabIds.length !== 1 ? "s" : ""} to ${temple}`,
+    `/dispatch?tab=provisional&dispatch_toast=${encodeURIComponent(
+      `✓ ${chalanLabel} created for ${temple} — awaiting senior approval`,
     )}`,
   );
 }
@@ -163,7 +174,7 @@ export async function createDispatchAction(formData: FormData) {
 // ─── markDeliveredAction ─────────────────────────────────────────────────
 
 export async function markDeliveredAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer"]);
+  const { profile } = await requireAuth(["developer", "owner"]);
   const admin = createAdminSupabaseClient();
 
   const dispatchId = String(formData.get("dispatch_id") || "").trim();
@@ -172,13 +183,17 @@ export async function markDeliveredAction(formData: FormData) {
 
   if (!dispatchId) fail("/dispatch", "Dispatch id is required");
 
-  // Guard: only out-for-delivery rows can be marked delivered.
+  // Guard: only approved (i.e. out-for-delivery) rows can be marked
+  // delivered. Cannot mark a still-provisional row delivered.
   const { data: dispatch } = await admin
     .from("dispatches")
-    .select("id, temple, delivered_at")
+    .select("id, temple, approved_at, delivered_at")
     .eq("id", dispatchId)
     .maybeSingle();
   if (!dispatch) fail("/dispatch", "Dispatch not found");
+  if (!dispatch.approved_at) {
+    fail("/dispatch", "Dispatch is still provisional — must be approved by a senior first");
+  }
   if (dispatch.delivered_at) {
     fail("/dispatch", "Dispatch is already marked delivered");
   }
@@ -215,19 +230,23 @@ export async function markDeliveredAction(formData: FormData) {
 // ─── undoDispatchAction ──────────────────────────────────────────────────
 
 export async function undoDispatchAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer"]);
+  const { profile } = await requireAuth(["developer", "owner"]);
   const admin = createAdminSupabaseClient();
 
   const dispatchId = String(formData.get("dispatch_id") || "").trim();
   if (!dispatchId) fail("/dispatch", "Dispatch id is required");
 
-  // Can only undo out-for-delivery (not-yet-delivered) rows.
+  // Can only undo out-for-delivery (approved but not-yet-delivered) rows.
+  // Provisional dispatches use cancelDispatchAction instead.
   const { data: dispatch } = await admin
     .from("dispatches")
-    .select("id, temple, delivered_at")
+    .select("id, temple, approved_at, delivered_at")
     .eq("id", dispatchId)
     .maybeSingle();
   if (!dispatch) fail("/dispatch", "Dispatch not found");
+  if (!dispatch.approved_at) {
+    fail("/dispatch", "Dispatch is still provisional — use Cancel instead of Undo");
+  }
   if (dispatch.delivered_at) {
     fail("/dispatch", "Cannot undo a dispatch that has already been marked delivered");
   }
@@ -270,5 +289,314 @@ export async function undoDispatchAction(formData: FormData) {
   revalidatePath("/carving");
   redirect(
     `/dispatch?dispatch_toast=${encodeURIComponent(`✓ Undid dispatch to ${dispatch.temple} — ${slabIds.length} slab${slabIds.length !== 1 ? "s" : ""} back in queue`)}`,
+  );
+}
+
+// ─── approveDispatchAction ───────────────────────────────────────────────
+// Senior signs off on a provisional dispatch — truck is now cleared to leave.
+// Sets approved_at + approved_by; row moves from Provisional → Out for Delivery.
+
+export async function approveDispatchAction(formData: FormData) {
+  const { profile } = await requireAuth(["developer", "owner"]);
+  const admin = createAdminSupabaseClient();
+
+  const dispatchId = String(formData.get("id") || "").trim();
+  if (!dispatchId) fail("/dispatch", "Dispatch id is required");
+
+  const { data: dispatch } = await admin
+    .from("dispatches")
+    .select("id, temple, challan_number, approved_at, delivered_at")
+    .eq("id", dispatchId)
+    .maybeSingle();
+  if (!dispatch) fail("/dispatch", "Dispatch not found");
+  if (dispatch.approved_at) fail("/dispatch", "Dispatch already approved");
+  if (dispatch.delivered_at) fail("/dispatch", "Dispatch already delivered");
+
+  const { error } = await admin
+    .from("dispatches")
+    .update({
+      approved_at: new Date().toISOString(),
+      approved_by: profile.id,
+    })
+    .eq("id", dispatchId);
+  if (error) fail("/dispatch", `Failed to approve: ${error.message}`);
+
+  const chalanLabel = dispatch.challan_number != null
+    ? `CHLN-${String(dispatch.challan_number).padStart(4, "0")}`
+    : dispatchId.slice(0, 8);
+
+  await logAudit(profile.id, "dispatch_approved", "dispatch", dispatchId, {
+    temple: dispatch.temple,
+    challan_number: dispatch.challan_number,
+  });
+  await notify("dispatch_approved", `${chalanLabel} approved for ${dispatch.temple}`, {
+    message: `Senior approved — truck cleared to leave`,
+    entityType: "dispatch",
+    entityId: dispatchId,
+    actorId: profile.id,
+    targetRoles: ["owner", "team_head", "developer"],
+  });
+
+  revalidatePath("/dispatch");
+  revalidatePath("/challan");
+  redirect(
+    `/dispatch?tab=out_for_delivery&dispatch_toast=${encodeURIComponent(`✓ ${chalanLabel} approved — ${dispatch.temple}`)}`,
+  );
+}
+
+// ─── cancelDispatchAction ────────────────────────────────────────────────
+// Senior rejects a provisional dispatch. Slabs go back to "completed" so
+// they reappear in Make Dispatch. The dispatch row + its dispatch_logs are
+// deleted. Sequence number is consumed (gap), same as a voided paper challan.
+
+export async function cancelDispatchAction(formData: FormData) {
+  const { profile } = await requireAuth(["developer", "owner"]);
+  const admin = createAdminSupabaseClient();
+
+  const dispatchId = String(formData.get("id") || "").trim();
+  if (!dispatchId) fail("/dispatch", "Dispatch id is required");
+
+  const { data: dispatch } = await admin
+    .from("dispatches")
+    .select("id, temple, challan_number, approved_at, delivered_at")
+    .eq("id", dispatchId)
+    .maybeSingle();
+  if (!dispatch) fail("/dispatch", "Dispatch not found");
+  if (dispatch.approved_at) {
+    fail("/dispatch", "Dispatch is already approved — use Undo (on Out-for-delivery) instead of Cancel");
+  }
+  if (dispatch.delivered_at) {
+    fail("/dispatch", "Cannot cancel a delivered dispatch");
+  }
+
+  // Fetch slab ids so we can flip their statuses back.
+  const { data: logs } = await admin
+    .from("dispatch_logs")
+    .select("slab_requirement_id, carving_item_id")
+    .eq("dispatch_id", dispatchId);
+  const slabIds = (logs ?? []).map((l) => l.slab_requirement_id).filter(Boolean) as string[];
+  const carvingIds = (logs ?? []).map((l) => l.carving_item_id).filter(Boolean) as string[];
+
+  const now = new Date().toISOString();
+  if (slabIds.length > 0) {
+    await admin
+      .from("slab_requirements")
+      .update({ status: "completed", updated_by: profile.id, updated_at: now })
+      .in("id", slabIds);
+  }
+  if (carvingIds.length > 0) {
+    await admin
+      .from("carving_items")
+      .update({ status: "completed" })
+      .in("id", carvingIds);
+  }
+
+  await admin.from("dispatch_logs").delete().eq("dispatch_id", dispatchId);
+  await admin.from("dispatches").delete().eq("id", dispatchId);
+
+  const chalanLabel = dispatch.challan_number != null
+    ? `CHLN-${String(dispatch.challan_number).padStart(4, "0")}`
+    : dispatchId.slice(0, 8);
+
+  await logAudit(profile.id, "dispatch_cancelled", "dispatch", dispatchId, {
+    temple: dispatch.temple,
+    challan_number: dispatch.challan_number,
+    slabs_returned: slabIds,
+  });
+
+  revalidatePath("/dispatch");
+  revalidatePath("/carving");
+  redirect(
+    `/dispatch?tab=ready&dispatch_toast=${encodeURIComponent(
+      `✓ Cancelled ${chalanLabel} — ${slabIds.length} slab${slabIds.length !== 1 ? "s" : ""} back in Make Dispatch`,
+    )}`,
+  );
+}
+
+// ─── editDispatchSlabsAction ─────────────────────────────────────────────
+// Senior modifies the slab list of a still-provisional dispatch.
+// Inputs (FormData):
+//   - id: dispatch_id
+//   - add_slab_ids:    JSON string[] of slab ids to add to this dispatch
+//   - remove_slab_ids: JSON string[] of slab ids to remove from this dispatch
+//
+// Validation:
+//   - dispatch must be provisional (approved_at IS NULL, delivered_at IS NULL)
+//   - every add-slab must belong to the dispatch's temple, be status=completed,
+//     and not already on another dispatch
+//   - every remove-slab must currently be on this dispatch
+//
+// Side effects: dispatch_logs rows inserted/deleted; slab_requirements +
+// carving_items statuses flipped accordingly. Auto-cancels the whole
+// dispatch if the edit leaves it with zero slabs.
+
+export async function editDispatchSlabsAction(formData: FormData) {
+  const { profile } = await requireAuth(["developer", "owner"]);
+  const admin = createAdminSupabaseClient();
+
+  const dispatchId = String(formData.get("id") || "").trim();
+  if (!dispatchId) fail("/dispatch", "Dispatch id is required");
+
+  let addIds: string[] = [];
+  let removeIds: string[] = [];
+  try {
+    addIds = JSON.parse(String(formData.get("add_slab_ids") || "[]"));
+    removeIds = JSON.parse(String(formData.get("remove_slab_ids") || "[]"));
+  } catch {
+    fail("/dispatch", "Malformed slab lists");
+  }
+  if (!Array.isArray(addIds) || !Array.isArray(removeIds)) {
+    fail("/dispatch", "Slab lists must be arrays");
+  }
+
+  // No-op check
+  if (addIds.length === 0 && removeIds.length === 0) {
+    redirect(`/dispatch?tab=provisional&dispatch_toast=${encodeURIComponent("No changes")}`);
+  }
+
+  // ── Load + validate dispatch
+  const { data: dispatch } = await admin
+    .from("dispatches")
+    .select("id, temple, challan_number, approved_at, delivered_at")
+    .eq("id", dispatchId)
+    .maybeSingle();
+  if (!dispatch) fail("/dispatch", "Dispatch not found");
+  if (dispatch.approved_at) fail("/dispatch", "Dispatch already approved — can no longer edit slabs");
+  if (dispatch.delivered_at) fail("/dispatch", "Dispatch already delivered");
+
+  // ── Validate remove-slabs are currently on this dispatch
+  if (removeIds.length > 0) {
+    const { data: currentLogs } = await admin
+      .from("dispatch_logs")
+      .select("slab_requirement_id")
+      .eq("dispatch_id", dispatchId);
+    const currentSet = new Set((currentLogs ?? []).map((l) => l.slab_requirement_id));
+    for (const id of removeIds) {
+      if (!currentSet.has(id)) fail("/dispatch", `Slab ${id} is not on this dispatch`);
+    }
+  }
+
+  // ── Validate add-slabs: same temple, status=completed, not on another dispatch
+  if (addIds.length > 0) {
+    const { data: addSlabs } = await admin
+      .from("slab_requirements")
+      .select("id, temple, status")
+      .in("id", addIds);
+    if (!addSlabs || addSlabs.length !== addIds.length) {
+      fail("/dispatch", "One or more slabs to add no longer exist");
+    }
+    for (const s of addSlabs) {
+      if (s.temple !== dispatch.temple) {
+        fail("/dispatch", `Slab ${s.id} belongs to ${s.temple}, not ${dispatch.temple}. One dispatch = one temple.`);
+      }
+      if (s.status !== "completed") {
+        fail("/dispatch", `Slab ${s.id} is not in 'completed' status (is '${s.status}')`);
+      }
+    }
+    // Reject if any add-slab is already on a different dispatch
+    const { data: otherLogs } = await admin
+      .from("dispatch_logs")
+      .select("slab_requirement_id, dispatch_id")
+      .in("slab_requirement_id", addIds);
+    for (const l of otherLogs ?? []) {
+      if (l.dispatch_id && l.dispatch_id !== dispatchId) {
+        fail("/dispatch", `Slab ${l.slab_requirement_id} is already on another dispatch`);
+      }
+    }
+  }
+
+  // ── Execute: remove first (so add-slabs get a clean slate), then add
+  const now = new Date().toISOString();
+
+  if (removeIds.length > 0) {
+    const { data: removedLogs } = await admin
+      .from("dispatch_logs")
+      .select("carving_item_id")
+      .eq("dispatch_id", dispatchId)
+      .in("slab_requirement_id", removeIds);
+    const removedCarvingIds = (removedLogs ?? [])
+      .map((l) => l.carving_item_id)
+      .filter(Boolean) as string[];
+
+    await admin
+      .from("dispatch_logs")
+      .delete()
+      .eq("dispatch_id", dispatchId)
+      .in("slab_requirement_id", removeIds);
+    await admin
+      .from("slab_requirements")
+      .update({ status: "completed", updated_by: profile.id, updated_at: now })
+      .in("id", removeIds);
+    if (removedCarvingIds.length > 0) {
+      await admin
+        .from("carving_items")
+        .update({ status: "completed" })
+        .in("id", removedCarvingIds);
+    }
+  }
+
+  if (addIds.length > 0) {
+    // Fetch carving_items for the slabs being added (need carving_item_id FK)
+    const { data: addCarving } = await admin
+      .from("carving_items")
+      .select("id, slab_requirement_id")
+      .in("slab_requirement_id", addIds);
+    const carvingBySlab = new Map<string, string>();
+    for (const ci of addCarving ?? []) {
+      carvingBySlab.set(ci.slab_requirement_id, ci.id);
+    }
+    for (const slabId of addIds) {
+      if (!carvingBySlab.has(slabId)) {
+        fail("/dispatch", `Slab ${slabId} has no carving record — cannot add`);
+      }
+    }
+    const newLogs = addIds.map((slabId) => ({
+      carving_item_id: carvingBySlab.get(slabId),
+      slab_requirement_id: slabId,
+      dispatched_by: profile.id,
+      dispatch_id: dispatchId,
+    }));
+    await admin.from("dispatch_logs").insert(newLogs);
+    await admin
+      .from("slab_requirements")
+      .update({ status: "dispatched", updated_by: profile.id, updated_at: now })
+      .in("id", addIds);
+    await admin
+      .from("carving_items")
+      .update({ status: "dispatched" })
+      .in("slab_requirement_id", addIds);
+  }
+
+  // ── If the dispatch now has zero slabs, auto-cancel
+  const { count: remaining } = await admin
+    .from("dispatch_logs")
+    .select("slab_requirement_id", { count: "exact", head: true })
+    .eq("dispatch_id", dispatchId);
+  if ((remaining ?? 0) === 0) {
+    await admin.from("dispatches").delete().eq("id", dispatchId);
+    redirect(
+      `/dispatch?tab=ready&dispatch_toast=${encodeURIComponent(
+        "Dispatch was left with zero slabs — auto-cancelled",
+      )}`,
+    );
+  }
+
+  const chalanLabel = dispatch.challan_number != null
+    ? `CHLN-${String(dispatch.challan_number).padStart(4, "0")}`
+    : dispatchId.slice(0, 8);
+
+  await logAudit(profile.id, "dispatch_edited", "dispatch", dispatchId, {
+    temple: dispatch.temple,
+    challan_number: dispatch.challan_number,
+    added: addIds,
+    removed: removeIds,
+  });
+
+  revalidatePath("/dispatch");
+  revalidatePath("/carving");
+  redirect(
+    `/dispatch?tab=provisional&dispatch_toast=${encodeURIComponent(
+      `✓ ${chalanLabel} updated — ${addIds.length} added, ${removeIds.length} removed`,
+    )}`,
   );
 }

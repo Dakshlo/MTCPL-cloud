@@ -8,10 +8,10 @@
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
-import { DispatchClient, type ReadySlab, type OutForDeliveryRow, type DeliveredRow, type LegacyDispatch } from "./dispatch-client";
+import { DispatchClient, type ReadySlab, type ProvisionalRow, type OutForDeliveryRow, type DeliveredRow, type LegacyDispatch } from "./dispatch-client";
 import type { StoneCategory } from "@/lib/stone-categories";
 
-type Tab = "ready" | "out_for_delivery" | "delivered";
+type Tab = "ready" | "provisional" | "out_for_delivery" | "delivered";
 
 function toCftFromFtNums(l: number, w: number, h: number): number {
   return (l * w * h) / 1728;
@@ -26,40 +26,54 @@ export default async function DispatchPage({
     dispatch_error?: string;
   }>;
 }) {
-  await requireAuth(["developer"]);
+  await requireAuth(["developer", "owner"]);
   const { tab: tabParam, dispatch_toast: toastParam, dispatch_error: errorParam } = await searchParams;
   const initialTab: Tab =
-    tabParam === "out_for_delivery" || tabParam === "delivered" ? tabParam : "ready";
+    tabParam === "provisional" || tabParam === "out_for_delivery" || tabParam === "delivered"
+      ? tabParam
+      : "ready";
 
   const admin = createAdminSupabaseClient();
 
   const [
     { data: completedSlabs },
+    { data: provisionalDispatches },
     { data: openDispatches },
     { data: closedDispatches },
     { data: allDispatchLogs },
     { data: stoneTypeRows },
   ] = await Promise.all([
-    // Ready = status=completed slabs
+    // Ready ("Make Dispatch") = status=completed slabs waiting to be packed
     admin
       .from("slab_requirements")
       .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, priority, status")
       .eq("status", "completed")
       .order("priority", { ascending: false })
       .order("updated_at", { ascending: true }),
-    // Open dispatches (out for delivery)
+    // Provisional = dispatch created but senior hasn't approved yet.
+    // Derived state: approved_at IS NULL AND delivered_at IS NULL.
     admin
       .from("dispatches")
       .select(
-        "id, temple, vehicle_no, driver_name, driver_phone, dispatched_at, expected_delivery_date, dispatched_by, notes, delivered_at",
+        "id, challan_number, temple, vehicle_no, driver_name, driver_phone, dispatched_at, expected_delivery_date, dispatched_by, notes",
       )
+      .is("approved_at", null)
       .is("delivered_at", null)
       .order("dispatched_at", { ascending: false }),
-    // Delivered archive (last 200)
+    // Out for Delivery = approved but not yet delivered.
     admin
       .from("dispatches")
       .select(
-        "id, temple, vehicle_no, driver_name, driver_phone, dispatched_at, expected_delivery_date, dispatched_by, notes, delivered_at, delivered_by, receiver_name, delivery_note",
+        "id, challan_number, temple, vehicle_no, driver_name, driver_phone, dispatched_at, expected_delivery_date, dispatched_by, notes, approved_at, approved_by, delivered_at",
+      )
+      .not("approved_at", "is", null)
+      .is("delivered_at", null)
+      .order("dispatched_at", { ascending: false }),
+    // Delivered archive (last 200 by delivered_at).
+    admin
+      .from("dispatches")
+      .select(
+        "id, challan_number, temple, vehicle_no, driver_name, driver_phone, dispatched_at, expected_delivery_date, dispatched_by, notes, approved_at, approved_by, delivered_at, delivered_by, receiver_name, delivery_note",
       )
       .not("delivered_at", "is", null)
       .order("delivered_at", { ascending: false })
@@ -147,10 +161,29 @@ export default async function DispatchPage({
       };
     });
 
+  const provisional: ProvisionalRow[] = (provisionalDispatches ?? []).map((d) => {
+    const { count, cft } = cftForDispatch(d.id);
+    return {
+      id: d.id,
+      challan_number: (d as { challan_number?: number }).challan_number ?? null,
+      temple: d.temple,
+      vehicle_no: d.vehicle_no,
+      driver_name: d.driver_name,
+      driver_phone: d.driver_phone,
+      dispatched_at: d.dispatched_at,
+      expected_delivery_date: d.expected_delivery_date,
+      dispatcher: d.dispatched_by ? profilesMap[d.dispatched_by] ?? null : null,
+      notes: d.notes,
+      slabCount: count,
+      slabCftTotal: cft,
+    };
+  });
+
   const outForDelivery: OutForDeliveryRow[] = (openDispatches ?? []).map((d) => {
     const { count, cft } = cftForDispatch(d.id);
     return {
       id: d.id,
+      challan_number: (d as { challan_number?: number }).challan_number ?? null,
       temple: d.temple,
       vehicle_no: d.vehicle_no,
       driver_name: d.driver_name,
@@ -168,6 +201,7 @@ export default async function DispatchPage({
     const { count, cft } = cftForDispatch(d.id);
     return {
       id: d.id,
+      challan_number: (d as { challan_number?: number }).challan_number ?? null,
       temple: d.temple,
       vehicle_no: d.vehicle_no,
       driver_name: d.driver_name,
@@ -196,9 +230,49 @@ export default async function DispatchPage({
       note: l.dispatch_note ?? null,
     }));
 
+  // Per-provisional slab details for the EditSlabsModal. Pulls the slab
+  // rows that each provisional dispatch currently holds so the modal can
+  // render a "current slabs" list with remove buttons without an extra
+  // client-side round-trip. Shaped like ReadySlab for symmetry.
+  const provisionalSlabIds = (provisionalDispatches ?? [])
+    .flatMap((d) => logsByDispatch.get(d.id) ?? []);
+  const provisionalSlabDetails = new Map<string, ReadySlab>();
+  if (provisionalSlabIds.length > 0) {
+    const { data: slabRows } = await admin
+      .from("slab_requirements")
+      .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, priority")
+      .in("id", provisionalSlabIds);
+    for (const s of slabRows ?? []) {
+      const L = Number(s.length_ft);
+      const W = Number(s.width_ft);
+      const T = Number(s.thickness_ft);
+      provisionalSlabDetails.set(s.id, {
+        id: s.id,
+        label: s.label,
+        temple: s.temple,
+        stone: s.stone,
+        quality: s.quality ?? null,
+        dimensions: `${L}×${W}×${T} in`,
+        cft: toCftFromFtNums(L, W, T),
+        priority: Boolean(s.priority),
+        isMarble: stoneCategoryMap[s.stone ?? ""] === "marble",
+      });
+    }
+  }
+
+  const provisionalSlabsByDispatch: Record<string, ReadySlab[]> = {};
+  for (const d of provisionalDispatches ?? []) {
+    const ids = logsByDispatch.get(d.id) ?? [];
+    provisionalSlabsByDispatch[d.id] = ids
+      .map((id) => provisionalSlabDetails.get(id))
+      .filter((s): s is ReadySlab => s !== undefined);
+  }
+
   return (
     <DispatchClient
       readySlabs={readySlabs}
+      provisional={provisional}
+      provisionalSlabsByDispatch={provisionalSlabsByDispatch}
       outForDelivery={outForDelivery}
       delivered={delivered}
       legacyDispatches={legacyDispatches}
