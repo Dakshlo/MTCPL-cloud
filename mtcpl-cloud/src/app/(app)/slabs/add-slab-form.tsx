@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { addSlabAction } from "./actions";
-import { generateSlabCode } from "./utils";
+import { nextSlabCodeFromMaxId } from "./utils";
 import { LabelSelect } from "./label-select";
 
 type Temple = { id: string; name: string; code_prefix: string; default_stone?: string | null };
@@ -50,7 +50,19 @@ function FtInInput({ label, inchValue, onInchChange }: { label: string; inchValu
   );
 }
 
-export function AddSlabForm({ temples, existingIds, stoneTypes = [], labels = [] }: { temples: Temple[]; existingIds: string[]; stoneTypes?: StoneType[]; labels?: string[] }) {
+export function AddSlabForm({
+  temples,
+  maxIdByPrefix,
+  stoneTypes = [],
+  labels = [],
+}: {
+  temples: Temple[];
+  /** Highest existing slab id per temple code_prefix, computed server-side
+   * via ORDER BY id DESC LIMIT 1. Sidesteps Supabase's 1000-row cap. */
+  maxIdByPrefix: Record<string, string | null>;
+  stoneTypes?: StoneType[];
+  labels?: string[];
+}) {
   const [quality, setQuality] = useState<"" | "A" | "B">("");
   const [selectedTemple, setSelectedTemple] = useState<Temple | null>(temples[0] ?? null);
   const [stone, setStone] = useState<string>(temples[0]?.default_stone ?? "PinkStone");
@@ -75,7 +87,9 @@ export function AddSlabForm({ temples, existingIds, stoneTypes = [], labels = []
 
   const isFtIn = unitMode === "feetinches";
   const cft = calcCft(l, w, t);
-  const baseCode = selectedTemple ? generateSlabCode(existingIds, selectedTemple.code_prefix) : "—";
+  const baseCode = selectedTemple
+    ? nextSlabCodeFromMaxId(maxIdByPrefix[selectedTemple.code_prefix] ?? null, selectedTemple.code_prefix)
+    : "—";
   const codePreview = baseCode === "—" ? "—" : previewCodes(baseCode, qty);
 
   return (

@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { generateSlabCode } from "./utils";
+import { nextSlabCodeFromMaxId } from "./utils";
 import { logAudit } from "@/lib/audit";
 import { notify } from "@/lib/notifications";
 
@@ -61,30 +61,27 @@ export async function addSlabAction(formData: FormData) {
     updated_by: profile.id,
   };
 
-  // Insert with collision retry. generateSlabCode uses MAX(existing)+1
-  // which is normally bulletproof — but it can collide when:
-  //   (a) another user simultaneously submits (race), OR
-  //   (b) a manually-inserted row has an id the parser skipped, OR
-  //   (c) two temples share a code_prefix and the snapshot is stale.
-  // Rather than failing with a cryptic "duplicate key" toast, refetch
-  // and recompute up to 5 times — each attempt is cheap and converges
-  // in one extra hop for any realistic collision.
+  // Insert with collision retry. Each attempt queries Postgres for the
+  // single highest ID under this prefix (no 1000-row cap issue —
+  // we only ask for ONE row), builds baseId = that + 1, attempts insert.
+  // If it collides (race condition, concurrent admin), refetch + retry.
   let baseId = "";
   let lastError: { message: string; code?: string } | null = null;
   for (let attempt = 0; attempt < 5; attempt++) {
-    // Explicit high limit — Supabase's default .select() cap is 1000,
-    // which silently truncates once total slab count crosses that. A
-    // truncated existingIds list means generateSlabCode computes a
-    // MAX that's lower than reality → picks a baseId that's already
-    // taken. Root cause of the "duplicate key" error we're retrying
-    // around; this prevents the retry from ever being needed for
-    // this reason.
-    const { data: existing } = await supabase
+    // ORDER BY id DESC + LIMIT 1 returns one row: the alphabetically
+    // highest id for the prefix. Zero-padded 4-digit numeric component
+    // means alphabetical DESC == numeric DESC, so this is also the
+    // numerically highest base number. parseInt on "0010-9" returns 10
+    // (stops at the hyphen), exactly what we want — batch children
+    // share their base's number.
+    const { data: maxRow } = await supabase
       .from("slab_requirements")
       .select("id")
-      .limit(100000);
-    const existingIds = (existing ?? []).map((r) => r.id);
-    baseId = generateSlabCode(existingIds, prefix);
+      .like("id", `${prefix}-%`)
+      .order("id", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    baseId = nextSlabCodeFromMaxId(maxRow?.id ?? null, prefix);
 
     const rows = Array.from({ length: qty }, (_, i) => ({
       ...common,
@@ -97,9 +94,9 @@ export async function addSlabAction(formData: FormData) {
       break;
     }
     lastError = { message: error.message, code: error.code };
-    // Non-dup errors are real — bail immediately with the original message.
     if (error.code !== "23505") break;
-    // 23505 = primary-key collision. Loop will refetch and try again.
+    // 23505 = primary-key collision. Loop will refetch + retry — the
+    // only way this happens now is a legitimate concurrent insert.
   }
   if (lastError) toast("/slabs", lastError.message);
 

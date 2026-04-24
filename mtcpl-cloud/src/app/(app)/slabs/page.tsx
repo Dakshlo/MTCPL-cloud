@@ -32,18 +32,9 @@ export default async function SlabsPage() {
   // Entry roles see only what they personally added
   if (isEntryRole) slabQuery = slabQuery.eq("created_by", profile.id);
 
-  const [{ data: slabs, error }, { data: temples }, { data: allIds }, { data: stoneTypes }, { data: labelRows }] = await Promise.all([
+  const [{ data: slabs, error }, { data: temples }, { data: stoneTypes }, { data: labelRows }] = await Promise.all([
     slabQuery,
     admin.from("temples").select("id, name, code_prefix, default_stone").eq("is_active", true).order("name"),
-    // Supabase's JS client caps .select() at 1000 rows by default. Without
-    // an explicit limit, a heavy-batch temple (e.g. ROHTAK with 400+ rows)
-    // can fill half the cap on its own and push other temples' high-number
-    // IDs off the end — generateSlabCode then misreads MAX and suggests a
-    // base-code that's already taken, blowing up with a pkey violation.
-    // Explicit high cap keeps us in "fetch everything" territory while
-    // leaving room to grow. The ids list is short strings; 100k rows is
-    // still under a megabyte of payload.
-    admin.from("slab_requirements").select("id").limit(100000),
     admin.from("stone_types").select("id, name").order("name"),
     admin.from("slab_labels").select("name").eq("is_active", true).order("name"),
   ]);
@@ -58,8 +49,29 @@ export default async function SlabsPage() {
   const stoneList = (stoneTypes && stoneTypes.length > 0)
     ? stoneTypes
     : [{ id: "pink", name: "PinkStone" }, { id: "white", name: "WhiteStone" }];
-  const existingIds = (allIds ?? []).map(r => r.id);
   const labels = (labelRows ?? []).map(r => r.name);
+
+  // Per-prefix highest-ID lookup for the "next code" form preview.
+  // Fetched one row per prefix via ORDER BY id DESC LIMIT 1 — this
+  // sidesteps Supabase's PostgREST db-max-rows cap (which truncates
+  // any .select() over 1000 rows) by only asking for exactly one row
+  // per temple. Even with 10k+ slabs across all temples, this is
+  // ~10 parallel single-row queries. Zero-padded 4-digit numeric
+  // component means string DESC == numeric DESC.
+  const uniquePrefixes = [...new Set(templeList.map(t => t.code_prefix).filter(Boolean))];
+  const maxIdByPrefixEntries = await Promise.all(
+    uniquePrefixes.map(async (pfx) => {
+      const { data } = await admin
+        .from("slab_requirements")
+        .select("id")
+        .like("id", `${pfx}-%`)
+        .order("id", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      return [pfx, data?.id ?? null] as const;
+    })
+  );
+  const maxIdByPrefix: Record<string, string | null> = Object.fromEntries(maxIdByPrefixEntries);
 
   const totalOpen = slabList.filter(s => s.status === "open").length;
   const priorityCount = slabList.filter(s => s.priority).length;
@@ -79,7 +91,7 @@ export default async function SlabsPage() {
 
       {/* Add form */}
       {canEdit && templeList.length > 0 && (
-        <AddSlabForm temples={templeList} existingIds={existingIds} stoneTypes={stoneList} labels={labels} />
+        <AddSlabForm temples={templeList} maxIdByPrefix={maxIdByPrefix} stoneTypes={stoneList} labels={labels} />
       )}
       {canEdit && templeList.length === 0 && (
         <div className="banner">
