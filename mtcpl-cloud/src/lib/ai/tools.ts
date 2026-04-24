@@ -88,7 +88,7 @@ export const AI_TOOLS = [
   {
     name: "get_cutting_activity",
     description:
-      "Cutting activity (blocks finished cutting) in a time window. Returns block count, slabs cut, total CFT, and efficiency.",
+      "Cutting activity in a time window, covering BOTH cutting paths: (1) Planned cuts — sandstone blocks routed through the Plan Generator + cut_session_blocks (has efficiency %). (2) Manual cuts — marble blocks cut via the Manual Cut modal on /blocks (tonnes → 8 CFT/tonne equivalence), plus any sandstone manually cut. Top-level `blocksCut` / `slabsCut` are COMBINED totals across both paths so 'how many blocks cut today' never silently omits marble work. Sub-objects `plannedCutting` and `manualCutting` (with `manualCutting.marble` / `manualCutting.sandstone` breakdown) let you narrate the split. Use this for 'today's cutting report', 'what happened today', 'how many blocks cut this week' — and mention both streams when both are non-zero.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -596,6 +596,23 @@ async function getTempleRequirements(input: Record<string, unknown>) {
 }
 
 // ─── get_cutting_activity ────────────────────────────────────────────────────
+//
+// Covers BOTH cutting paths:
+//
+//   1. Planned cuts (sandstone, mostly) — flow through cut_session_blocks;
+//      we count rows where status='done' in the time window. Has
+//      meaningful L×W×H block dims → efficiency % is calculable.
+//
+//   2. Manual cuts (marble, mostly — but any block can be manually cut) —
+//      flow through manualCutBlockAction which emits an audit_log with
+//      action='manual_cut_block'. No cut_session_blocks row. Marble
+//      blocks have tonnes instead of L×W×H, so we report tonnes + the
+//      CFT-equivalent (8 CFT/tonne) alongside slabs produced.
+//
+// Top-level `blocksCut` / `slabsCut` are COMBINED totals across both
+// paths. The `plannedCutting` / `manualCutting` sub-objects let the
+// LLM narrate the breakdown ("3 blocks cut today — 2 sandstone via
+// plan, 1 marble via manual step").
 
 async function getCuttingActivity(input: Record<string, unknown>) {
   const range = (input.range === "today" || input.range === "yesterday" || input.range === "this_week" || input.range === "this_month")
@@ -604,43 +621,171 @@ async function getCuttingActivity(input: Record<string, unknown>) {
   const { from, to } = istRange(range);
   const admin = createAdminSupabaseClient();
 
-  const { data, error } = await admin
+  // ── Path 1: Planned cutting (cut_session_blocks) ────────────────────
+  const { data: plannedRows, error: plannedErr } = await admin
     .from("cut_session_blocks")
     .select("id, block_id, updated_at, layout")
     .eq("status", "done")
     .gte("updated_at", from)
     .lt("updated_at", to);
-  if (error) throw new Error(error.message);
+  if (plannedErr) throw new Error(plannedErr.message);
 
-  const rows = data ?? [];
-  let slabsCut = 0;
-  let totalSlabCft = 0;
-  let totalBlockCft = 0;
+  const plannedList = plannedRows ?? [];
+  let plannedSlabsCut = 0;
+  let plannedSlabCft = 0;
+  let plannedBlockCft = 0;
 
-  for (const r of rows) {
+  for (const r of plannedList) {
     const layout = r.layout as { blk?: { l?: number; w?: number; h?: number }; placed?: Array<{ sw?: number; sh?: number; sd?: number }> } | null;
     const placed = layout?.placed ?? [];
-    slabsCut += placed.length;
+    plannedSlabsCut += placed.length;
     for (const s of placed) {
-      if (s.sw && s.sh && s.sd) totalSlabCft += toCFT(s.sw * s.sh * s.sd);
+      if (s.sw && s.sh && s.sd) plannedSlabCft += toCFT(s.sw * s.sh * s.sd);
     }
     if (layout?.blk) {
-      totalBlockCft += toCFT((layout.blk.l ?? 0) * (layout.blk.w ?? 0) * (layout.blk.h ?? 0));
+      plannedBlockCft += toCFT((layout.blk.l ?? 0) * (layout.blk.w ?? 0) * (layout.blk.h ?? 0));
     }
   }
 
-  const efficiencyPct = totalBlockCft > 0 ? Math.round((totalSlabCft / totalBlockCft) * 100) : 0;
+  const plannedEfficiencyPct = plannedBlockCft > 0 ? Math.round((plannedSlabCft / plannedBlockCft) * 100) : 0;
+
+  // ── Path 2: Manual cutting (audit_logs) ─────────────────────────────
+  // manualCutBlockAction logs with entity_type='block', entity_id=blockId,
+  // metadata={ slabs: [slabIds], restocked_blocks, restock }. Join back
+  // to blocks for stone + tonnes so we can break down marble vs sandstone.
+  const { data: manualAudit } = await admin
+    .from("audit_logs")
+    .select("entity_id, metadata, created_at")
+    .eq("action", "manual_cut_block")
+    .gte("created_at", from)
+    .lt("created_at", to);
+
+  const manualList = manualAudit ?? [];
+  const manualBlockIds = [...new Set(manualList.map((a) => a.entity_id).filter(Boolean))] as string[];
+  let manualBlockRows: Array<{ id: string; stone: string | null; tonnes: number | null; length_ft: number | null; width_ft: number | null; height_ft: number | null; category: string | null }> = [];
+  if (manualBlockIds.length > 0) {
+    const { data } = await admin
+      .from("blocks")
+      .select("id, stone, tonnes, length_ft, width_ft, height_ft, category")
+      .in("id", manualBlockIds);
+    manualBlockRows = data ?? [];
+  }
+  const manualBlockMap = new Map(manualBlockRows.map((b) => [b.id, b] as const));
+
+  // Stone category map so we can split marble vs sandstone in the breakdown
+  const { data: stoneTypes } = await admin.from("stone_types").select("name, stone_category");
+  const stoneCategoryMap: Record<string, string> = {};
+  for (const st of stoneTypes ?? []) {
+    stoneCategoryMap[st.name as string] = (st as { stone_category?: string }).stone_category ?? "sandstone";
+  }
+
+  let manualSlabsCut = 0;
+  let manualBlocksCut = 0;
+  let manualMarbleBlocks = 0;
+  let manualMarbleSlabs = 0;
+  let manualMarbleTonnes = 0;
+  let manualSandstoneBlocks = 0;
+  let manualSandstoneSlabs = 0;
+  let manualSandstoneBlockCft = 0;
+  const manualByStone: Record<string, { blocks: number; slabs: number; tonnes?: number; blockCft?: number }> = {};
+
+  for (const a of manualList) {
+    manualBlocksCut += 1;
+    const meta = a.metadata as { slabs?: string[] } | null;
+    const slabCount = Array.isArray(meta?.slabs) ? meta!.slabs.length : 0;
+    manualSlabsCut += slabCount;
+
+    const block = manualBlockMap.get(a.entity_id);
+    if (!block) continue;
+    const stone = block.stone ?? "Unknown";
+    const cat = stoneCategoryMap[stone] ?? "sandstone";
+
+    if (!manualByStone[stone]) manualByStone[stone] = { blocks: 0, slabs: 0 };
+    manualByStone[stone].blocks += 1;
+    manualByStone[stone].slabs += slabCount;
+
+    if (cat === "marble") {
+      manualMarbleBlocks += 1;
+      manualMarbleSlabs += slabCount;
+      const t = Number(block.tonnes ?? 0);
+      if (t > 0) {
+        manualMarbleTonnes += t;
+        manualByStone[stone].tonnes = (manualByStone[stone].tonnes ?? 0) + t;
+      }
+    } else {
+      manualSandstoneBlocks += 1;
+      manualSandstoneSlabs += slabCount;
+      const blockCft = toCFT((Number(block.length_ft) || 0) * (Number(block.width_ft) || 0) * (Number(block.height_ft) || 0));
+      if (blockCft > 0) {
+        manualSandstoneBlockCft += blockCft;
+        manualByStone[stone].blockCft = (manualByStone[stone].blockCft ?? 0) + blockCft;
+      }
+    }
+  }
+
+  // 8 CFT/tonne marble equivalence (matches cftEquivFromTonnes in
+  // src/lib/stone-categories.ts). Inlined here to keep the tool file
+  // self-contained.
+  const manualMarbleCftEquiv = manualMarbleTonnes * 8;
 
   return {
     range,
     from,
     to,
-    blocksCut: rows.length,
-    slabsCut,
-    totalSlabCft: Number(totalSlabCft.toFixed(2)),
-    totalBlockCft: Number(totalBlockCft.toFixed(2)),
-    efficiencyPct,
-    wasteCft: Number(Math.max(0, totalBlockCft - totalSlabCft).toFixed(2)),
+
+    // COMBINED TOTALS — what "how many blocks/slabs were cut" really means.
+    // These sum BOTH the planned (cut_session_blocks) and manual
+    // (audit-logged) cutting paths so no marble work gets silently omitted.
+    blocksCut: plannedList.length + manualBlocksCut,
+    slabsCut: plannedSlabsCut + manualSlabsCut,
+
+    // Sandstone-style efficiency — only computed on the planned-cutting
+    // side since that's the only path with real block L×W×H vs slab
+    // volumes. Manual sandstone cuts also contribute block CFT, but
+    // without a per-cut slab-dims layout we can't re-derive efficiency
+    // from audit meta alone. Leave that unsplit.
+    plannedCutting: {
+      blocksCut: plannedList.length,
+      slabsCut: plannedSlabsCut,
+      totalSlabCft: Number(plannedSlabCft.toFixed(2)),
+      totalBlockCft: Number(plannedBlockCft.toFixed(2)),
+      efficiencyPct: plannedEfficiencyPct,
+      wasteCft: Number(Math.max(0, plannedBlockCft - plannedSlabCft).toFixed(2)),
+    },
+
+    manualCutting: {
+      blocksCut: manualBlocksCut,
+      slabsCut: manualSlabsCut,
+      marble: {
+        blocksCut: manualMarbleBlocks,
+        slabsCut: manualMarbleSlabs,
+        totalTonnes: Number(manualMarbleTonnes.toFixed(3)),
+        cftEquiv: Number(manualMarbleCftEquiv.toFixed(2)),
+      },
+      sandstone: {
+        blocksCut: manualSandstoneBlocks,
+        slabsCut: manualSandstoneSlabs,
+        totalBlockCft: Number(manualSandstoneBlockCft.toFixed(2)),
+      },
+      byStone: Object.fromEntries(
+        Object.entries(manualByStone).map(([stone, v]) => [
+          stone,
+          {
+            blocks: v.blocks,
+            slabs: v.slabs,
+            tonnes: v.tonnes != null ? Number(v.tonnes.toFixed(3)) : undefined,
+            blockCft: v.blockCft != null ? Number(v.blockCft.toFixed(2)) : undefined,
+          },
+        ])
+      ),
+    },
+
+    // Legacy top-level fields — kept for any callers expecting the old
+    // shape. Now represent COMBINED totals, same as blocksCut/slabsCut above.
+    totalSlabCft: Number(plannedSlabCft.toFixed(2)),
+    totalBlockCft: Number(plannedBlockCft.toFixed(2)),
+    efficiencyPct: plannedEfficiencyPct,
+    wasteCft: Number(Math.max(0, plannedBlockCft - plannedSlabCft).toFixed(2)),
   };
 }
 
