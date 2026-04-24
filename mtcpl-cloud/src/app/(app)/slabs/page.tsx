@@ -35,7 +35,15 @@ export default async function SlabsPage() {
   const [{ data: slabs, error }, { data: temples }, { data: allIds }, { data: stoneTypes }, { data: labelRows }] = await Promise.all([
     slabQuery,
     admin.from("temples").select("id, name, code_prefix, default_stone").eq("is_active", true).order("name"),
-    admin.from("slab_requirements").select("id"),
+    // Supabase's JS client caps .select() at 1000 rows by default. Without
+    // an explicit limit, a heavy-batch temple (e.g. ROHTAK with 400+ rows)
+    // can fill half the cap on its own and push other temples' high-number
+    // IDs off the end — generateSlabCode then misreads MAX and suggests a
+    // base-code that's already taken, blowing up with a pkey violation.
+    // Explicit high cap keeps us in "fetch everything" territory while
+    // leaving room to grow. The ids list is short strings; 100k rows is
+    // still under a megabyte of payload.
+    admin.from("slab_requirements").select("id").limit(100000),
     admin.from("stone_types").select("id, name").order("name"),
     admin.from("slab_labels").select("name").eq("is_active", true).order("name"),
   ]);

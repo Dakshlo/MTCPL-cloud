@@ -30,7 +30,12 @@ export async function addBlockAction(formData: FormData) {
   const { profile } = await requireAuth(["owner", "team_head", "block_slab_entry", "block_entry"]);
   const supabase = createAdminSupabaseClient();
 
-  const { data: existingRows } = await supabase.from("blocks").select("id");
+  // Explicit high limit so the next-code picker sees every block. Without
+  // it, Supabase caps .select() at 1000 rows by default — crossing that
+  // threshold would silently make the picker suggest IDs that are already
+  // taken and blow up with a pkey violation. 100k row cap is far beyond
+  // any realistic block inventory.
+  const { data: existingRows } = await supabase.from("blocks").select("id").limit(100000);
   const existingIds = (existingRows ?? []).map(r => r.id);
   const requestedId = textValue(formData, "id");
 

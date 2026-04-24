@@ -72,7 +72,17 @@ export async function addSlabAction(formData: FormData) {
   let baseId = "";
   let lastError: { message: string; code?: string } | null = null;
   for (let attempt = 0; attempt < 5; attempt++) {
-    const { data: existing } = await supabase.from("slab_requirements").select("id");
+    // Explicit high limit — Supabase's default .select() cap is 1000,
+    // which silently truncates once total slab count crosses that. A
+    // truncated existingIds list means generateSlabCode computes a
+    // MAX that's lower than reality → picks a baseId that's already
+    // taken. Root cause of the "duplicate key" error we're retrying
+    // around; this prevents the retry from ever being needed for
+    // this reason.
+    const { data: existing } = await supabase
+      .from("slab_requirements")
+      .select("id")
+      .limit(100000);
     const existingIds = (existing ?? []).map((r) => r.id);
     baseId = generateSlabCode(existingIds, prefix);
 

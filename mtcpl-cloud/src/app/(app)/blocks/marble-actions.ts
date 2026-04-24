@@ -87,7 +87,12 @@ export async function createMarbleTruckAction(formData: FormData) {
   }
 
   // ── Generate N unique block IDs using stone-specific prefix ─────────────
-  const { data: existingBlocks } = await supabase.from("blocks").select("id");
+  // Explicit high limit so the ID generator sees every block in the DB.
+  // Supabase's .select() default caps at 1000 rows — once the blocks
+  // table crosses that, the next-code picker misreads MAX and starts
+  // suggesting IDs that are already taken (same pkey-collision bug that
+  // hit slab_requirements).
+  const { data: existingBlocks } = await supabase.from("blocks").select("id").limit(100000);
   const existingIds = (existingBlocks ?? []).map((r) => r.id as string);
   // Marble blocks share the same MT-B-XXX series as sandstone so the
   // owner sees one continuous ID sequence across the whole inventory.
