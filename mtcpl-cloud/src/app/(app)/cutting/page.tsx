@@ -403,28 +403,35 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                       />
                     )}
                     {/* Cutter sequence badge — visible only on cutting
-                     *  blocks that have a seq assigned. Lets operators
-                     *  refer to "Cutter #5" verbally. */}
-                    {isLive && typeof block.cutting_seq === "number" && (
-                      <span
-                        title={`Cutter #${block.cutting_seq} — short reference for this block while it's being cut`}
-                        style={{
-                          fontSize: 12,
-                          fontWeight: 800,
-                          fontFamily: "ui-monospace, monospace",
-                          color: "#fff",
-                          background: "var(--gold-dark)",
-                          padding: "3px 9px",
-                          borderRadius: 4,
-                          letterSpacing: "0.02em",
-                          marginTop: 1,
-                          flexShrink: 0,
-                          lineHeight: 1.4,
-                        }}
-                      >
-                        #{block.cutting_seq}
-                      </span>
-                    )}
+                     *  blocks that have a seq assigned. Prefixed with M
+                     *  (MTCPL) or R (RIICO) so an operator can say "M5"
+                     *  verbally and everyone knows which facility. The
+                     *  prefix is derived from the block's yard, NOT
+                     *  stored separately — a single integer per facility. */}
+                    {isLive && typeof block.cutting_seq === "number" && (() => {
+                      const fac = facilityOfYard(block.layout?.blk?.yard);
+                      const prefix = fac === "riico" ? "R" : "M";
+                      return (
+                        <span
+                          title={`${prefix}${block.cutting_seq} — short reference for this ${fac.toUpperCase()} block while it's being cut`}
+                          style={{
+                            fontSize: 12,
+                            fontWeight: 800,
+                            fontFamily: "ui-monospace, monospace",
+                            color: "#fff",
+                            background: fac === "riico" ? "#7c3aed" : "var(--gold-dark)",
+                            padding: "3px 9px",
+                            borderRadius: 4,
+                            letterSpacing: "0.02em",
+                            marginTop: 1,
+                            flexShrink: 0,
+                            lineHeight: 1.4,
+                          }}
+                        >
+                          {prefix}{block.cutting_seq}
+                        </span>
+                      );
+                    })()}
                     <div style={{ minWidth: 0 }}>
                       <strong
                         style={{

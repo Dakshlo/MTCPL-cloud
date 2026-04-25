@@ -244,9 +244,15 @@ export function buildLineages(
       const tonnes = num(root.tonnes);
       if (tonnes <= 0) continue; // bad data — skip
 
-      // Marble blocks never have reused descendants, but defensively sum
-      // slabs cut directly from this block.
+      // Skip marble blocks that are still in yard (status='available' /
+      // 'reserved') and have produced zero slabs. Block Journey is meant
+      // to track CUT blocks; un-cut marble belongs on /blocks, not here.
+      // We also keep 'consumed' blocks that produced 0 slabs (rare —
+      // would mean a botched manual cut) so the user can investigate.
       const ownSlabs = slabsByBlock.get(root.id) ?? [];
+      const hasBeenCut = root.status === "consumed" || ownSlabs.length > 0;
+      if (!hasBeenCut) continue;
+
       const slabCft = ownSlabs.reduce(
         (sum, s) =>
           sum + toCFT(num(s.length_ft) * num(s.width_ft) * num(s.thickness_ft)),

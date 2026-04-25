@@ -76,10 +76,11 @@ export async function approveBlockAction(formData: FormData) {
  * Waiting to Cut → In Progress.
  *
  * Operator presses "Start Cutting" when they're physically beginning
- * the cut. We assign a per-cutter sequence number (cutting_seq) so the
- * block has a stable short identifier ("Cutter #5") for the duration
- * of cutting. Number is reused after the block leaves cutting state
- * via the lowest-unused-positive-integer rule.
+ * the cut. We assign a per-cutter sequence number (cutting_seq) that's
+ * scoped to the block's FACILITY (MTCPL or RIICO have independent
+ * counters), so the block gets a short verbal id like "M5" or "R3".
+ * Number is reused after the block leaves cutting via lowest-unused-
+ * positive-integer-within-the-same-facility.
  *
  * cutting_seq is intentionally NOT durable — it's a working-set hint,
  * not an identity. Block.id (e.g. MT-B-005) remains the canonical id.
@@ -92,10 +93,11 @@ export async function startCuttingAction(formData: FormData) {
 
   // Validate the block is currently waiting (defensive — UI only
   // shows the button on pending_cut rows, but the action might be
-  // re-played from a stale tab or via curl).
+  // re-played from a stale tab or via curl). Pull the layout so we
+  // can determine facility from layout.blk.yard.
   const { data: existing } = await supabase
     .from("cut_session_blocks")
-    .select("status")
+    .select("status, layout")
     .eq("id", sessionBlockId)
     .maybeSingle();
   if (!existing) throw new Error("Cut session block not found");
@@ -103,14 +105,25 @@ export async function startCuttingAction(formData: FormData) {
     throw new Error(`Block is in '${existing.status}' state, not pending_cut`);
   }
 
+  const { facilityOfYard } = await import("@/lib/yards");
+  const blockYard = (existing.layout as { blk?: { yard?: number } } | null)?.blk?.yard;
+  const myFacility = facilityOfYard(blockYard);
+
   // Find the lowest-unused positive integer among currently-cutting
-  // blocks. Reuse pattern: if seqs in use are [1, 2, 4], assign 3.
+  // blocks IN THE SAME FACILITY. MTCPL and RIICO have independent
+  // counters — both can have an "M1"/"R1" simultaneously.
   const { data: inUse } = await supabase
     .from("cut_session_blocks")
-    .select("cutting_seq")
+    .select("cutting_seq, layout")
     .eq("status", "cutting")
     .not("cutting_seq", "is", null);
-  const used = new Set((inUse ?? []).map((r) => r.cutting_seq).filter((n): n is number => typeof n === "number"));
+  const used = new Set<number>();
+  for (const r of inUse ?? []) {
+    const yard = (r.layout as { blk?: { yard?: number } } | null)?.blk?.yard;
+    if (facilityOfYard(yard) === myFacility && typeof r.cutting_seq === "number") {
+      used.add(r.cutting_seq);
+    }
+  }
   let nextSeq = 1;
   while (used.has(nextSeq)) nextSeq++;
 
@@ -125,12 +138,16 @@ export async function startCuttingAction(formData: FormData) {
     .eq("status", "pending_cut"); // race guard
   if (error) throw new Error(error.message);
 
+  const seqLabel = `${myFacility === "riico" ? "R" : "M"}${nextSeq}`;
+
   await logAudit(profile.id, "cutting_started", "cut_session_block", sessionBlockId, {
     session_id: sessionId,
     cutting_seq: nextSeq,
+    facility: myFacility,
+    seq_label: seqLabel,
   });
 
-  await notify("cut_started", `Cutting started — Cutter #${nextSeq}`, {
+  await notify("cut_started", `Cutting started — ${seqLabel}`, {
     entityType: "cut_session_block",
     entityId: sessionBlockId,
     actorId: profile.id,
@@ -650,15 +667,27 @@ export async function undoDoneAction(formData: FormData) {
   }
 
   // Re-assign a cutter sequence number when reverting back to cutting.
-  // Same lowest-unused logic used by startCuttingAction.
+  // Same facility-scoped lowest-unused logic used by startCuttingAction.
+  const { facilityOfYard: facilityOfYardUndo } = await import("@/lib/yards");
+  const { data: undoBlockRow } = await supabase
+    .from("cut_session_blocks")
+    .select("layout")
+    .eq("id", sessionBlockId)
+    .maybeSingle();
+  const undoYard = (undoBlockRow?.layout as { blk?: { yard?: number } } | null)?.blk?.yard;
+  const undoFacility = facilityOfYardUndo(undoYard);
   const { data: inUseAtUndo } = await supabase
     .from("cut_session_blocks")
-    .select("cutting_seq")
+    .select("cutting_seq, layout")
     .eq("status", "cutting")
     .not("cutting_seq", "is", null);
-  const usedAtUndo = new Set(
-    (inUseAtUndo ?? []).map((r) => r.cutting_seq).filter((n): n is number => typeof n === "number"),
-  );
+  const usedAtUndo = new Set<number>();
+  for (const r of inUseAtUndo ?? []) {
+    const y = (r.layout as { blk?: { yard?: number } } | null)?.blk?.yard;
+    if (facilityOfYardUndo(y) === undoFacility && typeof r.cutting_seq === "number") {
+      usedAtUndo.add(r.cutting_seq);
+    }
+  }
   let undoSeq = 1;
   while (usedAtUndo.has(undoSeq)) undoSeq++;
 

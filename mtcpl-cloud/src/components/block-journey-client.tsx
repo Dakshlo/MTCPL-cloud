@@ -201,39 +201,12 @@ export function BlockJourneyClient({
         </div>
       )}
 
-      {/* Mode toggle — hidden when only marble is shown (not applicable) */}
-      {category !== "marble" && (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          flexWrap: "wrap",
-          marginBottom: 14,
-          padding: "10px 14px",
-          background: "var(--surface)",
-          border: "1px solid var(--border)",
-          borderRadius: 10,
-        }}
-      >
-        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>
-          View mode
-        </div>
-        <div style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
-          <ModeButton active={mode === "yield"} onClick={() => setMode("yield")} color="#15803d">
-            Yield
-          </ModeButton>
-          <ModeButton active={mode === "recovered"} onClick={() => setMode("recovered")} color="#b45309">
-            Recovered
-          </ModeButton>
-        </div>
-        <div style={{ fontSize: 11, color: "var(--muted)", flex: 1, minWidth: 240 }}>
-          {mode === "yield"
-            ? "Yield = slabs ÷ original. Conservative — only counts sellable slabs. Use for pricing."
-            : "Recovered = (slabs + live remainders) ÷ original. Optimistic — credits in-inventory restocks as recovered."}
-        </div>
-      </div>
-      )}
+      {/* View-mode toggle removed per business request — page always
+       *  shows the Recovered metric (slabs + live remainders ÷ original).
+       *  Yield is conservative pricing-side math; Recovered is operations-
+       *  side and what the team actually wants to see day-to-day.
+       *  `mode` is hardcoded to "recovered" via initialMode at the call
+       *  site. ModeButton is no longer rendered. */}
 
       {/* Search bar — its own row so it's always visible and scannable */}
       <div
