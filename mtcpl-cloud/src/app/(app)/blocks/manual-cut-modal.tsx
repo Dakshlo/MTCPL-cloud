@@ -47,11 +47,6 @@ export function ManualCutModal({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState("");
   const [templeFilter, setTempleFilter] = useState("all");
-  // Stone-match toggle: by default we narrow the slab list to slabs of
-  // the same stone as the block being cut (you can't physically cut a
-  // PinkStone slab from a YellowMarble block). Toggle off to override
-  // for legacy data or special cases.
-  const [matchStoneOnly, setMatchStoneOnly] = useState(true);
   const [remainders, setRemainders] = useState<RemainderEntry[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -88,12 +83,9 @@ export function ManualCutModal({
     }))
     .filter((r) => r.l > 0 && r.w > 0 && r.h > 0);
 
-  // Pre-narrow by stone if the toggle is on (default). The temples list
-  // is also derived AFTER stone filtering so the temple dropdown only
-  // shows temples that actually have same-stone slabs.
-  const stoneNarrowed = matchStoneOnly
-    ? openSlabs.filter((s) => s.stone === block.stone)
-    : openSlabs;
+  // Always filter by stone — you can't physically cut a PinkStone slab
+  // from a YellowMarble block. No toggle: this is hard-coded correctness.
+  const stoneNarrowed = openSlabs.filter((s) => s.stone === block.stone);
 
   const temples = Array.from(new Set(stoneNarrowed.map((s) => s.temple ?? "").filter(Boolean))).sort();
 
@@ -108,12 +100,36 @@ export function ManualCutModal({
     );
   });
 
+  // Group filtered slabs by temple for visual sectioning + per-temple
+  // "Select all" buttons. Each group has its temple name as the key.
+  const slabsByTemple = filteredSlabs.reduce<Record<string, typeof filteredSlabs>>((acc, s) => {
+    const t = s.temple ?? "(no temple)";
+    if (!acc[t]) acc[t] = [];
+    acc[t].push(s);
+    return acc;
+  }, {});
+  const templeGroupKeys = Object.keys(slabsByTemple).sort();
+
   // Bulk select / clear helpers — useful when picking many slabs at
   // once for a marble block (e.g. "all 12 slabs of UPARPITAM").
   function selectAllVisible() {
     setSelectedIds((prev) => {
       const next = new Set(prev);
       for (const s of filteredSlabs) next.add(s.id);
+      return next;
+    });
+  }
+  function selectAllInTemple(temple: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const list = slabsByTemple[temple] ?? [];
+      // Toggle: if every slab in this temple is already selected, deselect them.
+      const allSelected = list.length > 0 && list.every((s) => next.has(s.id));
+      if (allSelected) {
+        for (const s of list) next.delete(s.id);
+      } else {
+        for (const s of list) next.add(s.id);
+      }
       return next;
     });
   }
@@ -150,18 +166,79 @@ export function ManualCutModal({
 
   return (
     <>
-      <div className="drawer-backdrop" onClick={onClose} />
+      {/* Center-peek modal (Notion style). Backdrop dims the underlying
+       *  page; the modal sits in the middle of the viewport with rounded
+       *  corners and a soft shadow. The block edit drawer behind stays
+       *  open, so closing this modal returns the user to the edit drawer
+       *  view ("minimize back to edit block preview"). */}
       <div
-        className="edit-drawer"
-        style={{ maxWidth: 760 }}
+        onClick={onClose}
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(0,0,0,0.55)",
+          backdropFilter: "blur(2px)",
+          zIndex: 100,
+          animation: "manual-cut-fade 0.18s ease-out",
+        }}
+        aria-hidden="true"
+      />
+      <div
         role="dialog"
         aria-modal="true"
         aria-label="Manual Cut Entry"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          position: "fixed",
+          top: "50%",
+          left: "50%",
+          width: "min(92vw, 880px)",
+          maxHeight: "88vh",
+          background: "var(--surface)",
+          color: "var(--text)",
+          border: "1px solid var(--border)",
+          borderRadius: 14,
+          boxShadow: "0 25px 70px rgba(0,0,0,0.45)",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          zIndex: 101,
+          transform: "translate(-50%, -50%)",
+          animation: "manual-cut-peek 0.22s cubic-bezier(0.16, 1, 0.3, 1)",
+        }}
       >
-        <div className="drawer-header">
-          <div>
-            <div className="drawer-title">✂ Manual Cut Entry</div>
-            <code className="drawer-subtitle">{block.id}</code>
+        {/* Inline keyframes — keeps the component self-contained */}
+        <style>{`
+          @keyframes manual-cut-fade {
+            from { opacity: 0; }
+            to { opacity: 1; }
+          }
+          @keyframes manual-cut-peek {
+            from { opacity: 0; transform: translate(-50%, -50%) scale(0.96); }
+            to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+          }
+        `}</style>
+
+        {/* Header */}
+        <div
+          style={{
+            padding: "16px 20px",
+            borderBottom: "1px solid var(--border)",
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+            gap: 12,
+            flexShrink: 0,
+            background: "var(--surface-alt)",
+          }}
+        >
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 17, fontWeight: 700, color: "var(--text)" }}>
+              ✂ Manual Cut Entry
+            </div>
+            <code style={{ fontSize: 13, color: "var(--muted)", fontFamily: "ui-monospace, monospace", fontWeight: 600 }}>
+              {block.id}
+            </code>
             <p className="muted" style={{ margin: "4px 0 0", fontSize: 12 }}>
               {block.stone} · {yardLabel(block.yard)}
               {isMarble && block.tonnes != null
@@ -178,14 +255,35 @@ export function ManualCutModal({
                   fontStyle: "italic",
                 }}
               >
-                Marble blocks: no remainder pieces — slabs only, the rest is implicit yield loss.
+                Marble: no remainder pieces — slabs only, the rest is implicit yield loss.
               </p>
             )}
           </div>
-          <button className="drawer-close" onClick={onClose}>✕</button>
+          <button
+            onClick={onClose}
+            style={{
+              flexShrink: 0,
+              background: "transparent",
+              border: "none",
+              fontSize: 22,
+              color: "var(--muted)",
+              cursor: "pointer",
+              padding: 0,
+              lineHeight: 1,
+              width: 32,
+              height: 32,
+              borderRadius: 6,
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border-light)")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+            aria-label="Close"
+          >
+            ✕
+          </button>
         </div>
 
-        <div className="drawer-body">
+        {/* Scrollable body */}
+        <div style={{ overflowY: "auto", padding: 20, flex: 1, minHeight: 0 }}>
           {error && (
             <div style={{ padding: "10px 14px", background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 6, marginBottom: 14, fontSize: 13, color: "#dc2626" }}>
               {error}
@@ -209,13 +307,12 @@ export function ManualCutModal({
               </p>
             ) : stoneNarrowed.length === 0 ? (
               <p className="muted" style={{ fontSize: 13 }}>
-                No open <strong>{block.stone}</strong> slab requirements. Either add some on the
-                Required Sizes page, or untick &ldquo;Match block stone only&rdquo; below to choose
-                from any open slab.
+                No open <strong>{block.stone}</strong> slab requirements. Add some on the
+                Required Sizes page, then come back.
               </p>
             ) : (
               <>
-                {/* Filter / control row — now wider with more breathing room */}
+                {/* Filter / control row */}
                 <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap", alignItems: "stretch" }}>
                   <input
                     type="text"
@@ -257,7 +354,7 @@ export function ManualCutModal({
                   )}
                 </div>
 
-                {/* Stone-match toggle + bulk-select toolbar */}
+                {/* Bulk-select toolbar */}
                 <div
                   style={{
                     display: "flex",
@@ -273,22 +370,14 @@ export function ManualCutModal({
                     fontSize: 12,
                   }}
                 >
-                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", color: "var(--text)" }}>
-                    <input
-                      type="checkbox"
-                      checked={matchStoneOnly}
-                      onChange={(e) => setMatchStoneOnly(e.target.checked)}
-                      style={{ width: 14, height: 14 }}
-                    />
-                    Match block stone only
-                    <span className="muted" style={{ fontWeight: 400, marginLeft: 4 }}>
-                      ({block.stone})
-                    </span>
-                  </label>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <span className="muted" style={{ alignSelf: "center" }}>
-                      {filteredSlabs.length} visible · {selectedIds.size} selected
-                    </span>
+                  <span className="muted">
+                    Showing <strong style={{ color: "var(--text)" }}>{filteredSlabs.length}</strong>{" "}
+                    {block.stone} slab{filteredSlabs.length !== 1 ? "s" : ""}{" "}
+                    {templeFilter !== "all" ? `from ${templeFilter}` : `across ${templeGroupKeys.length} temple${templeGroupKeys.length !== 1 ? "s" : ""}`}
+                    {" · "}
+                    <strong style={{ color: "var(--text)" }}>{selectedIds.size}</strong> selected
+                  </span>
+                  <div style={{ display: "flex", gap: 6 }}>
                     <button
                       type="button"
                       onClick={selectAllVisible}
@@ -310,16 +399,13 @@ export function ManualCutModal({
                   </div>
                 </div>
 
-                {/* Slab list — much taller now (480px) so users can see ~12+
-                    rows without scrolling. Especially important for marble
-                    where this is the primary cut path. */}
+                {/* Slab list — temple-grouped. Each temple gets a sticky-feel
+                    header with a per-temple "Select all" toggle for picking
+                    a whole temple's batch in one click. */}
                 <div
                   style={{
-                    maxHeight: 480,
+                    maxHeight: "min(56vh, 560px)",
                     overflowY: "auto",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 0,
                     border: "1px solid var(--border)",
                     borderRadius: 8,
                     background: "var(--surface)",
@@ -330,60 +416,105 @@ export function ManualCutModal({
                       No matching slabs.
                     </p>
                   ) : (
-                    filteredSlabs.map((slab, i) => {
-                      const checked = selectedIds.has(slab.id);
+                    templeGroupKeys.map((temple) => {
+                      const list = slabsByTemple[temple];
+                      const allSelected = list.every((s) => selectedIds.has(s.id));
+                      const someSelected = !allSelected && list.some((s) => selectedIds.has(s.id));
                       return (
-                        <label
-                          key={slab.id}
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 12,
-                            cursor: "pointer",
-                            fontSize: 13,
-                            padding: "10px 12px",
-                            borderBottom: i < filteredSlabs.length - 1 ? "1px solid var(--border-light)" : "none",
-                            background: checked ? "rgba(232,197,114,0.10)" : "transparent",
-                            transition: "background 0.1s",
-                          }}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => toggleSlab(slab.id)}
-                            style={{ width: 17, height: 17, cursor: "pointer", flexShrink: 0 }}
-                          />
-                          <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                            <code style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>
-                              {slab.id}
-                            </code>
-                            {slab.priority && <span style={{ fontSize: 12 }}>⚡</span>}
-                            {slab.temple && (
-                              <span className="muted" style={{ fontSize: 12 }}>
-                                {slab.temple}
-                                {slab.label && slab.label !== slab.temple ? ` · ${slab.label}` : ""}
-                              </span>
-                            )}
-                            <span
+                        <div key={temple} style={{ borderBottom: "1px solid var(--border)" }}>
+                          {/* Temple group header with per-temple select-all */}
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 10,
+                              padding: "8px 12px",
+                              background: "rgba(232,197,114,0.08)",
+                              borderBottom: "1px solid var(--border-light)",
+                              position: "sticky",
+                              top: 0,
+                              zIndex: 1,
+                            }}
+                          >
+                            <span style={{ fontSize: 13 }}>🏛</span>
+                            <strong style={{ fontSize: 13, color: "var(--text)", flex: 1, minWidth: 0 }}>
+                              {temple}
+                            </strong>
+                            <span className="muted" style={{ fontSize: 11 }}>
+                              {list.length} slab{list.length !== 1 ? "s" : ""}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => selectAllInTemple(temple)}
+                              className="ghost-button"
                               style={{
-                                fontSize: 12,
-                                fontFamily: "ui-monospace, monospace",
-                                color: "var(--muted)",
-                                marginLeft: "auto",
+                                fontSize: 11,
+                                padding: "3px 10px",
+                                color: allSelected ? "var(--danger)" : "var(--gold-dark)",
+                                borderColor: allSelected ? "rgba(220,38,38,0.3)" : "var(--gold-border)",
                               }}
                             >
-                              {slab.length_ft}×{slab.width_ft}×{slab.thickness_ft} in
-                            </span>
-                            {slab.quality && (
-                              <span
-                                className={`role-pill ${slab.quality === "A" ? "badge-available" : "badge-reserved"}`}
-                                style={{ fontSize: 10 }}
-                              >
-                                {slab.quality}
-                              </span>
-                            )}
+                              {allSelected ? "Unselect all" : someSelected ? `Select rest (${list.length - list.filter(s => selectedIds.has(s.id)).length})` : `Select all ${list.length}`}
+                            </button>
                           </div>
-                        </label>
+
+                          {/* Slab rows for this temple */}
+                          {list.map((slab, i) => {
+                            const checked = selectedIds.has(slab.id);
+                            return (
+                              <label
+                                key={slab.id}
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 12,
+                                  cursor: "pointer",
+                                  fontSize: 13,
+                                  padding: "10px 14px 10px 30px",
+                                  borderBottom: i < list.length - 1 ? "1px solid var(--border-light)" : "none",
+                                  background: checked ? "rgba(232,197,114,0.10)" : "transparent",
+                                  transition: "background 0.1s",
+                                }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleSlab(slab.id)}
+                                  style={{ width: 17, height: 17, cursor: "pointer", flexShrink: 0 }}
+                                />
+                                <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                                  <code style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>
+                                    {slab.id}
+                                  </code>
+                                  {slab.priority && <span style={{ fontSize: 12 }}>⚡</span>}
+                                  {slab.label && slab.label !== slab.temple && (
+                                    <span className="muted" style={{ fontSize: 12 }}>
+                                      {slab.label}
+                                    </span>
+                                  )}
+                                  <span
+                                    style={{
+                                      fontSize: 12,
+                                      fontFamily: "ui-monospace, monospace",
+                                      color: "var(--muted)",
+                                      marginLeft: "auto",
+                                    }}
+                                  >
+                                    {slab.length_ft}×{slab.width_ft}×{slab.thickness_ft} in
+                                  </span>
+                                  {slab.quality && (
+                                    <span
+                                      className={`role-pill ${slab.quality === "A" ? "badge-available" : "badge-reserved"}`}
+                                      style={{ fontSize: 10 }}
+                                    >
+                                      {slab.quality}
+                                    </span>
+                                  )}
+                                </div>
+                              </label>
+                            );
+                          })}
+                        </div>
                       );
                     })
                   )}
@@ -463,42 +594,65 @@ export function ManualCutModal({
             )}
           </div>}
 
-          {/* Action buttons */}
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {hasValidRemainders && !isMarble ? (
-              <>
-                <button
-                  className="primary-button"
-                  disabled={submitting || selectedIds.size === 0}
-                  onClick={() => handleSubmit(true)}
-                >
-                  {submitting ? "Saving…" : `Cut & Restock (${validRemainders.length} piece${validRemainders.length > 1 ? "s" : ""})`}
-                </button>
-                <button
-                  className="secondary-button"
-                  disabled={submitting || selectedIds.size === 0}
-                  onClick={() => handleSubmit(false)}
-                >
-                  Cut & Discard
-                </button>
-              </>
+        </div>
+        {/* Sticky footer — actions always visible regardless of scroll
+         *  position. selectedIds count shown alongside so the user can
+         *  see "8 selected" before pressing Record Cut. */}
+        <div
+          style={{
+            padding: "12px 20px",
+            borderTop: "1px solid var(--border)",
+            background: "var(--surface-alt)",
+            display: "flex",
+            gap: 8,
+            flexWrap: "wrap",
+            alignItems: "center",
+            flexShrink: 0,
+          }}
+        >
+          <span className="muted" style={{ fontSize: 12, marginRight: "auto" }}>
+            {selectedIds.size === 0 ? (
+              "No slabs selected"
             ) : (
+              <>
+                <strong style={{ color: "var(--text)" }}>{selectedIds.size}</strong> slab
+                {selectedIds.size !== 1 ? "s" : ""} selected
+              </>
+            )}
+          </span>
+          <button
+            className="ghost-button"
+            disabled={submitting}
+            onClick={onClose}
+          >
+            Cancel
+          </button>
+          {hasValidRemainders && !isMarble ? (
+            <>
               <button
-                className="primary-button"
+                className="secondary-button"
                 disabled={submitting || selectedIds.size === 0}
                 onClick={() => handleSubmit(false)}
               >
-                {submitting ? "Saving…" : "Record Cut"}
+                Cut &amp; Discard
               </button>
-            )}
+              <button
+                className="primary-button"
+                disabled={submitting || selectedIds.size === 0}
+                onClick={() => handleSubmit(true)}
+              >
+                {submitting ? "Saving…" : `Cut & Restock (${validRemainders.length} piece${validRemainders.length > 1 ? "s" : ""})`}
+              </button>
+            </>
+          ) : (
             <button
-              className="ghost-button"
-              disabled={submitting}
-              onClick={onClose}
+              className="primary-button"
+              disabled={submitting || selectedIds.size === 0}
+              onClick={() => handleSubmit(false)}
             >
-              Cancel
+              {submitting ? "Saving…" : "Record Cut"}
             </button>
-          </div>
+          )}
         </div>
       </div>
     </>
