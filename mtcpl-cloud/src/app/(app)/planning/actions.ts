@@ -57,47 +57,205 @@ export async function generateAIPlanAction(payload: {
 
   const { blocks, slabs, kerfMm } = payload;
 
-  const blockLines = blocks.map(b =>
-    `${b.id}: ${b.stone} | ${b.length_ft}"L × ${b.width_ft}"W × ${b.height_ft}"H | quality: ${b.quality ?? "standard"}`
-  ).join("\n");
+  // ── Pre-compute helper fields the AI needs ──────────────────────────
+  // The AI's job is just to GROUP slabs into block buckets — it does
+  // NOT compute coordinates. The actual layout is computed by the same
+  // geometry engine that powers the algorithmic plan (runOptimization
+  // → tryPackBlock → packBlock in src/lib/planning/packing.ts). So we
+  // can offload all the geometric reasoning to the engine and keep the
+  // AI focused on the high-value decisions:
+  //   1. Which BLOCK fits this slab (smallest sufficient one)
+  //   2. Which OTHER slabs share the block (clustering)
+  //   3. INVENTORY STRATEGY — preserve big blocks for future beams.
 
-  const slabLines = slabs.map(s =>
-    `${s.id}${s.priority ? " ⚠PRIORITY" : ""}: ${s.temple} | ${s.stone ?? "any"} | ${s.length_ft}"L × ${s.width_ft}"W × ${s.thickness_ft}"T | ${s.label}${s.quality ? ` | quality:${s.quality}` : ""}`
-  ).join("\n");
+  // Block size tier — informal labels we tell the AI to use as a
+  // strategic hint. Tuned to typical sandstone / marble inventory at
+  // MTCPL: "small" blocks are aggressively used because they're hardest
+  // to find a use for later, "beam" blocks are preserved for very long
+  // (10ft+) future slabs that physically can't fit anywhere else.
+  function tier(b: { length_ft: number; width_ft: number; height_ft: number }) {
+    const longest = Math.max(b.length_ft, b.width_ft, b.height_ft);
+    if (longest < 60) return "SMALL";
+    if (longest < 90) return "MEDIUM";
+    if (longest < 130) return "LARGE";
+    return "BEAM";
+  }
 
-  const prompt = `You are an expert stone-cutting planner at a marble fabrication company.
-Your job: pack as many slabs as possible into as few blocks as possible, matching stone types.
+  function vol(b: { length_ft: number; width_ft: number; height_ft: number }) {
+    return Math.round(b.length_ft * b.width_ft * b.height_ft);
+  }
 
-AVAILABLE BLOCKS (${blocks.length}):
+  // Sort blocks by volume ASCENDING so the AI sees them in the order
+  // it should prefer to consume them (smallest first). The list is also
+  // grouped by stone so the AI can scan stone-by-stone.
+  const sortedBlocks = [...blocks].sort((a, b) => {
+    if (a.stone !== b.stone) return a.stone.localeCompare(b.stone);
+    return vol(a) - vol(b);
+  });
+
+  const blockLines = sortedBlocks
+    .map((b) => {
+      const longest = Math.max(b.length_ft, b.width_ft, b.height_ft);
+      return `  ${b.id} [${tier(b)} · ${vol(b).toLocaleString()}cu·in · longest=${longest}"]: ${b.stone} | ${b.length_ft}"L × ${b.width_ft}"W × ${b.height_ft}"H | quality:${b.quality ?? "standard"}`;
+    })
+    .join("\n");
+
+  // Sort slabs by anchor_dim DESCENDING — the longest slabs need to
+  // claim "their" smallest block first, otherwise smaller slabs would
+  // greedily occupy the small blocks and force long slabs onto beam
+  // blocks. (This is exactly what the algorithm does too.)
+  const sortedSlabs = [...slabs].sort((a, b) => {
+    const am = Math.max(a.length_ft, a.width_ft);
+    const bm = Math.max(b.length_ft, b.width_ft);
+    if (bm !== am) return bm - am;
+    if (a.priority !== b.priority) return a.priority ? -1 : 1;
+    return 0;
+  });
+
+  const slabLines = sortedSlabs
+    .map((s) => {
+      const anchor = Math.max(s.length_ft, s.width_ft);
+      return `  ${s.id}${s.priority ? " ⚠PRIORITY" : ""} [anchor=${anchor}"]: ${s.temple} | ${s.stone ?? "any-stone"} | ${s.length_ft}"L × ${s.width_ft}"W × ${s.thickness_ft}"T | ${s.label}${s.quality ? ` | quality:${s.quality}` : ""}`;
+    })
+    .join("\n");
+
+  // ── The prompt ──────────────────────────────────────────────────────
+  // We teach the AI the same algorithm the engine uses, then add the
+  // ONE strategic improvement we want it to make on top: prefer small
+  // blocks, preserve beams. Everything else (geometric feasibility,
+  // multi-layer packing, kerf math) is handled by the engine — the AI
+  // only needs to produce correct GROUPINGS.
+
+  const prompt = `You are the cut planner for MTCPL, a stone-fabrication company.
+
+Your output is consumed by a deterministic geometry engine that:
+  • takes your {block_id, slab_ids[]} groupings as ground truth
+  • computes the actual 3D layout, kerf math, and orientation
+  • rejects any infeasible grouping and falls back to the algorithm
+
+So your one job is to GROUP slabs into blocks. You don't compute coordinates.
+The engine will figure out if the slabs physically fit; your task is to make
+SMART choices about WHICH block holds WHICH slabs.
+
+═══════════════════════════════════════════════════════════════════
+ALGORITHM YOU'RE EMULATING (then improving)
+═══════════════════════════════════════════════════════════════════
+
+The deterministic algorithm does this for each slab (longest-first):
+  1. Find candidate blocks where stone matches, quality matches, and
+     max(block.L, block.W, block.H) ≥ max(slab.L, slab.W). The slab's
+     longest dimension is the "anchor" — every block must be at least
+     that long.
+  2. Sort candidates by VOLUME ASCENDING (smallest sufficient block first).
+  3. Try the smallest candidate. If the slab packs onto it, commit and
+     pull every other compatible slab onto the same block before moving on.
+
+This produces decent plans but treats all blocks the same size-wise. You
+will improve on it with INVENTORY STRATEGY.
+
+═══════════════════════════════════════════════════════════════════
+THE IMPROVEMENT YOU MUST MAKE — INVENTORY STRATEGY
+═══════════════════════════════════════════════════════════════════
+
+Blocks are tagged by tier in the listing below:
+  • SMALL   (longest < 60"):  USE AGGRESSIVELY. Hard to find a use for
+                              later — clear them out first.
+  • MEDIUM  (60–89"):         Bread and butter. Use freely.
+  • LARGE   (90–129"):        Use only when no SMALL/MEDIUM fits the
+                              anchor (anchor ≥ 60" requires at least
+                              MEDIUM, anchor ≥ 90" requires LARGE).
+  • BEAM    (≥ 130"):         RESERVE. Only use when:
+                              (a) the slab itself is anchor ≥ 130", OR
+                              (b) every smaller block has been tried
+                                  and no LARGE-tier block of matching
+                                  stone is left.
+
+Long beam orders (10ft+ railings, lintels) come in regularly; we lose
+those orders if we already cut a 12ft block into 4ft slabs we could
+have made on a 4ft block.
+
+═══════════════════════════════════════════════════════════════════
+PACKING MECHANICS (so you know what's feasible)
+═══════════════════════════════════════════════════════════════════
+
+Block dimensions: L × W × H inches (cut face = L × W, depth = H).
+Cuts go through H, producing horizontal layers.
+
+Slab fits a block iff at least one of these orientations works:
+  • slab.L ≤ blockface.X AND slab.W ≤ blockface.Y AND slab.T ≤ depth
+  • (and rotations / face permutations of the same)
+
+Multi-layer packing: each layer of cuts produces N slabs of the SAME
+THICKNESS in that layer. Layers stack; total layer depth ≤ block H.
+So one block holds many slabs:
+  Block 84×28×60 with 24×24×0.25"-thick slabs:
+  → ≈3 slabs per layer, ~200 layers ⇒ many hundreds in theory.
+
+Group slabs of similar thickness so layers stay clean.
+
+═══════════════════════════════════════════════════════════════════
+HARD RULES (engine rejects violations)
+═══════════════════════════════════════════════════════════════════
+
+1. STONE: slab.stone must equal block.stone. (slab.stone="any" matches anything.)
+2. QUALITY:
+     - Grade-A slab REQUIRES Grade-A block.
+     - Grade-B slab needs Grade-A or Grade-B block (NOT standard/null).
+     - Standard slab works on any block.
+3. ANCHOR: max(slab.L, slab.W) ≤ max(block.L, block.W, block.H).
+4. UNIQUE: every block_id at most ONCE; every slab_id at most ONCE.
+5. PRIORITY (⚠PRIORITY) slabs MUST be assigned if any block fits them.
+
+═══════════════════════════════════════════════════════════════════
+INPUT
+═══════════════════════════════════════════════════════════════════
+
+Blade kerf: ${kerfMm}mm per cut.
+
+AVAILABLE BLOCKS (${blocks.length}, sorted smallest-volume first within each stone):
 ${blockLines}
 
-SLABS TO CUT (${slabs.length}):
+SLABS TO CUT (${slabs.length}, sorted longest-anchor first):
 ${slabLines}
 
-Blade kerf: ${kerfMm}mm wasted per cut line.
+═══════════════════════════════════════════════════════════════════
+DECISION PROCEDURE — follow exactly
+═══════════════════════════════════════════════════════════════════
 
-PRIMARY GOAL: MINIMISE BLOCKS USED. A large block can yield many slabs cut from different layers (depth axis). Always try to fill one block completely before moving to the next.
+For each slab in the order shown (longest anchor first):
+  IF already assigned: skip.
+  Step 1: Determine min-tier needed by anchor:
+     anchor < 60"   → start with SMALL
+     anchor < 90"   → start with MEDIUM
+     anchor < 130"  → start with LARGE
+     anchor ≥ 130"  → start with BEAM
+  Step 2: List all unassigned blocks of matching stone+quality at the
+     min-tier or above. Sort by volume ASCENDING. Walk the list.
+  Step 3: Take the FIRST candidate. Pull onto it any other unassigned
+     compatible slabs (same stone, similar thickness preferred, same
+     temple as a tiebreaker). Stop pulling when face area is ~85% full
+     in 2D OR 4–8 slabs grouped (don't over-stuff — the engine will
+     also reject infeasible packs).
+  Step 4: If after Step 3 the chosen block has fewer than 2 slabs AND
+     the next-smaller tier also has a fitting block, downgrade. (Avoid
+     wasting a MEDIUM on a single small slab when SMALL was available.)
+  Step 5: Commit and move to the next slab.
 
-RULES:
-1. Stone must match — PinkStone slabs only on PinkStone blocks, etc.
-2. A slab fits a block if its two face dimensions fit within ANY face of the block (3 orientations possible). The block depth provides multiple cut layers.
-3. PACK MULTIPLE SLABS PER BLOCK — this is the most important rule. A single block can hold 4-10 slabs cut from different depth layers. Do NOT assign one slab per block.
-4. To check if multiple slabs fit one block: sum their thickness_ft values plus kerf gaps — if total ≤ block depth (or width or height depending on cut axis), they all fit.
-5. Each block appears only once in assignments.
-6. ⚠PRIORITY slabs must always be assigned if any valid block exists.
-7. Group same-temple slabs on the same block (reduces handling).
-8. Only put a slab in unassigned_slab_ids if it is physically larger than every available block of its stone type.
+═══════════════════════════════════════════════════════════════════
+OUTPUT — strict JSON, no markdown fences, no prose outside the JSON
+═══════════════════════════════════════════════════════════════════
 
-EXAMPLE of good packing: Block 4ft×3ft×2ft can hold slabs of thickness 0.25ft each → up to 8 slabs stacked in depth. Always do this.
-
-Return ONLY this JSON — no markdown, no explanation outside the JSON:
 {
-  "strategy": "2-3 sentences: how many slabs per block on average, which blocks you used and why",
+  "strategy": "2–4 sentences. Required content: how many blocks total, average slabs/block, how many SMALL vs MEDIUM vs LARGE vs BEAM blocks used, and which beams (if any) you preserved by escalating only when forced.",
   "assignments": [
-    { "block_id": "B-xxx", "slab_ids": ["SR-001", "SR-002", "SR-003", "SR-004"], "reasoning": "one sentence" }
+    {
+      "block_id": "MT-B-040",
+      "slab_ids": ["MH-0001", "MH-0002", "MH-0003"],
+      "reasoning": "One sentence. Mention the tier and why you picked this block over the next-smaller alternative (e.g. 'MEDIUM 78\\" was smallest fitting the 72\\" anchor; SMALL all under 60\\".')."
+    }
   ],
   "unassigned_slab_ids": [],
-  "unassigned_reason": ""
+  "unassigned_reason": "Empty string if all slabs assigned. Otherwise list each unassigned slab and the specific reason (no compatible stone block available, anchor too long, etc.)."
 }`;
 
   try {
@@ -105,8 +263,17 @@ Return ONLY this JSON — no markdown, no explanation outside the JSON:
     const anthropic = new Anthropic({ apiKey });
 
     const message = await anthropic.messages.create({
-      model: "claude-haiku-4-5",
-      max_tokens: 4096,
+      // Sonnet — much smarter than Haiku for the multi-step strategic
+      // reasoning required (tier preservation, anchor matching, kerf-
+      // aware grouping). Cost is higher per call but the AI button is
+      // pressed maybe 5–20 times a day, so total spend is negligible
+      // compared to the value of a better cut plan.
+      model: "claude-sonnet-4-5",
+      max_tokens: 8192,
+      // Low temperature — we want the model to follow the procedure,
+      // not get creative. Slight non-zero so it can still make
+      // reasonable judgement calls on ties.
+      temperature: 0.2,
       messages: [{ role: "user", content: prompt }],
     });
 
