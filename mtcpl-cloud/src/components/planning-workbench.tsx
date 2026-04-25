@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { BlockMiniPreview, SlabMiniPreview } from "@/components/stone-previews";
 import { getStonePalette } from "@/lib/stone-utils";
 import type { StoneTypeDef } from "@/lib/stone-utils";
-import type { AIAssignment, AIplanResponse } from "@/app/(app)/planning/actions";
+import type { AIAssignment, AISuggestion, AIplanResponse } from "@/app/(app)/planning/actions";
 import { computeCutEfficiency, toCFT, type CutEfficiency } from "@/lib/cut-efficiency";
 import { EfficiencyBar } from "@/components/efficiency-bar";
 import { yardLabel, yardShortLabel, FACILITIES, YARDS_BY_FACILITY, facilityLabel, facilityOfYard, type Facility } from "@/lib/yards";
@@ -392,6 +392,8 @@ export function PlanningWorkbench({
   aiPlanAction?: (payload: {
     blocks: Array<{ id: string; stone: string; yard: number; length_ft: number; width_ft: number; height_ft: number; quality: string | null }>;
     slabs: Array<{ id: string; label: string; temple: string; stone: string | null; length_ft: number; width_ft: number; thickness_ft: number; priority: boolean; quality: string | null }>;
+    /** Open slabs the user did NOT pick — pool the AI can mine for filler suggestions. */
+    availableSlabs?: Array<{ id: string; label: string; temple: string; stone: string | null; length_ft: number; width_ft: number; thickness_ft: number; priority: boolean; quality: string | null }>;
     kerfMm: number;
   }) => Promise<AIplanResponse>;
   stoneTypes?: StoneTypeDef[];
@@ -411,6 +413,12 @@ export function PlanningWorkbench({
   const [aiLoading, setAiLoading] = useState(false);
   const [aiStrategy, setAiStrategy] = useState<string | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
+  // AI suggestions = open slabs the user did NOT select but which the
+  // model thinks would fit into leftover space on already-planned blocks.
+  // Cleared whenever a non-AI plan run starts (algorithm-based). Each
+  // suggestion has an "Add to selection & re-plan" action attached in
+  // the UI so the operator can accept it in one click.
+  const [aiSuggestions, setAiSuggestions] = useState<AISuggestion[]>([]);
 
   const allUsableBlocks = blocks.filter((block) => block.status === "available" || block.status === "reserved");
   // Blocks restricted to active facility first, then to ticked yards within it.
@@ -443,6 +451,9 @@ export function PlanningWorkbench({
     setSelectedBlockIds(
       new Set(allUsableBlocks.filter((b) => facilityOfYard(b.yard) === f).map((b) => b.id)),
     );
+    // Old suggestions reference the previous facility's blocks — drop them.
+    setAiSuggestions([]);
+    setAiStrategy(null);
   }
 
   function toggleYard(y: number) {
@@ -483,6 +494,7 @@ export function PlanningWorkbench({
     setAckUnmet(false);
     setAiStrategy(null);
     setAiError(null);
+    setAiSuggestions([]); // algorithm path doesn't produce suggestions
     setOriginalSelectedCount(filteredSlabs.length);
     if (filteredSlabs.length === 0) {
       setResult({ plan: [], unmet: [], totalWaste: 0 });
@@ -495,6 +507,10 @@ export function PlanningWorkbench({
     if (!aiPlanAction) return;
     const filteredBlocks = usableBlocks.filter((b) => selectedBlockIds.has(b.id));
     const filteredSlabs = openSlabs.filter((s) => selectedSlabIds.has(s.id));
+    // The "available" pool = every open slab the user could have
+    // picked but didn't (matching stone of the selected blocks). The
+    // AI uses this in its Phase-2 suggestion scan.
+    const availableSlabs = openSlabs.filter((s) => !selectedSlabIds.has(s.id));
 
     if (filteredSlabs.length === 0) {
       setResult({ plan: [], unmet: [], totalWaste: 0 });
@@ -504,6 +520,7 @@ export function PlanningWorkbench({
     setAiLoading(true);
     setAiError(null);
     setAiStrategy(null);
+    setAiSuggestions([]);
     setAckUnmet(false);
     setOriginalSelectedCount(filteredSlabs.length);
 
@@ -519,6 +536,11 @@ export function PlanningWorkbench({
           length_ft: toNum(s.length_ft), width_ft: toNum(s.width_ft), thickness_ft: toNum(s.thickness_ft),
           priority: s.priority ?? false, quality: s.quality,
         })),
+        availableSlabs: availableSlabs.map((s) => ({
+          id: s.id, label: s.label, temple: s.temple, stone: s.stone,
+          length_ft: toNum(s.length_ft), width_ft: toNum(s.width_ft), thickness_ft: toNum(s.thickness_ft),
+          priority: s.priority ?? false, quality: s.quality,
+        })),
         kerfMm,
       });
 
@@ -528,12 +550,45 @@ export function PlanningWorkbench({
       }
 
       setAiStrategy(response.strategy ?? null);
+      // Defensive filter: only keep suggestions whose slab_id is
+      // genuinely in the open pool AND whose block_id appears in the
+      // assignments — protects against hallucinated IDs.
+      const validSlabIds = new Set(availableSlabs.map((s) => s.id));
+      const validBlockIds = new Set((response.assignments ?? []).map((a) => a.block_id));
+      const cleanSuggestions = (response.suggestions ?? []).filter(
+        (s) => validSlabIds.has(s.slab_id) && validBlockIds.has(s.block_id),
+      );
+      setAiSuggestions(cleanSuggestions);
       setResult(runOptimizationWithAIGroups(filteredBlocks, filteredSlabs, kerfMm, response.assignments ?? []));
     } catch (err) {
       setAiError(err instanceof Error ? err.message : "AI generation failed. Try again.");
     } finally {
       setAiLoading(false);
     }
+  }
+
+  /**
+   * Add an AI suggestion to the user's slab selection and immediately
+   * re-run AI generation. Single-suggestion variant. Used by the
+   * per-row "Add & re-plan" buttons.
+   */
+  function acceptSuggestion(slabId: string) {
+    setSelectedSlabIds((prev) => new Set(prev).add(slabId));
+    setAiSuggestions((prev) => prev.filter((s) => s.slab_id !== slabId));
+    // Re-run on the next tick so React picks up the new selection.
+    setTimeout(() => handleAIGenerate(), 0);
+  }
+
+  /** Bulk-accept every active suggestion + re-run. */
+  function acceptAllSuggestions() {
+    if (aiSuggestions.length === 0) return;
+    setSelectedSlabIds((prev) => {
+      const next = new Set(prev);
+      for (const s of aiSuggestions) next.add(s.slab_id);
+      return next;
+    });
+    setAiSuggestions([]);
+    setTimeout(() => handleAIGenerate(), 0);
   }
 
   const totalPlaced = result?.plan.reduce((sum, block) => sum + block.placed.length, 0) ?? 0;
@@ -840,6 +895,120 @@ export function PlanningWorkbench({
           </div>
         </section>
       )}
+
+      {/* AI suggestions — open slabs the model thinks would fit into
+          leftover space on already-planned blocks. Each row has an
+          "Add & re-plan" button that adds the slab to the selection
+          and re-runs AI generation in one click. */}
+      {aiSuggestions.length > 0 && (() => {
+        const slabById = new Map(openSlabs.map((s) => [s.id, s]));
+        // Group suggestions by block for compact display
+        const groups = new Map<string, AISuggestion[]>();
+        for (const sug of aiSuggestions) {
+          const arr = groups.get(sug.block_id) ?? [];
+          arr.push(sug);
+          groups.set(sug.block_id, arr);
+        }
+        return (
+          <section
+            className="page-card"
+            style={{
+              background: "rgba(245,158,11,0.05)",
+              border: "1px solid rgba(245,158,11,0.3)",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <span style={{ fontSize: 20, lineHeight: 1.3 }}>💡</span>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#b45309", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                    Efficiency suggestions
+                  </div>
+                  <p style={{ margin: "2px 0 0", fontSize: 13, color: "var(--text)" }}>
+                    {aiSuggestions.length} open slab{aiSuggestions.length === 1 ? "" : "s"} you didn&rsquo;t select would fit into leftover space on the planned blocks.
+                  </p>
+                </div>
+              </div>
+              {aiSuggestions.length > 1 && (
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={acceptAllSuggestions}
+                  style={{ fontSize: 12, padding: "6px 14px" }}
+                  disabled={aiLoading}
+                >
+                  Add all {aiSuggestions.length} & re-plan
+                </button>
+              )}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {[...groups.entries()].map(([blockId, sugs]) => (
+                <div
+                  key={blockId}
+                  style={{
+                    border: "1px solid rgba(245,158,11,0.2)",
+                    borderRadius: 8,
+                    padding: "10px 12px",
+                    background: "var(--surface)",
+                  }}
+                >
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
+                    On block <code style={{ fontFamily: "ui-monospace, monospace", color: "var(--gold-dark)" }}>{blockId}</code>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {sugs.map((sug) => {
+                      const slab = slabById.get(sug.slab_id);
+                      return (
+                        <div
+                          key={sug.slab_id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: 10,
+                            flexWrap: "wrap",
+                            padding: "8px 10px",
+                            background: "var(--surface-alt)",
+                            borderRadius: 6,
+                          }}
+                        >
+                          <div style={{ flex: "1 1 240px", minWidth: 0 }}>
+                            <div style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
+                              <strong style={{ fontFamily: "ui-monospace, monospace", fontSize: 13 }}>{sug.slab_id}</strong>
+                              {slab && (
+                                <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                                  · {slab.temple} · {slab.length_ft}×{slab.width_ft}×{slab.thickness_ft}″
+                                  {slab.priority && <span style={{ color: "#DC2626", marginLeft: 6, fontWeight: 700 }}>⚡</span>}
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 3, fontStyle: "italic" }}>
+                              {sug.reasoning}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className="ghost-button"
+                            onClick={() => acceptSuggestion(sug.slab_id)}
+                            disabled={aiLoading}
+                            style={{ fontSize: 12, padding: "5px 12px", whiteSpace: "nowrap" }}
+                          >
+                            + Add &amp; re-plan
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="muted" style={{ fontSize: 11, marginTop: 10, marginBottom: 0, fontStyle: "italic" }}>
+              These are AI estimates — the geometry engine will validate fit when you re-plan. If a suggestion
+              doesn&rsquo;t pack as expected, the slab quietly drops out of the new plan.
+            </p>
+          </section>
+        );
+      })()}
 
       {result ? (
         <>

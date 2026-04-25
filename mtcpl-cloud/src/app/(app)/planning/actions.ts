@@ -15,11 +15,34 @@ export type AIAssignment = {
   reasoning: string;
 };
 
+/**
+ * Efficiency improvement suggestion from the AI: an open slab that the
+ * user did NOT select for this plan but which would fit into the
+ * leftover face-area + depth of an already-planned block. Surfaced
+ * after each AI plan run so the operator can accept and re-plan if
+ * they want a tighter fill.
+ */
+export type AISuggestion = {
+  /** Open slab ID the user could add to the plan. */
+  slab_id: string;
+  /** Which already-planned block it would slot into (one of assignments[*].block_id). */
+  block_id: string;
+  /** One-sentence justification — fit dimensions + estimated efficiency gain. */
+  reasoning: string;
+};
+
 export type AIplanResponse = {
   assignments: AIAssignment[];
   unassigned_slab_ids: string[];
   unassigned_reason: string;
   strategy: string;
+  /**
+   * Optional efficiency-improvement hints. Populated from the model's
+   * second pass over the available (unselected) slab inventory after
+   * it has finalised assignments. Empty if there's no leftover space
+   * worth filling, or if the model omits the field.
+   */
+  suggestions?: AISuggestion[];
   error?: string;
 };
 
@@ -35,7 +58,25 @@ export async function generateAIPlanAction(payload: {
     height_ft: number;
     quality: string | null;
   }>;
+  /** Slabs the user explicitly picked — must be planned. */
   slabs: Array<{
+    id: string;
+    label: string;
+    temple: string;
+    stone: string | null;
+    length_ft: number;
+    width_ft: number;
+    thickness_ft: number;
+    priority: boolean;
+    quality: string | null;
+  }>;
+  /**
+   * Open slabs the user did NOT select — pool the model can mine
+   * for efficiency-improvement suggestions after producing the
+   * main assignments. Optional; if omitted, no suggestions field
+   * is populated.
+   */
+  availableSlabs?: Array<{
     id: string;
     label: string;
     temple: string;
@@ -55,7 +96,7 @@ export async function generateAIPlanAction(payload: {
     return { assignments: [], unassigned_slab_ids: [], unassigned_reason: "", strategy: "", error: "ANTHROPIC_API_KEY is not set in environment variables." };
   }
 
-  const { blocks, slabs, kerfMm } = payload;
+  const { blocks, slabs, availableSlabs = [], kerfMm } = payload;
 
   // ── Pre-compute helper fields the AI needs ──────────────────────────
   // The AI's job is just to GROUP slabs into block buckets — it does
@@ -118,6 +159,31 @@ export async function generateAIPlanAction(payload: {
       return `  ${s.id}${s.priority ? " ⚠PRIORITY" : ""} [anchor=${anchor}"]: ${s.temple} | ${s.stone ?? "any-stone"} | ${s.length_ft}"L × ${s.width_ft}"W × ${s.thickness_ft}"T | ${s.label}${s.quality ? ` | quality:${s.quality}` : ""}`;
     })
     .join("\n");
+
+  // Available (unselected) open slabs — fed to the model so it can
+  // propose efficiency-improvement suggestions in a second pass.
+  // Capped to keep the prompt size bounded; the cap is generous because
+  // Sonnet's context can hold thousands of lines easily, but we'd rather
+  // not pay for tokens describing slabs the model couldn't possibly use.
+  const AVAILABLE_CAP = 200;
+  const sortedAvailable = [...availableSlabs]
+    .sort((a, b) => {
+      const am = Math.max(a.length_ft, a.width_ft);
+      const bm = Math.max(b.length_ft, b.width_ft);
+      return am - bm; // smallest anchor first — easier-to-fit slabs at the top
+    })
+    .slice(0, AVAILABLE_CAP);
+  const availableLines = sortedAvailable.length === 0
+    ? "  (none — every open slab is already in the user's selection)"
+    : sortedAvailable
+        .map((s) => {
+          const anchor = Math.max(s.length_ft, s.width_ft);
+          return `  ${s.id}${s.priority ? " ⚠PRIORITY" : ""} [anchor=${anchor}"]: ${s.temple} | ${s.stone ?? "any-stone"} | ${s.length_ft}"L × ${s.width_ft}"W × ${s.thickness_ft}"T | ${s.label}${s.quality ? ` | quality:${s.quality}` : ""}`;
+        })
+        .join("\n");
+  const availableTruncated = availableSlabs.length > AVAILABLE_CAP
+    ? `\n  …${availableSlabs.length - AVAILABLE_CAP} more available slabs not shown (smallest-anchor shown first)`
+    : "";
 
   // ── The prompt ──────────────────────────────────────────────────────
   // We teach the AI the same algorithm the engine uses, then add the
@@ -215,12 +281,22 @@ Blade kerf: ${kerfMm}mm per cut.
 AVAILABLE BLOCKS (${blocks.length}, sorted smallest-volume first within each stone):
 ${blockLines}
 
-SLABS TO CUT (${slabs.length}, sorted longest-anchor first):
+SLABS THE USER ASKED YOU TO PLAN (${slabs.length}, sorted longest-anchor first):
 ${slabLines}
+
+OTHER OPEN SLABS NOT IN THE USER'S SELECTION (${availableSlabs.length}, sorted smallest-anchor first):
+These are slabs the user did NOT pick this run — but they exist in the open
+inventory. After you finalise the assignments below, you'll do a SECOND PASS
+to suggest which of these would fit into LEFTOVER face-area or LEFTOVER depth
+on the blocks you're already using, so the user can fill the block tighter
+in one cutting session instead of starting it half-full.
+${availableLines}${availableTruncated}
 
 ═══════════════════════════════════════════════════════════════════
 DECISION PROCEDURE — follow exactly
 ═══════════════════════════════════════════════════════════════════
+
+PHASE 1 — Plan the user's selection (the must-do work):
 
 For each slab in the order shown (longest anchor first):
   IF already assigned: skip.
@@ -241,6 +317,30 @@ For each slab in the order shown (longest anchor first):
      wasting a MEDIUM on a single small slab when SMALL was available.)
   Step 5: Commit and move to the next slab.
 
+PHASE 2 — Suggest fillers from OTHER OPEN SLABS:
+
+Once Phase 1 is complete, walk the blocks you've assigned. For each:
+  a. Estimate the leftover face area on the cut face (block.faceL × faceW
+     minus the area consumed by the selected slabs you packed onto it).
+  b. Estimate the leftover depth budget (block.depth minus the layer
+     depth your selected slabs already consumed, including kerf).
+  c. Scan OTHER OPEN SLABS for any that:
+     - share the block's stone (or have stone="any"),
+     - quality compatibility holds,
+     - their two face dims fit the leftover face area in some orientation,
+     - their depth dim fits remaining depth budget.
+  d. Pick the BEST candidates per block — at most 2 per block, at most 8
+     total across the plan. Prefer slabs that:
+     - share the same temple as slabs already on that block (one trip),
+     - have small anchor dims (easier to fit — they slot into corners),
+     - have the same thickness as one of the layers you already planned
+       (no extra kerf cut needed).
+  e. Skip a block entirely if leftover face area is < ~25% — not worth
+     the planner's time to consider tiny scraps.
+
+Quality of suggestions matters more than quantity. ZERO suggestions is a
+valid answer if the assigned blocks are already tightly packed.
+
 ═══════════════════════════════════════════════════════════════════
 OUTPUT — strict JSON, no markdown fences, no prose outside the JSON
 ═══════════════════════════════════════════════════════════════════
@@ -255,8 +355,19 @@ OUTPUT — strict JSON, no markdown fences, no prose outside the JSON
     }
   ],
   "unassigned_slab_ids": [],
-  "unassigned_reason": "Empty string if all slabs assigned. Otherwise list each unassigned slab and the specific reason (no compatible stone block available, anchor too long, etc.)."
-}`;
+  "unassigned_reason": "Empty string if all slabs assigned. Otherwise list each unassigned slab and the specific reason (no compatible stone block available, anchor too long, etc.).",
+  "suggestions": [
+    {
+      "slab_id": "MH-0099",
+      "block_id": "MT-B-040",
+      "reasoning": "One sentence. Cite leftover space on the block and why this slab fills it (e.g. 'leaves ~28×16\\" of free face after MH-0001/2/3; this slab is 24×14×0.5\\" and shares the same 0.5\\" thickness layer — fills without an extra cut.')."
+    }
+  ]
+}
+
+(suggestions[] may be an empty array. If you cannot identify any worthwhile
+filler, return suggestions: [] — do NOT invent low-quality suggestions to
+hit a count.)`;
 
   try {
     const Anthropic = (await import("@anthropic-ai/sdk")).default;
@@ -269,7 +380,9 @@ OUTPUT — strict JSON, no markdown fences, no prose outside the JSON
       // pressed maybe 5–20 times a day, so total spend is negligible
       // compared to the value of a better cut plan.
       model: "claude-sonnet-4-5",
-      max_tokens: 8192,
+      // Slightly higher cap to leave room for the Phase-2 suggestions
+      // pass on top of the main assignments.
+      max_tokens: 12288,
       // Low temperature — we want the model to follow the procedure,
       // not get creative. Slight non-zero so it can still make
       // reasonable judgement calls on ties.
