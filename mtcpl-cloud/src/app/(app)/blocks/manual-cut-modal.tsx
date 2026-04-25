@@ -110,15 +110,10 @@ export function ManualCutModal({
   }, {});
   const templeGroupKeys = Object.keys(slabsByTemple).sort();
 
-  // Bulk select / clear helpers — useful when picking many slabs at
-  // once for a marble block (e.g. "all 12 slabs of UPARPITAM").
-  function selectAllVisible() {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      for (const s of filteredSlabs) next.add(s.id);
-      return next;
-    });
-  }
+  // Per-temple bulk select. Cross-temple "select all visible" was
+  // intentionally removed — too easy to fat-finger and select hundreds
+  // of slabs from one click. Per-temple stays because picking "all 12
+  // slabs of one temple's batch" is the actual workflow.
   function selectAllInTemple(temple: string) {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -382,15 +377,10 @@ export function ManualCutModal({
                     <strong style={{ color: "var(--text)" }}>{selectedIds.size}</strong> selected
                   </span>
                   <div style={{ display: "flex", gap: 6 }}>
-                    <button
-                      type="button"
-                      onClick={selectAllVisible}
-                      className="ghost-button"
-                      style={{ fontSize: 11, padding: "3px 10px" }}
-                      disabled={filteredSlabs.length === 0}
-                    >
-                      Select all visible
-                    </button>
+                    {/* "Select all visible" intentionally removed — too
+                     *  easy to accidentally pick hundreds of slabs in one
+                     *  click. Per-temple "Select all N" inside each
+                     *  temple group remains; that's the safer workflow. */}
                     <button
                       type="button"
                       onClick={clearAllSelections}
