@@ -47,6 +47,11 @@ export function ManualCutModal({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState("");
   const [templeFilter, setTempleFilter] = useState("all");
+  // Stone-match toggle: by default we narrow the slab list to slabs of
+  // the same stone as the block being cut (you can't physically cut a
+  // PinkStone slab from a YellowMarble block). Toggle off to override
+  // for legacy data or special cases.
+  const [matchStoneOnly, setMatchStoneOnly] = useState(true);
   const [remainders, setRemainders] = useState<RemainderEntry[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -83,9 +88,16 @@ export function ManualCutModal({
     }))
     .filter((r) => r.l > 0 && r.w > 0 && r.h > 0);
 
-  const temples = Array.from(new Set(openSlabs.map((s) => s.temple ?? "").filter(Boolean))).sort();
+  // Pre-narrow by stone if the toggle is on (default). The temples list
+  // is also derived AFTER stone filtering so the temple dropdown only
+  // shows temples that actually have same-stone slabs.
+  const stoneNarrowed = matchStoneOnly
+    ? openSlabs.filter((s) => s.stone === block.stone)
+    : openSlabs;
 
-  const filteredSlabs = openSlabs.filter((s) => {
+  const temples = Array.from(new Set(stoneNarrowed.map((s) => s.temple ?? "").filter(Boolean))).sort();
+
+  const filteredSlabs = stoneNarrowed.filter((s) => {
     if (templeFilter !== "all" && s.temple !== templeFilter) return false;
     if (!filter) return true;
     const q = filter.toLowerCase();
@@ -95,6 +107,19 @@ export function ManualCutModal({
       (s.label ?? "").toLowerCase().includes(q)
     );
   });
+
+  // Bulk select / clear helpers — useful when picking many slabs at
+  // once for a marble block (e.g. "all 12 slabs of UPARPITAM").
+  function selectAllVisible() {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const s of filteredSlabs) next.add(s.id);
+      return next;
+    });
+  }
+  function clearAllSelections() {
+    setSelectedIds(new Set());
+  }
 
   const slabIdsList = [...selectedIds];
   const remaindersJson = JSON.stringify(validRemainders);
@@ -128,7 +153,7 @@ export function ManualCutModal({
       <div className="drawer-backdrop" onClick={onClose} />
       <div
         className="edit-drawer"
-        style={{ maxWidth: 520 }}
+        style={{ maxWidth: 760 }}
         role="dialog"
         aria-modal="true"
         aria-label="Manual Cut Entry"
@@ -180,23 +205,30 @@ export function ManualCutModal({
 
             {openSlabs.length === 0 ? (
               <p className="muted" style={{ fontSize: 13 }}>
-                No open {block.stone} slab requirements found. Add slab requirements first.
+                No open slab requirements found. Add slab requirements first.
+              </p>
+            ) : stoneNarrowed.length === 0 ? (
+              <p className="muted" style={{ fontSize: 13 }}>
+                No open <strong>{block.stone}</strong> slab requirements. Either add some on the
+                Required Sizes page, or untick &ldquo;Match block stone only&rdquo; below to choose
+                from any open slab.
               </p>
             ) : (
               <>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
+                {/* Filter / control row — now wider with more breathing room */}
+                <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap", alignItems: "stretch" }}>
                   <input
                     type="text"
-                    placeholder="Filter by ID, temple, label…"
+                    placeholder="🔍 Filter by ID, temple, label…"
                     value={filter}
                     onChange={(e) => setFilter(e.target.value)}
                     style={{
-                      width: "100%",
+                      flex: "2 1 240px",
                       boxSizing: "border-box",
-                      fontSize: 13,
+                      fontSize: 14,
                       border: "1px solid var(--border)",
-                      borderRadius: 5,
-                      padding: "7px 10px",
+                      borderRadius: 6,
+                      padding: "9px 12px",
                       background: "var(--bg)",
                       color: "var(--text)",
                       outline: "none",
@@ -207,12 +239,12 @@ export function ManualCutModal({
                       value={templeFilter}
                       onChange={(e) => setTempleFilter(e.target.value)}
                       style={{
-                        width: "100%",
+                        flex: "1 1 180px",
                         boxSizing: "border-box",
                         fontSize: 13,
                         border: "1px solid var(--border)",
-                        borderRadius: 5,
-                        padding: "7px 8px",
+                        borderRadius: 6,
+                        padding: "9px 10px",
                         background: "var(--bg)",
                         color: "var(--text)",
                       }}
@@ -225,38 +257,135 @@ export function ManualCutModal({
                   )}
                 </div>
 
-                <div style={{ maxHeight: 260, overflowY: "auto", display: "flex", flexDirection: "column", gap: 5, border: "1px solid var(--border)", borderRadius: 6, padding: "8px 10px", background: "var(--surface)" }}>
+                {/* Stone-match toggle + bulk-select toolbar */}
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    flexWrap: "wrap",
+                    gap: 10,
+                    marginBottom: 8,
+                    padding: "6px 10px",
+                    background: "var(--surface-alt)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 6,
+                    fontSize: 12,
+                  }}
+                >
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", color: "var(--text)" }}>
+                    <input
+                      type="checkbox"
+                      checked={matchStoneOnly}
+                      onChange={(e) => setMatchStoneOnly(e.target.checked)}
+                      style={{ width: 14, height: 14 }}
+                    />
+                    Match block stone only
+                    <span className="muted" style={{ fontWeight: 400, marginLeft: 4 }}>
+                      ({block.stone})
+                    </span>
+                  </label>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <span className="muted" style={{ alignSelf: "center" }}>
+                      {filteredSlabs.length} visible · {selectedIds.size} selected
+                    </span>
+                    <button
+                      type="button"
+                      onClick={selectAllVisible}
+                      className="ghost-button"
+                      style={{ fontSize: 11, padding: "3px 10px" }}
+                      disabled={filteredSlabs.length === 0}
+                    >
+                      Select all visible
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearAllSelections}
+                      className="ghost-button"
+                      style={{ fontSize: 11, padding: "3px 10px" }}
+                      disabled={selectedIds.size === 0}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+
+                {/* Slab list — much taller now (480px) so users can see ~12+
+                    rows without scrolling. Especially important for marble
+                    where this is the primary cut path. */}
+                <div
+                  style={{
+                    maxHeight: 480,
+                    overflowY: "auto",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 0,
+                    border: "1px solid var(--border)",
+                    borderRadius: 8,
+                    background: "var(--surface)",
+                  }}
+                >
                   {filteredSlabs.length === 0 ? (
-                    <p className="muted" style={{ fontSize: 12 }}>No matching slabs.</p>
+                    <p className="muted" style={{ fontSize: 13, padding: 14, margin: 0 }}>
+                      No matching slabs.
+                    </p>
                   ) : (
-                    filteredSlabs.map((slab) => (
-                      <label
-                        key={slab.id}
-                        style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13 }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedIds.has(slab.id)}
-                          onChange={() => toggleSlab(slab.id)}
-                          style={{ width: 15, height: 15, cursor: "pointer" }}
-                        />
-                        <code style={{ fontSize: 12, fontWeight: 600 }}>{slab.id}</code>
-                        {slab.priority && <span style={{ fontSize: 10 }}>⚡</span>}
-                        {slab.temple && (
-                          <span className="muted" style={{ fontSize: 11 }}>
-                            {slab.temple}{slab.label && slab.label !== slab.temple ? ` · ${slab.label}` : ""}
-                          </span>
-                        )}
-                        <span className="muted" style={{ fontSize: 11 }}>
-                          {slab.length_ft}×{slab.width_ft}×{slab.thickness_ft} in
-                        </span>
-                        {slab.quality && (
-                          <span className={`role-pill ${slab.quality === "A" ? "badge-available" : "badge-reserved"}`} style={{ fontSize: 9, marginLeft: "auto" }}>
-                            {slab.quality}
-                          </span>
-                        )}
-                      </label>
-                    ))
+                    filteredSlabs.map((slab, i) => {
+                      const checked = selectedIds.has(slab.id);
+                      return (
+                        <label
+                          key={slab.id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 12,
+                            cursor: "pointer",
+                            fontSize: 13,
+                            padding: "10px 12px",
+                            borderBottom: i < filteredSlabs.length - 1 ? "1px solid var(--border-light)" : "none",
+                            background: checked ? "rgba(232,197,114,0.10)" : "transparent",
+                            transition: "background 0.1s",
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleSlab(slab.id)}
+                            style={{ width: 17, height: 17, cursor: "pointer", flexShrink: 0 }}
+                          />
+                          <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                            <code style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>
+                              {slab.id}
+                            </code>
+                            {slab.priority && <span style={{ fontSize: 12 }}>⚡</span>}
+                            {slab.temple && (
+                              <span className="muted" style={{ fontSize: 12 }}>
+                                {slab.temple}
+                                {slab.label && slab.label !== slab.temple ? ` · ${slab.label}` : ""}
+                              </span>
+                            )}
+                            <span
+                              style={{
+                                fontSize: 12,
+                                fontFamily: "ui-monospace, monospace",
+                                color: "var(--muted)",
+                                marginLeft: "auto",
+                              }}
+                            >
+                              {slab.length_ft}×{slab.width_ft}×{slab.thickness_ft} in
+                            </span>
+                            {slab.quality && (
+                              <span
+                                className={`role-pill ${slab.quality === "A" ? "badge-available" : "badge-reserved"}`}
+                                style={{ fontSize: 10 }}
+                              >
+                                {slab.quality}
+                              </span>
+                            )}
+                          </div>
+                        </label>
+                      );
+                    })
                   )}
                 </div>
               </>

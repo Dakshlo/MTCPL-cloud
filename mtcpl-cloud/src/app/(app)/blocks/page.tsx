@@ -37,13 +37,51 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
 
   if (isEntryRole) blocksQuery = blocksQuery.eq("created_by", profile.id);
 
+  // Paginated open-slab fetch — Supabase's PostgREST caps single .select()
+  // calls at 1000 rows. Without paging, the manual-cut slab picker only
+  // sees the first 1000 of currently-open slabs (sorted priority+newest);
+  // older slabs (e.g. ROHTAK-0017 and below) silently fall off the list.
+  // Same fix pattern used in /slabs/page.tsx.
+  type OpenSlabRow = {
+    id: string;
+    label: string | null;
+    temple: string;
+    stone: string | null;
+    quality: string | null;
+    length_ft: number;
+    width_ft: number;
+    thickness_ft: number;
+    priority?: boolean;
+  };
+  async function fetchAllOpenSlabs(): Promise<OpenSlabRow[]> {
+    const PAGE = 1000;
+    const out: OpenSlabRow[] = [];
+    for (let offset = 0; offset < 50000; offset += PAGE) {
+      const { data, error: pageErr } = await admin
+        .from("slab_requirements")
+        .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, priority")
+        .eq("status", "open")
+        .order("priority", { ascending: false })
+        .order("created_at", { ascending: false })
+        .range(offset, offset + PAGE - 1);
+      if (pageErr) throw new Error(pageErr.message);
+      if (!data || data.length === 0) break;
+      // Coerce nullable priority → optional boolean to match downstream type
+      for (const row of data as Array<OpenSlabRow & { priority?: boolean | null }>) {
+        out.push({ ...row, priority: row.priority ?? undefined });
+      }
+      if (data.length < PAGE) break;
+    }
+    return out;
+  }
+
   const [
     { data: blocks, error },
     { data: allIds },
     { data: consumed },
     { data: vendorRows },
     { data: stoneTypes },
-    { data: openSlabs },
+    openSlabs,
   ] = await Promise.all([
     blocksQuery,
     // Explicit high limit — same reason as in the slab page: Supabase's
@@ -72,12 +110,7 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
       .select("id, name, color_top, color_front, color_side, stone_category")
       .order("sort_order")
       .order("name"),
-    admin
-      .from("slab_requirements")
-      .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, priority")
-      .eq("status", "open")
-      .order("priority", { ascending: false })
-      .order("created_at", { ascending: false }),
+    fetchAllOpenSlabs(),
   ]);
 
   if (error) throw new Error(error.message);
@@ -293,7 +326,7 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
           vendors={vendors}
           profilesMap={profilesMap}
           stoneTypes={stoneList}
-          openSlabs={openSlabs ?? []}
+          openSlabs={openSlabs}
           stoneCategoryMap={stoneCategoryMap}
         />
       )}
