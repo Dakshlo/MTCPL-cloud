@@ -7,7 +7,8 @@ import { ConfirmButton } from "@/components/confirm-button";
 import {
   approveCarvingJobAction,
   rejectCarvingJobAction,
-  dispatchCarvingJobAction,
+  markReadyToDispatchAction,
+  updateCarvingLocationAction,
   cancelCarvingJobAction,
 } from "../actions";
 
@@ -19,7 +20,7 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
   const [{ data: job }, { data: events }] = await Promise.all([
     admin
       .from("carving_items")
-      .select("id, slab_requirement_id, vendor_id, vendor_name, vendor_type, cnc_machine_id, note, status, deadline_days, due_at, assigned_by, assigned_at, completed_at, progress_phase, review_approved_at, review_approved_by, review_notes, photo_urls")
+      .select("id, slab_requirement_id, vendor_id, vendor_name, vendor_type, cnc_machine_id, note, status, deadline_days, due_at, assigned_by, assigned_at, completed_at, progress_phase, review_approved_at, review_approved_by, review_notes, photo_urls, location, ready_to_dispatch_at, ready_to_dispatch_by")
       .eq("id", id)
       .single(),
     admin
@@ -62,6 +63,7 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
   const overdue = daysUntilDeadline !== null && daysUntilDeadline < 0;
   const inReview = !!job.completed_at && !job.review_approved_at;
   const approved = !!job.review_approved_at;
+  const readyToDispatch = !!job.ready_to_dispatch_at;
   const dispatched = job.status === "dispatched";
 
   return (
@@ -142,6 +144,12 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
                   <span style={{ fontWeight: 600 }}>{job.progress_phase}</span>
                 </div>
               )}
+              {job.location && (
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span className="muted">Location</span>
+                  <span style={{ fontWeight: 600 }}>📍 {job.location}</span>
+                </div>
+              )}
               {job.note && (
                 <div style={{ marginTop: 6, padding: "8px 10px", background: "var(--surface-alt)", borderRadius: 6 }}>
                   <div className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.06em" }}>Assignment note</div>
@@ -214,19 +222,55 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
                 </>
               )}
 
-              {approved && !dispatched && (
-                <form action={dispatchCarvingJobAction} style={{ display: "flex", gap: 6 }}>
-                  <input type="hidden" name="job_id" value={job.id} />
-                  <input
-                    type="text"
-                    name="note"
-                    placeholder="Dispatch note (optional)"
-                    style={{ flex: 1, fontSize: 12, padding: "6px 10px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
-                  />
-                  <button type="submit" className="primary-button" style={{ fontSize: 12, padding: "6px 14px" }}>
-                    🚚 Mark Dispatched
-                  </button>
-                </form>
+              {/* Carving Done — approved but not yet ready for dispatch.
+                  Operator must enter the slab's physical location (could
+                  be inside the facility, at a vendor's yard, in transit
+                  back, etc.) before clicking "Ready to Dispatch", which
+                  is what makes it visible in the Dispatch Station. */}
+              {approved && !readyToDispatch && !dispatched && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ padding: "8px 12px", background: "rgba(180,115,51,0.08)", border: "1px solid rgba(180,115,51,0.2)", borderRadius: 6, fontSize: 12, color: "var(--gold-dark)" }}>
+                    ✔ Approved — now record where the slab is and mark it ready for dispatch.
+                  </div>
+                  <form action={markReadyToDispatchAction} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <input type="hidden" name="job_id" value={job.id} />
+                    <input
+                      type="text"
+                      name="location"
+                      required
+                      placeholder="Slab location (e.g. Yard 3, Vendor's facility, Truck #UP14-7821)"
+                      defaultValue={job.location ?? ""}
+                      style={{ fontSize: 12, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
+                    />
+                    <button type="submit" className="primary-button" style={{ fontSize: 12, padding: "8px 14px" }}>
+                      🚚 Ready to Dispatch
+                    </button>
+                  </form>
+                </div>
+              )}
+
+              {/* Ready to dispatch — visible in Dispatch Station. Show
+                  the location they recorded and let them edit it without
+                  un-readying the slab. */}
+              {readyToDispatch && !dispatched && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ padding: "10px 14px", background: "rgba(22,163,74,0.08)", border: "1px solid rgba(22,163,74,0.2)", borderRadius: 6, fontSize: 12, color: "#15803d", fontWeight: 600 }}>
+                    ✓ Ready for dispatch — visible in <Link href="/dispatch" style={{ color: "#15803d", textDecoration: "underline" }}>Dispatch Station</Link>.
+                  </div>
+                  <form action={updateCarvingLocationAction} style={{ display: "flex", gap: 6 }}>
+                    <input type="hidden" name="job_id" value={job.id} />
+                    <input
+                      type="text"
+                      name="location"
+                      placeholder="Slab location"
+                      defaultValue={job.location ?? ""}
+                      style={{ flex: 1, fontSize: 12, padding: "6px 10px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
+                    />
+                    <button type="submit" className="ghost-button" style={{ fontSize: 12, padding: "6px 14px" }}>
+                      Update location
+                    </button>
+                  </form>
+                </div>
               )}
 
               {dispatched && (

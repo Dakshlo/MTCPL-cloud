@@ -16,7 +16,6 @@
  * options. Client code stays the same.
  */
 
-import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AssignModal } from "./assign-modal";
@@ -49,6 +48,8 @@ type JobRow = {
   review_approved_at?: string | null;
   progress_phase?: string | null;
   cnc_machine_id?: string | null;
+  location?: string | null;
+  ready_to_dispatch_at?: string | null;
 };
 
 type Vendor = {
@@ -228,7 +229,7 @@ export function CarvingDashboardClient({
         <JobsByTemple
           jobs={filteredDone}
           machineCodeById={machineCodeById}
-          columns={["approved"]}
+          columns={["approved", "location", "ready"]}
           emptyMessage="No slabs in Carving Done yet."
           fmtDate={fmtDate}
           daysUntil={daysUntil}
@@ -381,11 +382,12 @@ function JobsByTemple({
 }: {
   jobs: JobRow[];
   machineCodeById: Record<string, string>;
-  columns: Array<"deadline" | "phase" | "completed" | "approved">;
+  columns: Array<"deadline" | "phase" | "completed" | "approved" | "location" | "ready">;
   emptyMessage: string;
   fmtDate: (iso: string | null) => string;
   daysUntil: (iso: string | null) => number | null;
 }) {
+  const router = useRouter();
   const groups = useMemo(() => groupByTemple(jobs, (j) => j.temple), [jobs]);
 
   if (jobs.length === 0) {
@@ -475,8 +477,30 @@ function JobsByTemple({
                 {items.map((j) => {
                   const days = daysUntil(j.due_at);
                   const overdue = days !== null && days < 0;
+                  // Whole-row click target: pressing anywhere in the row
+                  // navigates to the job detail page. Cmd/Ctrl-click and
+                  // middle-click still open in a new tab via the keyboard
+                  // handler below.
+                  const goToDetail = () => router.push(`/carving/${j.id}`);
                   return (
-                    <tr key={j.id} style={{ borderTop: "1px solid var(--border-light)" }}>
+                    <tr
+                      key={j.id}
+                      onClick={goToDetail}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          goToDetail();
+                        }
+                      }}
+                      role="link"
+                      tabIndex={0}
+                      style={{
+                        borderTop: "1px solid var(--border-light)",
+                        cursor: "pointer",
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-alt)")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                    >
                       <td
                         style={{
                           padding: "10px 14px",
@@ -484,12 +508,7 @@ function JobsByTemple({
                           fontWeight: 700,
                         }}
                       >
-                        <Link
-                          href={`/carving/${j.id}`}
-                          style={{ color: "var(--text)", textDecoration: "none" }}
-                        >
-                          {j.slab_requirement_id}
-                        </Link>
+                        <span style={{ color: "var(--text)" }}>{j.slab_requirement_id}</span>
                         {j.slab_label && (
                           <div
                             style={{
@@ -556,6 +575,30 @@ function JobsByTemple({
                           {j.status === "dispatched"
                             ? "✓ Dispatched"
                             : fmtDate(j.review_approved_at ?? null)}
+                        </td>
+                      )}
+                      {columns.includes("location") && (
+                        <td style={{ padding: "10px 14px", fontSize: 12, color: "var(--muted)" }}>
+                          {j.location ? (
+                            <span style={{ color: "var(--text)" }}>📍 {j.location}</span>
+                          ) : (
+                            <span style={{ color: "#D97706", fontStyle: "italic" }}>not set</span>
+                          )}
+                        </td>
+                      )}
+                      {columns.includes("ready") && (
+                        <td style={{ padding: "10px 14px", fontSize: 12 }}>
+                          {j.status === "dispatched" ? (
+                            <span style={{ color: "var(--muted)" }}>✓ Dispatched</span>
+                          ) : j.ready_to_dispatch_at ? (
+                            <span style={{ color: "#15803d", fontWeight: 600 }}>
+                              ✓ Ready
+                            </span>
+                          ) : (
+                            <span style={{ color: "#D97706", fontWeight: 600 }}>
+                              Awaiting location
+                            </span>
+                          )}
                         </td>
                       )}
                     </tr>

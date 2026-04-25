@@ -265,16 +265,34 @@ export function ChallanArchiveClient({
                 </td>
               </tr>
             ) : (
-              filtered.map((r) => (
-                <tr key={r.id} style={{ borderBottom: "1px solid var(--border-light)" }}>
-                  <td style={{ ...tdStyle, fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>
-                    <Link
-                      href={`/dispatch/${r.id}/print`}
-                      target="_blank"
-                      style={{ color: "var(--gold-dark)", textDecoration: "none" }}
-                    >
-                      {chalanLabel(r.challan_number, r.id)}
-                    </Link>
+              filtered.map((r) => {
+                // Whole-row click target — anywhere on the row opens the
+                // print challan in a new tab (matches the existing Print
+                // button's target="_blank" so behaviour is consistent).
+                // Print button is stopPropagation'd below so it still
+                // works as a normal click without re-firing the row.
+                const openPrint = () => window.open(`/dispatch/${r.id}/print`, "_blank", "noopener");
+                return (
+                <tr
+                  key={r.id}
+                  onClick={openPrint}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      openPrint();
+                    }
+                  }}
+                  role="link"
+                  tabIndex={0}
+                  style={{
+                    borderBottom: "1px solid var(--border-light)",
+                    cursor: "pointer",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-alt)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                >
+                  <td style={{ ...tdStyle, fontFamily: "ui-monospace, monospace", fontWeight: 700, color: "var(--gold-dark)" }}>
+                    {chalanLabel(r.challan_number, r.id)}
                   </td>
                   <td style={tdStyle}>{r.temple}</td>
                   <td style={{ ...tdStyle, fontFamily: "ui-monospace, monospace" }}>
@@ -326,12 +344,14 @@ export function ChallanArchiveClient({
                       target="_blank"
                       className="ghost-button"
                       style={{ fontSize: 11, padding: "4px 10px", textDecoration: "none" }}
+                      onClick={(e) => e.stopPropagation()}
                     >
                       🖨 Print
                     </Link>
                   </td>
                 </tr>
-              ))
+                );
+              })
             )}
           </tbody>
         </table>

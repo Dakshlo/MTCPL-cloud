@@ -422,6 +422,14 @@ export function PlanningWorkbench({
     () => new Set(allUsableBlocks.filter((b) => facilityOfYard(b.yard) === "mtcpl").map((b) => b.id)),
   );
   const [selectedSlabIds, setSelectedSlabIds] = useState<Set<string>>(() => new Set(openSlabs.map((s) => s.id)));
+  // Hide the long block list once there are enough blocks that scrolling
+  // past them just to reach "Generate Plan" becomes a chore. The header
+  // shows a toggle so the user can re-expand any time. Default-collapsed
+  // when >20 blocks; small inventories stay expanded so nothing changes
+  // for the common case.
+  const [showBlockList, setShowBlockList] = useState<boolean>(
+    () => allUsableBlocks.length <= 20,
+  );
 
   function pickFacility(f: Facility) {
     if (f === facility) return;
@@ -562,9 +570,23 @@ export function PlanningWorkbench({
 
       <div className="planning-two-col">
         <section className="page-card">
-          <div className="section-heading">
-            <h2 style={{ margin: 0 }}>Stock Blocks ({usableBlocks.length})</h2>
-            <p className="muted">Available and reserved blocks for cutting</p>
+          <div className="section-heading" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div>
+              <h2 style={{ margin: 0 }}>Stock Blocks ({usableBlocks.length})</h2>
+              <p className="muted">Available and reserved blocks for cutting</p>
+            </div>
+            {/* Hide/show button — collapses just the long list of cards
+                so users with 100+ blocks can still reach the controls
+                + Generate Plan button without endless scrolling. */}
+            <button
+              type="button"
+              onClick={() => setShowBlockList((v) => !v)}
+              className="ghost-button"
+              style={{ fontSize: 12, padding: "6px 12px", whiteSpace: "nowrap" }}
+              aria-expanded={showBlockList}
+            >
+              {showBlockList ? "▴ Hide list" : `▾ Show list (${usableBlocks.length})`}
+            </button>
           </div>
           {/* Facility selector — hard split between MTCPL and RIICO sites.
               Switching wipes block selection so a plan can never mix sites. */}
@@ -646,6 +668,29 @@ export function PlanningWorkbench({
             <button className="ghost-button" style={{ fontSize: 12, padding: "2px 10px" }} type="button" onClick={() => setSelectedBlockIds(new Set(usableBlocks.map((b) => b.id)))}>Select All</button>
             <button className="ghost-button" style={{ fontSize: 12, padding: "2px 10px" }} type="button" onClick={() => setSelectedBlockIds(new Set())}>Deselect All</button>
           </div>
+          {!showBlockList && (
+            // Collapsed summary — keep the operator informed without
+            // forcing them to expand the list. Selection counter
+            // matches the toolbar at the bottom.
+            <div
+              className="banner"
+              style={{ marginTop: 4, fontSize: 12, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}
+            >
+              <span>
+                <strong>{selectedBlockIds.size}</strong> of <strong>{usableBlocks.length}</strong> blocks selected ·
+                list hidden to keep Generate Plan in reach.
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowBlockList(true)}
+                className="ghost-button"
+                style={{ fontSize: 11, padding: "3px 10px" }}
+              >
+                Show list
+              </button>
+            </div>
+          )}
+          {showBlockList && (
           <div className="records-stack" style={{ marginTop: 4 }}>
             {usableBlocks.length === 0 ? (
               <div className="banner">No usable blocks found.</div>
@@ -682,6 +727,7 @@ export function PlanningWorkbench({
               </div>
             ))}
           </div>
+          )}
         </section>
 
         <section className="page-card">

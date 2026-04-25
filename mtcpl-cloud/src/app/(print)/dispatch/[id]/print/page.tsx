@@ -20,7 +20,11 @@ function cft(l: number, w: number, t: number): number {
 }
 
 export default async function DispatchChallanPrintPage({ params }: { params: Params }) {
-  await requireAuth(["developer"]);
+  // Anyone with owner / team_head / developer / cutting_operator role can
+  // print the challan — they're the people who hand it to the driver.
+  // Previously this was developer-only which silently bounced Naresh
+  // (owner) back to /dashboard whenever he clicked "Print challan".
+  await requireAuth(["developer", "owner", "team_head", "cutting_operator"]);
   const { id } = await params;
   const admin = createAdminSupabaseClient();
 
@@ -155,6 +159,19 @@ export default async function DispatchChallanPrintPage({ params }: { params: Par
           letter-spacing: 0.12em;
           margin-bottom: 4px;
         }
+        .brand-logo {
+          height: 44px;
+          width: auto;
+          margin-bottom: 8px;
+          display: block;
+        }
+        .brand-tagline {
+          font-size: 10px;
+          font-weight: 600;
+          color: #888;
+          letter-spacing: 0.08em;
+          margin-bottom: 2px;
+        }
         .doc-title { font-size: 26px; font-weight: 700; color: #1a1a1a; letter-spacing: -0.01em; }
         .doc-sub { font-size: 12px; color: #666; margin-top: 3px; }
         .doc-ref { text-align: right; }
@@ -260,7 +277,9 @@ export default async function DispatchChallanPrintPage({ params }: { params: Par
         {/* Header */}
         <div className="header-row">
           <div>
-            <div className="brand-eyebrow">MTCPL · Stone. Precision. Scale.</div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo-dark.png" alt="MTCPL" className="brand-logo" />
+            <div className="brand-tagline">Stone · Precision · Scale</div>
             <div className="doc-title">Delivery Challan</div>
             <div className="doc-sub">Outgoing shipment to {dispatch.temple}</div>
           </div>

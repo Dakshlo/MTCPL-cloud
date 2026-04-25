@@ -182,14 +182,24 @@ function timestampForFilename(): string {
 
 // ─── Backup execution ─────────────────────────────────────────────────
 
-async function fetchBackupBlob(): Promise<Blob> {
+async function fetchBackupBlob(): Promise<{
+  blob: Blob;
+  totalRows: number | null;
+  tables: number | null;
+}> {
   const res = await fetch("/api/export/full-backup", {
     method: "GET",
     cache: "no-store",
     credentials: "include",
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return await res.blob();
+  // Server sets these so we can show "all N rows" without re-parsing.
+  const totalRowsHdr = res.headers.get("X-Backup-Total-Rows");
+  const tablesHdr = res.headers.get("X-Backup-Tables");
+  const totalRows = totalRowsHdr ? Number(totalRowsHdr) : null;
+  const tables = tablesHdr ? Number(tablesHdr) : null;
+  const blob = await res.blob();
+  return { blob, totalRows, tables };
 }
 
 /** Save blob into the chosen FS-Access folder (requires Chromium + permission). */
@@ -218,9 +228,15 @@ function downloadBlobAsFile(blob: Blob, filename: string): void {
 
 async function runBackup(
   dirHandle: FSDirectoryHandle | null,
-): Promise<{ ok: boolean; method: "folder" | "downloads"; error?: string }> {
+): Promise<{
+  ok: boolean;
+  method: "folder" | "downloads";
+  error?: string;
+  totalRows?: number | null;
+  tables?: number | null;
+}> {
   try {
-    const blob = await fetchBackupBlob();
+    const { blob, totalRows, tables } = await fetchBackupBlob();
     const filename = `mtcpl-backup-${timestampForFilename()}.xlsx`;
 
     if (dirHandle) {
@@ -228,7 +244,7 @@ async function runBackup(
       if (granted) {
         try {
           await writeToFolder(dirHandle, blob, filename);
-          return { ok: true, method: "folder" };
+          return { ok: true, method: "folder", totalRows, tables };
         } catch (e) {
           // Fall through to default download if folder write fails
           // (folder may have been deleted, permission revoked, etc.)
@@ -236,17 +252,25 @@ async function runBackup(
           return {
             ok: true,
             method: "downloads",
+            totalRows,
+            tables,
             error: `Folder write failed (${e instanceof Error ? e.message : "unknown"}) — fell back to Downloads`,
           };
         }
       }
       // Permission denied — fall back
       downloadBlobAsFile(blob, filename);
-      return { ok: true, method: "downloads", error: "Folder permission denied — fell back to Downloads" };
+      return {
+        ok: true,
+        method: "downloads",
+        totalRows,
+        tables,
+        error: "Folder permission denied — fell back to Downloads",
+      };
     }
 
     downloadBlobAsFile(blob, filename);
-    return { ok: true, method: "downloads" };
+    return { ok: true, method: "downloads", totalRows, tables };
   } catch (e) {
     return {
       ok: false,
@@ -334,9 +358,13 @@ export function AutoBackup() {
       setBusy(false);
       const where =
         result.method === "folder" ? `→ ${folderName ?? "chosen folder"}` : "→ Downloads";
+      const sizeNote =
+        result.ok && result.totalRows
+          ? ` · ${result.totalRows.toLocaleString()} rows in ${result.tables ?? "?"} tables`
+          : "";
       setStatusMsg(
         result.ok
-          ? `✓ Backup saved ${where}${result.error ? ` (${result.error})` : ""}`
+          ? `✓ Backup saved ${where}${sizeNote}${result.error ? ` (${result.error})` : ""}`
           : `✕ Failed: ${result.error ?? "unknown"}`,
       );
       setTimeout(() => setStatusMsg(""), 8000);
@@ -366,9 +394,13 @@ export function AutoBackup() {
     setBusy(false);
     const where =
       result.method === "folder" ? `→ ${folderName ?? "chosen folder"}` : "→ Downloads";
+    const sizeNote =
+      result.ok && result.totalRows
+        ? ` · ${result.totalRows.toLocaleString()} rows in ${result.tables ?? "?"} tables`
+        : "";
     setStatusMsg(
       result.ok
-        ? `✓ Backup saved ${where}${result.error ? ` (${result.error})` : ""}`
+        ? `✓ Backup saved ${where}${sizeNote}${result.error ? ` (${result.error})` : ""}`
         : `✕ Failed: ${result.error ?? "unknown"}`,
     );
     setTimeout(() => setStatusMsg(""), 8000);
@@ -444,6 +476,11 @@ export function AutoBackup() {
             Downloads the full backup Excel on a schedule. Pick a folder once with the button below
             and files land there directly (no Downloads-folder detour). Only works while this
             browser tab is open.
+          </p>
+          <p className="muted" style={{ margin: "4px 0 0", fontSize: 11, lineHeight: 1.55, fontStyle: "italic" }}>
+            17 tables, raw column names, every row included (no 1000-row truncation). If data is
+            ever lost, re-import any sheet via Supabase Table Editor → Insert from spreadsheet to
+            restore. Check the <code>_manifest</code> sheet to verify row counts.
           </p>
         </div>
         <label

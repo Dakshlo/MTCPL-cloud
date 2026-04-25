@@ -255,6 +255,11 @@ export async function approveCarvingJobAction(formData: FormData) {
   if (!job) redirect("/carving?toast=Job+not+found");
   if (!job.completed_at) redirect(`/carving/${jobId}?toast=Vendor+hasn%27t+marked+it+complete+yet`);
 
+  // Approval moves the job to "Carving Done" — it does NOT yet make the
+  // slab visible in the Dispatch Station. The team still needs to record
+  // a physical location and click "Ready to Dispatch" before the slab
+  // shows up there. That's why we no longer flip slab.status to
+  // 'completed' here — markReadyToDispatchAction does that.
   await admin
     .from("carving_items")
     .update({
@@ -265,16 +270,82 @@ export async function approveCarvingJobAction(formData: FormData) {
     })
     .eq("id", jobId);
 
-  await admin
-    .from("slab_requirements")
-    .update({ status: "completed", updated_by: profile.id, updated_at: new Date().toISOString() })
-    .eq("id", job.slab_requirement_id);
-
-  await recordEvent(jobId, "approved", profile.id, notes || "Approved by team");
+  await recordEvent(jobId, "approved", profile.id, notes || "Approved by team — awaiting location + ready-to-dispatch");
   await logAudit(profile.id, "carving_approved", "carving_item", jobId, { slab_id: job.slab_requirement_id });
 
   refreshAll();
-  redirect(`/carving/${jobId}?toast=Approved`);
+  redirect(`/carving/${jobId}?toast=Approved+%E2%80%94+set+location+to+continue`);
+}
+
+export async function markReadyToDispatchAction(formData: FormData) {
+  const { profile } = await requireAuth(["developer", "owner"]);
+  const admin = createAdminSupabaseClient();
+  const jobId = txt(formData, "job_id");
+  const location = txt(formData, "location");
+
+  if (!jobId) redirect("/carving?toast=Missing+job+id");
+  if (!location) redirect(`/carving/${jobId}?toast=Location+is+required+before+marking+ready+to+dispatch`);
+
+  const { data: job } = await admin
+    .from("carving_items")
+    .select("id, slab_requirement_id, review_approved_at, ready_to_dispatch_at")
+    .eq("id", jobId)
+    .single();
+
+  if (!job) redirect("/carving?toast=Job+not+found");
+  if (!job.review_approved_at) {
+    redirect(`/carving/${jobId}?toast=Approve+the+job+first`);
+  }
+  if (job.ready_to_dispatch_at) {
+    // Idempotent: just update the location and bail.
+    await admin.from("carving_items").update({ location }).eq("id", jobId);
+    refreshAll();
+    redirect(`/carving/${jobId}?toast=Location+updated`);
+  }
+
+  const now = new Date().toISOString();
+
+  // Atomic side-effects:
+  //   1. carving_items: location + ready_to_dispatch_at + ready_to_dispatch_by
+  //   2. slab_requirements.status='completed' so it appears in Dispatch Station
+  await admin
+    .from("carving_items")
+    .update({
+      location,
+      ready_to_dispatch_at: now,
+      ready_to_dispatch_by: profile.id,
+    })
+    .eq("id", jobId);
+
+  await admin
+    .from("slab_requirements")
+    .update({ status: "completed", updated_by: profile.id, updated_at: now })
+    .eq("id", job.slab_requirement_id);
+
+  await recordEvent(jobId, "ready_to_dispatch", profile.id, `Ready for dispatch · location: ${location}`);
+  await logAudit(profile.id, "carving_ready_to_dispatch", "carving_item", jobId, {
+    slab_id: job.slab_requirement_id,
+    location,
+  });
+
+  refreshAll();
+  redirect(`/carving/${jobId}?toast=Ready+to+dispatch+%E2%80%94+visible+in+Dispatch+Station`);
+}
+
+export async function updateCarvingLocationAction(formData: FormData) {
+  const { profile } = await requireAuth(["developer", "owner"]);
+  const admin = createAdminSupabaseClient();
+  const jobId = txt(formData, "job_id");
+  const location = txt(formData, "location");
+
+  if (!jobId) redirect("/carving?toast=Missing+job+id");
+
+  await admin.from("carving_items").update({ location: location || null }).eq("id", jobId);
+  await recordEvent(jobId, "location_updated", profile.id, `Location set to: ${location || "(cleared)"}`);
+  await logAudit(profile.id, "carving_location_updated", "carving_item", jobId, { location });
+
+  refreshAll();
+  redirect(`/carving/${jobId}?toast=Location+saved`);
 }
 
 export async function rejectCarvingJobAction(formData: FormData) {
@@ -301,46 +372,10 @@ export async function rejectCarvingJobAction(formData: FormData) {
   redirect(`/carving/${jobId}?toast=Rejected+-+sent+back+to+vendor`);
 }
 
-export async function dispatchCarvingJobAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner"]);
-  const admin = createAdminSupabaseClient();
-  const jobId = txt(formData, "job_id");
-  const note = txt(formData, "note") || null;
-
-  if (!jobId) redirect("/carving?toast=Missing+job+id");
-
-  const { data: job } = await admin
-    .from("carving_items")
-    .select("id, slab_requirement_id, review_approved_at")
-    .eq("id", jobId)
-    .single();
-
-  if (!job) redirect("/carving?toast=Job+not+found");
-  if (!job.review_approved_at) redirect(`/carving/${jobId}?toast=Approve+before+dispatching`);
-
-  await admin.from("dispatch_logs").insert({
-    carving_item_id: jobId,
-    slab_requirement_id: job.slab_requirement_id,
-    dispatched_by: profile.id,
-    dispatch_note: note,
-  });
-
-  await admin
-    .from("carving_items")
-    .update({ status: "dispatched" })
-    .eq("id", jobId);
-
-  await admin
-    .from("slab_requirements")
-    .update({ status: "dispatched", updated_by: profile.id, updated_at: new Date().toISOString() })
-    .eq("id", job.slab_requirement_id);
-
-  await recordEvent(jobId, "dispatched", profile.id, note || "Dispatched to installation site");
-  await logAudit(profile.id, "carving_dispatched", "carving_item", jobId, { slab_id: job.slab_requirement_id });
-
-  refreshAll();
-  redirect(`/carving/${jobId}?toast=Dispatched`);
-}
+// dispatchCarvingJobAction was removed — carved slabs now flow through
+// markReadyToDispatchAction (above) and then through the Dispatch
+// Station instead of being one-click-dispatched from the carving
+// detail page. See migration 014 for the schema change.
 
 export async function cancelCarvingJobAction(formData: FormData) {
   const { profile } = await requireAuth(["developer", "owner"]);

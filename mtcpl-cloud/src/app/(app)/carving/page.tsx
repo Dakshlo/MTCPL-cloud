@@ -45,7 +45,7 @@ export default async function CarvingDashboardPage({
       .order("completed_at", { ascending: false }),
     admin
       .from("carving_items")
-      .select("id, slab_requirement_id, vendor_id, vendor_name, vendor_type, status, due_at, assigned_at, completed_at, review_approved_at, cnc_machine_id")
+      .select("id, slab_requirement_id, vendor_id, vendor_name, vendor_type, status, due_at, assigned_at, completed_at, review_approved_at, cnc_machine_id, location, ready_to_dispatch_at")
       .not("review_approved_at", "is", null)
       .order("review_approved_at", { ascending: false })
       .limit(200),

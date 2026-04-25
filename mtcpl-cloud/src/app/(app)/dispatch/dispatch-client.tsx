@@ -710,7 +710,22 @@ function DispatchRow({
         justifyContent: "space-between",
       }}
     >
-      <div style={{ flex: "1 1 300px", minWidth: 0 }}>
+      {/* Info area — whole region opens the print challan in a new tab.
+          The action buttons on the right stay in their own non-clickable
+          region, so Mark Delivered / Undo / Print don't fight with the
+          card click. */}
+      <div
+        onClick={() => window.open(`/dispatch/${row.id}/print`, "_blank", "noopener")}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            window.open(`/dispatch/${row.id}/print`, "_blank", "noopener");
+          }
+        }}
+        role="link"
+        tabIndex={0}
+        style={{ flex: "1 1 300px", minWidth: 0, cursor: "pointer" }}
+      >
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
           <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 11, color: "var(--muted)" }}>
             {chalan}
