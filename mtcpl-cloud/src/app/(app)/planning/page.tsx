@@ -21,29 +21,26 @@ export default async function PlanningPage({
     : null;
 
   // Paginated slab fetch — PostgREST db-max-rows=1000 silently caps
-  // single queries. Without pagination, the planner would miss open
-  // slabs past row 1000 and quietly produce plans that don't cover
-  // them. Loop in 1000-row chunks.
+  // single queries. Loop in 1000-row chunks. We always fetch the FULL
+  // open inventory; the URL-selected subset is split out further down
+  // so the workbench renders only those as cards, while the rest is
+  // surfaced to the developer-only AI suggestions as a candidate pool.
   type PlanningSlabRow = {
     id: string; label: string; temple: string; stone: string | null;
     quality: string | null; length_ft: number; width_ft: number;
     thickness_ft: number; status: string; priority?: boolean;
   };
-  async function fetchOpenSlabsForPlanning(): Promise<PlanningSlabRow[]> {
+  async function fetchAllOpenSlabs(): Promise<PlanningSlabRow[]> {
     const PAGE = 1000;
     const CAP = 50000;
     const all: PlanningSlabRow[] = [];
     for (let offset = 0; offset < CAP; offset += PAGE) {
-      let q = supabase
+      const { data, error } = await supabase
         .from("slab_requirements")
         .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority")
         .eq("status", "open")
         .order("created_at", { ascending: false })
         .range(offset, offset + PAGE - 1);
-      if (selectedSlabIds && selectedSlabIds.length > 0) {
-        q = q.in("id", selectedSlabIds);
-      }
-      const { data, error } = await q;
       if (error) throw new Error(error.message);
       if (!data || data.length === 0) break;
       for (const row of data as Array<PlanningSlabRow & { priority?: boolean | null }>) {
@@ -61,7 +58,7 @@ export default async function PlanningPage({
   const sinceIso = new Date(Date.now() - 180 * 24 * 3600 * 1000).toISOString();
   const [
     { data: blocks, error: blockError },
-    slabs,
+    allOpenSlabs,
     { data: stoneTypes },
     { data: historySlabs },
     { data: availableBlocks },
@@ -71,7 +68,7 @@ export default async function PlanningPage({
       .select("id, stone, yard, category, quality, length_ft, width_ft, height_ft, status")
       .eq("status", "available")
       .order("created_at", { ascending: false }),
-    fetchOpenSlabsForPlanning(),
+    fetchAllOpenSlabs(),
     admin.from("stone_types").select("id, name, color_top, color_front, color_side").order("sort_order").order("name"),
     admin
       .from("slab_requirements")
@@ -84,6 +81,22 @@ export default async function PlanningPage({
       .select("stone, length_ft, width_ft, height_ft")
       .in("status", ["available", "reserved"]),
   ]);
+
+  // Split the open-slab universe in two:
+  //   • slabs           → the user's URL selection (rendered as
+  //                       checkboxes in the workbench).
+  //   • aiAvailablePool → every other open slab (NOT rendered, only
+  //                       fed to the developer AI suggestions
+  //                       endpoint as the filler-candidate pool).
+  // This fixes a previous bug where the AI saw an empty inventory
+  // because we used to filter the fetch by the URL slab IDs.
+  const selectedSlabIdSet = new Set(selectedSlabIds ?? []);
+  const slabs = selectedSlabIds && selectedSlabIds.length > 0
+    ? allOpenSlabs.filter((s) => selectedSlabIdSet.has(s.id))
+    : allOpenSlabs;
+  const aiAvailablePool = selectedSlabIds && selectedSlabIds.length > 0
+    ? allOpenSlabs.filter((s) => !selectedSlabIdSet.has(s.id))
+    : [];
 
   if (blockError) throw new Error(blockError.message);
 
@@ -168,7 +181,8 @@ export default async function PlanningPage({
         approveAction={approvePlanAction}
         aiSuggestionsAction={profile.role === "developer" ? aiSuggestionsAction : undefined}
         blocks={blocks ?? []}
-        slabs={slabs ?? []}
+        slabs={slabs}
+        aiAvailablePool={aiAvailablePool}
         stoneTypes={stoneTypes ?? undefined}
       />
     </>

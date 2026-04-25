@@ -382,12 +382,21 @@ export function IsoBlockPreview({ block, placed, stoneTypes, onHoverSlab }: { bl
 export function PlanningWorkbench({
   blocks,
   slabs,
+  aiAvailablePool = [],
   approveAction,
   aiSuggestionsAction,
   stoneTypes,
 }: {
   blocks: BlockRow[];
   slabs: SlabRow[];
+  /**
+   * Open slabs the user did NOT send to this planner (URL-unselected).
+   * NOT rendered in the slab-selection UI — purely a candidate pool
+   * for the developer-only AI suggestions endpoint, which scans it
+   * for slabs that would fit into leftover space on planned blocks.
+   * Defaults to [] so non-developer / un-fetched cases are safe.
+   */
+  aiAvailablePool?: SlabRow[];
   approveAction: (formData: FormData) => void | Promise<void>;
   /**
    * Developer-only post-algorithm AI assistant. When provided, a "Get
@@ -536,12 +545,25 @@ export function PlanningWorkbench({
     setAiSuggestions([]);
     setAiProcurement([]);
 
-    // Available pool = open slabs not in the current selection AND
-    // not in the produced plan's placed list.
+    // Available pool fed to the AI = (a) open slabs the user could
+    // have picked but didn't, plus (b) the broader pool fetched on
+    // page load (every OTHER open slab in the system that wasn't
+    // sent to this planner). The latter is the important addition —
+    // without it, when the user sends only 3 slabs from /slabs/view
+    // the AI thought the inventory was empty.
+    //
+    // De-dupe by id in case a slab somehow appears in both lists.
     const planSlabIds = new Set(result.plan.flatMap((pb) => pb.placed.map((p) => p.id)));
-    const availableSlabs = openSlabs.filter(
-      (s) => !selectedSlabIds.has(s.id) && !planSlabIds.has(s.id),
-    );
+    const availableMap = new Map<string, SlabRow>();
+    for (const s of openSlabs) {
+      if (!selectedSlabIds.has(s.id) && !planSlabIds.has(s.id)) {
+        availableMap.set(s.id, s);
+      }
+    }
+    for (const s of aiAvailablePool) {
+      if (!planSlabIds.has(s.id)) availableMap.set(s.id, s);
+    }
+    const availableSlabs = [...availableMap.values()];
 
     // Unfittable list — every slab in result.unmet, looked up in the
     // current open-slab data so the AI sees full dims/stone/quality.
