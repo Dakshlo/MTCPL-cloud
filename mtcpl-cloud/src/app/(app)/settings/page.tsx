@@ -3,6 +3,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { addTempleAction, updateTempleAction, deleteTempleAction, updateUserAction, deleteUserAction, updateOwnNameAction, addStoneTypeAction, deleteStoneTypeAction, setStoneCategoryAction } from "./actions";
 import { stoneDisplayName } from "@/lib/stone-utils";
 import type { AppRole } from "@/lib/types";
+import { AutoBackup } from "@/components/auto-backup";
 
 // All assignable roles — only shown to developer
 const UI_ROLES_ALL = [
@@ -671,6 +672,11 @@ export default async function SettingsPage() {
               ↓ Download Backup
             </a>
           </div>
+
+          {/* Browser-side auto-backup. Saves Excel to Downloads folder
+              every N hours while this tab is open. Belt-and-braces with
+              Supabase Pro snapshot backups. */}
+          <AutoBackup />
         </div>
       )}
 
