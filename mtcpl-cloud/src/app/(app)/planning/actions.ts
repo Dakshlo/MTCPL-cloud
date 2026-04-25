@@ -633,12 +633,22 @@ ${availableLines}${availableTrunc}
 PHASE 1 — FILLER SUGGESTIONS
 ═══════════════════════════════════════════════════════════════════
 
+⚠ HARD RULE — STONE MUST MATCH ⚠
+Never suggest a slab on a block of a DIFFERENT stone. PinkStone slabs
+go ONLY on PinkStone blocks. WhiteStone slabs go ONLY on WhiteStone
+blocks. Same for every other stone. The downstream client filter
+will silently drop any cross-stone suggestion, so cross-stone entries
+are wasted output. (Exception: a slab whose stone is literally
+"any-stone" can go on any block.)
+
 For each PLANNED BLOCK above:
   a. Read the leftover space (last value on each block's line). If the
      leftover is empty/tiny (<25% of block face area), skip — not
      worth filling.
   b. From the OTHER OPEN SLABS list, find slabs that:
-     • share the block's stone (or have stone="any-stone"),
+     • have the SAME stone as the block (this is the hard rule above —
+       e.g. block stone = "PinkStone" ⇒ only consider slabs marked
+       "PinkStone" or "any-stone"),
      • quality compatibility holds (Grade A slab needs Grade A block;
        Grade B slab needs A or B; standard works on any),
      • their two face dims fit the leftover space in some orientation,
@@ -653,6 +663,12 @@ For each PLANNED BLOCK above:
 ═══════════════════════════════════════════════════════════════════
 PHASE 2 — PROCUREMENT SUGGESTIONS
 ═══════════════════════════════════════════════════════════════════
+
+⚠ HARD RULE — STONE MUST MATCH ⚠
+Each procurement entry MUST have a "stone" field that matches the
+stone of the slabs it claims to unblock. Never put a PinkStone slab in
+the unblocks_slab_ids of a WhiteStone procurement entry. Mixed-stone
+entries will be silently dropped by the client filter.
 
 If the UNFITTABLE list is empty, return procurementSuggestions: [].
 Otherwise:

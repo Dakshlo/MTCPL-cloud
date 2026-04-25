@@ -616,25 +616,54 @@ export function PlanningWorkbench({
 
       setAiStrategy(response.strategy ?? null);
 
-      // Defensive filtering of fillers — block_id must be in the plan,
-      // slab_id must be in the available pool. Guards against the model
-      // hallucinating IDs.
-      const validBlockIds = new Set(result.plan.map((pb) => pb.blk.id));
-      const validSlabIds = new Set(availableSlabs.map((s) => s.id));
+      // ── Defensive filtering of fillers ─────────────────────────────
+      // Drop any suggestion that:
+      //   • references a non-existent block or slab id (hallucination),
+      //   • pairs a slab with a block of a DIFFERENT stone,
+      //   • pairs a Grade-A slab with a non-Grade-A block (the engine
+      //     would reject it anyway, but we shouldn't even surface it).
+      // The geometry engine will still validate fit on re-plan; this
+      // is just a fast first-line check so the user never sees a
+      // bogus suggestion.
+      const blocksById = new Map(result.plan.map((pb) => [pb.blk.id, pb.blk]));
+      const slabsById = new Map(availableSlabs.map((s) => [s.id, s]));
       setAiSuggestions(
-        (response.fillerSuggestions ?? []).filter(
-          (s) => validBlockIds.has(s.block_id) && validSlabIds.has(s.slab_id),
-        ),
+        (response.fillerSuggestions ?? []).filter((s) => {
+          const blk = blocksById.get(s.block_id);
+          const slab = slabsById.get(s.slab_id);
+          if (!blk || !slab) return false; // hallucinated id
+          // Stone must match. slab.stone === null means "any" (rare,
+          // legacy data) and is allowed on any block.
+          if (slab.stone && slab.stone !== blk.stone) return false;
+          // Quality: Grade A slab needs Grade A block.
+          if (slab.quality === "A" && blk.quality !== "A") return false;
+          // Grade B slab needs A or B (NOT null/standard).
+          if (slab.quality === "B" && blk.quality !== "A" && blk.quality !== "B") return false;
+          return true;
+        }),
       );
 
-      // Procurement: keep entries whose unblocks_slab_ids reference
-      // genuinely-unfittable slabs (drop hallucinated refs).
-      const unfittableIds = new Set(unfittable.map((s) => s.id));
+      // ── Defensive filtering of procurement ─────────────────────────
+      // Drop unblocks_slab_ids that don't reference a genuinely-
+      // unfittable slab (hallucinated). Drop entries whose stone
+      // doesn't match any of the unfittable slabs they claim to
+      // unblock — the AI shouldn't propose, e.g., a WhiteStone block
+      // to handle a PinkStone unfittable slab.
+      const unfittableById = new Map(unfittable.map((s) => [s.id, s]));
       setAiProcurement(
-        (response.procurementSuggestions ?? []).map((p) => ({
-          ...p,
-          unblocks_slab_ids: p.unblocks_slab_ids.filter((id) => unfittableIds.has(id)),
-        })).filter((p) => p.unblocks_slab_ids.length > 0),
+        (response.procurementSuggestions ?? [])
+          .map((p) => {
+            const cleanIds = p.unblocks_slab_ids.filter((id) => {
+              const u = unfittableById.get(id);
+              if (!u) return false;
+              // Stone must match the procurement entry. If the slab's
+              // stone is null we permit it (fits any).
+              if (u.stone && u.stone !== p.stone) return false;
+              return true;
+            });
+            return { ...p, unblocks_slab_ids: cleanIds };
+          })
+          .filter((p) => p.unblocks_slab_ids.length > 0),
       );
     } catch (err) {
       setAiError(err instanceof Error ? err.message : "AI suggestion request failed. Try again.");
