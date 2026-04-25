@@ -176,9 +176,13 @@ export function ManualCutModal({
         style={{
           position: "fixed",
           inset: 0,
-          background: "rgba(0,0,0,0.55)",
-          backdropFilter: "blur(2px)",
-          zIndex: 100,
+          background: "rgba(0,0,0,0.65)",
+          backdropFilter: "blur(3px)",
+          // z-index 1000 puts us safely above the block edit drawer
+          // (.edit-drawer is 201). Without this, the drawer renders ON
+          // TOP of the manual-cut modal because both use position:fixed
+          // and the drawer's CSS z-index outranks ours.
+          zIndex: 1000,
           animation: "manual-cut-fade 0.18s ease-out",
         }}
         aria-hidden="true"
@@ -198,11 +202,11 @@ export function ManualCutModal({
           color: "var(--text)",
           border: "1px solid var(--border)",
           borderRadius: 14,
-          boxShadow: "0 25px 70px rgba(0,0,0,0.45)",
+          boxShadow: "0 25px 70px rgba(0,0,0,0.55)",
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
-          zIndex: 101,
+          zIndex: 1001, // above the backdrop (1000) and the edit drawer (201)
           transform: "translate(-50%, -50%)",
           animation: "manual-cut-peek 0.22s cubic-bezier(0.16, 1, 0.3, 1)",
         }}
