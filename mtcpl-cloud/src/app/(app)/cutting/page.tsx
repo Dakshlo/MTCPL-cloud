@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
-import { approveBlockAction, rejectBlockAction, undoApproveAction } from "./actions";
+import { approveBlockAction, rejectBlockAction, startCuttingAction, undoApproveAction } from "./actions";
 import { RejectButton } from "./reject-button";
 import { UndoApproveButton } from "./undo-approve-button";
 import { CuttingTimer } from "./cutting-timer";
@@ -12,7 +12,7 @@ import { PrintReportButton } from "./print-report-button";
 import { SelectionProvider } from "./selection-context";
 import { BlockSelector } from "./block-selector";
 
-type Tab = "pending" | "in_progress" | "done";
+type Tab = "pending" | "waiting" | "in_progress" | "done";
 type SearchParams = Promise<{ tab?: string }>;
 
 type BlockRow = {
@@ -29,6 +29,12 @@ type BlockRow = {
   cut_session_id: string;
   cut_sessions: { session_code: string; kerf_mm: number; planned_by: string | null } | null;
   cut_session_slabs: Array<{ slab_requirement_id: string }>;
+  /** Per-cutter sequence number assigned when block enters 'cutting'.
+   *  NULL when not in cutting state. Used as a short verbal id ("Cutter #3"). */
+  cutting_seq?: number | null;
+  /** Donor block needs reprint after a slab was claimed away. */
+  needs_reprint?: boolean | null;
+  reprint_reason?: string | null;
 };
 
 function defaultTab(role: string): Tab {
@@ -104,6 +110,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
   // Count per individual block status — "done" badge shows TODAY only
   const [
     { count: pendingCount },
+    { count: waitingCount },
     { count: inProgressCount },
     { count: doneTodayCount },
   ] = await Promise.all([
@@ -111,6 +118,10 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
       .from("cut_session_blocks")
       .select("*", { count: "exact", head: true })
       .eq("status", "pending_worker"),
+    supabase
+      .from("cut_session_blocks")
+      .select("*", { count: "exact", head: true })
+      .eq("status", "pending_cut"),
     supabase
       .from("cut_session_blocks")
       .select("*", { count: "exact", head: true })
@@ -125,6 +136,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
 
   let statusFilter: string[];
   if (activeTab === "pending") statusFilter = ["pending_worker"];
+  else if (activeTab === "waiting") statusFilter = ["pending_cut"];
   else if (activeTab === "in_progress") statusFilter = ["cutting", "done_prompt"];
   else statusFilter = ["done", "rejected"];
 
@@ -139,7 +151,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
   const { data: blocks } = await supabase
     .from("cut_session_blocks")
     .select(
-      "id, status, block_id, restocked_block_id, layout, updated_at, cut_session_id, cut_sessions(session_code, kerf_mm, planned_by), cut_session_slabs(slab_requirement_id)"
+      "id, status, block_id, restocked_block_id, layout, updated_at, cut_session_id, cutting_seq, needs_reprint, reprint_reason, cut_sessions(session_code, kerf_mm, planned_by), cut_session_slabs(slab_requirement_id)"
     )
     .in("status", statusFilter)
     .order("updated_at", { ascending: activeTab !== "done" })
@@ -219,12 +231,14 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
 
   const tabs: { key: Tab; label: string; count: number | null }[] = [
     { key: "pending",     label: "Pending Approval", count: pendingCount },
+    { key: "waiting",     label: "Waiting to Cut",   count: waitingCount },
     { key: "in_progress", label: "In Progress",      count: inProgressCount },
-    { key: "done",        label: "Done today",        count: doneTodayCount },
+    { key: "done",        label: "Done today",       count: doneTodayCount },
   ];
 
   const emptyMessages: Record<Tab, string> = {
     pending:     "No blocks waiting for approval.",
+    waiting:     "No blocks waiting to cut. Approved blocks land here before cutting starts.",
     in_progress: "No blocks currently being cut.",
     done:        "No completed cuts yet.",
   };
@@ -388,6 +402,29 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                         style={{ marginTop: 4 }}
                       />
                     )}
+                    {/* Cutter sequence badge — visible only on cutting
+                     *  blocks that have a seq assigned. Lets operators
+                     *  refer to "Cutter #5" verbally. */}
+                    {isLive && typeof block.cutting_seq === "number" && (
+                      <span
+                        title={`Cutter #${block.cutting_seq} — short reference for this block while it's being cut`}
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 800,
+                          fontFamily: "ui-monospace, monospace",
+                          color: "#fff",
+                          background: "var(--gold-dark)",
+                          padding: "3px 9px",
+                          borderRadius: 4,
+                          letterSpacing: "0.02em",
+                          marginTop: 1,
+                          flexShrink: 0,
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        #{block.cutting_seq}
+                      </span>
+                    )}
                     <div style={{ minWidth: 0 }}>
                       <strong
                         style={{
@@ -397,6 +434,27 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                       >
                         {block.block_id}
                       </strong>
+                      {/* Reprint warning — donor block had a slab claimed
+                       *  away. Visible on this card so the operator sees
+                       *  it from the list, before clicking into detail. */}
+                      {block.needs_reprint && (
+                        <span
+                          title={block.reprint_reason ?? ""}
+                          style={{
+                            fontSize: 10,
+                            fontWeight: 700,
+                            color: "#b45309",
+                            background: "rgba(180,83,9,0.12)",
+                            border: "1px solid rgba(180,83,9,0.35)",
+                            padding: "2px 7px",
+                            borderRadius: 4,
+                            letterSpacing: "0.05em",
+                            marginLeft: 8,
+                          }}
+                        >
+                          ⚠ NEEDS REPRINT
+                        </span>
+                      )}
                       {isUrgent && (
                         <span style={{ fontSize: 11, fontWeight: 700, color: "#DC2626", background: "rgba(220,38,38,0.12)", padding: "2px 8px", borderRadius: 8, marginLeft: 6 }}>
                           ⚡ Urgent slab
@@ -579,7 +637,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                           value={block.cut_session_id}
                         />
                         <button className="primary-button" type="submit">
-                          Approve &amp; Start Cutting
+                          Send to Cutting List →
                         </button>
                       </form>
                       <form action={rejectBlockAction}>
@@ -608,6 +666,26 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                           )}
                         />
                         <RejectButton />
+                      </form>
+                    </>
+                  )}
+
+                  {/* Waiting to Cut — operator presses Start Cutting when
+                   *  they're physically beginning. Cancel reverts to
+                   *  pending_worker. */}
+                  {block.status === "pending_cut" && (
+                    <>
+                      <form action={startCuttingAction}>
+                        <input type="hidden" name="session_block_id" value={block.id} />
+                        <input type="hidden" name="session_id" value={block.cut_session_id} />
+                        <button className="primary-button" type="submit">
+                          ▶ Start Cutting
+                        </button>
+                      </form>
+                      <form action={undoApproveAction}>
+                        <input type="hidden" name="session_block_id" value={block.id} />
+                        <input type="hidden" name="session_id" value={block.cut_session_id} />
+                        <UndoApproveButton />
                       </form>
                     </>
                   )}

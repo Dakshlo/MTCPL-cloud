@@ -23,10 +23,11 @@ import { useEffect, useRef, useState } from "react";
 import { useSelection } from "./selection-context";
 
 type Facility = "mtcpl" | "riico" | "both";
-export type CuttingTab = "pending" | "in_progress" | "done";
+export type CuttingTab = "pending" | "waiting" | "in_progress" | "done";
 
 const TAB_LABELS: Record<CuttingTab, string> = {
   pending: "Pending Approval",
+  waiting: "Waiting to Cut",
   in_progress: "In Progress",
   done: "Done today",
 };

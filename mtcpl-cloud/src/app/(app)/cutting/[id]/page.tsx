@@ -14,9 +14,13 @@ import { yardLabel } from "@/lib/yards";
 import {
   approveBlockAction,
   rejectBlockAction,
+  startCuttingAction,
   finishBlockAction,
   undoDoneAction,
+  acknowledgeReprintAction,
 } from "../actions";
+import { canTransferPlannedSlabs } from "@/lib/cutting-permissions";
+import { NeedsReprintBanner } from "@/components/needs-reprint-banner";
 
 type Params = Promise<{ id: string }>;
 
@@ -51,7 +55,7 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
   const { data: block, error } = await supabase
     .from("cut_session_blocks")
     .select(
-      "id, status, block_id, largest_remainder, restocked_block_id, layout, updated_at, cut_session_id, cut_sessions(id, session_code, kerf_mm, created_at, planned_by), cut_session_slabs(id, slab_requirement_id)"
+      "id, status, block_id, largest_remainder, restocked_block_id, layout, updated_at, cut_session_id, cutting_seq, needs_reprint, reprint_reason, cut_sessions(id, session_code, kerf_mm, created_at, planned_by), cut_session_slabs(id, slab_requirement_id)"
     )
     .eq("id", id)
     .single();
@@ -67,7 +71,25 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
   const blk = layout?.blk;
   const placed = layout?.placed ?? [];
   const blockStone = blk?.stone ?? null;
-  const [profilesMap, { data: stoneTypes }, { data: openSlabs }] = await Promise.all([
+  // Type for slab rows used by both open and transferable lists
+  type SlabRow = {
+    id: string;
+    label: string | null;
+    temple: string | null;
+    stone: string | null;
+    quality: string | null;
+    length_ft: number;
+    width_ft: number;
+    thickness_ft: number;
+  };
+  // Type for transferable slabs (carries donor block context)
+  type TransferableSlab = SlabRow & {
+    donor_session_block_id: string;
+    donor_block_id: string;
+    donor_status: string;
+  };
+
+  const [profilesMap, { data: stoneTypes }, { data: openSlabs }, transferableSlabs] = await Promise.all([
     getProfilesMap(),
     createAdminSupabaseClient().from("stone_types").select("id, name, color_top, color_front, color_side").order("name"),
     blockStone
@@ -77,7 +99,48 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
           .eq("status", "open")
           .eq("stone", blockStone)
           .order("created_at", { ascending: false })
-      : Promise.resolve({ data: [] as Array<{ id: string; label: string | null; temple: string | null; stone: string | null; quality: string | null; length_ft: number; width_ft: number; thickness_ft: number }> }),
+      : Promise.resolve({ data: [] as SlabRow[] }),
+    // Candidate planned slabs from OTHER cutting blocks. Only fetched
+    // for users with transfer permission (canTransferPlannedSlabs);
+    // others get an empty list and never see the section. Donor must
+    // be in pending_worker / pending_cut / cutting (not done/rejected).
+    blockStone && canTransferPlannedSlabs(profile)
+      ? (async () => {
+          const { data: links } = await supabase
+            .from("cut_session_slabs")
+            .select(`
+              slab_requirement_id,
+              cut_session_block_id,
+              block:cut_session_blocks!inner(id, status, block_id),
+              slab:slab_requirements!inner(id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status)
+            `)
+            .eq("slab.status", "planned")
+            .eq("slab.stone", blockStone)
+            .in("block.status", ["pending_worker", "pending_cut", "cutting"])
+            .neq("cut_session_block_id", id);
+          // The PostgREST shape for joins can be either a single object
+          // or an array — normalise.
+          type LinkRow = {
+            slab_requirement_id: string;
+            cut_session_block_id: string;
+            block: { id: string; status: string; block_id: string } | { id: string; status: string; block_id: string }[] | null;
+            slab: SlabRow | SlabRow[] | null;
+          };
+          const out: TransferableSlab[] = [];
+          for (const r of (links ?? []) as unknown as LinkRow[]) {
+            const blk = Array.isArray(r.block) ? r.block[0] : r.block;
+            const slab = Array.isArray(r.slab) ? r.slab[0] : r.slab;
+            if (!blk || !slab) continue;
+            out.push({
+              ...slab,
+              donor_session_block_id: r.cut_session_block_id,
+              donor_block_id: blk.block_id,
+              donor_status: blk.status,
+            });
+          }
+          return out;
+        })()
+      : Promise.resolve([] as TransferableSlab[]),
   ]);
 
   const session = block.cut_sessions as unknown as {
@@ -92,9 +155,11 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
   ).map((s) => s.slab_requirement_id);
 
   const isPending = block.status === "pending_worker";
+  const isWaiting = block.status === "pending_cut";
   const isCutting = block.status === "cutting" || block.status === "done_prompt";
   const isDone = block.status === "done";
   const isRejected = block.status === "rejected";
+  const allowTransfer = canTransferPlannedSlabs(profile);
 
   // When the cut is already done, fetch the REAL post-cut data so the
   // utilisation bar reflects what actually happened instead of the
@@ -141,12 +206,24 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
       {/* Breadcrumb */}
       <div style={{ marginBottom: 18 }}>
         <Link
-          href={`/cutting?tab=${isCutting ? "in_progress" : isDone ? "done" : isRejected ? "done" : "pending"}`}
+          href={`/cutting?tab=${isCutting ? "in_progress" : isWaiting ? "waiting" : isDone ? "done" : isRejected ? "done" : "pending"}`}
           style={{ color: "var(--muted)", textDecoration: "none", fontSize: 13, fontWeight: 500 }}
         >
           ← Back to Cutting
         </Link>
       </div>
+
+      {/* Needs-reprint banner — appears when a slab was claimed away
+       *  from this block's plan by another cutting block. Tells the
+       *  operator to reprint before continuing. RealtimeRefresh keeps
+       *  this banner in sync if a claim happens while the page is open. */}
+      {block.needs_reprint && (
+        <NeedsReprintBanner
+          blockId={block.id}
+          reason={block.reprint_reason ?? null}
+          printHref={`/cutting/${block.id}/print`}
+        />
+      )}
 
       {/* Header */}
       <div className="record-head" style={{ marginBottom: 20 }}>
@@ -491,7 +568,7 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
               value={block.cut_session_id}
             />
             <button className="primary-button" type="submit">
-              Approve &amp; Start Cutting
+              Send to Cutting List →
             </button>
           </form>
           <form action={rejectBlockAction}>
@@ -512,6 +589,19 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
               value={JSON.stringify(slabReqIds)}
             />
             <RejectButton />
+          </form>
+        </div>
+      )}
+
+      {/* ── WAITING TO CUT: Start Cutting / Cancel ── */}
+      {isWaiting && (
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", paddingTop: 8 }}>
+          <form action={startCuttingAction}>
+            <input type="hidden" name="session_block_id" value={block.id} />
+            <input type="hidden" name="session_id" value={block.cut_session_id} />
+            <button className="primary-button" type="submit">
+              ▶ Start Cutting
+            </button>
           </form>
         </div>
       )}
@@ -554,6 +644,8 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
               sh: s.sh,
             }))}
             openSlabs={(openSlabs ?? []).filter(s => !placed.some(p => p.id === s.id))}
+            transferableSlabs={transferableSlabs}
+            allowTransfer={allowTransfer}
             finishAction={finishBlockAction}
           />
         </>

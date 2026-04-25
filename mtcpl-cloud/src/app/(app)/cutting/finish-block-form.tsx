@@ -21,6 +21,12 @@ type OpenSlab = {
   thickness_ft: number;
 };
 
+type TransferableSlab = OpenSlab & {
+  donor_session_block_id: string;
+  donor_block_id: string;
+  donor_status: string; // "pending_worker" | "pending_cut" | "cutting"
+};
+
 type RemainderEntry = { l: string; w: string; h: string };
 
 export function FinishBlockForm({
@@ -31,6 +37,8 @@ export function FinishBlockForm({
   yard,
   allSlabs,
   openSlabs = [],
+  transferableSlabs = [],
+  allowTransfer = false,
   finishAction,
 }: {
   sessionBlockId: string;
@@ -40,6 +48,12 @@ export function FinishBlockForm({
   yard: number;
   allSlabs: PlacedSlab[];
   openSlabs?: OpenSlab[];
+  /** Slabs currently planned on OTHER cutting blocks. Operator can claim
+   *  these ("I cut this slab from THIS block, not the planned one"). */
+  transferableSlabs?: TransferableSlab[];
+  /** Permission flag — comes from canTransferPlannedSlabs(profile).
+   *  When false, the transferable section is hidden entirely. */
+  allowTransfer?: boolean;
   finishAction: (formData: FormData) => Promise<void>;
 }) {
   const [checkedIds, setCheckedIds] = useState<Set<string>>(
@@ -49,6 +63,9 @@ export function FinishBlockForm({
   const [extraIds, setExtraIds] = useState<Set<string>>(new Set());
   const [extraFilter, setExtraFilter] = useState("");
   const [showExtra, setShowExtra] = useState(false);
+  // Selected transfer slabs — kept separate from extraIds because the
+  // server action splits open vs planned via two different formData fields.
+  const [transferIds, setTransferIds] = useState<Set<string>>(new Set());
 
   function toggle(id: string) {
     setCheckedIds((prev) => {
@@ -61,6 +78,15 @@ export function FinishBlockForm({
 
   function toggleExtra(id: string) {
     setExtraIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleTransfer(id: string) {
+    setTransferIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -96,6 +122,7 @@ export function FinishBlockForm({
 
   const remaindersJson = JSON.stringify(validRemainders);
   const extraSlabIdsList = [...extraIds];
+  const transferIdsList = [...transferIds];
 
   const hiddenInputs = (restock: "yes" | "no") => (
     <>
@@ -109,8 +136,28 @@ export function FinishBlockForm({
       <input type="hidden" name="remainders_json" value={remaindersJson} />
       <input type="hidden" name="restock" value={restock} />
       <input type="hidden" name="extra_slab_ids" value={JSON.stringify(extraSlabIdsList)} />
+      <input type="hidden" name="transferred_slab_ids" value={JSON.stringify(transferIdsList)} />
     </>
   );
+
+  // If any selected transfer-slab is from a 'cutting' donor (operator
+  // is actively cutting that block right now), require explicit
+  // confirmation before submitting. Less risky donor states (pending)
+  // submit silently.
+  function confirmIfCuttingDonors(e: React.FormEvent) {
+    const selectedFromCutting = transferableSlabs.filter(
+      (s) => transferIds.has(s.id) && s.donor_status === "cutting",
+    );
+    if (selectedFromCutting.length > 0) {
+      const list = selectedFromCutting
+        .map((s) => `  · ${s.id} (from ${s.donor_block_id})`)
+        .join("\n");
+      const ok = confirm(
+        `⚠ ${selectedFromCutting.length} slab(s) you're claiming are from blocks that are CURRENTLY BEING CUT:\n\n${list}\n\nClaiming will modify their plans and require a reprint. Continue?`,
+      );
+      if (!ok) e.preventDefault();
+    }
+  }
 
   const filteredOpenSlabs = openSlabs.filter((s) => {
     if (!extraFilter) return true;
@@ -119,6 +166,16 @@ export function FinishBlockForm({
       s.id.toLowerCase().includes(q) ||
       (s.temple ?? "").toLowerCase().includes(q) ||
       (s.label ?? "").toLowerCase().includes(q)
+    );
+  });
+  const filteredTransferableSlabs = transferableSlabs.filter((s) => {
+    if (!extraFilter) return true;
+    const q = extraFilter.toLowerCase();
+    return (
+      s.id.toLowerCase().includes(q) ||
+      (s.temple ?? "").toLowerCase().includes(q) ||
+      (s.label ?? "").toLowerCase().includes(q) ||
+      s.donor_block_id.toLowerCase().includes(q)
     );
   });
 
@@ -251,6 +308,139 @@ export function FinishBlockForm({
         </div>
       )}
 
+      {/* Transferable planned slabs — claim from another block's plan.
+       *  Only visible to permitted users (canTransferPlannedSlabs check).
+       *  Sharp tool: the donor block's plan gets edited and operators
+       *  there see a "needs reprint" banner. Confirm dialog fires on
+       *  submit if any selected slab's donor is currently 'cutting'. */}
+      {allowTransfer && transferableSlabs.length > 0 && (
+        <div
+          style={{
+            background: "rgba(180,83,9,0.04)",
+            border: "1px solid rgba(180,83,9,0.25)",
+            borderLeft: "3px solid #b45309",
+            borderRadius: 8,
+            padding: "10px 14px",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
+            <div>
+              <p style={{ fontSize: 12, fontWeight: 700, margin: 0, color: "#b45309" }}>
+                ⚠ Claim from another block&rsquo;s plan
+                {transferIds.size > 0 && (
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: "#fff",
+                      background: "#b45309",
+                      padding: "2px 7px",
+                      borderRadius: 4,
+                      marginLeft: 8,
+                    }}
+                  >
+                    {transferIds.size} selected
+                  </span>
+                )}
+              </p>
+              <p className="muted" style={{ fontSize: 11, margin: "3px 0 0", lineHeight: 1.5 }}>
+                Use only if you cut a slab from THIS block that was originally
+                planned for another block. The donor block&rsquo;s plan will be
+                modified and they&rsquo;ll be asked to reprint.
+              </p>
+            </div>
+          </div>
+
+          <div
+            style={{
+              maxHeight: 220,
+              overflowY: "auto",
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+              border: "1px solid var(--border-light)",
+              borderRadius: 6,
+              padding: 6,
+              background: "var(--surface)",
+            }}
+          >
+            {filteredTransferableSlabs.length === 0 ? (
+              <p className="muted" style={{ fontSize: 12, padding: 8, margin: 0 }}>
+                {extraFilter ? "No matching planned slabs." : "No planned slabs available to claim."}
+              </p>
+            ) : (
+              filteredTransferableSlabs.map((slab) => {
+                const checked = transferIds.has(slab.id);
+                const donorPill =
+                  slab.donor_status === "cutting"
+                    ? { label: "🚨 CUTTING NOW", color: "#b91c1c", bg: "rgba(220,38,38,0.1)", border: "rgba(220,38,38,0.4)" }
+                    : slab.donor_status === "pending_cut"
+                      ? { label: "⏱ WAITING TO CUT", color: "#b45309", bg: "rgba(180,83,9,0.1)", border: "rgba(180,83,9,0.4)" }
+                      : { label: "📋 PENDING APPROVAL", color: "#7c3aed", bg: "rgba(124,58,237,0.1)", border: "rgba(124,58,237,0.4)" };
+                return (
+                  <label
+                    key={slab.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      cursor: "pointer",
+                      fontSize: 13,
+                      padding: "6px 8px",
+                      background: checked ? "rgba(180,83,9,0.08)" : "transparent",
+                      borderRadius: 4,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleTransfer(slab.id)}
+                      style={{ width: 15, height: 15, cursor: "pointer" }}
+                    />
+                    <code style={{ fontSize: 12, fontWeight: 700 }}>{slab.id}</code>
+                    {slab.temple && (
+                      <span className="muted" style={{ fontSize: 11 }}>
+                        {slab.temple}
+                        {slab.label && slab.label !== slab.temple ? ` · ${slab.label}` : ""}
+                      </span>
+                    )}
+                    <span className="muted" style={{ fontSize: 11, fontFamily: "ui-monospace, monospace" }}>
+                      {slab.length_ft}×{slab.width_ft}×{slab.thickness_ft} in
+                    </span>
+                    <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
+                      <span className="muted" style={{ fontSize: 10, fontFamily: "ui-monospace, monospace" }}>
+                        from {slab.donor_block_id}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 9,
+                          fontWeight: 700,
+                          color: donorPill.color,
+                          background: donorPill.bg,
+                          border: `1px solid ${donorPill.border}`,
+                          padding: "1px 6px",
+                          borderRadius: 3,
+                          letterSpacing: "0.04em",
+                        }}
+                      >
+                        {donorPill.label}
+                      </span>
+                    </span>
+                  </label>
+                );
+              })
+            )}
+          </div>
+          {transferIds.size > 0 && (
+            <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+              {transferIds.size} planned slab{transferIds.size > 1 ? "s" : ""} will be transferred to this block.
+              Donor blocks will be marked &ldquo;needs reprint&rdquo;.
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Remaining block pieces */}
       <div style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: remainders.length ? 10 : 0 }}>
@@ -352,19 +542,19 @@ export function FinishBlockForm({
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {validRemainders.length > 0 ? (
           <>
-            <form action={finishAction}>
+            <form action={finishAction} onSubmit={confirmIfCuttingDonors}>
               {hiddenInputs("yes")}
               <button className="primary-button" type="submit">
                 Done &amp; Restock ({validRemainders.length} piece{validRemainders.length > 1 ? "s" : ""})
               </button>
             </form>
-            <form action={finishAction}>
+            <form action={finishAction} onSubmit={confirmIfCuttingDonors}>
               {hiddenInputs("no")}
               <button className="secondary-button" type="submit">Done &amp; Discard</button>
             </form>
           </>
         ) : (
-          <form action={finishAction}>
+          <form action={finishAction} onSubmit={confirmIfCuttingDonors}>
             {hiddenInputs("no")}
             <button className="primary-button" type="submit">Done</button>
           </form>
