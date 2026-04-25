@@ -5,26 +5,57 @@
  *
  * Sits on the /settings page (developer-only). When enabled, it
  * triggers a download of /api/export/full-backup at a chosen interval
- * (1h / 6h / 24h). The Excel file lands in the browser's default
- * Downloads folder with a timestamped filename like:
- *   mtcpl-backup-2026-04-23-15-00.xlsx
+ * (1h / 6h / 24h). Files end up either:
  *
- * Constraints (worth knowing):
+ *   (a) Directly inside a folder the user picks once via the File
+ *       System Access API (Chrome / Edge / modern Chromium browsers).
+ *       Picked folder handle is persisted in IndexedDB so subsequent
+ *       sessions reuse it after a quick permission re-grant.
+ *
+ *   (b) The browser's default Downloads folder (Safari / Firefox, or
+ *       any case where the user hasn't picked a folder).
+ *
+ * Filename format: mtcpl-backup-YYYY-MM-DD-HH-mm.xlsx (IST timestamp).
+ *
+ * Constraints:
  *   - Only works while THIS tab is open. Close the tab → no backups.
- *   - Browser's "always allow downloads from this site" must be enabled
- *     once, otherwise Chrome will silently block multi-file downloads.
+ *   - File System Access API requires Chromium-based browser. Safari
+ *     and Firefox fall back to Downloads automatically.
+ *   - Folder permission may need re-granting after a browser restart
+ *     (handled by ensurePermission below — usually one click).
  *   - PC sleep / browser background-throttling can delay a tick by
  *     a few minutes; not a problem for hourly+ schedules.
  *
- * State persistence:
- *   - On/off + interval + last backup time → localStorage (key prefix
- *     `mtcpl_autobackup_`). Survives refreshes; resumes on next tab load.
- *
- * The endpoint /api/export/full-backup is developer-gated; if a
- * non-developer somehow toggled this on, the download would 403.
+ * State persistence (localStorage `mtcpl_autobackup_*`):
+ *   - enabled / interval / last_at / last_ok
+ * Folder handle persists in IndexedDB (key: 'backup-dir-handle').
  */
 
 import { useEffect, useRef, useState } from "react";
+
+// ─── Type augmentation for the File System Access API ──────────────────
+// TypeScript doesn't include these in lib.dom yet (as of TS 5.x).
+type FSPermissionDescriptor = { mode: "read" | "readwrite" };
+type FSPermissionState = "granted" | "denied" | "prompt";
+type FSWritableFileStream = {
+  write: (data: Blob | BufferSource | string) => Promise<void>;
+  close: () => Promise<void>;
+};
+type FSFileHandle = {
+  createWritable: () => Promise<FSWritableFileStream>;
+};
+type FSDirectoryHandle = {
+  name: string;
+  kind: "directory";
+  getFileHandle: (name: string, opts?: { create?: boolean }) => Promise<FSFileHandle>;
+  queryPermission: (desc: FSPermissionDescriptor) => Promise<FSPermissionState>;
+  requestPermission: (desc: FSPermissionDescriptor) => Promise<FSPermissionState>;
+};
+declare global {
+  interface Window {
+    showDirectoryPicker?: (opts?: { mode?: "read" | "readwrite" }) => Promise<FSDirectoryHandle>;
+  }
+}
 
 type Interval = "1h" | "6h" | "24h";
 
@@ -45,6 +76,83 @@ const KEY_INTERVAL = "mtcpl_autobackup_interval";
 const KEY_LAST_AT = "mtcpl_autobackup_last_at";
 const KEY_LAST_OK = "mtcpl_autobackup_last_ok";
 
+// ─── IndexedDB helpers (storing the FileSystemDirectoryHandle) ────────
+// localStorage can only hold strings, but FS handles need full object
+// persistence. IndexedDB does this natively for FS handles in Chrome/Edge.
+
+const IDB_NAME = "mtcpl-autobackup";
+const IDB_STORE = "handles";
+const IDB_KEY = "backup-dir-handle";
+
+function openIDB(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function saveDirHandle(handle: FSDirectoryHandle): Promise<void> {
+  const db = await openIDB();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, "readwrite");
+    tx.objectStore(IDB_STORE).put(handle, IDB_KEY);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+  db.close();
+}
+
+async function loadDirHandle(): Promise<FSDirectoryHandle | null> {
+  try {
+    const db = await openIDB();
+    const handle = await new Promise<FSDirectoryHandle | null>((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, "readonly");
+      const req = tx.objectStore(IDB_STORE).get(IDB_KEY);
+      req.onsuccess = () => resolve((req.result as FSDirectoryHandle | undefined) ?? null);
+      req.onerror = () => reject(req.error);
+    });
+    db.close();
+    return handle;
+  } catch {
+    return null;
+  }
+}
+
+async function clearDirHandle(): Promise<void> {
+  try {
+    const db = await openIDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, "readwrite");
+      tx.objectStore(IDB_STORE).delete(IDB_KEY);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch {
+    // ignore
+  }
+}
+
+/** Verify (or re-request) write permission on a saved handle. */
+async function ensurePermission(handle: FSDirectoryHandle): Promise<boolean> {
+  try {
+    const opts: FSPermissionDescriptor = { mode: "readwrite" };
+    const status = await handle.queryPermission(opts);
+    if (status === "granted") return true;
+    const requested = await handle.requestPermission(opts);
+    return requested === "granted";
+  } catch {
+    return false;
+  }
+}
+
+// ─── Filename helpers ─────────────────────────────────────────────────
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -61,8 +169,8 @@ function fmt(d: Date): string {
 }
 
 function timestampForFilename(): string {
+  // YYYY-MM-DD-HH-mm in IST so files sort by date in Finder/Explorer.
   const d = new Date();
-  // Keep filename-safe: YYYY-MM-DD-HH-mm in IST so backups sort by date.
   const ist = new Date(d.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
   const yyyy = ist.getFullYear();
   const mm = String(ist.getMonth() + 1).padStart(2, "0");
@@ -72,36 +180,83 @@ function timestampForFilename(): string {
   return `${yyyy}-${mm}-${dd}-${HH}-${MM}`;
 }
 
-/** Trigger a download of the backup file via a temporary anchor.
- *  Browsers will save it to Downloads with the suggested filename.
- *  Returns true on success, false if the fetch errored (not 200). */
-async function triggerDownload(): Promise<{ ok: boolean; error?: string }> {
+// ─── Backup execution ─────────────────────────────────────────────────
+
+async function fetchBackupBlob(): Promise<Blob> {
+  const res = await fetch("/api/export/full-backup", {
+    method: "GET",
+    cache: "no-store",
+    credentials: "include",
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return await res.blob();
+}
+
+/** Save blob into the chosen FS-Access folder (requires Chromium + permission). */
+async function writeToFolder(
+  handle: FSDirectoryHandle,
+  blob: Blob,
+  filename: string,
+): Promise<void> {
+  const fileHandle = await handle.getFileHandle(filename, { create: true });
+  const writable = await fileHandle.createWritable();
+  await writable.write(blob);
+  await writable.close();
+}
+
+/** Fallback: save via the standard browser download flow (Downloads folder). */
+function downloadBlobAsFile(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+async function runBackup(
+  dirHandle: FSDirectoryHandle | null,
+): Promise<{ ok: boolean; method: "folder" | "downloads"; error?: string }> {
   try {
-    const res = await fetch("/api/export/full-backup", {
-      method: "GET",
-      cache: "no-store",
-      credentials: "include",
-    });
-    if (!res.ok) {
-      return { ok: false, error: `HTTP ${res.status}` };
+    const blob = await fetchBackupBlob();
+    const filename = `mtcpl-backup-${timestampForFilename()}.xlsx`;
+
+    if (dirHandle) {
+      const granted = await ensurePermission(dirHandle);
+      if (granted) {
+        try {
+          await writeToFolder(dirHandle, blob, filename);
+          return { ok: true, method: "folder" };
+        } catch (e) {
+          // Fall through to default download if folder write fails
+          // (folder may have been deleted, permission revoked, etc.)
+          downloadBlobAsFile(blob, filename);
+          return {
+            ok: true,
+            method: "downloads",
+            error: `Folder write failed (${e instanceof Error ? e.message : "unknown"}) — fell back to Downloads`,
+          };
+        }
+      }
+      // Permission denied — fall back
+      downloadBlobAsFile(blob, filename);
+      return { ok: true, method: "downloads", error: "Folder permission denied — fell back to Downloads" };
     }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
 
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `mtcpl-backup-${timestampForFilename()}.xlsx`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-
-    // Free the blob URL after a short delay so the download completes.
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
-    return { ok: true };
+    downloadBlobAsFile(blob, filename);
+    return { ok: true, method: "downloads" };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "unknown" };
+    return {
+      ok: false,
+      method: "downloads",
+      error: e instanceof Error ? e.message : "unknown",
+    };
   }
 }
+
+// ─── Component ────────────────────────────────────────────────────────
 
 export function AutoBackup() {
   const [enabled, setEnabled] = useState(false);
@@ -110,24 +265,35 @@ export function AutoBackup() {
   const [lastOk, setLastOk] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string>("");
+  const [folderHandle, setFolderHandle] = useState<FSDirectoryHandle | null>(null);
+  const [folderName, setFolderName] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [mounted, setMounted] = useState(false);
 
-  // ── Hydrate from localStorage on mount
+  // ── Hydrate from localStorage + IndexedDB on mount
   useEffect(() => {
-    try {
-      const en = localStorage.getItem(KEY_ENABLED) === "1";
-      const iv = (localStorage.getItem(KEY_INTERVAL) as Interval) || "1h";
-      const la = localStorage.getItem(KEY_LAST_AT);
-      const lo = localStorage.getItem(KEY_LAST_OK);
-      setEnabled(en);
-      if (iv === "1h" || iv === "6h" || iv === "24h") setInterval(iv);
-      setLastAt(la);
-      setLastOk(lo === "1" ? true : lo === "0" ? false : null);
-    } catch {
-      // localStorage may be unavailable in private mode; ignore
-    }
-    setMounted(true);
+    (async () => {
+      try {
+        const en = localStorage.getItem(KEY_ENABLED) === "1";
+        const iv = (localStorage.getItem(KEY_INTERVAL) as Interval) || "1h";
+        const la = localStorage.getItem(KEY_LAST_AT);
+        const lo = localStorage.getItem(KEY_LAST_OK);
+        setEnabled(en);
+        if (iv === "1h" || iv === "6h" || iv === "24h") setInterval(iv);
+        setLastAt(la);
+        setLastOk(lo === "1" ? true : lo === "0" ? false : null);
+      } catch {
+        // localStorage may be unavailable in private mode; ignore
+      }
+
+      // Load saved folder handle if any
+      const handle = await loadDirHandle();
+      if (handle) {
+        setFolderHandle(handle);
+        setFolderName(handle.name);
+      }
+      setMounted(true);
+    })();
   }, []);
 
   // ── Persist toggles + interval
@@ -141,7 +307,6 @@ export function AutoBackup() {
 
   // ── The actual scheduler. Sets a timer based on (last backup time +
   // chosen interval). On fire: download → record timestamp → reschedule.
-  // Recomputed whenever enabled/interval/lastAt changes.
   useEffect(() => {
     if (!mounted) return;
     if (timerRef.current) {
@@ -158,7 +323,7 @@ export function AutoBackup() {
     timerRef.current = setTimeout(async () => {
       setBusy(true);
       setStatusMsg("Downloading backup…");
-      const result = await triggerDownload();
+      const result = await runBackup(folderHandle);
       const at = nowIso();
       try {
         localStorage.setItem(KEY_LAST_AT, at);
@@ -167,9 +332,14 @@ export function AutoBackup() {
       setLastAt(at);
       setLastOk(result.ok);
       setBusy(false);
-      setStatusMsg(result.ok ? "✓ Backup saved" : `✕ Failed: ${result.error ?? "unknown"}`);
-      // Clear status message after a few seconds.
-      setTimeout(() => setStatusMsg(""), 6000);
+      const where =
+        result.method === "folder" ? `→ ${folderName ?? "chosen folder"}` : "→ Downloads";
+      setStatusMsg(
+        result.ok
+          ? `✓ Backup saved ${where}${result.error ? ` (${result.error})` : ""}`
+          : `✕ Failed: ${result.error ?? "unknown"}`,
+      );
+      setTimeout(() => setStatusMsg(""), 8000);
     }, delay);
 
     return () => {
@@ -178,14 +348,14 @@ export function AutoBackup() {
         timerRef.current = null;
       }
     };
-  }, [enabled, interval, lastAt, mounted]);
+  }, [enabled, interval, lastAt, mounted, folderHandle, folderName]);
 
-  // ── Manual trigger ("Download Now") + immediate test
+  // ── Manual trigger
   async function handleManual() {
     if (busy) return;
     setBusy(true);
     setStatusMsg("Downloading…");
-    const result = await triggerDownload();
+    const result = await runBackup(folderHandle);
     const at = nowIso();
     try {
       localStorage.setItem(KEY_LAST_AT, at);
@@ -194,8 +364,56 @@ export function AutoBackup() {
     setLastAt(at);
     setLastOk(result.ok);
     setBusy(false);
-    setStatusMsg(result.ok ? "✓ Backup saved" : `✕ Failed: ${result.error ?? "unknown"}`);
-    setTimeout(() => setStatusMsg(""), 6000);
+    const where =
+      result.method === "folder" ? `→ ${folderName ?? "chosen folder"}` : "→ Downloads";
+    setStatusMsg(
+      result.ok
+        ? `✓ Backup saved ${where}${result.error ? ` (${result.error})` : ""}`
+        : `✕ Failed: ${result.error ?? "unknown"}`,
+    );
+    setTimeout(() => setStatusMsg(""), 8000);
+  }
+
+  // ── Folder picker
+  async function handlePickFolder() {
+    if (typeof window === "undefined" || !window.showDirectoryPicker) {
+      setStatusMsg("Folder picker not supported in this browser. Use Chrome / Edge.");
+      setTimeout(() => setStatusMsg(""), 6000);
+      return;
+    }
+    try {
+      const handle = await window.showDirectoryPicker({ mode: "readwrite" });
+      // Make sure the permission is actually granted (some browsers
+      // return a handle but with prompt-pending permission).
+      const granted = await ensurePermission(handle);
+      if (!granted) {
+        setStatusMsg("Folder permission was denied.");
+        setTimeout(() => setStatusMsg(""), 6000);
+        return;
+      }
+      await saveDirHandle(handle);
+      setFolderHandle(handle);
+      setFolderName(handle.name);
+      setStatusMsg(`✓ Folder set: ${handle.name}`);
+      setTimeout(() => setStatusMsg(""), 5000);
+    } catch (e) {
+      // User cancelled the dialog → no error needed
+      const isAbort = e instanceof Error && e.name === "AbortError";
+      if (!isAbort) {
+        setStatusMsg(
+          `✕ Could not pick folder: ${e instanceof Error ? e.message : "unknown"}`,
+        );
+        setTimeout(() => setStatusMsg(""), 6000);
+      }
+    }
+  }
+
+  async function handleClearFolder() {
+    await clearDirHandle();
+    setFolderHandle(null);
+    setFolderName(null);
+    setStatusMsg("Folder cleared — backups will go to Downloads.");
+    setTimeout(() => setStatusMsg(""), 5000);
   }
 
   // ── Compute "next backup at" for display
@@ -205,6 +423,8 @@ export function AutoBackup() {
     const next = new Date(lastMs + INTERVAL_MS[interval]);
     return next > new Date() ? next : new Date(Date.now() + INTERVAL_MS[interval]);
   })();
+
+  const fsApiSupported = mounted && typeof window !== "undefined" && !!window.showDirectoryPicker;
 
   return (
     <div
@@ -221,9 +441,9 @@ export function AutoBackup() {
             🕒 Automatic Hourly Backup
           </p>
           <p className="muted" style={{ margin: "4px 0 0", fontSize: 12, lineHeight: 1.55 }}>
-            Downloads the full backup Excel to your computer's <strong>Downloads</strong> folder on
-            a schedule. Only works while this browser tab is open. Useful as a belt-and-braces
-            safety net even with Supabase Pro backups in place.
+            Downloads the full backup Excel on a schedule. Pick a folder once with the button below
+            and files land there directly (no Downloads-folder detour). Only works while this
+            browser tab is open.
           </p>
         </div>
         <label
@@ -251,6 +471,59 @@ export function AutoBackup() {
           />
           {enabled ? "ON" : "OFF"}
         </label>
+      </div>
+
+      {/* Folder picker row */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          padding: "10px 12px",
+          background: folderHandle ? "rgba(22,163,74,0.06)" : "var(--surface-alt)",
+          border: `1px solid ${folderHandle ? "rgba(22,163,74,0.25)" : "var(--border)"}`,
+          borderRadius: 8,
+          flexWrap: "wrap",
+        }}
+      >
+        <span style={{ fontSize: 16 }}>📁</span>
+        <div style={{ flex: 1, minWidth: 200, fontSize: 12 }}>
+          <div style={{ fontWeight: 700, color: folderHandle ? "#15803d" : "var(--muted)" }}>
+            {folderHandle ? `Saving to: ${folderName}` : "No folder picked"}
+          </div>
+          <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+            {folderHandle
+              ? "Files write directly into this folder."
+              : "Backups will land in your browser's Downloads folder."}
+          </div>
+        </div>
+        {fsApiSupported ? (
+          <>
+            <button
+              type="button"
+              onClick={handlePickFolder}
+              className="ghost-button"
+              style={{ fontSize: 12, padding: "6px 12px", whiteSpace: "nowrap" }}
+            >
+              {folderHandle ? "Change Folder" : "📁 Choose Folder"}
+            </button>
+            {folderHandle && (
+              <button
+                type="button"
+                onClick={handleClearFolder}
+                className="ghost-button danger-ghost"
+                style={{ fontSize: 12, padding: "6px 10px" }}
+                title="Stop saving to this folder; revert to Downloads"
+              >
+                ✕
+              </button>
+            )}
+          </>
+        ) : (
+          <span className="muted" style={{ fontSize: 11, fontStyle: "italic" }}>
+            Folder picker unsupported — use Chrome or Edge to enable
+          </span>
+        )}
       </div>
 
       <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
@@ -317,10 +590,10 @@ export function AutoBackup() {
 
       {enabled && (
         <p className="muted" style={{ margin: 0, fontSize: 11, lineHeight: 1.5 }}>
-          ⚠️ <strong>For this to work reliably:</strong> keep this tab open in a window that doesn't
-          sleep. The first time a backup downloads, Chrome will ask if you want to allow multiple
-          downloads from this site — click <strong>Allow</strong>. Backups land in your default
-          Downloads folder; consider symlinking it to Google Drive or iCloud so files are also off-PC.
+          ⚠️ <strong>For this to work reliably:</strong> keep this tab open in a browser that
+          doesn't sleep. If you picked a folder, the browser may ask once per session to confirm
+          permission — click <strong>Allow</strong>. Files are named{" "}
+          <code>mtcpl-backup-YYYY-MM-DD-HH-MM.xlsx</code> so they sort by date in Finder.
         </p>
       )}
     </div>
