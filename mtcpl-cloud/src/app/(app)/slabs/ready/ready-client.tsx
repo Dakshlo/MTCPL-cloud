@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 
 type Slab = {
   id: string;
@@ -39,14 +39,16 @@ function calcCft(l: number, w: number, t: number) {
 
 type SortCol = "id" | "temple" | "stone" | "cft" | "created_at" | "updated_at";
 
-export function ReadySlabsClient({ slabs, stoneNames, templeNames }: {
+export function ReadySlabsClient({ slabs, stoneNames: _stoneNames, templeNames: _templeNames }: {
   slabs: Slab[];
+  /** @deprecated derived from slabs directly */
   stoneNames?: string[];
+  /** @deprecated derived from slabs directly */
   templeNames?: string[];
 }) {
+  void _stoneNames;
+  void _templeNames;
   const today = new Date().toISOString().slice(0, 10);
-  const ALL_STONES = stoneNames && stoneNames.length > 0 ? stoneNames : ["PinkStone", "WhiteStone"];
-  const ALL_TEMPLES = templeNames ?? [];
 
   const [stoneFilter, setStoneFilter] = useState("all");
   const [templeFilter, setTempleFilter] = useState("all");
@@ -57,6 +59,64 @@ export function ReadySlabsClient({ slabs, stoneNames, templeNames }: {
   const [sortBy, setSortBy] = useState<SortCol>("updated_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [exporting, setExporting] = useState(false);
+
+  // ── Cascading filter options ──────────────────────────────────────────
+  // Each dropdown's option list is derived from the slabs that pass
+  // ALL OTHER active filters. Selecting Stone=PinkStone narrows the
+  // Temple dropdown to only temples where PinkStone slabs exist.
+  // (See slab-selector.tsx for the same pattern + why.)
+  const availableStones = useMemo(() => {
+    let rows = slabs;
+    if (templeFilter !== "all") rows = rows.filter((s) => s.temple === templeFilter);
+    if (qualityFilter === "A") rows = rows.filter((s) => s.quality === "A");
+    else if (qualityFilter === "B") rows = rows.filter((s) => s.quality === "B");
+    else if (qualityFilter === "none") rows = rows.filter((s) => !s.quality);
+    if (search) {
+      const lower = search.toLowerCase();
+      rows = rows.filter((s) =>
+        s.id.toLowerCase().includes(lower) ||
+        s.label.toLowerCase().includes(lower) ||
+        s.temple.toLowerCase().includes(lower) ||
+        (s.stone ?? "").toLowerCase().includes(lower),
+      );
+    }
+    const set = new Set<string>();
+    for (const s of rows) if (s.stone) set.add(s.stone);
+    return [...set].sort();
+  }, [slabs, templeFilter, qualityFilter, search]);
+
+  const availableTemples = useMemo(() => {
+    let rows = slabs;
+    if (stoneFilter !== "all") rows = rows.filter((s) => s.stone === stoneFilter);
+    if (qualityFilter === "A") rows = rows.filter((s) => s.quality === "A");
+    else if (qualityFilter === "B") rows = rows.filter((s) => s.quality === "B");
+    else if (qualityFilter === "none") rows = rows.filter((s) => !s.quality);
+    if (search) {
+      const lower = search.toLowerCase();
+      rows = rows.filter((s) =>
+        s.id.toLowerCase().includes(lower) ||
+        s.label.toLowerCase().includes(lower) ||
+        s.temple.toLowerCase().includes(lower) ||
+        (s.stone ?? "").toLowerCase().includes(lower),
+      );
+    }
+    const set = new Set<string>();
+    for (const s of rows) if (s.temple) set.add(s.temple);
+    return [...set].sort();
+  }, [slabs, stoneFilter, qualityFilter, search]);
+
+  // Auto-reset orphaned selections: if user picked Stone=X then
+  // narrowed by Temple=Y where Y has no X, clear the orphan to "all".
+  useEffect(() => {
+    if (stoneFilter !== "all" && availableStones.length > 0 && !availableStones.includes(stoneFilter)) {
+      setStoneFilter("all");
+    }
+  }, [availableStones, stoneFilter]);
+  useEffect(() => {
+    if (templeFilter !== "all" && availableTemples.length > 0 && !availableTemples.includes(templeFilter)) {
+      setTempleFilter("all");
+    }
+  }, [availableTemples, templeFilter]);
 
   const filtered = useMemo(() => {
     let rows = [...slabs];
@@ -155,21 +215,21 @@ export function ReadySlabsClient({ slabs, stoneNames, templeNames }: {
       }}>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "flex-end" }}>
 
-          {/* Stone */}
+          {/* Stone — cascades from temple+quality+search */}
           <label className="stack" style={{ flex: "0 0 auto" }}>
-            <span>Stone</span>
+            <span>Stone <span style={{ fontSize: 9, color: "var(--muted)" }}>({availableStones.length})</span></span>
             <select value={stoneFilter} onChange={e => setStoneFilter(e.target.value)}>
               <option value="all">All Stones</option>
-              {ALL_STONES.map(s => <option key={s} value={s}>{s}</option>)}
+              {availableStones.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </label>
 
-          {/* Temple */}
+          {/* Temple — cascades from stone+quality+search */}
           <label className="stack" style={{ flex: "1 1 160px" }}>
-            <span>Temple</span>
+            <span>Temple <span style={{ fontSize: 9, color: "var(--muted)" }}>({availableTemples.length})</span></span>
             <select value={templeFilter} onChange={e => setTempleFilter(e.target.value)}>
               <option value="all">All Temples</option>
-              {ALL_TEMPLES.map(t => <option key={t} value={t}>{t}</option>)}
+              {availableTemples.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
           </label>
 

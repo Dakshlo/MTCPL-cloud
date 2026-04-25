@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 type Slab = {
@@ -41,15 +41,17 @@ type SortCol = "id" | "temple" | "stone" | "cft" | "status" | "created_at";
 
 export function SlabSelector({
   slabs,
-  temples,
+  temples: _temples,
   activeFilters,
   stoneNames,
 }: {
   slabs: Slab[];
+  /** @deprecated dropdown options are now derived from `slabs` directly */
   temples: string[];
   activeFilters: ActiveFilters;
   stoneNames?: string[];
 }) {
+  void _temples;
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -63,7 +65,82 @@ export function SlabSelector({
   const [sortBy, setSortBy] = useState<SortCol>("created_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
+  // ── Cascading filter options ──────────────────────────────────────────
+  // Each dropdown's option list is derived from the slabs that pass
+  // ALL OTHER active filters (search included). So selecting Stone=PinkStone
+  // narrows the Temple dropdown to only temples that actually have a
+  // PinkStone slab in the current view, and vice versa. This stops users
+  // from picking Stone=X then Temple=Y and getting an empty list because
+  // Y has no X-stone slabs.
+  //
+  // We only consider non-priority rows for the option set — priority
+  // rows bypass the stone/temple/quality dropdowns anyway (they always
+  // show), so including them would lie about what's reachable.
+  const availableStones = useMemo(() => {
+    let rows = allNormalAll();
+    if (templeFilter !== "all") rows = rows.filter((s) => s.temple === templeFilter);
+    if (qualityFilter === "A") rows = rows.filter((s) => s.quality === "A");
+    else if (qualityFilter === "B") rows = rows.filter((s) => s.quality === "B");
+    else if (qualityFilter === "none") rows = rows.filter((s) => !s.quality);
+    if (q.trim()) {
+      const lower = q.toLowerCase();
+      rows = rows.filter((s) =>
+        s.id.toLowerCase().includes(lower) ||
+        s.label.toLowerCase().includes(lower) ||
+        s.temple.toLowerCase().includes(lower),
+      );
+    }
+    const set = new Set<string>();
+    for (const s of rows) if (s.stone) set.add(s.stone);
+    return [...set].sort();
+    // allNormalAll changes only when slabs prop changes — declared below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slabs, templeFilter, qualityFilter, q]);
+
+  const availableTemples = useMemo(() => {
+    let rows = allNormalAll();
+    if (stoneFilter !== "all") rows = rows.filter((s) => s.stone === stoneFilter);
+    if (qualityFilter === "A") rows = rows.filter((s) => s.quality === "A");
+    else if (qualityFilter === "B") rows = rows.filter((s) => s.quality === "B");
+    else if (qualityFilter === "none") rows = rows.filter((s) => !s.quality);
+    if (q.trim()) {
+      const lower = q.toLowerCase();
+      rows = rows.filter((s) =>
+        s.id.toLowerCase().includes(lower) ||
+        s.label.toLowerCase().includes(lower) ||
+        s.temple.toLowerCase().includes(lower),
+      );
+    }
+    const set = new Set<string>();
+    for (const s of rows) if (s.temple) set.add(s.temple);
+    return [...set].sort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slabs, stoneFilter, qualityFilter, q]);
+
+  // Helper used by the two memos above. Defined after the memos that
+  // call it because JS hoists function declarations.
+  function allNormalAll() { return slabs.filter((s) => !s.priority); }
+
+  // Auto-reset an orphaned selection: if the user picks Stone=X then
+  // narrows by Temple=Y where Y has no X stones, the temple value is
+  // stale. Reset it to "all" instead of leaving the user with a
+  // dropdown displaying a value that's not in its options.
+  useEffect(() => {
+    if (stoneFilter !== "all" && availableStones.length > 0 && !availableStones.includes(stoneFilter)) {
+      setStoneFilter("all");
+    }
+  }, [availableStones, stoneFilter]);
+  useEffect(() => {
+    if (templeFilter !== "all" && availableTemples.length > 0 && !availableTemples.includes(templeFilter)) {
+      setTempleFilter("all");
+    }
+  }, [availableTemples, templeFilter]);
+
+  // Server-provided lists are the *upstream* universe — used so any
+  // currently-selected value is always rendered as an option even
+  // while an orphan-reset is in flight on a re-render.
   const ALL_STONES = stoneNames && stoneNames.length > 0 ? stoneNames : ["PinkStone", "WhiteStone"];
+  void ALL_STONES; // kept for backward-compat in case anything else reads it
 
   // Split priority slabs out — pinned at the top of whatever status
   // view the user is currently on. The server-side urgent fetcher
@@ -242,21 +319,21 @@ export function SlabSelector({
             </div>
           </div>
 
-          {/* Stone */}
+          {/* Stone — cascades from temple+quality+search */}
           <label className="stack" style={{ flex: "0 0 auto" }}>
-            <span>Stone</span>
+            <span>Stone <span style={{ fontSize: 9, color: "var(--muted)" }}>({availableStones.length})</span></span>
             <select value={stoneFilter} onChange={e => setStoneFilter(e.target.value)}>
               <option value="all">All Stones</option>
-              {ALL_STONES.map(s => <option key={s} value={s}>{s}</option>)}
+              {availableStones.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </label>
 
-          {/* Temple */}
+          {/* Temple — cascades from stone+quality+search */}
           <label className="stack" style={{ flex: "1 1 160px" }}>
-            <span>Temple</span>
+            <span>Temple <span style={{ fontSize: 9, color: "var(--muted)" }}>({availableTemples.length})</span></span>
             <select value={templeFilter} onChange={e => setTempleFilter(e.target.value)}>
               <option value="all">All Temples</option>
-              {temples.map(t => <option key={t} value={t}>{t}</option>)}
+              {availableTemples.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
           </label>
 
