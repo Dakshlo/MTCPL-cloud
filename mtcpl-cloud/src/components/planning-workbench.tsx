@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { BlockMiniPreview, SlabMiniPreview } from "@/components/stone-previews";
 import { getStonePalette } from "@/lib/stone-utils";
 import type { StoneTypeDef } from "@/lib/stone-utils";
-import type { AIAssignment, AISuggestion, AIplanResponse } from "@/app/(app)/planning/actions";
+import type { AISuggestion, AIProcurementSuggestion, AISuggestionsResponse } from "@/app/(app)/planning/actions";
 import { computeCutEfficiency, toCFT, type CutEfficiency } from "@/lib/cut-efficiency";
 import { EfficiencyBar } from "@/components/efficiency-bar";
 import { yardLabel, yardShortLabel, FACILITIES, YARDS_BY_FACILITY, facilityLabel, facilityOfYard, type Facility } from "@/lib/yards";
@@ -383,19 +383,29 @@ export function PlanningWorkbench({
   blocks,
   slabs,
   approveAction,
-  aiPlanAction,
+  aiSuggestionsAction,
   stoneTypes,
 }: {
   blocks: BlockRow[];
   slabs: SlabRow[];
   approveAction: (formData: FormData) => void | Promise<void>;
-  aiPlanAction?: (payload: {
-    blocks: Array<{ id: string; stone: string; yard: number; length_ft: number; width_ft: number; height_ft: number; quality: string | null }>;
-    slabs: Array<{ id: string; label: string; temple: string; stone: string | null; length_ft: number; width_ft: number; thickness_ft: number; priority: boolean; quality: string | null }>;
-    /** Open slabs the user did NOT pick — pool the AI can mine for filler suggestions. */
-    availableSlabs?: Array<{ id: string; label: string; temple: string; stone: string | null; length_ft: number; width_ft: number; thickness_ft: number; priority: boolean; quality: string | null }>;
+  /**
+   * Developer-only post-algorithm AI assistant. When provided, a "Get
+   * AI suggestions" button appears below the result card. Clicking it
+   * sends the algorithm's plan + unfittable slabs + open inventory
+   * to the model and gets back filler + procurement suggestions.
+   */
+  aiSuggestionsAction?: (payload: {
+    plan: Array<{
+      block: { id: string; stone: string; length_ft: number; width_ft: number; height_ft: number; quality: string | null };
+      placed: Array<{ id: string; label: string; temple: string; length_ft: number; width_ft: number; thickness_ft: number }>;
+      biggest_leftover: { length: number; width: number; height: number } | null;
+      efficiency_pct: number;
+    }>;
+    unfittableSlabs: Array<{ id: string; label: string; temple: string; stone: string | null; length_ft: number; width_ft: number; thickness_ft: number; quality: string | null; priority: boolean }>;
+    availableSlabs: Array<{ id: string; label: string; temple: string; stone: string | null; length_ft: number; width_ft: number; thickness_ft: number; priority: boolean; quality: string | null }>;
     kerfMm: number;
-  }) => Promise<AIplanResponse>;
+  }) => Promise<AISuggestionsResponse>;
   stoneTypes?: StoneTypeDef[];
 }) {
   const [kerfMm, setKerfMm] = useState(20);
@@ -413,12 +423,13 @@ export function PlanningWorkbench({
   const [aiLoading, setAiLoading] = useState(false);
   const [aiStrategy, setAiStrategy] = useState<string | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
-  // AI suggestions = open slabs the user did NOT select but which the
-  // model thinks would fit into leftover space on already-planned blocks.
-  // Cleared whenever a non-AI plan run starts (algorithm-based). Each
-  // suggestion has an "Add to selection & re-plan" action attached in
-  // the UI so the operator can accept it in one click.
+  // AI filler suggestions = open slabs the user did NOT select but which
+  // the model thinks would fit into leftover space on already-planned
+  // blocks. Cleared whenever a fresh algorithm run starts.
   const [aiSuggestions, setAiSuggestions] = useState<AISuggestion[]>([]);
+  // AI procurement suggestions = block dimensions the company should
+  // procure to unblock currently-unfittable slabs.
+  const [aiProcurement, setAiProcurement] = useState<AIProcurementSuggestion[]>([]);
 
   const allUsableBlocks = blocks.filter((block) => block.status === "available" || block.status === "reserved");
   // Blocks restricted to active facility first, then to ticked yards within it.
@@ -453,6 +464,7 @@ export function PlanningWorkbench({
     );
     // Old suggestions reference the previous facility's blocks — drop them.
     setAiSuggestions([]);
+    setAiProcurement([]);
     setAiStrategy(null);
   }
 
@@ -494,7 +506,11 @@ export function PlanningWorkbench({
     setAckUnmet(false);
     setAiStrategy(null);
     setAiError(null);
-    setAiSuggestions([]); // algorithm path doesn't produce suggestions
+    // Re-planning invalidates any prior AI suggestions — they were
+    // computed against the previous plan output and could now point
+    // to slabs/blocks that have moved.
+    setAiSuggestions([]);
+    setAiProcurement([]);
     setOriginalSelectedCount(filteredSlabs.length);
     if (filteredSlabs.length === 0) {
       setResult({ plan: [], unmet: [], totalWaste: 0 });
@@ -503,42 +519,69 @@ export function PlanningWorkbench({
     setResult(runOptimization(filteredBlocks, filteredSlabs, kerfMm));
   }
 
-  async function handleAIGenerate() {
-    if (!aiPlanAction) return;
-    const filteredBlocks = usableBlocks.filter((b) => selectedBlockIds.has(b.id));
-    const filteredSlabs = openSlabs.filter((s) => selectedSlabIds.has(s.id));
-    // The "available" pool = every open slab the user could have
-    // picked but didn't (matching stone of the selected blocks). The
-    // AI uses this in its Phase-2 suggestion scan.
-    const availableSlabs = openSlabs.filter((s) => !selectedSlabIds.has(s.id));
-
-    if (filteredSlabs.length === 0) {
-      setResult({ plan: [], unmet: [], totalWaste: 0 });
-      return;
-    }
+  /**
+   * Post-algorithm AI assistant. Sends the algorithm's plan + the
+   * unfittable slabs + the open inventory to the model and asks it
+   * for filler suggestions (slabs to add for tighter packing) and
+   * procurement suggestions (block sizes to order to unblock the
+   * unfittable slabs). Does NOT re-plan — the algorithm's output is
+   * authoritative.
+   */
+  async function handleGetAISuggestions() {
+    if (!aiSuggestionsAction || !result) return;
 
     setAiLoading(true);
     setAiError(null);
     setAiStrategy(null);
     setAiSuggestions([]);
-    setAckUnmet(false);
-    setOriginalSelectedCount(filteredSlabs.length);
+    setAiProcurement([]);
+
+    // Available pool = open slabs not in the current selection AND
+    // not in the produced plan's placed list.
+    const planSlabIds = new Set(result.plan.flatMap((pb) => pb.placed.map((p) => p.id)));
+    const availableSlabs = openSlabs.filter(
+      (s) => !selectedSlabIds.has(s.id) && !planSlabIds.has(s.id),
+    );
+
+    // Unfittable list — every slab in result.unmet, looked up in the
+    // current open-slab data so the AI sees full dims/stone/quality.
+    const slabById = new Map(openSlabs.map((s) => [s.id, s]));
+    const unfittable = result.unmet
+      .map((u) => slabById.get(u.id))
+      .filter((s): s is SlabRow => !!s)
+      .map((s) => ({
+        id: s.id, label: s.label, temple: s.temple,
+        stone: s.stone, length_ft: toNum(s.length_ft), width_ft: toNum(s.width_ft),
+        thickness_ft: toNum(s.thickness_ft),
+        quality: s.quality,
+        priority: s.priority ?? false,
+      }));
 
     try {
-      const response = await aiPlanAction({
-        blocks: filteredBlocks.map((b) => ({
-          id: b.id, stone: b.stone, yard: toNum(b.yard, 1),
-          length_ft: toNum(b.length_ft), width_ft: toNum(b.width_ft), height_ft: toNum(b.height_ft),
-          quality: b.quality,
+      const response = await aiSuggestionsAction({
+        plan: result.plan.map((pb) => ({
+          block: {
+            id: pb.blk.id,
+            stone: pb.blk.stone,
+            length_ft: pb.blk.l,
+            width_ft: pb.blk.w,
+            height_ft: pb.blk.h,
+            quality: pb.blk.quality ?? null,
+          },
+          placed: pb.placed.map((p) => ({
+            id: p.id, label: p.label, temple: p.temple,
+            length_ft: p.sw, width_ft: p.sh, thickness_ft: p.sd,
+          })),
+          biggest_leftover: pb.biggest
+            ? { length: pb.biggest.l, width: pb.biggest.w, height: pb.biggest.h }
+            : null,
+          efficiency_pct: pb.eff,
         })),
-        slabs: filteredSlabs.map((s) => ({
-          id: s.id, label: s.label, temple: s.temple, stone: s.stone,
-          length_ft: toNum(s.length_ft), width_ft: toNum(s.width_ft), thickness_ft: toNum(s.thickness_ft),
-          priority: s.priority ?? false, quality: s.quality,
-        })),
+        unfittableSlabs: unfittable,
         availableSlabs: availableSlabs.map((s) => ({
           id: s.id, label: s.label, temple: s.temple, stone: s.stone,
-          length_ft: toNum(s.length_ft), width_ft: toNum(s.width_ft), thickness_ft: toNum(s.thickness_ft),
+          length_ft: toNum(s.length_ft), width_ft: toNum(s.width_ft),
+          thickness_ft: toNum(s.thickness_ft),
           priority: s.priority ?? false, quality: s.quality,
         })),
         kerfMm,
@@ -550,36 +593,48 @@ export function PlanningWorkbench({
       }
 
       setAiStrategy(response.strategy ?? null);
-      // Defensive filter: only keep suggestions whose slab_id is
-      // genuinely in the open pool AND whose block_id appears in the
-      // assignments — protects against hallucinated IDs.
+
+      // Defensive filtering of fillers — block_id must be in the plan,
+      // slab_id must be in the available pool. Guards against the model
+      // hallucinating IDs.
+      const validBlockIds = new Set(result.plan.map((pb) => pb.blk.id));
       const validSlabIds = new Set(availableSlabs.map((s) => s.id));
-      const validBlockIds = new Set((response.assignments ?? []).map((a) => a.block_id));
-      const cleanSuggestions = (response.suggestions ?? []).filter(
-        (s) => validSlabIds.has(s.slab_id) && validBlockIds.has(s.block_id),
+      setAiSuggestions(
+        (response.fillerSuggestions ?? []).filter(
+          (s) => validBlockIds.has(s.block_id) && validSlabIds.has(s.slab_id),
+        ),
       );
-      setAiSuggestions(cleanSuggestions);
-      setResult(runOptimizationWithAIGroups(filteredBlocks, filteredSlabs, kerfMm, response.assignments ?? []));
+
+      // Procurement: keep entries whose unblocks_slab_ids reference
+      // genuinely-unfittable slabs (drop hallucinated refs).
+      const unfittableIds = new Set(unfittable.map((s) => s.id));
+      setAiProcurement(
+        (response.procurementSuggestions ?? []).map((p) => ({
+          ...p,
+          unblocks_slab_ids: p.unblocks_slab_ids.filter((id) => unfittableIds.has(id)),
+        })).filter((p) => p.unblocks_slab_ids.length > 0),
+      );
     } catch (err) {
-      setAiError(err instanceof Error ? err.message : "AI generation failed. Try again.");
+      setAiError(err instanceof Error ? err.message : "AI suggestion request failed. Try again.");
     } finally {
       setAiLoading(false);
     }
   }
 
   /**
-   * Add an AI suggestion to the user's slab selection and immediately
-   * re-run AI generation. Single-suggestion variant. Used by the
-   * per-row "Add & re-plan" buttons.
+   * Add an AI filler suggestion to the user's slab selection and
+   * immediately re-run the algorithmic plan so the new slab is placed.
    */
   function acceptSuggestion(slabId: string) {
     setSelectedSlabIds((prev) => new Set(prev).add(slabId));
     setAiSuggestions((prev) => prev.filter((s) => s.slab_id !== slabId));
-    // Re-run on the next tick so React picks up the new selection.
-    setTimeout(() => handleAIGenerate(), 0);
+    // Re-plan on the next tick so React picks up the new selection.
+    // NOTE: we use the ALGORITHM (generatePlan), not AI — the AI gave
+    // us suggestions, the algorithm packs them.
+    setTimeout(() => generatePlan(), 0);
   }
 
-  /** Bulk-accept every active suggestion + re-run. */
+  /** Bulk-accept every filler + re-plan. */
   function acceptAllSuggestions() {
     if (aiSuggestions.length === 0) return;
     setSelectedSlabIds((prev) => {
@@ -588,7 +643,7 @@ export function PlanningWorkbench({
       return next;
     });
     setAiSuggestions([]);
-    setTimeout(() => handleAIGenerate(), 0);
+    setTimeout(() => generatePlan(), 0);
   }
 
   const totalPlaced = result?.plan.reduce((sum, block) => sum + block.placed.length, 0) ?? 0;
@@ -861,18 +916,6 @@ export function PlanningWorkbench({
             <button className="primary-button" onClick={generatePlan} type="button">
               Generate 3D Cut Plan
             </button>
-            {aiPlanAction && (
-              <button
-                className="ghost-button"
-                onClick={handleAIGenerate}
-                type="button"
-                disabled={aiLoading}
-                style={{ display: "flex", alignItems: "center", gap: 6, opacity: aiLoading ? 0.7 : 1 }}
-              >
-                <span style={{ fontSize: 15 }}>✨</span>
-                {aiLoading ? "AI thinking…" : "Generate with AI"}
-              </button>
-            )}
           </div>
           {aiError && (
             <div style={{ fontSize: 12, color: "#DC2626", marginTop: 4, padding: "6px 10px", background: "rgba(220,38,38,0.05)", borderRadius: 6 }}>
@@ -882,24 +925,87 @@ export function PlanningWorkbench({
         </div>
       </section>
 
+      {/* ── AI suggestion trigger ────────────────────────────────────
+          Developer-only. Visible once an algorithm plan exists OR
+          the algorithm produced unfittable slabs. Fires the AI to
+          look for filler slabs (open-pool slabs that fit leftover
+          space) and procurement suggestions (block sizes to order
+          for unfittable slabs). Hidden after a successful AI run
+          since the panels themselves carry the actionable info. */}
+      {aiSuggestionsAction && result && (result.plan.length > 0 || result.unmet.length > 0) &&
+        aiSuggestions.length === 0 && aiProcurement.length === 0 && !aiStrategy && (
+          <section className="page-card" style={{ background: "rgba(124,58,237,0.04)", border: "1px solid rgba(124,58,237,0.2)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <span style={{ fontSize: 22, lineHeight: 1.3 }}>🤖</span>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#7c3aed", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                    AI Suggestions <span style={{ color: "#888", fontWeight: 500 }}>(developer-only)</span>
+                  </div>
+                  <p style={{ margin: "2px 0 0", fontSize: 13, color: "var(--text)" }}>
+                    {result.plan.length > 0 && result.unmet.length === 0 &&
+                      "Plan generated. Ask AI to suggest other open slabs that could fit into leftover space for tighter packing."}
+                    {result.plan.length > 0 && result.unmet.length > 0 &&
+                      `Plan generated with ${result.unmet.length} unfittable slab${result.unmet.length === 1 ? "" : "s"}. AI can suggest filler slabs AND block sizes to procure.`}
+                    {result.plan.length === 0 && result.unmet.length > 0 &&
+                      `${result.unmet.length} slab${result.unmet.length === 1 ? "" : "s"} couldn't be placed in current stock. AI can suggest block sizes to procure.`}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={handleGetAISuggestions}
+                disabled={aiLoading}
+                style={{ fontSize: 13, padding: "8px 18px", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 6 }}
+              >
+                <span style={{ fontSize: 14 }}>✨</span>
+                {aiLoading ? "AI thinking…" : "Get suggestions from AI"}
+              </button>
+            </div>
+            {aiError && (
+              <div style={{ fontSize: 12, color: "#DC2626", marginTop: 10, padding: "6px 10px", background: "rgba(220,38,38,0.05)", borderRadius: 6 }}>
+                ⚠ {aiError}
+              </div>
+            )}
+          </section>
+        )}
+
+      {/* ── AI Strategy banner ────────────────────────────────────── */}
       {aiStrategy && (
         <section className="page-card" style={{ background: "rgba(124,58,237,0.04)", border: "1px solid rgba(124,58,237,0.2)" }}>
-          <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-            <span style={{ fontSize: 20, flexShrink: 0, lineHeight: 1.3 }}>✨</span>
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#7c3aed", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 5 }}>
-                AI Strategy
+          <div style={{ display: "flex", gap: 10, alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: "1 1 360px", minWidth: 0 }}>
+              <span style={{ fontSize: 20, flexShrink: 0, lineHeight: 1.3 }}>✨</span>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#7c3aed", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 5 }}>
+                  AI Analysis
+                </div>
+                <p style={{ margin: 0, fontSize: 13, color: "var(--text)", lineHeight: 1.6 }}>{aiStrategy}</p>
               </div>
-              <p style={{ margin: 0, fontSize: 13, color: "var(--text)", lineHeight: 1.6 }}>{aiStrategy}</p>
             </div>
+            {/* Re-run button — useful if the user wants a second
+                opinion or has changed something. */}
+            {aiSuggestionsAction && result && (
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={handleGetAISuggestions}
+                disabled={aiLoading}
+                style={{ fontSize: 11, padding: "5px 12px", whiteSpace: "nowrap" }}
+              >
+                {aiLoading ? "AI thinking…" : "↻ Re-run AI"}
+              </button>
+            )}
           </div>
+          {aiError && (
+            <div style={{ fontSize: 12, color: "#DC2626", marginTop: 10, padding: "6px 10px", background: "rgba(220,38,38,0.05)", borderRadius: 6 }}>
+              ⚠ {aiError}
+            </div>
+          )}
         </section>
       )}
 
-      {/* AI suggestions — open slabs the model thinks would fit into
-          leftover space on already-planned blocks. Each row has an
-          "Add & re-plan" button that adds the slab to the selection
-          and re-runs AI generation in one click. */}
       {aiSuggestions.length > 0 && (() => {
         const slabById = new Map(openSlabs.map((s) => [s.id, s]));
         // Group suggestions by block for compact display
@@ -1005,6 +1111,93 @@ export function PlanningWorkbench({
             <p className="muted" style={{ fontSize: 11, marginTop: 10, marginBottom: 0, fontStyle: "italic" }}>
               These are AI estimates — the geometry engine will validate fit when you re-plan. If a suggestion
               doesn&rsquo;t pack as expected, the slab quietly drops out of the new plan.
+            </p>
+          </section>
+        );
+      })()}
+
+      {/* ── Procurement suggestions ─────────────────────────────────
+          Block dimensions the AI suggests procuring/ordering to
+          unblock slabs the algorithm flagged as unfittable. Surfaced
+          when result.unmet contains slabs (selected slabs that no
+          block in current stock could hold). */}
+      {aiProcurement.length > 0 && (() => {
+        const slabById = new Map(openSlabs.map((s) => [s.id, s]));
+        return (
+          <section
+            className="page-card"
+            style={{
+              background: "rgba(220,38,38,0.04)",
+              border: "1px solid rgba(220,38,38,0.3)",
+            }}
+          >
+            <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 10 }}>
+              <span style={{ fontSize: 22, lineHeight: 1.3 }}>📦</span>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                  Procurement suggestions
+                </div>
+                <p style={{ margin: "2px 0 0", fontSize: 13, color: "var(--text)" }}>
+                  AI recommends procuring {aiProcurement.length} block size{aiProcurement.length === 1 ? "" : "s"} to handle slabs that don&rsquo;t fit in current stock.
+                </p>
+              </div>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {aiProcurement.map((p, i) => (
+                <div
+                  key={i}
+                  style={{
+                    border: "1px solid rgba(220,38,38,0.2)",
+                    borderRadius: 8,
+                    padding: "12px 14px",
+                    background: "var(--surface)",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+                    <strong style={{ fontSize: 14 }}>
+                      {p.quantity}× {p.stone}
+                    </strong>
+                    <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 13, color: "var(--gold-dark)" }}>
+                      {p.recommended.length}″L × {p.recommended.width}″W × {p.recommended.height}″H
+                    </span>
+                    {p.quality && (
+                      <span className="role-pill" style={{ fontSize: 10 }}>Grade {p.quality}</span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 8, fontStyle: "italic" }}>
+                    {p.reasoning}
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--muted)" }}>
+                    <span style={{ fontWeight: 700, color: "#991b1b", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 10 }}>
+                      Unblocks {p.unblocks_slab_ids.length} slab{p.unblocks_slab_ids.length === 1 ? "" : "s"}:
+                    </span>
+                    <div style={{ marginTop: 3, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {p.unblocks_slab_ids.map((id) => {
+                        const slab = slabById.get(id);
+                        return (
+                          <span
+                            key={id}
+                            style={{
+                              fontFamily: "ui-monospace, monospace",
+                              fontSize: 11,
+                              padding: "2px 7px",
+                              background: "var(--surface-alt)",
+                              borderRadius: 10,
+                              color: "var(--text)",
+                            }}
+                          >
+                            {id}
+                            {slab && <span style={{ color: "var(--muted)", marginLeft: 4 }}>({slab.length_ft}×{slab.width_ft}×{slab.thickness_ft}″)</span>}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="muted" style={{ fontSize: 11, marginTop: 10, marginBottom: 0, fontStyle: "italic" }}>
+              AI estimate based on the unfittable slabs — verify dims with your supplier before placing the order.
             </p>
           </section>
         );

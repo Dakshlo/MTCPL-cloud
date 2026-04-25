@@ -46,6 +46,44 @@ export type AIplanResponse = {
   error?: string;
 };
 
+/**
+ * Procurement suggestion: a block dimension the AI thinks the company
+ * should buy/order to unblock currently-unfittable slabs. Surfaced when
+ * the algorithm marked one or more slabs as "no compatible block in
+ * stock".
+ */
+export type AIProcurementSuggestion = {
+  /** Stone type the procured block must be (PinkStone, WhiteStone, etc.). */
+  stone: string;
+  /** Recommended block dimensions (inches). */
+  recommended: { length: number; width: number; height: number };
+  /** Quality grade required (A or B); null if any. */
+  quality: string | null;
+  /** How many of these blocks would unblock all the currently-listed slabs. */
+  quantity: number;
+  /** Which currently-unfittable slabs this block size would handle. */
+  unblocks_slab_ids: string[];
+  /** One-sentence justification — why these dims, why this quantity. */
+  reasoning: string;
+};
+
+/**
+ * Response shape for the post-algorithm AI suggestions action. The
+ * algorithm runs first (deterministic geometry); the AI then walks
+ * its output and produces two kinds of advice on top:
+ *   1. fillerSuggestions — open-pool slabs that would slot into
+ *      leftover face/depth on already-planned blocks.
+ *   2. procurementSuggestions — block sizes the company should
+ *      order to handle the slabs the algorithm couldn't fit.
+ */
+export type AISuggestionsResponse = {
+  /** Always populated, even if both lists are empty. 1–3 sentences of context. */
+  strategy: string;
+  fillerSuggestions: AISuggestion[];
+  procurementSuggestions: AIProcurementSuggestion[];
+  error?: string;
+};
+
 // ── AI Plan Generation ──────────────────────────────────────────────────────
 
 export async function generateAIPlanAction(payload: {
@@ -407,6 +445,295 @@ hit a count.)`;
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
     return { assignments: [], unassigned_slab_ids: [], unassigned_reason: "", strategy: "", error: `AI call failed: ${msg}` };
+  }
+}
+
+/**
+ * Post-algorithm AI suggestions. Developer-only.
+ *
+ * Run AFTER the algorithmic planner has produced its plan. The AI is
+ * NOT asked to plan — it walks the algorithm's output and produces
+ * two kinds of advice:
+ *
+ *   1. fillerSuggestions  — open-pool slabs that would fit into
+ *                            leftover face area / depth budget on
+ *                            already-planned blocks. Lets the operator
+ *                            pack the cutting session tighter without
+ *                            having to think about geometry.
+ *
+ *   2. procurementSuggestions — block dimensions the company should
+ *                            order to handle slabs the algorithm
+ *                            couldn't fit anywhere ("unfittable"
+ *                            list). Grouped per stone with min-size
+ *                            recommendations.
+ *
+ * If the plan placed everything cleanly AND there's no leftover space
+ * worth mentioning, both lists come back empty — that's a valid
+ * answer ("nothing to suggest, plan is already optimal").
+ */
+export async function aiSuggestionsAction(payload: {
+  /** Algorithm-produced plan: each entry is one block + the slabs placed on it. */
+  plan: Array<{
+    block: {
+      id: string;
+      stone: string;
+      length_ft: number;
+      width_ft: number;
+      height_ft: number;
+      quality: string | null;
+    };
+    /** Slabs already on this block, with the dims as cut. */
+    placed: Array<{
+      id: string;
+      label: string;
+      temple: string;
+      length_ft: number;
+      width_ft: number;
+      thickness_ft: number;
+    }>;
+    /** Largest leftover space the engine reported, if any. */
+    biggest_leftover: { length: number; width: number; height: number } | null;
+    /** Computed "% volume used" — 0–99. */
+    efficiency_pct: number;
+  }>;
+  /** Slabs the algorithm reported as not fittable — drives procurement. */
+  unfittableSlabs: Array<{
+    id: string;
+    label: string;
+    temple: string;
+    stone: string | null;
+    length_ft: number;
+    width_ft: number;
+    thickness_ft: number;
+    quality: string | null;
+    priority: boolean;
+  }>;
+  /** Open slabs not in the plan — pool for filler suggestions. */
+  availableSlabs: Array<{
+    id: string;
+    label: string;
+    temple: string;
+    stone: string | null;
+    length_ft: number;
+    width_ft: number;
+    thickness_ft: number;
+    priority: boolean;
+    quality: string | null;
+  }>;
+  kerfMm: number;
+}): Promise<AISuggestionsResponse> {
+  await requireAuth(["developer"]);
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    return {
+      strategy: "",
+      fillerSuggestions: [],
+      procurementSuggestions: [],
+      error: "ANTHROPIC_API_KEY is not set in environment variables.",
+    };
+  }
+
+  const { plan, unfittableSlabs, availableSlabs, kerfMm } = payload;
+
+  // Empty plan AND no unfittable slabs = nothing to suggest about. Save
+  // a round-trip and return clean empties.
+  if (plan.length === 0 && unfittableSlabs.length === 0) {
+    return {
+      strategy: "Nothing to suggest — no planned blocks and no unfittable slabs.",
+      fillerSuggestions: [],
+      procurementSuggestions: [],
+    };
+  }
+
+  // ── Cap available pool size for prompt budget ────────────────────────
+  const AVAILABLE_CAP = 200;
+  const sortedAvailable = [...availableSlabs]
+    .sort((a, b) => {
+      const am = Math.max(a.length_ft, a.width_ft);
+      const bm = Math.max(b.length_ft, b.width_ft);
+      return am - bm; // smallest-anchor first — easiest to fit slot in corners
+    })
+    .slice(0, AVAILABLE_CAP);
+
+  // ── Render plan blocks with their leftover space ──────────────────────
+  const planLines = plan.length === 0
+    ? "  (no planned blocks — every selected slab was unfittable)"
+    : plan
+        .map((p) => {
+          const placedSummary = p.placed
+            .map((s) => `${s.id} (${s.length_ft}×${s.width_ft}×${s.thickness_ft}″)`)
+            .join(", ");
+          const left = p.biggest_leftover
+            ? `${p.biggest_leftover.length}×${p.biggest_leftover.width}×${p.biggest_leftover.height}″`
+            : "≈0";
+          return `  ${p.block.id} [${p.block.stone}, ${p.block.length_ft}×${p.block.width_ft}×${p.block.height_ft}″, quality:${p.block.quality ?? "standard"}, ${p.efficiency_pct}% used]
+    placed:   ${placedSummary || "(none)"}
+    leftover: ${left}`;
+        })
+        .join("\n");
+
+  const unfittableLines = unfittableSlabs.length === 0
+    ? "  (none — every selected slab was placed)"
+    : unfittableSlabs
+        .map((s) => {
+          const anchor = Math.max(s.length_ft, s.width_ft);
+          return `  ${s.id}${s.priority ? " ⚠PRIORITY" : ""} [anchor=${anchor}″]: ${s.temple} | ${s.stone ?? "any-stone"} | ${s.length_ft}×${s.width_ft}×${s.thickness_ft}″ | ${s.label}${s.quality ? ` | quality:${s.quality}` : ""}`;
+        })
+        .join("\n");
+
+  const availableLines = sortedAvailable.length === 0
+    ? "  (no other open slabs in inventory — nothing to fill leftover space with)"
+    : sortedAvailable
+        .map((s) => {
+          const anchor = Math.max(s.length_ft, s.width_ft);
+          return `  ${s.id}${s.priority ? " ⚠PRIORITY" : ""} [anchor=${anchor}″]: ${s.temple} | ${s.stone ?? "any-stone"} | ${s.length_ft}×${s.width_ft}×${s.thickness_ft}″ | ${s.label}${s.quality ? ` | quality:${s.quality}` : ""}`;
+        })
+        .join("\n");
+  const availableTrunc = availableSlabs.length > AVAILABLE_CAP
+    ? `\n  …${availableSlabs.length - AVAILABLE_CAP} more available slabs not shown (smallest-anchor first)`
+    : "";
+
+  const prompt = `You are an inventory advisor for MTCPL, a stone-fabrication company.
+
+The deterministic cut-planning algorithm has just produced a plan from
+the user's selection. Your role is NOT to re-plan — it's to look at the
+output and give two kinds of actionable advice on top:
+
+  1. FILLER SUGGESTIONS — slabs from the open inventory the user did
+     NOT select but which would slot into the leftover face area /
+     depth budget on the already-planned blocks. Goal: stop the
+     operator starting a cutting session with a half-empty block.
+
+  2. PROCUREMENT SUGGESTIONS — block dimensions the company should
+     order or source to unblock slabs the algorithm flagged as
+     UNFITTABLE (no block in current stock fits them). Goal: feed
+     these into the procurement queue so the company isn't stuck with
+     unfillable orders.
+
+═══════════════════════════════════════════════════════════════════
+INPUT
+═══════════════════════════════════════════════════════════════════
+
+Blade kerf: ${kerfMm}mm per cut.
+
+PLANNED BLOCKS (${plan.length}) — each line shows the block, slabs
+already cut from it, and the largest leftover space the engine measured:
+${planLines}
+
+UNFITTABLE SLABS (${unfittableSlabs.length}) — slabs the algorithm
+could NOT place anywhere in current stock (no compatible block long enough):
+${unfittableLines}
+
+OTHER OPEN SLABS (${availableSlabs.length}, capped at ${AVAILABLE_CAP},
+smallest-anchor first) — the pool you can mine for fillers:
+${availableLines}${availableTrunc}
+
+═══════════════════════════════════════════════════════════════════
+PHASE 1 — FILLER SUGGESTIONS
+═══════════════════════════════════════════════════════════════════
+
+For each PLANNED BLOCK above:
+  a. Read the leftover space (last value on each block's line). If the
+     leftover is empty/tiny (<25% of block face area), skip — not
+     worth filling.
+  b. From the OTHER OPEN SLABS list, find slabs that:
+     • share the block's stone (or have stone="any-stone"),
+     • quality compatibility holds (Grade A slab needs Grade A block;
+       Grade B slab needs A or B; standard works on any),
+     • their two face dims fit the leftover space in some orientation,
+     • their depth dim fits the leftover depth budget.
+  c. Prefer slabs that:
+     • share the same TEMPLE as slabs already on this block (one trip),
+     • have small anchor dims (slot into corners),
+     • have the same THICKNESS as slabs already on this block — same
+       cut layer means no extra kerf wasted.
+  d. Cap: at most 2 per block, 8 total. ZERO is a valid answer.
+
+═══════════════════════════════════════════════════════════════════
+PHASE 2 — PROCUREMENT SUGGESTIONS
+═══════════════════════════════════════════════════════════════════
+
+If the UNFITTABLE list is empty, return procurementSuggestions: [].
+Otherwise:
+
+For each STONE that has unfittable slabs:
+  a. Find the largest unfittable slab of that stone (by anchor dim).
+  b. Recommend a block size:
+     • length ≥ slab.anchor + 4″ (safety margin for kerf + clamp),
+     • width  ≥ second slab dim + 2″,
+     • height ≥ slab.thickness × (number of unfittable slabs of similar
+       size, capped at 8 layers; min 4″).
+  c. Quantity: ceil(total unfittable area of this stone / face area
+     of one recommended block). Never less than 1.
+  d. List which unfittable slab IDs this would unblock.
+  e. If different unfittable slabs of the same stone are wildly
+     different in size (e.g. 145″ + 70″), output TWO procurement
+     entries — one tall one for the 145″, one shorter one for the 70″.
+
+═══════════════════════════════════════════════════════════════════
+OUTPUT — strict JSON, no markdown fences, no prose outside the JSON
+═══════════════════════════════════════════════════════════════════
+
+{
+  "strategy": "1–3 sentences. Required: number of fillers proposed, number of procurement entries, total slabs unblocked by procurement (if any).",
+  "fillerSuggestions": [
+    {
+      "slab_id": "MH-0099",
+      "block_id": "MT-B-040",
+      "reasoning": "One sentence. Cite leftover dims and matching thickness/temple."
+    }
+  ],
+  "procurementSuggestions": [
+    {
+      "stone": "PinkStone",
+      "recommended": { "length": 150, "width": 30, "height": 24 },
+      "quality": "A",
+      "quantity": 1,
+      "unblocks_slab_ids": ["MH-0142"],
+      "reasoning": "One sentence. Cite the largest unfittable slab and why these dims."
+    }
+  ]
+}
+
+Both arrays may be []. Quality of reasoning matters more than quantity —
+DO NOT invent low-quality entries to hit a count.`;
+
+  try {
+    const Anthropic = (await import("@anthropic-ai/sdk")).default;
+    const anthropic = new Anthropic({ apiKey });
+
+    const message = await anthropic.messages.create({
+      model: "claude-sonnet-4-5",
+      max_tokens: 8192,
+      temperature: 0.2,
+      messages: [{ role: "user", content: prompt }],
+    });
+
+    const raw = message.content[0].type === "text" ? message.content[0].text.trim() : "";
+
+    // Strip markdown fences + prose around the JSON
+    let jsonText = raw.replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/i, "").trim();
+    const jsonStart = jsonText.indexOf("{");
+    const jsonEnd = jsonText.lastIndexOf("}");
+    if (jsonStart !== -1 && jsonEnd !== -1) {
+      jsonText = jsonText.slice(jsonStart, jsonEnd + 1);
+    }
+
+    const parsed = JSON.parse(jsonText) as Partial<AISuggestionsResponse>;
+    return {
+      strategy: parsed.strategy ?? "",
+      fillerSuggestions: Array.isArray(parsed.fillerSuggestions) ? parsed.fillerSuggestions : [],
+      procurementSuggestions: Array.isArray(parsed.procurementSuggestions) ? parsed.procurementSuggestions : [],
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unknown error";
+    return {
+      strategy: "",
+      fillerSuggestions: [],
+      procurementSuggestions: [],
+      error: `AI call failed: ${msg}`,
+    };
   }
 }
 
