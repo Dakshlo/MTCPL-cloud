@@ -311,6 +311,118 @@ export function ManualCutModal({
               </p>
             ) : (
               <>
+                {/* Selected chips — gives the user a clear running view
+                 *  of which slabs they've picked, with one-click remove
+                 *  per chip. Especially helpful when the user is
+                 *  scrolled deep into a long list and wants to confirm
+                 *  what's already chosen. */}
+                {selectedIds.size > 0 && (() => {
+                  const selectedById = new Map(filteredSlabs.map((s) => [s.id, s] as const));
+                  // Pick from filteredSlabs order so chips display in
+                  // the same order as the list. If a selected slab is
+                  // filtered out (e.g. user typed a search after picking),
+                  // we still want to show its chip — fall back to the
+                  // raw stoneNarrowed list.
+                  const fallbackById = new Map(stoneNarrowed.map((s) => [s.id, s] as const));
+                  const ordered = [...selectedIds]
+                    .map((id) => selectedById.get(id) ?? fallbackById.get(id))
+                    .filter((s): s is NonNullable<typeof s> => Boolean(s));
+                  return (
+                    <div
+                      style={{
+                        marginBottom: 10,
+                        padding: "8px 10px 10px",
+                        background: "rgba(232,197,114,0.10)",
+                        border: "1px solid rgba(232,197,114,0.35)",
+                        borderRadius: 8,
+                        maxHeight: 110,
+                        overflowY: "auto",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          color: "var(--gold-dark)",
+                          textTransform: "uppercase",
+                          letterSpacing: "0.05em",
+                          marginBottom: 6,
+                        }}
+                      >
+                        <span>✓ {selectedIds.size} selected</span>
+                        <button
+                          type="button"
+                          onClick={clearAllSelections}
+                          style={{
+                            background: "transparent",
+                            border: "none",
+                            color: "var(--muted)",
+                            fontSize: 11,
+                            fontWeight: 600,
+                            textTransform: "none",
+                            letterSpacing: 0,
+                            cursor: "pointer",
+                            padding: 0,
+                          }}
+                        >
+                          Clear all
+                        </button>
+                      </div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                        {ordered.map((s) => (
+                          <span
+                            key={s.id}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 4,
+                              padding: "3px 3px 3px 9px",
+                              background: "var(--surface)",
+                              border: "1px solid var(--gold-border)",
+                              borderRadius: 4,
+                              fontSize: 11,
+                              fontFamily: "ui-monospace, monospace",
+                              fontWeight: 600,
+                              color: "var(--text)",
+                            }}
+                          >
+                            {s.id}
+                            <button
+                              type="button"
+                              onClick={() => toggleSlab(s.id)}
+                              style={{
+                                background: "transparent",
+                                border: "none",
+                                cursor: "pointer",
+                                padding: "1px 5px",
+                                fontSize: 12,
+                                color: "var(--muted)",
+                                lineHeight: 1,
+                                borderRadius: 3,
+                              }}
+                              title={`Remove ${s.id}`}
+                              aria-label={`Remove ${s.id} from selection`}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.background = "rgba(220,38,38,0.12)";
+                                e.currentTarget.style.color = "var(--danger)";
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.background = "transparent";
+                                e.currentTarget.style.color = "var(--muted)";
+                              }}
+                            >
+                              ✕
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {/* Filter / control row */}
                 <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap", alignItems: "stretch" }}>
                   <input
