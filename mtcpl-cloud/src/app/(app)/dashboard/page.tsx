@@ -33,9 +33,44 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
   const today = istToday(0);
   const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
 
+  // Paginated fetch for the urgent-alert push panel — Supabase's
+  // PostgREST caps single .select() calls at 1000 rows. Once total
+  // open+planned slabs cross that threshold (currently 1500+), the
+  // panel silently truncates and shows "Show all 1000 slabs (997 more)"
+  // even when the real total is way higher. Loop in 1000-row pages
+  // via .range() to grab everything.
+  type PushableSlabRow = {
+    id: string;
+    label: string | null;
+    temple: string;
+    stone: string | null;
+    status: string;
+    priority: boolean | null;
+    deadline: string | null;
+    priority_note: string | null;
+  };
+  async function fetchAllPushableSlabs(): Promise<PushableSlabRow[]> {
+    const PAGE = 1000;
+    const out: PushableSlabRow[] = [];
+    for (let offset = 0; offset < 50000; offset += PAGE) {
+      const { data, error } = await admin
+        .from("slab_requirements")
+        .select("id, label, temple, stone, status, priority, deadline, priority_note")
+        .in("status", ["open", "planned"])
+        .order("priority", { ascending: false })
+        .order("created_at", { ascending: true })
+        .range(offset, offset + PAGE - 1);
+      if (error) throw new Error(error.message);
+      if (!data || data.length === 0) break;
+      out.push(...(data as PushableSlabRow[]));
+      if (data.length < PAGE) break;
+    }
+    return out;
+  }
+
   const [
     { data: prioritySlabs },
-    { data: pushableSlabs },
+    pushableSlabs,
     { data: onlineUsers },
   ] = await Promise.all([
     admin
@@ -43,13 +78,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
       .select("id, label, temple, deadline, priority_note")
       .eq("priority", true)
       .in("status", ["open", "planned"]),
-    admin
-      .from("slab_requirements")
-      .select("id, label, temple, stone, status, priority, deadline, priority_note")
-      .in("status", ["open", "planned"])
-      .order("priority", { ascending: false })
-      .order("created_at", { ascending: true })
-      .limit(1000),
+    fetchAllPushableSlabs(),
     admin
       .from("profiles")
       .select("id, full_name, role")
@@ -93,7 +122,19 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
   }
 
   // ── Derived display values ────────────────────────────────────────
-  const pushList = (pushableSlabs ?? []) as Array<{ id: string; label: string; temple: string; stone: string | null; status: string; priority: boolean; deadline: string | null; priority_note: string | null }>;
+  // pushableSlabs is now non-null (paginated fetcher returns []) so no
+  // ?? needed. Coerce nullable label/priority to non-null shapes the
+  // PushPanel expects.
+  const pushList = pushableSlabs.map((s) => ({
+    id: s.id,
+    label: s.label ?? "",
+    temple: s.temple,
+    stone: s.stone,
+    status: s.status,
+    priority: s.priority ?? false,
+    deadline: s.deadline,
+    priority_note: s.priority_note,
+  }));
   const pushed = params.pushed === "1";
   const onlineList = onlineUsers ?? [];
 
