@@ -152,35 +152,53 @@ export function SlabSelector({
   const allPriority = useMemo(() => slabs.filter(s => s.priority), [slabs]);
   const allNormal   = useMemo(() => slabs.filter(s => !s.priority), [slabs]);
 
-  // Priority section: only search can narrow it (stone/temple/quality/priority filters don't hide these)
-  const filteredPriority = useMemo(() => {
-    if (!q.trim()) return allPriority;
-    const lower = q.toLowerCase();
-    return allPriority.filter(s =>
-      s.id.toLowerCase().includes(lower) ||
-      s.label.toLowerCase().includes(lower) ||
-      s.temple.toLowerCase().includes(lower)
-    );
-  }, [allPriority, q]);
+  // ── Filtering ──────────────────────────────────────────────────────
+  // Both priority AND normal slabs go through the SAME dropdown filters
+  // (stone, temple, quality, search). Earlier the priority bucket
+  // bypassed everything except search — so filtering by Stone=PinkStone
+  // would still show priority YellowMarble slabs at the top, which
+  // confused users into thinking the filter was broken. Now if you
+  // pick a stone/temple/quality, both buckets respect it.
+  //
+  // The Priority dropdown itself ("All / Urgent only / Normal only")
+  // toggles which BUCKET is visible:
+  //   • all          → both buckets
+  //   • true         → only priority bucket
+  //   • false        → only normal bucket
 
-  // Normal section: filtered by everything
-  const filtered = useMemo(() => {
-    let rows = [...allNormal];
-
+  // Shared sub-filter applied to either bucket. Pure function of the
+  // dropdown values + search query.
+  function applyDropdowns(rows: Slab[]): Slab[] {
+    let out = rows;
     if (q.trim()) {
       const lower = q.toLowerCase();
-      rows = rows.filter(s =>
+      out = out.filter(s =>
         s.id.toLowerCase().includes(lower) ||
         s.label.toLowerCase().includes(lower) ||
         s.temple.toLowerCase().includes(lower)
       );
     }
-    if (stoneFilter !== "all") rows = rows.filter(s => s.stone === stoneFilter);
-    if (templeFilter !== "all") rows = rows.filter(s => s.temple === templeFilter);
-    if (qualityFilter === "A") rows = rows.filter(s => s.quality === "A");
-    else if (qualityFilter === "B") rows = rows.filter(s => s.quality === "B");
-    else if (qualityFilter === "none") rows = rows.filter(s => !s.quality);
-    // priorityFilter "true" → already handled above; "false" → normal rows only (already split)
+    if (stoneFilter !== "all") out = out.filter(s => s.stone === stoneFilter);
+    if (templeFilter !== "all") out = out.filter(s => s.temple === templeFilter);
+    if (qualityFilter === "A") out = out.filter(s => s.quality === "A");
+    else if (qualityFilter === "B") out = out.filter(s => s.quality === "B");
+    else if (qualityFilter === "none") out = out.filter(s => !s.quality);
+    return out;
+  }
+
+  const filteredPriority = useMemo(() => {
+    // Hidden entirely when user picks "Normal only".
+    if (priorityFilter === "false") return [];
+    return applyDropdowns(allPriority);
+    // applyDropdowns is recomputed on every render (cheap closure) — its
+    // inputs are tracked in the dep array.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allPriority, q, stoneFilter, templeFilter, qualityFilter, priorityFilter]);
+
+  const filtered = useMemo(() => {
+    // Hidden entirely when user picks "Urgent only".
+    if (priorityFilter === "true") return [];
+    let rows = applyDropdowns(allNormal);
 
     rows.sort((a, b) => {
       let av: string | number = "";
@@ -198,7 +216,10 @@ export function SlabSelector({
     });
 
     return rows;
-  }, [allNormal, q, stoneFilter, templeFilter, qualityFilter, sortBy, sortDir]);
+    // applyDropdowns is recomputed on every render — inputs are tracked
+    // in the dep array below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allNormal, q, stoneFilter, templeFilter, qualityFilter, priorityFilter, sortBy, sortDir]);
 
   // Status filter still goes via URL (server re-fetch)
   function setStatusFilter(value: string) {
