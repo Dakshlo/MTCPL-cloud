@@ -35,11 +35,39 @@ export function AuthForm() {
 
     try {
       const normalized = normalizePhone(phone);
-      const { error: err } = await supabase.auth.signInWithOtp({ phone: normalized });
+      // 20-second timeout race so the button never hangs forever when
+      // Supabase / the SMS provider is unreachable. Without this, a
+      // network stall or SMS-provider outage left the form stuck on
+      // "Sending code…" with no feedback to the user.
+      const otpPromise = supabase.auth.signInWithOtp({ phone: normalized });
+      const timeoutPromise = new Promise<{ error: Error }>((resolve) =>
+        setTimeout(
+          () => resolve({ error: new Error("Request timed out — server didn't respond in 20 seconds. Check network or contact support.") }),
+          20000,
+        ),
+      );
+      const result = await Promise.race([otpPromise, timeoutPromise]);
+      const err = (result as { error?: { message: string } | null }).error;
       if (err) throw err;
       setStep("otp");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not send OTP. Check the number and try again.");
+      const raw = err instanceof Error ? err.message : String(err);
+      // Surface raw Supabase error verbatim so the operator can act on
+      // it (e.g. "SMS rate limit exceeded", "Phone signups are disabled
+      // for this project", "Invalid phone number"). Also log to console
+      // for the developer's own debugging.
+      // eslint-disable-next-line no-console
+      console.error("[auth-form] signInWithOtp failed:", err);
+      let friendly = raw;
+      // Common cases — append a hint so the end-user knows what to try.
+      if (raw.toLowerCase().includes("rate limit")) {
+        friendly += "\n\nTip: SMS provider has hit a rate limit. Wait 60 seconds and retry.";
+      } else if (raw.toLowerCase().includes("signup") || raw.toLowerCase().includes("disabled")) {
+        friendly += "\n\nTip: This phone number isn't registered. Ask the developer to add it to the profiles table first.";
+      } else if (raw.toLowerCase().includes("timed out")) {
+        friendly += "\n\nTip: Check your internet connection. If it's working, the Supabase project / SMS provider may be down.";
+      }
+      setError(friendly);
     } finally {
       setPending(false);
     }
@@ -153,7 +181,17 @@ export function AuthForm() {
       )}
 
       {error ? (
-        <p style={{ marginTop: 14, fontSize: 13, color: "var(--danger)" }}>{error}</p>
+        <p
+          style={{
+            marginTop: 14,
+            fontSize: 13,
+            color: "var(--danger)",
+            whiteSpace: "pre-wrap", // honour the \n\n in friendly hint text
+            lineHeight: 1.5,
+          }}
+        >
+          {error}
+        </p>
       ) : null}
     </div>
   );
