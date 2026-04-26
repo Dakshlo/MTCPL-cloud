@@ -886,10 +886,19 @@ export async function fitBlockToFillAction(payload: {
 
     // Stepwise filter so we can populate per-block diagnostics. Stone
     // first (slab.stone === null is treated as "any"), then quality.
+    //
+    // Quality rule MUST match the actual planning algorithm in
+    // packing.ts (runOptimization → tryPackBlock filter). The algorithm
+    // only rejects Grade-A slabs on Grade-B blocks. Null/standard
+    // blocks accept anything (because null = "unspecified", not
+    // "definitely lower than A"). Earlier this fitter had a stricter
+    // rule that rejected A slabs on null blocks too, which dropped
+    // hundreds of valid candidates and produced confusing "0 fit"
+    // results when there was clearly room.
     const stoneMatches = availableSlabs.filter((s) => !s.stone || s.stone === block.stone);
     const qualityMatches = stoneMatches.filter((s) => {
-      if (s.quality === "A" && block.quality !== "A") return false;
-      if (s.quality === "B" && block.quality !== "A" && block.quality !== "B") return false;
+      // Only one rule: Grade-A slab on Grade-B block is rejected.
+      if (block.quality === "B" && s.quality === "A") return false;
       return true;
     });
     const candidates = qualityMatches;
