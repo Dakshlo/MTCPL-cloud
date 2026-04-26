@@ -73,7 +73,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           {children}
         </div>
       </main>
-      <MobileNav role={profile.role} />
+      <MobileNav role={profile.role} displayName={displayName} />
       <Toast />
     </div>
   );

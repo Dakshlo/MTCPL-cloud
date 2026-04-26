@@ -126,7 +126,29 @@ export function Sidebar({
   themePreference?: "light" | "dark" | null;
 }) {
   const pathname = usePathname();
-  const visibleEntries = navEntries.filter((entry) => entry.roles.includes(role));
+
+  // Standard role-based filter.
+  let visibleEntries = navEntries.filter((entry) => entry.roles.includes(role));
+
+  // ── Name-based overrides ───────────────────────────────────────────
+  // Specific named users get extra nav entries even if their stored
+  // role wouldn't normally show them. Rajesh is a team_head in the
+  // database but should still see Dashboard (where his stripped
+  // Block-Journey-only variant is rendered). Match policy mirrors
+  // canTransferPlannedSlabs in src/lib/cutting-permissions.ts —
+  // substring match on UPPERCASED full name.
+  const upperName = (displayName ?? "").toUpperCase();
+  const isNamedTrustedUser = upperName.includes("RAJESH") || upperName.includes("NARESH");
+  if (isNamedTrustedUser && !visibleEntries.some((e) => e.type !== "divider" && e.href === "/dashboard")) {
+    // Inject Dashboard at the very top of the nav (matches the order
+    // owners + developers see).
+    const dashboardEntry = navEntries.find(
+      (e) => e.type !== "divider" && (e as NavItem).href === "/dashboard",
+    );
+    if (dashboardEntry) {
+      visibleEntries = [dashboardEntry, ...visibleEntries];
+    }
+  }
 
   function isActive(href: string) {
     if (href === "/dashboard") return pathname === "/dashboard";
