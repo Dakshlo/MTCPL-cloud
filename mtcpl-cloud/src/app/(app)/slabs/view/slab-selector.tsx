@@ -37,6 +37,18 @@ function stoneLabel(stone: string | null) {
   return stone.replace(/Stone$/i, "") || stone;
 }
 
+/**
+ * Normalised string equality — used for stone/temple comparisons. Both
+ * sides are trimmed and lower-cased so a row with `stone = "PinkStone "`
+ * (trailing whitespace) still matches when the user picks "PinkStone"
+ * from the cascading dropdown. Defensive: production data is supposed
+ * to be clean but row-by-row entry occasionally leaves whitespace.
+ */
+function eqNorm(a: string | null | undefined, b: string): boolean {
+  if (a == null) return false;
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
 type SortCol = "id" | "temple" | "stone" | "cft" | "status" | "created_at";
 
 export function SlabSelector({
@@ -78,7 +90,7 @@ export function SlabSelector({
   // show), so including them would lie about what's reachable.
   const availableStones = useMemo(() => {
     let rows = allNormalAll();
-    if (templeFilter !== "all") rows = rows.filter((s) => s.temple === templeFilter);
+    if (templeFilter !== "all") rows = rows.filter((s) => eqNorm(s.temple, templeFilter));
     if (qualityFilter === "A") rows = rows.filter((s) => s.quality === "A");
     else if (qualityFilter === "B") rows = rows.filter((s) => s.quality === "B");
     else if (qualityFilter === "none") rows = rows.filter((s) => !s.quality);
@@ -90,8 +102,15 @@ export function SlabSelector({
         s.temple.toLowerCase().includes(lower),
       );
     }
+    // Canonicalise on insert — `"PinkStone"` and `"PinkStone "` (trailing
+    // whitespace) collapse into a single dropdown option. Without this
+    // the cascading dropdown shows two visually-identical options and
+    // user picks one variant whose `===` filter rejects the other rows.
     const set = new Set<string>();
-    for (const s of rows) if (s.stone) set.add(s.stone);
+    for (const s of rows) {
+      const t = s.stone?.trim();
+      if (t) set.add(t);
+    }
     return [...set].sort();
     // allNormalAll changes only when slabs prop changes — declared below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -99,7 +118,7 @@ export function SlabSelector({
 
   const availableTemples = useMemo(() => {
     let rows = allNormalAll();
-    if (stoneFilter !== "all") rows = rows.filter((s) => s.stone === stoneFilter);
+    if (stoneFilter !== "all") rows = rows.filter((s) => eqNorm(s.stone, stoneFilter));
     if (qualityFilter === "A") rows = rows.filter((s) => s.quality === "A");
     else if (qualityFilter === "B") rows = rows.filter((s) => s.quality === "B");
     else if (qualityFilter === "none") rows = rows.filter((s) => !s.quality);
@@ -112,7 +131,10 @@ export function SlabSelector({
       );
     }
     const set = new Set<string>();
-    for (const s of rows) if (s.temple) set.add(s.temple);
+    for (const s of rows) {
+      const t = s.temple?.trim();
+      if (t) set.add(t);
+    }
     return [...set].sort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slabs, stoneFilter, qualityFilter, q]);
@@ -126,12 +148,20 @@ export function SlabSelector({
   // stale. Reset it to "all" instead of leaving the user with a
   // dropdown displaying a value that's not in its options.
   useEffect(() => {
-    if (stoneFilter !== "all" && availableStones.length > 0 && !availableStones.includes(stoneFilter)) {
+    if (
+      stoneFilter !== "all" &&
+      availableStones.length > 0 &&
+      !availableStones.some((s) => eqNorm(s, stoneFilter))
+    ) {
       setStoneFilter("all");
     }
   }, [availableStones, stoneFilter]);
   useEffect(() => {
-    if (templeFilter !== "all" && availableTemples.length > 0 && !availableTemples.includes(templeFilter)) {
+    if (
+      templeFilter !== "all" &&
+      availableTemples.length > 0 &&
+      !availableTemples.some((t) => eqNorm(t, templeFilter))
+    ) {
       setTempleFilter("all");
     }
   }, [availableTemples, templeFilter]);
@@ -167,7 +197,9 @@ export function SlabSelector({
   //   • false        → only normal bucket
 
   // Shared sub-filter applied to either bucket. Pure function of the
-  // dropdown values + search query.
+  // dropdown values + search query. Stone + temple use eqNorm so any
+  // whitespace/case variants in the data row don't silently bypass the
+  // filter (see helper definition at top of file).
   function applyDropdowns(rows: Slab[]): Slab[] {
     let out = rows;
     if (q.trim()) {
@@ -178,8 +210,8 @@ export function SlabSelector({
         s.temple.toLowerCase().includes(lower)
       );
     }
-    if (stoneFilter !== "all") out = out.filter(s => s.stone === stoneFilter);
-    if (templeFilter !== "all") out = out.filter(s => s.temple === templeFilter);
+    if (stoneFilter !== "all") out = out.filter(s => eqNorm(s.stone, stoneFilter));
+    if (templeFilter !== "all") out = out.filter(s => eqNorm(s.temple, templeFilter));
     if (qualityFilter === "A") out = out.filter(s => s.quality === "A");
     else if (qualityFilter === "B") out = out.filter(s => s.quality === "B");
     else if (qualityFilter === "none") out = out.filter(s => !s.quality);
@@ -248,7 +280,29 @@ export function SlabSelector({
     });
   }
 
-  const allVisible = useMemo(() => [...filteredPriority, ...filtered], [filteredPriority, filtered]);
+  // Final defensive guard. Even if applyDropdowns has a regression OR
+  // a row is injected from a side-fetch (urgent-slabs in page.tsx)
+  // without going through the same filter, the table render will still
+  // drop rows whose stone/temple doesn't match. Belt-and-suspenders.
+  const allVisible = useMemo(() => {
+    let merged: Slab[] = [...filteredPriority, ...filtered];
+    if (stoneFilter !== "all") merged = merged.filter((s) => eqNorm(s.stone, stoneFilter));
+    if (templeFilter !== "all") merged = merged.filter((s) => eqNorm(s.temple, templeFilter));
+    return merged;
+  }, [filteredPriority, filtered, stoneFilter, templeFilter]);
+
+  // Derived from allVisible so counters, section headers, and table
+  // rows always show the same data. (Previously the renderer iterated
+  // filteredPriority/filtered directly, so a guard-rejected row could
+  // be COUNTED but not RENDERED, or vice versa.)
+  const visiblePriority = useMemo(
+    () => allVisible.filter((s) => s.priority),
+    [allVisible],
+  );
+  const visibleNormal = useMemo(
+    () => allVisible.filter((s) => !s.priority),
+    [allVisible],
+  );
 
   function toggleAll() {
     if (selected.size === allVisible.length && allVisible.length > 0) {
@@ -282,8 +336,8 @@ export function SlabSelector({
           <h1>Plan Generator</h1>
           <p className="muted">
             Select sizes to send to the Plan Generator.{" "}
-            {filteredPriority.length > 0 && <><strong style={{ color: "#DC2626" }}>⚡ {filteredPriority.length} urgent</strong> · </>}
-            <strong>{filtered.length}</strong> normal shown
+            {visiblePriority.length > 0 && <><strong style={{ color: "#DC2626" }}>⚡ {visiblePriority.length} urgent</strong> · </>}
+            <strong>{visibleNormal.length}</strong> normal shown
             {selected.size > 0 && <> · <strong style={{ color: "var(--gold-dark)" }}>{selected.size} selected</strong></>}
           </p>
         </div>
@@ -420,8 +474,8 @@ export function SlabSelector({
       {/* Summary bar */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
         <p className="muted" style={{ fontSize: 13 }}>
-          {filteredPriority.length > 0 && <><strong style={{ color: "#DC2626" }}>⚡ {filteredPriority.length} urgent</strong> · </>}
-          <strong style={{ color: "var(--text)" }}>{filtered.length}</strong> normal · {allVisible.length} total shown
+          {visiblePriority.length > 0 && <><strong style={{ color: "#DC2626" }}>⚡ {visiblePriority.length} urgent</strong> · </>}
+          <strong style={{ color: "var(--text)" }}>{visibleNormal.length}</strong> normal · {allVisible.length} total shown
           {selected.size > 0 && <> · <strong style={{ color: "var(--gold-dark)" }}>{selected.size} selected</strong></>}
         </p>
         {selected.size > 0 && (
@@ -478,8 +532,8 @@ export function SlabSelector({
             </tr>
           </thead>
           <tbody>
-            {/* ── PRIORITY SECTION — always visible, never filtered away ── */}
-            {filteredPriority.length > 0 && (
+            {/* ── PRIORITY SECTION — urgent slabs that pass current filters ── */}
+            {visiblePriority.length > 0 && (
               <>
                 <tr>
                   <td colSpan={10} style={{
@@ -489,11 +543,11 @@ export function SlabSelector({
                     borderTop: "1px solid rgba(220,38,38,0.2)",
                   }}>
                     <span style={{ fontSize: 11, fontWeight: 700, color: "#DC2626", textTransform: "uppercase", letterSpacing: "0.07em" }}>
-                      ⚡ Urgent / Pushed — {filteredPriority.length} {filteredPriority.length === 1 ? "size" : "sizes"} · Always shown regardless of filters
+                      ⚡ Urgent / Pushed — {visiblePriority.length} {visiblePriority.length === 1 ? "size" : "sizes"}
                     </span>
                   </td>
                 </tr>
-                {filteredPriority.map((s, i) => {
+                {visiblePriority.map((s, i) => {
                   const cft = ((Number(s.length_ft) * Number(s.width_ft) * Number(s.thickness_ft)) / 1728).toFixed(2);
                   const isChecked = selected.has(s.id);
                   return (
@@ -537,7 +591,7 @@ export function SlabSelector({
             )}
 
             {/* ── NORMAL SECTION — filtered by all controls ── */}
-            {filteredPriority.length > 0 && filtered.length > 0 && (
+            {visiblePriority.length > 0 && visibleNormal.length > 0 && (
               <tr>
                 <td colSpan={10} style={{
                   padding: "7px 14px",
@@ -546,26 +600,26 @@ export function SlabSelector({
                   borderTop: "2px solid var(--border)",
                 }}>
                   <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>
-                    Normal — {filtered.length} {filtered.length === 1 ? "size" : "sizes"}
+                    Normal — {visibleNormal.length} {visibleNormal.length === 1 ? "size" : "sizes"}
                   </span>
                 </td>
               </tr>
             )}
 
-            {filtered.length === 0 && filteredPriority.length === 0 ? (
+            {visibleNormal.length === 0 && visiblePriority.length === 0 ? (
               <tr>
                 <td colSpan={10} style={{ padding: 32, textAlign: "center", color: "var(--muted)" }}>
                   No sizes match your filters.
                 </td>
               </tr>
-            ) : filtered.length === 0 ? (
+            ) : visibleNormal.length === 0 ? (
               <tr>
                 <td colSpan={10} style={{ padding: 20, textAlign: "center", color: "var(--muted)", fontSize: 12 }}>
                   No normal sizes match the current filters.
                 </td>
               </tr>
             ) : (
-              filtered.map((s, i) => {
+              visibleNormal.map((s, i) => {
                 const cft = ((Number(s.length_ft) * Number(s.width_ft) * Number(s.thickness_ft)) / 1728).toFixed(2);
                 const isChecked = selected.has(s.id);
                 return (
