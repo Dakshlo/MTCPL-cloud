@@ -28,6 +28,54 @@ function istToday(daysAgo = 0) {
 export default async function DashboardPage({ searchParams }: { searchParams: SearchParams }) {
   const { profile } = await requireAuth(["owner", "developer"]);
   const params = await searchParams;
+
+  // ── Per-owner stripped dashboards ────────────────────────────────
+  // Rajesh has asked for a dashboard that shows ONLY the Block Journey
+  // entry card — nothing else. He uses Block Journey as his primary
+  // entry point and finds the rest of the dashboard noisy. Detect him
+  // by name (substring, case-insensitive — same pattern as
+  // canTransferPlannedSlabs in cutting-permissions.ts).
+  //
+  // Early-return here BEFORE any of the heavy data queries so this
+  // login path stays fast and zero-cost.
+  const fullName = (profile.full_name ?? "").toUpperCase();
+  if (fullName.includes("RAJESH")) {
+    const istObj = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+    const hr = istObj.getHours();
+    const greeting = hr < 12 ? "Good morning" : hr < 17 ? "Good afternoon" : "Good evening";
+    const dateDisplay = istObj.toLocaleDateString("en-IN", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 20, paddingBottom: 32 }}>
+        {/* Lightweight greeting header — same visual style as the main
+            dashboard but with no online-users panel. */}
+        <div style={{
+          background: "linear-gradient(135deg, #2D2410 0%, #4a3a1f 100%)",
+          borderRadius: 12,
+          padding: "20px 24px",
+          boxShadow: "0 4px 16px rgba(45,36,16,0.18)",
+        }}>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>
+            {dateDisplay}
+          </div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: "#fff", letterSpacing: "-0.3px" }}>
+            {greeting}, <span style={{ color: "#E8C572" }}>{profile.full_name || "there"}</span>
+          </div>
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginTop: 4 }}>
+            Open Block Journey to track inventory throughput.
+          </div>
+        </div>
+
+        {/* The single card Rajesh wants. Full-width on this dashboard. */}
+        <BlockJourneyEntryCard />
+      </div>
+    );
+  }
+
   const admin = createAdminSupabaseClient();
 
   const today = istToday(0);
