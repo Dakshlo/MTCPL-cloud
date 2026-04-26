@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
-import { tryPackBlock, type RemainingSlab, type PlacedSlab } from "@/lib/planning/packing";
+import { tryPackBlock, type RemainingSlab, type PlacedSlab, type PlanBlock } from "@/lib/planning/packing";
 
 // ── Types shared with planning-workbench ────────────────────────────────────
 
@@ -118,18 +118,19 @@ export type FitExpansionSuggestion = {
 };
 
 /**
- * 3D-preview payload per block: the block dimensions + the FULL packed
- * layout with both must-include (already-placed) and the top-N suggested
- * slabs, plus a list of which slab IDs are NEW. The client renders this
- * via IsoBlockPreview with newSlabIds highlighted, so the user can SEE
- * the proposed packing before accepting.
+ * 3D-preview payload per block: a fully-formed PlanBlock that's a
+ * drop-in replacement for the existing block in `result.plan`. The
+ * client renders it via IsoBlockPreview, and on accept directly swaps
+ * the old PlanBlock with `planBlock` here — no re-running the
+ * algorithm, no risk of the planner choosing different blocks or
+ * blowing up the slab count.
  */
 export type FitFillPreview = {
   block_id: string;
-  block: { id: string; stone: string; l: number; w: number; h: number; orient?: string };
-  /** Existing + top-N suggested slabs, all packed by the geometry engine. */
-  placed: PlacedSlab[];
-  /** IDs in `placed` that are the new (suggested) slabs. The rest are existing. */
+  /** Full PlanBlock with placed[], spaces, biggest, ua/ka/ba/eff. */
+  planBlock: PlanBlock;
+  /** IDs in planBlock.placed that are NEW (suggestions). The rest are
+   * the slabs that were already there in the user's plan. */
   suggested_slab_ids: string[];
 };
 
@@ -1017,17 +1018,57 @@ export async function fitBlockToFillAction(payload: {
       ];
       const previewPacked = tryPackBlock(toBlockRow(block), previewSlabs, kerfFt);
       if (previewPacked.allPlaced.length > 0 && previewPacked.orient) {
-        previews.push({
-          block_id: block.id,
-          block: {
+        // Construct a full PlanBlock — same shape runOptimization
+        // produces — so the client can drop it directly into
+        // result.plan to replace the existing block. Keeps the rest
+        // of the result.plan UI (efficiency bar, biggest-leftover
+        // info, etc.) working without any re-plan.
+        const orient = previewPacked.orient;
+        const faceL = orient.faceL;
+        const faceW = orient.faceW;
+        const depth = orient.depth;
+        const blockVol = faceL * faceW * depth;
+        const placedVol = previewPacked.allPlaced.reduce(
+          (sum, p) => sum + p.pw * p.ph * p.sd, 0,
+        );
+        const kerfVol = previewPacked.allPlaced.reduce(
+          (sum, p) => sum + (p.aw * p.ah - p.pw * p.ph) * p.sd, 0,
+        );
+        const round2 = (n: number) => Math.round(n * 100) / 100;
+        const remainingDepth = Math.max(0, depth - previewPacked.depthUsed);
+        let biggest: { l: number; w: number; h: number } | null = null;
+        if (remainingDepth > 0.05) {
+          biggest = { l: round2(faceL), w: round2(faceW), h: round2(remainingDepth) };
+        } else {
+          for (const space of previewPacked.lastSpaces) {
+            if (!biggest || space.w * space.h > biggest.l * biggest.w) {
+              biggest = { l: round2(space.w), w: round2(space.h), h: round2(depth) };
+            }
+          }
+        }
+        const planBlock: PlanBlock = {
+          blk: {
             id: block.id,
             stone: block.stone,
-            l: previewPacked.orient.faceL,
-            w: previewPacked.orient.faceW,
-            h: previewPacked.orient.depth,
-            orient: previewPacked.orient.label,
+            yard: 1, // PlanBlock requires yard; not used by the
+                     // renderer; defaulting is safe.
+            quality: block.quality ?? null,
+            l: round2(faceL),
+            w: round2(faceW),
+            h: round2(depth),
+            orient: orient.label,
           },
           placed: previewPacked.allPlaced,
+          spaces: previewPacked.lastSpaces,
+          ua: round2(placedVol),
+          ka: round2(kerfVol),
+          ba: round2(blockVol),
+          eff: blockVol > 0 ? Math.min(99, Math.round((placedVol / blockVol) * 100)) : 0,
+          biggest,
+        };
+        previews.push({
+          block_id: block.id,
+          planBlock,
           suggested_slab_ids: topSuggestedIds,
         });
       }

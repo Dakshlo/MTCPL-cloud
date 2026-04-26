@@ -892,25 +892,77 @@ export function PlanningWorkbench({
   }
 
   /**
-   * Add a single fit-fill suggestion to the user's slab selection and
-   * re-run the algorithm so the new slab actually gets placed.
+   * Approve a per-block fit-to-fill suggestion. DIRECTLY mutates
+   * result.plan to swap the affected block with the proposed
+   * pre-packed PlanBlock — no re-running the algorithm. This was
+   * the user's explicit request: previously clicking accept
+   * triggered generatePlan() with the expanded selection, which
+   * could (and did) produce wildly different plans (4 blocks → 6
+   * blocks, 10 slabs → 40 slabs). Direct-replace fixes that.
+   *
+   * Side effects:
+   *   • result.plan[i] for the matching block is replaced.
+   *   • Selected slab IDs gain the new (suggested) slab IDs so the
+   *     selection state stays consistent if the user re-plans later.
+   *   • All suggestions and the preview for that block are cleared
+   *     from the panel.
    */
-  function acceptFitSuggestion(slabId: string) {
-    setSelectedSlabIds((prev) => new Set(prev).add(slabId));
-    setFitFillSuggestions((prev) => prev.filter((s) => s.slab_id !== slabId));
-    setTimeout(() => generatePlan(), 0);
-  }
+  function acceptBlockFill(blockId: string) {
+    if (!result) return;
+    const preview = fitPreviews.find((p) => p.block_id === blockId);
+    if (!preview) return;
+    // Preserve the original yard from the existing PlanBlock — server
+    // doesn't know it (not in the action payload), so we hold onto it
+    // here so the result-section UI keeps showing the correct yard
+    // tag after the swap.
+    const oldPlanBlock = result.plan.find((pb) => pb.blk.id === blockId);
+    const yardToKeep = oldPlanBlock?.blk.yard ?? preview.planBlock.blk.yard;
+    const merged: PlanBlock = {
+      ...preview.planBlock,
+      blk: { ...preview.planBlock.blk, yard: yardToKeep },
+    };
+    const newPlan = result.plan.map((pb) =>
+      pb.blk.id === blockId ? merged : pb,
+    );
+    // Recompute totalWaste off the new plan in case it changed.
+    const totalWaste = newPlan.reduce((sum, b) => sum + Math.max(0, b.ba - b.ua - b.ka), 0);
+    setResult({ ...result, plan: newPlan, totalWaste: Math.round(totalWaste * 100) / 100 });
 
-  /** Bulk-accept every fit-fill suggestion + re-plan. */
-  function acceptAllFitSuggestions() {
-    if (fitFillSuggestions.length === 0) return;
     setSelectedSlabIds((prev) => {
       const next = new Set(prev);
-      for (const s of fitFillSuggestions) next.add(s.slab_id);
+      for (const id of preview.suggested_slab_ids) next.add(id);
+      return next;
+    });
+    setFitFillSuggestions((prev) => prev.filter((s) => s.block_id !== blockId));
+    setFitPreviews((prev) => prev.filter((p) => p.block_id !== blockId));
+  }
+
+  /** Approve every block's fit-to-fill suggestion in one click. Same
+   *  direct-mutation logic as acceptBlockFill — applied to all blocks
+   *  that have proposals. No re-plan. */
+  function acceptAllBlockFills() {
+    if (!result || fitPreviews.length === 0) return;
+    const previewByBlock = new Map(fitPreviews.map((p) => [p.block_id, p]));
+    const newPlan = result.plan.map((pb) => {
+      const preview = previewByBlock.get(pb.blk.id);
+      if (!preview) return pb;
+      return {
+        ...preview.planBlock,
+        blk: { ...preview.planBlock.blk, yard: pb.blk.yard ?? 1 },
+      } satisfies PlanBlock;
+    });
+    const totalWaste = newPlan.reduce((sum, b) => sum + Math.max(0, b.ba - b.ua - b.ka), 0);
+    setResult({ ...result, plan: newPlan, totalWaste: Math.round(totalWaste * 100) / 100 });
+
+    setSelectedSlabIds((prev) => {
+      const next = new Set(prev);
+      for (const p of fitPreviews) {
+        for (const id of p.suggested_slab_ids) next.add(id);
+      }
       return next;
     });
     setFitFillSuggestions([]);
-    setTimeout(() => generatePlan(), 0);
+    setFitPreviews([]);
   }
 
   // (acceptExpansion removed — the fitter no longer suggests new blocks.)
@@ -1414,15 +1466,15 @@ export function PlanningWorkbench({
                   </p>
                 </div>
               </div>
-              {fitFillSuggestions.length > 1 && (
+              {fitPreviews.length > 1 && (
                 <button
                   type="button"
                   className="primary-button"
-                  onClick={acceptAllFitSuggestions}
+                  onClick={acceptAllBlockFills}
                   style={{ fontSize: 12, padding: "6px 14px" }}
                   disabled={fitFillLoading}
                 >
-                  Add all {fitFillSuggestions.length} & re-plan
+                  Approve all {fitPreviews.length} blocks
                 </button>
               )}
             </div>
@@ -1463,8 +1515,8 @@ export function PlanningWorkbench({
                     >
                       <div style={{ flex: "0 0 auto" }}>
                         <IsoBlockPreview
-                          block={{ ...preview.block, yard: 1 }}
-                          placed={preview.placed}
+                          block={preview.planBlock.blk}
+                          placed={preview.planBlock.placed}
                           newSlabIds={newIds}
                           stoneTypes={stoneTypes}
                         />
@@ -1475,11 +1527,11 @@ export function PlanningWorkbench({
                           <span><strong style={{ color: "#b45309" }}>NEW</strong> = recommended slab</span>
                         </div>
                         <div style={{ fontSize: 10 }}>
-                          Existing placed: {preview.placed.length - preview.suggested_slab_ids.length} ·
+                          Existing placed: {preview.planBlock.placed.length - preview.suggested_slab_ids.length} ·
                           recommended: {preview.suggested_slab_ids.length}
                         </div>
                         <div style={{ marginTop: 4, fontSize: 10, fontStyle: "italic" }}>
-                          Approve below to commit. The result section beneath updates after re-plan.
+                          Click <strong>Approve</strong> to commit — the block above updates in place; no re-plan.
                         </div>
                       </div>
                     </div>
@@ -1492,8 +1544,7 @@ export function PlanningWorkbench({
                           key={sug.slab_id}
                           style={{
                             display: "flex",
-                            alignItems: "center",
-                            justifyContent: "space-between",
+                            alignItems: "baseline",
                             gap: 10,
                             flexWrap: "wrap",
                             padding: "8px 10px",
@@ -1503,7 +1554,7 @@ export function PlanningWorkbench({
                         >
                           <div style={{ flex: "1 1 240px", minWidth: 0 }}>
                             <div style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
-                              <strong style={{ fontFamily: "ui-monospace, monospace", fontSize: 13 }}>{sug.slab_id}</strong>
+                              <strong style={{ fontFamily: "ui-monospace, monospace", fontSize: 13, color: "#b45309" }}>{sug.slab_id}</strong>
                               {slab && (
                                 <span style={{ fontSize: 11, color: "var(--muted)" }}>
                                   · {slab.temple} · {slab.length_ft}×{slab.width_ft}×{slab.thickness_ft}″
@@ -1515,18 +1566,25 @@ export function PlanningWorkbench({
                               {sug.reasoning}
                             </div>
                           </div>
-                          <button
-                            type="button"
-                            className="ghost-button"
-                            onClick={() => acceptFitSuggestion(sug.slab_id)}
-                            disabled={fitFillLoading}
-                            style={{ fontSize: 12, padding: "5px 12px", whiteSpace: "nowrap" }}
-                          >
-                            + Add &amp; re-plan
-                          </button>
                         </div>
                       );
                     })}
+                  </div>
+                  {/* Single per-block approve. Click → swaps this
+                      block's PlanBlock with the proposed (pre-packed)
+                      version directly in result.plan. No re-plan, so
+                      no risk of the algorithm choosing different
+                      blocks or expanding the slab count. */}
+                  <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+                    <button
+                      type="button"
+                      className="primary-button"
+                      onClick={() => acceptBlockFill(blockId)}
+                      disabled={fitFillLoading}
+                      style={{ fontSize: 12, padding: "7px 16px", whiteSpace: "nowrap" }}
+                    >
+                      ✓ Approve — add {sugs.length} slab{sugs.length === 1 ? "" : "s"} to {blockId}
+                    </button>
                   </div>
                 </div>
                 );
