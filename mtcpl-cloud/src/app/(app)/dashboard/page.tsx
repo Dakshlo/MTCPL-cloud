@@ -1,6 +1,8 @@
 import Link from "next/link";
-import { requireAuth } from "@/lib/auth";
+import { redirect } from "next/navigation";
+import { requireAuth, getDefaultRouteForRole } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { canTransferPlannedSlabs } from "@/lib/cutting-permissions";
 import { PushPanel } from "./push-panel";
 import { AskAiEntryCard } from "@/components/ask-ai-entry-card";
 import { BlockJourneyEntryCard } from "@/components/block-journey-entry-card";
@@ -26,8 +28,21 @@ function istToday(daysAgo = 0) {
 }
 
 export default async function DashboardPage({ searchParams }: { searchParams: SearchParams }) {
-  const { profile } = await requireAuth(["owner", "developer"]);
+  // Permissive auth here — we want to allow the named-trusted users
+  // (Rajesh / Naresh) onto the dashboard even if their stored role
+  // isn't "owner" (a real-world data state we hit in production).
+  // requireAuth() with no role list = any logged-in active user;
+  // the explicit guard below restricts down to: owner | developer |
+  // anyone canTransferPlannedSlabs accepts.
+  const { profile } = await requireAuth();
   const params = await searchParams;
+  const isDashboardAllowed =
+    profile.role === "owner" ||
+    profile.role === "developer" ||
+    canTransferPlannedSlabs(profile);
+  if (!isDashboardAllowed) {
+    redirect(getDefaultRouteForRole(profile.role));
+  }
 
   // ── Per-owner stripped dashboards ────────────────────────────────
   // Rajesh has asked for a dashboard that shows ONLY the Block Journey
