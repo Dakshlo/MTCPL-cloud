@@ -66,6 +66,13 @@ export function FinishBlockForm({
   // Selected transfer slabs — kept separate from extraIds because the
   // server action splits open vs planned via two different formData fields.
   const [transferIds, setTransferIds] = useState<Set<string>>(new Set());
+  // The transferable-slabs panel is a sharp tool (donor blocks get their
+  // plans modified + a reprint banner). Default-collapse it so the long
+  // list doesn't dominate the form when the operator just wants to mark
+  // their planned slabs cut. Auto-stays-open if the operator has already
+  // selected something to transfer (so they don't lose visibility on a
+  // selection mid-edit).
+  const [showTransfer, setShowTransfer] = useState(false);
 
   function toggle(id: string) {
     setCheckedIds((prev) => {
@@ -313,7 +320,12 @@ export function FinishBlockForm({
        *  Sharp tool: the donor block's plan gets edited and operators
        *  there see a "needs reprint" banner. Confirm dialog fires on
        *  submit if any selected slab's donor is currently 'cutting'. */}
-      {allowTransfer && transferableSlabs.length > 0 && (
+      {allowTransfer && transferableSlabs.length > 0 && (() => {
+        // Auto-expand whenever the operator has at least one transfer
+        // selected, so a fresh re-render (e.g. after toggling a checkbox)
+        // can't accidentally hide their selection.
+        const isOpen = showTransfer || transferIds.size > 0;
+        return (
         <div
           style={{
             background: "rgba(180,83,9,0.04)",
@@ -323,10 +335,32 @@ export function FinishBlockForm({
             padding: "10px 14px",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
+          <button
+            type="button"
+            onClick={() => setShowTransfer((v) => !v)}
+            aria-expanded={isOpen}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 8,
+              flexWrap: "wrap",
+              width: "100%",
+              padding: 0,
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              textAlign: "left",
+              color: "inherit",
+            }}
+          >
             <div>
-              <p style={{ fontSize: 12, fontWeight: 700, margin: 0, color: "#b45309" }}>
+              <p style={{ fontSize: 12, fontWeight: 700, margin: 0, color: "#b45309", display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ fontSize: 10, opacity: 0.7 }}>{isOpen ? "▾" : "▸"}</span>
                 ⚠ Claim from another block&rsquo;s plan
+                <span className="muted" style={{ fontSize: 11, fontWeight: 500 }}>
+                  ({transferableSlabs.length} available)
+                </span>
                 {transferIds.size > 0 && (
                   <span
                     style={{
@@ -336,21 +370,23 @@ export function FinishBlockForm({
                       background: "#b45309",
                       padding: "2px 7px",
                       borderRadius: 4,
-                      marginLeft: 8,
                     }}
                   >
                     {transferIds.size} selected
                   </span>
                 )}
               </p>
-              <p className="muted" style={{ fontSize: 11, margin: "3px 0 0", lineHeight: 1.5 }}>
-                Use only if you cut a slab from THIS block that was originally
-                planned for another block. The donor block&rsquo;s plan will be
-                modified and they&rsquo;ll be asked to reprint.
-              </p>
+              {isOpen && (
+                <p className="muted" style={{ fontSize: 11, margin: "3px 0 0", lineHeight: 1.5 }}>
+                  Use only if you cut a slab from THIS block that was originally
+                  planned for another block. The donor block&rsquo;s plan will be
+                  modified and they&rsquo;ll be asked to reprint.
+                </p>
+              )}
             </div>
-          </div>
+          </button>
 
+          {isOpen && (<>
           <div
             style={{
               maxHeight: 220,
@@ -362,6 +398,7 @@ export function FinishBlockForm({
               borderRadius: 6,
               padding: 6,
               background: "var(--surface)",
+              marginTop: 8,
             }}
           >
             {filteredTransferableSlabs.length === 0 ? (
@@ -438,8 +475,10 @@ export function FinishBlockForm({
               Donor blocks will be marked &ldquo;needs reprint&rdquo;.
             </p>
           )}
+          </>)}
         </div>
-      )}
+        );
+      })()}
 
       {/* Remaining block pieces */}
       <div style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px" }}>
