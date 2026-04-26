@@ -133,11 +133,33 @@ export type FitFillPreview = {
   suggested_slab_ids: string[];
 };
 
+/**
+ * Per-block diagnostic breakdown so the user can see WHY a block didn't
+ * receive any fill suggestions instead of a vague "Plan is tight" message.
+ */
+export type FitBlockDiagnostic = {
+  block_id: string;
+  /** Total open slabs in the available pool (before any filtering). */
+  pool_total: number;
+  /** Slabs in pool whose stone matches this block's stone. */
+  matched_stone: number;
+  /** Of those, how many ALSO meet the quality compatibility rule. */
+  matched_quality: number;
+  /** Of those, how many actually packed alongside the existing placed slabs. */
+  fits: number;
+  /** Final count of suggestions surfaced for this block (capped at 3). */
+  suggested: number;
+  /** One-line plain-English explanation of the result. */
+  reason: string;
+};
+
 export type FitBlockToFillResponse = {
   fillSuggestions: FitFillSuggestion[];
   expansionSuggestions: FitExpansionSuggestion[];
   /** Per-block visual previews of the proposed layout. Empty if no fills. */
   previews: FitFillPreview[];
+  /** Per-block diagnostic counts. Always populated, one entry per planned block. */
+  diagnostics: FitBlockDiagnostic[];
   /** 1–2 sentences summarising what the fitter found. Auto-generated. */
   strategy: string;
   error?: string;
@@ -831,6 +853,7 @@ export async function fitBlockToFillAction(payload: {
 
   const fillSuggestions: FitFillSuggestion[] = [];
   const previews: FitFillPreview[] = [];
+  const diagnostics: FitBlockDiagnostic[] = [];
   const fittedSlabIds = new Set<string>();
 
   // Helper: build the BlockRow shape tryPackBlock expects (string-or-number
@@ -861,14 +884,38 @@ export async function fitBlockToFillAction(payload: {
   for (const planEntry of plan) {
     const { block, placed } = planEntry;
 
-    // Stone + quality pre-filter. Slab.stone === null is treated as "any".
-    const candidates = availableSlabs.filter((s) => {
-      if (s.stone && s.stone !== block.stone) return false;
+    // Stepwise filter so we can populate per-block diagnostics. Stone
+    // first (slab.stone === null is treated as "any"), then quality.
+    const stoneMatches = availableSlabs.filter((s) => !s.stone || s.stone === block.stone);
+    const qualityMatches = stoneMatches.filter((s) => {
       if (s.quality === "A" && block.quality !== "A") return false;
       if (s.quality === "B" && block.quality !== "A" && block.quality !== "B") return false;
       return true;
     });
-    if (candidates.length === 0) continue;
+    const candidates = qualityMatches;
+
+    // Helper: push the per-block diag with a one-line reason. Called from
+    // every early-exit path so the panel always knows why this block had
+    // no fits.
+    function pushDiag(fits: number, suggested: number, reason: string) {
+      diagnostics.push({
+        block_id: block.id,
+        pool_total: availableSlabs.length,
+        matched_stone: stoneMatches.length,
+        matched_quality: qualityMatches.length,
+        fits,
+        suggested,
+        reason,
+      });
+    }
+
+    if (candidates.length === 0) {
+      const reason = stoneMatches.length === 0
+        ? `no other open ${block.stone} slabs in inventory`
+        : `${stoneMatches.length} ${block.stone} slab(s) in pool but none meet this block's quality (${block.quality ?? "standard"})`;
+      pushDiag(0, 0, reason);
+      continue;
+    }
 
     // Reconstruct RemainingSlab[] for the engine.
     const mustInclude: RemainingSlab[] = placed.map((p) => ({
@@ -901,10 +948,16 @@ export async function fitBlockToFillAction(payload: {
     // AND every must-include slab is still packed (otherwise we'd be
     // suggesting a swap, not a fill).
     const allMustIncluded = mustInclude.every((m) => placedIds.has(m.id));
-    if (!allMustIncluded) continue;
+    if (!allMustIncluded) {
+      pushDiag(0, 0, `${candidates.length} compatible candidate(s) but the geometry engine couldn't keep all already-placed slabs while adding any of them`);
+      continue;
+    }
 
     const fitsHere = candidates.filter((c) => placedIds.has(c.id));
-    if (fitsHere.length === 0) continue;
+    if (fitsHere.length === 0) {
+      pushDiag(0, 0, `${candidates.length} compatible candidate(s) but none fit the leftover face/depth on this block`);
+      continue;
+    }
 
     // ── Score + rank
     // Round thicknesses to the same precision as the engine to avoid 0.499
@@ -970,6 +1023,13 @@ export async function fitBlockToFillAction(payload: {
         });
       }
     }
+
+    // Success diag — record the success path for this block.
+    pushDiag(
+      fitsHere.length,
+      topSuggestedIds.length,
+      `${fitsHere.length} compatible candidate(s) fit; surfaced ${topSuggestedIds.length} top suggestion(s)`,
+    );
   }
 
   // ── Phase 2 (expansion) intentionally disabled per user request ────────
@@ -980,6 +1040,8 @@ export async function fitBlockToFillAction(payload: {
   void availableBlocks; // payload field kept for back-compat with the UI
 
   // ── Strategy text ──────────────────────────────────────────────────────
+  // Pull a single dominant cause when there are no fits, so the user sees
+  // *why* the plan looks "tight" instead of a vague summary.
   const filledBlockCount = new Set(fillSuggestions.map((s) => s.block_id)).size;
   const lines: string[] = [];
   if (fillSuggestions.length > 0) {
@@ -987,12 +1049,26 @@ export async function fitBlockToFillAction(payload: {
       `Found ${fillSuggestions.length} slab${fillSuggestions.length === 1 ? "" : "s"} that fit alongside your existing slabs across ${filledBlockCount} of ${plan.length} planned block${plan.length === 1 ? "" : "s"}.`,
     );
   } else if (plan.length > 0) {
-    lines.push("Plan is already tight — no other open slabs fit the leftover space on the planned blocks.");
+    // Build a more useful one-liner from diagnostics. Common cases:
+    //   1. Pool is empty → "open inventory has no other X slabs"
+    //   2. Pool exists but all wrong stone → "no PinkStone slabs in inventory pool"
+    //   3. Pool exists, stone matches, but quality fails → "Grade A blocks need Grade A slabs"
+    //   4. Stone+quality OK but geometry rejects → "leftover face/depth too narrow"
+    const reasonCounts = new Map<string, number>();
+    for (const d of diagnostics) {
+      reasonCounts.set(d.reason, (reasonCounts.get(d.reason) ?? 0) + 1);
+    }
+    // Pick the dominant reason
+    const dominant = [...reasonCounts.entries()].sort((a, b) => b[1] - a[1])[0];
+    if (dominant) {
+      lines.push(`No fillers found — ${dominant[0]} (across ${dominant[1]}/${plan.length} planned block${plan.length === 1 ? "" : "s"}). Expand the diagnostic list below for per-block details.`);
+    } else {
+      lines.push("No fillers found.");
+    }
   }
-  // Expansion phase removed — no message about new blocks.
   const strategy = lines.join(" ") || "Nothing to suggest.";
 
-  return { fillSuggestions, expansionSuggestions, previews, strategy };
+  return { fillSuggestions, expansionSuggestions, previews, diagnostics, strategy };
 }
 
 function errUrl(msg: string, slabIds?: string) {

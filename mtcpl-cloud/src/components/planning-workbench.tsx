@@ -11,6 +11,7 @@ import type {
   FitBlockToFillResponse,
   FitFillSuggestion,
   FitFillPreview,
+  FitBlockDiagnostic,
 } from "@/app/(app)/planning/actions";
 import { computeCutEfficiency, toCFT, type CutEfficiency } from "@/lib/cut-efficiency";
 import { EfficiencyBar } from "@/components/efficiency-bar";
@@ -517,6 +518,10 @@ export function PlanningWorkbench({
   // suggestions panel to show a side-by-side "what your block looks
   // like with the additions" view.
   const [fitPreviews, setFitPreviews] = useState<FitFillPreview[]>([]);
+  // Per-block diagnostic counts so the user can see WHY any block
+  // didn't get a suggestion (no candidates of matching stone, all
+  // candidates wrong quality, leftover face too narrow, etc.).
+  const [fitDiagnostics, setFitDiagnostics] = useState<FitBlockDiagnostic[]>([]);
 
   const allUsableBlocks = blocks.filter((block) => block.status === "available" || block.status === "reserved");
   // Blocks restricted to active facility first, then to ticked yards within it.
@@ -555,6 +560,7 @@ export function PlanningWorkbench({
     setAiStrategy(null);
     setFitFillSuggestions([]);
     setFitPreviews([]);
+    setFitDiagnostics([]);
     setFitFillStrategy(null);
     setFitFillError(null);
   }
@@ -604,6 +610,7 @@ export function PlanningWorkbench({
     setAiProcurement([]);
     setFitFillSuggestions([]);
     setFitPreviews([]);
+    setFitDiagnostics([]);
     setFitFillStrategy(null);
     setFitFillError(null);
     setOriginalSelectedCount(filteredSlabs.length);
@@ -797,6 +804,7 @@ export function PlanningWorkbench({
     setFitFillStrategy(null);
     setFitFillSuggestions([]);
     setFitPreviews([]);
+    setFitDiagnostics([]);
 
     // Pool = all open slabs not in the user's current selection AND
     // not already placed in the plan.
@@ -867,6 +875,12 @@ export function PlanningWorkbench({
       // and the client plan disagree.
       setFitPreviews(
         (response.previews ?? []).filter((p) => validBlockIds.has(p.block_id)),
+      );
+
+      // Per-block diagnostics — surfaced in an expandable breakdown so
+      // the user can see exactly why any block didn't get a suggestion.
+      setFitDiagnostics(
+        (response.diagnostics ?? []).filter((d) => validBlockIds.has(d.block_id)),
       );
 
       setFitFillStrategy(response.strategy ?? null);
@@ -1322,6 +1336,44 @@ export function PlanningWorkbench({
             <div style={{ fontSize: 12, color: "#DC2626", marginTop: 10, padding: "6px 10px", background: "rgba(220,38,38,0.05)", borderRadius: 6 }}>
               ⚠ {fitFillError}
             </div>
+          )}
+          {/* Per-block diagnostic breakdown — collapsed by default. Use
+              when fillSuggestions is empty (or thin) to surface why each
+              block didn't receive any suggestions. Always rendered when
+              diagnostics are available so the user can audit any run. */}
+          {fitDiagnostics.length > 0 && (
+            <details style={{ marginTop: 10, fontSize: 12 }}>
+              <summary style={{ cursor: "pointer", color: "var(--muted)", userSelect: "none" }}>
+                Per-block diagnostic ({fitDiagnostics.length} block{fitDiagnostics.length === 1 ? "" : "s"})
+              </summary>
+              <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                {fitDiagnostics.map((d) => (
+                  <div
+                    key={d.block_id}
+                    style={{
+                      padding: "6px 10px",
+                      background: "var(--surface)",
+                      border: "1px solid var(--border-light)",
+                      borderRadius: 6,
+                      fontSize: 11,
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                      <code style={{ fontFamily: "ui-monospace, monospace", color: "var(--gold-dark)", fontWeight: 700 }}>{d.block_id}</code>
+                      <span style={{ color: d.suggested > 0 ? "#15803d" : "var(--muted)" }}>
+                        {d.suggested > 0 ? `✓ ${d.suggested} suggestion${d.suggested === 1 ? "" : "s"}` : "no suggestions"}
+                      </span>
+                    </div>
+                    <div style={{ marginTop: 3, color: "var(--muted)" }}>
+                      Pool: {d.pool_total} · stone match: {d.matched_stone} · quality match: {d.matched_quality} · fits: {d.fits}
+                    </div>
+                    <div style={{ marginTop: 3, fontStyle: "italic", color: "var(--text)" }}>
+                      {d.reason}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </details>
           )}
         </section>
       )}
