@@ -10,7 +10,7 @@ import type {
   AISuggestionsResponse,
   FitBlockToFillResponse,
   FitFillSuggestion,
-  FitExpansionSuggestion,
+  FitFillPreview,
 } from "@/app/(app)/planning/actions";
 import { computeCutEfficiency, toCFT, type CutEfficiency } from "@/lib/cut-efficiency";
 import { EfficiencyBar } from "@/components/efficiency-bar";
@@ -50,7 +50,15 @@ export function sclr(id: string) {
 
 // ─── 3D Isometric Block Preview ────────────────────────────────────────────────
 
-export function IsoBlockPreview({ block, placed, stoneTypes, onHoverSlab }: { block: PlanBlock["blk"]; placed: PlacedSlab[]; stoneTypes?: StoneTypeDef[]; onHoverSlab?: (id: string | null) => void }) {
+export function IsoBlockPreview({ block, placed, stoneTypes, onHoverSlab, newSlabIds }: { block: PlanBlock["blk"]; placed: PlacedSlab[]; stoneTypes?: StoneTypeDef[]; onHoverSlab?: (id: string | null) => void;
+  /**
+   * Optional set of slab IDs that should be visually marked as "new"
+   * (i.e. proposed/recommended additions, not yet committed). Used by
+   * the Fit-Block-to-Fill preview to clearly differentiate which slabs
+   * the user is being asked to approve from the ones already placed.
+   */
+  newSlabIds?: Set<string>;
+ }) {
   const [az, setAz] = useState(Math.PI * 0.25);
   const [zoom, setZoom] = useState(1.0);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -244,11 +252,16 @@ export function IsoBlockPreview({ block, placed, stoneTypes, onHoverSlab }: { bl
         {/* Slab 3D boxes — sorted back-to-front */}
         {sortedSlabs.map((item) => {
           const isHovered = hoveredId === item.id;
+          const isNew = newSlabIds?.has(item.id) ?? false;
           const layerDimmed = activeLayerIds !== null && !activeLayerIds.has(item.id);
           const hoverDimmed = hoveredId !== null && !isHovered;
           const dimmed = layerDimmed || hoverDimmed;
-          const topAlpha = dimmed ? 0.10 : 0.88;
-          const sideAlpha = dimmed ? 0.07 : 0.70;
+          // "New" (recommended) slabs are rendered slightly brighter than
+          // existing ones — and they get a distinct dashed amber stroke
+          // (drawn last, below) so the user can tell at a glance which
+          // boxes are the proposal vs the committed plan.
+          const topAlpha = dimmed ? 0.10 : (isNew ? 0.95 : 0.78);
+          const sideAlpha = dimmed ? 0.07 : (isNew ? 0.80 : 0.62);
           const color = sclr(item.id);
 
           // Use annotated Z positions from multilayer algorithm; fall back for old data
@@ -309,9 +322,36 @@ export function IsoBlockPreview({ block, placed, stoneTypes, onHoverSlab }: { bl
                 ].join(" ")}
                 fill={color}
                 opacity={topAlpha}
-                stroke={isHovered ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.6)"}
-                strokeWidth={isHovered ? "2" : "0.8"}
+                stroke={isNew ? "#f59e0b" : (isHovered ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.6)")}
+                strokeWidth={isNew ? "1.8" : (isHovered ? "2" : "0.8")}
+                strokeDasharray={isNew ? "3 2" : undefined}
               />
+              {/* "NEW" badge floating above the top centre, only for
+                  recommended slabs in the fit-fill preview. */}
+              {isNew && (
+                <g pointerEvents="none">
+                  <rect
+                    x={center.x - 16}
+                    y={center.y - 7}
+                    width={32}
+                    height={11}
+                    rx={3}
+                    fill="#f59e0b"
+                    opacity={0.95}
+                  />
+                  <text
+                    x={center.x}
+                    y={center.y + 1}
+                    textAnchor="middle"
+                    fill="#fff"
+                    fontSize={7}
+                    fontWeight={700}
+                    style={{ letterSpacing: "0.06em" }}
+                  >
+                    NEW
+                  </text>
+                </g>
+              )}
             </g>
           );
         })}
@@ -472,7 +512,11 @@ export function PlanningWorkbench({
   const [fitFillError, setFitFillError] = useState<string | null>(null);
   const [fitFillStrategy, setFitFillStrategy] = useState<string | null>(null);
   const [fitFillSuggestions, setFitFillSuggestions] = useState<FitFillSuggestion[]>([]);
-  const [fitExpansions, setFitExpansions] = useState<FitExpansionSuggestion[]>([]);
+  // Per-block 3D-preview payloads from the fitter — server-rendered
+  // proposed layouts including the suggested slabs. Used by the
+  // suggestions panel to show a side-by-side "what your block looks
+  // like with the additions" view.
+  const [fitPreviews, setFitPreviews] = useState<FitFillPreview[]>([]);
 
   const allUsableBlocks = blocks.filter((block) => block.status === "available" || block.status === "reserved");
   // Blocks restricted to active facility first, then to ticked yards within it.
@@ -510,7 +554,7 @@ export function PlanningWorkbench({
     setAiProcurement([]);
     setAiStrategy(null);
     setFitFillSuggestions([]);
-    setFitExpansions([]);
+    setFitPreviews([]);
     setFitFillStrategy(null);
     setFitFillError(null);
   }
@@ -559,7 +603,7 @@ export function PlanningWorkbench({
     setAiSuggestions([]);
     setAiProcurement([]);
     setFitFillSuggestions([]);
-    setFitExpansions([]);
+    setFitPreviews([]);
     setFitFillStrategy(null);
     setFitFillError(null);
     setOriginalSelectedCount(filteredSlabs.length);
@@ -752,7 +796,7 @@ export function PlanningWorkbench({
     setFitFillError(null);
     setFitFillStrategy(null);
     setFitFillSuggestions([]);
-    setFitExpansions([]);
+    setFitPreviews([]);
 
     // Pool = all open slabs not in the user's current selection AND
     // not already placed in the plan.
@@ -818,14 +862,11 @@ export function PlanningWorkbench({
         ),
       );
 
-      const validExpansionBlockIds = new Set(expansionBlocks.map((b) => b.id));
-      setFitExpansions(
-        (response.expansionSuggestions ?? [])
-          .map((e) => ({
-            ...e,
-            slab_ids: e.slab_ids.filter((id) => validSlabIds.has(id)),
-          }))
-          .filter((e) => validExpansionBlockIds.has(e.block_id) && e.slab_ids.length > 0),
+      // Per-block 3D previews — keep only previews whose block is still
+      // in the plan; defensive against any race where the engine output
+      // and the client plan disagree.
+      setFitPreviews(
+        (response.previews ?? []).filter((p) => validBlockIds.has(p.block_id)),
       );
 
       setFitFillStrategy(response.strategy ?? null);
@@ -858,20 +899,7 @@ export function PlanningWorkbench({
     setTimeout(() => generatePlan(), 0);
   }
 
-  /**
-   * Accept an expansion suggestion: add the new block to the block
-   * selection AND its slab IDs to the slab selection, then re-plan.
-   */
-  function acceptExpansion(expansion: FitExpansionSuggestion) {
-    setSelectedBlockIds((prev) => new Set(prev).add(expansion.block_id));
-    setSelectedSlabIds((prev) => {
-      const next = new Set(prev);
-      for (const id of expansion.slab_ids) next.add(id);
-      return next;
-    });
-    setFitExpansions((prev) => prev.filter((e) => e.block_id !== expansion.block_id));
-    setTimeout(() => generatePlan(), 0);
-  }
+  // (acceptExpansion removed — the fitter no longer suggests new blocks.)
 
   const totalPlaced = result?.plan.reduce((sum, block) => sum + block.placed.length, 0) ?? 0;
   // Aggregate efficiency across all plan blocks, weighted by block volume.
@@ -1159,7 +1187,7 @@ export function PlanningWorkbench({
           involvement — every suggestion is a verified pack. Hidden
           after a successful run; the panels carry the info. */}
       {fitBlockToFillAction && result && result.plan.length > 0 &&
-        fitFillSuggestions.length === 0 && fitExpansions.length === 0 && !fitFillStrategy && (
+        fitFillSuggestions.length === 0 && fitPreviews.length === 0 && !fitFillStrategy && (
           <section className="page-card" style={{ background: "rgba(184,115,51,0.04)", border: "1px solid rgba(184,115,51,0.25)" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
               <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
@@ -1309,6 +1337,11 @@ export function PlanningWorkbench({
           arr.push(sug);
           groups.set(sug.block_id, arr);
         }
+        // Per-block preview lookup — maps block_id → server-rendered
+        // proposed layout (must-include + recommended slabs all packed
+        // by the geometry engine).
+        const previewByBlock = new Map<string, FitFillPreview>();
+        for (const p of fitPreviews) previewByBlock.set(p.block_id, p);
         return (
           <section
             className="page-card"
@@ -1342,7 +1375,10 @@ export function PlanningWorkbench({
               )}
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {[...groups.entries()].map(([blockId, sugs]) => (
+              {[...groups.entries()].map(([blockId, sugs]) => {
+                const preview = previewByBlock.get(blockId);
+                const newIds = preview ? new Set(preview.suggested_slab_ids) : undefined;
+                return (
                 <div
                   key={blockId}
                   style={{
@@ -1355,6 +1391,47 @@ export function PlanningWorkbench({
                   <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
                     On block <code style={{ fontFamily: "ui-monospace, monospace", color: "var(--gold-dark)" }}>{blockId}</code>
                   </div>
+                  {/* 3D preview of the proposed packing.
+                      • Existing slabs render in their normal style.
+                      • Recommended (NEW) slabs get an amber dashed
+                        outline + a small "NEW" badge so the operator
+                        can see exactly which boxes the proposal adds. */}
+                  {preview && (
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 12,
+                        alignItems: "flex-start",
+                        marginBottom: 10,
+                        padding: "8px 10px",
+                        background: "var(--bg)",
+                        border: "1px dashed rgba(245,158,11,0.4)",
+                        borderRadius: 6,
+                      }}
+                    >
+                      <div style={{ flex: "0 0 auto" }}>
+                        <IsoBlockPreview
+                          block={{ ...preview.block, yard: 1 }}
+                          placed={preview.placed}
+                          newSlabIds={newIds}
+                          stoneTypes={stoneTypes}
+                        />
+                      </div>
+                      <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.5, flex: "1 1 140px", minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 4 }}>
+                          <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, border: "1.5px dashed #f59e0b", background: "rgba(245,158,11,0.2)" }} />
+                          <span><strong style={{ color: "#b45309" }}>NEW</strong> = recommended slab</span>
+                        </div>
+                        <div style={{ fontSize: 10 }}>
+                          Existing placed: {preview.placed.length - preview.suggested_slab_ids.length} ·
+                          recommended: {preview.suggested_slab_ids.length}
+                        </div>
+                        <div style={{ marginTop: 4, fontSize: 10, fontStyle: "italic" }}>
+                          Approve below to commit. The result section beneath updates after re-plan.
+                        </div>
+                      </div>
+                    </div>
+                  )}
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                     {sugs.map((sug) => {
                       const slab = poolMap.get(sug.slab_id);
@@ -1400,7 +1477,8 @@ export function PlanningWorkbench({
                     })}
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
             <p className="muted" style={{ fontSize: 11, marginTop: 10, marginBottom: 0, fontStyle: "italic" }}>
               Each suggestion was verified by running the same packing engine the planner uses with the candidate added — these are real fits, not estimates.
@@ -1409,103 +1487,9 @@ export function PlanningWorkbench({
         );
       })()}
 
-      {/* ── 📐 Fit-to-Fill: block-expansion suggestions panel ─────── */}
-      {fitExpansions.length > 0 && (() => {
-        const poolMap = new Map<string, SlabRow>();
-        for (const s of openSlabs) poolMap.set(s.id, s);
-        for (const s of aiAvailablePool) poolMap.set(s.id, s);
-        const blocksMap = new Map<string, BlockRow>();
-        for (const b of usableBlocks) blocksMap.set(b.id, b);
-        return (
-          <section
-            className="page-card"
-            style={{
-              background: "rgba(37,99,235,0.04)",
-              border: "1px solid rgba(37,99,235,0.3)",
-            }}
-          >
-            <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 10 }}>
-              <span style={{ fontSize: 22, lineHeight: 1.3 }}>🆕</span>
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: "#1d4ed8", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                  Expand the plan
-                </div>
-                <p style={{ margin: "2px 0 0", fontSize: 13, color: "var(--text)" }}>
-                  {fitExpansions.length} additional block{fitExpansions.length === 1 ? "" : "s"} would let you cut more slabs in this session.
-                </p>
-              </div>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {fitExpansions.map((exp) => {
-                const block = blocksMap.get(exp.block_id);
-                return (
-                  <div
-                    key={exp.block_id}
-                    style={{
-                      border: "1px solid rgba(37,99,235,0.2)",
-                      borderRadius: 8,
-                      padding: "10px 12px",
-                      background: "var(--surface)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: 10,
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <div style={{ flex: "1 1 280px", minWidth: 0 }}>
-                      <div style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
-                        <strong style={{ fontFamily: "ui-monospace, monospace", fontSize: 13, color: "#1d4ed8" }}>{exp.block_id}</strong>
-                        {block && (
-                          <span style={{ fontSize: 11, color: "var(--muted)" }}>
-                            · {block.stone} · {block.length_ft}×{block.width_ft}×{block.height_ft}″
-                          </span>
-                        )}
-                      </div>
-                      <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 3 }}>
-                        {exp.reasoning}
-                      </div>
-                      <div style={{ marginTop: 5, display: "flex", gap: 4, flexWrap: "wrap" }}>
-                        {exp.slab_ids.map((id) => {
-                          const slab = poolMap.get(id);
-                          return (
-                            <span
-                              key={id}
-                              style={{
-                                fontFamily: "ui-monospace, monospace",
-                                fontSize: 10,
-                                padding: "2px 6px",
-                                background: "var(--surface-alt)",
-                                borderRadius: 8,
-                                color: "var(--text)",
-                              }}
-                            >
-                              {id}
-                              {slab && <span style={{ color: "var(--muted)", marginLeft: 4 }}>({slab.length_ft}×{slab.width_ft}×{slab.thickness_ft}″)</span>}
-                            </span>
-                          );
-                        })}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      className="ghost-button"
-                      onClick={() => acceptExpansion(exp)}
-                      disabled={fitFillLoading}
-                      style={{ fontSize: 12, padding: "5px 12px", whiteSpace: "nowrap" }}
-                    >
-                      + Add block &amp; re-plan
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-            <p className="muted" style={{ fontSize: 11, marginTop: 10, marginBottom: 0, fontStyle: "italic" }}>
-              Each entry is verified — adding the block + slabs will produce a plan that places them.
-            </p>
-          </section>
-        );
-      })()}
+      {/* (Block-expansion panel removed per user request — Fit-to-Fill
+          now ONLY suggests slabs that fit into already-planned blocks.
+          It never proposes adding new blocks to the plan.) */}
 
       {aiSuggestions.length > 0 && (() => {
         const slabById = new Map(openSlabs.map((s) => [s.id, s]));

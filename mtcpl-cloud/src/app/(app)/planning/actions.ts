@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
-import { tryPackBlock, type RemainingSlab } from "@/lib/planning/packing";
+import { tryPackBlock, type RemainingSlab, type PlacedSlab } from "@/lib/planning/packing";
 
 // ── Types shared with planning-workbench ────────────────────────────────────
 
@@ -106,22 +106,38 @@ export type FitFillSuggestion = {
 
 /**
  * One way to expand the plan with a NEW block to cut more slabs that didn't
- * fit any existing planned block. Surfaced as a separate panel.
+ * fit any existing planned block. Disabled per user request — kept as a type
+ * stub so the client/server interface stays compatible. The server always
+ * returns expansionSuggestions: [] now.
  */
 export type FitExpansionSuggestion = {
-  /** A block_id NOT in the current plan. */
   block_id: string;
-  /** Slabs that pack onto this new block. */
   slab_ids: string[];
-  /** Higher = better. Currently just slab count. */
   score: number;
-  /** Procedurally-generated. */
   reasoning: string;
+};
+
+/**
+ * 3D-preview payload per block: the block dimensions + the FULL packed
+ * layout with both must-include (already-placed) and the top-N suggested
+ * slabs, plus a list of which slab IDs are NEW. The client renders this
+ * via IsoBlockPreview with newSlabIds highlighted, so the user can SEE
+ * the proposed packing before accepting.
+ */
+export type FitFillPreview = {
+  block_id: string;
+  block: { id: string; stone: string; l: number; w: number; h: number; orient?: string };
+  /** Existing + top-N suggested slabs, all packed by the geometry engine. */
+  placed: PlacedSlab[];
+  /** IDs in `placed` that are the new (suggested) slabs. The rest are existing. */
+  suggested_slab_ids: string[];
 };
 
 export type FitBlockToFillResponse = {
   fillSuggestions: FitFillSuggestion[];
   expansionSuggestions: FitExpansionSuggestion[];
+  /** Per-block visual previews of the proposed layout. Empty if no fills. */
+  previews: FitFillPreview[];
   /** 1–2 sentences summarising what the fitter found. Auto-generated. */
   strategy: string;
   error?: string;
@@ -813,8 +829,8 @@ export async function fitBlockToFillAction(payload: {
   const { plan, availableSlabs, availableBlocks, kerfMm } = payload;
   const kerfFt = kerfMm / 25.4;
 
-  // Empty-plan fast path: just run the expansion phase below.
   const fillSuggestions: FitFillSuggestion[] = [];
+  const previews: FitFillPreview[] = [];
   const fittedSlabIds = new Set<string>();
 
   // Helper: build the BlockRow shape tryPackBlock expects (string-or-number
@@ -910,6 +926,7 @@ export async function fitBlockToFillAction(payload: {
       .sort((a, b) => b.score - a.score)
       .slice(0, 3);
 
+    const topSuggestedIds: string[] = [];
     for (const { c, score, sharesThickness, sharesTemple } of scored) {
       const reasons: string[] = [];
       if (sharesThickness) reasons.push(`shares ${c.thickness_ft}″ thickness layer (no extra kerf)`);
@@ -922,65 +939,45 @@ export async function fitBlockToFillAction(payload: {
         reasoning: reasons.join(" · "),
       });
       fittedSlabIds.add(c.id);
+      topSuggestedIds.push(c.id);
+    }
+
+    // ── Build the proposed-layout preview for THIS block ──────────────
+    // Re-run the engine with [must-include + top-N suggested] so the
+    // returned PlacedSlab[] reflects what the user actually sees if
+    // they accept these suggestions. (The earlier `packed` may have
+    // contained MORE candidates than the top 3, since it was the
+    // initial fit-test pass.)
+    if (topSuggestedIds.length > 0) {
+      const previewSlabs: RemainingSlab[] = [
+        ...mustInclude,
+        ...candidateRows.filter((c) => topSuggestedIds.includes(c.id)),
+      ];
+      const previewPacked = tryPackBlock(toBlockRow(block), previewSlabs, kerfFt);
+      if (previewPacked.allPlaced.length > 0 && previewPacked.orient) {
+        previews.push({
+          block_id: block.id,
+          block: {
+            id: block.id,
+            stone: block.stone,
+            l: previewPacked.orient.faceL,
+            w: previewPacked.orient.faceW,
+            h: previewPacked.orient.depth,
+            orient: previewPacked.orient.label,
+          },
+          placed: previewPacked.allPlaced,
+          suggested_slab_ids: topSuggestedIds,
+        });
+      }
     }
   }
 
-  // ── Phase 2: expansion (slabs that don't fit any planned block) ────────
+  // ── Phase 2 (expansion) intentionally disabled per user request ────────
+  // The fitter now ONLY proposes additions to blocks already in the plan;
+  // it never suggests adding new blocks. Always return an empty array so
+  // the response shape stays stable for the workbench client.
   const expansionSuggestions: FitExpansionSuggestion[] = [];
-  const remainingCandidates = availableSlabs.filter((s) => !fittedSlabIds.has(s.id));
-
-  if (remainingCandidates.length > 0 && availableBlocks.length > 0) {
-    // Group remaining candidates by stone so each unused block only runs
-    // against its compatible pool (saves work + avoids cross-stone packs).
-    const byStone = new Map<string, typeof remainingCandidates>();
-    for (const c of remainingCandidates) {
-      const key = c.stone ?? "any";
-      const arr = byStone.get(key) ?? [];
-      arr.push(c);
-      byStone.set(key, arr);
-    }
-
-    const usedExpansionSlabs = new Set<string>();
-    for (const block of availableBlocks) {
-      // Quality pre-filter: blocks of grade B can only host B or null;
-      // grade A hosts everything.
-      const cands = (byStone.get(block.stone) ?? []).filter((s) => {
-        if (usedExpansionSlabs.has(s.id)) return false;
-        if (s.quality === "A" && block.quality !== "A") return false;
-        if (s.quality === "B" && block.quality !== "A" && block.quality !== "B") return false;
-        return true;
-      });
-      if (cands.length === 0) continue;
-
-      const candidateRows: RemainingSlab[] = cands.map((s) => ({
-        id: s.id,
-        label: s.label,
-        temple: s.temple,
-        stone: s.stone,
-        quality: s.quality,
-        sl: s.length_ft,
-        sw: s.width_ft,
-        sd: s.thickness_ft,
-      }));
-      const packed = tryPackBlock(toBlockRow(block), candidateRows, kerfFt);
-      // Don't propose a whole new block for a single slab — that's not a
-      // win unless there's no other option, and the user can just pick the
-      // slab manually if they want.
-      if (packed.allPlaced.length < 2) continue;
-
-      const slabIds = packed.allPlaced.map((p) => p.id);
-      for (const id of slabIds) usedExpansionSlabs.add(id);
-      expansionSuggestions.push({
-        block_id: block.id,
-        slab_ids: slabIds,
-        score: slabIds.length,
-        reasoning: `Adds ${block.id} (${block.length_ft}×${block.width_ft}×${block.height_ft}″, ${block.stone}) — packs ${slabIds.length} slabs.`,
-      });
-    }
-
-    expansionSuggestions.sort((a, b) => b.score - a.score);
-    expansionSuggestions.splice(5); // cap at 5 to keep the UI manageable
-  }
+  void availableBlocks; // payload field kept for back-compat with the UI
 
   // ── Strategy text ──────────────────────────────────────────────────────
   const filledBlockCount = new Set(fillSuggestions.map((s) => s.block_id)).size;
@@ -992,15 +989,10 @@ export async function fitBlockToFillAction(payload: {
   } else if (plan.length > 0) {
     lines.push("Plan is already tight — no other open slabs fit the leftover space on the planned blocks.");
   }
-  if (expansionSuggestions.length > 0) {
-    const totalExtraSlabs = expansionSuggestions.reduce((sum, e) => sum + e.slab_ids.length, 0);
-    lines.push(
-      `Plus ${expansionSuggestions.length} way${expansionSuggestions.length === 1 ? "" : "s"} to add another block to cut ${totalExtraSlabs} more.`,
-    );
-  }
+  // Expansion phase removed — no message about new blocks.
   const strategy = lines.join(" ") || "Nothing to suggest.";
 
-  return { fillSuggestions, expansionSuggestions, strategy };
+  return { fillSuggestions, expansionSuggestions, previews, strategy };
 }
 
 function errUrl(msg: string, slabIds?: string) {
