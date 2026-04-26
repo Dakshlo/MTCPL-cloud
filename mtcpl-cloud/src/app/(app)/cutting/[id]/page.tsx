@@ -689,7 +689,17 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
               </p>
             )}
           </div>
-          {(profile.role === "owner" || profile.role === "developer") && (
+          {/* Visible to:
+                – every developer
+                – every owner (existing rule)
+                – Naresh + Rajesh specifically, even if their stored
+                  role isn't "owner" (caught by canTransferPlannedSlabs).
+              The fallback exists because the original owner-only check
+              was excluding Naresh and Rajesh in production due to a
+              role-data mismatch. */}
+          {(profile.role === "owner"
+            || profile.role === "developer"
+            || canTransferPlannedSlabs(profile)) && (
             <form action={undoDoneAction} style={{ display: "inline" }}>
               <input
                 type="hidden"

@@ -641,7 +641,18 @@ export async function acknowledgeReprintAction(formData: FormData) {
 }
 
 export async function undoDoneAction(formData: FormData) {
-  const { profile } = await requireAuth(["owner"]);
+  // Allow any role through requireAuth; permission is then refined
+  // below to: developer | owner | trusted-named-owner. This matches
+  // the UI gate so a button click can never produce a 403.
+  const { profile } = await requireAuth();
+  const { canTransferPlannedSlabs } = await import("@/lib/cutting-permissions");
+  if (
+    profile.role !== "developer" &&
+    profile.role !== "owner" &&
+    !canTransferPlannedSlabs(profile)
+  ) {
+    redirect("/cutting?toast=Only+owners+can+undo+a+cut");
+  }
   const supabase = createAdminSupabaseClient();
   const sessionBlockId = String(formData.get("session_block_id") || "");
   const blockId = String(formData.get("block_id") || "");
