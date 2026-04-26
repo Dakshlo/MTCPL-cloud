@@ -89,8 +89,11 @@ export type PlanResult = {
 };
 
 // ─── Internal types ──────────────────────────────────────────────────────────
+// RemainingSlab + PackedResult are exported because the new
+// fitBlockToFillAction (server action) reuses the geometry engine and
+// needs to construct / inspect these shapes.
 
-type RemainingSlab = {
+export type RemainingSlab = {
   id: string;
   label: string;
   temple: string;
@@ -103,7 +106,7 @@ type RemainingSlab = {
 
 type BlockAxis = { faceL: number; faceW: number; depth: number; label: string };
 
-type PackedResult = {
+export type PackedResult = {
   allPlaced: PlacedSlab[];
   orient: BlockAxis | null;
   lastSpaces: Array<{ x: number; y: number; w: number; h: number }>;
@@ -237,7 +240,7 @@ function bestSlabFaceForAxis(
  * each placed slab with `zTop` / `zBot` so the 3D preview can render it at
  * the correct depth.
  */
-function tryPackBlock(
+export function tryPackBlock(
   block: BlockRow,
   remaining: RemainingSlab[],
   kerfFt: number,

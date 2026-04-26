@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
+import { tryPackBlock, type RemainingSlab } from "@/lib/planning/packing";
 
 // ── Types shared with planning-workbench ────────────────────────────────────
 
@@ -81,6 +82,48 @@ export type AISuggestionsResponse = {
   strategy: string;
   fillerSuggestions: AISuggestion[];
   procurementSuggestions: AIProcurementSuggestion[];
+  error?: string;
+};
+
+// ── Fit Block to Fill — deterministic post-plan slab fitter ─────────────────
+// Uses the same geometry engine (tryPackBlock) the algorithm uses, so every
+// suggestion is a verified physical fit, not an AI guess. Developer-only.
+
+/**
+ * One slab that fits alongside the already-placed slabs on a block already
+ * in the plan. Score is for stable client-side sort if needed.
+ */
+export type FitFillSuggestion = {
+  /** A block_id from the user's current plan. */
+  block_id: string;
+  /** An open slab id that the engine packed alongside the must-include slabs. */
+  slab_id: string;
+  /** Higher = better fit. Composed from thickness/temple match + volume bonus. */
+  score: number;
+  /** Procedurally-generated, accurate justification. */
+  reasoning: string;
+};
+
+/**
+ * One way to expand the plan with a NEW block to cut more slabs that didn't
+ * fit any existing planned block. Surfaced as a separate panel.
+ */
+export type FitExpansionSuggestion = {
+  /** A block_id NOT in the current plan. */
+  block_id: string;
+  /** Slabs that pack onto this new block. */
+  slab_ids: string[];
+  /** Higher = better. Currently just slab count. */
+  score: number;
+  /** Procedurally-generated. */
+  reasoning: string;
+};
+
+export type FitBlockToFillResponse = {
+  fillSuggestions: FitFillSuggestion[];
+  expansionSuggestions: FitExpansionSuggestion[];
+  /** 1–2 sentences summarising what the fitter found. Auto-generated. */
+  strategy: string;
   error?: string;
 };
 
@@ -546,15 +589,11 @@ export async function aiSuggestionsAction(payload: {
     };
   }
 
-  // ── Cap available pool size for prompt budget ────────────────────────
-  const AVAILABLE_CAP = 200;
-  const sortedAvailable = [...availableSlabs]
-    .sort((a, b) => {
-      const am = Math.max(a.length_ft, a.width_ft);
-      const bm = Math.max(b.length_ft, b.width_ft);
-      return am - bm; // smallest-anchor first — easiest to fit slot in corners
-    })
-    .slice(0, AVAILABLE_CAP);
+  // The available-slabs pool used to be rendered into the prompt for
+  // the model's filler-suggestion phase. That phase moved to the
+  // deterministic fitBlockToFillAction, so we no longer need to ship
+  // that data over the wire — saves ~5–15k tokens per call.
+  void availableSlabs; // payload field kept for back-compat with the workbench
 
   // ── Render plan blocks with their leftover space ──────────────────────
   const planLines = plan.length === 0
@@ -582,34 +621,16 @@ export async function aiSuggestionsAction(payload: {
         })
         .join("\n");
 
-  const availableLines = sortedAvailable.length === 0
-    ? "  (no other open slabs in inventory — nothing to fill leftover space with)"
-    : sortedAvailable
-        .map((s) => {
-          const anchor = Math.max(s.length_ft, s.width_ft);
-          return `  ${s.id}${s.priority ? " ⚠PRIORITY" : ""} [anchor=${anchor}″]: ${s.temple} | ${s.stone ?? "any-stone"} | ${s.length_ft}×${s.width_ft}×${s.thickness_ft}″ | ${s.label}${s.quality ? ` | quality:${s.quality}` : ""}`;
-        })
-        .join("\n");
-  const availableTrunc = availableSlabs.length > AVAILABLE_CAP
-    ? `\n  …${availableSlabs.length - AVAILABLE_CAP} more available slabs not shown (smallest-anchor first)`
-    : "";
-
-  const prompt = `You are an inventory advisor for MTCPL, a stone-fabrication company.
+  const prompt = `You are a procurement advisor for MTCPL, a stone-fabrication company.
 
 The deterministic cut-planning algorithm has just produced a plan from
-the user's selection. Your role is NOT to re-plan — it's to look at the
-output and give two kinds of actionable advice on top:
+the user's selection. Some selected slabs may have been UNFITTABLE —
+they don't fit any block in current stock. Your job: recommend block
+dimensions to procure / source so the company can cut these slabs.
 
-  1. FILLER SUGGESTIONS — slabs from the open inventory the user did
-     NOT select but which would slot into the leftover face area /
-     depth budget on the already-planned blocks. Goal: stop the
-     operator starting a cutting session with a half-empty block.
-
-  2. PROCUREMENT SUGGESTIONS — block dimensions the company should
-     order or source to unblock slabs the algorithm flagged as
-     UNFITTABLE (no block in current stock fits them). Goal: feed
-     these into the procurement queue so the company isn't stuck with
-     unfillable orders.
+(There used to be a second job — proposing other open slabs to fill
+leftover space on planned blocks — but that's now handled by an
+in-app deterministic geometry fitter. Don't propose fillers here.)
 
 ═══════════════════════════════════════════════════════════════════
 INPUT
@@ -625,44 +646,17 @@ UNFITTABLE SLABS (${unfittableSlabs.length}) — slabs the algorithm
 could NOT place anywhere in current stock (no compatible block long enough):
 ${unfittableLines}
 
-OTHER OPEN SLABS (${availableSlabs.length}, capped at ${AVAILABLE_CAP},
-smallest-anchor first) — the pool you can mine for fillers:
-${availableLines}${availableTrunc}
-
 ═══════════════════════════════════════════════════════════════════
-PHASE 1 — FILLER SUGGESTIONS
+PROCUREMENT SUGGESTIONS  (your only job)
 ═══════════════════════════════════════════════════════════════════
 
-⚠ HARD RULE — STONE MUST MATCH ⚠
-Never suggest a slab on a block of a DIFFERENT stone. PinkStone slabs
-go ONLY on PinkStone blocks. WhiteStone slabs go ONLY on WhiteStone
-blocks. Same for every other stone. The downstream client filter
-will silently drop any cross-stone suggestion, so cross-stone entries
-are wasted output. (Exception: a slab whose stone is literally
-"any-stone" can go on any block.)
+NOTE: The "filler suggestions" job (proposing other open slabs to slot
+into leftover space on planned blocks) has moved to a deterministic
+in-app fitter — fitBlockToFillAction — which runs the same geometry
+engine the planner uses. Don't propose fillers here; return an empty
+fillerSuggestions array.
 
-For each PLANNED BLOCK above:
-  a. Read the leftover space (last value on each block's line). If the
-     leftover is empty/tiny (<25% of block face area), skip — not
-     worth filling.
-  b. From the OTHER OPEN SLABS list, find slabs that:
-     • have the SAME stone as the block (this is the hard rule above —
-       e.g. block stone = "PinkStone" ⇒ only consider slabs marked
-       "PinkStone" or "any-stone"),
-     • quality compatibility holds (Grade A slab needs Grade A block;
-       Grade B slab needs A or B; standard works on any),
-     • their two face dims fit the leftover space in some orientation,
-     • their depth dim fits the leftover depth budget.
-  c. Prefer slabs that:
-     • share the same TEMPLE as slabs already on this block (one trip),
-     • have small anchor dims (slot into corners),
-     • have the same THICKNESS as slabs already on this block — same
-       cut layer means no extra kerf wasted.
-  d. Cap: at most 2 per block, 8 total. ZERO is a valid answer.
-
-═══════════════════════════════════════════════════════════════════
-PHASE 2 — PROCUREMENT SUGGESTIONS
-═══════════════════════════════════════════════════════════════════
+Your only job is procurement.
 
 ⚠ HARD RULE — STONE MUST MATCH ⚠
 Each procurement entry MUST have a "stone" field that matches the
@@ -692,14 +686,8 @@ OUTPUT — strict JSON, no markdown fences, no prose outside the JSON
 ═══════════════════════════════════════════════════════════════════
 
 {
-  "strategy": "1–3 sentences. Required: number of fillers proposed, number of procurement entries, total slabs unblocked by procurement (if any).",
-  "fillerSuggestions": [
-    {
-      "slab_id": "MH-0099",
-      "block_id": "MT-B-040",
-      "reasoning": "One sentence. Cite leftover dims and matching thickness/temple."
-    }
-  ],
+  "strategy": "1–3 sentences. Required: number of procurement entries, total slabs unblocked.",
+  "fillerSuggestions": [],
   "procurementSuggestions": [
     {
       "stone": "PinkStone",
@@ -712,8 +700,9 @@ OUTPUT — strict JSON, no markdown fences, no prose outside the JSON
   ]
 }
 
-Both arrays may be []. Quality of reasoning matters more than quantity —
-DO NOT invent low-quality entries to hit a count.`;
+procurementSuggestions may be []. Quality of reasoning matters more than
+quantity — DO NOT invent low-quality entries to hit a count. Always
+return fillerSuggestions: [] (empty) since fillers are handled elsewhere.`;
 
   try {
     const Anthropic = (await import("@anthropic-ai/sdk")).default;
@@ -751,6 +740,267 @@ DO NOT invent low-quality entries to hit a count.`;
       error: `AI call failed: ${msg}`,
     };
   }
+}
+
+/**
+ * Fit Block to Fill — deterministic post-plan slab fitter. Developer-only.
+ *
+ * Runs AFTER the algorithmic planner has produced its plan. For each block
+ * already in the plan, calls the SAME geometry engine the algorithm uses
+ * (tryPackBlock) with [...mustInclude, ...candidates] to discover which
+ * other open slabs would physically fit alongside the slabs the algorithm
+ * already placed there. No AI involved — every suggestion is a verified
+ * pack, not a guess. Reasoning text is generated procedurally so the user
+ * always sees an accurate justification.
+ *
+ * Two outputs:
+ *   1. fillSuggestions     — slabs that fit on a CURRENTLY-PLANNED block.
+ *                            Filled in alongside the existing slabs without
+ *                            adding any new blocks to the plan.
+ *   2. expansionSuggestions — slabs that don't fit any planned block but
+ *                            WOULD fit on an unused block. Surfaced as
+ *                            "add this block + cut these N slabs too".
+ *
+ * Stone + quality compatibility is enforced server-side BEFORE packing,
+ * so cross-stone suggestions cannot occur even if the engine has a bug.
+ */
+export async function fitBlockToFillAction(payload: {
+  /** Algorithm-produced plan: each entry is one block + the slabs placed on it. */
+  plan: Array<{
+    block: {
+      id: string;
+      stone: string;
+      length_ft: number;
+      width_ft: number;
+      height_ft: number;
+      quality: string | null;
+    };
+    placed: Array<{
+      id: string;
+      label: string;
+      temple: string;
+      length_ft: number;
+      width_ft: number;
+      thickness_ft: number;
+    }>;
+  }>;
+  /** Open slabs not in the current plan — pool to mine for fillers. */
+  availableSlabs: Array<{
+    id: string;
+    label: string;
+    temple: string;
+    stone: string | null;
+    length_ft: number;
+    width_ft: number;
+    thickness_ft: number;
+    priority: boolean;
+    quality: string | null;
+  }>;
+  /** Available blocks NOT in plan — for expansion-mode suggestions. */
+  availableBlocks: Array<{
+    id: string;
+    stone: string;
+    yard: number;
+    length_ft: number;
+    width_ft: number;
+    height_ft: number;
+    quality: string | null;
+  }>;
+  kerfMm: number;
+}): Promise<FitBlockToFillResponse> {
+  await requireAuth(["developer"]);
+
+  const { plan, availableSlabs, availableBlocks, kerfMm } = payload;
+  const kerfFt = kerfMm / 25.4;
+
+  // Empty-plan fast path: just run the expansion phase below.
+  const fillSuggestions: FitFillSuggestion[] = [];
+  const fittedSlabIds = new Set<string>();
+
+  // Helper: build the BlockRow shape tryPackBlock expects (string-or-number
+  // dims accepted, but we have numbers so it's a noop pass-through).
+  function toBlockRow(b: {
+    id: string;
+    stone: string;
+    length_ft: number;
+    width_ft: number;
+    height_ft: number;
+    quality: string | null;
+    yard?: number;
+  }) {
+    return {
+      id: b.id,
+      stone: b.stone,
+      yard: b.yard ?? 1,
+      category: "Fresh",
+      length_ft: b.length_ft,
+      width_ft: b.width_ft,
+      height_ft: b.height_ft,
+      status: "available",
+      quality: b.quality,
+    };
+  }
+
+  // ── Phase 1: per-block fill ────────────────────────────────────────────
+  for (const planEntry of plan) {
+    const { block, placed } = planEntry;
+
+    // Stone + quality pre-filter. Slab.stone === null is treated as "any".
+    const candidates = availableSlabs.filter((s) => {
+      if (s.stone && s.stone !== block.stone) return false;
+      if (s.quality === "A" && block.quality !== "A") return false;
+      if (s.quality === "B" && block.quality !== "A" && block.quality !== "B") return false;
+      return true;
+    });
+    if (candidates.length === 0) continue;
+
+    // Reconstruct RemainingSlab[] for the engine.
+    const mustInclude: RemainingSlab[] = placed.map((p) => ({
+      id: p.id,
+      label: p.label,
+      temple: p.temple,
+      stone: block.stone,
+      quality: null,
+      sl: p.length_ft,
+      sw: p.width_ft,
+      sd: p.thickness_ft,
+    }));
+    const candidateRows: RemainingSlab[] = candidates.map((s) => ({
+      id: s.id,
+      label: s.label,
+      temple: s.temple,
+      stone: s.stone,
+      quality: s.quality,
+      sl: s.length_ft,
+      sw: s.width_ft,
+      sd: s.thickness_ft,
+    }));
+
+    // Run the same engine the algorithm uses. Must-include slabs go first
+    // so the engine prefers placing them (it sorts by face area).
+    const packed = tryPackBlock(toBlockRow(block), [...mustInclude, ...candidateRows], kerfFt);
+    const placedIds = new Set(packed.allPlaced.map((p) => p.id));
+
+    // Defensive: only suggest a candidate if the engine actually packed it
+    // AND every must-include slab is still packed (otherwise we'd be
+    // suggesting a swap, not a fill).
+    const allMustIncluded = mustInclude.every((m) => placedIds.has(m.id));
+    if (!allMustIncluded) continue;
+
+    const fitsHere = candidates.filter((c) => placedIds.has(c.id));
+    if (fitsHere.length === 0) continue;
+
+    // ── Score + rank
+    // Round thicknesses to the same precision as the engine to avoid 0.499
+    // vs 0.5 mismatches.
+    const placedThicknesses = new Set(placed.map((p) => Math.round(p.thickness_ft * 1000) / 1000));
+    const placedTemples = new Set(placed.map((p) => p.temple));
+    const scored = fitsHere
+      .map((c) => {
+        let score = 0;
+        const t = Math.round(c.thickness_ft * 1000) / 1000;
+        const sharesThickness = placedThicknesses.has(t);
+        const sharesTemple = placedTemples.has(c.temple);
+        if (sharesThickness) score += 50;
+        if (sharesTemple) score += 20;
+        // Volume bonus (small) — prefer larger slabs that reduce more waste.
+        score += (c.length_ft * c.width_ft * c.thickness_ft) / 100;
+        return { c, score, sharesThickness, sharesTemple };
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3);
+
+    for (const { c, score, sharesThickness, sharesTemple } of scored) {
+      const reasons: string[] = [];
+      if (sharesThickness) reasons.push(`shares ${c.thickness_ft}″ thickness layer (no extra kerf)`);
+      if (sharesTemple) reasons.push(`same temple (${c.temple})`);
+      reasons.push(`packs cleanly into ${block.id}`);
+      fillSuggestions.push({
+        block_id: block.id,
+        slab_id: c.id,
+        score: Math.round(score * 100) / 100,
+        reasoning: reasons.join(" · "),
+      });
+      fittedSlabIds.add(c.id);
+    }
+  }
+
+  // ── Phase 2: expansion (slabs that don't fit any planned block) ────────
+  const expansionSuggestions: FitExpansionSuggestion[] = [];
+  const remainingCandidates = availableSlabs.filter((s) => !fittedSlabIds.has(s.id));
+
+  if (remainingCandidates.length > 0 && availableBlocks.length > 0) {
+    // Group remaining candidates by stone so each unused block only runs
+    // against its compatible pool (saves work + avoids cross-stone packs).
+    const byStone = new Map<string, typeof remainingCandidates>();
+    for (const c of remainingCandidates) {
+      const key = c.stone ?? "any";
+      const arr = byStone.get(key) ?? [];
+      arr.push(c);
+      byStone.set(key, arr);
+    }
+
+    const usedExpansionSlabs = new Set<string>();
+    for (const block of availableBlocks) {
+      // Quality pre-filter: blocks of grade B can only host B or null;
+      // grade A hosts everything.
+      const cands = (byStone.get(block.stone) ?? []).filter((s) => {
+        if (usedExpansionSlabs.has(s.id)) return false;
+        if (s.quality === "A" && block.quality !== "A") return false;
+        if (s.quality === "B" && block.quality !== "A" && block.quality !== "B") return false;
+        return true;
+      });
+      if (cands.length === 0) continue;
+
+      const candidateRows: RemainingSlab[] = cands.map((s) => ({
+        id: s.id,
+        label: s.label,
+        temple: s.temple,
+        stone: s.stone,
+        quality: s.quality,
+        sl: s.length_ft,
+        sw: s.width_ft,
+        sd: s.thickness_ft,
+      }));
+      const packed = tryPackBlock(toBlockRow(block), candidateRows, kerfFt);
+      // Don't propose a whole new block for a single slab — that's not a
+      // win unless there's no other option, and the user can just pick the
+      // slab manually if they want.
+      if (packed.allPlaced.length < 2) continue;
+
+      const slabIds = packed.allPlaced.map((p) => p.id);
+      for (const id of slabIds) usedExpansionSlabs.add(id);
+      expansionSuggestions.push({
+        block_id: block.id,
+        slab_ids: slabIds,
+        score: slabIds.length,
+        reasoning: `Adds ${block.id} (${block.length_ft}×${block.width_ft}×${block.height_ft}″, ${block.stone}) — packs ${slabIds.length} slabs.`,
+      });
+    }
+
+    expansionSuggestions.sort((a, b) => b.score - a.score);
+    expansionSuggestions.splice(5); // cap at 5 to keep the UI manageable
+  }
+
+  // ── Strategy text ──────────────────────────────────────────────────────
+  const filledBlockCount = new Set(fillSuggestions.map((s) => s.block_id)).size;
+  const lines: string[] = [];
+  if (fillSuggestions.length > 0) {
+    lines.push(
+      `Found ${fillSuggestions.length} slab${fillSuggestions.length === 1 ? "" : "s"} that fit alongside your existing slabs across ${filledBlockCount} of ${plan.length} planned block${plan.length === 1 ? "" : "s"}.`,
+    );
+  } else if (plan.length > 0) {
+    lines.push("Plan is already tight — no other open slabs fit the leftover space on the planned blocks.");
+  }
+  if (expansionSuggestions.length > 0) {
+    const totalExtraSlabs = expansionSuggestions.reduce((sum, e) => sum + e.slab_ids.length, 0);
+    lines.push(
+      `Plus ${expansionSuggestions.length} way${expansionSuggestions.length === 1 ? "" : "s"} to add another block to cut ${totalExtraSlabs} more.`,
+    );
+  }
+  const strategy = lines.join(" ") || "Nothing to suggest.";
+
+  return { fillSuggestions, expansionSuggestions, strategy };
 }
 
 function errUrl(msg: string, slabIds?: string) {

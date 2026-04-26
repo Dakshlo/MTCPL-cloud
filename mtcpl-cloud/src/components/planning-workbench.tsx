@@ -4,7 +4,14 @@ import { useState, useRef, useEffect } from "react";
 import { BlockMiniPreview, SlabMiniPreview } from "@/components/stone-previews";
 import { getStonePalette } from "@/lib/stone-utils";
 import type { StoneTypeDef } from "@/lib/stone-utils";
-import type { AISuggestion, AIProcurementSuggestion, AISuggestionsResponse } from "@/app/(app)/planning/actions";
+import type {
+  AISuggestion,
+  AIProcurementSuggestion,
+  AISuggestionsResponse,
+  FitBlockToFillResponse,
+  FitFillSuggestion,
+  FitExpansionSuggestion,
+} from "@/app/(app)/planning/actions";
 import { computeCutEfficiency, toCFT, type CutEfficiency } from "@/lib/cut-efficiency";
 import { EfficiencyBar } from "@/components/efficiency-bar";
 import { yardLabel, yardShortLabel, FACILITIES, YARDS_BY_FACILITY, facilityLabel, facilityOfYard, type Facility } from "@/lib/yards";
@@ -385,6 +392,7 @@ export function PlanningWorkbench({
   aiAvailablePool = [],
   approveAction,
   aiSuggestionsAction,
+  fitBlockToFillAction,
   stoneTypes,
 }: {
   blocks: BlockRow[];
@@ -402,7 +410,9 @@ export function PlanningWorkbench({
    * Developer-only post-algorithm AI assistant. When provided, a "Get
    * AI suggestions" button appears below the result card. Clicking it
    * sends the algorithm's plan + unfittable slabs + open inventory
-   * to the model and gets back filler + procurement suggestions.
+   * to the model and gets back procurement suggestions for slabs that
+   * don't fit current stock. (Filler suggestions moved to the
+   * deterministic fitBlockToFillAction.)
    */
   aiSuggestionsAction?: (payload: {
     plan: Array<{
@@ -415,6 +425,22 @@ export function PlanningWorkbench({
     availableSlabs: Array<{ id: string; label: string; temple: string; stone: string | null; length_ft: number; width_ft: number; thickness_ft: number; priority: boolean; quality: string | null }>;
     kerfMm: number;
   }) => Promise<AISuggestionsResponse>;
+  /**
+   * Developer-only deterministic post-algorithm slab fitter. When
+   * provided, a "📐 Fit Blocks to Fill" button appears beside the AI
+   * button. Runs the same packing engine the algorithm uses to
+   * discover which open slabs fit alongside the planned slabs on each
+   * block, plus optional "add this block to plan" expansion suggestions.
+   */
+  fitBlockToFillAction?: (payload: {
+    plan: Array<{
+      block: { id: string; stone: string; length_ft: number; width_ft: number; height_ft: number; quality: string | null };
+      placed: Array<{ id: string; label: string; temple: string; length_ft: number; width_ft: number; thickness_ft: number }>;
+    }>;
+    availableSlabs: Array<{ id: string; label: string; temple: string; stone: string | null; length_ft: number; width_ft: number; thickness_ft: number; priority: boolean; quality: string | null }>;
+    availableBlocks: Array<{ id: string; stone: string; yard: number; length_ft: number; width_ft: number; height_ft: number; quality: string | null }>;
+    kerfMm: number;
+  }) => Promise<FitBlockToFillResponse>;
   stoneTypes?: StoneTypeDef[];
 }) {
   const [kerfMm, setKerfMm] = useState(20);
@@ -439,6 +465,14 @@ export function PlanningWorkbench({
   // AI procurement suggestions = block dimensions the company should
   // procure to unblock currently-unfittable slabs.
   const [aiProcurement, setAiProcurement] = useState<AIProcurementSuggestion[]>([]);
+  // Fit Block to Fill — deterministic post-algorithm fitter. Same UX
+  // shape as the AI button (loading / error / strategy / suggestions)
+  // but every suggestion is a verified geometric fit, not an AI guess.
+  const [fitFillLoading, setFitFillLoading] = useState(false);
+  const [fitFillError, setFitFillError] = useState<string | null>(null);
+  const [fitFillStrategy, setFitFillStrategy] = useState<string | null>(null);
+  const [fitFillSuggestions, setFitFillSuggestions] = useState<FitFillSuggestion[]>([]);
+  const [fitExpansions, setFitExpansions] = useState<FitExpansionSuggestion[]>([]);
 
   const allUsableBlocks = blocks.filter((block) => block.status === "available" || block.status === "reserved");
   // Blocks restricted to active facility first, then to ticked yards within it.
@@ -475,6 +509,10 @@ export function PlanningWorkbench({
     setAiSuggestions([]);
     setAiProcurement([]);
     setAiStrategy(null);
+    setFitFillSuggestions([]);
+    setFitExpansions([]);
+    setFitFillStrategy(null);
+    setFitFillError(null);
   }
 
   function toggleYard(y: number) {
@@ -515,11 +553,15 @@ export function PlanningWorkbench({
     setAckUnmet(false);
     setAiStrategy(null);
     setAiError(null);
-    // Re-planning invalidates any prior AI suggestions — they were
-    // computed against the previous plan output and could now point
-    // to slabs/blocks that have moved.
+    // Re-planning invalidates any prior AI / fit-fill suggestions —
+    // they were computed against the previous plan output and could
+    // now point to slabs/blocks that have moved.
     setAiSuggestions([]);
     setAiProcurement([]);
+    setFitFillSuggestions([]);
+    setFitExpansions([]);
+    setFitFillStrategy(null);
+    setFitFillError(null);
     setOriginalSelectedCount(filteredSlabs.length);
     if (filteredSlabs.length === 0) {
       setResult({ plan: [], unmet: [], totalWaste: 0 });
@@ -694,6 +736,140 @@ export function PlanningWorkbench({
       return next;
     });
     setAiSuggestions([]);
+    setTimeout(() => generatePlan(), 0);
+  }
+
+  /**
+   * Run the deterministic fitter against the current plan. Sends the
+   * plan + the open inventory pool + unused blocks to the server,
+   * receives fill + expansion suggestions, every one of which is a
+   * verified physical fit (not an AI guess).
+   */
+  async function handleFitBlockToFill() {
+    if (!fitBlockToFillAction || !result || result.plan.length === 0) return;
+
+    setFitFillLoading(true);
+    setFitFillError(null);
+    setFitFillStrategy(null);
+    setFitFillSuggestions([]);
+    setFitExpansions([]);
+
+    // Pool = all open slabs not in the user's current selection AND
+    // not already placed in the plan.
+    const planSlabIds = new Set(result.plan.flatMap((pb) => pb.placed.map((p) => p.id)));
+    const poolMap = new Map<string, SlabRow>();
+    for (const s of openSlabs) {
+      if (!selectedSlabIds.has(s.id) && !planSlabIds.has(s.id)) poolMap.set(s.id, s);
+    }
+    for (const s of aiAvailablePool) {
+      if (!planSlabIds.has(s.id)) poolMap.set(s.id, s);
+    }
+    const poolSlabs = [...poolMap.values()];
+
+    // Available blocks = usable, in current facility, NOT already in
+    // the plan, NOT in current block selection or in plan.
+    const usedBlockIds = new Set(result.plan.map((pb) => pb.blk.id));
+    const expansionBlocks = usableBlocks.filter((b) => !usedBlockIds.has(b.id));
+
+    try {
+      const response = await fitBlockToFillAction({
+        plan: result.plan.map((pb) => ({
+          block: {
+            id: pb.blk.id,
+            stone: pb.blk.stone,
+            length_ft: pb.blk.l,
+            width_ft: pb.blk.w,
+            height_ft: pb.blk.h,
+            quality: pb.blk.quality ?? null,
+          },
+          placed: pb.placed.map((p) => ({
+            id: p.id, label: p.label, temple: p.temple,
+            length_ft: p.sw, width_ft: p.sh, thickness_ft: p.sd,
+          })),
+        })),
+        availableSlabs: poolSlabs.map((s) => ({
+          id: s.id, label: s.label, temple: s.temple, stone: s.stone,
+          length_ft: toNum(s.length_ft), width_ft: toNum(s.width_ft),
+          thickness_ft: toNum(s.thickness_ft),
+          priority: s.priority ?? false, quality: s.quality,
+        })),
+        availableBlocks: expansionBlocks.map((b) => ({
+          id: b.id, stone: b.stone, yard: toNum(b.yard, 1),
+          length_ft: toNum(b.length_ft), width_ft: toNum(b.width_ft),
+          height_ft: toNum(b.height_ft),
+          quality: b.quality,
+        })),
+        kerfMm,
+      });
+
+      if (response.error) {
+        setFitFillError(response.error);
+        return;
+      }
+
+      // Defensive: drop any suggestion whose block_id is no longer in
+      // the plan or whose slab_id isn't in the pool — protects against
+      // any future engine bug.
+      const validBlockIds = new Set(result.plan.map((pb) => pb.blk.id));
+      const validSlabIds = new Set(poolSlabs.map((s) => s.id));
+      setFitFillSuggestions(
+        (response.fillSuggestions ?? []).filter(
+          (s) => validBlockIds.has(s.block_id) && validSlabIds.has(s.slab_id),
+        ),
+      );
+
+      const validExpansionBlockIds = new Set(expansionBlocks.map((b) => b.id));
+      setFitExpansions(
+        (response.expansionSuggestions ?? [])
+          .map((e) => ({
+            ...e,
+            slab_ids: e.slab_ids.filter((id) => validSlabIds.has(id)),
+          }))
+          .filter((e) => validExpansionBlockIds.has(e.block_id) && e.slab_ids.length > 0),
+      );
+
+      setFitFillStrategy(response.strategy ?? null);
+    } catch (err) {
+      setFitFillError(err instanceof Error ? err.message : "Fit-to-fill failed. Try again.");
+    } finally {
+      setFitFillLoading(false);
+    }
+  }
+
+  /**
+   * Add a single fit-fill suggestion to the user's slab selection and
+   * re-run the algorithm so the new slab actually gets placed.
+   */
+  function acceptFitSuggestion(slabId: string) {
+    setSelectedSlabIds((prev) => new Set(prev).add(slabId));
+    setFitFillSuggestions((prev) => prev.filter((s) => s.slab_id !== slabId));
+    setTimeout(() => generatePlan(), 0);
+  }
+
+  /** Bulk-accept every fit-fill suggestion + re-plan. */
+  function acceptAllFitSuggestions() {
+    if (fitFillSuggestions.length === 0) return;
+    setSelectedSlabIds((prev) => {
+      const next = new Set(prev);
+      for (const s of fitFillSuggestions) next.add(s.slab_id);
+      return next;
+    });
+    setFitFillSuggestions([]);
+    setTimeout(() => generatePlan(), 0);
+  }
+
+  /**
+   * Accept an expansion suggestion: add the new block to the block
+   * selection AND its slab IDs to the slab selection, then re-plan.
+   */
+  function acceptExpansion(expansion: FitExpansionSuggestion) {
+    setSelectedBlockIds((prev) => new Set(prev).add(expansion.block_id));
+    setSelectedSlabIds((prev) => {
+      const next = new Set(prev);
+      for (const id of expansion.slab_ids) next.add(id);
+      return next;
+    });
+    setFitExpansions((prev) => prev.filter((e) => e.block_id !== expansion.block_id));
     setTimeout(() => generatePlan(), 0);
   }
 
@@ -976,30 +1152,62 @@ export function PlanningWorkbench({
         </div>
       </section>
 
-      {/* ── AI suggestion trigger ────────────────────────────────────
-          Developer-only. Visible once an algorithm plan exists OR
-          the algorithm produced unfittable slabs. Fires the AI to
-          look for filler slabs (open-pool slabs that fit leftover
-          space) and procurement suggestions (block sizes to order
-          for unfittable slabs). Hidden after a successful AI run
-          since the panels themselves carry the actionable info. */}
-      {aiSuggestionsAction && result && (result.plan.length > 0 || result.unmet.length > 0) &&
-        aiSuggestions.length === 0 && aiProcurement.length === 0 && !aiStrategy && (
+      {/* ── 📐 Fit Blocks to Fill trigger ─────────────────────────────
+          Developer-only. Visible once a plan with at least one block
+          exists. Runs the deterministic geometry engine to find which
+          OTHER open slabs would fit alongside the planned slabs. No AI
+          involvement — every suggestion is a verified pack. Hidden
+          after a successful run; the panels carry the info. */}
+      {fitBlockToFillAction && result && result.plan.length > 0 &&
+        fitFillSuggestions.length === 0 && fitExpansions.length === 0 && !fitFillStrategy && (
+          <section className="page-card" style={{ background: "rgba(184,115,51,0.04)", border: "1px solid rgba(184,115,51,0.25)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <span style={{ fontSize: 22, lineHeight: 1.3 }}>📐</span>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--gold-dark)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                    Fit Blocks to Fill <span style={{ color: "#888", fontWeight: 500 }}>(developer-only)</span>
+                  </div>
+                  <p style={{ margin: "2px 0 0", fontSize: 13, color: "var(--text)" }}>
+                    Scan the open inventory for slabs that fit into the leftover space on these {result.plan.length} block{result.plan.length === 1 ? "" : "s"}. Same stone only. Uses the same geometry engine as the planner — every fit is verified.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={handleFitBlockToFill}
+                disabled={fitFillLoading}
+                style={{ fontSize: 13, padding: "8px 18px", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 6 }}
+              >
+                <span style={{ fontSize: 14 }}>📐</span>
+                {fitFillLoading ? "Fitting…" : "Fit Blocks to Fill"}
+              </button>
+            </div>
+            {fitFillError && (
+              <div style={{ fontSize: 12, color: "#DC2626", marginTop: 10, padding: "6px 10px", background: "rgba(220,38,38,0.05)", borderRadius: 6 }}>
+                ⚠ {fitFillError}
+              </div>
+            )}
+          </section>
+        )}
+
+      {/* ── 🤖 AI procurement trigger ────────────────────────────────
+          Developer-only. Now scoped to procurement only — only shown
+          when the algorithm produced unfittable slabs. The filler-
+          suggestion job moved to the deterministic Fit-to-Fill above. */}
+      {aiSuggestionsAction && result && result.unmet.length > 0 &&
+        aiProcurement.length === 0 && !aiStrategy && (
           <section className="page-card" style={{ background: "rgba(124,58,237,0.04)", border: "1px solid rgba(124,58,237,0.2)" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
               <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                 <span style={{ fontSize: 22, lineHeight: 1.3 }}>🤖</span>
                 <div>
                   <div style={{ fontSize: 11, fontWeight: 700, color: "#7c3aed", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                    AI Suggestions <span style={{ color: "#888", fontWeight: 500 }}>(developer-only)</span>
+                    AI Procurement Advice <span style={{ color: "#888", fontWeight: 500 }}>(developer-only)</span>
                   </div>
                   <p style={{ margin: "2px 0 0", fontSize: 13, color: "var(--text)" }}>
-                    {result.plan.length > 0 && result.unmet.length === 0 &&
-                      "Plan generated. Ask AI to suggest other open slabs that could fit into leftover space for tighter packing."}
-                    {result.plan.length > 0 && result.unmet.length > 0 &&
-                      `Plan generated with ${result.unmet.length} unfittable slab${result.unmet.length === 1 ? "" : "s"}. AI can suggest filler slabs AND block sizes to procure.`}
-                    {result.plan.length === 0 && result.unmet.length > 0 &&
-                      `${result.unmet.length} slab${result.unmet.length === 1 ? "" : "s"} couldn't be placed in current stock. AI can suggest block sizes to procure.`}
+                    {result.unmet.length} slab{result.unmet.length === 1 ? "" : "s"} couldn&rsquo;t be placed in current stock. AI can suggest block sizes to procure for these.
                   </p>
                 </div>
               </div>
@@ -1011,7 +1219,7 @@ export function PlanningWorkbench({
                 style={{ fontSize: 13, padding: "8px 18px", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 6 }}
               >
                 <span style={{ fontSize: 14 }}>✨</span>
-                {aiLoading ? "AI thinking…" : "Get suggestions from AI"}
+                {aiLoading ? "AI thinking…" : "Get procurement suggestions"}
               </button>
             </div>
             {aiError && (
@@ -1056,6 +1264,248 @@ export function PlanningWorkbench({
           )}
         </section>
       )}
+
+      {/* ── 📐 Fit-to-Fill: Strategy banner ───────────────────────── */}
+      {fitFillStrategy && (
+        <section className="page-card" style={{ background: "rgba(184,115,51,0.04)", border: "1px solid rgba(184,115,51,0.25)" }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: "1 1 360px", minWidth: 0 }}>
+              <span style={{ fontSize: 20, flexShrink: 0, lineHeight: 1.3 }}>📐</span>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--gold-dark)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 5 }}>
+                  Fit-to-Fill Result <span style={{ color: "#888", fontWeight: 500 }}>(deterministic geometry)</span>
+                </div>
+                <p style={{ margin: 0, fontSize: 13, color: "var(--text)", lineHeight: 1.6 }}>{fitFillStrategy}</p>
+              </div>
+            </div>
+            {fitBlockToFillAction && result && (
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={handleFitBlockToFill}
+                disabled={fitFillLoading}
+                style={{ fontSize: 11, padding: "5px 12px", whiteSpace: "nowrap" }}
+              >
+                {fitFillLoading ? "Fitting…" : "↻ Re-run"}
+              </button>
+            )}
+          </div>
+          {fitFillError && (
+            <div style={{ fontSize: 12, color: "#DC2626", marginTop: 10, padding: "6px 10px", background: "rgba(220,38,38,0.05)", borderRadius: 6 }}>
+              ⚠ {fitFillError}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* ── 📐 Fit-to-Fill: per-block fill suggestions panel ─────── */}
+      {fitFillSuggestions.length > 0 && (() => {
+        const poolMap = new Map<string, SlabRow>();
+        for (const s of openSlabs) poolMap.set(s.id, s);
+        for (const s of aiAvailablePool) poolMap.set(s.id, s);
+        const groups = new Map<string, FitFillSuggestion[]>();
+        for (const sug of fitFillSuggestions) {
+          const arr = groups.get(sug.block_id) ?? [];
+          arr.push(sug);
+          groups.set(sug.block_id, arr);
+        }
+        return (
+          <section
+            className="page-card"
+            style={{
+              background: "rgba(184,115,51,0.04)",
+              border: "1px solid rgba(184,115,51,0.3)",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <span style={{ fontSize: 20, lineHeight: 1.3 }}>📐</span>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--gold-dark)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                    Fit into existing blocks
+                  </div>
+                  <p style={{ margin: "2px 0 0", fontSize: 13, color: "var(--text)" }}>
+                    {fitFillSuggestions.length} slab{fitFillSuggestions.length === 1 ? "" : "s"} verified to fit alongside the placed slabs. Adding them won&rsquo;t require any new blocks.
+                  </p>
+                </div>
+              </div>
+              {fitFillSuggestions.length > 1 && (
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={acceptAllFitSuggestions}
+                  style={{ fontSize: 12, padding: "6px 14px" }}
+                  disabled={fitFillLoading}
+                >
+                  Add all {fitFillSuggestions.length} & re-plan
+                </button>
+              )}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {[...groups.entries()].map(([blockId, sugs]) => (
+                <div
+                  key={blockId}
+                  style={{
+                    border: "1px solid rgba(184,115,51,0.2)",
+                    borderRadius: 8,
+                    padding: "10px 12px",
+                    background: "var(--surface)",
+                  }}
+                >
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
+                    On block <code style={{ fontFamily: "ui-monospace, monospace", color: "var(--gold-dark)" }}>{blockId}</code>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {sugs.map((sug) => {
+                      const slab = poolMap.get(sug.slab_id);
+                      return (
+                        <div
+                          key={sug.slab_id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: 10,
+                            flexWrap: "wrap",
+                            padding: "8px 10px",
+                            background: "var(--surface-alt)",
+                            borderRadius: 6,
+                          }}
+                        >
+                          <div style={{ flex: "1 1 240px", minWidth: 0 }}>
+                            <div style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
+                              <strong style={{ fontFamily: "ui-monospace, monospace", fontSize: 13 }}>{sug.slab_id}</strong>
+                              {slab && (
+                                <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                                  · {slab.temple} · {slab.length_ft}×{slab.width_ft}×{slab.thickness_ft}″
+                                  {slab.priority && <span style={{ color: "#DC2626", marginLeft: 6, fontWeight: 700 }}>⚡</span>}
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 3 }}>
+                              {sug.reasoning}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className="ghost-button"
+                            onClick={() => acceptFitSuggestion(sug.slab_id)}
+                            disabled={fitFillLoading}
+                            style={{ fontSize: 12, padding: "5px 12px", whiteSpace: "nowrap" }}
+                          >
+                            + Add &amp; re-plan
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="muted" style={{ fontSize: 11, marginTop: 10, marginBottom: 0, fontStyle: "italic" }}>
+              Each suggestion was verified by running the same packing engine the planner uses with the candidate added — these are real fits, not estimates.
+            </p>
+          </section>
+        );
+      })()}
+
+      {/* ── 📐 Fit-to-Fill: block-expansion suggestions panel ─────── */}
+      {fitExpansions.length > 0 && (() => {
+        const poolMap = new Map<string, SlabRow>();
+        for (const s of openSlabs) poolMap.set(s.id, s);
+        for (const s of aiAvailablePool) poolMap.set(s.id, s);
+        const blocksMap = new Map<string, BlockRow>();
+        for (const b of usableBlocks) blocksMap.set(b.id, b);
+        return (
+          <section
+            className="page-card"
+            style={{
+              background: "rgba(37,99,235,0.04)",
+              border: "1px solid rgba(37,99,235,0.3)",
+            }}
+          >
+            <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 10 }}>
+              <span style={{ fontSize: 22, lineHeight: 1.3 }}>🆕</span>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#1d4ed8", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                  Expand the plan
+                </div>
+                <p style={{ margin: "2px 0 0", fontSize: 13, color: "var(--text)" }}>
+                  {fitExpansions.length} additional block{fitExpansions.length === 1 ? "" : "s"} would let you cut more slabs in this session.
+                </p>
+              </div>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {fitExpansions.map((exp) => {
+                const block = blocksMap.get(exp.block_id);
+                return (
+                  <div
+                    key={exp.block_id}
+                    style={{
+                      border: "1px solid rgba(37,99,235,0.2)",
+                      borderRadius: 8,
+                      padding: "10px 12px",
+                      background: "var(--surface)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 10,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <div style={{ flex: "1 1 280px", minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
+                        <strong style={{ fontFamily: "ui-monospace, monospace", fontSize: 13, color: "#1d4ed8" }}>{exp.block_id}</strong>
+                        {block && (
+                          <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                            · {block.stone} · {block.length_ft}×{block.width_ft}×{block.height_ft}″
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 3 }}>
+                        {exp.reasoning}
+                      </div>
+                      <div style={{ marginTop: 5, display: "flex", gap: 4, flexWrap: "wrap" }}>
+                        {exp.slab_ids.map((id) => {
+                          const slab = poolMap.get(id);
+                          return (
+                            <span
+                              key={id}
+                              style={{
+                                fontFamily: "ui-monospace, monospace",
+                                fontSize: 10,
+                                padding: "2px 6px",
+                                background: "var(--surface-alt)",
+                                borderRadius: 8,
+                                color: "var(--text)",
+                              }}
+                            >
+                              {id}
+                              {slab && <span style={{ color: "var(--muted)", marginLeft: 4 }}>({slab.length_ft}×{slab.width_ft}×{slab.thickness_ft}″)</span>}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="ghost-button"
+                      onClick={() => acceptExpansion(exp)}
+                      disabled={fitFillLoading}
+                      style={{ fontSize: 12, padding: "5px 12px", whiteSpace: "nowrap" }}
+                    >
+                      + Add block &amp; re-plan
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="muted" style={{ fontSize: 11, marginTop: 10, marginBottom: 0, fontStyle: "italic" }}>
+              Each entry is verified — adding the block + slabs will produce a plan that places them.
+            </p>
+          </section>
+        );
+      })()}
 
       {aiSuggestions.length > 0 && (() => {
         const slabById = new Map(openSlabs.map((s) => [s.id, s]));

@@ -2,7 +2,7 @@ import { PlanningWorkbench } from "@/components/planning-workbench";
 import { requireAuth } from "@/lib/auth";
 import { createDataClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { approvePlanAction, aiSuggestionsAction } from "./actions";
+import { approvePlanAction, aiSuggestionsAction, fitBlockToFillAction } from "./actions";
 import { ProcurementHeadsUp } from "./procurement-heads-up";
 
 export default async function PlanningPage({
@@ -180,6 +180,7 @@ export default async function PlanningPage({
       <PlanningWorkbench
         approveAction={approvePlanAction}
         aiSuggestionsAction={profile.role === "developer" ? aiSuggestionsAction : undefined}
+        fitBlockToFillAction={profile.role === "developer" ? fitBlockToFillAction : undefined}
         blocks={blocks ?? []}
         slabs={slabs}
         aiAvailablePool={aiAvailablePool}
