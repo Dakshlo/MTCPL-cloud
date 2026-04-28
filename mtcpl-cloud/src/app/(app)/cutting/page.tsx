@@ -169,8 +169,20 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
   // cards keeps using the planner's projection — only done cards flip to
   // real numbers.
   type ActualSlab = { sw: number; sh: number; sd: number };
+  type ActualSlabRow = {
+    id: string;
+    label: string | null;
+    temple: string | null;
+    sw: number;
+    sh: number;
+    sd: number;
+  };
   type ActualRemainder = { id: string; l: number; w: number; h: number; status: string };
   const actualSlabsByParent = new Map<string, ActualSlab[]>();
+  /** Full slab rows (id + label + temple + dims) per parent block —
+   *  used to render chips on Done Today cards so manual additions
+   *  surface alongside planned ones. */
+  const actualSlabRowsByParent = new Map<string, ActualSlabRow[]>();
   const actualRemaindersByParent = new Map<string, ActualRemainder[]>();
 
   if (activeTab === "done" && rows.length > 0) {
@@ -179,14 +191,28 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
     // Actually cut slabs for these blocks
     const { data: realSlabRows } = await supabase
       .from("slab_requirements")
-      .select("id, length_ft, width_ft, thickness_ft, source_block_id, status")
+      .select("id, label, temple, length_ft, width_ft, thickness_ft, source_block_id, status")
       .in("source_block_id", parentBlockIds)
       .eq("status", "cut_done");
     for (const s of realSlabRows ?? []) {
       if (!s.source_block_id) continue;
+      const sw = Number(s.length_ft);
+      const sh = Number(s.width_ft);
+      const sd = Number(s.thickness_ft);
       const list = actualSlabsByParent.get(s.source_block_id) ?? [];
-      list.push({ sw: Number(s.length_ft), sh: Number(s.width_ft), sd: Number(s.thickness_ft) });
+      list.push({ sw, sh, sd });
       actualSlabsByParent.set(s.source_block_id, list);
+
+      const rowList = actualSlabRowsByParent.get(s.source_block_id) ?? [];
+      rowList.push({
+        id: s.id,
+        label: s.label ?? null,
+        temple: s.temple ?? null,
+        sw,
+        sh,
+        sd,
+      });
+      actualSlabRowsByParent.set(s.source_block_id, rowList);
     }
 
     // Restocked remainder blocks for these rows
@@ -354,9 +380,18 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                 {list.map((block) => {
                   const blk = block.layout?.blk;
                   const placed = block.layout?.placed ?? [];
-                  const slabCount = block.cut_session_slabs.length;
                   const isLive = block.status === "cutting";
                   const isDoneStatus = block.status === "done";
+                  // For pending/in-progress: show the planned count.
+                  // For done: show the REAL cut count (which includes
+                  // any slabs the operator manually added from inventory
+                  // during the Cutting-Done flow). Falls back to the
+                  // planned count if real data didn't come back.
+                  const realRowCount = isDoneStatus
+                    ? actualSlabRowsByParent.get(block.block_id)?.length ?? 0
+                    : 0;
+                  const slabCount =
+                    isDoneStatus && realRowCount > 0 ? realRowCount : block.cut_session_slabs.length;
                   const isUrgent = block.cut_session_slabs.some((s) => urgentSlabIds.has(s.slab_requirement_id));
                   // Done blocks: use REAL post-cut data (actually-cut slabs
                   // + actually-restocked blocks). For any slab data the
@@ -564,22 +599,93 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                 </div>
 
                 {/* Slab ID chips — include W×H×T so the owner can see the
-                    size without opening the detail view. */}
-                {placed.length > 0 && (
-                  <div className="chip-row" style={{ marginTop: 8 }}>
-                    {placed.map((s) => (
-                      <span className="plan-chip" key={s.id}>
-                        {s.id}
-                        {(s.sw != null || s.sh != null || s.sd != null) && (
-                          <> · <span style={{ fontFamily: "ui-monospace, monospace" }}>
-                            {s.sw ?? "—"}×{s.sh ?? "—"}×{s.sd ?? "—"}″
-                          </span></>
+                    size without opening the detail view.
+
+                    On DONE cards we flip from the planner's `placed`
+                    projection to the REAL cut slabs from
+                    slab_requirements. That way any slab the operator
+                    manually added from inventory during the
+                    Cutting-Done flow shows up here too — not just the
+                    originals from the cut session. Manual additions
+                    are tagged with a small "+ added" badge so the team
+                    can see at a glance what was an unplanned add.
+
+                    Pending / waiting / in-progress cards keep using
+                    `placed` (the projection) — that's still the best
+                    forward-looking view until the cut finishes. */}
+                {(() => {
+                  const realRows = isDoneStatus ? actualSlabRowsByParent.get(block.block_id) : undefined;
+                  if (isDoneStatus && realRows && realRows.length > 0) {
+                    // Anything in the real cut list that wasn't in the
+                    // original cut_session_slabs is a manual / unplanned
+                    // add — flag it with a coloured badge.
+                    const plannedIds = new Set(block.cut_session_slabs.map((s) => s.slab_requirement_id));
+                    const manualCount = realRows.filter((s) => !plannedIds.has(s.id)).length;
+                    return (
+                      <>
+                        <div className="chip-row" style={{ marginTop: 8 }}>
+                          {realRows.map((s) => {
+                            const isManual = !plannedIds.has(s.id);
+                            return (
+                              <span
+                                className="plan-chip"
+                                key={s.id}
+                                style={isManual ? {
+                                  background: "rgba(120,53,15,0.12)",
+                                  border: "1px solid rgba(180,83,9,0.45)",
+                                  color: "var(--text)",
+                                } : undefined}
+                                title={isManual ? "Added from inventory during Cutting Done — not in original plan" : undefined}
+                              >
+                                {s.id}
+                                {(s.sw != null || s.sh != null || s.sd != null) && (
+                                  <> · <span style={{ fontFamily: "ui-monospace, monospace" }}>
+                                    {s.sw ?? "—"}×{s.sh ?? "—"}×{s.sd ?? "—"}″
+                                  </span></>
+                                )}
+                                {s.temple ? ` · ${s.temple}` : ""}
+                                {isManual && (
+                                  <span style={{
+                                    marginLeft: 6,
+                                    fontSize: 9,
+                                    fontWeight: 700,
+                                    letterSpacing: "0.05em",
+                                    color: "#b45309",
+                                    textTransform: "uppercase",
+                                  }}>
+                                    + added
+                                  </span>
+                                )}
+                              </span>
+                            );
+                          })}
+                        </div>
+                        {manualCount > 0 && (
+                          <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                            {manualCount} slab{manualCount === 1 ? "" : "s"} added from inventory during cutting (unplanned)
+                          </div>
                         )}
-                        {s.temple ? ` · ${s.temple}` : ""}
-                      </span>
-                    ))}
-                  </div>
-                )}
+                      </>
+                    );
+                  }
+                  // Pre-done (or done with no real-slab data) → planner projection
+                  if (placed.length === 0) return null;
+                  return (
+                    <div className="chip-row" style={{ marginTop: 8 }}>
+                      {placed.map((s) => (
+                        <span className="plan-chip" key={s.id}>
+                          {s.id}
+                          {(s.sw != null || s.sh != null || s.sd != null) && (
+                            <> · <span style={{ fontFamily: "ui-monospace, monospace" }}>
+                              {s.sw ?? "—"}×{s.sh ?? "—"}×{s.sd ?? "—"}″
+                            </span></>
+                          )}
+                          {s.temple ? ` · ${s.temple}` : ""}
+                        </span>
+                      ))}
+                    </div>
+                  );
+                })()}
 
                 {/* Restocked remainder pieces — shown on done cards with
                     real dimensions + each piece's current status so the
