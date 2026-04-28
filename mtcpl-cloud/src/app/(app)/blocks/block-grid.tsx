@@ -178,6 +178,7 @@ export function BlockGrid({
     return (
       <div
         key={block.id}
+        data-block-id={block.id}
         className={`block-card${isSelected ? " block-card-active" : ""}`}
         style={isUnavailable ? { filter: "grayscale(0.9)", opacity: 0.65 } : undefined}
         onClick={() => setSelectedId(isSelected ? null : block.id)}

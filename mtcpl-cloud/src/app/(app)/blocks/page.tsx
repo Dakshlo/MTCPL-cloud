@@ -4,6 +4,7 @@ import { getProfilesMap } from "@/lib/profiles";
 import { AddBlockForm } from "./add-block-form";
 import { MarbleTruckForm } from "./marble-truck-form";
 import { BlockGrid } from "./block-grid";
+import { BlockSearchBar } from "./block-search-bar";
 import { BlockExport } from "./block-export";
 import { generateNextCode } from "./utils";
 import { yardLabel } from "@/lib/yards";
@@ -291,6 +292,15 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
           </div>
           <BlockExport />
         </div>
+      )}
+
+      {/* Search bar — same UX as the slab page. Click to expand a
+          center-peek modal that searches across id, stone, yard,
+          vendor, truck no, dimensions, status. Click outside / Esc
+          closes. Click a result → scrolls + highlights the matching
+          card in the BlockGrid below. */}
+      {blockList.length > 0 && (
+        <BlockSearchBar blocks={blockList} />
       )}
 
       <div className="section-heading">
