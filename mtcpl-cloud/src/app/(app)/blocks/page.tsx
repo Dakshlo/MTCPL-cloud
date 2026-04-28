@@ -120,10 +120,14 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
   const profilesMap = await getProfilesMap();
 
   // ── Marble cut log ────────────────────────────────────────────────
-  // Pull every consumed block (any category) so the MarbleCutLog
-  // component can filter to marble client-side. Then for those
-  // blocks fetch the cut_done slabs that came from them. The log
-  // is "what did we cut from each marble block, when, by whom".
+  // We define "cut" inclusively: any block that's either
+  //   (a) status='consumed' (officially marked done), OR
+  //   (b) referenced by at least one slab_requirements.source_block_id
+  //       (i.e. slabs were physically generated from it, even if the
+  //        block.status didn't get flipped to 'consumed')
+  // Either signal proves cutting happened — and we want every such
+  // block to surface in the log so manual-cut bypass blocks aren't
+  // silently dropped because of a missing status flip.
   // Paginated to dodge the 1000-row PostgREST cap.
   type ConsumedRow = {
     id: string;
@@ -138,7 +142,7 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
     updated_at: string | null;
     updated_by: string | null;
   };
-  async function fetchAllConsumedBlocks(): Promise<ConsumedRow[]> {
+  async function fetchConsumedBlocks(): Promise<ConsumedRow[]> {
     const PAGE = 1000;
     const out: ConsumedRow[] = [];
     for (let offset = 0; offset < 50000; offset += PAGE) {
@@ -154,6 +158,48 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
       if (!data || data.length === 0) break;
       out.push(...(data as ConsumedRow[]));
       if (data.length < PAGE) break;
+    }
+    return out;
+  }
+
+  // Fetch every distinct source_block_id from slab_requirements —
+  // these are blocks that had slabs generated from them. Any such
+  // block was cut, regardless of what its current status is.
+  async function fetchAllSourceBlockIds(): Promise<Set<string>> {
+    const ids = new Set<string>();
+    const PAGE = 1000;
+    for (let offset = 0; offset < 50000; offset += PAGE) {
+      const { data, error: pageErr } = await admin
+        .from("slab_requirements")
+        .select("source_block_id")
+        .not("source_block_id", "is", null)
+        .range(offset, offset + PAGE - 1);
+      if (pageErr) throw new Error(pageErr.message);
+      if (!data || data.length === 0) break;
+      for (const r of data as { source_block_id: string | null }[]) {
+        if (r.source_block_id) ids.add(r.source_block_id);
+      }
+      if (data.length < PAGE) break;
+    }
+    return ids;
+  }
+
+  // Fetch a list of block records by id (any status). Used to fill in
+  // blocks that have slabs linked but aren't in the consumed set.
+  async function fetchBlocksByIds(blockIds: string[]): Promise<ConsumedRow[]> {
+    if (blockIds.length === 0) return [];
+    const PAGE = 500;
+    const out: ConsumedRow[] = [];
+    for (let i = 0; i < blockIds.length; i += PAGE) {
+      const chunk = blockIds.slice(i, i + PAGE);
+      const { data, error: pageErr } = await admin
+        .from("blocks")
+        .select(
+          "id, stone, yard, length_ft, width_ft, height_ft, tonnes, truck_no, vendor_name, updated_at, updated_by",
+        )
+        .in("id", chunk);
+      if (pageErr) throw new Error(pageErr.message);
+      if (data) out.push(...(data as ConsumedRow[]));
     }
     return out;
   }
@@ -174,20 +220,30 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
     const PAGE = 500;
     const out: CutSlabRow[] = [];
     // Chunk block-id list to keep .in() query strings safe.
+    // No status filter: we want to surface every slab linked to a
+    // cut block — including ones still in 'planned' / 'open' if the
+    // operator generated them but hasn't moved them along yet.
+    // The component already shows status per slab.
     for (let i = 0; i < blockIds.length; i += PAGE) {
       const chunk = blockIds.slice(i, i + PAGE);
       const { data, error: pageErr } = await admin
         .from("slab_requirements")
         .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, status, source_block_id")
-        .in("source_block_id", chunk)
-        .in("status", ["cut_done", "completed", "dispatched"]);
+        .in("source_block_id", chunk);
       if (pageErr) throw new Error(pageErr.message);
       if (data) out.push(...(data as CutSlabRow[]));
     }
     return out;
   }
 
-  const allConsumed = await fetchAllConsumedBlocks();
+  // Build the inclusive cut-block universe.
+  const consumedBlocks = await fetchConsumedBlocks();
+  const linkedBlockIds = await fetchAllSourceBlockIds();
+  const consumedIdSet = new Set(consumedBlocks.map((b) => b.id));
+  const missingIds = [...linkedBlockIds].filter((id) => !consumedIdSet.has(id));
+  const extraBlocks = await fetchBlocksByIds(missingIds);
+  const allConsumed: ConsumedRow[] = [...consumedBlocks, ...extraBlocks];
+
   const consumedSlabs = await fetchSlabsForBlocks(allConsumed.map((b) => b.id));
   const slabsByBlock = new Map<string, CutSlabRow[]>();
   for (const s of consumedSlabs) {
