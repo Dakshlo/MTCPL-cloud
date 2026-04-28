@@ -1,9 +1,12 @@
 /**
  * Block Journey — Real Efficiency Report.
  *
- * Server component. Auth-gated to owner + developer. Bulk-fetches every
- * table needed, calls buildLineages() once, and hands the result to the
- * client component for filtering / sorting / rendering.
+ * Server component. Auth-gated to owner + developer + the trusted
+ * named users (Naresh, Rajesh Kumar) — Rajesh is stored as team_head
+ * but his stripped dashboard surfaces the Block Journey entry card,
+ * so he needs to actually be able to open the page.
+ * Bulk-fetches every table needed, calls buildLineages() once, and
+ * hands the result to the client component for filtering / sorting.
  *
  * Four Supabase round-trips total (no N+1):
  *   1. Fresh blocks
@@ -13,9 +16,11 @@
  * Plus the cached profiles map.
  */
 
-import { requireAuth } from "@/lib/auth";
+import { redirect } from "next/navigation";
+import { requireAuth, getDefaultRouteForRole } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
+import { canTransferPlannedSlabs } from "@/lib/cutting-permissions";
 import { BlockJourneyClient } from "@/components/block-journey-client";
 import type { StoneCategory } from "@/lib/stone-categories";
 import {
@@ -33,7 +38,17 @@ export default async function BlockJourneyPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireAuth(["owner", "developer"]);
+  // Permissive requireAuth + inline guard so trusted named users
+  // (Naresh, Rajesh) get in even if their stored role isn't owner.
+  // Same pattern as /dashboard.
+  const { profile } = await requireAuth();
+  const isAllowed =
+    profile.role === "owner" ||
+    profile.role === "developer" ||
+    canTransferPlannedSlabs(profile);
+  if (!isAllowed) {
+    redirect(getDefaultRouteForRole(profile.role));
+  }
   const { mode } = await searchParams;
   // Default is "recovered" (optimistic, judges cutter performance). Users
   // Mode is now hard-locked to "recovered" — the team only ever wants
