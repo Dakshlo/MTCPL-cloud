@@ -853,7 +853,24 @@ export async function fitBlockToFillAction(payload: {
   }>;
   kerfMm: number;
 }): Promise<FitBlockToFillResponse> {
-  await requireAuth(["developer"]);
+  // Server-side gate must mirror the UI gate in planning/page.tsx —
+  // otherwise Naresh / Rajesh see the button (UI gate is permissive)
+  // but get redirected when they click it (server gate too strict).
+  // Allow: developer + the trusted named users (Naresh, Rajesh).
+  const { canTransferPlannedSlabs } = await import("@/lib/cutting-permissions");
+  const { profile } = await requireAuth();
+  if (profile.role !== "developer" && !canTransferPlannedSlabs(profile)) {
+    // Match the requireAuth redirect contract — non-developer, non-trusted
+    // → return an empty response that the workbench handles gracefully.
+    return {
+      strategy: "Not authorised — Fit-to-Fill is restricted to developer + Naresh + Rajesh.",
+      fillSuggestions: [],
+      expansionSuggestions: [],
+      previews: [],
+      diagnostics: [],
+      error: "Not authorised",
+    };
+  }
 
   const { plan, availableSlabs, availableBlocks, kerfMm } = payload;
   const kerfFt = kerfMm / 25.4;
