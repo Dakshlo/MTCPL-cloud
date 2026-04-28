@@ -310,3 +310,111 @@ export async function manualCutBlockAction(formData: FormData) {
   revalidatePath("/cutting");
   revalidatePath("/dashboard");
 }
+
+/**
+ * Undo a marble block cut — restore the block to "available" and put
+ * its linked slabs back into the "open" pool with source_block_id
+ * cleared. Used by the Marble Cutting Log undo button.
+ *
+ * Refuses if any linked slab is already dispatched / completed
+ * (those have left the building — undoing would orphan downstream
+ * records). Cleans up any stray cut_session_blocks rows in case the
+ * block went through the formal cutting flow.
+ *
+ * Auth: developer / owner / team_head only.
+ */
+export async function undoMarbleCutAction(
+  blockId: string,
+): Promise<{ success?: boolean; error?: string; resetSlabCount?: number }> {
+  const { profile } = await requireAuth(["owner", "team_head", "developer"]);
+  const supabase = createAdminSupabaseClient();
+
+  if (!blockId || typeof blockId !== "string") {
+    return { error: "Missing block id." };
+  }
+
+  // 1. Confirm the block exists and snapshot prior state for audit
+  const { data: block, error: blockReadErr } = await supabase
+    .from("blocks")
+    .select("id, status, stone, category")
+    .eq("id", blockId)
+    .single();
+  if (blockReadErr || !block) {
+    return { error: `Block ${blockId} not found.` };
+  }
+
+  // 2. Find every slab linked to this block
+  const { data: slabs, error: slabReadErr } = await supabase
+    .from("slab_requirements")
+    .select("id, status, label")
+    .eq("source_block_id", blockId);
+  if (slabReadErr) {
+    return { error: `Could not read linked slabs: ${slabReadErr.message}` };
+  }
+  const linkedSlabs = slabs ?? [];
+
+  // 3. Safety: if any slab is already dispatched or completed, refuse.
+  // Those have moved past cutting and undoing them would orphan
+  // downstream records.
+  const lockedStatuses = new Set(["dispatched", "completed"]);
+  const locked = linkedSlabs.filter((s) => lockedStatuses.has(s.status));
+  if (locked.length > 0) {
+    return {
+      error: `Cannot undo — ${locked.length} slab(s) already ${locked[0].status}: ${locked
+        .map((s) => s.id)
+        .slice(0, 5)
+        .join(", ")}${locked.length > 5 ? "…" : ""}. Resolve those records first.`,
+    };
+  }
+
+  // 4. Reset slabs → open, clear source_block_id
+  if (linkedSlabs.length > 0) {
+    const { error } = await supabase
+      .from("slab_requirements")
+      .update({
+        status: "open",
+        source_block_id: null,
+        updated_by: profile.id,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("source_block_id", blockId);
+    if (error) {
+      return { error: `Failed to reset slabs: ${error.message}` };
+    }
+  }
+
+  // 5. Reset block → available
+  const { error: blockUpdateErr } = await supabase
+    .from("blocks")
+    .update({
+      status: "available",
+      updated_by: profile.id,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", blockId);
+  if (blockUpdateErr) {
+    return { error: `Failed to reset block: ${blockUpdateErr.message}` };
+  }
+
+  // 6. Clear any cut_session_blocks rows for this block (in case the
+  // block also went through the formal cut-session flow). Best-effort
+  // — failure here doesn't block the undo.
+  await supabase.from("cut_session_blocks").delete().eq("block_id", blockId);
+
+  // 7. Audit
+  await logAudit(profile.id, "undo_manual_cut", "block", blockId, {
+    prior_block_status: block.status,
+    slab_ids: linkedSlabs.map((s) => s.id),
+    slab_count: linkedSlabs.length,
+    reset_to: { block: "available", slabs: "open" },
+  });
+
+  revalidatePath("/blocks");
+  revalidatePath("/slabs");
+  revalidatePath("/planning");
+  revalidatePath("/cutting");
+  revalidatePath("/dashboard");
+  revalidatePath("/block-journey");
+
+  return { success: true, resetSlabCount: linkedSlabs.length };
+}

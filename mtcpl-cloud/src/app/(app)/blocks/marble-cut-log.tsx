@@ -19,7 +19,7 @@
  * Pure client filtering over the array the page already loaded.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 type CutSlab = {
   id: string;
@@ -45,6 +45,8 @@ type MarbleCutBlock = {
   cut_by_name: string | null;
   slabs: CutSlab[];
 };
+
+type UndoResult = { success?: boolean; error?: string; resetSlabCount?: number };
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
@@ -73,12 +75,58 @@ function cft(l: number | null, w: number | null, h: number | null): number {
   return (l * w * h) / 1728;
 }
 
-export function MarbleCutLog({ entries }: { entries: MarbleCutBlock[] }) {
+export function MarbleCutLog({
+  entries,
+  undoAction,
+}: {
+  entries: MarbleCutBlock[];
+  /**
+   * Optional server action to undo a marble block cut. When provided,
+   * each block row in the modal gets an "Undo cut" button that flips
+   * the block back to `available` and the slabs back to `open`.
+   * Page passes this only for developer / owner / team_head.
+   */
+  undoAction?: (blockId: string) => Promise<UndoResult>;
+}) {
   const [open, setOpen] = useState(false);
   const [stoneFilter, setStoneFilter] = useState<string>("all");
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [, startTransition] = useTransition();
   const dialogRef = useRef<HTMLDivElement>(null);
+
+  function handleUndo(blockId: string, slabCount: number) {
+    if (!undoAction) return;
+    const ok = window.confirm(
+      `Undo cut for ${blockId}?\n\n` +
+        `• Block ${blockId} will go back to AVAILABLE\n` +
+        `• ${slabCount} slab${slabCount === 1 ? "" : "s"} will go back to OPEN (with source-block link cleared)\n\n` +
+        `This cannot be undone automatically. Continue?`,
+    );
+    if (!ok) return;
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    setPendingId(blockId);
+    startTransition(async () => {
+      try {
+        const result = await undoAction(blockId);
+        if (result.error) {
+          setErrorMsg(result.error);
+        } else {
+          setSuccessMsg(
+            `Undid ${blockId}. ${result.resetSlabCount ?? 0} slab${(result.resetSlabCount ?? 0) === 1 ? "" : "s"} returned to open.`,
+          );
+        }
+      } catch (e) {
+        setErrorMsg(e instanceof Error ? e.message : String(e));
+      } finally {
+        setPendingId(null);
+      }
+    });
+  }
 
   // Esc closes
   useEffect(() => {
@@ -318,6 +366,38 @@ export function MarbleCutLog({ entries }: { entries: MarbleCutBlock[] }) {
                   <strong style={{ color: "var(--text)" }}>{totals.totalSlabCft.toFixed(2)} CFT</strong> yielded
                 </span>
               </div>
+
+              {/* Undo banners */}
+              {errorMsg && (
+                <div
+                  style={{
+                    marginTop: 10,
+                    padding: "8px 10px",
+                    borderRadius: 6,
+                    fontSize: 12,
+                    background: "rgba(220,38,38,0.08)",
+                    border: "1px solid rgba(220,38,38,0.3)",
+                    color: "#b91c1c",
+                  }}
+                >
+                  ⚠ {errorMsg}
+                </div>
+              )}
+              {successMsg && (
+                <div
+                  style={{
+                    marginTop: 10,
+                    padding: "8px 10px",
+                    borderRadius: 6,
+                    fontSize: 12,
+                    background: "rgba(22,101,52,0.08)",
+                    border: "1px solid rgba(22,101,52,0.3)",
+                    color: "#15803d",
+                  }}
+                >
+                  ✓ {successMsg} <span className="muted">— refresh to see it removed from the log.</span>
+                </div>
+              )}
             </div>
 
             {/* Scrollable body */}
@@ -387,9 +467,34 @@ export function MarbleCutLog({ entries }: { entries: MarbleCutBlock[] }) {
                                   : ""}
                               </span>
                             </div>
-                            <div style={{ fontSize: 11, color: "var(--muted)" }}>
-                              {b.cut_by_name && <>by <strong style={{ color: "var(--text)" }}>{b.cut_by_name}</strong> · </>}
-                              {fmtDateTime(b.cut_at)}
+                            <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 11, color: "var(--muted)" }}>
+                              <span>
+                                {b.cut_by_name && <>by <strong style={{ color: "var(--text)" }}>{b.cut_by_name}</strong> · </>}
+                                {fmtDateTime(b.cut_at)}
+                              </span>
+                              {undoAction && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleUndo(b.id, b.slabs.length)}
+                                  disabled={pendingId === b.id}
+                                  title="Reset block to available + slabs to open"
+                                  style={{
+                                    fontSize: 10,
+                                    fontWeight: 700,
+                                    letterSpacing: "0.04em",
+                                    textTransform: "uppercase",
+                                    padding: "4px 9px",
+                                    borderRadius: 5,
+                                    border: "1px solid rgba(220,38,38,0.4)",
+                                    background: pendingId === b.id ? "rgba(220,38,38,0.18)" : "rgba(220,38,38,0.06)",
+                                    color: "#b91c1c",
+                                    cursor: pendingId === b.id ? "wait" : "pointer",
+                                    transition: "background 0.12s",
+                                  }}
+                                >
+                                  {pendingId === b.id ? "Undoing…" : "↺ Undo cut"}
+                                </button>
+                              )}
                             </div>
                           </div>
 

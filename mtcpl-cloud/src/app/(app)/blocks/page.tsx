@@ -7,6 +7,7 @@ import { BlockGrid } from "./block-grid";
 import { BlockSearchBar } from "./block-search-bar";
 import { BlockExport } from "./block-export";
 import { MarbleCutLog } from "./marble-cut-log";
+import { undoMarbleCutAction } from "./actions";
 import { generateNextCode } from "./utils";
 import { yardLabel } from "@/lib/yards";
 import type { StoneCategory } from "@/lib/stone-categories";
@@ -464,7 +465,11 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
             </div>
             <BlockExport />
           </div>
-          <MarbleCutLog entries={marbleCutLog} />
+          {/* Marble Cutting Log only relevant on the Marble or All tabs —
+              hide it on Sandstone so the Block Report stretches full-width. */}
+          {(activeCat === "marble" || activeCat === "all") && (
+            <MarbleCutLog entries={marbleCutLog} undoAction={undoMarbleCutAction} />
+          )}
         </div>
       )}
 
