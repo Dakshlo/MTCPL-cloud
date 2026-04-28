@@ -949,32 +949,25 @@ export async function fitBlockToFillAction(payload: {
       sd: s.thickness_ft,
     }));
 
-    // Run the same engine the algorithm uses. Must-include slabs go first
-    // so the engine prefers placing them (it sorts by face area).
-    const packed = tryPackBlock(toBlockRow(block), [...mustInclude, ...candidateRows], kerfFt);
-    const placedIds = new Set(packed.allPlaced.map((p) => p.id));
-
-    // Defensive: only suggest a candidate if the engine actually packed it
-    // AND every must-include slab is still packed (otherwise we'd be
-    // suggesting a swap, not a fill).
-    const allMustIncluded = mustInclude.every((m) => placedIds.has(m.id));
-    if (!allMustIncluded) {
-      pushDiag(0, 0, `${candidates.length} compatible candidate(s) but the geometry engine couldn't keep all already-placed slabs while adding any of them`);
+    // ── Sanity: verify mustInclude even packs alone ───────────────────
+    // If even the existing slabs can't pack into the block via the
+    // engine's algorithm, something's off (geometry rounding edge, or
+    // the algorithm's original placement used a different orientation
+    // we can't reproduce here). Skip with a clear diag.
+    const baselinePacked = tryPackBlock(toBlockRow(block), mustInclude, kerfFt);
+    const baselineIds = new Set(baselinePacked.allPlaced.map((p) => p.id));
+    const baselineOk = mustInclude.every((m) => baselineIds.has(m.id));
+    if (!baselineOk) {
+      pushDiag(0, 0, `engine couldn't reproduce the original placement of the existing slabs on this block — geometry rounding edge case`);
       continue;
     }
 
-    const fitsHere = candidates.filter((c) => placedIds.has(c.id));
-    if (fitsHere.length === 0) {
-      pushDiag(0, 0, `${candidates.length} compatible candidate(s) but none fit the leftover face/depth on this block`);
-      continue;
-    }
-
-    // ── Score + rank
-    // Round thicknesses to the same precision as the engine to avoid 0.499
-    // vs 0.5 mismatches.
+    // ── Pre-score all candidates against the mustInclude properties.
+    // We rank BEFORE the iterative pack so we try the best matches
+    // first (same-thickness layer, same-temple, big volume).
     const placedThicknesses = new Set(placed.map((p) => Math.round(p.thickness_ft * 1000) / 1000));
     const placedTemples = new Set(placed.map((p) => p.temple));
-    const scored = fitsHere
+    const scoredCandidates = candidates
       .map((c) => {
         let score = 0;
         const t = Math.round(c.thickness_ft * 1000) / 1000;
@@ -986,19 +979,93 @@ export async function fitBlockToFillAction(payload: {
         score += (c.length_ft * c.width_ft * c.thickness_ft) / 100;
         return { c, score, sharesThickness, sharesTemple };
       })
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 3);
+      .sort((a, b) => b.score - a.score);
 
+    // ── Pre-filter: physical-fit feasibility check.
+    // Drop candidates whose anchor dimension exceeds the block's
+    // longest face dimension. Saves us from running the engine on
+    // candidates that can't possibly fit.
+    const blockLongestFace = Math.max(block.length_ft, block.width_ft);
+    const blockH = block.height_ft;
+    const feasibleCandidates = scoredCandidates.filter(({ c }) => {
+      const anchor = Math.max(c.length_ft, c.width_ft);
+      const minDim = Math.min(c.length_ft, c.width_ft, c.thickness_ft);
+      return anchor <= blockLongestFace + 0.001 && minDim <= blockH + 0.001;
+    });
+
+    // ── Iterative incremental packing ─────────────────────────────────
+    // The OLD approach packed [mustInclude + ALL candidates] in one
+    // engine call. With 600+ candidates that's a disaster: the engine's
+    // greedy "max slabs per layer" heuristic lets thin candidates
+    // stack many shallow layers, exhausting the depth budget BEFORE
+    // the must_include's deeper layer gets a chance — must_include
+    // gets displaced and the whole block returns "no fits".
+    //
+    // The NEW approach: lock mustInclude in via a baseline pack, then
+    // try ONE candidate at a time on top of the running set. Accept
+    // the candidate ONLY if the engine still places mustInclude +
+    // already-accepted + this one. Otherwise skip it.
+    //
+    // Cost: O(N) tryPackBlock calls per block where N = feasible
+    // candidate count. Each call is sub-millisecond on this scale.
+    // For 100 candidates × 8 blocks ≈ 800 calls < 1 second.
+    const accepted: RemainingSlab[] = [];
+    const acceptedScores: typeof scoredCandidates = [];
+    const PER_BLOCK_CAP = 3; // top-3 per block, like before
+    const TRY_CAP = 60;       // don't iterate the entire pool — only try the top-60 by score
+
+    for (const entry of feasibleCandidates.slice(0, TRY_CAP)) {
+      if (accepted.length >= PER_BLOCK_CAP) break;
+      // Skip if already used as a suggestion on a different block this
+      // run (avoid suggesting the same slab twice).
+      if (fittedSlabIds.has(entry.c.id)) continue;
+
+      const candidateRow = candidateRows.find((r) => r.id === entry.c.id);
+      if (!candidateRow) continue;
+
+      const trial = tryPackBlock(
+        toBlockRow(block),
+        [...mustInclude, ...accepted, candidateRow],
+        kerfFt,
+      );
+      const trialIds = new Set(trial.allPlaced.map((p) => p.id));
+      const allStillPlaced =
+        mustInclude.every((m) => trialIds.has(m.id)) &&
+        accepted.every((a) => trialIds.has(a.id)) &&
+        trialIds.has(candidateRow.id);
+
+      if (allStillPlaced) {
+        accepted.push(candidateRow);
+        acceptedScores.push(entry);
+      }
+      // else: this candidate would displace mustInclude or an earlier
+      // accepted slab, so we silently skip it and move on.
+    }
+
+    if (accepted.length === 0) {
+      pushDiag(
+        0,
+        0,
+        feasibleCandidates.length === 0
+          ? `${candidates.length} compatible candidate(s) but none fit dimensionally — too long or too tall for this block`
+          : `${candidates.length} compatible candidate(s); tried top ${Math.min(TRY_CAP, feasibleCandidates.length)} but none fit alongside the existing slabs without displacing them`,
+      );
+      continue;
+    }
+
+    // ── Emit suggestions for the accepted candidates ───────────────
     const topSuggestedIds: string[] = [];
-    for (const { c, score, sharesThickness, sharesTemple } of scored) {
+    for (let i = 0; i < accepted.length; i++) {
+      const c = accepted[i];
+      const entry = acceptedScores[i];
       const reasons: string[] = [];
-      if (sharesThickness) reasons.push(`shares ${c.thickness_ft}″ thickness layer (no extra kerf)`);
-      if (sharesTemple) reasons.push(`same temple (${c.temple})`);
-      reasons.push(`packs cleanly into ${block.id}`);
+      if (entry.sharesThickness) reasons.push(`shares ${c.sd}″ thickness layer (no extra kerf)`);
+      if (entry.sharesTemple) reasons.push(`same temple (${c.temple})`);
+      reasons.push(`fits alongside the existing slab(s) on ${block.id}`);
       fillSuggestions.push({
         block_id: block.id,
         slab_id: c.id,
-        score: Math.round(score * 100) / 100,
+        score: Math.round(entry.score * 100) / 100,
         reasoning: reasons.join(" · "),
       });
       fittedSlabIds.add(c.id);
@@ -1076,9 +1143,9 @@ export async function fitBlockToFillAction(payload: {
 
     // Success diag — record the success path for this block.
     pushDiag(
-      fitsHere.length,
+      accepted.length,
       topSuggestedIds.length,
-      `${fitsHere.length} compatible candidate(s) fit; surfaced ${topSuggestedIds.length} top suggestion(s)`,
+      `${accepted.length} candidate(s) packed alongside existing slabs; surfaced ${topSuggestedIds.length} top suggestion(s)`,
     );
   }
 
