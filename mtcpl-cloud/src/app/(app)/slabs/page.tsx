@@ -4,6 +4,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
 import { AddSlabForm } from "./add-slab-form";
 import { SlabGrid } from "./slab-grid";
+import { SlabSearchBar } from "./slab-search-bar";
 
 // Entry roles see only their own additions; senior roles see everything
 const ENTRY_ROLES = ["slab_entry", "block_slab_entry"] as const;
@@ -130,6 +131,13 @@ export default async function SlabsPage() {
           </Link>{" "}
           to add temples before entering slabs.
         </div>
+      )}
+
+      {/* Search bar — sits between the AddSlabForm and the slab grid.
+          Collapsed by default; click to open a center-peek modal that
+          searches across id / label / temple / stone / dimensions. */}
+      {slabList.length > 0 && (
+        <SlabSearchBar slabs={slabList} />
       )}
 
       {/* Inventory */}

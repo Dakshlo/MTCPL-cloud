@@ -268,6 +268,7 @@ export function SlabGrid({
                   return (
                     <div
                       key={slab.id}
+                      data-slab-id={slab.id}
                       className={`slab-card${slab.priority ? " slab-card-priority" : ""}${isSelected && !activeBatch ? " slab-card-active" : ""}`}
                       style={{
                         ...(isNotOpen ? { filter: "grayscale(0.85)", opacity: 0.6 } : {}),

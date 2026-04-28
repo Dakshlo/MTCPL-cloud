@@ -1023,6 +1023,27 @@ export async function fitBlockToFillAction(payload: {
       return [r(l), r(w), r(t)].sort((a, b) => a - b).join("|");
     }
     const placedDimSigs = new Set(placed.map((p) => dimSig(p.length_ft, p.width_ft, p.thickness_ft)));
+
+    // ── Per-layer leftover space ──────────────────────────────────────
+    // For each existing thickness layer, compute how much face area
+    // is unused. Candidates whose thickness matches a MOSTLY-EMPTY
+    // layer should outrank candidates whose thickness matches an
+    // ALMOST-FULL layer — the one with more leftover space is where
+    // we want to focus filling.
+    //
+    // Approximation: assume slabs of the same thickness share one
+    // depth band. For multi-layer same-thickness blocks (rare; the
+    // engine usually fits everything in one layer if dim-feasible)
+    // this is over-estimated, but the score is a soft preference
+    // not a hard constraint, so the cost is harmless.
+    const blockFaceArea = block.length_ft * block.width_ft;
+    const layerLeftoverByThickness = new Map<number, number>();
+    for (const t of placedThicknesses) {
+      const usedAtT = placed
+        .filter((p) => Math.round(p.thickness_ft * 1000) / 1000 === t)
+        .reduce((sum, p) => sum + p.length_ft * p.width_ft, 0);
+      layerLeftoverByThickness.set(t, Math.max(0, blockFaceArea - usedAtT));
+    }
     const scoredCandidates = candidates
       .map((c) => {
         let score = 0;
@@ -1041,8 +1062,22 @@ export async function fitBlockToFillAction(payload: {
         // same-thickness boost so same-thickness still wins ties.
         else if (isSingleLayer) score += 35;
         if (sharesTemple) score += 20;          // same trip
-        // Volume bonus (small) — prefer larger slabs that reduce more waste.
-        score += (c.length_ft * c.width_ft * c.thickness_ft) / 100;
+        // Layer-leftover bonus — for same-thickness candidates,
+        // boost by the proportional emptiness of their target layer.
+        // A candidate matching a 76%-empty layer scores +38; matching
+        // a 35%-empty layer scores +18. Means the algorithm prefers
+        // filling the most-empty layer first, even when multiple
+        // thicknesses share +50 same-thickness bonus.
+        if (sharesThickness) {
+          const leftover = layerLeftoverByThickness.get(t) ?? 0;
+          const fraction = blockFaceArea > 0 ? leftover / blockFaceArea : 0;
+          score += Math.round(fraction * 50);
+        }
+        // Volume bonus — capped tiebreaker so a single 162×39×5 monster
+        // doesn't dwarf the same-thickness/dim/leftover signals. Was
+        // previously /100 uncapped, which let a giant slab outrank
+        // a perfect-dim duplicate by sheer volume.
+        score += Math.min((c.length_ft * c.width_ft * c.thickness_ft) / 1000, 15);
         return { c, score, sharesDims, sharesThickness, sharesTemple };
       })
       .sort((a, b) => b.score - a.score);
@@ -1081,11 +1116,12 @@ export async function fitBlockToFillAction(payload: {
     // layer (e.g. MT-B-005 L2), 3 fillers leave obvious gaps. 5 is
     // still bounded so the suggestion list doesn't run away.
     const PER_BLOCK_CAP = 5;
-    // Bumped from 60 → 150. Iteration is sub-millisecond per call;
-    // even 8 blocks × 150 trials × 1ms = 1.2s. The previous 60 cap
-    // could miss exact-dim duplicates if 600+ candidates all had
-    // shared-thickness scoring competing for the top of the queue.
-    const TRY_CAP = 150;
+    // Bumped 150 → 250. With many same-thickness candidates of
+    // wildly varying sizes (a 162×39×5 monster vs 31×41×5 dups),
+    // the bigger ones can crowd the top even after the volume-bonus
+    // cap, then get rejected by the trial pack one by one. We need
+    // headroom so smaller-but-fits candidates aren't truncated.
+    const TRY_CAP = 250;
 
     // Cutter-feasibility tracking per the user's rule:
     //   - Single-layer block (zBands.size === 1) can absorb ONE
