@@ -821,6 +821,12 @@ export async function fitBlockToFillAction(payload: {
       length_ft: number;
       width_ft: number;
       thickness_ft: number;
+      /** Layer-bottom Z (depth from block face) — used to detect
+       *  whether the block is currently single-layer or multi-layer.
+       *  Optional for backward-compat; if missing, the server falls
+       *  back to "treat as multi-layer" (the conservative default). */
+      z_top?: number;
+      z_bot?: number;
     }>;
   }>;
   /** Open slabs not in the current plan — pool to mine for fillers. */
@@ -962,6 +968,36 @@ export async function fitBlockToFillAction(payload: {
       continue;
     }
 
+    // ── Detect single-layer vs multi-layer ─────────────────────────────
+    // Per the user's cutter-feasibility rule: when a block is currently
+    // a single layer (all placed slabs share the same z-band), the
+    // cutter can handle adding a candidate of DIFFERENT thickness
+    // (the resulting 2-layer block is still cleanly separable).
+    // Once the block is already multi-layer, adding a NEW thickness
+    // creates an extra cut layer that's not cleanly feasible — so
+    // we restrict candidates to thicknesses already present.
+    //
+    // Source of truth: distinct (z_bot, z_top) pairs in the workbench-
+    // sent payload. Falls back to "multi-layer" if z-band info is
+    // missing (conservative default — better safe than wrong).
+    function zBandKey(p: { z_top?: number; z_bot?: number }): string | null {
+      if (p.z_top == null || p.z_bot == null) return null;
+      const r = (n: number) => Math.round(n * 1000) / 1000;
+      return `${r(p.z_bot)}|${r(p.z_top)}`;
+    }
+    const zBands = new Set<string>();
+    let zBandsKnown = true;
+    for (const p of placed) {
+      const k = zBandKey(p);
+      if (k == null) { zBandsKnown = false; break; }
+      zBands.add(k);
+    }
+    // Single-layer if every placed slab has a known band AND there's
+    // exactly one distinct band. If zBands info is missing, we treat
+    // the block as multi-layer (conservative — won't create surprise
+    // extra-thickness suggestions).
+    const isSingleLayer = zBandsKnown && zBands.size === 1 && placed.length > 0;
+
     // ── Pre-score all candidates against the mustInclude properties.
     // We rank BEFORE the iterative pack so we try the best matches
     // first. Priority order:
@@ -997,6 +1033,13 @@ export async function fitBlockToFillAction(payload: {
         const sharesTemple = placedTemples.has(c.temple);
         if (sharesDims) score += 150;          // exact duplicate of a placed slab
         if (sharesThickness) score += 50;       // matches a layer's thickness
+        // Single-layer block — different-thickness candidates also
+        // get a competitive bonus so they aren't queued behind a
+        // swarm of same-thickness siblings. Cutter is OK with mixed
+        // thicknesses on a single-layer block (creates a 2-layer
+        // block, still cleanly separable). Bonus is below the +50
+        // same-thickness boost so same-thickness still wins ties.
+        else if (isSingleLayer) score += 35;
         if (sharesTemple) score += 20;          // same trip
         // Volume bonus (small) — prefer larger slabs that reduce more waste.
         score += (c.length_ft * c.width_ft * c.thickness_ft) / 100;
@@ -1044,6 +1087,16 @@ export async function fitBlockToFillAction(payload: {
     // shared-thickness scoring competing for the top of the queue.
     const TRY_CAP = 150;
 
+    // Cutter-feasibility tracking per the user's rule:
+    //   - Single-layer block (zBands.size === 1) can absorb ONE
+    //     new-thickness candidate (becomes 2-layer). After that,
+    //     subsequent new-thickness candidates are rejected.
+    //   - Multi-layer block can never absorb a new thickness.
+    // Same-thickness candidates are always allowed (they slot into
+    // an existing layer; no new cuts needed).
+    let allowOneMoreNewThickness = isSingleLayer;
+    const runningThicknesses = new Set(placedThicknesses);
+
     for (const entry of feasibleCandidates.slice(0, TRY_CAP)) {
       if (accepted.length >= PER_BLOCK_CAP) break;
       // Skip if already used as a suggestion on a different block this
@@ -1052,6 +1105,13 @@ export async function fitBlockToFillAction(payload: {
 
       const candidateRow = candidateRows.find((r) => r.id === entry.c.id);
       if (!candidateRow) continue;
+
+      const candThickness = Math.round(candidateRow.sd * 1000) / 1000;
+      const isNewThickness = !runningThicknesses.has(candThickness);
+
+      // Cutter-feasibility gate: new-thickness candidates only allowed
+      // on single-layer blocks AND only one of them.
+      if (isNewThickness && !allowOneMoreNewThickness) continue;
 
       const trial = tryPackBlock(
         toBlockRow(block),
@@ -1067,6 +1127,10 @@ export async function fitBlockToFillAction(payload: {
       if (allStillPlaced) {
         accepted.push(candidateRow);
         acceptedScores.push(entry);
+        runningThicknesses.add(candThickness);
+        // Burn the "one new thickness" budget — even if the candidate
+        // shared an existing thickness this is a no-op.
+        if (isNewThickness) allowOneMoreNewThickness = false;
       }
       // else: this candidate would displace mustInclude or an earlier
       // accepted slab, so we silently skip it and move on.
@@ -1092,6 +1156,13 @@ export async function fitBlockToFillAction(payload: {
       // Exact-dim duplicate is the strongest reason — call it out first.
       if (entry.sharesDims) reasons.push(`exact dim duplicate of an existing slab — fills the same layer perfectly`);
       else if (entry.sharesThickness) reasons.push(`shares ${c.sd}″ thickness layer (no extra kerf)`);
+      else if (isSingleLayer) {
+        // Single-layer block — the cutter-feasibility relaxation lets
+        // us add ONE different-thickness candidate, creating a 2-layer
+        // block. Explain the trade-off in the reasoning so the
+        // operator knows what they're approving.
+        reasons.push(`adds a ${c.sd}″ layer to this single-layer block (cutter-feasible: 2 layers max)`);
+      }
       if (entry.sharesTemple) reasons.push(`same temple (${c.temple})`);
       reasons.push(`fits alongside the existing slab(s) on ${block.id}`);
       fillSuggestions.push({

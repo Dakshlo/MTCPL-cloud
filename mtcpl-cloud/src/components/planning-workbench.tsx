@@ -520,7 +520,7 @@ export function PlanningWorkbench({
   fitBlockToFillAction?: (payload: {
     plan: Array<{
       block: { id: string; stone: string; length_ft: number; width_ft: number; height_ft: number; quality: string | null };
-      placed: Array<{ id: string; label: string; temple: string; length_ft: number; width_ft: number; thickness_ft: number }>;
+      placed: Array<{ id: string; label: string; temple: string; length_ft: number; width_ft: number; thickness_ft: number; z_top?: number; z_bot?: number }>;
     }>;
     availableSlabs: Array<{ id: string; label: string; temple: string; stone: string | null; length_ft: number; width_ft: number; thickness_ft: number; priority: boolean; quality: string | null }>;
     availableBlocks: Array<{ id: string; stone: string; yard: number; length_ft: number; width_ft: number; height_ft: number; quality: string | null }>;
@@ -889,6 +889,10 @@ export function PlanningWorkbench({
           placed: pb.placed.map((p) => ({
             id: p.id, label: p.label, temple: p.temple,
             length_ft: p.sw, width_ft: p.sh, thickness_ft: p.sd,
+            // Z-band tells the server which layer this slab is in.
+            // Used to detect single-layer vs multi-layer blocks for
+            // the cutter-feasibility constraint on Fit-to-Fill.
+            z_top: p.zTop, z_bot: p.zBot,
           })),
         })),
         availableSlabs: poolSlabs.map((s) => ({
