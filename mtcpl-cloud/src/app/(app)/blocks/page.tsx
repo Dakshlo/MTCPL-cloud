@@ -6,6 +6,7 @@ import { MarbleTruckForm } from "./marble-truck-form";
 import { BlockGrid } from "./block-grid";
 import { BlockSearchBar } from "./block-search-bar";
 import { BlockExport } from "./block-export";
+import { MarbleCutLog } from "./marble-cut-log";
 import { generateNextCode } from "./utils";
 import { yardLabel } from "@/lib/yards";
 import type { StoneCategory } from "@/lib/stone-categories";
@@ -118,6 +119,84 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
 
   const profilesMap = await getProfilesMap();
 
+  // ── Marble cut log ────────────────────────────────────────────────
+  // Pull every consumed block (any category) so the MarbleCutLog
+  // component can filter to marble client-side. Then for those
+  // blocks fetch the cut_done slabs that came from them. The log
+  // is "what did we cut from each marble block, when, by whom".
+  // Paginated to dodge the 1000-row PostgREST cap.
+  type ConsumedRow = {
+    id: string;
+    stone: string | null;
+    yard: number;
+    length_ft: number | null;
+    width_ft: number | null;
+    height_ft: number | null;
+    tonnes: number | string | null;
+    truck_no: string | null;
+    vendor_name: string | null;
+    updated_at: string | null;
+    updated_by: string | null;
+  };
+  async function fetchAllConsumedBlocks(): Promise<ConsumedRow[]> {
+    const PAGE = 1000;
+    const out: ConsumedRow[] = [];
+    for (let offset = 0; offset < 50000; offset += PAGE) {
+      const { data, error: pageErr } = await admin
+        .from("blocks")
+        .select(
+          "id, stone, yard, length_ft, width_ft, height_ft, tonnes, truck_no, vendor_name, updated_at, updated_by",
+        )
+        .eq("status", "consumed")
+        .order("updated_at", { ascending: false })
+        .range(offset, offset + PAGE - 1);
+      if (pageErr) throw new Error(pageErr.message);
+      if (!data || data.length === 0) break;
+      out.push(...(data as ConsumedRow[]));
+      if (data.length < PAGE) break;
+    }
+    return out;
+  }
+
+  type CutSlabRow = {
+    id: string;
+    label: string | null;
+    temple: string;
+    stone: string | null;
+    length_ft: number;
+    width_ft: number;
+    thickness_ft: number;
+    status: string;
+    source_block_id: string | null;
+  };
+  async function fetchSlabsForBlocks(blockIds: string[]): Promise<CutSlabRow[]> {
+    if (blockIds.length === 0) return [];
+    const PAGE = 500;
+    const out: CutSlabRow[] = [];
+    // Chunk block-id list to keep .in() query strings safe.
+    for (let i = 0; i < blockIds.length; i += PAGE) {
+      const chunk = blockIds.slice(i, i + PAGE);
+      const { data, error: pageErr } = await admin
+        .from("slab_requirements")
+        .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, status, source_block_id")
+        .in("source_block_id", chunk)
+        .in("status", ["cut_done", "completed", "dispatched"]);
+      if (pageErr) throw new Error(pageErr.message);
+      if (data) out.push(...(data as CutSlabRow[]));
+    }
+    return out;
+  }
+
+  const allConsumed = await fetchAllConsumedBlocks();
+  const consumedSlabs = await fetchSlabsForBlocks(allConsumed.map((b) => b.id));
+  const slabsByBlock = new Map<string, CutSlabRow[]>();
+  for (const s of consumedSlabs) {
+    if (!s.source_block_id) continue;
+    const arr = slabsByBlock.get(s.source_block_id) ?? [];
+    arr.push(s);
+    slabsByBlock.set(s.source_block_id, arr);
+  }
+
   const canEdit = ["developer", "owner", "team_head", "block_slab_entry", "block_entry"].includes(profile.role);
   const canViewReport = ["developer", "owner", "team_head"].includes(profile.role);
   const allBlocks = blocks ?? [];
@@ -147,6 +226,34 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
   }
   const sandstoneBlocks = allBlocks.filter((b) => categoryOf(b.stone) === "sandstone");
   const marbleBlocks = allBlocks.filter((b) => categoryOf(b.stone) === "marble");
+
+  // Build the marble-cut log feed — one entry per consumed marble
+  // block with its cut slabs and cutter info. Client-side filterable
+  // by date / stone (yellow vs white) inside the modal.
+  const marbleCutLog = allConsumed
+    .filter((b) => categoryOf(b.stone) === "marble")
+    .map((b) => ({
+      id: b.id,
+      stone: b.stone ?? "Unknown",
+      yard: b.yard,
+      length_ft: b.length_ft,
+      width_ft: b.width_ft,
+      height_ft: b.height_ft,
+      tonnes: b.tonnes != null ? Number(b.tonnes) : null,
+      truck_no: b.truck_no,
+      vendor_name: b.vendor_name,
+      cut_at: b.updated_at,
+      cut_by_name: b.updated_by ? profilesMap[b.updated_by] ?? null : null,
+      slabs: (slabsByBlock.get(b.id) ?? []).map((s) => ({
+        id: s.id,
+        label: s.label,
+        temple: s.temple,
+        length_ft: Number(s.length_ft),
+        width_ft: Number(s.width_ft),
+        thickness_ft: Number(s.thickness_ft),
+        status: s.status,
+      })),
+    }));
 
   const blockList =
     activeCat === "sandstone" ? sandstoneBlocks : activeCat === "marble" ? marbleBlocks : allBlocks;
@@ -274,23 +381,34 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
         <div
           style={{
             margin: "28px 0 4px",
-            padding: "14px 18px",
-            background: "var(--surface)",
-            border: "2px dashed var(--border)",
-            borderRadius: 10,
             display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 16,
+            gap: 12,
+            flexWrap: "wrap",
+            alignItems: "stretch",
           }}
         >
-          <div>
-            <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: "var(--text)" }}>Block Report</p>
-            <p className="muted" style={{ margin: "3px 0 0", fontSize: 12 }}>
-              View, filter and sort all block records — including consumed, discarded, and active · Export to Excel
-            </p>
+          <div
+            style={{
+              flex: "1 1 320px",
+              padding: "14px 18px",
+              background: "var(--surface)",
+              border: "2px dashed var(--border)",
+              borderRadius: 10,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 16,
+            }}
+          >
+            <div>
+              <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: "var(--text)" }}>Block Report</p>
+              <p className="muted" style={{ margin: "3px 0 0", fontSize: 12 }}>
+                View, filter and sort all block records — including consumed, discarded, and active · Export to Excel
+              </p>
+            </div>
+            <BlockExport />
           </div>
-          <BlockExport />
+          <MarbleCutLog entries={marbleCutLog} />
         </div>
       )}
 
