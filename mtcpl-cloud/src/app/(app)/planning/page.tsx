@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth";
 import { createDataClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { approvePlanAction, aiSuggestionsAction, fitBlockToFillAction } from "./actions";
+import { canTransferPlannedSlabs } from "@/lib/cutting-permissions";
 import { ProcurementHeadsUp } from "./procurement-heads-up";
 
 export default async function PlanningPage({
@@ -180,7 +181,12 @@ export default async function PlanningPage({
       <PlanningWorkbench
         approveAction={approvePlanAction}
         aiSuggestionsAction={profile.role === "developer" ? aiSuggestionsAction : undefined}
-        fitBlockToFillAction={profile.role === "developer" ? fitBlockToFillAction : undefined}
+        // Fit-to-Fill: visible to developer + the trusted power-user
+        // owners (Naresh, Rajesh Kumar). canTransferPlannedSlabs is
+        // already the centralised "trusted operator" check used by
+        // cross-block transfer + Undo + dashboard access — reusing
+        // it keeps the access list consistent.
+        fitBlockToFillAction={canTransferPlannedSlabs(profile) ? fitBlockToFillAction : undefined}
         blocks={blocks ?? []}
         slabs={slabs}
         aiAvailablePool={aiAvailablePool}
