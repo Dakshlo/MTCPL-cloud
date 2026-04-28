@@ -964,20 +964,43 @@ export async function fitBlockToFillAction(payload: {
 
     // ── Pre-score all candidates against the mustInclude properties.
     // We rank BEFORE the iterative pack so we try the best matches
-    // first (same-thickness layer, same-temple, big volume).
+    // first. Priority order:
+    //   1. Exact-dim duplicate of a slab already on this block.
+    //      (+150 — these are guaranteed-clean fits since same dims =
+    //       same depth layer = no engine reshuffle.)
+    //   2. Same thickness as an existing layer (+50).
+    //   3. Same temple as an existing slab (+20).
+    //   4. Larger-volume bias (small bonus).
+    //
+    // The exact-dim boost is the key change for "find duplicates
+    // first": when L2 has 2× 31×41×5 slabs, any other 31×41×5 in
+    // the open pool gets pushed to the very top of the queue, so
+    // we try filling the same layer with siblings before reaching
+    // for unrelated candidates.
     const placedThicknesses = new Set(placed.map((p) => Math.round(p.thickness_ft * 1000) / 1000));
     const placedTemples = new Set(placed.map((p) => p.temple));
+    // Build a Set of "dim signatures" — sorted dims joined into a
+    // canonical string. Two slabs with the same three dims (in any
+    // orientation) hash to the same signature.
+    function dimSig(l: number, w: number, t: number): string {
+      const r = (n: number) => Math.round(n * 1000) / 1000;
+      return [r(l), r(w), r(t)].sort((a, b) => a - b).join("|");
+    }
+    const placedDimSigs = new Set(placed.map((p) => dimSig(p.length_ft, p.width_ft, p.thickness_ft)));
     const scoredCandidates = candidates
       .map((c) => {
         let score = 0;
         const t = Math.round(c.thickness_ft * 1000) / 1000;
+        const sig = dimSig(c.length_ft, c.width_ft, c.thickness_ft);
+        const sharesDims = placedDimSigs.has(sig);
         const sharesThickness = placedThicknesses.has(t);
         const sharesTemple = placedTemples.has(c.temple);
-        if (sharesThickness) score += 50;
-        if (sharesTemple) score += 20;
+        if (sharesDims) score += 150;          // exact duplicate of a placed slab
+        if (sharesThickness) score += 50;       // matches a layer's thickness
+        if (sharesTemple) score += 20;          // same trip
         // Volume bonus (small) — prefer larger slabs that reduce more waste.
         score += (c.length_ft * c.width_ft * c.thickness_ft) / 100;
-        return { c, score, sharesThickness, sharesTemple };
+        return { c, score, sharesDims, sharesThickness, sharesTemple };
       })
       .sort((a, b) => b.score - a.score);
 
@@ -1011,8 +1034,15 @@ export async function fitBlockToFillAction(payload: {
     // For 100 candidates × 8 blocks ≈ 800 calls < 1 second.
     const accepted: RemainingSlab[] = [];
     const acceptedScores: typeof scoredCandidates = [];
-    const PER_BLOCK_CAP = 3; // top-3 per block, like before
-    const TRY_CAP = 60;       // don't iterate the entire pool — only try the top-60 by score
+    // Bumped from 3 → 5 because for blocks with one mostly-empty
+    // layer (e.g. MT-B-005 L2), 3 fillers leave obvious gaps. 5 is
+    // still bounded so the suggestion list doesn't run away.
+    const PER_BLOCK_CAP = 5;
+    // Bumped from 60 → 150. Iteration is sub-millisecond per call;
+    // even 8 blocks × 150 trials × 1ms = 1.2s. The previous 60 cap
+    // could miss exact-dim duplicates if 600+ candidates all had
+    // shared-thickness scoring competing for the top of the queue.
+    const TRY_CAP = 150;
 
     for (const entry of feasibleCandidates.slice(0, TRY_CAP)) {
       if (accepted.length >= PER_BLOCK_CAP) break;
@@ -1059,7 +1089,9 @@ export async function fitBlockToFillAction(payload: {
       const c = accepted[i];
       const entry = acceptedScores[i];
       const reasons: string[] = [];
-      if (entry.sharesThickness) reasons.push(`shares ${c.sd}″ thickness layer (no extra kerf)`);
+      // Exact-dim duplicate is the strongest reason — call it out first.
+      if (entry.sharesDims) reasons.push(`exact dim duplicate of an existing slab — fills the same layer perfectly`);
+      else if (entry.sharesThickness) reasons.push(`shares ${c.sd}″ thickness layer (no extra kerf)`);
       if (entry.sharesTemple) reasons.push(`same temple (${c.temple})`);
       reasons.push(`fits alongside the existing slab(s) on ${block.id}`);
       fillSuggestions.push({
