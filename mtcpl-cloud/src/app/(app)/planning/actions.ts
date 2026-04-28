@@ -1202,6 +1202,22 @@ export async function approvePlanAction(formData: FormData) {
 
     const kerfMm = Number(formData.get("kerf_mm"));
     const planJson = formData.get("plan_json");
+    // Slab IDs flagged as "extra" / "filler" — added via Fit-to-Fill,
+    // not part of the operator's primary demand selection. Persisted
+    // onto cut_session_slabs.is_filler so the cutter sees the EXTRA
+    // marker on /cutting and on the printable layout.
+    const extraSlabIdsRaw = formData.get("extra_slab_ids");
+    let extraSlabIds = new Set<string>();
+    if (typeof extraSlabIdsRaw === "string" && extraSlabIdsRaw.length > 0) {
+      try {
+        const parsed = JSON.parse(extraSlabIdsRaw);
+        if (Array.isArray(parsed)) extraSlabIds = new Set(parsed.map(String));
+      } catch {
+        // Bad JSON in the hidden field — silently ignore. The plan
+        // still goes through; nothing gets flagged as extra. Better
+        // than failing the whole approval.
+      }
+    }
 
     if (typeof planJson !== "string" || !planJson) {
       redirect(errUrl("Plan payload missing", slabIdsParam));
@@ -1308,6 +1324,7 @@ export async function approvePlanAction(formData: FormData) {
           pos_x_ft:  slab.px,
           pos_y_ft:  slab.py,
           rotated:   slab.rot,
+          is_filler: extraSlabIds.has(slab.id),
         });
 
         if (linkErr) redirect(errUrl(linkErr.message, slabIdsParam));

@@ -45,7 +45,7 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
   const { data: block, error } = await supabase
     .from("cut_session_blocks")
     .select(
-      "id, status, block_id, largest_remainder, layout, cut_session_id, cut_sessions(id, session_code, kerf_mm, created_at, planned_by), cut_session_slabs(id, slab_requirement_id)"
+      "id, status, block_id, largest_remainder, layout, cut_session_id, cut_sessions(id, session_code, kerf_mm, created_at, planned_by), cut_session_slabs(id, slab_requirement_id, is_filler)"
     )
     .eq("id", id)
     .single();
@@ -65,6 +65,14 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
 
   const blk = layout?.blk;
   const placed = layout?.placed ?? [];
+  // Slabs flagged as filler / cut-ahead inventory. Renders as a
+  // purple "EXTRA" tag on the printed page so the saw operator
+  // sees at a glance which slabs are not part of the current order.
+  const extraSlabIds = new Set(
+    (block.cut_session_slabs as Array<{ slab_requirement_id: string; is_filler?: boolean }>)
+      .filter((s) => s.is_filler)
+      .map((s) => s.slab_requirement_id),
+  );
   const session = block.cut_sessions as unknown as {
     id: string;
     session_code: string;
@@ -678,7 +686,8 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
                     </text>
                     {/* Placed slabs */}
                     {placed.map((s) => {
-                      const col = slabColor(s.id);
+                      const isExtra = extraSlabIds.has(s.id);
+                      const col = isExtra ? "#7c3aed" : slabColor(s.id);
                       const x = topDownSvg.PAD + s.px * topDownSvg.sc;
                       const y = topDownSvg.PAD + s.py * topDownSvg.sc;
                       const w = s.pw * topDownSvg.sc;
@@ -689,13 +698,13 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
                       return (
                         <g key={s.id}>
                           <rect x={x} y={y} width={w} height={h}
-                            fill={col} fillOpacity={0.28}
+                            fill={col} fillOpacity={isExtra ? 0.42 : 0.28}
                             stroke={col} strokeWidth="1.2"
                           />
                           {showId && (
                             <text x={cx} y={cy} textAnchor="middle" dominantBaseline="middle"
                               fill="#1a1a1a" fontSize={8} fontWeight={700} fontFamily="ui-monospace,monospace">
-                              {s.id}
+                              {s.id}{isExtra ? "*" : ""}
                             </text>
                           )}
                         </g>
@@ -736,7 +745,8 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
                       {/* All slabs: dim those not in this layer, highlight current layer */}
                       {placed.map((s) => {
                         const inLayer = layer.slabs.some(ls => ls.id === s.id);
-                        const col = slabColor(s.id);
+                        const isExtra = extraSlabIds.has(s.id);
+                        const col = isExtra ? "#7c3aed" : slabColor(s.id);
                         const x = PAD + s.px * sc;
                         const y = PAD + s.py * sc;
                         const w = s.pw * sc;
@@ -754,7 +764,7 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
                                 textAnchor="middle" dominantBaseline="middle"
                                 fill="#1a1a1a" fontSize={7} fontWeight={700}
                                 fontFamily="ui-monospace,monospace">
-                                {s.id}
+                                {s.id}{isExtra ? "*" : ""}
                               </text>
                             )}
                           </g>
@@ -1004,13 +1014,23 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
             </thead>
             <tbody>
               {placed.map((s, i) => {
-                const color = slabColor(s.id);
+                const isExtra = extraSlabIds.has(s.id);
+                // Extras render in unified purple (overrides palette) + an
+                // EXTRA badge in the Slab ID cell. Light purple row tint
+                // for the whole row so the cutter can scan extras at a
+                // glance even with the page printed in monochrome.
+                const color = isExtra ? "#7c3aed" : slabColor(s.id);
                 return (
-                  <tr key={s.id}>
+                  <tr key={s.id} style={isExtra ? { background: "#f5f0ff" } : undefined}>
                     <td style={{ color: "#999" }}>{i + 1}</td>
                     <td>
                       <span className="color-dot" style={{ background: color }} />
                       <span className="slab-code">{s.id}</span>
+                      {isExtra && (
+                        <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 3, background: "#7c3aed", color: "#fff", letterSpacing: "0.04em" }}>
+                          EXTRA
+                        </span>
+                      )}
                     </td>
                     <td>{s.temple ?? "—"}</td>
                     <td style={{ color: "#555" }}>{s.label ?? "—"}</td>
@@ -1044,15 +1064,30 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
                 Slabs Actually Cut — tick each one completed:
               </div>
               <div className="slab-checklist">
-                {placed.map((s) => (
-                  <div className="slab-check-row" key={s.id}>
-                    <span className="check-box" />
-                    <span className="color-dot" style={{ background: slabColor(s.id) }} />
-                    <span className="slab-code" style={{ fontSize: 12 }}>{s.id}</span>
-                    <span style={{ fontSize: 11, color: "#888" }}>{s.sw}×{s.sh} in</span>
-                  </div>
-                ))}
+                {placed.map((s) => {
+                  const isExtra = extraSlabIds.has(s.id);
+                  return (
+                    <div className="slab-check-row" key={s.id} style={isExtra ? { background: "#f5f0ff", borderRadius: 3 } : undefined}>
+                      <span className="check-box" />
+                      <span className="color-dot" style={{ background: isExtra ? "#7c3aed" : slabColor(s.id) }} />
+                      <span className="slab-code" style={{ fontSize: 12 }}>{s.id}</span>
+                      <span style={{ fontSize: 11, color: "#888" }}>{s.sw}×{s.sh} in</span>
+                      {isExtra && (
+                        <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 3, background: "#7c3aed", color: "#fff", letterSpacing: "0.04em" }}>
+                          EXTRA
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
+              {/* Legend so cutters/office staff understand the EXTRA tag */}
+              {placed.some((s) => extraSlabIds.has(s.id)) && (
+                <div style={{ fontSize: 10, color: "#666", marginTop: 6, fontStyle: "italic" }}>
+                  <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: "#7c3aed", marginRight: 4, verticalAlign: "middle" }} />
+                  <strong>EXTRA</strong> = filler / cut-ahead inventory (not for current order). Marked with * in 2D layouts.
+                </div>
+              )}
             </>
           )}
 

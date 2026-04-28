@@ -33,10 +33,15 @@ export function CuttingDetailPreview({
   blk,
   placed,
   stoneTypes,
+  extraSlabIds,
 }: {
   blk: Blk;
   placed: Slab[];
   stoneTypes?: StoneTypeDef[];
+  /** Slabs flagged as filler / cut-ahead inventory. Render with
+   * purple tint + EXTRA badge so cutters know they're not part
+   * of the current order. */
+  extraSlabIds?: Set<string>;
 }) {
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
 
@@ -49,6 +54,7 @@ export function CuttingDetailPreview({
           placed={placed as any}
           stoneTypes={stoneTypes}
           onHoverSlab={setHighlightedId}
+          extraIds={extraSlabIds}
         />
       </div>
 
@@ -64,18 +70,20 @@ export function CuttingDetailPreview({
           <div className="chip-row">
             {placed.map((s) => {
               const isHighlighted = highlightedId === s.id;
-              const col = slabColor(s.id);
+              const isExtra = extraSlabIds?.has(s.id) ?? false;
+              const col = isExtra ? "#7c3aed" : slabColor(s.id);
               return (
                 <span
                   key={s.id}
                   className="plan-chip"
+                  title={isExtra ? "Filler slab — cut ahead, not for current order" : undefined}
                   style={{
                     fontFamily: "ui-monospace, monospace",
                     fontSize: 12,
                     transition: "all 0.12s",
-                    background: isHighlighted ? col + "22" : undefined,
-                    border: isHighlighted ? `1.5px solid ${col}` : undefined,
-                    color: isHighlighted ? "var(--text)" : undefined,
+                    background: isHighlighted ? col + "22" : (isExtra ? "#7c3aed11" : undefined),
+                    border: isHighlighted ? `1.5px solid ${col}` : (isExtra ? "1px solid #7c3aed44" : undefined),
+                    color: isHighlighted ? "var(--text)" : (isExtra ? "#7c3aed" : undefined),
                     fontWeight: isHighlighted ? 700 : undefined,
                     boxShadow: isHighlighted ? `0 0 0 2px ${col}44` : undefined,
                   }}
@@ -87,6 +95,11 @@ export function CuttingDetailPreview({
                   {s.temple ? ` · ${s.temple}` : ""}
                   {` · ${s.sw}×${s.sh}${s.sd ? `×${s.sd}` : ""} in`}
                   {s.rot ? " ↻" : ""}
+                  {isExtra && (
+                    <span style={{ marginLeft: 5, fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 3, background: "#7c3aed", color: "#fff", letterSpacing: "0.04em" }}>
+                      EXTRA
+                    </span>
+                  )}
                 </span>
               );
             })}

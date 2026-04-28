@@ -55,7 +55,7 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
   const { data: block, error } = await supabase
     .from("cut_session_blocks")
     .select(
-      "id, status, block_id, largest_remainder, restocked_block_id, layout, updated_at, cut_session_id, cutting_seq, needs_reprint, reprint_reason, cut_sessions(id, session_code, kerf_mm, created_at, planned_by), cut_session_slabs(id, slab_requirement_id)"
+      "id, status, block_id, largest_remainder, restocked_block_id, layout, updated_at, cut_session_id, cutting_seq, needs_reprint, reprint_reason, cut_sessions(id, session_code, kerf_mm, created_at, planned_by), cut_session_slabs(id, slab_requirement_id, is_filler)"
     )
     .eq("id", id)
     .single();
@@ -151,8 +151,16 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
     planned_by: string | null;
   } | null;
   const slabReqIds = (
-    block.cut_session_slabs as Array<{ id: string; slab_requirement_id: string }>
+    block.cut_session_slabs as Array<{ id: string; slab_requirement_id: string; is_filler?: boolean }>
   ).map((s) => s.slab_requirement_id);
+  // Slabs flagged as "filler" / "extra" — added via Fit-to-Fill,
+  // not part of the original demand. Surfaced to the preview
+  // components so they render with a purple tint + EXTRA badge.
+  const extraSlabIds = new Set(
+    (block.cut_session_slabs as Array<{ slab_requirement_id: string; is_filler?: boolean }>)
+      .filter((s) => s.is_filler)
+      .map((s) => s.slab_requirement_id),
+  );
 
   const isPending = block.status === "pending_worker";
   const isWaiting = block.status === "pending_cut";
@@ -284,7 +292,12 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
 
       {/* 3D preview + slab chip list (cross-highlighted on hover) */}
       {blk && placed.length > 0 && (
-        <CuttingDetailPreview blk={blk} placed={placed as any} stoneTypes={stoneTypes ?? undefined} />
+        <CuttingDetailPreview
+          blk={blk}
+          placed={placed as any}
+          stoneTypes={stoneTypes ?? undefined}
+          extraSlabIds={extraSlabIds}
+        />
       )}
 
       {/* Block efficiency breakdown — REAL post-cut numbers when status=done,

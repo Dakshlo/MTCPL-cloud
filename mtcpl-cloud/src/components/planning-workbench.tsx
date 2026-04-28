@@ -51,14 +51,25 @@ export function sclr(id: string) {
 
 // ─── 3D Isometric Block Preview ────────────────────────────────────────────────
 
-export function IsoBlockPreview({ block, placed, stoneTypes, onHoverSlab, newSlabIds }: { block: PlanBlock["blk"]; placed: PlacedSlab[]; stoneTypes?: StoneTypeDef[]; onHoverSlab?: (id: string | null) => void;
+export function IsoBlockPreview({ block, placed, stoneTypes, onHoverSlab, newSlabIds, extraIds }: { block: PlanBlock["blk"]; placed: PlacedSlab[]; stoneTypes?: StoneTypeDef[]; onHoverSlab?: (id: string | null) => void;
   /**
    * Optional set of slab IDs that should be visually marked as "new"
    * (i.e. proposed/recommended additions, not yet committed). Used by
    * the Fit-Block-to-Fill preview to clearly differentiate which slabs
    * the user is being asked to approve from the ones already placed.
+   * Style: amber dashed border + "NEW" badge.
    */
   newSlabIds?: Set<string>;
+  /**
+   * Optional set of slab IDs that are EXTRAS — slabs added to the plan
+   * via Fit-to-Fill (not part of the operator's original demand-driven
+   * selection). Surfaced with a purple tint + "EXTRA" badge so cutters
+   * can tell at-a-glance which slabs are "for-now demand" vs
+   * "cut-ahead inventory". Distinct from `newSlabIds` (which means
+   * "proposed but not yet committed"). On the result-block view AND
+   * the cutter print, extras render this way after approval.
+   */
+  extraIds?: Set<string>;
  }) {
   const [az, setAz] = useState(Math.PI * 0.25);
   const [zoom, setZoom] = useState(1.0);
@@ -254,6 +265,7 @@ export function IsoBlockPreview({ block, placed, stoneTypes, onHoverSlab, newSla
         {sortedSlabs.map((item) => {
           const isHovered = hoveredId === item.id;
           const isNew = newSlabIds?.has(item.id) ?? false;
+          const isExtra = extraIds?.has(item.id) ?? false;
           const layerDimmed = activeLayerIds !== null && !activeLayerIds.has(item.id);
           const hoverDimmed = hoveredId !== null && !isHovered;
           const dimmed = layerDimmed || hoverDimmed;
@@ -263,7 +275,11 @@ export function IsoBlockPreview({ block, placed, stoneTypes, onHoverSlab, newSla
           // boxes are the proposal vs the committed plan.
           const topAlpha = dimmed ? 0.10 : (isNew ? 0.95 : 0.78);
           const sideAlpha = dimmed ? 0.07 : (isNew ? 0.80 : 0.62);
-          const color = sclr(item.id);
+          // Extras get a unified purple fill (overrides the rainbow
+          // palette), so 5 extras across one block all look identical
+          // — a clear "these are not for the current order" cluster.
+          // Otherwise, each slab keeps its per-id rainbow colour.
+          const color = isExtra ? "#7c3aed" : sclr(item.id);
 
           // Use annotated Z positions from multilayer algorithm; fall back for old data
           const slabZTop = item.zTop ?? H;
@@ -350,6 +366,34 @@ export function IsoBlockPreview({ block, placed, stoneTypes, onHoverSlab, newSla
                     style={{ letterSpacing: "0.06em" }}
                   >
                     NEW
+                  </text>
+                </g>
+              )}
+              {/* "EXTRA" badge — rendered on every slab the operator
+                  added via Fit-to-Fill. Persists into the cutting
+                  page + cutter print so the saw operator knows
+                  which slabs are pre-cut inventory vs current order. */}
+              {isExtra && !isNew && (
+                <g pointerEvents="none">
+                  <rect
+                    x={center.x - 18}
+                    y={center.y - 7}
+                    width={36}
+                    height={11}
+                    rx={3}
+                    fill="#7c3aed"
+                    opacity={0.95}
+                  />
+                  <text
+                    x={center.x}
+                    y={center.y + 1}
+                    textAnchor="middle"
+                    fill="#fff"
+                    fontSize={7}
+                    fontWeight={700}
+                    style={{ letterSpacing: "0.06em" }}
+                  >
+                    EXTRA
                   </text>
                 </g>
               )}
@@ -522,6 +566,12 @@ export function PlanningWorkbench({
   // didn't get a suggestion (no candidates of matching stone, all
   // candidates wrong quality, leftover face too narrow, etc.).
   const [fitDiagnostics, setFitDiagnostics] = useState<FitBlockDiagnostic[]>([]);
+  // Slab IDs that were added to the plan by Fit-to-Fill (not part of
+  // the user's original selection). Persists across re-plans so the
+  // "EXTRA" tag survives if the user re-runs the algorithm. Cleared
+  // only on facility switch (different inventory) or when generatePlan
+  // is fired with a fresh selection that excludes them.
+  const [extraSlabIds, setExtraSlabIds] = useState<Set<string>>(new Set());
 
   const allUsableBlocks = blocks.filter((block) => block.status === "available" || block.status === "reserved");
   // Blocks restricted to active facility first, then to ticked yards within it.
@@ -563,6 +613,8 @@ export function PlanningWorkbench({
     setFitDiagnostics([]);
     setFitFillStrategy(null);
     setFitFillError(null);
+    // Slabs from one facility's inventory don't apply to the other.
+    setExtraSlabIds(new Set());
   }
 
   function toggleYard(y: number) {
@@ -933,6 +985,14 @@ export function PlanningWorkbench({
       for (const id of preview.suggested_slab_ids) next.add(id);
       return next;
     });
+    // Track these as "extras" (not part of the original selection)
+    // so they render with a purple tint + EXTRA badge in the result
+    // view AND get persisted with is_filler=true on plan approval.
+    setExtraSlabIds((prev) => {
+      const next = new Set(prev);
+      for (const id of preview.suggested_slab_ids) next.add(id);
+      return next;
+    });
     setFitFillSuggestions((prev) => prev.filter((s) => s.block_id !== blockId));
     setFitPreviews((prev) => prev.filter((p) => p.block_id !== blockId));
   }
@@ -955,6 +1015,14 @@ export function PlanningWorkbench({
     setResult({ ...result, plan: newPlan, totalWaste: Math.round(totalWaste * 100) / 100 });
 
     setSelectedSlabIds((prev) => {
+      const next = new Set(prev);
+      for (const p of fitPreviews) {
+        for (const id of p.suggested_slab_ids) next.add(id);
+      }
+      return next;
+    });
+    // Mark all newly-added slabs as extras (see acceptBlockFill).
+    setExtraSlabIds((prev) => {
       const next = new Set(prev);
       for (const p of fitPreviews) {
         for (const id of p.suggested_slab_ids) next.add(id);
@@ -1869,18 +1937,40 @@ export function PlanningWorkbench({
                           <span className="role-pill">Slab yield {eff?.slabPct ?? item.eff}%</span>
                         </div>
 
-                        <IsoBlockPreview block={item.blk} placed={item.placed} stoneTypes={stoneTypes} />
+                        <IsoBlockPreview
+                          block={item.blk}
+                          placed={item.placed}
+                          stoneTypes={stoneTypes}
+                          extraIds={extraSlabIds}
+                        />
 
                         <div className="chip-row">
-                          {item.placed.map((slab) => (
-                            <span
-                              className="plan-chip"
-                              key={slab.id}
-                              style={{ background: `${sclr(slab.id)}22`, color: sclr(slab.id), borderColor: `${sclr(slab.id)}44` }}
-                            >
-                              {slab.id} {slab.rot ? "R" : ""} {slab.sw}×{slab.sh}×{slab.sd} in
-                            </span>
-                          ))}
+                          {item.placed.map((slab) => {
+                            const isExtra = extraSlabIds.has(slab.id);
+                            // Extras override the rainbow palette with
+                            // a unified purple so they're visually
+                            // distinct from "for-now demand" slabs.
+                            const colour = isExtra ? "#7c3aed" : sclr(slab.id);
+                            return (
+                              <span
+                                className="plan-chip"
+                                key={slab.id}
+                                style={{
+                                  background: `${colour}22`,
+                                  color: colour,
+                                  borderColor: `${colour}44`,
+                                }}
+                                title={isExtra ? "Filler / extra slab — added by Fit-to-Fill" : undefined}
+                              >
+                                {slab.id} {slab.rot ? "R" : ""} {slab.sw}×{slab.sh}×{slab.sd} in
+                                {isExtra && (
+                                  <span style={{ marginLeft: 4, fontSize: 9, fontWeight: 700, padding: "0 4px", borderRadius: 3, background: "#7c3aed", color: "#fff", letterSpacing: "0.04em" }}>
+                                    EXTRA
+                                  </span>
+                                )}
+                              </span>
+                            );
+                          })}
                         </div>
 
                         {eff && <EfficiencyBar eff={eff} />}
@@ -1963,6 +2053,19 @@ export function PlanningWorkbench({
                       name="slab_ids"
                       type="hidden"
                       value={[...new Set(result.plan.flatMap(pb => pb.placed.map(s => s.id)))].join(",")}
+                    />
+                    {/* Filter extras to only those actually IN the
+                        current plan — extras the user accepted earlier
+                        but that aren't on any planned block anymore
+                        shouldn't get persisted. */}
+                    <input
+                      name="extra_slab_ids"
+                      type="hidden"
+                      value={JSON.stringify(
+                        result.plan
+                          .flatMap(pb => pb.placed.map(s => s.id))
+                          .filter(id => extraSlabIds.has(id))
+                      )}
                     />
 
                     {/* Acknowledgement gate — user cannot approve until they check this when there are unmet slabs */}
