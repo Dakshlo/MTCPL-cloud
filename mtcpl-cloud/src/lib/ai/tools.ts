@@ -1327,15 +1327,32 @@ async function getLiveCuttingStatus(input: Record<string, unknown>) {
     }
   }
 
+  // Disambiguated counts so the AI can't accidentally narrate
+  // "78 blocks cutting" when 77 of them are actually approved-but-not-started.
+  // ONLY `activelyCutting` means a saw is running. pending_worker = waiting,
+  // done_prompt = saw finished, slab record pending. Use the right one.
+  const activelyCutting = byStatus.cutting;
+  const approvedWaiting = byStatus.pending_worker;
+  const awaitingSlabRecord = byStatus.done_prompt;
+  const onTheFloorRightNow = activelyCutting + awaitingSlabRecord; // "in cutting" lifecycle
+  const totalInPipeline = filtered.length;
+
   const summaryParts: string[] = [];
-  summaryParts.push(`${byStatus.cutting} block${byStatus.cutting === 1 ? "" : "s"} being cut right now`);
-  summaryParts.push(`${byStatus.pending_worker} approved & waiting to start`);
-  summaryParts.push(`${byStatus.done_prompt} cut, awaiting slab record`);
+  summaryParts.push(`${activelyCutting} block${activelyCutting === 1 ? "" : "s"} actively cutting (saw running)`);
+  summaryParts.push(`${approvedWaiting} approved & waiting to start (NOT yet cutting)`);
+  summaryParts.push(`${awaitingSlabRecord} cut, awaiting slab record`);
 
   return {
-    total: filtered.length,
+    // Disambiguated counts — prefer these in narration over `total*`.
+    activelyCutting,
+    approvedWaiting,
+    awaitingSlabRecord,
+    onTheFloorRightNow,
+    totalInPipeline,
     breakdown: byStatus,
     summary: summaryParts.join(" · "),
+    narrationGuide:
+      "When the user asks how many blocks are cutting NOW, use `activelyCutting` (saw running) — NOT `totalInPipeline` and NOT `approvedWaiting`. Approved-but-not-started blocks are queued, not cutting.",
     filters: { facility: facilityFilter ?? "any" },
     liveBlocks: live.slice(0, 30),
     pendingBlocks: pending.slice(0, 30),
