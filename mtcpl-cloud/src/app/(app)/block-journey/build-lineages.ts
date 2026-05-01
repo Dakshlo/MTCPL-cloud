@@ -31,6 +31,11 @@ export type BjBlockRow = {
   status: string;
   created_at: string | null;
   created_by?: string | null;
+  /** Last-modified timestamp — used to derive `cutAt` for manual marble
+   *  cuts when no cut_session_blocks row exists (status flips to
+   *  'consumed' but no cut session is created). Optional for backward
+   *  compatibility; callers that don't pass it lose the manual-cut date. */
+  updated_at?: string | null;
   /** Marble blocks carry tonnage instead of dimensions. Null for sandstone. */
   tonnes?: number | string | null;
   /** Marble blocks link to their truck entry. Null for sandstone. */
@@ -64,6 +69,9 @@ export type BjSlabRow = {
 export type BjCsbRow = {
   block_id: string;
   status: string;
+  /** When the block's cut session reached `done`. Used to surface
+   *  the cut date on the lineage card. */
+  updated_at?: string | null;
 };
 
 // ─── Output shapes ───────────────────────────────────────────────────────
@@ -83,6 +91,12 @@ export type LineageNode = {
   cft: number;
   createdAt: string | null;
   wasCut: boolean;             // has a done cut_session_blocks row
+  /** Timestamp of the most recent done cut for this block (the
+   *  block's "cut completed on" date). Null if never cut, or only
+   *  cut via the manual-bypass flow which doesn't write
+   *  cut_session_blocks. Falls back to the block's updated_at when
+   *  status='consumed' so manual marble cuts still get a date. */
+  cutAt: string | null;
   slabsFromThis: Array<{
     id: string;
     cft: number;
@@ -199,6 +213,17 @@ export function buildLineages(
   const freshById = new Map(freshBlocks.map((b) => [b.id, b]));
   const freshIds = new Set(freshById.keys());
   const doneBlockIds = new Set(doneCsbs.map((c) => c.block_id));
+  // Most-recent done timestamp per block_id — used to surface "Cut on X"
+  // on each lineage card. Multiple done sessions per block are rare but
+  // possible; we keep the latest.
+  const doneAtByBlockId = new Map<string, string>();
+  for (const c of doneCsbs) {
+    if (!c.block_id || !c.updated_at) continue;
+    const prev = doneAtByBlockId.get(c.block_id);
+    if (!prev || c.updated_at > prev) {
+      doneAtByBlockId.set(c.block_id, c.updated_at);
+    }
+  }
 
   const truckById = new Map(marbleTruckEntries.map((t) => [t.id, t]));
 
@@ -267,7 +292,7 @@ export function buildLineages(
       // live descendants to wait on.
       const isResolved = root.status === "consumed";
 
-      const tree: LineageNode = buildTreeNode(root, true, [], slabsByBlock, doneBlockIds);
+      const tree: LineageNode = buildTreeNode(root, true, [], slabsByBlock, doneBlockIds, doneAtByBlockId);
 
       lineages.push({
         category: "marble",
@@ -352,7 +377,7 @@ export function buildLineages(
       }
     }
 
-    const tree = buildTreeNode(root, true, descendants, slabsByBlock, doneBlockIds);
+    const tree = buildTreeNode(root, true, descendants, slabsByBlock, doneBlockIds, doneAtByBlockId);
 
     lineages.push({
       category: "sandstone",
@@ -390,6 +415,7 @@ function buildTreeNode(
   allDescendants: BjBlockRow[],
   slabsByBlock: Map<string, BjSlabRow[]>,
   doneBlockIds: Set<string>,
+  doneAtByBlockId: Map<string, string>,
 ): LineageNode {
   const directChildren = allDescendants.filter((d) => isDirectChild(block.id, d.id));
   const ownSlabs = slabsByBlock.get(block.id) ?? [];
@@ -397,6 +423,14 @@ function buildTreeNode(
   const l = num(block.length_ft);
   const w = num(block.width_ft);
   const h = num(block.height_ft);
+
+  // Cut date: prefer the explicit done timestamp from cut_session_blocks.
+  // Fall back to block.updated_at when status='consumed' so manual marble
+  // cuts (which don't write cut_session_blocks rows) still get a date on
+  // the card. Returns null if neither signal is present.
+  const wasCut = doneBlockIds.has(block.id);
+  const cutAt = doneAtByBlockId.get(block.id)
+    ?? (block.status === "consumed" ? (block.updated_at ?? null) : null);
 
   return {
     id: block.id,
@@ -411,7 +445,8 @@ function buildTreeNode(
     h,
     cft: toCFT(l * w * h),
     createdAt: block.created_at ?? null,
-    wasCut: doneBlockIds.has(block.id),
+    wasCut,
+    cutAt,
     slabsFromThis: ownSlabs.map((s) => ({
       id: s.id,
       cft: toCFT(num(s.length_ft) * num(s.width_ft) * num(s.thickness_ft)),
@@ -423,7 +458,7 @@ function buildTreeNode(
       0,
     ),
     children: directChildren.map((c) =>
-      buildTreeNode(c, false, allDescendants, slabsByBlock, doneBlockIds),
+      buildTreeNode(c, false, allDescendants, slabsByBlock, doneBlockIds, doneAtByBlockId),
     ),
   };
 }

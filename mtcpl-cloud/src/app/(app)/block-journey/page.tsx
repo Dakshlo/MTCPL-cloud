@@ -64,13 +64,13 @@ export default async function BlockJourneyPage({
     admin
       .from("blocks")
       .select(
-        "id, stone, yard, quality, category, length_ft, width_ft, height_ft, tonnes, truck_entry_id, status, created_at, created_by",
+        "id, stone, yard, quality, category, length_ft, width_ft, height_ft, tonnes, truck_entry_id, status, created_at, created_by, updated_at",
       )
       .eq("category", "Fresh"),
     admin
       .from("blocks")
       .select(
-        "id, stone, yard, quality, category, length_ft, width_ft, height_ft, tonnes, truck_entry_id, status, created_at, created_by",
+        "id, stone, yard, quality, category, length_ft, width_ft, height_ft, tonnes, truck_entry_id, status, created_at, created_by, updated_at",
       )
       .eq("category", "Reused"),
     admin
@@ -80,7 +80,7 @@ export default async function BlockJourneyPage({
       .eq("status", "cut_done"),
     admin
       .from("cut_session_blocks")
-      .select("block_id, status")
+      .select("block_id, status, updated_at")
       .eq("status", "done"),
     admin.from("stone_types").select("name, stone_category").order("name"),
     admin

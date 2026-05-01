@@ -118,6 +118,14 @@ function SandstoneLineageCard({
             {createdByName && (
               <> by <span style={{ color: "var(--gold-dark)", fontWeight: 600 }}>{createdByName}</span></>
             )}
+            {l.tree.cutAt && (
+              <>
+                {" · "}
+                <span style={{ color: "#15803d", fontWeight: 600 }}>
+                  ✓ Cut {new Date(l.tree.cutAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                </span>
+              </>
+            )}
             {" · "}{l.cutCount} cut{l.cutCount !== 1 ? "s" : ""}
             {l.descendantCount > 0 ? ` · ${l.descendantCount} remainder piece${l.descendantCount !== 1 ? "s" : ""}` : ""}
           </div>
@@ -446,6 +454,14 @@ function MarbleLineageCard({
             {createdByName && (
               <>
                 {" "}by <span style={{ color: "var(--gold-dark)", fontWeight: 600 }}>{createdByName}</span>
+              </>
+            )}
+            {l.tree.cutAt && (
+              <>
+                {" · "}
+                <span style={{ color: "#15803d", fontWeight: 600 }}>
+                  ✓ Cut {new Date(l.tree.cutAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                </span>
               </>
             )}
             {l.truckNo && (

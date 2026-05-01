@@ -11,6 +11,7 @@ import { yardLabel, facilityOfYard, facilityLabel, FACILITIES, type Facility } f
 import { PrintReportButton } from "./print-report-button";
 import { SelectionProvider } from "./selection-context";
 import { BlockSelector } from "./block-selector";
+import { CuttingHistorySearchBar, type HistoryRow } from "./cutting-history-search-bar";
 
 type Tab = "pending" | "waiting" | "in_progress" | "done";
 type SearchParams = Promise<{ tab?: string }>;
@@ -148,16 +149,41 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
     .in("status", ["open", "planned", "cutting"]);
   const urgentSlabIds = new Set((urgentSlabData ?? []).map(s => s.id));
 
-  const { data: blocks } = await supabase
-    .from("cut_session_blocks")
-    .select(
-      "id, status, block_id, restocked_block_id, layout, updated_at, cut_session_id, cutting_seq, needs_reprint, reprint_reason, cut_sessions(session_code, kerf_mm, planned_by), cut_session_slabs(slab_requirement_id)"
-    )
-    .in("status", statusFilter)
-    .order("updated_at", { ascending: activeTab !== "done" })
-    .limit(100);
-
-  const allRows = (blocks ?? []) as unknown as BlockRow[];
+  // Paginated fetch — Supabase's PostgREST caps single .select() calls at
+  // 1000 rows. The previous .limit(100) silently dropped older Done /
+  // Rejected blocks once history grew past ~100 rows, which is why
+  // operators reported "block-64 isn't showing in Earlier". On the
+  // active tabs (Pending / Waiting / In Progress) we still cap at 200
+  // because those should never grow that long; the Done tab needs
+  // unlimited history so the Earlier + Rejected sections (and the
+  // upcoming search bar) can find anything the team has ever cut.
+  type CutBlockRow = BlockRow;
+  async function fetchAllBlocks(): Promise<CutBlockRow[]> {
+    const PAGE = 1000;
+    const ascending = activeTab !== "done";
+    const out: CutBlockRow[] = [];
+    // Active tabs cap at 200 (more than enough); done tab walks the
+    // full history so search can reach anything.
+    const maxRows = activeTab === "done" ? 50000 : 200;
+    for (let offset = 0; offset < maxRows; offset += PAGE) {
+      const upper = Math.min(offset + PAGE - 1, maxRows - 1);
+      const { data, error } = await supabase
+        .from("cut_session_blocks")
+        .select(
+          "id, status, block_id, restocked_block_id, layout, updated_at, cut_session_id, cutting_seq, needs_reprint, reprint_reason, cut_sessions(session_code, kerf_mm, planned_by), cut_session_slabs(slab_requirement_id)"
+        )
+        .in("status", statusFilter)
+        .order("updated_at", { ascending })
+        .range(offset, upper);
+      if (error) throw new Error(error.message);
+      if (!data || data.length === 0) break;
+      out.push(...(data as unknown as CutBlockRow[]));
+      if (data.length < PAGE) break;
+      if (out.length >= maxRows) break;
+    }
+    return out;
+  }
+  const allRows = await fetchAllBlocks();
   const rows = activeTab === "done" ? allRows.filter(b => b.status !== "rejected") : allRows;
   const rejectedRows = activeTab === "done" ? allRows.filter(b => b.status === "rejected") : [];
 
@@ -392,6 +418,21 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                     : 0;
                   const slabCount =
                     isDoneStatus && realRowCount > 0 ? realRowCount : block.cut_session_slabs.length;
+                  // For done blocks: how many of the actual cut slabs were
+                  // added manually from inventory during the cutting-done
+                  // flow (i.e. not in the original cut_session_slabs plan).
+                  // Used to show a "+N added" hint next to the slab count
+                  // pill so the team head can see at a glance that the
+                  // operator pulled extras off the open-slabs shelf.
+                  const manualAddedCount = (() => {
+                    if (!isDoneStatus) return 0;
+                    const realRows = actualSlabRowsByParent.get(block.block_id);
+                    if (!realRows || realRows.length === 0) return 0;
+                    const plannedIdSet = new Set(
+                      block.cut_session_slabs.map((s) => s.slab_requirement_id),
+                    );
+                    return realRows.filter((s) => !plannedIdSet.has(s.id)).length;
+                  })();
                   const isUrgent = block.cut_session_slabs.some((s) => urgentSlabIds.has(s.slab_requirement_id));
                   // Done blocks: use REAL post-cut data (actually-cut slabs
                   // + actually-restocked blocks). For any slab data the
@@ -537,8 +578,29 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                     {block.updated_at && (isLive || block.status === "done_prompt") && (
                       <CuttingTimer startedAt={block.updated_at} prefix="Cutting from last" />
                     )}
-                    <span className="role-pill">
+                    <span
+                      className="role-pill"
+                      title={
+                        manualAddedCount > 0
+                          ? `${slabCount - manualAddedCount} planned + ${manualAddedCount} added from inventory during cutting`
+                          : undefined
+                      }
+                    >
                       {slabCount} slab{slabCount !== 1 ? "s" : ""}
+                      {manualAddedCount > 0 && (
+                        <span style={{
+                          marginLeft: 6,
+                          fontSize: 10,
+                          fontWeight: 700,
+                          color: "#b45309",
+                          background: "rgba(180,83,9,0.14)",
+                          padding: "1px 6px",
+                          borderRadius: 4,
+                          letterSpacing: "0.04em",
+                        }}>
+                          +{manualAddedCount} added
+                        </span>
+                      )}
                     </span>
                     {eff && (
                       <span
@@ -906,6 +968,34 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
           });
         })()}
 
+        {/* Done tab: search across Earlier + Rejected. Always rendered
+            when those sections have content, even if collapsed — clicking
+            a result auto-expands the right <details> and scrolls the
+            matching card into view with a brief gold ring highlight. */}
+        {activeTab === "done" && (earlierRows.length > 0 || rejectedRows.length > 0) && (() => {
+          const historyRows: HistoryRow[] = [...earlierRows, ...rejectedRows].map((b) => {
+            const realRows = actualSlabRowsByParent.get(b.block_id);
+            const slabCount =
+              realRows && realRows.length > 0
+                ? realRows.length
+                : b.cut_session_slabs.length;
+            return {
+              id: b.id,
+              block_id: b.block_id,
+              status: b.status === "rejected" ? "rejected" : "done",
+              session_code: b.cut_sessions?.session_code ?? null,
+              stone: b.layout?.blk?.stone ?? null,
+              yard: typeof b.layout?.blk?.yard === "number" ? b.layout.blk.yard : null,
+              l: typeof b.layout?.blk?.l === "number" ? b.layout.blk.l : null,
+              w: typeof b.layout?.blk?.w === "number" ? b.layout.blk.w : null,
+              h: typeof b.layout?.blk?.h === "number" ? b.layout.blk.h : null,
+              updated_at: b.updated_at,
+              slab_count: slabCount,
+            };
+          });
+          return <CuttingHistorySearchBar rows={historyRows} />;
+        })()}
+
         {/* Done tab: "Earlier" collapsed section for previous days */}
         {activeTab === "done" && earlierRows.length > 0 && (
           <details style={{ marginTop: 16 }}>
@@ -938,7 +1028,22 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                       {list.map((block) => {
                         const blk = block.layout?.blk;
                         const placed = block.layout?.placed ?? [];
-                        const slabCount = block.cut_session_slabs.length;
+                        // Real cut slabs (planned + manual extras pulled in
+                        // from inventory during cutting-done). Same logic
+                        // as the active Done Today card so manual adds
+                        // surface here too.
+                        const realRowsEarlier = actualSlabRowsByParent.get(block.block_id);
+                        const slabCount =
+                          realRowsEarlier && realRowsEarlier.length > 0
+                            ? realRowsEarlier.length
+                            : block.cut_session_slabs.length;
+                        const plannedIdSetEarlier = new Set(
+                          block.cut_session_slabs.map((s) => s.slab_requirement_id),
+                        );
+                        const manualAddedCountEarlier =
+                          realRowsEarlier && realRowsEarlier.length > 0
+                            ? realRowsEarlier.filter((s) => !plannedIdSetEarlier.has(s.id)).length
+                            : 0;
                         // Same actual-vs-projected logic as the active done list
                         const actualSlabsEarlier = actualSlabsByParent.get(block.block_id);
                         const actualRemaindersEarlier = actualRemaindersByParent.get(block.block_id);
@@ -948,7 +1053,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                         const effEarlier = computeActualCutEfficiency(blk, slabsForEffEarlier, actualRemaindersEarlier ?? []);
                         const useActualEarlier = (actualSlabsEarlier?.length ?? 0) > 0 || (actualRemaindersEarlier?.length ?? 0) > 0;
                         return (
-                          <div className="plan-card" key={block.id} style={{ marginBottom: 8 }}>
+                          <div className="plan-card" data-cut-block-id={block.id} key={block.id} style={{ marginBottom: 8 }}>
                             <div className="record-head" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-start" }}>
                               <div style={{ display: "flex", alignItems: "flex-start", gap: 10, flex: 1, minWidth: 0 }}>
                                 <BlockSelector id={block.id} />
@@ -971,7 +1076,30 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                                 </div>
                               </div>
                               <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                                <span className="role-pill">{slabCount} slab{slabCount !== 1 ? "s" : ""}</span>
+                                <span
+                                  className="role-pill"
+                                  title={
+                                    manualAddedCountEarlier > 0
+                                      ? `${slabCount - manualAddedCountEarlier} planned + ${manualAddedCountEarlier} added from inventory during cutting`
+                                      : undefined
+                                  }
+                                >
+                                  {slabCount} slab{slabCount !== 1 ? "s" : ""}
+                                  {manualAddedCountEarlier > 0 && (
+                                    <span style={{
+                                      marginLeft: 6,
+                                      fontSize: 10,
+                                      fontWeight: 700,
+                                      color: "#b45309",
+                                      background: "rgba(180,83,9,0.14)",
+                                      padding: "1px 6px",
+                                      borderRadius: 4,
+                                      letterSpacing: "0.04em",
+                                    }}>
+                                      +{manualAddedCountEarlier} added
+                                    </span>
+                                  )}
+                                </span>
                                 <Link
                                   href={`/cutting/${block.id}/print`}
                                   target="_blank"
@@ -996,21 +1124,70 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                                 </Link>
                               </div>
                             </div>
-                            {placed.length > 0 && (
-                              <div className="chip-row" style={{ marginTop: 8 }}>
-                                {placed.map((s) => (
-                                  <span className="plan-chip" key={s.id}>
-                                    {s.id}
-                                    {(s.sw != null || s.sh != null || s.sd != null) && (
-                                      <> · <span style={{ fontFamily: "ui-monospace, monospace" }}>
-                                        {s.sw ?? "—"}×{s.sh ?? "—"}×{s.sd ?? "—"}″
-                                      </span></>
-                                    )}
-                                    {s.temple ? ` · ${s.temple}` : ""}
-                                  </span>
-                                ))}
-                              </div>
-                            )}
+                            {(() => {
+                              // Prefer real rows so manual adds surface; fall
+                              // back to planner projection if real data is
+                              // unavailable.
+                              if (realRowsEarlier && realRowsEarlier.length > 0) {
+                                return (
+                                  <div className="chip-row" style={{ marginTop: 8 }}>
+                                    {realRowsEarlier.map((s) => {
+                                      const isManual = !plannedIdSetEarlier.has(s.id);
+                                      return (
+                                        <span
+                                          className="plan-chip"
+                                          key={s.id}
+                                          style={isManual ? {
+                                            background: "rgba(120,53,15,0.12)",
+                                            border: "1px solid rgba(180,83,9,0.45)",
+                                            color: "var(--text)",
+                                          } : undefined}
+                                          title={isManual ? "Added from inventory during Cutting Done — not in original plan" : undefined}
+                                        >
+                                          {s.id}
+                                          {(s.sw != null || s.sh != null || s.sd != null) && (
+                                            <> · <span style={{ fontFamily: "ui-monospace, monospace" }}>
+                                              {s.sw ?? "—"}×{s.sh ?? "—"}×{s.sd ?? "—"}″
+                                            </span></>
+                                          )}
+                                          {s.temple ? ` · ${s.temple}` : ""}
+                                          {isManual && (
+                                            <span style={{
+                                              marginLeft: 6,
+                                              fontSize: 9,
+                                              fontWeight: 700,
+                                              letterSpacing: "0.05em",
+                                              color: "#b45309",
+                                              textTransform: "uppercase",
+                                            }}>
+                                              + added
+                                            </span>
+                                          )}
+                                        </span>
+                                      );
+                                    })}
+                                  </div>
+                                );
+                              }
+                              if (placed.length > 0) {
+                                return (
+                                  <div className="chip-row" style={{ marginTop: 8 }}>
+                                    {placed.map((s) => (
+                                      <span className="plan-chip" key={s.id}>
+                                        {s.id}
+                                        {(s.sw != null || s.sh != null || s.sd != null) && (
+                                          <> · <span style={{ fontFamily: "ui-monospace, monospace" }}>
+                                            {s.sw ?? "—"}×{s.sh ?? "—"}×{s.sd ?? "—"}″
+                                          </span></>
+                                        )}
+                                        {s.temple ? ` · ${s.temple}` : ""}
+                                      </span>
+                                    ))}
+                                  </div>
+                                );
+                              }
+                              return null;
+                            })()}
                             {(() => {
                               const rems = actualRemaindersByParent.get(block.block_id);
                               if (!rems || rems.length === 0) return null;
@@ -1151,7 +1328,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                         const blk = block.layout?.blk;
                         const slabCount = block.cut_session_slabs.length;
                         return (
-                          <div key={block.id} className="plan-card" style={{ opacity: 0.65, marginBottom: 8 }}>
+                          <div key={block.id} data-cut-block-id={block.id} className="plan-card" style={{ opacity: 0.65, marginBottom: 8 }}>
                             <div className="record-head" style={{ flexWrap: "wrap", gap: 10 }}>
                               <div style={{ flex: 1, minWidth: 0 }}>
                                 <strong style={{ fontFamily: "ui-monospace, monospace", fontSize: 14 }}>
