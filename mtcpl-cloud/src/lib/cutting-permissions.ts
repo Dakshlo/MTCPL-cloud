@@ -32,14 +32,17 @@ export function canTransferPlannedSlabs(profile: Pick<Profile, "role" | "full_na
 
 /**
  * Manage cutter operators — pick from list, add new ones, assign to
- * blocks. Initial release is intentionally narrow (developer only) so
- * the team can validate the flow before it goes wider. To open it up
- * to team_heads later: change `=== "developer"` below to also accept
- * "team_head", or call canTransferPlannedSlabs(profile).
+ * blocks. Open to every role that already touches cutting flow:
+ * developer, owner, team_head, cutting_operator. Block-entry /
+ * slab-entry roles stay locked out — they don't run cutting.
  *
  * The operator NAME, however, surfaces on cards for everyone — only
  * the management actions are gated.
  */
 export function canManageOperators(profile: Pick<Profile, "role" | "full_name">): boolean {
-  return profile.role === "developer";
+  if (profile.role === "developer") return true;
+  if (profile.role === "owner") return true;
+  if (profile.role === "team_head") return true;
+  if (profile.role === "cutting_operator") return true;
+  return false;
 }

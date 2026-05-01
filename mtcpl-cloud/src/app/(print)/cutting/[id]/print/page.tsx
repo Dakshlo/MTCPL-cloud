@@ -45,7 +45,7 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
   const { data: block, error } = await supabase
     .from("cut_session_blocks")
     .select(
-      "id, status, block_id, largest_remainder, layout, cut_session_id, cut_sessions(id, session_code, kerf_mm, created_at, planned_by), cut_session_slabs(id, slab_requirement_id, is_filler)"
+      "id, status, block_id, largest_remainder, layout, cut_session_id, operator_id, operators(id, name), cut_sessions(id, session_code, kerf_mm, created_at, planned_by), cut_session_slabs(id, slab_requirement_id, is_filler)"
     )
     .eq("id", id)
     .single();
@@ -80,6 +80,12 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
     created_at: string;
     planned_by: string | null;
   } | null;
+  // Cutter operator (if assigned). Surfaces in the header + the
+  // Block Information meta grid so the printed sheet that goes to
+  // the saw shows who owns this cut without anyone needing to
+  // open the app to check.
+  const operator = (block as unknown as { operators?: { id: string; name: string } | null }).operators ?? null;
+  const operatorName = operator?.name ?? null;
 
   const plannerName = session?.planned_by ? (profilesMap[session.planned_by] ?? "Unknown") : null;
   const printDate = new Date().toLocaleDateString("en-IN", {
@@ -535,6 +541,9 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
               {plannerName && (
                 <> &nbsp;·&nbsp; Plan by <strong style={{ color: "#b87333" }}>{plannerName}</strong></>
               )}
+              {operatorName && (
+                <> &nbsp;·&nbsp; 👷 Operator <strong style={{ color: "#15803d" }}>{operatorName}</strong></>
+              )}
             </div>
           </div>
           <div className="doc-date">
@@ -576,6 +585,14 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
             <div className="meta-label">Kerf</div>
             <div className="meta-val">{session?.kerf_mm ?? "—"} mm</div>
           </div>
+          {operatorName && (
+            <div>
+              <div className="meta-label">Cutter Operator</div>
+              <div className="meta-val" style={{ color: "#15803d", fontWeight: 700 }}>
+                👷 {operatorName}
+              </div>
+            </div>
+          )}
           {blk?.quality && (
             <div>
               <div className="meta-label">Quality</div>
@@ -1122,7 +1139,23 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
           <div className="signoff-row">
             <div className="signoff-field">
               <div className="signoff-label">Cutting Operator</div>
-              <div className="signoff-line" />
+              {operatorName ? (
+                <div
+                  className="signoff-line"
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-end",
+                    paddingBottom: 2,
+                    fontWeight: 700,
+                    color: "#15803d",
+                    fontSize: 14,
+                  }}
+                >
+                  {operatorName}
+                </div>
+              ) : (
+                <div className="signoff-line" />
+              )}
             </div>
             <div className="signoff-field">
               <div className="signoff-label">Date Completed</div>
