@@ -29,3 +29,17 @@ export function canTransferPlannedSlabs(profile: Pick<Profile, "role" | "full_na
   // the profile happens to be stored as.
   return TRANSFER_ALLOWED_NAME_SUBSTRINGS.some((sub) => name.includes(sub));
 }
+
+/**
+ * Manage cutter operators — pick from list, add new ones, assign to
+ * blocks. Initial release is intentionally narrow (developer only) so
+ * the team can validate the flow before it goes wider. To open it up
+ * to team_heads later: change `=== "developer"` below to also accept
+ * "team_head", or call canTransferPlannedSlabs(profile).
+ *
+ * The operator NAME, however, surfaces on cards for everyone — only
+ * the management actions are gated.
+ */
+export function canManageOperators(profile: Pick<Profile, "role" | "full_name">): boolean {
+  return profile.role === "developer";
+}

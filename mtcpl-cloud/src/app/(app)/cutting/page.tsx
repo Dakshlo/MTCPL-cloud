@@ -3,6 +3,12 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
 import { approveBlockAction, rejectBlockAction, startCuttingAction, undoApproveAction } from "./actions";
+import {
+  addOperatorAction,
+  approveBlockWithOperatorAction,
+  approveBlockSkipOperatorAction,
+  assignOperatorOnlyAction,
+} from "./operator-actions";
 import { RejectButton } from "./reject-button";
 import { UndoApproveButton } from "./undo-approve-button";
 import { CuttingTimer } from "./cutting-timer";
@@ -12,6 +18,8 @@ import { PrintReportButton } from "./print-report-button";
 import { SelectionProvider } from "./selection-context";
 import { BlockSelector } from "./block-selector";
 import { CuttingHistorySearchBar, type HistoryRow } from "./cutting-history-search-bar";
+import { PendingApprovalActions } from "./pending-approval-actions";
+import { canManageOperators } from "@/lib/cutting-permissions";
 
 type Tab = "pending" | "waiting" | "in_progress" | "done";
 type SearchParams = Promise<{ tab?: string }>;
@@ -36,6 +44,12 @@ type BlockRow = {
   /** Donor block needs reprint after a slab was claimed away. */
   needs_reprint?: boolean | null;
   reprint_reason?: string | null;
+  /** Cutter operator assignment — added by team_head when sending the
+   *  block to Waiting to Cut (or pre-tagged from Pending Approval).
+   *  Joined operators row for display. Both nullable: a block may
+   *  have been approved before the operator workflow existed. */
+  operator_id?: string | null;
+  operators?: { id: string; name: string } | null;
 };
 
 function defaultTab(role: string): Tab {
@@ -100,11 +114,23 @@ function istTodayBounds() {
 }
 
 export default async function CuttingPage({ searchParams }: { searchParams: SearchParams }) {
-  const { profile } = await requireAuth(["owner", "team_head", "cutting_operator"]);
+  const { profile } = await requireAuth(["owner", "team_head", "cutting_operator", "developer"]);
   const params = await searchParams;
   const activeTab: Tab = (params.tab as Tab) || defaultTab(profile.role);
   const supabase = createAdminSupabaseClient();
   const profilesMap = await getProfilesMap();
+  const showOperatorPicker = canManageOperators(profile);
+
+  // Active operator picklist for the modal. Loaded once per page
+  // render, cheap join: small lookup table, indexed on is_active.
+  const { data: operatorRows } = showOperatorPicker
+    ? await supabase
+        .from("operators")
+        .select("id, name")
+        .eq("is_active", true)
+        .order("name")
+    : { data: [] };
+  const operatorOptions = (operatorRows ?? []) as Array<{ id: string; name: string }>;
 
   const { todayStartIso, tomorrowStartIso } = istTodayBounds();
 
@@ -170,7 +196,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
       const { data, error } = await supabase
         .from("cut_session_blocks")
         .select(
-          "id, status, block_id, restocked_block_id, layout, updated_at, cut_session_id, cutting_seq, needs_reprint, reprint_reason, cut_sessions(session_code, kerf_mm, planned_by), cut_session_slabs(slab_requirement_id)"
+          "id, status, block_id, restocked_block_id, layout, updated_at, cut_session_id, cutting_seq, needs_reprint, reprint_reason, operator_id, operators(id, name), cut_sessions(session_code, kerf_mm, planned_by), cut_session_slabs(slab_requirement_id)"
         )
         .in("status", statusFilter)
         .order("updated_at", { ascending })
@@ -560,6 +586,24 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                           </span>
                         </p>
                       )}
+                      {/* Operator pill — visible to everyone once
+                          assigned. Tag stays through Waiting / In
+                          Progress / Done so the team always knows
+                          who handled this block. */}
+                      {block.operators?.name && (
+                        <p style={{ margin: "3px 0 0", fontSize: 11, color: "var(--muted)" }}>
+                          👷 Operator{" "}
+                          <span style={{
+                            color: "#15803d",
+                            fontWeight: 700,
+                            background: "rgba(22,101,52,0.10)",
+                            padding: "1px 7px",
+                            borderRadius: 4,
+                          }}>
+                            {block.operators.name}
+                          </span>
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -800,21 +844,36 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                 <div className="record-actions" style={{ marginTop: 12, gap: 8 }}>
                   {block.status === "pending_worker" && (
                     <>
-                      <form action={approveBlockAction}>
-                        <input
-                          type="hidden"
-                          name="session_block_id"
-                          value={block.id}
+                      {showOperatorPicker ? (
+                        <PendingApprovalActions
+                          sessionBlockId={block.id}
+                          sessionId={block.cut_session_id}
+                          blockCode={block.block_id}
+                          initialOperatorId={block.operator_id ?? null}
+                          initialOperatorName={block.operators?.name ?? null}
+                          operators={operatorOptions}
+                          approveAction={approveBlockWithOperatorAction}
+                          approveSkipAction={approveBlockSkipOperatorAction}
+                          assignAction={assignOperatorOnlyAction}
+                          addOperatorAction={addOperatorAction}
                         />
-                        <input
-                          type="hidden"
-                          name="session_id"
-                          value={block.cut_session_id}
-                        />
-                        <button className="primary-button" type="submit">
-                          Send to Cutting List →
-                        </button>
-                      </form>
+                      ) : (
+                        <form action={approveBlockAction}>
+                          <input
+                            type="hidden"
+                            name="session_block_id"
+                            value={block.id}
+                          />
+                          <input
+                            type="hidden"
+                            name="session_id"
+                            value={block.cut_session_id}
+                          />
+                          <button className="primary-button" type="submit">
+                            Send to Cutting List →
+                          </button>
+                        </form>
+                      )}
                       <form action={rejectBlockAction}>
                         <input
                           type="hidden"
@@ -1070,6 +1129,20 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                                   <p style={{ margin: "3px 0 0", fontSize: 11, color: "var(--muted)" }}>
                                     Plan by <span style={{ color: "var(--gold-dark)", fontWeight: 600 }}>
                                       {profilesMap[block.cut_sessions.planned_by]}
+                                    </span>
+                                  </p>
+                                )}
+                                {block.operators?.name && (
+                                  <p style={{ margin: "3px 0 0", fontSize: 11, color: "var(--muted)" }}>
+                                    👷 Operator{" "}
+                                    <span style={{
+                                      color: "#15803d",
+                                      fontWeight: 700,
+                                      background: "rgba(22,101,52,0.10)",
+                                      padding: "1px 7px",
+                                      borderRadius: 4,
+                                    }}>
+                                      {block.operators.name}
                                     </span>
                                   </p>
                                 )}
