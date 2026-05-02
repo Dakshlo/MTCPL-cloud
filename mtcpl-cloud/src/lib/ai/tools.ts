@@ -42,6 +42,21 @@ function istRange(key: "today" | "yesterday" | "this_week" | "this_month") {
   return { from: new Date(monthStartMs).toISOString(), to: new Date(todayMidnight + DAY).toISOString() };
 }
 
+/** Build a time window from "N hours ago up to now". Used by
+ *  get_user_activity / get_audit_trail when the model passes
+ *  hours_ago instead of a day-level range. Clamped to [0.1, 168]
+ *  hours so a runaway value can't pull half a year of audit logs. */
+function istHoursWindow(hoursAgo: number) {
+  const HOUR = 60 * 60 * 1000;
+  const clamped = Math.max(0.1, Math.min(168, hoursAgo));
+  const now = Date.now();
+  return {
+    from: new Date(now - clamped * HOUR).toISOString(),
+    to: new Date(now).toISOString(),
+    hours: clamped,
+  };
+}
+
 // ─── Tool schemas (what Claude sees) ─────────────────────────────────────────
 
 export const AI_TOOLS = [
@@ -180,7 +195,7 @@ export const AI_TOOLS = [
   {
     name: "get_user_activity",
     description:
-      "Count and summarise what each user has done (added / updated / deleted / cut / approved etc.) in a time range. Use for questions like 'how many blocks did Rajesh add today?', 'who added the most slabs this week?', 'what did the team do today?'. Reads from the audit_logs table + resolves user IDs to names.",
+      "Count and summarise what each user has done (added / updated / deleted / cut / approved etc.) in a time range. Use for questions like 'how many blocks did Rajesh add today?', 'who added the most slabs this week?', 'what did the team do today?', 'what happened in the last 2 hours?'. Reads from the audit_logs table + resolves user IDs to names.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -194,7 +209,11 @@ export const AI_TOOLS = [
         range: {
           type: "string",
           enum: ["today", "yesterday", "this_week", "this_month"],
-          description: "Time window in IST. Default: today.",
+          description: "Day-level time window in IST. Default: today. Ignored when hours_ago is set.",
+        },
+        hours_ago: {
+          type: "number",
+          description: "OPTIONAL sub-day window — events from the last N hours up to NOW. Use this for 'last 2 hours', 'last 30 minutes' (pass 0.5), 'last 6 hours' etc. Overrides `range` when both are set. Range: 0.1 to 168 (one week).",
         },
         limit: { type: "number", description: "Max sample events to return alongside the count summary. Default 20, max 50." },
       },
@@ -218,11 +237,15 @@ export const AI_TOOLS = [
   {
     name: "get_audit_trail",
     description:
-      "Chronological activity log — every create / update / delete / cutting action across the system in a time window, with user names resolved. Use for 'what happened today?', 'recent activity', 'activity log'. For user-specific counts use get_user_activity instead.",
+      "Chronological activity log — every create / update / delete / cutting action across the system in a time window, with user names resolved. Use for 'what happened today?', 'recent activity', 'activity log', 'what happened in the last N hours'. For user-specific counts use get_user_activity instead.",
     input_schema: {
       type: "object" as const,
       properties: {
-        range: { type: "string", enum: ["today", "yesterday", "this_week", "this_month"], description: "Time window in IST. Default: today." },
+        range: { type: "string", enum: ["today", "yesterday", "this_week", "this_month"], description: "Day-level window in IST. Default: today. Ignored when hours_ago is set." },
+        hours_ago: {
+          type: "number",
+          description: "OPTIONAL sub-day window — events from the last N hours up to NOW. Use for 'last 2 hours', 'last 30 minutes' (pass 0.5), 'last 6 hours'. Overrides `range` when both are set. Range: 0.1 to 168.",
+        },
         limit: { type: "number", description: "Max events to return, newest first. Default 30, max 100." },
         entity_type: {
           type: "string",
@@ -1462,10 +1485,20 @@ async function getWatchdogAlerts() {
 
 async function getUserActivity(input: Record<string, unknown>) {
   const admin = createAdminSupabaseClient();
+  // Sub-day window takes precedence over the day-level range so the
+  // model can ask "last 2 hours" cleanly. Day-level range stays as
+  // the fallback for "today" / "this_week" etc.
+  const hoursAgoRaw = typeof input.hours_ago === "number" ? input.hours_ago : null;
   const range = input.range === "today" || input.range === "yesterday" || input.range === "this_week" || input.range === "this_month"
     ? input.range
     : "today";
-  const { from, to } = istRange(range);
+  const hoursWindow = hoursAgoRaw != null ? istHoursWindow(hoursAgoRaw) : null;
+  const window = hoursWindow ?? istRange(range);
+  const from = window.from;
+  const to = window.to;
+  const windowLabel = hoursWindow
+    ? `last ${hoursWindow.hours} hour(s)`
+    : range;
   const userNameFilter = typeof input.user_name === "string" ? input.user_name.trim().toLowerCase() : null;
   const actionFilter = typeof input.action === "string" ? input.action : null;
   const entityFilter = typeof input.entity_type === "string" ? input.entity_type : null;
@@ -1540,7 +1573,9 @@ async function getUserActivity(input: Record<string, unknown>) {
   }));
 
   return {
-    range,
+    range: windowLabel,
+    windowFromIso: from,
+    windowToIso: to,
     totalEvents: filtered.length,
     filters: {
       userNameFilter: userNameFilter ?? "any",
@@ -1617,12 +1652,21 @@ async function listUsers(input: Record<string, unknown>) {
 
 async function getAuditTrail(input: Record<string, unknown>) {
   const admin = createAdminSupabaseClient();
+  // Sub-day window takes precedence — "last 2 hours" must not get
+  // silently widened to "today".
+  const hoursAgoRaw = typeof input.hours_ago === "number" ? input.hours_ago : null;
   const range = input.range === "today" || input.range === "yesterday" || input.range === "this_week" || input.range === "this_month"
     ? input.range
     : "today";
+  const hoursWindow = hoursAgoRaw != null ? istHoursWindow(hoursAgoRaw) : null;
+  const window = hoursWindow ?? istRange(range);
+  const from = window.from;
+  const to = window.to;
+  const windowLabel = hoursWindow
+    ? `last ${hoursWindow.hours} hour(s)`
+    : range;
   const limit = Math.max(1, Math.min(100, typeof input.limit === "number" ? input.limit : 30));
   const entityFilter = typeof input.entity_type === "string" ? input.entity_type : null;
-  const { from, to } = istRange(range);
 
   let q = admin
     .from("audit_logs")
@@ -1655,7 +1699,9 @@ async function getAuditTrail(input: Record<string, unknown>) {
   }));
 
   return {
-    range,
+    range: windowLabel,
+    windowFromIso: from,
+    windowToIso: to,
     totalEvents: events.length,
     filters: { entityType: entityFilter ?? "any" },
     events,
