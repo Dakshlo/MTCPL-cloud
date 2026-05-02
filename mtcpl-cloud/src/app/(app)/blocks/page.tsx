@@ -5,9 +5,9 @@ import { AddBlockForm } from "./add-block-form";
 import { MarbleTruckForm } from "./marble-truck-form";
 import { BlockGrid } from "./block-grid";
 import { BlockSearchBar } from "./block-search-bar";
-import { BlockExport } from "./block-export";
 import { MarbleCutLog } from "./marble-cut-log";
 import { undoMarbleCutAction } from "./actions";
+import { PeekIframe } from "@/components/peek-iframe";
 import { generateNextCode } from "./utils";
 import { yardLabel } from "@/lib/yards";
 import type { StoneCategory } from "@/lib/stone-categories";
@@ -444,26 +444,19 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
             alignItems: "stretch",
           }}
         >
-          <div
-            style={{
-              flex: "1 1 320px",
-              padding: "14px 18px",
-              background: "var(--surface)",
-              border: "2px dashed var(--border)",
-              borderRadius: 10,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 16,
-            }}
-          >
-            <div>
-              <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: "var(--text)" }}>Block Report</p>
-              <p className="muted" style={{ margin: "3px 0 0", fontSize: 12 }}>
-                View, filter and sort all block records — including consumed, discarded, and active · Export to Excel
-              </p>
-            </div>
-            <BlockExport />
+          {/* Block Report — opens in a center-peek iframe over /embed/blocks/report
+              so the team doesn't lose their place on /blocks. The
+              standalone /blocks/report route still works (sidebar +
+              back button) for direct nav. */}
+          <div style={{ flex: "1 1 320px", display: "flex" }}>
+            <PeekIframe
+              url="/embed/blocks/report"
+              triggerIcon="📊"
+              triggerLabel="Block Report"
+              triggerSubtitle="View, filter and sort all block records — including consumed, discarded, and active · Export to Excel"
+              modalTitle="Block Report"
+              triggerStyle={{ flex: 1 }}
+            />
           </div>
           {/* Marble Cutting Log only relevant on the Marble or All tabs —
               hide it on Sandstone so the Block Report stretches full-width. */}
