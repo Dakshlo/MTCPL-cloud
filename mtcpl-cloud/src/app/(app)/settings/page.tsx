@@ -4,6 +4,7 @@ import { addTempleAction, updateTempleAction, deleteTempleAction, updateUserActi
 import { stoneDisplayName } from "@/lib/stone-utils";
 import type { AppRole } from "@/lib/types";
 import { AutoBackup } from "@/components/auto-backup";
+import { PeekSection } from "./peek-section";
 
 // All assignable roles — only shown to developer
 const UI_ROLES_ALL = [
@@ -652,50 +653,21 @@ export default async function SettingsPage() {
         )}
       </details>
 
-      {/* Full System Backup — developer only */}
-      {currentUser.role === "developer" && (
-        <div className="settings-section">
-          <div className="settings-section-header">
-            <h2>Full System Backup</h2>
-            <p>Download all live data as an Excel file. Each table is a separate sheet with raw column names — ready to insert directly into Supabase.</p>
-          </div>
-          <div className="settings-card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
-            <div>
-              <p style={{ margin: 0, fontWeight: 600, fontSize: 14 }}>Export: blocks · slab_requirements · cut_sessions · temples · vendors · profiles</p>
-              <p className="muted" style={{ margin: "4px 0 0", fontSize: 12 }}>Snapshot of current live data at time of download. JSONB columns are stringified.</p>
-            </div>
-            <a
-              href="/api/export/full-backup"
-              className="primary-button"
-              style={{ textDecoration: "none", whiteSpace: "nowrap" }}
-            >
-              ↓ Download Backup
-            </a>
-          </div>
+      {/* Three operator/admin surfaces — all rendered as collapsed
+          cards that open in a Notion-style center-peek modal so the
+          settings page stays scannable. Order: Screen Time first
+          (most-glanced metric), then the Audit Log, then the Full
+          System Backup as the bottom power-user tool. */}
 
-          {/* Browser-side auto-backup. Saves Excel to Downloads folder
-              every N hours while this tab is open. Belt-and-braces with
-              Supabase Pro snapshot backups. */}
-          <AutoBackup />
-        </div>
-      )}
-
-      {/* Screen Time Today — developer + owner */}
+      {/* 1. Screen Time Today — developer + owner */}
       {(currentUser.role === "developer" || currentUser.role === "owner") && (
-        <details className="settings-section">
-          <summary style={{ cursor: "pointer", listStyle: "none", userSelect: "none", padding: "16px 0" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <span style={{ fontWeight: 700, fontSize: 15, color: "var(--text)" }}>Screen Time Today</span>
-                <span style={{ fontSize: 12, color: "var(--muted)", background: "var(--surface-alt)", padding: "2px 8px", borderRadius: 10, fontWeight: 600 }}>{screenTimeData.length}</span>
-              </div>
-              <span style={{ fontSize: 11, color: "var(--muted)", transition: "transform 0.2s" }}>▼</span>
-            </div>
-            <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>
-              How long each user has been active today ({todayIST}). Heartbeat pings every 2 minutes.
-            </p>
-          </summary>
-          <div className="settings-card" style={{ padding: 0, overflow: "hidden", marginTop: 10 }}>
+        <PeekSection
+          icon="🕐"
+          title="Screen Time Today"
+          count={screenTimeData.length}
+          subtitle={`How long each user has been active today (${todayIST}). Heartbeat pings every 2 minutes.`}
+        >
+          <div className="settings-card" style={{ padding: 0, overflow: "hidden" }}>
             {screenTimeData.length === 0 ? (
               <p className="muted" style={{ padding: 16 }}>No activity recorded today yet.</p>
             ) : (
@@ -755,27 +727,18 @@ export default async function SettingsPage() {
               </table>
             )}
           </div>
-        </details>
+        </PeekSection>
       )}
 
-      {/* Audit Log — collapsible dropdown, closed by default. The audit
-          list can get long; hiding it keeps the settings page scannable
-          but it's one click away when the owner needs to review actions. */}
+      {/* 2. Audit Log — developer + owner */}
       {(currentUser.role === "owner" || currentUser.role === "developer") && (
-        <details className="settings-section">
-          <summary style={{ cursor: "pointer", listStyle: "none", userSelect: "none", padding: "16px 0" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <span style={{ fontWeight: 700, fontSize: 15, color: "var(--text)" }}>Audit Log</span>
-                <span style={{ fontSize: 12, color: "var(--muted)", background: "var(--surface-alt)", padding: "2px 8px", borderRadius: 10, fontWeight: 600 }}>{(recentAudit ?? []).length}</span>
-              </div>
-              <span style={{ fontSize: 11, color: "var(--muted)", transition: "transform 0.2s" }}>▼</span>
-            </div>
-            <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>
-              Last 50 actions by your team — who did what when.
-            </p>
-          </summary>
-          <div className="settings-card" style={{ padding: 0, overflow: "hidden", marginTop: 10 }}>
+        <PeekSection
+          icon="📋"
+          title="Audit Log"
+          count={(recentAudit ?? []).length}
+          subtitle="Last 50 actions by your team — who did what when."
+        >
+          <div className="settings-card" style={{ padding: 0, overflow: "hidden" }}>
             {(recentAudit ?? []).length === 0 ? (
               <p className="muted" style={{ padding: 16 }}>No actions recorded yet.</p>
             ) : (
@@ -795,7 +758,35 @@ export default async function SettingsPage() {
               </table>
             )}
           </div>
-        </details>
+        </PeekSection>
+      )}
+
+      {/* 3. Full System Backup — developer only */}
+      {currentUser.role === "developer" && (
+        <PeekSection
+          icon="💾"
+          title="Full System Backup"
+          subtitle="Download all live data as an Excel file. Each table is a separate sheet with raw column names — ready to insert directly into Supabase."
+        >
+          <div className="settings-card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+            <div>
+              <p style={{ margin: 0, fontWeight: 600, fontSize: 14 }}>Export: blocks · slab_requirements · cut_sessions · temples · vendors · profiles</p>
+              <p className="muted" style={{ margin: "4px 0 0", fontSize: 12 }}>Snapshot of current live data at time of download. JSONB columns are stringified.</p>
+            </div>
+            <a
+              href="/api/export/full-backup"
+              className="primary-button"
+              style={{ textDecoration: "none", whiteSpace: "nowrap" }}
+            >
+              ↓ Download Backup
+            </a>
+          </div>
+
+          {/* Browser-side auto-backup. Saves Excel to Downloads folder
+              every N hours while this tab is open. Belt-and-braces with
+              Supabase Pro snapshot backups. */}
+          <AutoBackup />
+        </PeekSection>
       )}
     </>
   );
