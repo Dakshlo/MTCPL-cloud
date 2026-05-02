@@ -665,7 +665,13 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                         <span style={{ color: "#15803d", fontWeight: 700 }}>{eff.slabPct}%</span>
                       </span>
                     )}
-                    {(block.status === "pending_worker" || isLive || block.status === "done_prompt" || block.status === "done") && (
+                    {(
+                      block.status === "pending_worker" ||
+                      block.status === "pending_cut" ||
+                      isLive ||
+                      block.status === "done_prompt" ||
+                      block.status === "done"
+                    ) && (
                       <Link
                         href={`/cutting/${block.id}/print`}
                         target="_blank"
