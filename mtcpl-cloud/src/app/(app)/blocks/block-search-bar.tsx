@@ -152,7 +152,7 @@ export function BlockSearchBar({ blocks }: { blocks: Block[] }) {
           style={{
             position: "fixed",
             top: 0,
-            left: 0,
+            left: "var(--content-left)",
             right: 0,
             bottom: 0,
             background: "rgba(15, 12, 6, 0.55)",

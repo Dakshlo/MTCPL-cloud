@@ -155,17 +155,13 @@ export default async function SettingsPage() {
 
       {/* User Management — owner, team_head, developer */}
       {(currentUser.role === "owner" || currentUser.role === "developer" || currentUser.role === "team_head") && (
-        <details className="settings-section">
-          <summary style={{ cursor: "pointer", listStyle: "none", userSelect: "none", padding: "16px 0" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <span style={{ fontWeight: 700, fontSize: 15, color: "var(--text)" }}>Users</span>
-                <span style={{ fontSize: 12, color: "var(--muted)", background: "var(--surface-alt)", padding: "2px 8px", borderRadius: 10, fontWeight: 600 }}>{userList.length}</span>
-              </div>
-              <span style={{ fontSize: 11, color: "var(--muted)", transition: "transform 0.2s" }}>▼</span>
-            </div>
-          </summary>
-
+        <PeekSection
+          icon="👥"
+          title="Users"
+          count={userList.length}
+          subtitle="Manage roles, status, and access for everyone on your team."
+          modalMaxWidth={1100}
+        >
           {userList.length === 0 ? (
             <div className="banner">No users found.</div>
           ) : (
@@ -341,21 +337,17 @@ export default async function SettingsPage() {
               })}
             </div>
           )}
-        </details>
+        </PeekSection>
       )}
 
       {/* Stone Type Configuration — developer, owner, team_head */}
-      <details className="settings-section">
-        <summary style={{ cursor: "pointer", listStyle: "none", userSelect: "none", padding: "16px 0" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ fontWeight: 700, fontSize: 15, color: "var(--text)" }}>Stone Types</span>
-              <span style={{ fontSize: 12, color: "var(--muted)", background: "var(--surface-alt)", padding: "2px 8px", borderRadius: 10, fontWeight: 600 }}>{stoneList.length}</span>
-            </div>
-            <span style={{ fontSize: 11, color: "var(--muted)", transition: "transform 0.2s" }}>▼</span>
-          </div>
-        </summary>
-
+      <PeekSection
+        icon="🪨"
+        title="Stone Types"
+        count={stoneList.length}
+        subtitle="Add, recategorise, or remove stone types. Sandstone uses CFT; Marble uses tonnes."
+        modalMaxWidth={1100}
+      >
         <div className="settings-card">
           <h3 className="settings-card-title">Add Stone Type</h3>
           <form action={addStoneTypeAction} className="settings-form-row">
@@ -516,7 +508,7 @@ export default async function SettingsPage() {
             <div className="banner">No stone types found. Run the database setup SQL first.</div>
           )}
         </div>
-      </details>
+      </PeekSection>
 
       {/* Temple Code Configuration */}
       <details className="settings-section">

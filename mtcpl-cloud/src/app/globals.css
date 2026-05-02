@@ -21,6 +21,13 @@
   --sidebar-hover:  rgba(255,255,255,0.07);
   --sidebar-active: rgba(201,151,58,0.18);
 
+  /* Working content-area left offset. Equals --sidebar-width on
+   * desktop (so fixed-position overlays can start AFTER the
+   * sidebar) and 0 on mobile (where the sidebar collapses). Used
+   * by center-peek modals (PeekSection, etc.) so they centre over
+   * the working area, not the full viewport. */
+  --content-left: var(--sidebar-width);
+
   /* Gold accent — from logo mandala */
   --gold:           #C9973A;
   --gold-dark:      #A67B28;
@@ -1541,6 +1548,11 @@ details.block-card[open] {
 /* ── Responsive ─────────────────────────────────────────────── */
 
 @media (max-width: 900px) {
+  /* Mobile: sidebar collapses to a bottom nav, so center-peek
+   * modals should span the full viewport again. */
+  :root {
+    --content-left: 0px;
+  }
   .app-shell {
     grid-template-columns: 1fr;
   }

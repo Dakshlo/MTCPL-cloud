@@ -149,7 +149,10 @@ export function PeekSection({
           style={{
             position: "fixed",
             top: 0,
-            left: 0,
+            // Skip the sidebar so the modal centres over the working
+            // content area, not the whole viewport. --content-left
+            // resolves to --sidebar-width on desktop and 0 on mobile.
+            left: "var(--content-left)",
             right: 0,
             bottom: 0,
             background: "rgba(15, 12, 6, 0.55)",
