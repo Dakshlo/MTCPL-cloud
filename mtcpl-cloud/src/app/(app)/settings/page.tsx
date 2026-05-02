@@ -4,7 +4,7 @@ import { addTempleAction, updateTempleAction, deleteTempleAction, updateUserActi
 import { stoneDisplayName } from "@/lib/stone-utils";
 import type { AppRole } from "@/lib/types";
 import { AutoBackup } from "@/components/auto-backup";
-import { PeekSection } from "./peek-section";
+import { PeekSection } from "@/components/peek-section";
 
 // All assignable roles — only shown to developer
 const UI_ROLES_ALL = [

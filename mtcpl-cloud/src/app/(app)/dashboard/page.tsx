@@ -6,6 +6,7 @@ import { canTransferPlannedSlabs } from "@/lib/cutting-permissions";
 import { PushPanel } from "./push-panel";
 import { AskAiEntryCard } from "@/components/ask-ai-entry-card";
 import { BlockJourneyEntryCard } from "@/components/block-journey-entry-card";
+import { PeekSection } from "@/components/peek-section";
 
 type SearchParams = Promise<{ pushed?: string }>;
 
@@ -318,9 +319,22 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
         </Link>
       </div>
 
-      {/* ── PUSH ALERT PANEL ── */}
+      {/* ── PUSH ALERT PANEL ──
+          Wrapped in PeekSection so the dashboard isn't dominated by
+          the full-table view. Click the card → centred modal opens
+          with the same panel + search + Push controls inside. The
+          "id=push" anchor stays on the wrapper so any deep link
+          (?#push) still scrolls to the right spot. */}
       <div id="push">
-        <PushPanel slabs={pushList} pushed={pushed} todayLabel={today.label} />
+        <PeekSection
+          icon="🔔"
+          title="Push Urgent Alert to Workers"
+          count={pushList.length}
+          subtitle="Mark a slab as urgent — workers see a red highlight on their pages."
+          modalMaxWidth={1100}
+        >
+          <PushPanel slabs={pushList} pushed={pushed} todayLabel={today.label} />
+        </PeekSection>
       </div>
 
       {/* ── SCREEN TIME TODAY ── */}
