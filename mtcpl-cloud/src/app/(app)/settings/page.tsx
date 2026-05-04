@@ -142,6 +142,64 @@ export default async function SettingsPage() {
     .order("created_at", { ascending: false })
     .limit(50);
 
+  // Live Users (developer only) — who is on which page right now.
+  // Pulls last_seen_at + last_path from profiles. last_path is set
+  // by the heartbeat ping every 2 min (or on tab focus / soft nav)
+  // — see /api/heartbeat. Anyone seen within 5 min is treated as
+  // "online now".
+  type LiveUserRow = {
+    id: string;
+    full_name: string | null;
+    role: string;
+    last_seen_at: string | null;
+    last_path: string | null;
+  };
+  let liveUsers: LiveUserRow[] = [];
+  if (currentUser.role === "developer") {
+    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const { data } = await admin
+      .from("profiles")
+      .select("id, full_name, role, last_seen_at, last_path")
+      .gte("last_seen_at", fiveMinAgo)
+      .order("last_seen_at", { ascending: false })
+      .limit(50);
+    liveUsers = (data ?? []) as LiveUserRow[];
+  }
+
+  // Friendly label for the most common pathnames so the table
+  // reads as "Cutting" instead of "/cutting". Falls back to the
+  // raw path for routes not in the map.
+  function pathLabel(path: string | null): string {
+    if (!path) return "—";
+    const map: Record<string, string> = {
+      "/dashboard": "Dashboard",
+      "/blocks": "Blocks Inventory",
+      "/blocks/report": "Block Report",
+      "/slabs": "Required Sizes",
+      "/slabs/view": "Slab View",
+      "/slabs/ready": "Ready Sizes",
+      "/planning": "Plan Generator",
+      "/planning/weekly": "Weekly Plan",
+      "/cutting": "Cutting",
+      "/dispatch": "Dispatch",
+      "/carving": "Carving",
+      "/carving-assign": "Carving Assign",
+      "/block-journey": "Block Journey",
+      "/settings": "Settings",
+      "/users": "Users",
+      "/vendors": "Vendors",
+      "/audit": "Audit Log",
+      "/my-jobs": "My Jobs",
+      "/approval": "Approval Queue",
+    };
+    if (map[path]) return map[path];
+    // /cutting/<id> → "Cutting › <id>"
+    if (path.startsWith("/cutting/")) return `Cutting › ${path.slice("/cutting/".length, "/cutting/".length + 24)}`;
+    if (path.startsWith("/blocks/")) return `Blocks › ${path.slice("/blocks/".length, "/blocks/".length + 24)}`;
+    if (path.startsWith("/slabs/")) return `Slabs › ${path.slice("/slabs/".length, "/slabs/".length + 24)}`;
+    return path;
+  }
+
   const templeList = temples ?? [];
 
   return (
@@ -511,17 +569,13 @@ export default async function SettingsPage() {
       </PeekSection>
 
       {/* Temple Code Configuration */}
-      <details className="settings-section">
-        <summary style={{ cursor: "pointer", listStyle: "none", userSelect: "none", padding: "16px 0" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ fontWeight: 700, fontSize: 15, color: "var(--text)" }}>Temple Codes</span>
-              <span style={{ fontSize: 12, color: "var(--muted)", background: "var(--surface-alt)", padding: "2px 8px", borderRadius: 10, fontWeight: 600 }}>{templeList.length}</span>
-            </div>
-            <span style={{ fontSize: 11, color: "var(--muted)", transition: "transform 0.2s" }}>▼</span>
-          </div>
-        </summary>
-
+      <PeekSection
+        icon="🛕"
+        title="Temple Codes"
+        count={templeList.length}
+        subtitle="Add or edit temple names + their slab-id prefixes."
+        modalMaxWidth={1100}
+      >
         <div className="settings-card">
           <h3 className="settings-card-title">Add Temple</h3>
           <form action={addTempleAction} className="settings-form-row">
@@ -643,13 +697,93 @@ export default async function SettingsPage() {
             ))}
           </div>
         )}
-      </details>
+      </PeekSection>
 
-      {/* Three operator/admin surfaces — all rendered as collapsed
-          cards that open in a Notion-style center-peek modal so the
-          settings page stays scannable. Order: Screen Time first
-          (most-glanced metric), then the Audit Log, then the Full
-          System Backup as the bottom power-user tool. */}
+      {/* Operator/admin surfaces — all rendered as collapsed cards
+          that open in a Notion-style center-peek modal. Order:
+          Live Users (developer only — most actionable signal when
+          someone needs help), Screen Time, Audit Log, Backup. */}
+
+      {/* 0. Live Users — developer only */}
+      {currentUser.role === "developer" && (
+        <PeekSection
+          icon="🛰"
+          title="Live Users"
+          count={liveUsers.length}
+          subtitle={
+            liveUsers.length === 0
+              ? "Nobody seen in the last 5 minutes — everyone is offline."
+              : `Who's online RIGHT NOW (last 5 min) and which page they're on. Updates each time someone navigates or every 2 minutes.`
+          }
+          modalMaxWidth={900}
+        >
+          <div className="settings-card" style={{ padding: 0, overflow: "hidden" }}>
+            {liveUsers.length === 0 ? (
+              <p className="muted" style={{ padding: 16 }}>
+                Nobody is online right now. Heartbeat detects activity within the last 5 minutes.
+              </p>
+            ) : (
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: "var(--surface-alt)" }}>
+                    <th style={{ padding: "10px 16px", textAlign: "left", fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>User</th>
+                    <th style={{ padding: "10px 16px", textAlign: "left", fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Role</th>
+                    <th style={{ padding: "10px 16px", textAlign: "left", fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>On Page</th>
+                    <th style={{ padding: "10px 16px", textAlign: "left", fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Last Seen</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {liveUsers.map((u) => {
+                    const lastSeenMs = u.last_seen_at ? new Date(u.last_seen_at).getTime() : 0;
+                    const elapsedSec = lastSeenMs ? Math.max(0, Math.round((Date.now() - lastSeenMs) / 1000)) : null;
+                    const lastSeenLabel =
+                      elapsedSec == null
+                        ? "—"
+                        : elapsedSec < 60
+                          ? `${elapsedSec}s ago`
+                          : elapsedSec < 300
+                            ? `${Math.floor(elapsedSec / 60)}m ago`
+                            : new Date(u.last_seen_at!).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" });
+                    return (
+                      <tr key={u.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                        <td style={{ padding: "10px 16px", fontWeight: 600 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#22c55e", flexShrink: 0, boxShadow: "0 0 0 2px rgba(34,197,94,0.25)" }} />
+                            {u.full_name || "—"}
+                          </div>
+                        </td>
+                        <td style={{ padding: "10px 16px" }}>
+                          <span className="role-pill" style={{ fontSize: 11 }}>{roleLabel(u.role as AppRole)}</span>
+                        </td>
+                        <td style={{ padding: "10px 16px", fontSize: 12 }}>
+                          {u.last_path ? (
+                            <span style={{ color: "var(--gold-dark)", fontWeight: 600 }}>
+                              {pathLabel(u.last_path)}
+                            </span>
+                          ) : (
+                            <span className="muted">unknown</span>
+                          )}
+                          {u.last_path && (
+                            <span className="muted" style={{ fontSize: 11, marginLeft: 6, fontFamily: "ui-monospace, monospace" }}>
+                              {u.last_path}
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ padding: "10px 16px", color: "#22c55e", fontWeight: 600, fontSize: 12 }}>
+                          {lastSeenLabel}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+            <p className="muted" style={{ fontSize: 11, padding: "10px 16px", borderTop: "1px solid var(--border)", margin: 0 }}>
+              Path is captured on every soft nav + every 2-minute heartbeat. May lag by up to 2 min on rapid navigation.
+            </p>
+          </div>
+        </PeekSection>
+      )}
 
       {/* 1. Screen Time Today — developer + owner */}
       {(currentUser.role === "developer" || currentUser.role === "owner") && (
