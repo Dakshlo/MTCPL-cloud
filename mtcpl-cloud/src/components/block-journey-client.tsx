@@ -20,7 +20,7 @@ import {
 } from "@/app/(app)/block-journey/build-lineages";
 
 type Resolution = "all" | "resolved" | "in_progress";
-type SortKey = "eff_desc" | "eff_asc" | "cft_desc" | "cft_asc" | "newest" | "oldest";
+type SortKey = "eff_desc" | "eff_asc" | "cft_desc" | "cft_asc" | "newest" | "oldest" | "cut_desc" | "cut_asc";
 type SizeBucket = "all" | "small" | "medium" | "large";
 type CategoryFilter = "all" | "sandstone" | "marble";
 
@@ -67,7 +67,11 @@ export function BlockJourneyClient({
   const [resolution, setResolution] = useState<Resolution>("all");
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
-  const [sortKey, setSortKey] = useState<SortKey>("eff_desc");
+  // Default: "Recently cut first" — operators want most recent
+  // activity on top so they can scan today's / yesterday's cuts at
+  // a glance. Was eff_desc, but the team rarely sorts by efficiency
+  // when reviewing the page.
+  const [sortKey, setSortKey] = useState<SortKey>("cut_desc");
 
   // ── Apply filters ──────────────────────────────────────────────────────
   const filtered = useMemo(() => {
@@ -101,6 +105,12 @@ export function BlockJourneyClient({
 
   const sorted = useMemo(() => {
     const copy = [...filtered];
+    // Cut date lives on tree.cutAt (the root block's most-recent
+    // done timestamp, with a fallback to block.updated_at when
+    // status='consumed' for manual marble cuts). Null = never cut;
+    // those rows sink to the bottom of either cut sort so the
+    // "most recently cut" ordering puts actual cuts on top.
+    const cutAtOf = (l: typeof copy[number]) => l.tree.cutAt ?? "";
     copy.sort((a, b) => {
       switch (sortKey) {
         case "eff_desc":
@@ -115,6 +125,25 @@ export function BlockJourneyClient({
           return (b.rootCreatedAt ?? "").localeCompare(a.rootCreatedAt ?? "");
         case "oldest":
           return (a.rootCreatedAt ?? "").localeCompare(b.rootCreatedAt ?? "");
+        case "cut_desc": {
+          const av = cutAtOf(a);
+          const bv = cutAtOf(b);
+          // Push uncut rows (empty string) to the bottom regardless
+          // of direction so "most recent cut" doesn't list them
+          // first as a side-effect of empty-string sorting low.
+          if (!av && !bv) return 0;
+          if (!av) return 1;
+          if (!bv) return -1;
+          return bv.localeCompare(av);
+        }
+        case "cut_asc": {
+          const av = cutAtOf(a);
+          const bv = cutAtOf(b);
+          if (!av && !bv) return 0;
+          if (!av) return 1;
+          if (!bv) return -1;
+          return av.localeCompare(bv);
+        }
       }
     });
     return copy;
@@ -351,12 +380,14 @@ export function BlockJourneyClient({
           value={sortKey}
           onChange={(v) => setSortKey(v as SortKey)}
           options={[
+            { value: "cut_desc", label: "Recently cut first" },
+            { value: "cut_asc", label: "Earliest cut first" },
             { value: "eff_desc", label: mode === "yield" ? "Highest yield" : "Highest recovered" },
             { value: "eff_asc", label: mode === "yield" ? "Lowest yield" : "Lowest recovered" },
             { value: "cft_desc", label: "Biggest CFT first" },
             { value: "cft_asc", label: "Smallest CFT first" },
-            { value: "newest", label: "Newest first" },
-            { value: "oldest", label: "Oldest first" },
+            { value: "newest", label: "Newest first (added)" },
+            { value: "oldest", label: "Oldest first (added)" },
           ]}
         />
 
