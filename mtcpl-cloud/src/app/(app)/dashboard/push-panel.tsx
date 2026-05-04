@@ -18,13 +18,22 @@ export function PushPanel({
   slabs,
   pushed,
   todayLabel,
+  expandedByDefault = false,
 }: {
   slabs: PushSlab[];
   pushed: boolean;
   todayLabel: string;
+  /**
+   * When true, skip the collapsed-3-rows view and render every
+   * slab immediately. Used inside the dashboard's PeekSection
+   * modal where the user has already explicitly opened the
+   * panel — the extra "Show all N slabs" click is redundant
+   * friction.
+   */
+  expandedByDefault?: boolean;
 }) {
   const [q, setQ] = useState("");
-  const [showAll, setShowAll] = useState(false);
+  const [showAll, setShowAll] = useState(expandedByDefault);
   const COLLAPSED_COUNT = 3;
 
   const filtered = useMemo(() => {

@@ -8,6 +8,7 @@ import { BlockSearchBar } from "./block-search-bar";
 import { MarbleCutLog } from "./marble-cut-log";
 import { undoMarbleCutAction } from "./actions";
 import { PeekIframe } from "@/components/peek-iframe";
+import { PeekSection } from "@/components/peek-section";
 import { generateNextCode } from "./utils";
 import { yardLabel } from "@/lib/yards";
 import type { StoneCategory } from "@/lib/stone-categories";
@@ -513,63 +514,53 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
         />
       )}
 
-      {/* Block Usage History — collapsible */}
+      {/* Block Usage History — center-peek modal so the page stays
+          short. Same content as before, just hosted in the modal. */}
       {consumedList.length > 0 && (
-        <details style={{ marginTop: 40 }}>
-          <summary style={{ cursor: "pointer", listStyle: "none", userSelect: "none" }}>
-            <div
-              className="section-heading"
-              style={{
-                marginTop: 0,
-                display: "inline-flex",
-                width: "100%",
-                alignItems: "center",
-                justifyContent: "space-between",
-              }}
-            >
-              <div>
-                <h2 style={{ margin: 0 }}>Block History ({consumedList.length}) ▾</h2>
-                <p className="muted" style={{ margin: "2px 0 0" }}>
-                  Recently consumed blocks · click to expand
-                </p>
-              </div>
-            </div>
-          </summary>
-          <div className="records-stack" style={{ marginTop: 12 }}>
-            {consumedList.map((blk) => {
-              const isMarbleBlock = stoneCategoryMap[blk.stone ?? ""] === "marble";
-              const cft =
-                !isMarbleBlock && blk.length_ft && blk.width_ft && blk.height_ft
-                  ? ((Number(blk.length_ft) * Number(blk.width_ft) * Number(blk.height_ft)) / 1728).toFixed(2)
-                  : null;
-              const tonnes =
-                isMarbleBlock && blk.tonnes != null ? Number(blk.tonnes).toFixed(3) : null;
-              return (
-                <div className="record-card compact-record" key={blk.id}>
-                  <div className="record-head">
-                    <div>
-                      <strong style={{ fontFamily: "ui-monospace, monospace" }}>{blk.id}</strong>
-                      <p className="muted" style={{ margin: "2px 0 0" }}>
-                        {blk.stone} · {yardLabel(blk.yard)}
-                        {cft
-                          ? ` · ${Number(blk.length_ft)} × ${Number(blk.width_ft)} × ${Number(blk.height_ft)} in · ${cft} CFT`
-                          : tonnes
-                            ? ` · ${tonnes} T (marble)`
-                            : ""}
-                      </p>
-                    </div>
-                    <div style={{ textAlign: "right" }}>
-                      <span className="role-pill badge-consumed">cut &amp; consumed</span>
-                      <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                        Used: {fmtDate(blk.updated_at)}
-                      </p>
+        <div style={{ marginTop: 24 }}>
+          <PeekSection
+            icon="📜"
+            title="Block History"
+            count={consumedList.length}
+            subtitle="Recently consumed blocks — click to view the full list."
+            modalMaxWidth={1100}
+          >
+            <div className="records-stack">
+              {consumedList.map((blk) => {
+                const isMarbleBlock = stoneCategoryMap[blk.stone ?? ""] === "marble";
+                const cft =
+                  !isMarbleBlock && blk.length_ft && blk.width_ft && blk.height_ft
+                    ? ((Number(blk.length_ft) * Number(blk.width_ft) * Number(blk.height_ft)) / 1728).toFixed(2)
+                    : null;
+                const tonnes =
+                  isMarbleBlock && blk.tonnes != null ? Number(blk.tonnes).toFixed(3) : null;
+                return (
+                  <div className="record-card compact-record" key={blk.id}>
+                    <div className="record-head">
+                      <div>
+                        <strong style={{ fontFamily: "ui-monospace, monospace" }}>{blk.id}</strong>
+                        <p className="muted" style={{ margin: "2px 0 0" }}>
+                          {blk.stone} · {yardLabel(blk.yard)}
+                          {cft
+                            ? ` · ${Number(blk.length_ft)} × ${Number(blk.width_ft)} × ${Number(blk.height_ft)} in · ${cft} CFT`
+                            : tonnes
+                              ? ` · ${tonnes} T (marble)`
+                              : ""}
+                        </p>
+                      </div>
+                      <div style={{ textAlign: "right" }}>
+                        <span className="role-pill badge-consumed">cut &amp; consumed</span>
+                        <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                          Used: {fmtDate(blk.updated_at)}
+                        </p>
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
-        </details>
+                );
+              })}
+            </div>
+          </PeekSection>
+        </div>
       )}
     </>
   );

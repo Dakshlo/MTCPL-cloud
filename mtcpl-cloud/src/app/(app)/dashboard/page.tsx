@@ -7,6 +7,7 @@ import { PushPanel } from "./push-panel";
 import { AskAiEntryCard } from "@/components/ask-ai-entry-card";
 import { BlockJourneyEntryCard } from "@/components/block-journey-entry-card";
 import { PeekSection } from "@/components/peek-section";
+import { PeekIframe } from "@/components/peek-iframe";
 
 type SearchParams = Promise<{ pushed?: string }>;
 
@@ -268,55 +269,48 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
         </div>
       </div>
 
-      {/* ── REPORT BUTTONS ── */}
+      {/* ── REPORT BUTTONS ──
+          Both reports open as center-peek iframe modals over /embed
+          routes so the dashboard never goes through a full nav. The
+          inline Link cards used to bounce the user out and force a
+          back-button round-trip — now they stay on the dashboard
+          and just click through. */}
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-        <Link
-          href="/blocks/report"
-          style={{
-            flex: "1 1 220px",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "14px 20px",
-            background: "var(--surface)",
-            border: "1px solid var(--border)",
-            borderRadius: 10,
-            textDecoration: "none",
-            gap: 12,
-          }}
-        >
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 13, color: "var(--text)" }}>📊 Block Report</div>
-            <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
-              All blocks — filter by stone, yard, vendor · Export to Excel
-            </div>
-          </div>
-          <span style={{ fontSize: 12, color: "var(--gold-dark)", fontWeight: 600, flexShrink: 0 }}>Open →</span>
-        </Link>
+        <div style={{ flex: "1 1 220px", display: "flex" }}>
+          <PeekIframe
+            url="/embed/blocks/report"
+            triggerIcon="📊"
+            triggerLabel="Block Report"
+            triggerSubtitle="All blocks — filter by stone, yard, vendor · Export to Excel"
+            modalTitle="Block Report"
+            triggerStyle={{
+              flex: 1,
+              padding: "14px 20px",
+              background: "var(--surface)",
+              border: "1px solid var(--border)",
+              borderStyle: "solid",
+              borderRadius: 10,
+            }}
+          />
+        </div>
 
-        <Link
-          href="/slabs/ready"
-          style={{
-            flex: "1 1 220px",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "14px 20px",
-            background: "var(--surface)",
-            border: "1px solid var(--border)",
-            borderRadius: 10,
-            textDecoration: "none",
-            gap: 12,
-          }}
-        >
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 13, color: "var(--text)" }}>📋 Ready Sizes Report</div>
-            <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
-              Cut-done sizes — filter by temple, stone, grade · Export to Excel
-            </div>
-          </div>
-          <span style={{ fontSize: 12, color: "var(--gold-dark)", fontWeight: 600, flexShrink: 0 }}>Open →</span>
-        </Link>
+        <div style={{ flex: "1 1 220px", display: "flex" }}>
+          <PeekIframe
+            url="/embed/slabs/ready"
+            triggerIcon="📋"
+            triggerLabel="Ready Sizes Report"
+            triggerSubtitle="Cut-done sizes — filter by temple, stone, grade · Export to Excel"
+            modalTitle="Ready Sizes Report"
+            triggerStyle={{
+              flex: 1,
+              padding: "14px 20px",
+              background: "var(--surface)",
+              border: "1px solid var(--border)",
+              borderStyle: "solid",
+              borderRadius: 10,
+            }}
+          />
+        </div>
       </div>
 
       {/* ── PUSH ALERT PANEL ──
@@ -333,7 +327,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
           subtitle="Mark a slab as urgent — workers see a red highlight on their pages."
           modalMaxWidth={1100}
         >
-          <PushPanel slabs={pushList} pushed={pushed} todayLabel={today.label} />
+          <PushPanel slabs={pushList} pushed={pushed} todayLabel={today.label} expandedByDefault />
         </PeekSection>
       </div>
 
