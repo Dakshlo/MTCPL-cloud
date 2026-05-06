@@ -1010,14 +1010,22 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
           );
         })()}
 
-        {/* ── Planned slabs table ── */}
-        <div className="section-head">Slabs to Cut ({placed.length})</div>
+        {/* ── Planned slabs table ──
+            Tick column (✓) is the FIRST column so the cutter can
+            mark each slab DONE right next to the row they're
+            looking at. Replaces the previous bottom-of-page
+            "Slabs Actually Cut" checklist that was disconnected
+            from the dimensions and confused operators. */}
+        <div className="section-head">
+          Slabs to Cut ({placed.length}) <span style={{ fontSize: 11, fontWeight: 500, color: "#666", marginLeft: 8 }}>— ✓ tick each slab as you finish cutting it · हर slab कटने के बाद tick करें</span>
+        </div>
         {placed.length === 0 ? (
           <p style={{ color: "#888", fontSize: 12 }}>No slabs planned.</p>
         ) : (
           <table className="slab-table">
             <thead>
               <tr>
+                <th style={{ width: 28 }}>✓</th>
                 <th style={{ width: 24 }}>#</th>
                 <th>Slab ID</th>
                 <th>Temple</th>
@@ -1039,6 +1047,12 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
                 const color = isExtra ? "#7c3aed" : slabColor(s.id);
                 return (
                   <tr key={s.id} style={isExtra ? { background: "#f5f0ff" } : undefined}>
+                    <td style={{ textAlign: "center", verticalAlign: "middle" }}>
+                      <span
+                        className="check-box"
+                        style={{ width: 16, height: 16, verticalAlign: "middle" }}
+                      />
+                    </td>
                     <td style={{ color: "#999" }}>{i + 1}</td>
                     <td>
                       <span className="color-dot" style={{ background: color }} />
@@ -1069,48 +1083,63 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
           </table>
         )}
 
-        {/* ── MANUAL ENTRY SECTION (filled after cutting) ── */}
+        {/* ── MANUAL ENTRY SECTION (filled after cutting) ──
+            The "Slabs Actually Cut" checklist that used to live here
+            is gone — checkboxes are now inline in the Slabs to Cut
+            table at the top so the cutter ticks where they're already
+            looking at dimensions. The two forms BELOW are for things
+            that aren't in the original plan: extra slabs cut from
+            inventory, and remainder block pieces leftover after the
+            cut. Hindi labels added for each since most floor staff
+            read Hindi more comfortably than English. */}
         <div className="manual-section">
           <div className="manual-title">✍ After Cutting — Fill in Manually &amp; Return to Office</div>
           <div className="manual-hint">Cutter fills this section. Office staff enters into system after receiving.</div>
 
-          {/* Slab checklist */}
-          {placed.length > 0 && (
-            <>
-              <div style={{ fontSize: 10, fontWeight: 700, color: "#666", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
-                Slabs Actually Cut — tick each one completed:
-              </div>
-              <div className="slab-checklist">
-                {placed.map((s) => {
-                  const isExtra = extraSlabIds.has(s.id);
-                  return (
-                    <div className="slab-check-row" key={s.id} style={isExtra ? { background: "#f5f0ff", borderRadius: 3 } : undefined}>
-                      <span className="check-box" />
-                      <span className="color-dot" style={{ background: isExtra ? "#7c3aed" : slabColor(s.id) }} />
-                      <span className="slab-code" style={{ fontSize: 12 }}>{s.id}</span>
-                      <span style={{ fontSize: 11, color: "#888" }}>{s.sw}×{s.sh} in</span>
-                      {isExtra && (
-                        <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 3, background: "#7c3aed", color: "#fff", letterSpacing: "0.04em" }}>
-                          EXTRA
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-              {/* Legend so cutters/office staff understand the EXTRA tag */}
-              {placed.some((s) => extraSlabIds.has(s.id)) && (
-                <div style={{ fontSize: 10, color: "#666", marginTop: 6, fontStyle: "italic" }}>
-                  <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: "#7c3aed", marginRight: 4, verticalAlign: "middle" }} />
-                  <strong>EXTRA</strong> = filler / cut-ahead inventory (not for current order). Marked with * in 2D layouts.
-                </div>
-              )}
-            </>
+          {/* Legend for the EXTRA tag (kept here since the inline
+              checkboxes still surface them in the top table). */}
+          {placed.some((s) => extraSlabIds.has(s.id)) && (
+            <div style={{ fontSize: 10, color: "#666", marginBottom: 12, fontStyle: "italic" }}>
+              <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: "#7c3aed", marginRight: 4, verticalAlign: "middle" }} />
+              <strong>EXTRA</strong> = filler / cut-ahead inventory (not for current order). Marked with * in 2D layouts.
+            </div>
           )}
+
+          {/* Manual extras — slabs cut from inventory that were NOT
+              in the original plan. Cutter writes the slab id (or
+              size if no id), dimensions, and any note. Office uses
+              this to record the cut in the system. */}
+          <div style={{ fontSize: 10, fontWeight: 700, color: "#666", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
+            और क्या काटा (Manual Extras) — slabs cut from inventory not in plan:
+          </div>
+          <table className="waste-table">
+            <thead>
+              <tr>
+                <th style={{ width: 28 }}>#</th>
+                <th>Slab ID / Size</th>
+                <th>Length (in)</th>
+                <th>Width (in)</th>
+                <th>Thickness (in)</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[1, 2, 3, 4].map((n) => (
+                <tr key={`extra-${n}`}>
+                  <td style={{ padding: "0 8px", color: "#999", textAlign: "center", verticalAlign: "middle" }}>{n}</td>
+                  <td><span className="write-line" /></td>
+                  <td><span className="write-line" /></td>
+                  <td><span className="write-line" /></td>
+                  <td><span className="write-line" /></td>
+                  <td><span className="write-line" /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
 
           {/* Waste / remainder block entries */}
           <div style={{ fontSize: 10, fontWeight: 700, color: "#666", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
-            Remaining Block Pieces (leave blank if none / discarded):
+            बचा हुआ block / निकले हुए block (Remaining Block Pieces) — leave blank if none / discarded:
           </div>
           <table className="waste-table">
             <thead>
