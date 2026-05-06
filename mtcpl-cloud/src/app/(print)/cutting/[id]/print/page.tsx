@@ -865,7 +865,16 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
                                   {idx + 1}
                                 </span>
                                 <span style={{ fontWeight: 700 }}>{s.id}</span>
-                                <span style={{ color: "#666" }}>{s.sw}×{s.sh}″</span>
+                                {/* W × H × thickness — repeating the
+                                    slab thickness here is technically
+                                    redundant (the primary slab header
+                                    above shows it once) but cutters
+                                    aren't sophisticated enough to
+                                    remember it across the page; spell
+                                    it out per row. */}
+                                <span style={{ color: "#666" }}>
+                                  {s.sw}×{s.sh}{s.sd != null ? `×${s.sd}` : ""}″
+                                </span>
                                 {s.temple && <span style={{ color: "#888", fontFamily: "-apple-system,Arial,sans-serif" }}>· {s.temple}</span>}
                               </div>
                             );
@@ -1106,8 +1115,8 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
             <div style={{ fontSize: 18, fontWeight: 800, color: "#1a1a1a", lineHeight: 1.2 }}>
               ✏️ Extra kata hua size
             </div>
-            <div style={{ fontSize: 11, color: "#666", marginTop: 2 }}>
-              Manual extras · slabs cut from inventory NOT in the original plan
+            <div style={{ fontSize: 12, color: "#444", marginTop: 3, fontWeight: 500 }}>
+              जो slabs plan में नहीं थीं पर inventory से काट दी गयीं — उनकी detail यहाँ भरें
             </div>
           </div>
           <table className="waste-table">
@@ -1141,8 +1150,8 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
             <div style={{ fontSize: 18, fontWeight: 800, color: "#1a1a1a", lineHeight: 1.2 }}>
               ♻️ बचा हुआ block / निकले हुए block
             </div>
-            <div style={{ fontSize: 11, color: "#666", marginTop: 2 }}>
-              Remaining block pieces · leave blank if none / discarded
+            <div style={{ fontSize: 12, color: "#444", marginTop: 3, fontWeight: 500 }}>
+              अगर block का कोई हिस्सा बच गया हो तो नीचे लिखें — कुछ नहीं बचा तो खाली छोड़ दें
             </div>
           </div>
           <table className="waste-table">

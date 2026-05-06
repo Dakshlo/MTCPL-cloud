@@ -39,6 +39,7 @@ export function FinishBlockForm({
   openSlabs = [],
   transferableSlabs = [],
   allowTransfer = false,
+  parentQuality = "",
   finishAction,
 }: {
   sessionBlockId: string;
@@ -54,6 +55,10 @@ export function FinishBlockForm({
   /** Permission flag — comes from canTransferPlannedSlabs(profile).
    *  When false, the transferable section is hidden entirely. */
   allowTransfer?: boolean;
+  /** Parent block's grade. Pre-fills new remainder rows so the operator
+   *  doesn't have to re-pick the same grade four times. They can still
+   *  override per-row if the interior is a different grade. */
+  parentQuality?: "" | "A" | "B";
   finishAction: (formData: FormData) => Promise<void>;
 }) {
   const [checkedIds, setCheckedIds] = useState<Set<string>>(
@@ -102,7 +107,10 @@ export function FinishBlockForm({
   }
 
   function addRemainder() {
-    setRemainders((prev) => [...prev, { l: "", w: "", h: "", quality: "" }]);
+    // Default each new row to the parent block's grade so the
+    // operator only changes it when the interior reveals a
+    // different grade. Saves four clicks on a 4-piece restock.
+    setRemainders((prev) => [...prev, { l: "", w: "", h: "", quality: parentQuality }]);
   }
 
   function removeRemainder(index: number) {
@@ -261,7 +269,7 @@ export function FinishBlockForm({
                 )}
               </div>
               <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-                Also cut from this block (unplanned) — pick from open inventory
+                जो slabs plan में नहीं थीं पर इस block से extra काटी गयीं — open inventory से चुनें
               </div>
             </div>
             <button
@@ -518,7 +526,7 @@ export function FinishBlockForm({
               )}
             </div>
             <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-              Remaining block pieces — leave blank if none / discarded
+              अगर block का कोई हिस्सा बच गया हो तो नीचे लिखें — कुछ नहीं बचा तो खाली छोड़ दें
             </div>
           </div>
           <button

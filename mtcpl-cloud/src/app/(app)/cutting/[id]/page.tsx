@@ -89,7 +89,7 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
     donor_status: string;
   };
 
-  const [profilesMap, { data: stoneTypes }, { data: openSlabs }, transferableSlabs] = await Promise.all([
+  const [profilesMap, { data: stoneTypes }, { data: openSlabs }, transferableSlabs, { data: parentBlock }] = await Promise.all([
     getProfilesMap(),
     createAdminSupabaseClient().from("stone_types").select("id, name, color_top, color_front, color_side").order("name"),
     blockStone
@@ -141,6 +141,12 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
           return out;
         })()
       : Promise.resolve([] as TransferableSlab[]),
+    // Parent block's quality — used as the default Grade for any
+    // remainder pieces the operator restocks during Cutting Done.
+    // Most cuts inherit the parent grade; the operator only
+    // overrides per-piece if the cut surface reveals the interior
+    // is a different grade than the outside.
+    supabase.from("blocks").select("quality").eq("id", block.block_id).maybeSingle(),
   ]);
 
   const session = block.cut_sessions as unknown as {
@@ -161,6 +167,13 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
       .filter((s) => s.is_filler)
       .map((s) => s.slab_requirement_id),
   );
+
+  // Default Grade for new remainder rows in the Cutting-Done form.
+  // Empty string = "Both" (no grade preference). Operator can
+  // override per-piece if the interior reveals a different grade.
+  const rawParentQuality = (parentBlock as { quality?: string | null } | null)?.quality;
+  const parentQuality: "" | "A" | "B" =
+    rawParentQuality === "A" || rawParentQuality === "B" ? rawParentQuality : "";
 
   const isPending = block.status === "pending_worker";
   const isWaiting = block.status === "pending_cut";
@@ -659,6 +672,7 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
             openSlabs={(openSlabs ?? []).filter(s => !placed.some(p => p.id === s.id))}
             transferableSlabs={transferableSlabs}
             allowTransfer={allowTransfer}
+            parentQuality={parentQuality}
             finishAction={finishBlockAction}
           />
         </>
