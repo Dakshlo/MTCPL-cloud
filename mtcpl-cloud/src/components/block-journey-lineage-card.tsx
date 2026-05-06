@@ -303,6 +303,8 @@ function TreeView({ node, depth }: { node: LineageNode; depth: number }) {
                   <tr style={{ background: "var(--surface-alt)" }}>
                     <th style={{ padding: "5px 8px", textAlign: "left", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.04em", fontSize: 10 }}>#</th>
                     <th style={{ padding: "5px 8px", textAlign: "left", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.04em", fontSize: 10 }}>Slab ID</th>
+                    <th style={{ padding: "5px 8px", textAlign: "left", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.04em", fontSize: 10 }}>Source</th>
+                    <th style={{ padding: "5px 8px", textAlign: "left", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.04em", fontSize: 10 }}>Dim (in)</th>
                     <th style={{ padding: "5px 8px", textAlign: "left", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.04em", fontSize: 10 }}>Temple</th>
                     <th style={{ padding: "5px 8px", textAlign: "left", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.04em", fontSize: 10 }}>Label</th>
                     <th style={{ padding: "5px 8px", textAlign: "right", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.04em", fontSize: 10 }}>CFT</th>
@@ -313,6 +315,12 @@ function TreeView({ node, depth }: { node: LineageNode; depth: number }) {
                     <tr key={s.id} style={{ borderTop: i === 0 ? "none" : "1px solid var(--border-light)" }}>
                       <td style={{ padding: "5px 8px", color: "var(--muted)", fontFamily: "ui-monospace, monospace", width: 28 }}>{i + 1}</td>
                       <td style={{ padding: "5px 8px", fontFamily: "ui-monospace, monospace", fontWeight: 600, color: "var(--text)" }}>{s.id}</td>
+                      <td style={{ padding: "5px 8px" }}>
+                        <ProvenancePill kind={s.provenance} />
+                      </td>
+                      <td style={{ padding: "5px 8px", fontFamily: "ui-monospace, monospace", color: "var(--muted)" }}>
+                        {s.l && s.w ? `${formatDim(s.l)}×${formatDim(s.w)}${s.t ? `×${formatDim(s.t)}` : ""}` : "—"}
+                      </td>
                       <td style={{ padding: "5px 8px", color: "var(--muted)" }}>{s.temple ?? "—"}</td>
                       <td style={{ padding: "5px 8px", color: "var(--muted)" }}>{s.label ?? "—"}</td>
                       <td style={{ padding: "5px 8px", textAlign: "right", fontFamily: "ui-monospace, monospace", color: "#15803d", fontWeight: 600 }}>{s.cft.toFixed(2)}</td>
@@ -378,6 +386,51 @@ function StatusPill({ status, wasCut }: { status: string; wasCut: boolean }) {
       {label}
     </span>
   );
+}
+
+/** Compact pill that calls out where a slab in the lineage card
+ *  came from: was it part of the original plan, a Fit-to-Fill
+ *  filler at planning time, or an unplanned addition / transfer
+ *  during cutting-done? Helps the team eyeball "this block
+ *  picked up 3 extras at cutting time" at a glance. */
+function ProvenancePill({ kind }: { kind: "planned" | "filler" | "extra" }) {
+  if (kind === "planned") {
+    return (
+      <span title="In the original cut plan" style={{
+        fontSize: 9, fontWeight: 700, padding: "1px 6px",
+        borderRadius: 3, color: "#15803d",
+        background: "rgba(22,101,52,0.10)",
+        border: "1px solid rgba(22,101,52,0.25)",
+        letterSpacing: "0.04em",
+      }}>PLAN</span>
+    );
+  }
+  if (kind === "filler") {
+    return (
+      <span title="Cut-ahead inventory — added via Fit-to-Fill at planning time" style={{
+        fontSize: 9, fontWeight: 700, padding: "1px 6px",
+        borderRadius: 3, color: "#fff",
+        background: "#7c3aed",
+        letterSpacing: "0.04em",
+      }}>FILLER</span>
+    );
+  }
+  return (
+    <span title="Added during Cutting-Done — manual extra from open inventory or transferred from another block's plan" style={{
+      fontSize: 9, fontWeight: 700, padding: "1px 6px",
+      borderRadius: 3, color: "#b45309",
+      background: "rgba(180,83,9,0.10)",
+      border: "1px solid rgba(180,83,9,0.30)",
+      letterSpacing: "0.04em",
+    }}>EXTRA</span>
+  );
+}
+
+/** Render a dimension number compactly: integers stay as-is,
+ *  fractional values get one decimal. Drops trailing ".0". */
+function formatDim(n: number): string {
+  if (!Number.isFinite(n) || n === 0) return "—";
+  return Number.isInteger(n) ? String(n) : n.toFixed(1).replace(/\.0$/, "");
 }
 
 function statusLabel(status: string, wasCut: boolean): string {

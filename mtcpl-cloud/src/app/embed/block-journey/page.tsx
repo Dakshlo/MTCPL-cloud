@@ -21,6 +21,7 @@ import {
   type BjSlabRow,
   type BjCsbRow,
   type BjMarbleTruckRow,
+  type BjCutSessionSlabRow,
 } from "@/app/(app)/block-journey/build-lineages";
 
 type SearchParams = Promise<{ mode?: string }>;
@@ -44,7 +45,7 @@ export default async function EmbedBlockJourneyPage({
 
   const admin = createAdminSupabaseClient();
 
-  const [freshR, reusedR, cutDoneR, doneCsbR, stoneTypesR, trucksR] = await Promise.all([
+  const [freshR, reusedR, cutDoneR, doneCsbR, stoneTypesR, trucksR, cutSessionSlabsR] = await Promise.all([
     admin
       .from("blocks")
       .select(
@@ -70,6 +71,9 @@ export default async function EmbedBlockJourneyPage({
     admin
       .from("marble_truck_entries")
       .select("id, stone, truck_no, vendor_name, total_tonnes, num_blocks, created_at"),
+    admin
+      .from("cut_session_slabs")
+      .select("slab_requirement_id, is_filler, cut_session_blocks!inner(block_id)"),
   ]);
 
   const freshBlocks = (freshR.data ?? []) as BjBlockRow[];
@@ -77,6 +81,28 @@ export default async function EmbedBlockJourneyPage({
   const cutDoneSlabs = (cutDoneR.data ?? []) as BjSlabRow[];
   const doneCsbs = (doneCsbR.data ?? []) as BjCsbRow[];
   const trucks = (trucksR.data ?? []) as BjMarbleTruckRow[];
+
+  type RawCutSessionSlabRow = {
+    slab_requirement_id: string;
+    is_filler: boolean | null;
+    cut_session_blocks:
+      | { block_id: string }
+      | { block_id: string }[]
+      | null;
+  };
+  const cutSessionSlabsRaw = (cutSessionSlabsR.data ?? []) as RawCutSessionSlabRow[];
+  const cutSessionSlabs: BjCutSessionSlabRow[] = [];
+  for (const r of cutSessionSlabsRaw) {
+    const csb = Array.isArray(r.cut_session_blocks)
+      ? r.cut_session_blocks[0]
+      : r.cut_session_blocks;
+    if (!csb || !csb.block_id) continue;
+    cutSessionSlabs.push({
+      slab_requirement_id: r.slab_requirement_id,
+      is_filler: r.is_filler ?? null,
+      block_id: csb.block_id,
+    });
+  }
 
   const stoneCategoryMap: Record<string, StoneCategory> = {};
   for (const s of stoneTypesR.data ?? []) {
@@ -92,6 +118,7 @@ export default async function EmbedBlockJourneyPage({
     doneCsbs,
     stoneCategoryMap,
     trucks,
+    cutSessionSlabs,
   );
   const profilesMap = await getProfilesMap();
 

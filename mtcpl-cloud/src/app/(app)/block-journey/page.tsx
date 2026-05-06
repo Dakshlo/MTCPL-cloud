@@ -29,6 +29,7 @@ import {
   type BjSlabRow,
   type BjCsbRow,
   type BjMarbleTruckRow,
+  type BjCutSessionSlabRow,
 } from "./build-lineages";
 
 type SearchParams = Promise<{ mode?: string }>;
@@ -60,7 +61,7 @@ export default async function BlockJourneyPage({
 
   const admin = createAdminSupabaseClient();
 
-  const [freshR, reusedR, cutDoneR, doneCsbR, stoneTypesR, trucksR] = await Promise.all([
+  const [freshR, reusedR, cutDoneR, doneCsbR, stoneTypesR, trucksR, cutSessionSlabsR] = await Promise.all([
     admin
       .from("blocks")
       .select(
@@ -86,6 +87,13 @@ export default async function BlockJourneyPage({
     admin
       .from("marble_truck_entries")
       .select("id, stone, truck_no, vendor_name, total_tonnes, num_blocks, created_at"),
+    // Cut session slab links — used by buildLineages to mark each
+    // slab as "planned" / "filler" / "extra" on the lineage card.
+    // Joined to cut_session_blocks so we know which physical
+    // block_id each link is bound to.
+    admin
+      .from("cut_session_slabs")
+      .select("slab_requirement_id, is_filler, cut_session_blocks!inner(block_id)"),
   ]);
 
   const freshBlocks = (freshR.data ?? []) as BjBlockRow[];
@@ -93,6 +101,32 @@ export default async function BlockJourneyPage({
   const cutDoneSlabs = (cutDoneR.data ?? []) as BjSlabRow[];
   const doneCsbs = (doneCsbR.data ?? []) as BjCsbRow[];
   const trucks = (trucksR.data ?? []) as BjMarbleTruckRow[];
+
+  // Flatten the join so each cut_session_slabs row carries the
+  // block_id of its parent cut_session_block. PostgREST returns the
+  // join as either an object or an array depending on the
+  // foreign-key direction; normalise to a single block_id string.
+  type RawCutSessionSlabRow = {
+    slab_requirement_id: string;
+    is_filler: boolean | null;
+    cut_session_blocks:
+      | { block_id: string }
+      | { block_id: string }[]
+      | null;
+  };
+  const cutSessionSlabsRaw = (cutSessionSlabsR.data ?? []) as RawCutSessionSlabRow[];
+  const cutSessionSlabs: BjCutSessionSlabRow[] = [];
+  for (const r of cutSessionSlabsRaw) {
+    const csb = Array.isArray(r.cut_session_blocks)
+      ? r.cut_session_blocks[0]
+      : r.cut_session_blocks;
+    if (!csb || !csb.block_id) continue;
+    cutSessionSlabs.push({
+      slab_requirement_id: r.slab_requirement_id,
+      is_filler: r.is_filler ?? null,
+      block_id: csb.block_id,
+    });
+  }
 
   // Build the stone-name → category map so buildLineages can branch
   // per block.
@@ -110,6 +144,7 @@ export default async function BlockJourneyPage({
     doneCsbs,
     stoneCategoryMap,
     trucks,
+    cutSessionSlabs,
   );
   const profilesMap = await getProfilesMap();
 

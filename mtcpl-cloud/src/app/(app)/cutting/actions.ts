@@ -213,7 +213,16 @@ export async function finishBlockAction(formData: FormData) {
   const restock = String(formData.get("restock") || "") === "yes";
   const remainders = JSON.parse(
     String(formData.get("remainders_json") || "[]")
-  ) as Array<{ id: string; l: number; w: number; h: number; quality?: "" | "A" | "B" }>;
+  ) as Array<{
+    id: string;
+    l: number;
+    w: number;
+    h: number;
+    quality?: "" | "A" | "B";
+    /** Per-piece yard override. Defaults to the parent block's
+     *  yard if the client didn't pass one. */
+    yard?: number;
+  }>;
   const extraSlabIds = JSON.parse(String(formData.get("extra_slab_ids") || "[]")) as string[];
   // Transferred slabs — claimed from another block's plan (status='planned').
   // These cause donor block layout edits + needs_reprint flag.
@@ -275,10 +284,16 @@ export async function finishBlockAction(formData: FormData) {
           // show it as unset, not as a specific grade.
           const remainderQuality =
             piece.quality === "A" || piece.quality === "B" ? piece.quality : null;
+          // Yard override — fall back to the parent block's yard
+          // when the client didn't pass one (older clients) or the
+          // value isn't in the allowed list.
+          const { isAllowedYard } = await import("@/lib/yards");
+          const remainderYard =
+            typeof piece.yard === "number" && isAllowedYard(piece.yard) ? piece.yard : yard;
           const { error } = await supabase.from("blocks").insert({
             id: piece.id,
             stone,
-            yard,
+            yard: remainderYard,
             category: "Reused",
             length_ft: piece.l,
             width_ft: piece.w,

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { ALLOWED_YARDS, yardLabel } from "@/lib/yards";
 
 type PlacedSlab = {
   id: string;
@@ -27,7 +28,7 @@ type TransferableSlab = OpenSlab & {
   donor_status: string; // "pending_worker" | "pending_cut" | "cutting"
 };
 
-type RemainderEntry = { l: string; w: string; h: string; quality: "" | "A" | "B" };
+type RemainderEntry = { l: string; w: string; h: string; quality: "" | "A" | "B"; yard: number };
 
 export function FinishBlockForm({
   sessionBlockId,
@@ -107,10 +108,12 @@ export function FinishBlockForm({
   }
 
   function addRemainder() {
-    // Default each new row to the parent block's grade so the
-    // operator only changes it when the interior reveals a
-    // different grade. Saves four clicks on a 4-piece restock.
-    setRemainders((prev) => [...prev, { l: "", w: "", h: "", quality: parentQuality }]);
+    // Default each new row to the parent block's grade and yard
+    // so the operator only changes them when the interior reveals
+    // a different grade, or the leftover piece is being moved to
+    // a different yard. Saves clicks on the typical case where
+    // everything matches the parent.
+    setRemainders((prev) => [...prev, { l: "", w: "", h: "", quality: parentQuality, yard }]);
   }
 
   function removeRemainder(index: number) {
@@ -126,6 +129,12 @@ export function FinishBlockForm({
   function updateRemainderQuality(index: number, value: "" | "A" | "B") {
     setRemainders((prev) =>
       prev.map((r, i) => (i === index ? { ...r, quality: value } : r))
+    );
+  }
+
+  function updateRemainderYard(index: number, value: number) {
+    setRemainders((prev) =>
+      prev.map((r, i) => (i === index ? { ...r, yard: value } : r))
     );
   }
 
@@ -145,6 +154,10 @@ export function FinishBlockForm({
     // but the interior cut surface is B). Empty string = unset
     // (server treats as "Both" / null).
     quality: r.quality,
+    // Yard override per piece. Defaults to the parent block's
+    // yard but the operator can move a leftover piece to a
+    // different yard at restock time.
+    yard: r.yard,
   })).filter((r) => r.l > 0 && r.w > 0 && r.h > 0);
 
   const remaindersJson = JSON.stringify(validRemainders);
@@ -610,9 +623,28 @@ export function FinishBlockForm({
                 <option value="A">A</option>
                 <option value="B">B</option>
               </select>
+              {/* Per-piece yard override. Defaults to the parent
+                  block's yard. Operator may relocate a leftover
+                  piece (e.g. the saw moved across yards mid-cut). */}
+              <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>Yard</span>
+              <select
+                value={r.yard}
+                onChange={(e) => updateRemainderYard(i, Number(e.target.value))}
+                style={{ fontSize: 13, padding: "3px 6px" }}
+                title="Yard of this remainder piece — override if the leftover is being moved to a different yard"
+              >
+                {ALLOWED_YARDS.map((y) => (
+                  <option key={y} value={y}>
+                    {yardLabel(y)}
+                  </option>
+                ))}
+              </select>
               {isValid && (
                 <span className="role-pill badge-available" style={{ fontSize: 10 }}>
-                  {stone}{r.quality ? ` · Grade ${r.quality}` : ""} · Reused
+                  {stone}
+                  {r.quality ? ` · Grade ${r.quality}` : ""}
+                  {r.yard !== yard ? ` · ${yardLabel(r.yard)}` : ""}
+                  {" · Reused"}
                 </span>
               )}
               <button

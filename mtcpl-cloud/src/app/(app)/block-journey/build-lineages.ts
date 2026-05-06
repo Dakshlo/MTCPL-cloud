@@ -74,6 +74,17 @@ export type BjCsbRow = {
   updated_at?: string | null;
 };
 
+/** Minimal cut_session_slabs row for provenance lookups. Joined
+ *  with the parent cut_session_block's block_id so we can ask
+ *  "was this slab originally planned for THIS block?". */
+export type BjCutSessionSlabRow = {
+  slab_requirement_id: string;
+  is_filler: boolean | null;
+  /** block_id of the parent cut_session_block (the physical block
+   *  this slab was planned to be cut from). */
+  block_id: string;
+};
+
 // ─── Output shapes ───────────────────────────────────────────────────────
 
 /** A single node in the lineage tree — the root is also one of these. */
@@ -102,6 +113,23 @@ export type LineageNode = {
     cft: number;
     temple: string | null;
     label: string | null;
+    /** Slab dimensions in inches (raw — unconverted to CFT) so the
+     *  Block Journey card can show "44.5 × 17 × 5 in" alongside
+     *  the CFT total. */
+    l: number;
+    w: number;
+    t: number;
+    /** Provenance — how this slab ended up linked to this block:
+     *   • "planned"  — was in the original cut_session plan
+     *   • "filler"   — was in the plan but tagged is_filler at
+     *                  approval time (Fit-to-Fill cut-ahead)
+     *   • "extra"    — added at Cutting-Done time from the
+     *                  open-inventory or transferred-from-another-
+     *                  block flow (no cut_session_slabs row exists
+     *                  for it on this block).
+     *  When the cut_session_slabs lookup data isn't supplied at
+     *  buildLineages time, defaults to "planned" for back-compat. */
+    provenance: "planned" | "filler" | "extra";
   }>;
   slabCftFromThis: number;     // sum of slabsFromThis[].cft
   children: LineageNode[];     // DIRECT children only (recursion carries deeper)
@@ -209,6 +237,10 @@ export function buildLineages(
   /** Optional truck entries — only needed when marble lineages should
    *  carry truck context for per-truck rollups in the UI. */
   marbleTruckEntries: BjMarbleTruckRow[] = [],
+  /** Optional cut_session_slabs index — used to mark slabs as
+   *  "planned" / "filler" / "extra" on each lineage card. When
+   *  omitted, all slabs default to "planned" for back-compat. */
+  cutSessionSlabs: BjCutSessionSlabRow[] = [],
 ): Lineage[] {
   const freshById = new Map(freshBlocks.map((b) => [b.id, b]));
   const freshIds = new Set(freshById.keys());
@@ -226,6 +258,20 @@ export function buildLineages(
   }
 
   const truckById = new Map(marbleTruckEntries.map((t) => [t.id, t]));
+
+  // Provenance index — for each slab_requirement_id, find the
+  // cut_session_slabs row that links it to its planned block (if
+  // any). Keyed by "<slab_requirement_id>|<block_id>" so a slab
+  // planned for block A but actually cut from block B (transfer
+  // case) is correctly surfaced as "extra" on block B and as
+  // "planned" on block A's lineage (only one of those is real
+  // since block A's plan was modified at transfer time).
+  const provenanceByKey = new Map<string, "planned" | "filler">();
+  for (const r of cutSessionSlabs) {
+    if (!r.slab_requirement_id || !r.block_id) continue;
+    const key = `${r.slab_requirement_id}|${r.block_id}`;
+    provenanceByKey.set(key, r.is_filler ? "filler" : "planned");
+  }
 
   // Index slabs by source_block_id (each block can have 0..n slabs cut from it).
   const slabsByBlock = new Map<string, BjSlabRow[]>();
@@ -292,7 +338,7 @@ export function buildLineages(
       // live descendants to wait on.
       const isResolved = root.status === "consumed";
 
-      const tree: LineageNode = buildTreeNode(root, true, [], slabsByBlock, doneBlockIds, doneAtByBlockId);
+      const tree: LineageNode = buildTreeNode(root, true, [], slabsByBlock, doneBlockIds, doneAtByBlockId, provenanceByKey);
 
       lineages.push({
         category: "marble",
@@ -377,7 +423,7 @@ export function buildLineages(
       }
     }
 
-    const tree = buildTreeNode(root, true, descendants, slabsByBlock, doneBlockIds, doneAtByBlockId);
+    const tree = buildTreeNode(root, true, descendants, slabsByBlock, doneBlockIds, doneAtByBlockId, provenanceByKey);
 
     lineages.push({
       category: "sandstone",
@@ -416,6 +462,7 @@ function buildTreeNode(
   slabsByBlock: Map<string, BjSlabRow[]>,
   doneBlockIds: Set<string>,
   doneAtByBlockId: Map<string, string>,
+  provenanceByKey: Map<string, "planned" | "filler">,
 ): LineageNode {
   const directChildren = allDescendants.filter((d) => isDirectChild(block.id, d.id));
   const ownSlabs = slabsByBlock.get(block.id) ?? [];
@@ -447,18 +494,30 @@ function buildTreeNode(
     createdAt: block.created_at ?? null,
     wasCut,
     cutAt,
-    slabsFromThis: ownSlabs.map((s) => ({
-      id: s.id,
-      cft: toCFT(num(s.length_ft) * num(s.width_ft) * num(s.thickness_ft)),
-      temple: s.temple,
-      label: s.label,
-    })),
+    slabsFromThis: ownSlabs.map((s) => {
+      const key = `${s.id}|${block.id}`;
+      // Provenance: if the cut_session_slabs index has a row that
+      // links this slab to THIS block, use it ("planned" or
+      // "filler"). Otherwise the slab arrived via the
+      // cutting-done extras path or a transfer — call it "extra".
+      const provenance = provenanceByKey.get(key) ?? "extra";
+      return {
+        id: s.id,
+        cft: toCFT(num(s.length_ft) * num(s.width_ft) * num(s.thickness_ft)),
+        temple: s.temple,
+        label: s.label,
+        l: num(s.length_ft),
+        w: num(s.width_ft),
+        t: num(s.thickness_ft),
+        provenance,
+      };
+    }),
     slabCftFromThis: ownSlabs.reduce(
       (sum, s) => sum + toCFT(num(s.length_ft) * num(s.width_ft) * num(s.thickness_ft)),
       0,
     ),
     children: directChildren.map((c) =>
-      buildTreeNode(c, false, allDescendants, slabsByBlock, doneBlockIds, doneAtByBlockId),
+      buildTreeNode(c, false, allDescendants, slabsByBlock, doneBlockIds, doneAtByBlockId, provenanceByKey),
     ),
   };
 }
