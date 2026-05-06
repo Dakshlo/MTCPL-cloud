@@ -27,7 +27,7 @@ type TransferableSlab = OpenSlab & {
   donor_status: string; // "pending_worker" | "pending_cut" | "cutting"
 };
 
-type RemainderEntry = { l: string; w: string; h: string };
+type RemainderEntry = { l: string; w: string; h: string; quality: "" | "A" | "B" };
 
 export function FinishBlockForm({
   sessionBlockId,
@@ -102,7 +102,7 @@ export function FinishBlockForm({
   }
 
   function addRemainder() {
-    setRemainders((prev) => [...prev, { l: "", w: "", h: "" }]);
+    setRemainders((prev) => [...prev, { l: "", w: "", h: "", quality: "" }]);
   }
 
   function removeRemainder(index: number) {
@@ -112,6 +112,12 @@ export function FinishBlockForm({
   function updateRemainder(index: number, field: "l" | "w" | "h", value: string) {
     setRemainders((prev) =>
       prev.map((r, i) => (i === index ? { ...r, [field]: value } : r))
+    );
+  }
+
+  function updateRemainderQuality(index: number, value: "" | "A" | "B") {
+    setRemainders((prev) =>
+      prev.map((r, i) => (i === index ? { ...r, quality: value } : r))
     );
   }
 
@@ -125,6 +131,12 @@ export function FinishBlockForm({
     l: parseFloat(r.l) || 0,
     w: parseFloat(r.w) || 0,
     h: parseFloat(r.h) || 0,
+    // Quality on the remainder piece — operator can override the
+    // parent block's grade when the inside of the block turned out
+    // to be a different grade than the surface (e.g. parent was A
+    // but the interior cut surface is B). Empty string = unset
+    // (server treats as "Both" / null).
+    quality: r.quality,
   })).filter((r) => r.l > 0 && r.w > 0 && r.h > 0);
 
   const remaindersJson = JSON.stringify(validRemainders);
@@ -188,11 +200,16 @@ export function FinishBlockForm({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 8 }}>
-      {/* Slab checklist */}
-      <div style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px" }}>
-        <p style={{ fontSize: 12, fontWeight: 600, margin: "0 0 10px", color: "var(--text)" }}>
-          Mark slabs that were actually cut ({cutCount}/{totalCount})
-        </p>
+      {/* Slab checklist — bilingual header for floor staff */}
+      <div style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, padding: "12px 14px" }}>
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text)", lineHeight: 1.2 }}>
+            ✂️ Kati hui slabs
+          </div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+            Mark slabs that were actually cut · <strong>{cutCount}/{totalCount}</strong>
+          </div>
+        </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
           {allSlabs.map((slab) => (
             <label
@@ -230,22 +247,27 @@ export function FinishBlockForm({
         )}
       </div>
 
-      {/* Unplanned slabs (deviation picker) */}
+      {/* Unplanned slabs (deviation picker) — bilingual header */}
       {openSlabs.length > 0 && (
-        <div style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: showExtra ? 10 : 0 }}>
-            <p style={{ fontSize: 12, fontWeight: 600, margin: 0, color: "var(--text)" }}>
-              Also cut from this block (unplanned)
-              {extraIds.size > 0 && (
-                <span className="role-pill badge-available" style={{ fontSize: 10, marginLeft: 8 }}>
-                  {extraIds.size} selected
-                </span>
-              )}
-            </p>
+        <div style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, padding: "12px 14px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: showExtra ? 10 : 0 }}>
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text)", lineHeight: 1.2 }}>
+                ➕ Extra kata hua size
+                {extraIds.size > 0 && (
+                  <span className="role-pill badge-available" style={{ fontSize: 10, marginLeft: 8, verticalAlign: "middle" }}>
+                    {extraIds.size} selected
+                  </span>
+                )}
+              </div>
+              <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+                Also cut from this block (unplanned) — pick from open inventory
+              </div>
+            </div>
             <button
               type="button"
               className="ghost-button"
-              style={{ fontSize: 12, padding: "2px 10px" }}
+              style={{ fontSize: 12, padding: "4px 12px", whiteSpace: "nowrap" }}
               onClick={() => setShowExtra((v) => !v)}
             >
               {showExtra ? "− Hide" : "+ Add unplanned slab"}
@@ -480,16 +502,29 @@ export function FinishBlockForm({
         );
       })()}
 
-      {/* Remaining block pieces */}
-      <div style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: remainders.length ? 10 : 0 }}>
-          <p style={{ fontSize: 12, fontWeight: 600, margin: 0, color: "var(--text)" }}>
-            Remaining block pieces{remainders.length > 0 ? ` (${validRemainders.length} valid)` : ""}
-          </p>
+      {/* Remaining block pieces — bilingual header + per-row Grade
+          selector. Operator can override the parent block's grade
+          when the inside of the block turned out to be a different
+          quality than the outside. */}
+      <div style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, padding: "12px 14px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: remainders.length ? 10 : 0 }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text)", lineHeight: 1.2 }}>
+              ♻️ बचा हुआ block / निकले हुए block
+              {remainders.length > 0 && (
+                <span className="role-pill badge-available" style={{ fontSize: 10, marginLeft: 8, verticalAlign: "middle" }}>
+                  {validRemainders.length} valid
+                </span>
+              )}
+            </div>
+            <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+              Remaining block pieces — leave blank if none / discarded
+            </div>
+          </div>
           <button
             type="button"
             className="ghost-button"
-            style={{ fontSize: 12, padding: "2px 10px" }}
+            style={{ fontSize: 12, padding: "4px 12px", whiteSpace: "nowrap" }}
             onClick={addRemainder}
           >
             + Add piece
@@ -552,10 +587,24 @@ export function FinishBlockForm({
                 onChange={(e) => updateRemainder(i, "h", e.target.value)}
                 style={{ width: 72, fontSize: 13 }}
               />
-              <span className="muted" style={{ fontSize: 11 }}>ft</span>
+              <span className="muted" style={{ fontSize: 11 }}>in</span>
+              {/* Per-piece grade override. Default empty = "Both"
+                  in inventory. Operator picks A or B if the cut
+                  surface tells them the interior grade differs. */}
+              <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>Grade</span>
+              <select
+                value={r.quality}
+                onChange={(e) => updateRemainderQuality(i, e.target.value as "" | "A" | "B")}
+                style={{ fontSize: 13, padding: "3px 6px" }}
+                title="Grade of this remainder piece — override if the inside of the block is a different grade than the outside"
+              >
+                <option value="">Both</option>
+                <option value="A">A</option>
+                <option value="B">B</option>
+              </select>
               {isValid && (
                 <span className="role-pill badge-available" style={{ fontSize: 10 }}>
-                  {stone} · Reused
+                  {stone}{r.quality ? ` · Grade ${r.quality}` : ""} · Reused
                 </span>
               )}
               <button

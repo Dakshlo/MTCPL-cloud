@@ -213,7 +213,7 @@ export async function finishBlockAction(formData: FormData) {
   const restock = String(formData.get("restock") || "") === "yes";
   const remainders = JSON.parse(
     String(formData.get("remainders_json") || "[]")
-  ) as Array<{ id: string; l: number; w: number; h: number }>;
+  ) as Array<{ id: string; l: number; w: number; h: number; quality?: "" | "A" | "B" }>;
   const extraSlabIds = JSON.parse(String(formData.get("extra_slab_ids") || "[]")) as string[];
   // Transferred slabs — claimed from another block's plan (status='planned').
   // These cause donor block layout edits + needs_reprint flag.
@@ -269,6 +269,12 @@ export async function finishBlockAction(formData: FormData) {
             restockedIds.push(piece.id);
             continue;
           }
+          // Quality on the remainder — operator picks per-piece.
+          // Empty string from the form means "Both" (no preference)
+          // which we persist as NULL so the inventory dropdowns
+          // show it as unset, not as a specific grade.
+          const remainderQuality =
+            piece.quality === "A" || piece.quality === "B" ? piece.quality : null;
           const { error } = await supabase.from("blocks").insert({
             id: piece.id,
             stone,
@@ -277,6 +283,7 @@ export async function finishBlockAction(formData: FormData) {
             length_ft: piece.l,
             width_ft: piece.w,
             height_ft: piece.h,
+            quality: remainderQuality,
             status: "available",
             created_by: profile.id,
             updated_by: profile.id,

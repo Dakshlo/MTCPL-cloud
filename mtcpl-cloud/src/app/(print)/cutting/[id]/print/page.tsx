@@ -967,41 +967,15 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
                         </div>
                       </div>
 
-                      {/* Required sizes table */}
-                      <div className="prim-table-head">Required Sizes — this primary slab</div>
-                      <table className="slab-table">
-                        <thead>
-                          <tr>
-                            <th style={{ width: 28 }}>#</th>
-                            <th>Slab ID</th>
-                            <th>Temple</th>
-                            <th>Label</th>
-                            <th>W × H (in)</th>
-                            <th>Thickness (in)</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {layer.slabs.map((s, i) => {
-                            const color = slabColor(s.id);
-                            return (
-                              <tr key={s.id}>
-                                <td>
-                                  <span className="prim-legend-badge" style={{ background: color, width: 16, height: 16, fontSize: 10 }}>
-                                    {i + 1}
-                                  </span>
-                                </td>
-                                <td>
-                                  <span className="slab-code">{s.id}</span>
-                                </td>
-                                <td>{s.temple ?? "—"}</td>
-                                <td style={{ color: "#555" }}>{s.label ?? "—"}</td>
-                                <td style={{ fontFamily: "ui-monospace, monospace" }}>{s.sw} × {s.sh}</td>
-                                <td style={{ fontFamily: "ui-monospace, monospace" }}>{s.sd ?? "—"}</td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                      {/* Per-primary-slab Required Sizes table was here
+                          but it duplicated the "Cut list" legend at the
+                          top of this same primary-slab card and the
+                          master "Slabs to Cut" table on the first page.
+                          The legend up there has badge + slab id + dims
+                          + temple — the exact info a cutter needs while
+                          looking at the 3D / 2D views right above it.
+                          Dropped the duplicate to keep this section
+                          compact and avoid confusing operators. */}
                     </div>
                   </div>
                 );
@@ -1017,8 +991,23 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
             "Slabs Actually Cut" checklist that was disconnected
             from the dimensions and confused operators. */}
         <div className="section-head">
-          Slabs to Cut ({placed.length}) <span style={{ fontSize: 11, fontWeight: 500, color: "#666", marginLeft: 8 }}>— ✓ tick each slab as you finish cutting it · हर slab कटने के बाद tick करें</span>
+          Slabs to Cut ({placed.length})
         </div>
+        {placed.length > 0 && (
+          <div style={{
+            fontSize: 14,
+            fontWeight: 700,
+            color: "#1a1a1a",
+            margin: "-4px 0 8px",
+            padding: "6px 10px",
+            background: "#fffbeb",
+            border: "1.5px dashed #d97706",
+            borderRadius: 4,
+            lineHeight: 1.3,
+          }}>
+            ✓ हर slab कटने के बाद tick करें · Tick each slab as you finish cutting it
+          </div>
+        )}
         {placed.length === 0 ? (
           <p style={{ color: "#888", fontSize: 12 }}>No slabs planned.</p>
         ) : (
@@ -1108,9 +1097,18 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
           {/* Manual extras — slabs cut from inventory that were NOT
               in the original plan. Cutter writes the slab id (or
               size if no id), dimensions, and any note. Office uses
-              this to record the cut in the system. */}
-          <div style={{ fontSize: 10, fontWeight: 700, color: "#666", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
-            और क्या काटा (Manual Extras) — slabs cut from inventory not in plan:
+              this to record the cut in the system.
+
+              Hindi label is the dominant heading because the cutter
+              actually reads it. English subtitle stays small for
+              office staff. */}
+          <div style={{ marginTop: 16, marginBottom: 6 }}>
+            <div style={{ fontSize: 18, fontWeight: 800, color: "#1a1a1a", lineHeight: 1.2 }}>
+              ✏️ Extra kata hua size
+            </div>
+            <div style={{ fontSize: 11, color: "#666", marginTop: 2 }}>
+              Manual extras · slabs cut from inventory NOT in the original plan
+            </div>
           </div>
           <table className="waste-table">
             <thead>
@@ -1137,9 +1135,15 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
             </tbody>
           </table>
 
-          {/* Waste / remainder block entries */}
-          <div style={{ fontSize: 10, fontWeight: 700, color: "#666", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
-            बचा हुआ block / निकले हुए block (Remaining Block Pieces) — leave blank if none / discarded:
+          {/* Waste / remainder block entries — Hindi heading is the
+              dominant text since the cutter is the one filling this. */}
+          <div style={{ marginTop: 16, marginBottom: 6 }}>
+            <div style={{ fontSize: 18, fontWeight: 800, color: "#1a1a1a", lineHeight: 1.2 }}>
+              ♻️ बचा हुआ block / निकले हुए block
+            </div>
+            <div style={{ fontSize: 11, color: "#666", marginTop: 2 }}>
+              Remaining block pieces · leave blank if none / discarded
+            </div>
           </div>
           <table className="waste-table">
             <thead>
