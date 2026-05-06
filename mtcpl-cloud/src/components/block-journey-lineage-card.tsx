@@ -53,11 +53,14 @@ function SandstoneLineageCard({
   return (
     <div
       style={{
-        background: "var(--surface)",
+        background: expanded ? "var(--surface-alt)" : "var(--surface)",
         border: `1px solid ${isResolved ? "var(--border)" : "rgba(180,83,9,0.3)"}`,
+        borderLeft: expanded ? `4px solid var(--gold-dark)` : `1px solid ${isResolved ? "var(--border)" : "rgba(180,83,9,0.3)"}`,
         borderRadius: 10,
         padding: "14px 16px",
-        marginBottom: 10,
+        marginBottom: expanded ? 18 : 10,
+        boxShadow: expanded ? "0 4px 14px rgba(0,0,0,0.06)" : "none",
+        transition: "background 0.12s, margin 0.12s, box-shadow 0.12s",
       }}
     >
       {/* Header row — block id, stone/yard, resolution badge, expand toggle */}
@@ -277,24 +280,47 @@ function TreeView({ node, depth }: { node: LineageNode; depth: number }) {
         </div>
 
         {node.slabsFromThis.length > 0 && (
-          <div
-            style={{
-              marginTop: 4,
-              marginLeft: 14,
+          <div style={{ marginTop: 6, marginLeft: 14 }}>
+            <div style={{
               fontSize: 11,
               color: "var(--muted)",
-            }}
-          >
-            → <strong style={{ color: "#15803d" }}>{node.slabCftFromThis.toFixed(2)} CFT</strong> in {node.slabsFromThis.length} slab
-            {node.slabsFromThis.length !== 1 ? "s" : ""}:{" "}
-            {node.slabsFromThis.slice(0, 6).map((s, i) => (
-              <span key={s.id} style={{ fontFamily: "ui-monospace, monospace" }}>
-                {i > 0 ? ", " : ""}
-                {s.id}
-                {s.temple ? ` (${s.temple})` : ""}
-              </span>
-            ))}
-            {node.slabsFromThis.length > 6 && <span> … +{node.slabsFromThis.length - 6} more</span>}
+              marginBottom: 4,
+            }}>
+              → <strong style={{ color: "#15803d" }}>{node.slabCftFromThis.toFixed(2)} CFT</strong> in {node.slabsFromThis.length} slab{node.slabsFromThis.length !== 1 ? "s" : ""}
+            </div>
+            {/* Slab list as a compact table — easier to scan than
+                comma-separated text, and we show ALL slabs (no
+                "+N more" truncation) so the operator never has to
+                wonder which ones got hidden. */}
+            <div style={{
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              overflow: "hidden",
+              background: "var(--bg)",
+            }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                <thead>
+                  <tr style={{ background: "var(--surface-alt)" }}>
+                    <th style={{ padding: "5px 8px", textAlign: "left", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.04em", fontSize: 10 }}>#</th>
+                    <th style={{ padding: "5px 8px", textAlign: "left", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.04em", fontSize: 10 }}>Slab ID</th>
+                    <th style={{ padding: "5px 8px", textAlign: "left", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.04em", fontSize: 10 }}>Temple</th>
+                    <th style={{ padding: "5px 8px", textAlign: "left", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.04em", fontSize: 10 }}>Label</th>
+                    <th style={{ padding: "5px 8px", textAlign: "right", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.04em", fontSize: 10 }}>CFT</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {node.slabsFromThis.map((s, i) => (
+                    <tr key={s.id} style={{ borderTop: i === 0 ? "none" : "1px solid var(--border-light)" }}>
+                      <td style={{ padding: "5px 8px", color: "var(--muted)", fontFamily: "ui-monospace, monospace", width: 28 }}>{i + 1}</td>
+                      <td style={{ padding: "5px 8px", fontFamily: "ui-monospace, monospace", fontWeight: 600, color: "var(--text)" }}>{s.id}</td>
+                      <td style={{ padding: "5px 8px", color: "var(--muted)" }}>{s.temple ?? "—"}</td>
+                      <td style={{ padding: "5px 8px", color: "var(--muted)" }}>{s.label ?? "—"}</td>
+                      <td style={{ padding: "5px 8px", textAlign: "right", fontFamily: "ui-monospace, monospace", color: "#15803d", fontWeight: 600 }}>{s.cft.toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
@@ -304,6 +330,26 @@ function TreeView({ node, depth }: { node: LineageNode; depth: number }) {
           </div>
         )}
       </div>
+
+      {/* Visual divider when entering descendants — only at the top
+          level. Makes the "block had remainders that became reused
+          blocks" relationship obvious without forcing the operator
+          to count tree-indents. */}
+      {depth === 0 && node.children.length > 0 && (
+        <div style={{
+          marginTop: 12,
+          marginBottom: 4,
+          paddingTop: 10,
+          borderTop: "1px dashed var(--border)",
+          fontSize: 10,
+          fontWeight: 700,
+          color: "var(--muted)",
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+        }}>
+          ↳ {node.children.length} remainder piece{node.children.length === 1 ? "" : "s"} · cut from above
+        </div>
+      )}
 
       {node.children.map((child) => (
         <TreeView key={child.id} node={child} depth={depth + 1} />
@@ -370,11 +416,14 @@ function MarbleLineageCard({
   return (
     <div
       style={{
-        background: "var(--surface)",
+        background: expanded ? "var(--surface-alt)" : "var(--surface)",
         border: `1px solid ${isResolved ? "var(--border)" : "rgba(180,83,9,0.3)"}`,
+        borderLeft: expanded ? `4px solid var(--gold-dark)` : `1px solid ${isResolved ? "var(--border)" : "rgba(180,83,9,0.3)"}`,
         borderRadius: 10,
         padding: "14px 16px",
-        marginBottom: 10,
+        marginBottom: expanded ? 18 : 10,
+        boxShadow: expanded ? "0 4px 14px rgba(0,0,0,0.06)" : "none",
+        transition: "background 0.12s, margin 0.12s, box-shadow 0.12s",
       }}
     >
       {/* Header */}

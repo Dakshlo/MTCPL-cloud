@@ -336,7 +336,7 @@ export function BlockJourneyClient({
             { value: "large", label: "Large (>80)" },
           ]}
         />
-        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
           <span style={{ fontSize: 11, color: "var(--muted)" }}>Added</span>
           <input
             type="date"
@@ -351,6 +351,78 @@ export function BlockJourneyClient({
             onChange={(e) => setDateTo(e.target.value)}
             style={inputStyle}
           />
+          {/* Quick-range presets — saves the operator from clicking
+              the date pickers for the four most common windows.
+              All windows are anchored to TODAY in the user's local
+              timezone so "this week" means "last 7 days including
+              today", not the calendar Mon–Sun. Operators thought
+              about it that way in feedback. */}
+          <div style={{ display: "inline-flex", gap: 4, alignItems: "center", marginLeft: 4 }}>
+            {([
+              { label: "Today", days: 0 },
+              { label: "Last 7d", days: 6 },
+              { label: "Last 30d", days: 29 },
+            ] as const).map(({ label, days }) => {
+              const isActive = (() => {
+                if (!dateFrom || !dateTo) return false;
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const start = new Date(today);
+                start.setDate(start.getDate() - days);
+                const expectFrom = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-${String(start.getDate()).padStart(2, "0")}`;
+                const expectTo = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+                return dateFrom === expectFrom && dateTo === expectTo;
+              })();
+              return (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => {
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    const start = new Date(today);
+                    start.setDate(start.getDate() - days);
+                    const fmt = (d: Date) =>
+                      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+                    setDateFrom(fmt(start));
+                    setDateTo(fmt(today));
+                  }}
+                  style={{
+                    fontSize: 11,
+                    padding: "3px 8px",
+                    border: `1px solid ${isActive ? "var(--gold-dark)" : "var(--border)"}`,
+                    borderRadius: 5,
+                    background: isActive ? "var(--gold-subtle)" : "var(--surface)",
+                    color: isActive ? "var(--gold-dark)" : "var(--muted)",
+                    fontWeight: isActive ? 700 : 500,
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+            {(dateFrom || dateTo) && (
+              <button
+                type="button"
+                onClick={() => { setDateFrom(""); setDateTo(""); }}
+                style={{
+                  fontSize: 11,
+                  padding: "3px 8px",
+                  border: "1px solid var(--border)",
+                  borderRadius: 5,
+                  background: "transparent",
+                  color: "#b91c1c",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+                title="Clear date filter"
+              >
+                ✕
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Resolution segmented */}
