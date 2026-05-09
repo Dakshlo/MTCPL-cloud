@@ -265,13 +265,16 @@ BEGIN
   END IF;
 
   -- ── Step 7: Cut session block → done ──────────────────────────
+  -- NOTE: cut_session_blocks does NOT have an updated_by column
+  -- (verified via information_schema). Only the slab/block tables
+  -- carry that audit field. Don't add it here or the function
+  -- will crash with "column does not exist".
   UPDATE cut_session_blocks
     SET status = 'done',
         restocked_block_id = v_restocked_str,
         cutting_seq = NULL,
         needs_reprint = FALSE,
         reprint_reason = NULL,
-        updated_by = p_actor,
         updated_at = v_now
     WHERE id = p_session_block_id;
 
