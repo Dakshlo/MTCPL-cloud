@@ -1,11 +1,12 @@
 "use server";
 
-// Vercel function timeout for this server-actions module. The
-// default is 10 seconds; finishBlockAction can do 20+ Supabase
-// round-trips when the operator picks many extras + transfers
-// simultaneously, which was timing out and leaving partial
-// commits. Pro plan allows up to 300s; 60s is plenty.
-export const maxDuration = 60;
+// IMPORTANT: this file is a server-actions module ("use server"
+// directive). Next.js only permits async function exports here —
+// non-async exports like `export const maxDuration` will fail the
+// build with "The export was not found in module" because Next
+// strips them out. Per-action timeout is configured on the PAGE
+// that calls finishBlockAction (cutting/[id]/page.tsx) via its
+// own `export const maxDuration = 60`.
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";

@@ -1,3 +1,11 @@
+// Vercel function timeout for THIS page's server actions
+// (finishBlockAction in particular). Default is 10s; the
+// cutting-done flow can do 20+ Supabase round-trips when the
+// operator picks many extras + transfers, which was hitting the
+// default timeout mid-commit and leaving partial state. Pro plan
+// supports up to 300s; 60s is plenty of headroom.
+export const maxDuration = 60;
+
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
