@@ -301,115 +301,160 @@ export async function finishBlockAction(formData: FormData) {
 
     const restockedIds: string[] = [];
 
+    // Per-step timing so we can spot slow ops in Vercel logs. Each
+    // labelled tic logs the wall-clock since the previous tic.
+    let tStart = Date.now();
+    const tic = (label: string) => {
+      const ms = Date.now() - tStart;
+      console.log(`[finishBlockAction] step ${label} +${ms}ms`);
+      tStart = Date.now();
+    };
+
     // Remainder block inserts are idempotent. If a previous run crashed
     // after creating them, we detect and reuse rather than error on
-    // duplicate PK.
+    // duplicate PK. We parallelise the non-existing inserts since each
+    // is independent.
     if (restock && remainders.length > 0) {
-      const ids = remainders.filter(p => p.l > 0 && p.w > 0 && p.h > 0).map(p => p.id);
+      const validPieces = remainders.filter(p => p.l > 0 && p.w > 0 && p.h > 0);
+      const ids = validPieces.map(p => p.id);
       const { data: existingRows } = await supabase
         .from("blocks")
         .select("id")
         .in("id", ids);
       const existing = new Set((existingRows ?? []).map(r => r.id));
 
-      for (const piece of remainders) {
-        if (piece.l > 0 && piece.w > 0 && piece.h > 0) {
-          if (existing.has(piece.id)) {
-            restockedIds.push(piece.id);
-            continue;
-          }
-          // Quality on the remainder — operator picks per-piece.
-          // Empty string from the form means "Both" (no preference)
-          // which we persist as NULL so the inventory dropdowns
-          // show it as unset, not as a specific grade.
-          const remainderQuality =
-            piece.quality === "A" || piece.quality === "B" ? piece.quality : null;
-          // Yard override — fall back to the parent block's yard
-          // when the client didn't pass one (older clients) or the
-          // value isn't in the allowed list.
-          const { isAllowedYard } = await import("@/lib/yards");
-          const remainderYard =
-            typeof piece.yard === "number" && isAllowedYard(piece.yard) ? piece.yard : yard;
-          const { error } = await supabase.from("blocks").insert({
-            id: piece.id,
-            stone,
-            yard: remainderYard,
-            category: "Reused",
-            length_ft: piece.l,
-            width_ft: piece.w,
-            height_ft: piece.h,
-            quality: remainderQuality,
-            status: "available",
-            created_by: profile.id,
-            updated_by: profile.id,
-          });
-          if (error) {
-            if (/duplicate key/i.test(error.message)) {
-              console.warn("[finishBlockAction] duplicate block on insert (benign)", piece.id);
-            } else {
-              console.error("[finishBlockAction] insert remainder failed", { piece, error });
-              throw new Error(`Failed to create block ${piece.id}: ${error.message}`);
-            }
-          }
+      const { isAllowedYard } = await import("@/lib/yards");
+
+      // Insert all the missing remainder rows in parallel.
+      const insertPromises: PromiseLike<{ id: string; error: string | null }>[] = [];
+      for (const piece of validPieces) {
+        if (existing.has(piece.id)) {
           restockedIds.push(piece.id);
+          continue;
         }
+        const remainderQuality =
+          piece.quality === "A" || piece.quality === "B" ? piece.quality : null;
+        const remainderYard =
+          typeof piece.yard === "number" && isAllowedYard(piece.yard) ? piece.yard : yard;
+        insertPromises.push(
+          supabase
+            .from("blocks")
+            .insert({
+              id: piece.id,
+              stone,
+              yard: remainderYard,
+              category: "Reused",
+              length_ft: piece.l,
+              width_ft: piece.w,
+              height_ft: piece.h,
+              quality: remainderQuality,
+              status: "available",
+              created_by: profile.id,
+              updated_by: profile.id,
+            })
+            .then(({ error }) => ({ id: piece.id, error: error ? error.message : null })),
+        );
       }
+      const insertResults = await Promise.all(insertPromises);
+      for (const r of insertResults) {
+        if (r.error) {
+          if (/duplicate key/i.test(r.error)) {
+            console.warn("[finishBlockAction] duplicate block on insert (benign)", r.id);
+          } else {
+            console.error("[finishBlockAction] insert remainder failed", r);
+            throw new Error(`Failed to create remainder block ${r.id}: ${r.error}`);
+          }
+        }
+        restockedIds.push(r.id);
+      }
+      tic("remainders");
     }
 
     const restockedBlockId = restockedIds.length > 0 ? restockedIds.join(",") : null;
 
-    // Mark parent block consumed.
-    const parentUpdate = await supabase
-      .from("blocks")
-      .update({ status: "consumed", updated_by: profile.id, updated_at: new Date().toISOString() })
-      .eq("id", blockId);
-    if (parentUpdate.error) {
-      console.error("[finishBlockAction] parent update error", parentUpdate.error);
-      throw new Error(`Failed to mark parent block ${blockId} consumed: ${parentUpdate.error.message}`);
-    }
+    // ── Parallelise the four independent slab updates ──────────
+    // (1) Parent block → consumed
+    // (2) Cut slabs → cut_done
+    // (3) Uncut slabs → open
+    // (4) Extra slabs → cut_done with source=this block
+    // None of these read each other; running concurrently roughly
+    // halves the round-trip count on a typical Cutting Done.
+    const nowIso = new Date().toISOString();
+    const parallelOps: PromiseLike<{ label: string; error: string | null }>[] = [];
+
+    parallelOps.push(
+      supabase
+        .from("blocks")
+        .update({ status: "consumed", updated_by: profile.id, updated_at: nowIso })
+        .eq("id", blockId)
+        .then(({ error }) => ({ label: "parent block consumed", error: error ? error.message : null })),
+    );
 
     if (cutSlabIds.length) {
-      const r = await supabase
-        .from("slab_requirements")
-        .update({ status: "cut_done", updated_by: profile.id, updated_at: new Date().toISOString() })
-        .in("id", cutSlabIds);
-      if (r.error) {
-        console.error("[finishBlockAction] cut slabs update error", r.error);
-        throw new Error(`Failed to mark slabs cut_done: ${r.error.message}`);
-      }
+      parallelOps.push(
+        supabase
+          .from("slab_requirements")
+          .update({ status: "cut_done", updated_by: profile.id, updated_at: nowIso })
+          .in("id", cutSlabIds)
+          .then(({ error }) => ({ label: "cut slabs cut_done", error: error ? error.message : null })),
+      );
     }
 
     if (notCutSlabIds.length) {
-      const r = await supabase
-        .from("slab_requirements")
-        .update({ status: "open", source_block_id: null, updated_by: profile.id, updated_at: new Date().toISOString() })
-        .in("id", notCutSlabIds);
-      if (r.error) {
-        console.error("[finishBlockAction] reset uncut slabs error", r.error);
-        throw new Error(`Failed to reset uncut slabs: ${r.error.message}`);
-      }
+      parallelOps.push(
+        supabase
+          .from("slab_requirements")
+          .update({ status: "open", source_block_id: null, updated_by: profile.id, updated_at: nowIso })
+          .in("id", notCutSlabIds)
+          .then(({ error }) => ({ label: "reset uncut slabs", error: error ? error.message : null })),
+      );
     }
 
+    // Extras update is special: needs the .select() because we
+    // assert the row count matches expectations. So it runs as
+    // its own parallelised op but with a different result shape.
+    let extrasResultPromise: PromiseLike<{ updatedCount: number; error: string | null }> | null = null;
     if (pendingExtraSlabIds.length > 0) {
-      const { data: updated, error: extraErr } = await supabase
+      extrasResultPromise = supabase
         .from("slab_requirements")
         .update({
           status: "cut_done",
           source_block_id: blockId,
           updated_by: profile.id,
-          updated_at: new Date().toISOString(),
+          updated_at: nowIso,
         })
         .in("id", pendingExtraSlabIds)
         .eq("status", "open")
-        .select("id");
-      if (extraErr) {
-        console.error("[finishBlockAction] extra slabs error", extraErr);
-        throw new Error(extraErr.message);
-      }
-      if ((updated?.length ?? 0) !== pendingExtraSlabIds.length) {
-        throw new Error("One or more unplanned slabs were already taken by another operation. Refresh and try again.");
+        .select("id")
+        .then(({ data, error }) => ({
+          updatedCount: data?.length ?? 0,
+          error: error ? error.message : null,
+        }));
+    }
+
+    const [parallelResults, extrasResult] = await Promise.all([
+      Promise.all(parallelOps),
+      extrasResultPromise ?? Promise.resolve(null),
+    ]);
+
+    for (const r of parallelResults) {
+      if (r.error) {
+        console.error(`[finishBlockAction] ${r.label} error`, r.error);
+        throw new Error(`Failed at "${r.label}": ${r.error}`);
       }
     }
+    if (extrasResult) {
+      if (extrasResult.error) {
+        console.error("[finishBlockAction] extra slabs error", extrasResult.error);
+        throw new Error(`Failed at "extra slabs cut_done": ${extrasResult.error}`);
+      }
+      if (extrasResult.updatedCount !== pendingExtraSlabIds.length) {
+        throw new Error(
+          `Some unplanned slabs (${pendingExtraSlabIds.length - extrasResult.updatedCount} of ${pendingExtraSlabIds.length}) were already taken by another operation. Refresh and try again.`,
+        );
+      }
+    }
+    tic("slab updates (parallel)");
 
     // ── Transferred slabs — claimed from another block's plan ───────
     // The operator cut a slab that was planned for a DIFFERENT block.
@@ -491,45 +536,69 @@ export async function finishBlockAction(formData: FormData) {
         byDonor.set(link.cut_session_block_id, entry);
       }
 
-      // 4. For each donor: edit layout, delete link rows, mark needs_reprint, notify
+      // 4. For each donor: edit layout, delete link rows, fire notify.
+      //    All three per-donor ops touch different tables/queues so
+      //    they can run concurrently; multiple donors run concurrently
+      //    too. Plus the transfer slab status update happens in
+      //    parallel since it touches yet another table
+      //    (slab_requirements). One big Promise.all collapses what
+      //    used to be 3N + 1 sequential round-trips into 1 wave.
       const dateStr = new Date().toISOString().slice(0, 10);
+      const donorPromises: PromiseLike<{ label: string; error: string | null }>[] = [];
       for (const [donorId, { donor, slabIds }] of byDonor) {
         const placed = (donor.layout?.placed ?? []).filter((p) => !slabIds.includes(p.id));
         const newLayout = { ...(donor.layout ?? {}), placed };
+        const reprintReason = `${slabIds.length} slab(s) transferred to ${blockId} on ${dateStr}: ${slabIds.join(", ")}`;
 
-        const { error: updErr } = await supabase
-          .from("cut_session_blocks")
-          .update({
-            layout: newLayout,
-            needs_reprint: true,
-            reprint_reason: `${slabIds.length} slab(s) transferred to ${blockId} on ${dateStr}: ${slabIds.join(", ")}`,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", donorId);
-        if (updErr) throw new Error(`Donor layout update failed: ${updErr.message}`);
-
-        await supabase
-          .from("cut_session_slabs")
-          .delete()
-          .eq("cut_session_block_id", donorId)
-          .in("slab_requirement_id", slabIds);
-
-        await notify(
-          "slab_transferred_from",
-          `${slabIds.length} slab(s) moved away from ${donor.block_id}`,
-          {
-            message: `Claimed by ${blockId}: ${slabIds.join(", ")}. Reprint plan before cutting.`,
-            entityType: "cut_session_block",
-            entityId: donorId,
-            actorId: profile.id,
-            targetRoles: ["cutting_operator", "team_head", "developer"],
-          },
+        donorPromises.push(
+          supabase
+            .from("cut_session_blocks")
+            .update({
+              layout: newLayout,
+              needs_reprint: true,
+              reprint_reason: reprintReason,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", donorId)
+            .then(({ error }) => ({
+              label: `donor ${donor.block_id} layout edit`,
+              error: error ? error.message : null,
+            })),
+          supabase
+            .from("cut_session_slabs")
+            .delete()
+            .eq("cut_session_block_id", donorId)
+            .in("slab_requirement_id", slabIds)
+            .then(({ error }) => ({
+              label: `donor ${donor.block_id} link delete`,
+              error: error ? error.message : null,
+            })),
+          notify(
+            "slab_transferred_from",
+            `${slabIds.length} slab(s) moved away from ${donor.block_id}`,
+            {
+              message: `Claimed by ${blockId}: ${slabIds.join(", ")}. Reprint plan before cutting.`,
+              entityType: "cut_session_block",
+              entityId: donorId,
+              actorId: profile.id,
+              targetRoles: ["cutting_operator", "team_head", "developer"],
+            },
+          ).then(
+            () => ({ label: `donor ${donor.block_id} notify`, error: null }),
+            (e: unknown) => ({
+              label: `donor ${donor.block_id} notify`,
+              // Notify failure is non-fatal — log it but don't block the cut.
+              error: null as null,
+              warn: e instanceof Error ? e.message : String(e),
+            }),
+          ),
         );
       }
 
-      // 5. Update slab_requirements: planned → cut_done. Race guard
-      //    via .eq("status","planned") so a stale request can't double-claim.
-      const { data: transferUpdated, error: transferUpdErr } = await supabase
+      // Transfer slab status update — runs in parallel with donor edits.
+      // Race guard: .eq("status","planned") so a stale request can't
+      // double-claim a slab.
+      const transferUpdatePromise = supabase
         .from("slab_requirements")
         .update({
           status: "cut_done",
@@ -539,18 +608,38 @@ export async function finishBlockAction(formData: FormData) {
         })
         .in("id", pendingTransferredSlabIds)
         .eq("status", "planned")
-        .select("id");
-      if (transferUpdErr) throw new Error(`Transfer update failed: ${transferUpdErr.message}`);
-      if ((transferUpdated?.length ?? 0) !== pendingTransferredSlabIds.length) {
+        .select("id")
+        .then(({ data, error }) => ({
+          updatedCount: data?.length ?? 0,
+          error: error ? error.message : null,
+        }));
+
+      const [donorResults, transferResult] = await Promise.all([
+        Promise.all(donorPromises),
+        transferUpdatePromise,
+      ]);
+      for (const r of donorResults) {
+        if (r.error) {
+          console.error(`[finishBlockAction] ${r.label} error`, r.error);
+          throw new Error(`Failed at "${r.label}": ${r.error}`);
+        }
+      }
+      if (transferResult.error) {
+        console.error("[finishBlockAction] transfer status update error", transferResult.error);
+        throw new Error(`Failed at "transfer slabs cut_done": ${transferResult.error}`);
+      }
+      if (transferResult.updatedCount !== pendingTransferredSlabIds.length) {
         throw new Error(
-          "Some transferred slabs were already cut or rejected by another operator. Refresh and retry.",
+          `Some transferred slabs (${pendingTransferredSlabIds.length - transferResult.updatedCount} of ${pendingTransferredSlabIds.length}) were already cut or rejected by another operator. Refresh and retry.`,
         );
       }
+      tic("transfers + donor edits (parallel)");
 
-      await logAudit(profile.id, "slab_transferred_in", "cut_session_block", sessionBlockId, {
+      // Audit for the transfer — fire-and-forget so it doesn't block.
+      logAudit(profile.id, "slab_transferred_in", "cut_session_block", sessionBlockId, {
         transferred_slabs: transferredSlabIds,
         donors: [...byDonor.keys()],
-      });
+      }).catch((e) => console.warn("[finishBlockAction] audit slab_transferred_in failed (non-fatal)", e));
     }
 
     // Critical: mark the cut as done. Try WITH updated_by first — if the
@@ -589,34 +678,48 @@ export async function finishBlockAction(formData: FormData) {
       console.error("[finishBlockAction] done update error", doneErr.error);
       throw new Error(`Failed to mark cut as done: ${doneErr.error.message}`);
     }
+    tic("cut_session_block done flip");
 
+    // ── Critical path complete — the block is now officially done. ──
+    // Everything below is bookkeeping (audit log, notification feed,
+    // session-status sync, path revalidation). Run them in parallel
+    // and treat individual failures as warnings, not errors — none of
+    // them affect the integrity of the cut record itself, but we still
+    // want to await before redirect so the next page render sees fresh
+    // data.
     const hasDeviation = extraSlabIds.length > 0 || transferredSlabIds.length > 0;
-    await logAudit(
-      profile.id,
-      hasDeviation ? "cutting_done_with_deviation" : "cutting_done",
-      "cut_session_block",
-      sessionBlockId,
-      {
-        session_id: sessionId,
-        block_id: blockId,
-        cut_slabs: cutSlabIds,
-        not_cut_slabs: notCutSlabIds,
-        restocked_blocks: restockedIds,
-        restock,
-        ...(extraSlabIds.length > 0 ? { extra_slabs: extraSlabIds } : {}),
-        ...(transferredSlabIds.length > 0 ? { transferred_slabs: transferredSlabIds } : {}),
-      },
-    );
-
-    await notify("cut_done", `Block ${blockId} cutting completed`, {
-      message: `${cutSlabIds.length} slab(s) cut${restockedIds.length > 0 ? ` · ${restockedIds.length} restocked` : ""}${extraSlabIds.length > 0 ? ` · ${extraSlabIds.length} unplanned` : ""}${transferredSlabIds.length > 0 ? ` · ${transferredSlabIds.length} transferred from other plans` : ""}`,
-      entityType: "cut_session_block",
-      entityId: sessionBlockId,
-      actorId: profile.id,
-    });
-
-    await syncSessionStatus(sessionId);
+    const cleanupResults = await Promise.allSettled([
+      logAudit(
+        profile.id,
+        hasDeviation ? "cutting_done_with_deviation" : "cutting_done",
+        "cut_session_block",
+        sessionBlockId,
+        {
+          session_id: sessionId,
+          block_id: blockId,
+          cut_slabs: cutSlabIds,
+          not_cut_slabs: notCutSlabIds,
+          restocked_blocks: restockedIds,
+          restock,
+          ...(extraSlabIds.length > 0 ? { extra_slabs: extraSlabIds } : {}),
+          ...(transferredSlabIds.length > 0 ? { transferred_slabs: transferredSlabIds } : {}),
+        },
+      ),
+      notify("cut_done", `Block ${blockId} cutting completed`, {
+        message: `${cutSlabIds.length} slab(s) cut${restockedIds.length > 0 ? ` · ${restockedIds.length} restocked` : ""}${extraSlabIds.length > 0 ? ` · ${extraSlabIds.length} unplanned` : ""}${transferredSlabIds.length > 0 ? ` · ${transferredSlabIds.length} transferred from other plans` : ""}`,
+        entityType: "cut_session_block",
+        entityId: sessionBlockId,
+        actorId: profile.id,
+      }),
+      syncSessionStatus(sessionId),
+    ]);
+    for (const r of cleanupResults) {
+      if (r.status === "rejected") {
+        console.warn("[finishBlockAction] post-done cleanup task failed (non-fatal)", r.reason);
+      }
+    }
     await refreshPaths();
+    tic("cleanup tasks (parallel)");
     console.log("[finishBlockAction] SUCCESS", { sessionBlockId, blockId });
   } catch (err) {
     // Don't swallow Next's redirect signal — let it propagate so the

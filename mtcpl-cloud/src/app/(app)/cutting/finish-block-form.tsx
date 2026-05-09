@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { ALLOWED_YARDS, yardLabel } from "@/lib/yards";
 import { ExtraSizePicker } from "./extra-size-picker";
 
@@ -74,6 +74,13 @@ export function FinishBlockForm({
   // toggle handlers still route to the right set so submission is
   // unchanged downstream.
   const [transferIds, setTransferIds] = useState<Set<string>>(new Set());
+  // Submit / error state. Server action throws on failure; we catch
+  // here so the operator sees the actual message ("transfer slabs
+  // cut_done failed: …") instead of Next's generic "server error"
+  // page. Transition keeps the click responsive while the action
+  // runs (which can be a few seconds).
+  const [submitting, startSubmit] = useTransition();
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   function toggle(id: string) {
     setCheckedIds((prev) => {
@@ -178,20 +185,56 @@ export function FinishBlockForm({
   // If any selected transfer-slab is from a 'cutting' donor (operator
   // is actively cutting that block right now), require explicit
   // confirmation before submitting. Less risky donor states (pending)
-  // submit silently.
-  function confirmIfCuttingDonors(e: React.FormEvent) {
+  // submit silently. Returns true if the operator confirmed (or no
+  // confirmation needed); false if they cancelled.
+  function confirmIfCuttingDonors(): boolean {
     const selectedFromCutting = transferableSlabs.filter(
       (s) => transferIds.has(s.id) && s.donor_status === "cutting",
     );
-    if (selectedFromCutting.length > 0) {
-      const list = selectedFromCutting
-        .map((s) => `  · ${s.id} (from ${s.donor_block_id})`)
-        .join("\n");
-      const ok = confirm(
-        `⚠ ${selectedFromCutting.length} slab(s) you're claiming are from blocks that are CURRENTLY BEING CUT:\n\n${list}\n\nClaiming will modify their plans and require a reprint. Continue?`,
-      );
-      if (!ok) e.preventDefault();
-    }
+    if (selectedFromCutting.length === 0) return true;
+    const list = selectedFromCutting
+      .map((s) => `  · ${s.id} (from ${s.donor_block_id})`)
+      .join("\n");
+    return confirm(
+      `⚠ ${selectedFromCutting.length} slab(s) you're claiming are from blocks that are CURRENTLY BEING CUT:\n\n${list}\n\nClaiming will modify their plans and require a reprint. Continue?`,
+    );
+  }
+
+  // Submit handler — wraps finishAction in useTransition so we can
+  // catch errors (currently the action throws on failure → Next.js
+  // shows a generic "server error" page with no diagnostic info).
+  // We intercept the throw, extract the message, and display it
+  // inline so the operator sees exactly what failed.
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>, restock: "yes" | "no") {
+    e.preventDefault();
+    if (!confirmIfCuttingDonors()) return;
+    setSubmitError(null);
+    const formData = new FormData(e.currentTarget);
+    // Make sure the right restock flag is on the form
+    formData.set("restock", restock);
+    startSubmit(async () => {
+      try {
+        await finishAction(formData);
+        // Action ends with redirect() which throws NEXT_REDIRECT;
+        // Next.js intercepts the throw and navigates the browser.
+        // If the await returns normally, we never reached the
+        // redirect — that's an unexpected success path; just reload.
+      } catch (err) {
+        // Next.js redirect signal: rethrow so the framework navigates.
+        if (
+          err &&
+          typeof err === "object" &&
+          "digest" in err &&
+          typeof (err as { digest?: unknown }).digest === "string" &&
+          (err as { digest: string }).digest.startsWith("NEXT_REDIRECT")
+        ) {
+          throw err;
+        }
+        const msg = err instanceof Error ? err.message : String(err);
+        setSubmitError(msg);
+        console.error("[FinishBlockForm] submit failed", err);
+      }
+    });
   }
 
   return (
@@ -406,25 +449,59 @@ export function FinishBlockForm({
         )}
       </div>
 
+      {/* Submit error banner — surfaces the actual server-action
+          failure inline so the operator can see what went wrong
+          (and we can debug it) instead of a generic 500 page. */}
+      {submitError && (
+        <div
+          role="alert"
+          style={{
+            padding: "12px 14px",
+            background: "rgba(220,38,38,0.08)",
+            border: "1.5px solid #dc2626",
+            borderLeft: "5px solid #b91c1c",
+            borderRadius: 8,
+            color: "#7f1d1d",
+            fontSize: 13,
+            lineHeight: 1.5,
+          }}
+        >
+          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>
+            ⚠ Cutting Done failed — your selections are still here, retry below
+          </div>
+          <div style={{ fontFamily: "ui-monospace, monospace", fontSize: 12, marginBottom: 6, wordBreak: "break-word" }}>
+            {submitError}
+          </div>
+          <div style={{ fontSize: 12, color: "#444" }}>
+            The action is now idempotent — clicking Done again will pick up where it left off without
+            duplicating any slab updates.
+          </div>
+        </div>
+      )}
+
       {/* Action buttons */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {validRemainders.length > 0 ? (
           <>
-            <form action={finishAction} onSubmit={confirmIfCuttingDonors}>
+            <form onSubmit={(e) => handleSubmit(e, "yes")}>
               {hiddenInputs("yes")}
-              <button className="primary-button" type="submit">
-                Done &amp; Restock ({validRemainders.length} piece{validRemainders.length > 1 ? "s" : ""})
+              <button className="primary-button" type="submit" disabled={submitting}>
+                {submitting ? "Submitting…" : `Done & Restock (${validRemainders.length} piece${validRemainders.length > 1 ? "s" : ""})`}
               </button>
             </form>
-            <form action={finishAction} onSubmit={confirmIfCuttingDonors}>
+            <form onSubmit={(e) => handleSubmit(e, "no")}>
               {hiddenInputs("no")}
-              <button className="secondary-button" type="submit">Done &amp; Discard</button>
+              <button className="secondary-button" type="submit" disabled={submitting}>
+                {submitting ? "Submitting…" : "Done & Discard"}
+              </button>
             </form>
           </>
         ) : (
-          <form action={finishAction} onSubmit={confirmIfCuttingDonors}>
+          <form onSubmit={(e) => handleSubmit(e, "no")}>
             {hiddenInputs("no")}
-            <button className="primary-button" type="submit">Done</button>
+            <button className="primary-button" type="submit" disabled={submitting}>
+              {submitting ? "Submitting…" : "Done"}
+            </button>
           </form>
         )}
       </div>
