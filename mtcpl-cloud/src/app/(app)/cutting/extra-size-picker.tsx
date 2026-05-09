@@ -283,26 +283,137 @@ export function ExtraSizePicker({
         </div>
       </div>
 
-      {/* Selected summary outside the modal so the operator can
-          see what they've already added at a glance even when the
-          modal is closed. */}
-      {totalSelected > 0 && (
-        <div
-          className="muted"
-          style={{ fontSize: 11, marginTop: 8, padding: "0 4px", lineHeight: 1.5 }}
-        >
-          <strong style={{ color: "var(--text)" }}>{totalSelected}</strong> slab
-          {totalSelected === 1 ? "" : "s"} will be marked as cut from this block:
-          {selectedExtraIds.size > 0 && (
-            <> {selectedExtraIds.size} from open inventory</>
-          )}
-          {selectedExtraIds.size > 0 && selectedTransferIds.size > 0 && ","}
-          {selectedTransferIds.size > 0 && (
-            <> {selectedTransferIds.size} claimed from another block&rsquo;s plan</>
-          )}
-          .
-        </div>
-      )}
+      {/* Selected slab chips outside the modal so the operator can
+          see EXACTLY which slabs will be added without re-opening
+          the picker. Open-inventory slabs render in green; planned
+          (claimed-from-another-block) slabs render in red with
+          their donor block id appended. Click an X on any chip to
+          unselect it without re-opening the modal. */}
+      {totalSelected > 0 && (() => {
+        const openItems = items.filter(
+          (i): i is OpenSlabItem & { kind: "open" } =>
+            i.kind === "open" && selectedExtraIds.has(i.id),
+        );
+        const plannedItems = items.filter(
+          (i): i is TransferableSlabItem & { kind: "planned" } =>
+            i.kind === "planned" && selectedTransferIds.has(i.id),
+        );
+        return (
+          <div
+            style={{
+              marginTop: 10,
+              padding: "10px 12px",
+              background: "rgba(22,101,52,0.04)",
+              border: "1px solid rgba(22,101,52,0.20)",
+              borderRadius: 6,
+            }}
+          >
+            <div className="muted" style={{ fontSize: 11, marginBottom: 6, lineHeight: 1.4 }}>
+              <strong style={{ color: "#15803d" }}>{totalSelected}</strong> slab
+              {totalSelected === 1 ? "" : "s"} queued — will be cut from this block when you click Done:
+              {selectedExtraIds.size > 0 && (
+                <> <strong style={{ color: "#15803d" }}>{selectedExtraIds.size}</strong> from open inventory</>
+              )}
+              {selectedExtraIds.size > 0 && selectedTransferIds.size > 0 && " · "}
+              {selectedTransferIds.size > 0 && (
+                <>
+                  {" "}
+                  <strong style={{ color: "#b91c1c" }}>{selectedTransferIds.size}</strong> claimed from another block&rsquo;s plan
+                </>
+              )}
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+              {openItems.map((s) => (
+                <span
+                  key={`open-${s.id}`}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 5,
+                    fontSize: 11,
+                    padding: "3px 8px",
+                    background: "rgba(22,101,52,0.10)",
+                    color: "#15803d",
+                    border: "1px solid rgba(22,101,52,0.30)",
+                    borderRadius: 4,
+                    fontFamily: "ui-monospace, monospace",
+                    fontWeight: 600,
+                  }}
+                >
+                  {s.id}
+                  <span style={{ color: "var(--muted)", fontWeight: 500 }}>
+                    {s.length_ft}×{s.width_ft}″
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onToggleExtra(s.id)}
+                    title="Remove"
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      color: "#15803d",
+                      cursor: "pointer",
+                      padding: 0,
+                      fontSize: 13,
+                      lineHeight: 1,
+                      marginLeft: 2,
+                    }}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+              {plannedItems.map((s) => {
+                const badge = donorStatusBadge(s.donor_status);
+                return (
+                  <span
+                    key={`planned-${s.id}`}
+                    title={`From ${s.donor_block_id} · ${badge.label}`}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 5,
+                      fontSize: 11,
+                      padding: "3px 8px",
+                      background: "rgba(220,38,38,0.08)",
+                      color: "#b91c1c",
+                      border: "1px solid rgba(220,38,38,0.35)",
+                      borderRadius: 4,
+                      fontFamily: "ui-monospace, monospace",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {s.id}
+                    <span style={{ color: "var(--muted)", fontWeight: 500 }}>
+                      {s.length_ft}×{s.width_ft}″
+                    </span>
+                    <span style={{ color: "var(--muted)", fontWeight: 500 }}>
+                      ← {s.donor_block_id}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => onToggleTransfer(s.id)}
+                      title="Remove"
+                      style={{
+                        background: "transparent",
+                        border: "none",
+                        color: "#b91c1c",
+                        cursor: "pointer",
+                        padding: 0,
+                        fontSize: 13,
+                        lineHeight: 1,
+                        marginLeft: 2,
+                      }}
+                    >
+                      ×
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Center-peek modal */}
       {open && (

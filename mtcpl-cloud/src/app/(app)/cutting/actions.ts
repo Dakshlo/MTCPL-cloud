@@ -1,5 +1,12 @@
 "use server";
 
+// Vercel function timeout for this server-actions module. The
+// default is 10 seconds; finishBlockAction can do 20+ Supabase
+// round-trips when the operator picks many extras + transfers
+// simultaneously, which was timing out and leaving partial
+// commits. Pro plan allows up to 300s; 60s is plenty.
+export const maxDuration = 60;
+
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
@@ -259,6 +266,38 @@ export async function finishBlockAction(formData: FormData) {
       redirect("/cutting?tab=done");
     }
 
+    // ── Idempotency pre-flight ────────────────────────────────────
+    // Previous timeouts left this action in a partial-commit state:
+    // some slabs were already moved to cut_done with
+    // source_block_id=blockId, but the cut_session_block flip
+    // never happened, so the operator retried. Without this check
+    // the retry crashes ("slab already taken by another operation")
+    // because the .eq("status","open") race guards see them as
+    // unavailable. We trim already-done IDs out of the to-do list
+    // so retries pick up where the previous attempt left off.
+    const allInputIds = [...extraSlabIds, ...transferredSlabIds];
+    const alreadyDoneFromThisBlock = new Set<string>();
+    if (allInputIds.length > 0) {
+      const { data: prior } = await supabase
+        .from("slab_requirements")
+        .select("id, status, source_block_id")
+        .in("id", allInputIds);
+      for (const row of prior ?? []) {
+        if (row.status === "cut_done" && row.source_block_id === blockId) {
+          alreadyDoneFromThisBlock.add(row.id);
+        }
+      }
+    }
+    const pendingExtraSlabIds = extraSlabIds.filter((id) => !alreadyDoneFromThisBlock.has(id));
+    const pendingTransferredSlabIds = transferredSlabIds.filter((id) => !alreadyDoneFromThisBlock.has(id));
+    if (alreadyDoneFromThisBlock.size > 0) {
+      console.log("[finishBlockAction] resuming partial commit", {
+        alreadyDone: [...alreadyDoneFromThisBlock],
+        remainingExtras: pendingExtraSlabIds,
+        remainingTransfers: pendingTransferredSlabIds,
+      });
+    }
+
     const restockedIds: string[] = [];
 
     // Remainder block inserts are idempotent. If a previous run crashed
@@ -350,7 +389,7 @@ export async function finishBlockAction(formData: FormData) {
       }
     }
 
-    if (extraSlabIds.length > 0) {
+    if (pendingExtraSlabIds.length > 0) {
       const { data: updated, error: extraErr } = await supabase
         .from("slab_requirements")
         .update({
@@ -359,14 +398,14 @@ export async function finishBlockAction(formData: FormData) {
           updated_by: profile.id,
           updated_at: new Date().toISOString(),
         })
-        .in("id", extraSlabIds)
+        .in("id", pendingExtraSlabIds)
         .eq("status", "open")
         .select("id");
       if (extraErr) {
         console.error("[finishBlockAction] extra slabs error", extraErr);
         throw new Error(extraErr.message);
       }
-      if ((updated?.length ?? 0) !== extraSlabIds.length) {
+      if ((updated?.length ?? 0) !== pendingExtraSlabIds.length) {
         throw new Error("One or more unplanned slabs were already taken by another operation. Refresh and try again.");
       }
     }
@@ -383,7 +422,7 @@ export async function finishBlockAction(formData: FormData) {
     //   5. Update slab_requirements: status='cut_done', source_block_id
     //      = THIS block (with .eq("status","planned") race guard).
     //   6. Notify donor's operators via realtime + notification bell.
-    if (transferredSlabIds.length > 0) {
+    if (pendingTransferredSlabIds.length > 0) {
       const { canTransferPlannedSlabs } = await import("@/lib/cutting-permissions");
       if (!canTransferPlannedSlabs(profile)) {
         throw new Error(
@@ -398,9 +437,9 @@ export async function finishBlockAction(formData: FormData) {
           id, cut_session_block_id, slab_requirement_id,
           block:cut_session_blocks(id, status, layout, block_id)
         `)
-        .in("slab_requirement_id", transferredSlabIds);
+        .in("slab_requirement_id", pendingTransferredSlabIds);
       if (donorErr) throw new Error(`Donor lookup failed: ${donorErr.message}`);
-      if (!donorLinks || donorLinks.length !== transferredSlabIds.length) {
+      if (!donorLinks || donorLinks.length !== pendingTransferredSlabIds.length) {
         throw new Error(
           "One or more transferred slabs are no longer planned anywhere — refresh and retry.",
         );
@@ -497,11 +536,11 @@ export async function finishBlockAction(formData: FormData) {
           updated_by: profile.id,
           updated_at: new Date().toISOString(),
         })
-        .in("id", transferredSlabIds)
+        .in("id", pendingTransferredSlabIds)
         .eq("status", "planned")
         .select("id");
       if (transferUpdErr) throw new Error(`Transfer update failed: ${transferUpdErr.message}`);
-      if ((transferUpdated?.length ?? 0) !== transferredSlabIds.length) {
+      if ((transferUpdated?.length ?? 0) !== pendingTransferredSlabIds.length) {
         throw new Error(
           "Some transferred slabs were already cut or rejected by another operator. Refresh and retry.",
         );
