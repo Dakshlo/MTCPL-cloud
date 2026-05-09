@@ -245,440 +245,108 @@ export async function finishBlockAction(formData: FormData) {
   });
 
   try {
-    // If a previous attempt already marked this block "done" but then
-    // something later failed (and left the UI unable to navigate), this
-    // retry should short-circuit to the redirect. Otherwise we keep
-    // going.
-    const { data: currentState, error: stateErr } = await supabase
-      .from("cut_session_blocks")
-      .select("status, restocked_block_id")
-      .eq("id", sessionBlockId)
-      .maybeSingle();
-    if (stateErr) {
-      console.error("[finishBlockAction] state check error", stateErr);
-      throw new Error(`Could not read cut state: ${stateErr.message}`);
-    }
-    if (!currentState) {
-      throw new Error(`Cut session block ${sessionBlockId} not found.`);
-    }
-    if (currentState.status === "done") {
-      console.log("[finishBlockAction] already done — skipping to redirect");
-      await refreshPaths();
-      redirect("/cutting?tab=done");
-    }
-
-    // ── Idempotency pre-flight ────────────────────────────────────
-    // Previous timeouts left this action in a partial-commit state:
-    // some slabs were already moved to cut_done with
-    // source_block_id=blockId, but the cut_session_block flip
-    // never happened, so the operator retried. Without this check
-    // the retry crashes ("slab already taken by another operation")
-    // because the .eq("status","open") race guards see them as
-    // unavailable. We trim already-done IDs out of the to-do list
-    // so retries pick up where the previous attempt left off.
-    const allInputIds = [...extraSlabIds, ...transferredSlabIds];
-    const alreadyDoneFromThisBlock = new Set<string>();
-    if (allInputIds.length > 0) {
-      const { data: prior } = await supabase
-        .from("slab_requirements")
-        .select("id, status, source_block_id")
-        .in("id", allInputIds);
-      for (const row of prior ?? []) {
-        if (row.status === "cut_done" && row.source_block_id === blockId) {
-          alreadyDoneFromThisBlock.add(row.id);
-        }
-      }
-    }
-    const pendingExtraSlabIds = extraSlabIds.filter((id) => !alreadyDoneFromThisBlock.has(id));
-    const pendingTransferredSlabIds = transferredSlabIds.filter((id) => !alreadyDoneFromThisBlock.has(id));
-    if (alreadyDoneFromThisBlock.size > 0) {
-      console.log("[finishBlockAction] resuming partial commit", {
-        alreadyDone: [...alreadyDoneFromThisBlock],
-        remainingExtras: pendingExtraSlabIds,
-        remainingTransfers: pendingTransferredSlabIds,
-      });
-    }
-
-    const restockedIds: string[] = [];
-
-    // Per-step timing so we can spot slow ops in Vercel logs. Each
-    // labelled tic logs the wall-clock since the previous tic.
-    let tStart = Date.now();
-    const tic = (label: string) => {
-      const ms = Date.now() - tStart;
-      console.log(`[finishBlockAction] step ${label} +${ms}ms`);
-      tStart = Date.now();
-    };
-
-    // Remainder block inserts are idempotent. If a previous run crashed
-    // after creating them, we detect and reuse rather than error on
-    // duplicate PK. We parallelise the non-existing inserts since each
-    // is independent.
-    if (restock && remainders.length > 0) {
-      const validPieces = remainders.filter(p => p.l > 0 && p.w > 0 && p.h > 0);
-      const ids = validPieces.map(p => p.id);
-      const { data: existingRows } = await supabase
-        .from("blocks")
-        .select("id")
-        .in("id", ids);
-      const existing = new Set((existingRows ?? []).map(r => r.id));
-
-      const { isAllowedYard } = await import("@/lib/yards");
-
-      // Insert all the missing remainder rows in parallel.
-      const insertPromises: PromiseLike<{ id: string; error: string | null }>[] = [];
-      for (const piece of validPieces) {
-        if (existing.has(piece.id)) {
-          restockedIds.push(piece.id);
-          continue;
-        }
-        const remainderQuality =
-          piece.quality === "A" || piece.quality === "B" ? piece.quality : null;
-        const remainderYard =
-          typeof piece.yard === "number" && isAllowedYard(piece.yard) ? piece.yard : yard;
-        insertPromises.push(
-          supabase
-            .from("blocks")
-            .insert({
-              id: piece.id,
-              stone,
-              yard: remainderYard,
-              category: "Reused",
-              length_ft: piece.l,
-              width_ft: piece.w,
-              height_ft: piece.h,
-              quality: remainderQuality,
-              status: "available",
-              created_by: profile.id,
-              updated_by: profile.id,
-            })
-            .then(({ error }) => ({ id: piece.id, error: error ? error.message : null })),
-        );
-      }
-      const insertResults = await Promise.all(insertPromises);
-      for (const r of insertResults) {
-        if (r.error) {
-          if (/duplicate key/i.test(r.error)) {
-            console.warn("[finishBlockAction] duplicate block on insert (benign)", r.id);
-          } else {
-            console.error("[finishBlockAction] insert remainder failed", r);
-            throw new Error(`Failed to create remainder block ${r.id}: ${r.error}`);
-          }
-        }
-        restockedIds.push(r.id);
-      }
-      tic("remainders");
-    }
-
-    const restockedBlockId = restockedIds.length > 0 ? restockedIds.join(",") : null;
-
-    // ── Parallelise the four independent slab updates ──────────
-    // (1) Parent block → consumed
-    // (2) Cut slabs → cut_done
-    // (3) Uncut slabs → open
-    // (4) Extra slabs → cut_done with source=this block
-    // None of these read each other; running concurrently roughly
-    // halves the round-trip count on a typical Cutting Done.
-    const nowIso = new Date().toISOString();
-    const parallelOps: PromiseLike<{ label: string; error: string | null }>[] = [];
-
-    parallelOps.push(
-      supabase
-        .from("blocks")
-        .update({ status: "consumed", updated_by: profile.id, updated_at: nowIso })
-        .eq("id", blockId)
-        .then(({ error }) => ({ label: "parent block consumed", error: error ? error.message : null })),
-    );
-
-    if (cutSlabIds.length) {
-      parallelOps.push(
-        supabase
-          .from("slab_requirements")
-          .update({ status: "cut_done", updated_by: profile.id, updated_at: nowIso })
-          .in("id", cutSlabIds)
-          .then(({ error }) => ({ label: "cut slabs cut_done", error: error ? error.message : null })),
-      );
-    }
-
-    if (notCutSlabIds.length) {
-      parallelOps.push(
-        supabase
-          .from("slab_requirements")
-          .update({ status: "open", source_block_id: null, updated_by: profile.id, updated_at: nowIso })
-          .in("id", notCutSlabIds)
-          .then(({ error }) => ({ label: "reset uncut slabs", error: error ? error.message : null })),
-      );
-    }
-
-    // Extras update is special: needs the .select() because we
-    // assert the row count matches expectations. So it runs as
-    // its own parallelised op but with a different result shape.
-    let extrasResultPromise: PromiseLike<{ updatedCount: number; error: string | null }> | null = null;
-    if (pendingExtraSlabIds.length > 0) {
-      extrasResultPromise = supabase
-        .from("slab_requirements")
-        .update({
-          status: "cut_done",
-          source_block_id: blockId,
-          updated_by: profile.id,
-          updated_at: nowIso,
-        })
-        .in("id", pendingExtraSlabIds)
-        .eq("status", "open")
-        .select("id")
-        .then(({ data, error }) => ({
-          updatedCount: data?.length ?? 0,
-          error: error ? error.message : null,
-        }));
-    }
-
-    const [parallelResults, extrasResult] = await Promise.all([
-      Promise.all(parallelOps),
-      extrasResultPromise ?? Promise.resolve(null),
-    ]);
-
-    for (const r of parallelResults) {
-      if (r.error) {
-        console.error(`[finishBlockAction] ${r.label} error`, r.error);
-        throw new Error(`Failed at "${r.label}": ${r.error}`);
-      }
-    }
-    if (extrasResult) {
-      if (extrasResult.error) {
-        console.error("[finishBlockAction] extra slabs error", extrasResult.error);
-        throw new Error(`Failed at "extra slabs cut_done": ${extrasResult.error}`);
-      }
-      if (extrasResult.updatedCount !== pendingExtraSlabIds.length) {
-        throw new Error(
-          `Some unplanned slabs (${pendingExtraSlabIds.length - extrasResult.updatedCount} of ${pendingExtraSlabIds.length}) were already taken by another operation. Refresh and try again.`,
-        );
-      }
-    }
-    tic("slab updates (parallel)");
-
-    // ── Transferred slabs — claimed from another block's plan ───────
-    // The operator cut a slab that was planned for a DIFFERENT block.
-    // Permission-gated: only developer + specific named owners (Naresh,
-    // Rajesh Kumar) per cutting-permissions.ts. Atomic side effects:
-    //   1. Validate each slab is planned + on a donor block in
-    //      pending_worker or cutting state.
-    //   2. Strip the slab from each donor's layout.placed[] array.
-    //   3. Delete the donor's cut_session_slabs link row.
-    //   4. Mark donor.needs_reprint=TRUE with a reason string.
-    //   5. Update slab_requirements: status='cut_done', source_block_id
-    //      = THIS block (with .eq("status","planned") race guard).
-    //   6. Notify donor's operators via realtime + notification bell.
-    if (pendingTransferredSlabIds.length > 0) {
+    // Permission gate for transfers — the PG function trusts callers
+    // (it's SECURITY DEFINER), so the auth check has to live here.
+    if (transferredSlabIds.length > 0) {
       const { canTransferPlannedSlabs } = await import("@/lib/cutting-permissions");
       if (!canTransferPlannedSlabs(profile)) {
         throw new Error(
           "You do not have permission to transfer slabs from another block's plan. Contact a developer or authorised owner.",
         );
       }
+    }
 
-      // 1. Look up donor link rows for each transferred slab
-      const { data: donorLinks, error: donorErr } = await supabase
-        .from("cut_session_slabs")
-        .select(`
-          id, cut_session_block_id, slab_requirement_id,
-          block:cut_session_blocks(id, status, layout, block_id)
-        `)
-        .in("slab_requirement_id", pendingTransferredSlabIds);
-      if (donorErr) throw new Error(`Donor lookup failed: ${donorErr.message}`);
-      if (!donorLinks || donorLinks.length !== pendingTransferredSlabIds.length) {
-        throw new Error(
-          "One or more transferred slabs are no longer planned anywhere — refresh and retry.",
-        );
-      }
+    // ── ATOMIC RPC ───────────────────────────────────────────────
+    // Everything below — remainder inserts, parent block update,
+    // slab status flips, donor layout edits, transfer link
+    // teardown, cut_session_block done flip — runs as ONE Postgres
+    // function call inside ONE transaction. Single round-trip,
+    // single timeout window, single rollback boundary. Replaces
+    // ~18 sequential round-trips that were causing recurring
+    // partial-commit timeouts on the cutting floor.
+    //
+    // Migration 018_finish_block_cut_rpc.sql installs the function.
+    // Run the migration in Supabase SQL Editor before this code
+    // hits production.
+    const tStart = Date.now();
+    const { data: rpcData, error: rpcErr } = await supabase.rpc("finish_block_cut", {
+      p_session_block_id: sessionBlockId,
+      p_session_id: sessionId,
+      p_block_id: blockId,
+      p_stone: stone,
+      p_yard: yard,
+      p_actor: profile.id,
+      p_cut_slab_ids: cutSlabIds,
+      p_not_cut_slab_ids: notCutSlabIds,
+      p_extra_slab_ids: extraSlabIds,
+      p_transferred_slab_ids: transferredSlabIds,
+      // Pass remainders as-is — the PG function reads l/w/h/quality/yard/id off each.
+      p_remainders: remainders,
+      p_restock: restock,
+    });
+    console.log(`[finishBlockAction] RPC finish_block_cut returned in ${Date.now() - tStart}ms`);
 
-      // 2. Validate every donor is in pending_worker | pending_cut | cutting
-      type DonorBlockLite = {
-        id: string;
-        status: string;
-        layout: { blk?: unknown; placed?: Array<{ id: string }> } | null;
-        block_id: string;
-      };
-      type DonorLinkRow = {
-        id: string;
-        cut_session_block_id: string;
-        slab_requirement_id: string;
-        block: DonorBlockLite | DonorBlockLite[] | null;
-      };
-      const linkRows = donorLinks as unknown as DonorLinkRow[];
-      function asBlock(b: DonorBlockLite | DonorBlockLite[] | null): DonorBlockLite | null {
-        if (!b) return null;
-        return Array.isArray(b) ? b[0] ?? null : b;
-      }
-      for (const link of linkRows) {
-        const donor = asBlock(link.block);
-        if (!donor) {
-          throw new Error(`Slab ${link.slab_requirement_id} has no donor block — cannot transfer.`);
-        }
-        if (donor.status !== "pending_worker" && donor.status !== "pending_cut" && donor.status !== "cutting") {
-          throw new Error(
-            `Slab ${link.slab_requirement_id} cannot be transferred — donor block is in '${donor.status}' state.`,
-          );
-        }
-        if (link.cut_session_block_id === sessionBlockId) {
-          throw new Error(
-            `Slab ${link.slab_requirement_id} is already on this block — cannot transfer to itself.`,
-          );
-        }
-      }
+    if (rpcErr) {
+      console.error("[finishBlockAction] RPC error", rpcErr);
+      // Surface the PG function's RAISE EXCEPTION message verbatim
+      // so the operator sees what actually failed.
+      throw new Error(rpcErr.message ?? "Cutting Done RPC failed without a message.");
+    }
 
-      // 3. Group by donor block — one layout-edit per donor
-      const byDonor = new Map<string, { donor: DonorBlockLite; slabIds: string[] }>();
-      for (const link of linkRows) {
-        const donor = asBlock(link.block);
-        if (!donor) continue;
-        const entry = byDonor.get(link.cut_session_block_id) ?? { donor, slabIds: [] };
-        entry.slabIds.push(link.slab_requirement_id);
-        byDonor.set(link.cut_session_block_id, entry);
-      }
+    const result = (rpcData ?? {}) as {
+      success?: boolean;
+      already_done?: boolean;
+      restocked_block_id?: string | null;
+      restocked_count?: number;
+      extras_committed?: number;
+      transfers_committed?: number;
+      transfer_donor_blocks?: string[];
+      transfer_donor_session_block_ids?: string[];
+      already_done_slab_ids?: string[];
+    };
 
-      // 4. For each donor: edit layout, delete link rows, fire notify.
-      //    All three per-donor ops touch different tables/queues so
-      //    they can run concurrently; multiple donors run concurrently
-      //    too. Plus the transfer slab status update happens in
-      //    parallel since it touches yet another table
-      //    (slab_requirements). One big Promise.all collapses what
-      //    used to be 3N + 1 sequential round-trips into 1 wave.
-      const dateStr = new Date().toISOString().slice(0, 10);
-      const donorPromises: PromiseLike<{ label: string; error: string | null }>[] = [];
-      for (const [donorId, { donor, slabIds }] of byDonor) {
-        const placed = (donor.layout?.placed ?? []).filter((p) => !slabIds.includes(p.id));
-        const newLayout = { ...(donor.layout ?? {}), placed };
-        const reprintReason = `${slabIds.length} slab(s) transferred to ${blockId} on ${dateStr}: ${slabIds.join(", ")}`;
+    if (result.already_done) {
+      console.log("[finishBlockAction] block was already done — skipping cleanup");
+      await refreshPaths();
+      redirect("/cutting?tab=done");
+    }
 
-        donorPromises.push(
-          supabase
-            .from("cut_session_blocks")
-            .update({
-              layout: newLayout,
-              needs_reprint: true,
-              reprint_reason: reprintReason,
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", donorId)
-            .then(({ error }) => ({
-              label: `donor ${donor.block_id} layout edit`,
-              error: error ? error.message : null,
-            })),
-          supabase
-            .from("cut_session_slabs")
-            .delete()
-            .eq("cut_session_block_id", donorId)
-            .in("slab_requirement_id", slabIds)
-            .then(({ error }) => ({
-              label: `donor ${donor.block_id} link delete`,
-              error: error ? error.message : null,
-            })),
-          notify(
+    // Reconstruct the values the cleanup phase needs.
+    const restockedBlockId = result.restocked_block_id ?? null;
+    const restockedIds: string[] = restockedBlockId ? restockedBlockId.split(",").filter(Boolean) : [];
+    const transferDonorBlocks = result.transfer_donor_blocks ?? [];
+    const transferDonorCsbIds = result.transfer_donor_session_block_ids ?? [];
+
+    // Fire-and-forget donor notifications outside the critical path.
+    // The PG function already flipped donor needs_reprint=true so the
+    // banner shows even if these notify calls fail.
+    if (transferDonorCsbIds.length > 0) {
+      void Promise.all(
+        transferDonorCsbIds.map((donorId, i) => {
+          const donorBlockId = transferDonorBlocks[i] ?? donorId;
+          return notify(
             "slab_transferred_from",
-            `${slabIds.length} slab(s) moved away from ${donor.block_id}`,
+            `Slab(s) moved away from ${donorBlockId}`,
             {
-              message: `Claimed by ${blockId}: ${slabIds.join(", ")}. Reprint plan before cutting.`,
+              message: `Claimed by ${blockId}. Reprint plan before cutting.`,
               entityType: "cut_session_block",
               entityId: donorId,
               actorId: profile.id,
               targetRoles: ["cutting_operator", "team_head", "developer"],
             },
-          ).then(
-            () => ({ label: `donor ${donor.block_id} notify`, error: null }),
-            (e: unknown) => ({
-              label: `donor ${donor.block_id} notify`,
-              // Notify failure is non-fatal — log it but don't block the cut.
-              error: null as null,
-              warn: e instanceof Error ? e.message : String(e),
-            }),
-          ),
-        );
-      }
+          ).catch((e) =>
+            console.warn(`[finishBlockAction] donor ${donorBlockId} notify failed (non-fatal)`, e),
+          );
+        }),
+      );
 
-      // Transfer slab status update — runs in parallel with donor edits.
-      // Race guard: .eq("status","planned") so a stale request can't
-      // double-claim a slab.
-      const transferUpdatePromise = supabase
-        .from("slab_requirements")
-        .update({
-          status: "cut_done",
-          source_block_id: blockId,
-          updated_by: profile.id,
-          updated_at: new Date().toISOString(),
-        })
-        .in("id", pendingTransferredSlabIds)
-        .eq("status", "planned")
-        .select("id")
-        .then(({ data, error }) => ({
-          updatedCount: data?.length ?? 0,
-          error: error ? error.message : null,
-        }));
-
-      const [donorResults, transferResult] = await Promise.all([
-        Promise.all(donorPromises),
-        transferUpdatePromise,
-      ]);
-      for (const r of donorResults) {
-        if (r.error) {
-          console.error(`[finishBlockAction] ${r.label} error`, r.error);
-          throw new Error(`Failed at "${r.label}": ${r.error}`);
-        }
-      }
-      if (transferResult.error) {
-        console.error("[finishBlockAction] transfer status update error", transferResult.error);
-        throw new Error(`Failed at "transfer slabs cut_done": ${transferResult.error}`);
-      }
-      if (transferResult.updatedCount !== pendingTransferredSlabIds.length) {
-        throw new Error(
-          `Some transferred slabs (${pendingTransferredSlabIds.length - transferResult.updatedCount} of ${pendingTransferredSlabIds.length}) were already cut or rejected by another operator. Refresh and retry.`,
-        );
-      }
-      tic("transfers + donor edits (parallel)");
-
-      // Audit for the transfer — fire-and-forget so it doesn't block.
+      // Audit the transfer-in event (fire-and-forget).
       logAudit(profile.id, "slab_transferred_in", "cut_session_block", sessionBlockId, {
         transferred_slabs: transferredSlabIds,
-        donors: [...byDonor.keys()],
+        donor_blocks: transferDonorBlocks,
+        donor_session_block_ids: transferDonorCsbIds,
       }).catch((e) => console.warn("[finishBlockAction] audit slab_transferred_in failed (non-fatal)", e));
     }
-
-    // Critical: mark the cut as done. Try WITH updated_by first — if the
-    // column doesn't exist on cut_session_blocks (possible given the
-    // schema.sql is out of date with prod), fall back to a minimal
-    // update that just sets the status + restocked_block_id.
-    let doneErr = await supabase
-      .from("cut_session_blocks")
-      .update({
-        status: "done",
-        restocked_block_id: restockedBlockId,
-        // Free up the cutter sequence number so it can be reused by
-        // the next block that enters cutting state.
-        cutting_seq: null,
-        // Reprint flag is irrelevant once the block is done.
-        needs_reprint: false,
-        reprint_reason: null,
-        updated_by: profile.id,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", sessionBlockId);
-
-    if (doneErr.error && /updated_by|cutting_seq|needs_reprint|column/i.test(doneErr.error.message)) {
-      console.warn("[finishBlockAction] some columns not accepted on cut_session_blocks, retrying with minimal set", doneErr.error.message);
-      doneErr = await supabase
-        .from("cut_session_blocks")
-        .update({
-          status: "done",
-          restocked_block_id: restockedBlockId,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", sessionBlockId);
-    }
-
-    if (doneErr.error) {
-      console.error("[finishBlockAction] done update error", doneErr.error);
-      throw new Error(`Failed to mark cut as done: ${doneErr.error.message}`);
-    }
-    tic("cut_session_block done flip");
 
     // ── Critical path complete — the block is now officially done. ──
     // Everything below is bookkeeping (audit log, notification feed,
@@ -719,7 +387,6 @@ export async function finishBlockAction(formData: FormData) {
       }
     }
     await refreshPaths();
-    tic("cleanup tasks (parallel)");
     console.log("[finishBlockAction] SUCCESS", { sessionBlockId, blockId });
   } catch (err) {
     // Don't swallow Next's redirect signal — let it propagate so the
