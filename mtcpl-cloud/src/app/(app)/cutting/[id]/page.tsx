@@ -92,13 +92,32 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
   const [profilesMap, { data: stoneTypes }, { data: openSlabs }, transferableSlabs, { data: parentBlock }] = await Promise.all([
     getProfilesMap(),
     createAdminSupabaseClient().from("stone_types").select("id, name, color_top, color_front, color_side").order("name"),
+    // Paginated fetch so the "Add unplanned slab" picker sees the
+    // full open-slab pool. The previous single .select() was capped
+    // at PostgREST's default 1000 rows — once a stone had >1000
+    // open requirements, older slabs (e.g. MH-0015, MH-0035 family)
+    // silently dropped off and operators reported "I can see it on
+    // /slabs but not in the picker". Walks 1000-row pages up to
+    // 50000 rows (way past any realistic backlog).
     blockStone
-      ? supabase
-          .from("slab_requirements")
-          .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft")
-          .eq("status", "open")
-          .eq("stone", blockStone)
-          .order("created_at", { ascending: false })
+      ? (async () => {
+          const PAGE = 1000;
+          const all: SlabRow[] = [];
+          for (let offset = 0; offset < 50000; offset += PAGE) {
+            const { data, error: pageErr } = await supabase
+              .from("slab_requirements")
+              .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft")
+              .eq("status", "open")
+              .eq("stone", blockStone)
+              .order("created_at", { ascending: false })
+              .range(offset, offset + PAGE - 1);
+            if (pageErr) throw new Error(pageErr.message);
+            if (!data || data.length === 0) break;
+            all.push(...(data as SlabRow[]));
+            if (data.length < PAGE) break;
+          }
+          return { data: all };
+        })()
       : Promise.resolve({ data: [] as SlabRow[] }),
     // Candidate planned slabs from OTHER cutting blocks. Only fetched
     // for users with transfer permission (canTransferPlannedSlabs);
