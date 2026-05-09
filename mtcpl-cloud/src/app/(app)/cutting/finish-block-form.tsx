@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ALLOWED_YARDS, yardLabel } from "@/lib/yards";
+import { ExtraSizePicker } from "./extra-size-picker";
 
 type PlacedSlab = {
   id: string;
@@ -67,18 +68,12 @@ export function FinishBlockForm({
   );
   const [remainders, setRemainders] = useState<RemainderEntry[]>([]);
   const [extraIds, setExtraIds] = useState<Set<string>>(new Set());
-  const [extraFilter, setExtraFilter] = useState("");
-  const [showExtra, setShowExtra] = useState(false);
   // Selected transfer slabs — kept separate from extraIds because the
-  // server action splits open vs planned via two different formData fields.
+  // server action splits open vs planned via two different formData
+  // fields. The combined ExtraSizePicker shows them merged but
+  // toggle handlers still route to the right set so submission is
+  // unchanged downstream.
   const [transferIds, setTransferIds] = useState<Set<string>>(new Set());
-  // The transferable-slabs panel is a sharp tool (donor blocks get their
-  // plans modified + a reprint banner). Default-collapse it so the long
-  // list doesn't dominate the form when the operator just wants to mark
-  // their planned slabs cut. Auto-stays-open if the operator has already
-  // selected something to transfer (so they don't lose visibility on a
-  // selection mid-edit).
-  const [showTransfer, setShowTransfer] = useState(false);
 
   function toggle(id: string) {
     setCheckedIds((prev) => {
@@ -199,26 +194,6 @@ export function FinishBlockForm({
     }
   }
 
-  const filteredOpenSlabs = openSlabs.filter((s) => {
-    if (!extraFilter) return true;
-    const q = extraFilter.toLowerCase();
-    return (
-      s.id.toLowerCase().includes(q) ||
-      (s.temple ?? "").toLowerCase().includes(q) ||
-      (s.label ?? "").toLowerCase().includes(q)
-    );
-  });
-  const filteredTransferableSlabs = transferableSlabs.filter((s) => {
-    if (!extraFilter) return true;
-    const q = extraFilter.toLowerCase();
-    return (
-      s.id.toLowerCase().includes(q) ||
-      (s.temple ?? "").toLowerCase().includes(q) ||
-      (s.label ?? "").toLowerCase().includes(q) ||
-      s.donor_block_id.toLowerCase().includes(q)
-    );
-  });
-
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 8 }}>
       {/* Slab checklist — bilingual header for floor staff */}
@@ -268,260 +243,25 @@ export function FinishBlockForm({
         )}
       </div>
 
-      {/* Unplanned slabs (deviation picker) — bilingual header */}
-      {openSlabs.length > 0 && (
-        <div style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, padding: "12px 14px" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: showExtra ? 10 : 0 }}>
-            <div>
-              <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text)", lineHeight: 1.2 }}>
-                ➕ Extra kata hua size
-                {extraIds.size > 0 && (
-                  <span className="role-pill badge-available" style={{ fontSize: 10, marginLeft: 8, verticalAlign: "middle" }}>
-                    {extraIds.size} selected
-                  </span>
-                )}
-              </div>
-              <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-                जो slabs plan में नहीं थीं पर इस block से extra काटी गयीं — open inventory से चुनें
-              </div>
-            </div>
-            <button
-              type="button"
-              className="ghost-button"
-              style={{ fontSize: 12, padding: "4px 12px", whiteSpace: "nowrap" }}
-              onClick={() => setShowExtra((v) => !v)}
-            >
-              {showExtra ? "− Hide" : "+ Add unplanned slab"}
-            </button>
-          </div>
-
-          {showExtra && (
-            <>
-              <input
-                type="text"
-                placeholder="Filter by ID, temple, label…"
-                value={extraFilter}
-                onChange={(e) => setExtraFilter(e.target.value)}
-                style={{
-                  width: "100%",
-                  fontSize: 13,
-                  marginBottom: 8,
-                  boxSizing: "border-box",
-                  border: "1px solid var(--border)",
-                  borderRadius: 5,
-                  padding: "6px 10px",
-                  background: "var(--bg)",
-                  color: "var(--text)",
-                  outline: "none",
-                }}
-              />
-              <div style={{ maxHeight: 220, overflowY: "auto", display: "flex", flexDirection: "column", gap: 5 }}>
-                {filteredOpenSlabs.length === 0 ? (
-                  <p className="muted" style={{ fontSize: 12 }}>No matching slabs found.</p>
-                ) : (
-                  filteredOpenSlabs.map((slab) => (
-                    <label
-                      key={slab.id}
-                      style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13 }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={extraIds.has(slab.id)}
-                        onChange={() => toggleExtra(slab.id)}
-                        style={{ width: 15, height: 15, cursor: "pointer" }}
-                      />
-                      <code style={{ fontSize: 12, fontWeight: 600 }}>{slab.id}</code>
-                      {slab.temple && (
-                        <span className="muted" style={{ fontSize: 11 }}>
-                          {slab.temple}{slab.label && slab.label !== slab.temple ? ` · ${slab.label}` : ""}
-                        </span>
-                      )}
-                      <span className="muted" style={{ fontSize: 11 }}>
-                        {slab.length_ft}×{slab.width_ft}×{slab.thickness_ft} in
-                      </span>
-                      {extraIds.has(slab.id) && (
-                        <span className="role-pill badge-available" style={{ fontSize: 10, marginLeft: "auto" }}>
-                          Added ✓
-                        </span>
-                      )}
-                    </label>
-                  ))
-                )}
-              </div>
-              {extraIds.size > 0 && (
-                <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>
-                  {extraIds.size} unplanned slab{extraIds.size > 1 ? "s" : ""} will be marked as cut from this block.
-                </p>
-              )}
-            </>
-          )}
-        </div>
+      {/* Combined picker — Open inventory + Claim-from-another-block
+          merged into one center-peek modal. Replaces the previous
+          two inline sections so the Done button stays above the
+          fold and operators don't have to search the same slab id
+          in two places. The picker handles search (id / temple /
+          label / size / donor block), selected-on-top sorting, and
+          status badges for planned rows. Submission split is still
+          done internally via extraIds vs transferIds. */}
+      {(openSlabs.length > 0 || (allowTransfer && transferableSlabs.length > 0)) && (
+        <ExtraSizePicker
+          openSlabs={openSlabs}
+          transferableSlabs={transferableSlabs}
+          allowTransfer={allowTransfer}
+          selectedExtraIds={extraIds}
+          selectedTransferIds={transferIds}
+          onToggleExtra={toggleExtra}
+          onToggleTransfer={toggleTransfer}
+        />
       )}
-
-      {/* Transferable planned slabs — claim from another block's plan.
-       *  Only visible to permitted users (canTransferPlannedSlabs check).
-       *  Sharp tool: the donor block's plan gets edited and operators
-       *  there see a "needs reprint" banner. Confirm dialog fires on
-       *  submit if any selected slab's donor is currently 'cutting'. */}
-      {allowTransfer && transferableSlabs.length > 0 && (() => {
-        // Auto-expand whenever the operator has at least one transfer
-        // selected, so a fresh re-render (e.g. after toggling a checkbox)
-        // can't accidentally hide their selection.
-        const isOpen = showTransfer || transferIds.size > 0;
-        return (
-        <div
-          style={{
-            background: "rgba(180,83,9,0.04)",
-            border: "1px solid rgba(180,83,9,0.25)",
-            borderLeft: "3px solid #b45309",
-            borderRadius: 8,
-            padding: "10px 14px",
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => setShowTransfer((v) => !v)}
-            aria-expanded={isOpen}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 8,
-              flexWrap: "wrap",
-              width: "100%",
-              padding: 0,
-              background: "transparent",
-              border: "none",
-              cursor: "pointer",
-              textAlign: "left",
-              color: "inherit",
-            }}
-          >
-            <div>
-              <p style={{ fontSize: 12, fontWeight: 700, margin: 0, color: "#b45309", display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ fontSize: 10, opacity: 0.7 }}>{isOpen ? "▾" : "▸"}</span>
-                ⚠ Claim from another block&rsquo;s plan
-                <span className="muted" style={{ fontSize: 11, fontWeight: 500 }}>
-                  ({transferableSlabs.length} available)
-                </span>
-                {transferIds.size > 0 && (
-                  <span
-                    style={{
-                      fontSize: 10,
-                      fontWeight: 700,
-                      color: "#fff",
-                      background: "#b45309",
-                      padding: "2px 7px",
-                      borderRadius: 4,
-                    }}
-                  >
-                    {transferIds.size} selected
-                  </span>
-                )}
-              </p>
-              {isOpen && (
-                <p className="muted" style={{ fontSize: 11, margin: "3px 0 0", lineHeight: 1.5 }}>
-                  Use only if you cut a slab from THIS block that was originally
-                  planned for another block. The donor block&rsquo;s plan will be
-                  modified and they&rsquo;ll be asked to reprint.
-                </p>
-              )}
-            </div>
-          </button>
-
-          {isOpen && (<>
-          <div
-            style={{
-              maxHeight: 220,
-              overflowY: "auto",
-              display: "flex",
-              flexDirection: "column",
-              gap: 4,
-              border: "1px solid var(--border-light)",
-              borderRadius: 6,
-              padding: 6,
-              background: "var(--surface)",
-              marginTop: 8,
-            }}
-          >
-            {filteredTransferableSlabs.length === 0 ? (
-              <p className="muted" style={{ fontSize: 12, padding: 8, margin: 0 }}>
-                {extraFilter ? "No matching planned slabs." : "No planned slabs available to claim."}
-              </p>
-            ) : (
-              filteredTransferableSlabs.map((slab) => {
-                const checked = transferIds.has(slab.id);
-                const donorPill =
-                  slab.donor_status === "cutting"
-                    ? { label: "🚨 CUTTING NOW", color: "#b91c1c", bg: "rgba(220,38,38,0.1)", border: "rgba(220,38,38,0.4)" }
-                    : slab.donor_status === "pending_cut"
-                      ? { label: "⏱ WAITING TO CUT", color: "#b45309", bg: "rgba(180,83,9,0.1)", border: "rgba(180,83,9,0.4)" }
-                      : { label: "📋 PENDING APPROVAL", color: "#7c3aed", bg: "rgba(124,58,237,0.1)", border: "rgba(124,58,237,0.4)" };
-                return (
-                  <label
-                    key={slab.id}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      cursor: "pointer",
-                      fontSize: 13,
-                      padding: "6px 8px",
-                      background: checked ? "rgba(180,83,9,0.08)" : "transparent",
-                      borderRadius: 4,
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggleTransfer(slab.id)}
-                      style={{ width: 15, height: 15, cursor: "pointer" }}
-                    />
-                    <code style={{ fontSize: 12, fontWeight: 700 }}>{slab.id}</code>
-                    {slab.temple && (
-                      <span className="muted" style={{ fontSize: 11 }}>
-                        {slab.temple}
-                        {slab.label && slab.label !== slab.temple ? ` · ${slab.label}` : ""}
-                      </span>
-                    )}
-                    <span className="muted" style={{ fontSize: 11, fontFamily: "ui-monospace, monospace" }}>
-                      {slab.length_ft}×{slab.width_ft}×{slab.thickness_ft} in
-                    </span>
-                    <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
-                      <span className="muted" style={{ fontSize: 10, fontFamily: "ui-monospace, monospace" }}>
-                        from {slab.donor_block_id}
-                      </span>
-                      <span
-                        style={{
-                          fontSize: 9,
-                          fontWeight: 700,
-                          color: donorPill.color,
-                          background: donorPill.bg,
-                          border: `1px solid ${donorPill.border}`,
-                          padding: "1px 6px",
-                          borderRadius: 3,
-                          letterSpacing: "0.04em",
-                        }}
-                      >
-                        {donorPill.label}
-                      </span>
-                    </span>
-                  </label>
-                );
-              })
-            )}
-          </div>
-          {transferIds.size > 0 && (
-            <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>
-              {transferIds.size} planned slab{transferIds.size > 1 ? "s" : ""} will be transferred to this block.
-              Donor blocks will be marked &ldquo;needs reprint&rdquo;.
-            </p>
-          )}
-          </>)}
-        </div>
-        );
-      })()}
 
       {/* Remaining block pieces — bilingual header + per-row Grade
           selector. Operator can override the parent block's grade
