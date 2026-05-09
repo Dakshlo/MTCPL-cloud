@@ -209,7 +209,20 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
     }
     return out;
   }
-  const allRows = await fetchAllBlocks();
+  const allRowsRaw = await fetchAllBlocks();
+  // Float blocks with needs_reprint=true to the top of the active
+  // tabs so the donor operator sees the "PLAN MODIFIED" surface
+  // first when they open /cutting. Within each priority bucket the
+  // existing updated_at ordering is preserved (stable sort).
+  // Done tab is exempt — those blocks are already finished and
+  // the reprint flag would have been cleared by finishBlockAction.
+  const allRows = activeTab === "done"
+    ? allRowsRaw
+    : [...allRowsRaw].sort((a, b) => {
+        const aP = a.needs_reprint ? 1 : 0;
+        const bP = b.needs_reprint ? 1 : 0;
+        return bP - aP; // needs_reprint=true first
+      });
   const rows = activeTab === "done" ? allRows.filter(b => b.status !== "rejected") : allRows;
   const rejectedRows = activeTab === "done" ? allRows.filter(b => b.status === "rejected") : [];
 
@@ -481,7 +494,21 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                   const useActual = isDoneStatus && ((actualSlabs?.length ?? 0) > 0 || (actualRemainders?.length ?? 0) > 0);
 
                   return (
-                    <div className="plan-card" key={block.id} style={isUrgent ? { borderLeft: "4px solid #DC2626", background: "rgba(220,38,38,0.10)" } : {}}>
+                    <div
+                      className="plan-card"
+                      key={block.id}
+                      style={
+                        block.needs_reprint
+                          ? {
+                              borderLeft: "6px solid #dc2626",
+                              background: "rgba(220,38,38,0.07)",
+                              boxShadow: "0 2px 10px rgba(220,38,38,0.12)",
+                            }
+                          : isUrgent
+                            ? { borderLeft: "4px solid #DC2626", background: "rgba(220,38,38,0.10)" }
+                            : {}
+                      }
+                    >
                 <div
                   className="record-head"
                   style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-start" }}
@@ -550,18 +577,19 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                         <span
                           title={block.reprint_reason ?? ""}
                           style={{
-                            fontSize: 10,
-                            fontWeight: 700,
-                            color: "#b45309",
-                            background: "rgba(180,83,9,0.12)",
-                            border: "1px solid rgba(180,83,9,0.35)",
-                            padding: "2px 7px",
+                            fontSize: 12,
+                            fontWeight: 800,
+                            color: "#fff",
+                            background: "#dc2626",
+                            border: "1px solid #b91c1c",
+                            padding: "3px 10px",
                             borderRadius: 4,
                             letterSpacing: "0.05em",
                             marginLeft: 8,
+                            boxShadow: "0 2px 6px rgba(220,38,38,0.30)",
                           }}
                         >
-                          ⚠ NEEDS REPRINT
+                          🚨 REPRINT NEEDED
                         </span>
                       )}
                       {isUrgent && (
