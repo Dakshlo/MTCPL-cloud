@@ -551,33 +551,56 @@ export async function approveCarvingJobAction(formData: FormData) {
 
   const { data: job } = await admin
     .from("carving_items")
-    .select("id, slab_requirement_id, completed_at")
+    .select("id, slab_requirement_id, completed_at, temporary_location, location")
     .eq("id", jobId)
-    .single();
+    .maybeSingle();
 
   if (!job) redirect("/carving?toast=Job+not+found");
-  if (!job.completed_at) redirect(`/carving/${jobId}?toast=Vendor+hasn%27t+marked+it+complete+yet`);
+  const j = job as {
+    id: string;
+    slab_requirement_id: string;
+    completed_at: string | null;
+    temporary_location: string | null;
+    location: string | null;
+  };
+  if (!j.completed_at) redirect(`/carving/${jobId}?toast=Vendor+hasn%27t+marked+it+complete+yet`);
 
-  // Approval moves the job to "Carving Done" — it does NOT yet make the
-  // slab visible in the Dispatch Station. The team still needs to record
-  // a physical location and click "Ready to Dispatch" before the slab
-  // shows up there. That's why we no longer flip slab.status to
-  // 'completed' here — markReadyToDispatchAction does that.
+  // Phase 3 simplification: approval now auto-marks the slab as
+  // ready-for-dispatch using the vendor's temporary_location (set
+  // when they unloaded). The "enter a location and click Ready to
+  // Dispatch" intermediate step is gone — Carving Done items appear
+  // in the Dispatch Station's Ready tab immediately.
+  const now = new Date().toISOString();
+  const finalLocation = j.temporary_location ?? j.location ?? "Carving area";
+
   await admin
     .from("carving_items")
     .update({
-      review_approved_at: new Date().toISOString(),
+      review_approved_at: now,
       review_approved_by: profile.id,
       review_notes: notes,
       status: "completed",
+      location: finalLocation,
+      ready_to_dispatch_at: now,
+      ready_to_dispatch_by: profile.id,
     })
     .eq("id", jobId);
 
-  await recordEvent(jobId, "approved", profile.id, notes || "Approved by team — awaiting location + ready-to-dispatch");
-  await logAudit(profile.id, "carving_approved", "carving_item", jobId, { slab_id: job.slab_requirement_id });
+  // Flip the slab to 'completed' so it surfaces in the Dispatch
+  // Station "Ready" tab.
+  await admin
+    .from("slab_requirements")
+    .update({ status: "completed", updated_by: profile.id, updated_at: now })
+    .eq("id", j.slab_requirement_id);
+
+  await recordEvent(jobId, "approved", profile.id, `Approved + ready for dispatch · ${finalLocation}${notes ? ` · ${notes}` : ""}`);
+  await logAudit(profile.id, "carving_approved", "carving_item", jobId, {
+    slab_id: j.slab_requirement_id,
+    location: finalLocation,
+  });
 
   refreshAll();
-  redirect(`/carving/${jobId}?toast=Approved+%E2%80%94+set+location+to+continue`);
+  redirect(`/carving/${jobId}?toast=Approved+%E2%80%94+ready+for+dispatch`);
 }
 
 export async function markReadyToDispatchAction(formData: FormData) {

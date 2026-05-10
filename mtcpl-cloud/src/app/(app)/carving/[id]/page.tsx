@@ -7,7 +7,6 @@ import { ConfirmButton } from "@/components/confirm-button";
 import {
   approveCarvingJobAction,
   rejectCarvingJobAction,
-  markReadyToDispatchAction,
   updateCarvingLocationAction,
   cancelCarvingJobAction,
 } from "../actions";
@@ -257,40 +256,18 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
                 </>
               )}
 
-              {/* Carving Done — approved but not yet ready for dispatch.
-                  Operator must enter the slab's physical location (could
-                  be inside the facility, at a vendor's yard, in transit
-                  back, etc.) before clicking "Ready to Dispatch", which
-                  is what makes it visible in the Dispatch Station. */}
-              {approved && !readyToDispatch && !dispatched && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  <div style={{ padding: "8px 12px", background: "rgba(180,115,51,0.08)", border: "1px solid rgba(180,115,51,0.2)", borderRadius: 6, fontSize: 12, color: "var(--gold-dark)" }}>
-                    ✔ Approved — now record where the slab is and mark it ready for dispatch.
-                  </div>
-                  <form action={markReadyToDispatchAction} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <input type="hidden" name="job_id" value={jobRow.id} />
-                    <input
-                      type="text"
-                      name="location"
-                      required
-                      placeholder="Slab location (e.g. Yard 3, Vendor's facility, Truck #UP14-7821)"
-                      defaultValue={jobRow.location ?? ""}
-                      style={{ fontSize: 12, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
-                    />
-                    <button type="submit" className="primary-button" style={{ fontSize: 12, padding: "8px 14px" }}>
-                      🚚 Ready to Dispatch
-                    </button>
-                  </form>
-                </div>
-              )}
-
-              {/* Ready to dispatch — visible in Dispatch Station. Show
-                  the location they recorded and let them edit it without
-                  un-readying the slab. */}
-              {readyToDispatch && !dispatched && (
+              {/* Approved — auto-marked ready for dispatch. The slab
+                  appears in the Dispatch Station Ready tab right away;
+                  the carving head can still tweak the location text
+                  here without affecting the dispatch flow. */}
+              {(approved || readyToDispatch) && !dispatched && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   <div style={{ padding: "10px 14px", background: "rgba(22,163,74,0.08)", border: "1px solid rgba(22,163,74,0.2)", borderRadius: 6, fontSize: 12, color: "#15803d", fontWeight: 600 }}>
-                    ✓ Ready for dispatch — visible in <Link href="/dispatch" style={{ color: "#15803d", textDecoration: "underline" }}>Dispatch Station</Link>.
+                    ✓ Approved & ready for dispatch — visible in{" "}
+                    <Link href="/dispatch" style={{ color: "#15803d", textDecoration: "underline" }}>
+                      Dispatch Station
+                    </Link>
+                    .
                   </div>
                   <form action={updateCarvingLocationAction} style={{ display: "flex", gap: 6 }}>
                     <input type="hidden" name="job_id" value={jobRow.id} />

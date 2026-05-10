@@ -1,23 +1,37 @@
 "use client";
 
 /**
- * Assign-to-vendor modal — Phase 3 (CNC ops).
+ * Assign-to-vendor — Phase 3 (CNC ops), center-peek dialog.
  *
- * Carving head picks a CNC vendor from the live list (each row shows
- * "X/Y free · Z queued"), marks urgency, optionally enters a rough
- * estimated time. Machine selection is NOT here — the vendor (CNC
- * supervisor) decides which machine to load it on later. If all the
- * vendor's machines are busy, the slab still goes to that vendor's
- * queue and gets loaded as machines free up.
+ * Carving head:
+ *   1. Picks a CNC vendor from the live list (each row shows
+ *      "X/Y free · Z queued").
+ *   2. After picking, sees a grid of THAT vendor's machines colour-
+ *      coded by status — gives them an at-a-glance read on which
+ *      machines will pick this slab up vs whether it'll go to a
+ *      queue. (They don't pick the machine; the vendor does.)
+ *   3. Marks urgency, optionally enters a rough estimated time
+ *      (days + hours since carving runs span hours to multi-day).
+ *
+ * Renders as a center-peek modal (matches the dashboard ID-lookup +
+ * settings PeekSection style) — feels native on big monitors and
+ * fits on tablets that the carving head walks around with.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { assignCarvingJobAction } from "./actions";
+
+type Machine = {
+  id: string;
+  machine_code: string;
+  status: "idle" | "carving" | "maintenance" | "inactive";
+};
 
 type Vendor = {
   id: string;
   name: string;
   vendor_type: "CNC" | "Manual";
+  machines: Machine[];
   live?: {
     free: number;
     busy: number;
@@ -37,6 +51,13 @@ type Slab = {
   thickness_ft: number;
 };
 
+const MACHINE_TINT: Record<Machine["status"], { bg: string; border: string; fg: string; label: string }> = {
+  idle: { bg: "rgba(22,163,74,0.1)", border: "rgba(22,163,74,0.4)", fg: "#15803d", label: "FREE" },
+  carving: { bg: "rgba(37,99,235,0.08)", border: "rgba(37,99,235,0.4)", fg: "#1d4ed8", label: "CARVING" },
+  maintenance: { bg: "rgba(220,38,38,0.08)", border: "rgba(220,38,38,0.4)", fg: "#b91c1c", label: "MAINT" },
+  inactive: { bg: "var(--surface-alt)", border: "var(--border)", fg: "var(--muted)", label: "OFF" },
+};
+
 export function AssignModal({
   slab,
   vendors,
@@ -48,20 +69,32 @@ export function AssignModal({
 }) {
   const [vendorId, setVendorId] = useState<string>("");
   const [urgency, setUrgency] = useState<"normal" | "urgent">("normal");
+  const [days, setDays] = useState<string>("");
   const [hours, setHours] = useState<string>("");
-  const [minutes, setMinutes] = useState<string>("");
   const [note, setNote] = useState("");
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // Esc closes
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   const selectedVendor = vendors.find((v) => v.id === vendorId);
 
   // Sort vendors so ones with idle capacity bubble to the top —
-  // carving head can scan the list and grab a free vendor fast.
+  // carving head can scan and grab a free vendor fast.
   const sortedVendors = useMemo(() => {
     return [...vendors].sort((a, b) => {
       const aFree = a.live?.free ?? 0;
       const bFree = b.live?.free ?? 0;
       if (aFree !== bFree) return bFree - aFree;
-      // Then by queue depth ascending (less backlog = better choice)
       const aQ = a.live?.queued ?? 0;
       const bQ = b.live?.queued ?? 0;
       if (aQ !== bQ) return aQ - bQ;
@@ -69,32 +102,97 @@ export function AssignModal({
     });
   }, [vendors]);
 
-  const totalMinutes = (Number(hours) || 0) * 60 + (Number(minutes) || 0);
+  // Compute total minutes from days + hours inputs.
+  // Note: `name="estimated_minutes"` on a hidden input feeds the
+  // server action — that field continues to take minutes so the DB
+  // stores a single normalised unit.
+  const totalMinutes = (Number(days) || 0) * 60 * 24 + (Number(hours) || 0) * 60;
 
   return (
-    <>
-      <div className="drawer-backdrop" onClick={onClose} />
-      <div className="edit-drawer" style={{ maxWidth: 520 }}>
-        <div className="drawer-header">
-          <div>
-            <div className="drawer-title">Assign carving job</div>
-            <code className="drawer-subtitle">{slab.id}</code>
-            <p className="muted" style={{ margin: "4px 0 0", fontSize: 12 }}>
+    <div
+      onMouseDown={(e) => {
+        if (dialogRef.current && !dialogRef.current.contains(e.target as Node)) {
+          onClose();
+        }
+      }}
+      style={{
+        position: "fixed",
+        top: 0,
+        left: "var(--content-left)",
+        right: 0,
+        bottom: 0,
+        background: "rgba(15, 12, 6, 0.55)",
+        backdropFilter: "blur(2px)",
+        zIndex: 1000,
+        display: "flex",
+        alignItems: "flex-start",
+        justifyContent: "center",
+        paddingTop: "6vh",
+        paddingLeft: 12,
+        paddingRight: 12,
+      }}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        style={{
+          background: "var(--surface)",
+          border: "1px solid var(--border)",
+          borderRadius: 12,
+          boxShadow: "0 18px 60px rgba(0,0,0,0.45)",
+          width: "100%",
+          maxWidth: 720,
+          maxHeight: "88vh",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
+        {/* Header */}
+        <div
+          style={{
+            padding: "14px 18px",
+            borderBottom: "1px solid var(--border)",
+            background: "var(--bg)",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            gap: 12,
+          }}
+        >
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <h2 style={{ margin: 0, fontSize: 17 }}>Assign carving job</h2>
+            <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>
+              <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>{slab.id}</code>
+              {" · "}
               {slab.temple} · {slab.label} · {slab.length_ft}×{slab.width_ft}×{slab.thickness_ft}&Prime;
             </p>
           </div>
-          <button className="drawer-close" onClick={onClose}>✕</button>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              fontSize: 18,
+              border: "none",
+              background: "transparent",
+              cursor: "pointer",
+              color: "var(--muted)",
+              padding: 4,
+            }}
+            aria-label="Close"
+          >
+            ✕
+          </button>
         </div>
 
-        <div className="drawer-body">
+        <div style={{ flex: 1, overflowY: "auto", padding: "14px 18px 18px" }}>
           <form action={assignCarvingJobAction} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <input type="hidden" name="slab_id" value={slab.id} />
 
-            {/* Vendor picker — list of cards, each shows live capacity */}
+            {/* Vendor list */}
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                CNC vendor
-              </span>
+              <Label>CNC vendor</Label>
               {sortedVendors.length === 0 ? (
                 <div className="muted" style={{ padding: 12, fontSize: 13 }}>
                   No active CNC vendors. Add one in <strong>Manage Vendors</strong>.
@@ -183,29 +281,101 @@ export function AssignModal({
                   })}
                 </div>
               )}
-              {selectedVendor && (selectedVendor.live?.free ?? 0) === 0 && (
+            </div>
+
+            {/* Per-machine breakdown for the selected vendor */}
+            {selectedVendor && (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                  padding: 10,
+                  background: "var(--surface-alt)",
+                  border: "1px dashed var(--border)",
+                  borderRadius: 8,
+                }}
+              >
                 <div
                   style={{
                     fontSize: 11,
-                    color: "#b45309",
-                    background: "rgba(217,119,6,0.06)",
-                    padding: "6px 10px",
-                    borderRadius: 6,
-                    border: "1px solid rgba(217,119,6,0.25)",
+                    fontWeight: 700,
+                    color: "var(--muted)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.06em",
                   }}
                 >
-                  All of {selectedVendor.name}&apos;s machines are busy or in
-                  maintenance. The slab will go to their queue and load when a
-                  machine frees up.
+                  {selectedVendor.name}&apos;s machines
                 </div>
-              )}
-            </div>
+                {selectedVendor.machines.length === 0 ? (
+                  <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                    No machines configured for this vendor yet.
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))",
+                      gap: 6,
+                    }}
+                  >
+                    {selectedVendor.machines.map((m) => {
+                      const tint = MACHINE_TINT[m.status];
+                      return (
+                        <div
+                          key={m.id}
+                          style={{
+                            padding: "6px 10px",
+                            background: tint.bg,
+                            border: `1.5px solid ${tint.border}`,
+                            borderRadius: 6,
+                            fontFamily: "ui-monospace, monospace",
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "flex-start",
+                            gap: 2,
+                          }}
+                        >
+                          <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>
+                            {m.machine_code}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: 9,
+                              fontWeight: 700,
+                              color: tint.fg,
+                              letterSpacing: "0.05em",
+                            }}
+                          >
+                            {tint.label}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {(selectedVendor.live?.free ?? 0) === 0 && (
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: "#b45309",
+                      background: "rgba(217,119,6,0.06)",
+                      padding: "6px 10px",
+                      borderRadius: 6,
+                      border: "1px solid rgba(217,119,6,0.25)",
+                    }}
+                  >
+                    All of {selectedVendor.name}&apos;s machines are busy or in
+                    maintenance. The slab will go to their queue and load when
+                    a machine frees up.
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Urgency picker */}
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                Urgency
-              </span>
+              <Label>Urgency</Label>
               <input type="hidden" name="urgency" value={urgency} />
               <div style={{ display: "flex", gap: 8 }}>
                 <button
@@ -245,33 +415,31 @@ export function AssignModal({
               </div>
             </div>
 
-            {/* Estimated time — rough idea from carving head */}
+            {/* Estimated time — days + hours */}
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                Rough estimated time (carving head&apos;s guess)
-              </span>
+              <Label>Rough estimated time (carving head&apos;s guess)</Label>
               <input type="hidden" name="estimated_minutes" value={totalMinutes || ""} />
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <input
                   type="number"
                   min="0"
-                  max="200"
+                  max="30"
+                  value={days}
+                  onChange={(e) => setDays(e.target.value)}
+                  placeholder="0"
+                  style={{ width: 80, padding: "8px 10px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
+                />
+                <span style={{ fontSize: 12, color: "var(--muted)" }}>days</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="23"
                   value={hours}
                   onChange={(e) => setHours(e.target.value)}
                   placeholder="0"
                   style={{ width: 80, padding: "8px 10px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
                 />
                 <span style={{ fontSize: 12, color: "var(--muted)" }}>hours</span>
-                <input
-                  type="number"
-                  min="0"
-                  max="59"
-                  value={minutes}
-                  onChange={(e) => setMinutes(e.target.value)}
-                  placeholder="0"
-                  style={{ width: 80, padding: "8px 10px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
-                />
-                <span style={{ fontSize: 12, color: "var(--muted)" }}>min</span>
               </div>
               <span style={{ fontSize: 11, color: "var(--muted-light)" }}>
                 The vendor will set a tighter estimate when they actually load
@@ -280,9 +448,7 @@ export function AssignModal({
             </div>
 
             <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                Note (optional)
-              </span>
+              <Label>Note (optional)</Label>
               <textarea
                 name="note"
                 value={note}
@@ -309,6 +475,22 @@ export function AssignModal({
           </form>
         </div>
       </div>
-    </>
+    </div>
+  );
+}
+
+function Label({ children }: { children: React.ReactNode }) {
+  return (
+    <span
+      style={{
+        fontSize: 11,
+        fontWeight: 700,
+        color: "var(--muted)",
+        textTransform: "uppercase",
+        letterSpacing: "0.06em",
+      }}
+    >
+      {children}
+    </span>
   );
 }

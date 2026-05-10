@@ -66,12 +66,21 @@ const MAINTENANCE_REASONS: Array<{ value: string; label: string }> = [
   { value: "other", label: "Other (write detail below)" },
 ];
 
+// Format minutes as a human-readable duration that can scale from
+// minutes up to several days. Carving runs in this shop range from
+// "30 min finishing pass" to "3-day complex temple piece", so we need
+// the same formatter to read sensibly across all of them.
 function fmtDuration(minutes: number): string {
   const m = Math.abs(Math.round(minutes));
   if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  const mm = m % 60;
-  return mm > 0 ? `${h}h ${mm}m` : `${h}h`;
+  if (m < 60 * 24) {
+    const h = Math.floor(m / 60);
+    const mm = m % 60;
+    return mm > 0 ? `${h}h ${mm}m` : `${h}h`;
+  }
+  const d = Math.floor(m / (60 * 24));
+  const remH = Math.floor((m % (60 * 24)) / 60);
+  return remH > 0 ? `${d}d ${remH}h` : `${d}d`;
 }
 
 function dimStr(s: SlabLite | null): string {
@@ -823,20 +832,24 @@ function LoadModal({
   const [carvingItemId, setCarvingItemId] = useState<string>(queue[0]?.id ?? "");
   const selectedJob = queue.find((q) => q.id === carvingItemId) ?? null;
   const idleMachines = machines.filter((m) => m.status === "idle");
+  // Days + hours pickers — carving runs span hours to multiple days,
+  // so days is a more useful primary unit than minutes.
+  const [days, setDays] = useState<string>("");
   const [hours, setHours] = useState<string>("");
-  const [minutes, setMinutes] = useState<string>("");
-  const totalMinutes = (Number(hours) || 0) * 60 + (Number(minutes) || 0);
+  const totalMinutes = (Number(days) || 0) * 60 * 24 + (Number(hours) || 0) * 60;
 
   // When user picks a different slab, prefill estimate from carving
   // head's number (vendor can adjust).
   useEffect(() => {
     if (selectedJob?.estimated_minutes) {
       const m = selectedJob.estimated_minutes;
-      setHours(String(Math.floor(m / 60) || ""));
-      setMinutes(String(m % 60 || ""));
+      const d = Math.floor(m / (60 * 24));
+      const h = Math.floor((m % (60 * 24)) / 60);
+      setDays(d > 0 ? String(d) : "");
+      setHours(h > 0 ? String(h) : "");
     } else {
+      setDays("");
       setHours("");
-      setMinutes("");
     }
   }, [selectedJob?.id, selectedJob?.estimated_minutes]);
 
@@ -920,7 +933,9 @@ function LoadModal({
             </div>
           </div>
 
-          {/* Vendor's estimated time — defaults from carving head */}
+          {/* Vendor's estimated time — defaults from carving head.
+              Days + hours range so it works for short pieces and
+              multi-day complex carves alike. */}
           <div>
             <Label>Your estimated time</Label>
             <input type="hidden" name="vendor_estimated_minutes" value={totalMinutes || ""} />
@@ -928,24 +943,29 @@ function LoadModal({
               <input
                 type="number"
                 min="0"
-                max="200"
+                max="30"
+                value={days}
+                onChange={(e) => setDays(e.target.value)}
+                placeholder="0"
+                style={{ width: 70, padding: "8px 10px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
+              />
+              <span style={{ fontSize: 12, color: "var(--muted)" }}>days</span>
+              <input
+                type="number"
+                min="0"
+                max="23"
                 value={hours}
                 onChange={(e) => setHours(e.target.value)}
                 placeholder="0"
                 style={{ width: 70, padding: "8px 10px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
               />
-              <span style={{ fontSize: 12, color: "var(--muted)" }}>hr</span>
-              <input
-                type="number"
-                min="0"
-                max="59"
-                value={minutes}
-                onChange={(e) => setMinutes(e.target.value)}
-                placeholder="0"
-                style={{ width: 70, padding: "8px 10px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
-              />
-              <span style={{ fontSize: 12, color: "var(--muted)" }}>min</span>
+              <span style={{ fontSize: 12, color: "var(--muted)" }}>hours</span>
             </div>
+            {totalMinutes > 0 && (
+              <div style={{ fontSize: 10, color: "var(--muted-light)", marginTop: 4, fontFamily: "ui-monospace, monospace" }}>
+                Total: {fmtDuration(totalMinutes)}
+              </div>
+            )}
             {selectedJob?.estimated_minutes != null && (
               <div style={{ fontSize: 10, color: "var(--muted-light)", marginTop: 4 }}>
                 Carving head estimated: {fmtDuration(selectedJob.estimated_minutes)}

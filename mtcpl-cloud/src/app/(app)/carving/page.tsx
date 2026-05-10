@@ -170,17 +170,29 @@ export default async function CarvingDashboardPage({
     }
   }
 
-  // Enrich vendors with their machines + live counts
+  // Enrich vendors with their machines (incl. live status) + live
+  // counts. The per-machine status flows through to the assign modal
+  // so the carving head can see exactly which CNCs are free / busy /
+  // in maintenance before picking a vendor.
   const vendorsEnriched = (vendors ?? []).map((v) => {
     const counts = machineCountsByVendor.get(v.id) ?? { idle: 0, carving: 0, maintenance: 0, total: 0 };
     return {
       id: v.id,
       name: v.name,
       vendor_type: v.vendor_type as "CNC" | "Manual",
-      machines: (machines ?? []).filter((m) => m.vendor_id === v.id).map((m) => ({
-        id: m.id,
-        machine_code: m.machine_code,
-      })),
+      machines: (machines ?? [])
+        .filter((m) => m.vendor_id === v.id)
+        .map((m) => {
+          const st = (m as { status?: string }).status ?? "idle";
+          return {
+            id: m.id,
+            machine_code: m.machine_code,
+            status:
+              st === "carving" || st === "maintenance" || st === "inactive"
+                ? (st as "carving" | "maintenance" | "inactive")
+                : ("idle" as const),
+          };
+        }),
       live: {
         free: counts.idle,
         busy: counts.carving,
