@@ -833,3 +833,186 @@ export async function cancelCarvingJobAction(formData: FormData) {
   refreshAll();
   redirect("/carving?toast=Assignment+cancelled");
 }
+
+// ── Machine history — events + computed aggregates ────────────────
+//
+// Surfaces a machine's full event timeline (loaded / unloaded /
+// maintenance start / maintenance end) plus rolled-up totals so the
+// supervisor can see at a glance:
+//   • how much time the machine has spent CARVING vs DOWN over a
+//     given window (default last 30d)
+//   • how many slabs it has produced
+//   • how many maintenance episodes it had + cumulative downtime
+//
+// Read-only; can be called from any logged-in user with carving-
+// related access.
+export type MachineEvent = {
+  id: string;
+  event_type: string;
+  carving_item_id: string | null;
+  reason: string | null;
+  message: string | null;
+  user_id: string | null;
+  user_name: string | null;
+  slab_id: string | null;
+  created_at: string;
+};
+
+export type MachineHistory = {
+  machine: {
+    id: string;
+    machine_code: string;
+    operator_name: string | null;
+    machine_type: "single_head" | "multi_head_2" | "lathe";
+    status: string;
+  };
+  windowDays: number;
+  totals: {
+    /** Number of carving sessions completed in the window. */
+    sessions: number;
+    /** Total minutes the machine spent carving (sum of unload − load
+     *  pairs). Open sessions count up to "now". */
+    carvingMinutes: number;
+    /** Number of maintenance episodes started in the window. */
+    maintEpisodes: number;
+    /** Total minutes the machine spent in maintenance (sum of end −
+     *  start pairs). Open episodes count up to "now". */
+    maintMinutes: number;
+  };
+  events: MachineEvent[];
+};
+
+export async function getMachineHistory(
+  machineId: string,
+  windowDays = 30,
+): Promise<MachineHistory | null> {
+  await requireAuth(["developer", "owner", "carving_head", "vendor"]);
+  const admin = createAdminSupabaseClient();
+
+  const sinceIso = new Date(Date.now() - windowDays * 86400000).toISOString();
+
+  const [{ data: machine }, { data: rawEvents }] = await Promise.all([
+    admin
+      .from("cnc_machines")
+      .select("id, machine_code, operator_name, machine_type, status")
+      .eq("id", machineId)
+      .maybeSingle(),
+    admin
+      .from("cnc_machine_events")
+      .select("id, event_type, carving_item_id, reason, message, user_id, created_at")
+      .eq("cnc_machine_id", machineId)
+      .gte("created_at", sinceIso)
+      .order("created_at", { ascending: false })
+      .limit(500),
+  ]);
+
+  if (!machine) return null;
+  const m = machine as {
+    id: string;
+    machine_code: string;
+    operator_name: string | null;
+    machine_type: string | null;
+    status: string;
+  };
+
+  // Hydrate user names + slab ids in one round-trip each.
+  const userIds = [...new Set((rawEvents ?? [])
+    .map((e) => (e as { user_id: string | null }).user_id)
+    .filter(Boolean) as string[])];
+  const itemIds = [...new Set((rawEvents ?? [])
+    .map((e) => (e as { carving_item_id: string | null }).carving_item_id)
+    .filter(Boolean) as string[])];
+
+  const [{ data: profs }, { data: items }] = await Promise.all([
+    userIds.length > 0
+      ? admin.from("profiles").select("id, full_name").in("id", userIds)
+      : Promise.resolve({ data: [] as { id: string; full_name: string | null }[] }),
+    itemIds.length > 0
+      ? admin
+          .from("carving_items")
+          .select("id, slab_requirement_id")
+          .in("id", itemIds)
+      : Promise.resolve({ data: [] as { id: string; slab_requirement_id: string }[] }),
+  ]);
+  const nameById = new Map<string, string>();
+  for (const p of profs ?? []) nameById.set(p.id, p.full_name ?? "—");
+  const slabIdByItem = new Map<string, string>();
+  for (const i of items ?? []) slabIdByItem.set(i.id, i.slab_requirement_id);
+
+  const events: MachineEvent[] = ((rawEvents ?? []) as Array<{
+    id: string; event_type: string; carving_item_id: string | null;
+    reason: string | null; message: string | null; user_id: string | null;
+    created_at: string;
+  }>).map((e) => ({
+    id: e.id,
+    event_type: e.event_type,
+    carving_item_id: e.carving_item_id,
+    reason: e.reason,
+    message: e.message,
+    user_id: e.user_id,
+    user_name: e.user_id ? nameById.get(e.user_id) ?? null : null,
+    slab_id: e.carving_item_id ? slabIdByItem.get(e.carving_item_id) ?? null : null,
+    created_at: e.created_at,
+  }));
+
+  // Walk the events in chronological order and pair load↔unload +
+  // maintenance_start↔maintenance_end to compute durations. Open
+  // sessions / episodes count up to `now`.
+  const chronological = [...events].reverse();
+  const now = Date.now();
+  let carvingMinutes = 0;
+  let sessions = 0;
+  let maintMinutes = 0;
+  let maintEpisodes = 0;
+  let openLoadAt: number | null = null;
+  let openMaintAt: number | null = null;
+  for (const ev of chronological) {
+    const t = new Date(ev.created_at).getTime();
+    if (ev.event_type === "loaded") {
+      openLoadAt = t;
+    } else if (ev.event_type === "unloaded") {
+      if (openLoadAt != null) {
+        carvingMinutes += (t - openLoadAt) / 60000;
+        sessions += 1;
+        openLoadAt = null;
+      }
+    } else if (ev.event_type === "maintenance_start") {
+      openMaintAt = t;
+      maintEpisodes += 1;
+    } else if (ev.event_type === "maintenance_end") {
+      if (openMaintAt != null) {
+        maintMinutes += (t - openMaintAt) / 60000;
+        openMaintAt = null;
+      }
+    }
+  }
+  // Currently-open session / episode → count up to now.
+  if (openLoadAt != null) {
+    carvingMinutes += (now - openLoadAt) / 60000;
+    sessions += 1; // still in progress; show in count
+  }
+  if (openMaintAt != null) {
+    maintMinutes += (now - openMaintAt) / 60000;
+  }
+
+  return {
+    machine: {
+      id: m.id,
+      machine_code: m.machine_code,
+      operator_name: m.operator_name,
+      machine_type:
+        m.machine_type === "multi_head_2" || m.machine_type === "lathe"
+          ? (m.machine_type as "multi_head_2" | "lathe")
+          : "single_head",
+      status: m.status,
+    },
+    windowDays,
+    totals: {
+      sessions,
+      carvingMinutes: Math.round(carvingMinutes),
+      maintEpisodes,
+      maintMinutes: Math.round(maintMinutes),
+    },
+    events,
+  };
+}

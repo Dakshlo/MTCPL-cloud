@@ -8,6 +8,8 @@ import {
   flagMaintenanceAction,
   resolveMaintenanceAction,
   updateTemporaryLocationAction,
+  getMachineHistory,
+  type MachineHistory,
 } from "../carving/actions";
 
 // ── Types — kept here so server page can import them ──────────────
@@ -179,6 +181,7 @@ export function VendorCockpitClient({
   const [loadFor, setLoadFor] = useState<{ machine: CncMachineLive } | null>(null);
   const [completeFor, setCompleteFor] = useState<CncMachineLive | null>(null);
   const [maintenanceFor, setMaintenanceFor] = useState<CncMachineLive | null>(null);
+  const [historyFor, setHistoryFor] = useState<CncMachineLive | null>(null);
   const [editLocFor, setEditLocFor] = useState<{
     id: string;
     slab_id: string;
@@ -311,6 +314,7 @@ export function VendorCockpitClient({
                 onLoad={() => setLoadFor({ machine: m })}
                 onComplete={() => setCompleteFor(m)}
                 onMaintenance={() => setMaintenanceFor(m)}
+                onHistory={() => setHistoryFor(m)}
               />
             ))}
           </div>
@@ -399,6 +403,9 @@ export function VendorCockpitClient({
       )}
       {maintenanceFor && (
         <MaintenanceModal machine={maintenanceFor} onClose={() => setMaintenanceFor(null)} />
+      )}
+      {historyFor && (
+        <MachineHistoryModal machine={historyFor} onClose={() => setHistoryFor(null)} />
       )}
       {editLocFor && (
         <EditLocationModal
@@ -567,6 +574,7 @@ function MachineCard({
   onLoad,
   onComplete,
   onMaintenance,
+  onHistory,
 }: {
   machine: CncMachineLive;
   queueLength: number;
@@ -574,17 +582,22 @@ function MachineCard({
   onLoad: () => void;
   onComplete: () => void;
   onMaintenance: () => void;
+  onHistory: () => void;
 }) {
   const tint = STATUS_TINT[machine.status];
   const job = machine.current_job;
 
-  // Countdown for in-progress jobs.
+  // Countdown + elapsed timers for in-progress jobs. We show BOTH —
+  // running-for tells the supervisor "how long has this slab been
+  // on the machine?", remaining tells "how much longer until ETA".
+  let runningForLabel: string | null = null;
   let remainingLabel: string | null = null;
   let remainingColor: string | null = null;
   let progressPct: number | null = null;
   if (machine.status === "carving" && job?.loaded_at) {
     const eta = job.vendor_estimated_minutes ?? job.estimated_minutes ?? null;
     const elapsedMin = (now - new Date(job.loaded_at).getTime()) / 60_000;
+    runningForLabel = `running for ${fmtDuration(elapsedMin)}`;
     if (eta) {
       const remaining = eta - elapsedMin;
       progressPct = Math.max(0, Math.min(100, (elapsedMin / eta) * 100));
@@ -595,9 +608,6 @@ function MachineCard({
         remainingLabel = `${fmtDuration(remaining)} over`;
         remainingColor = "#b91c1c";
       }
-    } else {
-      remainingLabel = `${fmtDuration(elapsedMin)} elapsed`;
-      remainingColor = "var(--muted)";
     }
   }
 
@@ -684,24 +694,53 @@ function MachineCard({
               <span style={{ fontSize: 10, color: "var(--muted)" }}>· {machine.operator_name}</span>
             )}
           </div>
-          <span
-            style={{
-              fontSize: 10,
-              fontWeight: 800,
-              padding: "3px 10px",
-              borderRadius: 999,
-              color: "#fff",
-              background: tint.accent,
-              letterSpacing: "0.07em",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 4,
-              opacity: machine.status === "idle" ? 0.85 : 1,
-            }}
-          >
-            <span style={{ fontSize: 9 }}>{tint.icon}</span>
-            {tint.label}
-          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {/* History button — always visible regardless of status.
+                Opens a modal with the machine's event timeline +
+                rolled-up totals (carving / downtime / sessions). */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onHistory();
+              }}
+              title="View this machine's history"
+              style={{
+                background: "rgba(0,0,0,0.05)",
+                border: "1px solid var(--border)",
+                color: "var(--muted)",
+                width: 24,
+                height: 24,
+                borderRadius: 6,
+                cursor: "pointer",
+                fontSize: 12,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: 0,
+              }}
+            >
+              📊
+            </button>
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 800,
+                padding: "3px 10px",
+                borderRadius: 999,
+                color: "#fff",
+                background: tint.accent,
+                letterSpacing: "0.07em",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                opacity: machine.status === "idle" ? 0.85 : 1,
+              }}
+            >
+              <span style={{ fontSize: 9 }}>{tint.icon}</span>
+              {tint.label}
+            </span>
+          </div>
         </div>
 
         {/* Body — depends on status */}
@@ -763,17 +802,37 @@ function MachineCard({
                   {job.slab.temple} · {dimStr(job.slab)}
                 </div>
               )}
-              {remainingLabel && (
+              {/* Two timers: elapsed (always) + remaining (when ETA
+                  was set). Side-by-side so the supervisor sees both
+                  "this slab has been on for Xh" and "Xh left" at a
+                  glance. */}
+              {(runningForLabel || remainingLabel) && (
                 <div
                   style={{
                     marginTop: 6,
-                    fontSize: 13,
-                    fontWeight: 800,
-                    color: remainingColor!,
+                    display: "flex",
+                    flexWrap: "wrap",
+                    alignItems: "baseline",
+                    gap: 8,
                     fontFamily: "ui-monospace, monospace",
                   }}
                 >
-                  ⏱ {remainingLabel}
+                  {runningForLabel && (
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "#2563eb" }}>
+                      ▶ {runningForLabel}
+                    </span>
+                  )}
+                  {remainingLabel && (
+                    <span
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 800,
+                        color: remainingColor!,
+                      }}
+                    >
+                      ⏱ {remainingLabel}
+                    </span>
+                  )}
                 </div>
               )}
               {progressPct != null && (
@@ -1342,6 +1401,222 @@ function Label({ children }: { children: React.ReactNode }) {
       }}
     >
       {children}
+    </div>
+  );
+}
+
+// ── Machine history modal ──────────────────────────────────────────
+//
+// Lazy-loads from the server action when opened. Shows top-line
+// totals (carving / down / sessions / maint episodes) for the last
+// 30d and a chronological event timeline beneath.
+function MachineHistoryModal({
+  machine,
+  onClose,
+}: {
+  machine: CncMachineLive;
+  onClose: () => void;
+}) {
+  const [history, setHistory] = useState<MachineHistory | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    getMachineHistory(machine.id, 30)
+      .then((h) => {
+        if (cancelled) return;
+        if (!h) setError("Machine not found");
+        else setHistory(h);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [machine.id]);
+
+  return (
+    <ModalShell
+      title={`📊 ${machine.machine_code} · history`}
+      subtitle="Last 30 days · sessions, maintenance, totals"
+      onClose={onClose}
+    >
+      {loading ? (
+        <div className="muted" style={{ fontSize: 13, padding: 24, textAlign: "center" }}>
+          Loading history…
+        </div>
+      ) : error ? (
+        <div
+          role="alert"
+          style={{
+            padding: "10px 12px",
+            background: "rgba(220,38,38,0.08)",
+            border: "1px solid rgba(220,38,38,0.25)",
+            color: "#991b1b",
+            borderRadius: 8,
+            fontSize: 13,
+          }}
+        >
+          {error}
+        </div>
+      ) : history ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {/* Totals strip */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+              gap: 10,
+            }}
+          >
+            <HistoryStat label="Carving time" value={fmtDuration(history.totals.carvingMinutes)} fg="#1d4ed8" />
+            <HistoryStat label="Sessions" value={String(history.totals.sessions)} fg="#1d4ed8" />
+            <HistoryStat label="Down time" value={fmtDuration(history.totals.maintMinutes)} fg="#b91c1c" />
+            <HistoryStat label="Maint episodes" value={String(history.totals.maintEpisodes)} fg="#b91c1c" />
+          </div>
+
+          {/* Event timeline */}
+          <div>
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: "var(--muted)",
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                marginBottom: 8,
+              }}
+            >
+              Timeline · {history.events.length} event{history.events.length !== 1 ? "s" : ""}
+            </div>
+            {history.events.length === 0 ? (
+              <div
+                style={{
+                  padding: "16px 12px",
+                  textAlign: "center",
+                  color: "var(--muted-light)",
+                  fontSize: 12,
+                  background: "var(--surface-alt)",
+                  borderRadius: 8,
+                }}
+              >
+                No events recorded in the last 30 days.
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {history.events.map((e) => (
+                  <HistoryEventRow key={e.id} event={e} />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
+    </ModalShell>
+  );
+}
+
+function HistoryStat({ label, value, fg }: { label: string; value: string; fg: string }) {
+  return (
+    <div
+      style={{
+        padding: "8px 12px",
+        background: "var(--surface-alt)",
+        border: "1px solid var(--border)",
+        borderRadius: 8,
+      }}
+    >
+      <div style={{ fontSize: 9, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 16, fontWeight: 800, color: fg, fontFamily: "ui-monospace, monospace", marginTop: 2 }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function HistoryEventRow({ event }: { event: MachineHistory["events"][number] }) {
+  const cfg: Record<string, { icon: string; label: string; color: string }> = {
+    loaded: { icon: "▶", label: "Loaded", color: "#1d4ed8" },
+    unloaded: { icon: "✓", label: "Unloaded", color: "#15803d" },
+    maintenance_start: { icon: "🔧", label: "Maintenance start", color: "#b91c1c" },
+    maintenance_end: { icon: "✓", label: "Back online", color: "#15803d" },
+    created: { icon: "+", label: "Machine created", color: "var(--muted)" },
+    reactivated: { icon: "↻", label: "Reactivated", color: "var(--muted)" },
+    deactivated: { icon: "—", label: "Deactivated", color: "var(--muted)" },
+  };
+  const c = cfg[event.event_type] ?? { icon: "•", label: event.event_type.replace(/_/g, " "), color: "var(--muted)" };
+  const when = new Date(event.created_at).toLocaleString("en-IN", {
+    day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
+  });
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: 10,
+        padding: "8px 10px",
+        background: "var(--surface)",
+        border: "1px solid var(--border)",
+        borderRadius: 6,
+        alignItems: "flex-start",
+      }}
+    >
+      <div
+        style={{
+          fontSize: 14,
+          color: c.color,
+          fontWeight: 800,
+          flexShrink: 0,
+          width: 22,
+          textAlign: "center",
+        }}
+      >
+        {c.icon}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: c.color }}>{c.label}</span>
+          <span
+            style={{
+              fontSize: 10,
+              color: "var(--muted)",
+              fontFamily: "ui-monospace, monospace",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {when}
+          </span>
+        </div>
+        {event.slab_id && (
+          <div style={{ fontSize: 11, color: "var(--text)", marginTop: 2 }}>
+            <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 600 }}>
+              {event.slab_id}
+            </span>
+          </div>
+        )}
+        {event.reason && (
+          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+            Reason: <strong style={{ color: "var(--text)" }}>{event.reason}</strong>
+          </div>
+        )}
+        {event.message && (
+          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2, fontStyle: "italic" }}>
+            {event.message}
+          </div>
+        )}
+        {event.user_name && (
+          <div style={{ fontSize: 10, color: "var(--muted-light)", marginTop: 2 }}>
+            by {event.user_name}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

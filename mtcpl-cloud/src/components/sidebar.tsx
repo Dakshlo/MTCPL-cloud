@@ -87,6 +87,12 @@ const navEntries: NavEntry[] = [
     roles: ["developer", "owner", "carving_head"],
   },
   {
+    href: "/carving/reports",
+    label: "CNC Report",
+    icon: "📊",
+    roles: ["developer", "owner", "carving_head"],
+  },
+  {
     href: "/dispatch",
     label: "Dispatch",
     icon: "🚚",
@@ -174,6 +180,7 @@ export function Sidebar({
     // gets its own pill, detail pages don't need either lit).
     if (href === "/carving") return pathname === "/carving";
     if (href === "/carving/floor") return pathname.startsWith("/carving/floor");
+    if (href === "/carving/reports") return pathname.startsWith("/carving/reports");
     return pathname === href || pathname.startsWith(href + "/");
   }
 

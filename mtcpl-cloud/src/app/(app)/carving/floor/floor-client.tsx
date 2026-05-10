@@ -786,14 +786,20 @@ function CompactMachineTile({ machine, now }: { machine: FloorMachine; now: numb
             {machine.current_job.slab_id}
           </span>
           {machine.current_job.loaded_at && (() => {
-            const eta = machine.current_job!.vendor_estimated_minutes ?? machine.current_job!.estimated_minutes;
-            if (!eta) return null;
             const elapsed = (now - new Date(machine.current_job!.loaded_at!).getTime()) / 60000;
-            const remaining = eta - elapsed;
+            const eta = machine.current_job!.vendor_estimated_minutes ?? machine.current_job!.estimated_minutes;
+            const remaining = eta != null ? eta - elapsed : null;
             return (
-              <span style={{ marginLeft: 6, color: remaining < 0 ? "#dc2626" : remaining < 15 ? "#b45309" : "var(--muted)" }}>
-                ⏱ {remaining < 0 ? `${fmtDuration(remaining)} over` : fmtDuration(remaining) + " left"}
-              </span>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 2, fontFamily: "ui-monospace, monospace" }}>
+                <span style={{ color: "#2563eb", fontWeight: 700 }}>
+                  ▶ {fmtDuration(elapsed)}
+                </span>
+                {remaining != null && (
+                  <span style={{ color: remaining < 0 ? "#dc2626" : remaining < 15 ? "#b45309" : "var(--muted)", fontWeight: 700 }}>
+                    ⏱ {remaining < 0 ? `${fmtDuration(remaining)} over` : fmtDuration(remaining) + " left"}
+                  </span>
+                )}
+              </div>
             );
           })()}
         </div>
@@ -893,21 +899,34 @@ function TvMachineTile({ machine, now }: { machine: FloorMachine; now: number })
             </div>
           )}
           {machine.current_job.loaded_at && (() => {
-            const eta = machine.current_job!.vendor_estimated_minutes ?? machine.current_job!.estimated_minutes;
-            if (!eta) return null;
             const elapsed = (now - new Date(machine.current_job!.loaded_at!).getTime()) / 60000;
-            const remaining = eta - elapsed;
+            const eta = machine.current_job!.vendor_estimated_minutes ?? machine.current_job!.estimated_minutes;
+            const remaining = eta != null ? eta - elapsed : null;
             return (
               <div
                 style={{
-                  fontSize: 18,
-                  fontWeight: 800,
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 14,
+                  alignItems: "baseline",
                   fontFamily: "ui-monospace, monospace",
                   marginTop: 6,
-                  color: remaining < 0 ? "#fca5a5" : remaining < 15 ? "#fbbf24" : "#93c5fd",
                 }}
               >
-                ⏱ {remaining < 0 ? `${fmtDuration(remaining)} over` : fmtDuration(remaining) + " left"}
+                <span style={{ fontSize: 16, fontWeight: 800, color: "#93c5fd" }}>
+                  ▶ {fmtDuration(elapsed)}
+                </span>
+                {remaining != null && (
+                  <span
+                    style={{
+                      fontSize: 18,
+                      fontWeight: 800,
+                      color: remaining < 0 ? "#fca5a5" : remaining < 15 ? "#fbbf24" : "#93c5fd",
+                    }}
+                  >
+                    ⏱ {remaining < 0 ? `${fmtDuration(remaining)} over` : fmtDuration(remaining) + " left"}
+                  </span>
+                )}
               </div>
             );
           })()}
