@@ -86,6 +86,12 @@ export async function createVendorAction(formData: FormData) {
       const rows = machines
         .filter((m) => m.machine_code.trim())
         .map((m) => ({
+          // Belt-and-suspenders: generate the UUID app-side so the
+          // insert succeeds even if the cnc_machines.id column is
+          // missing its gen_random_uuid() default on the target DB.
+          // Migration 022 also restores the default — this is just a
+          // second line of defence.
+          id: crypto.randomUUID(),
           vendor_id: vendor.id,
           machine_code: m.machine_code.trim(),
           operator_name: m.operator_name?.trim() || null,
@@ -162,11 +168,17 @@ export async function updateVendorAction(formData: FormData) {
         if (dErr) throw new Error(`delete failed: ${dErr.message}`);
       }
 
-      // Upsert the rest
+      // Upsert the rest. New rows (no `m.id`) get a fresh UUID
+      // generated app-side — see migration 022 for the backstory.
+      // We were hitting a NOT-NULL constraint on cnc_machines.id
+      // because the column's gen_random_uuid() default was missing
+      // on the prod DB. The migration restores the default; this
+      // app-side fallback ensures inserts work even on a DB where
+      // the default is somehow still absent.
       const toUpsert = machines
         .filter((m) => !m._delete && m.machine_code.trim())
         .map((m) => ({
-          ...(m.id ? { id: m.id } : {}),
+          id: m.id || crypto.randomUUID(),
           vendor_id: vendorId,
           machine_code: m.machine_code.trim(),
           operator_name: m.operator_name?.trim() || null,

@@ -10,6 +10,7 @@
 import Link from "next/link";
 import { requireAuth } from "@/lib/auth";
 import { buildCncMonthlyReport, type CncMonthlyReport } from "@/lib/cnc-monthly-report";
+import { PrintButton } from "@/components/print-button";
 
 type Search = Promise<{ year?: string; month?: string }>;
 
@@ -135,18 +136,9 @@ function Header({
         >
           ⬇ Download Excel
         </Link>
-        <button
-          type="button"
-          onClick={undefined}
-          className="ghost-button"
-          style={{ fontSize: 12, padding: "8px 14px" }}
-          // Use a tiny client snippet to print — the form-button hack
-          // keeps the page server-rendered while still triggering print.
-          // (Not ideal but fine for this single button.)
-          formAction="javascript:window.print()"
-        >
+        <PrintButton style={{ fontSize: 13, padding: "8px 16px", fontWeight: 700 }}>
           🖨 Print
-        </button>
+        </PrintButton>
       </div>
     </div>
   );

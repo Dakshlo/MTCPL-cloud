@@ -8,6 +8,27 @@ Reverse-chronological. Most recent at top. Append to TOP when shipping new work.
 
 ## Recent (this Claude session)
 
+### `(pending)` · fix: cnc_machines insert NOT-NULL on id + reports/page Print button
+Two fixes in one commit:
+
+1. **Migration 022**: restore `gen_random_uuid()` default on
+   `cnc_machines.id`. Daksh hit `null value in column "id" of
+   relation "cnc_machines" violates not-null constraint` when adding
+   2-head and lathe machines. The original `carving_phase_2_1.sql`
+   defined the default but it was missing on prod (lost in an
+   earlier draft migration that recreated the table). Migration 022
+   sets the default explicitly and is idempotent.
+2. **App-side belt-and-suspenders**: `createVendorAction` and
+   `updateVendorAction` now generate `crypto.randomUUID()` for new
+   machine rows so inserts succeed even on a DB where the default
+   has somehow gone missing again.
+3. **`reports/page.tsx` Print button cleanup**: replaced the hacky
+   `formAction="javascript:..."` button with the proper
+   `<PrintButton />` client component (now accepts children +
+   className + style props, defaults to "🖨 Print" + "ghost-button").
+   Same pattern any other server-rendered page should use for
+   client-side actions.
+
 ### `901602d` · hotfix: TvModeEntryCard needs 'use client'
 The /dashboard route was 500-ing for everyone after the previous
 TV Mode card was added — the card had onMouseEnter / onMouseLeave
@@ -128,4 +149,4 @@ New `app_role` value `carving_head`. Lands on `/slabs/ready`. Access: Ready Size
 
 See `03_data_model_and_migrations.md` for the table. Latest run on prod (Daksh confirmed): **021**.
 
-Outstanding migrations awaiting run: none as of this changelog entry. Confirm with Daksh after every new migration.
+Outstanding migrations awaiting run: **022** (`cnc_machines_id_default.sql`) — must be run before adding new CNC machines, otherwise the insert fails with `null value in column "id" ... violates not-null constraint`. Confirm with Daksh after he runs it.

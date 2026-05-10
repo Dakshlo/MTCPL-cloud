@@ -27,6 +27,7 @@
 | 019 | `cnc_ops.sql` | CNC ops module — machine status, current_carving_item_id, maintenance, urgency, loaded_at, etc. |
 | 020 | `stock_location.sql` | `slab_requirements.stock_location` + RPC update with `p_stock_location` |
 | 021 | `cnc_machine_type.sql` | `cnc_machines.machine_type` enum (single_head / multi_head_2 / lathe) |
+| 022 | `cnc_machines_id_default.sql` | Restore `gen_random_uuid()` default on `cnc_machines.id` (was missing on prod, blocked new-machine inserts with NOT NULL violation) |
 
 ## How migrations get to prod
 
