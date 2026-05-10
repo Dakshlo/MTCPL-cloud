@@ -10,7 +10,7 @@ export default async function CarvingDashboardPage({
 }: {
   searchParams: Promise<{ tab?: string; temple?: string }>;
 }) {
-  await requireAuth(["developer", "owner"]);
+  await requireAuth(["developer", "owner", "carving_head"]);
   const admin = createAdminSupabaseClient();
   const params = await searchParams;
   const tab: Tab = (params.tab as Tab) || "unassigned";

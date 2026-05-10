@@ -11,6 +11,7 @@ const UI_ROLES_ALL = [
   { value: "developer",        label: "DEVELOPER" },
   { value: "owner",            label: "OWNER" },
   { value: "team_head",        label: "TEAM HEAD" },
+  { value: "carving_head",     label: "CARVING HEAD" },
   { value: "block_slab_entry", label: "BLOCK+SLAB ENTRY" },
   { value: "slab_entry",       label: "SLAB ENTRY" },
   { value: "block_entry",      label: "BLOCK ENTRY" },
@@ -20,6 +21,7 @@ const UI_ROLES_ALL = [
 // Roles owner/team-head can assign — cannot promote to owner or developer
 const UI_ROLES_PLANNER = [
   { value: "team_head",        label: "TEAM HEAD" },
+  { value: "carving_head",     label: "CARVING HEAD" },
   { value: "block_slab_entry", label: "BLOCK+SLAB ENTRY" },
   { value: "slab_entry",       label: "SLAB ENTRY" },
   { value: "block_entry",      label: "BLOCK ENTRY" },
@@ -33,6 +35,7 @@ const ROLE_ACCESS: Record<string, string[]> = {
   developer:        ["Dashboard", "Blocks", "Slabs", "Plan Generator", "Cutting", "Settings"],
   owner:            ["Dashboard", "Blocks", "Slabs", "Plan Generator", "Cutting", "Settings"],
   team_head:        ["Blocks", "Slabs", "Plan Generator", "Cutting", "Settings"],
+  carving_head:     ["Ready Sizes", "Carving Jobs", "Dispatch"],
   block_slab_entry: ["Dashboard", "Blocks", "Slabs"],
   slab_entry:       ["Dashboard", "Slabs"],
   block_entry:      ["Blocks"],

@@ -3,7 +3,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { ReadySlabsClient } from "./ready-client";
 
 export default async function ReadySlabsPage() {
-  const { profile } = await requireAuth(["owner", "team_head", "block_slab_entry"]);
+  const { profile } = await requireAuth(["owner", "team_head", "block_slab_entry", "carving_head"]);
   void profile;
 
   const admin = createAdminSupabaseClient();

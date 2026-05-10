@@ -62,26 +62,29 @@ const navEntries: NavEntry[] = [
     href: "/slabs/ready",
     label: "Ready Sizes",
     icon: "✦",
-    roles: ["developer", "owner", "team_head", "block_slab_entry"],
+    roles: ["developer", "owner", "team_head", "block_slab_entry", "carving_head"],
   },
-  // — Phase 2 carving module. Carving Jobs is now shared with owner
-  //   (Naresh) so he can see the pipeline; dispatch stays developer-only. —
+  // — Phase 2 carving module. Carving Jobs visible to owner +
+  //   the new carving_head role (whose entire job is the carving
+  //   pipeline → dispatch). Dispatch shared with carving_head too
+  //   so they can hand finished pieces off without bouncing to
+  //   the owner. —
   {
     type: "divider",
     label: "CARVING",
-    roles: ["developer", "owner", "vendor"],
+    roles: ["developer", "owner", "vendor", "carving_head"],
   },
   {
     href: "/carving",
     label: "Carving Jobs",
     icon: "🎨",
-    roles: ["developer", "owner"],
+    roles: ["developer", "owner", "carving_head"],
   },
   {
     href: "/dispatch",
     label: "Dispatch",
     icon: "🚚",
-    roles: ["developer", "owner"],
+    roles: ["developer", "owner", "carving_head"],
   },
   {
     href: "/challan",
@@ -102,6 +105,7 @@ function roleLabel(role: AppRole): string {
     developer: "DEVELOPER",
     owner: "OWNER",
     team_head: "TEAM HEAD",
+    carving_head: "CARVING HEAD",
     block_slab_entry: "BLOCK+SLAB ENTRY",
     slab_entry: "SLAB ENTRY",
     block_entry: "BLOCK ENTRY",

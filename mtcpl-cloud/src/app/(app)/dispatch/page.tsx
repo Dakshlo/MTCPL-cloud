@@ -26,7 +26,7 @@ export default async function DispatchPage({
     dispatch_error?: string;
   }>;
 }) {
-  await requireAuth(["developer", "owner"]);
+  await requireAuth(["developer", "owner", "carving_head"]);
   const { tab: tabParam, dispatch_toast: toastParam, dispatch_error: errorParam } = await searchParams;
   const initialTab: Tab =
     tabParam === "provisional" || tabParam === "out_for_delivery" || tabParam === "delivered"

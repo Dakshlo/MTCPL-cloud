@@ -2,6 +2,7 @@ export type AppRole =
   | "developer"
   | "owner"
   | "team_head"
+  | "carving_head"
   | "block_slab_entry"
   | "slab_entry"
   | "block_entry"

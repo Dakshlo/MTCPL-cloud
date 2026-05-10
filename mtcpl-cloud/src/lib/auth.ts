@@ -11,6 +11,8 @@ export function getDefaultRouteForRole(role?: AppRole | null) {
       return "/dashboard";
     case "team_head":
       return "/slabs";
+    case "carving_head":
+      return "/slabs/ready";
     case "dispatch":
     case "block_slab_entry":
     case "block_entry":
