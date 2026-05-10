@@ -322,7 +322,25 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
             </span>
           )}
           {isDone && (
-            <span className="role-pill badge-available">✓ Done</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span className="role-pill badge-available">✓ Done</span>
+              <Link
+                href={`/cutting/${block.id}/labels`}
+                target="_blank"
+                rel="noreferrer"
+                className="primary-button"
+                style={{
+                  fontSize: 13,
+                  padding: "8px 16px",
+                  fontWeight: 700,
+                  textDecoration: "none",
+                  whiteSpace: "nowrap",
+                }}
+                title="Print a sheet with every slab's ID + dimensions + stock location — the cutter writes the IDs onto the physical slabs"
+              >
+                🖨 Print slab labels
+              </Link>
+            </div>
           )}
           {isRejected && (
             <span className="role-pill badge-discarded">Rejected</span>

@@ -68,6 +68,13 @@ export function FinishBlockForm({
   );
   const [remainders, setRemainders] = useState<RemainderEntry[]>([]);
   const [extraIds, setExtraIds] = useState<Set<string>>(new Set());
+  // Stock location for the cut slabs — where the operator is putting
+  // them physically. Required so the carving/dispatch teams can find
+  // the slabs after cutting. Defaults to the parent block's yard
+  // label as a sensible starting point.
+  const [stockLocation, setStockLocation] = useState<string>(
+    `Yard ${yard}`,
+  );
   // Selected transfer slabs — kept separate from extraIds because the
   // server action splits open vs planned via two different formData
   // fields. The combined ExtraSizePicker shows them merged but
@@ -179,6 +186,7 @@ export function FinishBlockForm({
       <input type="hidden" name="restock" value={restock} />
       <input type="hidden" name="extra_slab_ids" value={JSON.stringify(extraSlabIdsList)} />
       <input type="hidden" name="transferred_slab_ids" value={JSON.stringify(transferIdsList)} />
+      <input type="hidden" name="stock_location" value={stockLocation} />
     </>
   );
 
@@ -447,6 +455,42 @@ export function FinishBlockForm({
             {validRemainders.length} piece{validRemainders.length > 1 ? "s" : ""} will be added to Blocks inventory when you click &ldquo;Done &amp; Restock&rdquo;.
           </p>
         )}
+      </div>
+
+      {/* Stock location — where the operator is physically placing
+          the cut slabs. Required so carving/dispatch teams can find
+          them later. Defaults to the parent block's yard label so
+          the typical "stays in this yard" case is one tap.
+          Bilingual heading because this is filled on the floor. */}
+      <div style={{ background: "var(--bg)", border: "2px solid var(--gold-dark)", borderRadius: 8, padding: "12px 14px" }}>
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text)", lineHeight: 1.2 }}>
+            📍 Stock location
+          </div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+            slabs कहाँ रखी जा रही हैं? · Where are these slabs being stocked physically?
+          </div>
+        </div>
+        <input
+          type="text"
+          value={stockLocation}
+          onChange={(e) => setStockLocation(e.target.value)}
+          placeholder="e.g. Yard 2 · Polishing area · vendor pickup ramp"
+          required
+          style={{
+            width: "100%",
+            padding: "10px 12px",
+            fontSize: 14,
+            border: "1px solid var(--border)",
+            borderRadius: 6,
+            background: "var(--surface)",
+            color: "var(--text)",
+          }}
+        />
+        <div className="muted" style={{ fontSize: 10, marginTop: 4 }}>
+          Applied to every cut slab from this block — the carving team
+          uses this to locate the slabs after the cut.
+        </div>
       </div>
 
       {/* Submit error banner — surfaces the actual server-action

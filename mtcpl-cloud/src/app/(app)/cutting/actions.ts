@@ -235,12 +235,19 @@ export async function finishBlockAction(formData: FormData) {
   // Transferred slabs — claimed from another block's plan (status='planned').
   // These cause donor block layout edits + needs_reprint flag.
   const transferredSlabIds = JSON.parse(String(formData.get("transferred_slab_ids") || "[]")) as string[];
+  // Stock location — where the cut slabs are physically going. Operator
+  // enters this when finishing the cut. Applies to every slab the
+  // action touches (planned cuts, extras, transfers). Manual slabs
+  // added later by office staff inherit nothing here — the office
+  // team sets stock_location separately via the slab edit flow.
+  const stockLocation = String(formData.get("stock_location") || "").trim() || null;
 
   // Log the incoming request so we can trace failures from Vercel logs.
   console.log("[finishBlockAction] START", {
     sessionBlockId, sessionId, blockId, stone, yard,
     cutSlabIds, notCutSlabIds, extraSlabIds,
     restock, remainderCount: remainders.length,
+    stockLocation,
     actor: profile.id,
   });
 
@@ -283,6 +290,10 @@ export async function finishBlockAction(formData: FormData) {
       // Pass remainders as-is — the PG function reads l/w/h/quality/yard/id off each.
       p_remainders: remainders,
       p_restock: restock,
+      // Optional — applied to every slab the RPC touches.
+      // Migration 020 adds slab_requirements.stock_location +
+      // teaches the RPC to consume this parameter.
+      p_stock_location: stockLocation,
     });
     console.log(`[finishBlockAction] RPC finish_block_cut returned in ${Date.now() - tStart}ms`);
 
