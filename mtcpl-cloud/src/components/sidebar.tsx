@@ -81,8 +81,11 @@ const navEntries: NavEntry[] = [
     roles: ["developer", "owner", "carving_head"],
   },
   {
-    href: "/carving/floor",
-    label: "Floor View",
+    // Floor View now lives inline on Carving Jobs → Active tab.
+    // The sidebar entry deep-links straight to TV mode for the
+    // wall-mounted display.
+    href: "/carving/floor?mode=tv",
+    label: "TV Mode",
     icon: "📺",
     roles: ["developer", "owner", "carving_head"],
   },

@@ -28,6 +28,7 @@ import {
 } from "./actions";
 import { IsoBlockStaticSVG } from "@/components/iso-block-static";
 import type { StoneTypeDef } from "@/lib/stone-utils";
+import { VendorGridSection, type FloorVendor } from "./floor/floor-client";
 
 type UnassignedSlab = {
   id: string;
@@ -65,6 +66,9 @@ type JobRow = {
   vendor_name: string;
   vendor_type: "CNC" | "Manual";
   status: string;
+  /** Urgency stamp from the assign step. Used to surface a chip on
+   *  Active cards beside the queued/carving status ribbon. */
+  urgency?: "normal" | "urgent" | null;
   due_at: string | null;
   assigned_at: string;
   completed_at: string | null;
@@ -73,6 +77,12 @@ type JobRow = {
   cnc_machine_id?: string | null;
   location?: string | null;
   ready_to_dispatch_at?: string | null;
+  /** Live timer fields for the Active tab card. loaded_at is set by
+   *  loadSlabOnMachineAction; minutes prefer the vendor's tighter
+   *  estimate, fall back to the carving head's rough one. */
+  loaded_at?: string | null;
+  vendor_estimated_minutes?: number | null;
+  estimated_minutes?: number | null;
 };
 
 type Vendor = {
@@ -108,6 +118,7 @@ export function CarvingDashboardClient({
   templeNames,
   templeFilter,
   stoneTypes,
+  floorVendors,
 }: {
   tab: "unassigned" | "active" | "review" | "done";
   unassignedSlabs: UnassignedSlab[];
@@ -122,6 +133,9 @@ export function CarvingDashboardClient({
   templeFilter: string;
   /** Stone palette definitions for the 3D thumbnails on cards. */
   stoneTypes: StoneTypeDef[];
+  /** Floor view payload — only sent when on the Active tab. Used to
+   *  render vendor cockpit sections above the active job cards. */
+  floorVendors?: FloorVendor[] | null;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -552,17 +566,22 @@ export function CarvingDashboardClient({
       )}
 
       {tab === "active" && (
-        <JobsByTemple
-          jobs={filteredActive}
-          machineCodeById={machineCodeById}
-          stoneTypes={stoneTypes}
-          groupBy={jobsGroupBy}
-          fields={["deadline", "phase"]}
-          emptyMessage="No active carving jobs. Assign some slabs from the Unassigned tab."
-          fmtDate={fmtDate}
-          daysUntil={daysUntil}
-          onOpenJob={(j) => setPeekJob(j)}
-        />
+        <>
+          {floorVendors && floorVendors.length > 0 && (
+            <ActiveFloorEmbed vendors={floorVendors} />
+          )}
+          <JobsByTemple
+            jobs={filteredActive}
+            machineCodeById={machineCodeById}
+            stoneTypes={stoneTypes}
+            groupBy={jobsGroupBy}
+            fields={["deadline", "phase"]}
+            emptyMessage="No active carving jobs. Assign some slabs from the Unassigned tab."
+            fmtDate={fmtDate}
+            daysUntil={daysUntil}
+            onOpenJob={(j) => setPeekJob(j)}
+          />
+        </>
       )}
 
       {tab === "review" && (
@@ -1270,6 +1289,84 @@ function JobsByTemple({
                     t={j.thickness_ft}
                     stoneTypes={stoneTypes}
                   />
+
+                  {/* ACTIVE-tab status ribbon. Surfaces "▶ CARVING NOW"
+                      vs "⏳ WAITING" so the carving head + team can
+                      tell at a glance whether each row is loaded on a
+                      machine or sitting in the vendor's queue.
+                      Carving rows show the running-for / remaining
+                      duo when a loaded_at + ETA exist. */}
+                  {fields.includes("deadline") && (() => {
+                    const isCarving = j.status === "carving_in_progress";
+                    const isUrgent = j.urgency === "urgent";
+                    if (isCarving && j.loaded_at) {
+                      const elapsedMin = (now - new Date(j.loaded_at).getTime()) / 60000;
+                      const eta = j.vendor_estimated_minutes ?? j.estimated_minutes ?? null;
+                      const remaining = eta != null ? eta - elapsedMin : null;
+                      const fmtDur = (m: number) => {
+                        const a = Math.abs(Math.round(m));
+                        if (a < 60) return `${a}m`;
+                        if (a < 60 * 24) return `${Math.floor(a / 60)}h ${a % 60}m`;
+                        return `${Math.floor(a / (60 * 24))}d ${Math.floor((a % (60 * 24)) / 60)}h`;
+                      };
+                      return (
+                        <div
+                          style={{
+                            background: "rgba(37,99,235,0.08)",
+                            border: "1px solid rgba(37,99,235,0.35)",
+                            borderRadius: 6,
+                            padding: "5px 8px",
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 2,
+                          }}
+                        >
+                          <div style={{ fontSize: 9, fontWeight: 800, color: "#1d4ed8", letterSpacing: "0.07em" }}>
+                            ▶ CARVING NOW
+                          </div>
+                          <div
+                            style={{
+                              fontSize: 10,
+                              color: "#1e3a8a",
+                              fontFamily: "ui-monospace, monospace",
+                              display: "flex",
+                              gap: 6,
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            <span>▶ {fmtDur(elapsedMin)}</span>
+                            {remaining != null && (
+                              <span style={{ color: remaining < 0 ? "#dc2626" : remaining < 15 ? "#b45309" : "#1d4ed8", fontWeight: 700 }}>
+                                ⏱ {remaining < 0 ? `${fmtDur(remaining)} over` : `${fmtDur(remaining)} left`}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    }
+                    // Carving_assigned / not loaded yet
+                    return (
+                      <div
+                        style={{
+                          background: isUrgent ? "rgba(220,38,38,0.08)" : "rgba(217,119,6,0.08)",
+                          border: `1px solid ${isUrgent ? "rgba(220,38,38,0.35)" : "rgba(217,119,6,0.3)"}`,
+                          borderRadius: 6,
+                          padding: "5px 8px",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 6,
+                          fontSize: 10,
+                          fontWeight: 800,
+                          letterSpacing: "0.07em",
+                          color: isUrgent ? "#991b1b" : "#b45309",
+                        }}
+                      >
+                        <span>⏳ WAITING (queued)</span>
+                        {isUrgent && <span style={{ fontSize: 9, fontWeight: 800 }}>⚡ URGENT</span>}
+                      </div>
+                    );
+                  })()}
 
                   {/* Header: slab id + stone */}
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
@@ -2078,6 +2175,112 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span style={{ fontSize: 13, color: "var(--text)", textAlign: "right", minWidth: 0 }}>
         {children}
       </span>
+    </div>
+  );
+}
+
+// ─── Active-tab floor embed ─────────────────────────────────────────
+//
+// Renders one VendorGridSection per CNC vendor inline on the Active
+// carving tab so the carving head sees their full floor cockpit
+// (machines + queue + last 24h done) without having to navigate to
+// /carving/floor. The 30s tick is local so its timers stay live.
+function ActiveFloorEmbed({ vendors }: { vendors: FloorVendor[] }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Aggregate fleet totals so the embed has its own header strip.
+  const fleet = useMemo(() => {
+    const acc = { total: 0, idle: 0, carving: 0, maintenance: 0, queue: 0, today: 0 };
+    for (const v of vendors) {
+      acc.total += v.totals.total;
+      acc.idle += v.totals.idle;
+      acc.carving += v.totals.carving;
+      acc.maintenance += v.totals.maintenance;
+      acc.queue += v.totals.queue;
+      acc.today += v.totals.today;
+    }
+    return acc;
+  }, [vendors]);
+
+  return (
+    <section style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 18 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 10,
+          padding: "10px 14px",
+          background: "linear-gradient(135deg, #2D2410 0%, #4a3a1f 100%)",
+          color: "#fff",
+          borderRadius: 10,
+          flexWrap: "wrap",
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>
+            📺 Floor — live
+          </div>
+          <div style={{ fontSize: 16, fontWeight: 700, marginTop: 2 }}>
+            {vendors.length} operator{vendors.length !== 1 ? "s" : ""} · {fleet.total} CNC{fleet.total !== 1 ? "s" : ""}
+          </div>
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          <FleetTile label="Free" value={fleet.idle} fg="#22c55e" />
+          <FleetTile label="Carving" value={fleet.carving} fg="#60a5fa" />
+          <FleetTile label="Maint" value={fleet.maintenance} fg="#f87171" />
+          <FleetTile label="Queue" value={fleet.queue} fg="#fbbf24" />
+          <FleetTile label="Today" value={fleet.today} fg="#E8C572" />
+        </div>
+        <Link
+          href="/carving/floor?mode=tv"
+          target="_blank"
+          rel="noreferrer"
+          style={{
+            background: "rgba(255,255,255,0.12)",
+            color: "#fff",
+            border: "1px solid rgba(255,255,255,0.25)",
+            padding: "6px 12px",
+            fontSize: 12,
+            fontWeight: 700,
+            borderRadius: 6,
+            textDecoration: "none",
+            whiteSpace: "nowrap",
+          }}
+          title="Open this floor in TV mode (auto-rotate)"
+        >
+          📺 TV mode
+        </Link>
+      </div>
+
+      {vendors.map((v) => (
+        <VendorGridSection key={v.id} vendor={v} now={now} />
+      ))}
+    </section>
+  );
+}
+
+function FleetTile({ label, value, fg }: { label: string; value: number; fg: string }) {
+  return (
+    <div
+      style={{
+        padding: "5px 10px",
+        background: "rgba(255,255,255,0.08)",
+        borderRadius: 6,
+        textAlign: "center",
+        minWidth: 50,
+      }}
+    >
+      <div style={{ fontSize: 9, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 18, fontWeight: 800, color: fg, fontFamily: "ui-monospace, monospace", lineHeight: 1 }}>
+        {value}
+      </div>
     </div>
   );
 }

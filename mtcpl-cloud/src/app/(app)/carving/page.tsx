@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { CarvingDashboardClient } from "./dashboard-client";
 import { VendorsManagerPeek } from "./vendors-manager-peek";
+import { buildFloorViewData } from "@/lib/floor-view-data";
 
 type Tab = "unassigned" | "active" | "review" | "done";
 
@@ -68,7 +69,9 @@ export default async function CarvingDashboardPage({
     fetchAllUnassignedSlabs(),
     admin
       .from("carving_items")
-      .select("id, slab_requirement_id, vendor_id, vendor_name, vendor_type, status, due_at, assigned_at, completed_at, progress_phase, cnc_machine_id")
+      .select(
+        "id, slab_requirement_id, vendor_id, vendor_name, vendor_type, status, urgency, due_at, assigned_at, completed_at, progress_phase, cnc_machine_id, loaded_at, vendor_estimated_minutes, estimated_minutes",
+      )
       .in("status", ["carving_assigned", "carving_in_progress"])
       .order("assigned_at", { ascending: false }),
     admin
@@ -380,6 +383,7 @@ export default async function CarvingDashboardPage({
         templeNames={templeNames}
         templeFilter={templeFilter}
         stoneTypes={stoneTypes ?? []}
+        floorVendors={tab === "active" ? await buildFloorViewData() : null}
       />
     </div>
   );

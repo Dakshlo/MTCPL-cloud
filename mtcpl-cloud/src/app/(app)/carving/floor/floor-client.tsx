@@ -396,7 +396,7 @@ function TvHeader({
 
 // ── Vendor sections ────────────────────────────────────────────────
 
-function VendorGridSection({ vendor, now }: { vendor: FloorVendor; now: number }) {
+export function VendorGridSection({ vendor, now }: { vendor: FloorVendor; now: number }) {
   // Subgroups by machine type — single → 2× head → lathe.
   const grouped = groupMachinesByType(vendor.machines);
   // Queue and "done last 24h" are collapsed by default per request;
