@@ -72,8 +72,11 @@ export async function createVendorAction(formData: FormData) {
     redirect(`/carving/vendors?toast=${encodeURIComponent(error?.message ?? "Failed to create vendor")}`);
   }
 
-  // If CNC, insert machines
+  // If CNC, insert machines. Surface errors via toast — silently
+  // logging means the user sees "Vendor created" but no machines
+  // appear and they can't tell why.
   if (vendorType === "CNC" && machinesJson) {
+    let machineErr: string | null = null;
     try {
       const machines = JSON.parse(machinesJson) as Array<{
         machine_code: string;
@@ -94,8 +97,15 @@ export async function createVendorAction(formData: FormData) {
         if (mErr) throw new Error(mErr.message);
       }
     } catch (e) {
-      // Vendor created but machines failed — log it, continue
+      machineErr = e instanceof Error ? e.message : String(e);
       console.error("[createVendorAction] machine insert error:", e);
+    }
+    if (machineErr) {
+      await logAudit(profile.id, "vendor_created", "vendor", vendor.id, { name, type: vendorType, machine_error: machineErr });
+      refreshAll();
+      redirect(
+        `/carving/vendors/${vendor.id}?toast=${encodeURIComponent(`Vendor saved but machines failed: ${machineErr}`)}`,
+      );
     }
   }
 
@@ -129,8 +139,12 @@ export async function updateVendorAction(formData: FormData) {
     redirect(`${redirectTo}?toast=${encodeURIComponent(error.message)}`);
   }
 
-  // Sync machines for CNC vendors
+  // Sync machines for CNC vendors. Errors here used to be swallowed
+  // (logged + ignored) which meant the user clicked "Save changes",
+  // saw "Vendor saved", and had no idea why the new machine wasn't
+  // there. Now we redirect with the real error in the toast.
   if (vendorType === "CNC" && machinesJson) {
+    let machineErr: string | null = null;
     try {
       const machines = JSON.parse(machinesJson) as Array<{
         id?: string;
@@ -144,7 +158,8 @@ export async function updateVendorAction(formData: FormData) {
       // Delete marked machines
       const toDelete = machines.filter((m) => m._delete && m.id).map((m) => m.id!);
       if (toDelete.length > 0) {
-        await admin.from("cnc_machines").delete().in("id", toDelete);
+        const { error: dErr } = await admin.from("cnc_machines").delete().in("id", toDelete);
+        if (dErr) throw new Error(`delete failed: ${dErr.message}`);
       }
 
       // Upsert the rest
@@ -164,7 +179,13 @@ export async function updateVendorAction(formData: FormData) {
         if (mErr) throw new Error(mErr.message);
       }
     } catch (e) {
+      machineErr = e instanceof Error ? e.message : String(e);
       console.error("[updateVendorAction] machine sync error:", e);
+    }
+    if (machineErr) {
+      await logAudit(profile.id, "vendor_updated", "vendor", vendorId, { name, machine_error: machineErr });
+      refreshAll();
+      redirect(`${redirectTo}?toast=${encodeURIComponent(`Machine sync failed: ${machineErr}`)}`);
     }
   }
 
