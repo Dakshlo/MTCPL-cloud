@@ -16,7 +16,7 @@
  * options. Client code stays the same.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AssignModal } from "./assign-modal";
 import { IsoBlockStaticSVG } from "@/components/iso-block-static";
@@ -111,6 +111,37 @@ export function CarvingDashboardClient({
   const searchParams = useSearchParams();
   const [assigning, setAssigning] = useState<UnassignedSlab | null>(null);
 
+  // ── Filter / view state ──────────────────────────────────────────
+  // Search across slab id, label, and temple. Lower-cased compare.
+  const [query, setQuery] = useState("");
+  const [stoneFilter, setStoneFilter] = useState("all");
+  const [priorityOnly, setPriorityOnly] = useState(false);
+  // Unassigned tab can render either temple-grouped (default, good
+  // when the carving head is working through one temple at a time)
+  // or as a flat searchable grid (better with a query active).
+  const [viewMode, setViewMode] = useState<"grouped" | "flat">("grouped");
+
+  // Cmd/Ctrl-K or `/` focuses the search input — power users can fly.
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const isInput =
+        document.activeElement instanceof HTMLInputElement ||
+        document.activeElement instanceof HTMLTextAreaElement;
+      if (e.key === "/" && !isInput) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   // Temple filter handler — updates URL, preserving tab.
   function setTempleFilter(next: string) {
     const params = new URLSearchParams(searchParams.toString());
@@ -120,35 +151,77 @@ export function CarvingDashboardClient({
     router.replace(q ? `/carving?${q}` : "/carving");
   }
 
-  // Apply temple filter to each dataset.
+  // Stones derived from the actual data — saves us plumbing another
+  // list from the server. Sorted alphabetically.
+  const stoneNames = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of unassignedSlabs) if (s.stone) set.add(s.stone);
+    for (const j of activeJobs) if (j.stone) set.add(j.stone);
+    for (const j of reviewJobs) if (j.stone) set.add(j.stone);
+    for (const j of doneJobs) if (j.stone) set.add(j.stone);
+    return [...set].sort();
+  }, [unassignedSlabs, activeJobs, reviewJobs, doneJobs]);
+
+  const queryNorm = query.trim().toLowerCase();
+
+  // Generic filter that works on both unassigned slabs and job rows.
+  // Pulls the right id/label fields off either shape.
+  function matches(item: {
+    id?: string;
+    slab_requirement_id?: string;
+    label?: string | null;
+    slab_label?: string | null;
+    temple: string;
+    stone: string | null;
+    priority?: boolean;
+  }): boolean {
+    if (templeFilter && templeFilter !== "all" && item.temple !== templeFilter) return false;
+    if (stoneFilter !== "all" && item.stone !== stoneFilter) return false;
+    if (priorityOnly && !item.priority) return false;
+    if (queryNorm) {
+      const id = (item.id ?? item.slab_requirement_id ?? "").toLowerCase();
+      const lbl = (item.label ?? item.slab_label ?? "").toLowerCase();
+      const tem = item.temple.toLowerCase();
+      if (!id.includes(queryNorm) && !lbl.includes(queryNorm) && !tem.includes(queryNorm)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   const filteredUnassigned = useMemo(
-    () =>
-      templeFilter && templeFilter !== "all"
-        ? unassignedSlabs.filter((s) => s.temple === templeFilter)
-        : unassignedSlabs,
-    [unassignedSlabs, templeFilter],
+    () => unassignedSlabs.filter(matches),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [unassignedSlabs, templeFilter, stoneFilter, priorityOnly, queryNorm],
   );
   const filteredActive = useMemo(
-    () =>
-      templeFilter && templeFilter !== "all"
-        ? activeJobs.filter((j) => j.temple === templeFilter)
-        : activeJobs,
-    [activeJobs, templeFilter],
+    () => activeJobs.filter(matches),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeJobs, templeFilter, stoneFilter, priorityOnly, queryNorm],
   );
   const filteredReview = useMemo(
-    () =>
-      templeFilter && templeFilter !== "all"
-        ? reviewJobs.filter((j) => j.temple === templeFilter)
-        : reviewJobs,
-    [reviewJobs, templeFilter],
+    () => reviewJobs.filter(matches),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [reviewJobs, templeFilter, stoneFilter, priorityOnly, queryNorm],
   );
   const filteredDone = useMemo(
-    () =>
-      templeFilter && templeFilter !== "all"
-        ? doneJobs.filter((j) => j.temple === templeFilter)
-        : doneJobs,
-    [doneJobs, templeFilter],
+    () => doneJobs.filter(matches),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [doneJobs, templeFilter, stoneFilter, priorityOnly, queryNorm],
   );
+
+  const hasAnyFilter =
+    queryNorm.length > 0 ||
+    (templeFilter && templeFilter !== "all") ||
+    stoneFilter !== "all" ||
+    priorityOnly;
+
+  function clearAllFilters() {
+    setQuery("");
+    setStoneFilter("all");
+    setPriorityOnly(false);
+    setTempleFilter("all");
+  }
 
   function fmtDate(iso: string | null) {
     if (!iso) return "—";
@@ -160,60 +233,222 @@ export function CarvingDashboardClient({
     return Math.ceil((new Date(iso).getTime() - Date.now()) / 86400000);
   }
 
+  // Result count for the current tab — displayed in the toolbar.
+  const currentTabCount =
+    tab === "unassigned"
+      ? filteredUnassigned.length
+      : tab === "active"
+        ? filteredActive.length
+        : tab === "review"
+          ? filteredReview.length
+          : filteredDone.length;
+
   const filterBar = (
     <div
       style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        padding: "10px 14px",
+        position: "sticky",
+        top: 0,
+        zIndex: 4,
         marginBottom: 14,
-        background: "var(--surface)",
-        border: "1px solid var(--border)",
-        borderRadius: 10,
-        flexWrap: "wrap",
       }}
     >
-      <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>
-        Temple
-      </span>
-      <select
-        value={templeFilter || "all"}
-        onChange={(e) => setTempleFilter(e.target.value)}
+      <div
         style={{
-          fontSize: 13,
-          padding: "6px 10px",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "10px 12px",
+          background: "var(--surface)",
           border: "1px solid var(--border)",
-          borderRadius: 6,
-          background: "var(--bg)",
-          color: "var(--text)",
-          minWidth: 220,
+          borderRadius: 10,
+          flexWrap: "wrap",
+          boxShadow: "0 2px 8px rgba(0,0,0,0.04)",
         }}
       >
-        <option value="all">All temples</option>
-        {templeNames.map((t) => (
-          <option key={t} value={t}>
-            {t}
-          </option>
-        ))}
-      </select>
-      {templeFilter && templeFilter !== "all" && (
-        <button
-          type="button"
-          onClick={() => setTempleFilter("all")}
+        {/* Search — primary control, gets the most weight */}
+        <div
           style={{
-            background: "transparent",
-            border: "1px solid var(--border)",
-            color: "var(--muted)",
-            padding: "4px 10px",
-            fontSize: 11,
-            borderRadius: 5,
-            cursor: "pointer",
+            position: "relative",
+            flex: "1 1 280px",
+            minWidth: 220,
           }}
         >
-          ✕ Clear
+          <span
+            style={{
+              position: "absolute",
+              left: 10,
+              top: "50%",
+              transform: "translateY(-50%)",
+              color: "var(--muted)",
+              pointerEvents: "none",
+              fontSize: 14,
+            }}
+          >
+            🔎
+          </span>
+          <input
+            ref={searchInputRef}
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search slab id, label or temple…   (press / to focus)"
+            style={{
+              width: "100%",
+              padding: "8px 32px 8px 32px",
+              fontSize: 13,
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              background: "var(--bg)",
+              color: "var(--text)",
+            }}
+          />
+          {query && (
+            <button
+              type="button"
+              onClick={() => setQuery("")}
+              style={{
+                position: "absolute",
+                right: 6,
+                top: "50%",
+                transform: "translateY(-50%)",
+                background: "transparent",
+                border: "none",
+                color: "var(--muted)",
+                cursor: "pointer",
+                fontSize: 14,
+                padding: 4,
+              }}
+              aria-label="Clear search"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
+        {/* Temple */}
+        <select
+          value={templeFilter || "all"}
+          onChange={(e) => setTempleFilter(e.target.value)}
+          title="Filter by temple"
+          style={{
+            fontSize: 12,
+            padding: "7px 10px",
+            border: "1px solid var(--border)",
+            borderRadius: 6,
+            background: "var(--bg)",
+            color: "var(--text)",
+            minWidth: 160,
+          }}
+        >
+          <option value="all">All temples</option>
+          {templeNames.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
+
+        {/* Stone */}
+        {stoneNames.length > 0 && (
+          <select
+            value={stoneFilter}
+            onChange={(e) => setStoneFilter(e.target.value)}
+            title="Filter by stone"
+            style={{
+              fontSize: 12,
+              padding: "7px 10px",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              background: "var(--bg)",
+              color: "var(--text)",
+              minWidth: 120,
+            }}
+          >
+            <option value="all">All stones</option>
+            {stoneNames.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        )}
+
+        {/* Priority toggle */}
+        <button
+          type="button"
+          onClick={() => setPriorityOnly((p) => !p)}
+          title="Show only ⚡ priority slabs"
+          style={{
+            padding: "7px 12px",
+            fontSize: 12,
+            fontWeight: 700,
+            border: `1.5px solid ${priorityOnly ? "#dc2626" : "var(--border)"}`,
+            background: priorityOnly ? "rgba(220,38,38,0.08)" : "var(--surface)",
+            color: priorityOnly ? "#991b1b" : "var(--muted)",
+            borderRadius: 6,
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+          }}
+        >
+          ⚡ Priority
         </button>
-      )}
+
+        {/* View toggle (unassigned tab only — other tabs always
+            grouped since they're already small enough) */}
+        {tab === "unassigned" && (
+          <div style={{ display: "flex", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
+            {(
+              [
+                { v: "grouped", label: "🏛 Grouped" },
+                { v: "flat", label: "▦ Flat" },
+              ] as const
+            ).map((m) => (
+              <button
+                key={m.v}
+                type="button"
+                onClick={() => setViewMode(m.v)}
+                style={{
+                  padding: "7px 10px",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  border: "none",
+                  background: viewMode === m.v ? "var(--gold-dark)" : "var(--bg)",
+                  color: viewMode === m.v ? "#fff" : "var(--muted)",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Result count + clear */}
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 11, color: "var(--muted)", fontFamily: "ui-monospace, monospace", whiteSpace: "nowrap" }}>
+            {currentTabCount} result{currentTabCount !== 1 ? "s" : ""}
+          </span>
+          {hasAnyFilter && (
+            <button
+              type="button"
+              onClick={clearAllFilters}
+              style={{
+                background: "transparent",
+                border: "1px solid var(--border)",
+                color: "var(--muted)",
+                padding: "5px 10px",
+                fontSize: 11,
+                borderRadius: 5,
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              ✕ Clear all
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 
@@ -225,6 +460,7 @@ export function CarvingDashboardClient({
         <UnassignedByTemple
           slabs={filteredUnassigned}
           stoneTypes={stoneTypes}
+          viewMode={viewMode}
           onAssign={(s) => setAssigning(s)}
         />
       )}
@@ -343,10 +579,12 @@ function SlabThumb({
 function UnassignedByTemple({
   slabs,
   stoneTypes,
+  viewMode,
   onAssign,
 }: {
   slabs: UnassignedSlab[];
   stoneTypes: StoneTypeDef[];
+  viewMode: "grouped" | "flat";
   onAssign: (s: UnassignedSlab) => void;
 }) {
   const groups = useMemo(() => groupByTemple(slabs, (s) => s.temple), [slabs]);
@@ -362,6 +600,95 @@ function UnassignedByTemple({
   }
 
   const openByDefault = groups.length <= 3;
+
+  // Card render reused by both grouped and flat views — keeps the
+  // visual identical so the user can switch view modes without
+  // re-learning the layout.
+  const renderCard = (s: UnassignedSlab) => (
+    <div
+      key={s.id}
+      style={{
+        padding: "8px 10px",
+        background: s.priority ? "rgba(220,38,38,0.04)" : "var(--surface)",
+        border: `1px solid ${s.priority ? "rgba(220,38,38,0.2)" : "var(--border)"}`,
+        borderRadius: 8,
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+      }}
+    >
+      <SlabThumb
+        stone={s.stone}
+        l={Number(s.length_ft)}
+        w={Number(s.width_ft)}
+        t={Number(s.thickness_ft)}
+        stoneTypes={stoneTypes}
+      />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+        <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {s.priority && "⚡ "}
+          {s.id}
+        </span>
+        {s.stone && (
+          <span className="role-pill" style={{ fontSize: 9, padding: "1px 6px", flexShrink: 0 }}>
+            {s.stone}
+          </span>
+        )}
+      </div>
+      {/* In flat view we surface temple under the slab id since the
+          temple group header is gone. In grouped view temple is in
+          the accordion header so we hide it here. */}
+      {viewMode === "flat" && (
+        <div style={{ fontSize: 10, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          🏛 {s.temple}
+        </div>
+      )}
+      {s.label && (
+        <div style={{ fontSize: 10, color: "var(--muted)" }}>{s.label}</div>
+      )}
+      <div
+        style={{
+          fontSize: 10,
+          color: "var(--muted-light)",
+          fontFamily: "ui-monospace, monospace",
+        }}
+      >
+        {s.length_ft}×{s.width_ft}×{s.thickness_ft}&Prime;
+        {s.source_block_id && ` · ${s.source_block_id}`}
+      </div>
+      <button
+        type="button"
+        onClick={() => onAssign(s)}
+        className="primary-button"
+        style={{ marginTop: 2, fontSize: 11, padding: "5px 10px" }}
+      >
+        Assign to Vendor →
+      </button>
+    </div>
+  );
+
+  // ── Flat view — one big grid, no temple grouping. Best when a
+  //    search query is active or the carving head wants to scan
+  //    across temples.
+  if (viewMode === "flat") {
+    return (
+      <>
+        <p className="muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
+          {slabs.length} slab{slabs.length > 1 ? "s" : ""} across {groups.length} temple
+          {groups.length > 1 ? "s" : ""}.
+        </p>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+            gap: 8,
+          }}
+        >
+          {slabs.map(renderCard)}
+        </div>
+      </>
+    );
+  }
 
   return (
     <>
@@ -417,60 +744,7 @@ function UnassignedByTemple({
               gap: 8,
             }}
           >
-            {items.map((s) => (
-              <div
-                key={s.id}
-                style={{
-                  padding: "8px 10px",
-                  background: s.priority ? "rgba(220,38,38,0.04)" : "var(--surface)",
-                  border: `1px solid ${s.priority ? "rgba(220,38,38,0.2)" : "var(--border)"}`,
-                  borderRadius: 8,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 6,
-                }}
-              >
-                <SlabThumb
-                  stone={s.stone}
-                  l={Number(s.length_ft)}
-                  w={Number(s.width_ft)}
-                  t={Number(s.thickness_ft)}
-                  stoneTypes={stoneTypes}
-                />
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
-                  <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {s.priority && "⚡ "}
-                    {s.id}
-                  </span>
-                  {s.stone && (
-                    <span className="role-pill" style={{ fontSize: 9, padding: "1px 6px", flexShrink: 0 }}>
-                      {s.stone}
-                    </span>
-                  )}
-                </div>
-                {s.label && (
-                  <div style={{ fontSize: 10, color: "var(--muted)" }}>{s.label}</div>
-                )}
-                <div
-                  style={{
-                    fontSize: 10,
-                    color: "var(--muted-light)",
-                    fontFamily: "ui-monospace, monospace",
-                  }}
-                >
-                  {s.length_ft}×{s.width_ft}×{s.thickness_ft}&Prime;
-                  {s.source_block_id && ` · ${s.source_block_id}`}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => onAssign(s)}
-                  className="primary-button"
-                  style={{ marginTop: 2, fontSize: 11, padding: "5px 10px" }}
-                >
-                  Assign to Vendor →
-                </button>
-              </div>
-            ))}
+            {items.map(renderCard)}
           </div>
         </details>
       ))}

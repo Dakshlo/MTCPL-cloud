@@ -50,11 +50,58 @@ type Vendor = { id: string; name: string };
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
-const STATUS_TINT: Record<string, { bg: string; border: string; fg: string; label: string }> = {
-  idle: { bg: "rgba(22,163,74,0.08)", border: "rgba(22,163,74,0.35)", fg: "#15803d", label: "IDLE" },
-  carving: { bg: "rgba(37,99,235,0.06)", border: "rgba(37,99,235,0.4)", fg: "#1d4ed8", label: "CARVING" },
-  maintenance: { bg: "rgba(220,38,38,0.06)", border: "rgba(220,38,38,0.4)", fg: "#b91c1c", label: "MAINTENANCE" },
-  inactive: { bg: "var(--surface-alt)", border: "var(--border)", fg: "var(--muted)", label: "INACTIVE" },
+// Each status has its own visual identity so a glance across the
+// cockpit immediately reads the floor. Idle stays low-key (no
+// information to act on); carving is the most prominent (the floor's
+// active work); maintenance pops red so it can't be missed.
+const STATUS_TINT: Record<
+  string,
+  {
+    bg: string;
+    bgAccent: string;
+    border: string;
+    accent: string;
+    fg: string;
+    label: string;
+    icon: string;
+  }
+> = {
+  idle: {
+    bg: "var(--surface)",
+    bgAccent: "rgba(22,163,74,0.06)",
+    border: "var(--border)",
+    accent: "#16a34a",
+    fg: "#15803d",
+    label: "AVAILABLE",
+    icon: "○",
+  },
+  carving: {
+    bg: "linear-gradient(180deg, rgba(37,99,235,0.12) 0%, rgba(37,99,235,0.05) 100%)",
+    bgAccent: "rgba(37,99,235,0.18)",
+    border: "rgba(37,99,235,0.55)",
+    accent: "#2563eb",
+    fg: "#1d4ed8",
+    label: "RUNNING",
+    icon: "▶",
+  },
+  maintenance: {
+    bg: "linear-gradient(180deg, rgba(220,38,38,0.12) 0%, rgba(220,38,38,0.05) 100%)",
+    bgAccent: "rgba(220,38,38,0.18)",
+    border: "rgba(220,38,38,0.55)",
+    accent: "#dc2626",
+    fg: "#b91c1c",
+    label: "DOWN",
+    icon: "🔧",
+  },
+  inactive: {
+    bg: "var(--surface-alt)",
+    bgAccent: "var(--surface-alt)",
+    border: "var(--border)",
+    accent: "var(--muted)",
+    fg: "var(--muted)",
+    label: "OFFLINE",
+    icon: "—",
+  },
 };
 
 const MAINTENANCE_REASONS: Array<{ value: string; label: string }> = [
@@ -531,152 +578,236 @@ function MachineCard({
   // Countdown for in-progress jobs.
   let remainingLabel: string | null = null;
   let remainingColor: string | null = null;
+  let progressPct: number | null = null;
   if (machine.status === "carving" && job?.loaded_at) {
     const eta = job.vendor_estimated_minutes ?? job.estimated_minutes ?? null;
+    const elapsedMin = (now - new Date(job.loaded_at).getTime()) / 60_000;
     if (eta) {
-      const elapsedMin = (now - new Date(job.loaded_at).getTime()) / 60_000;
       const remaining = eta - elapsedMin;
+      progressPct = Math.max(0, Math.min(100, (elapsedMin / eta) * 100));
       if (remaining >= 0) {
-        remainingLabel = `${fmtDuration(remaining)} remaining`;
+        remainingLabel = `${fmtDuration(remaining)} left`;
         remainingColor = remaining <= 15 ? "#b45309" : "#1d4ed8";
       } else {
         remainingLabel = `${fmtDuration(remaining)} over`;
         remainingColor = "#b91c1c";
       }
     } else {
-      const elapsedMin = (now - new Date(job.loaded_at).getTime()) / 60_000;
       remainingLabel = `${fmtDuration(elapsedMin)} elapsed`;
       remainingColor = "var(--muted)";
     }
   }
 
+  // Downtime timer for maintenance. Same `now` tick as the countdown
+  // so it refreshes every 30s along with everything else.
+  let downtimeLabel: string | null = null;
+  if (machine.status === "maintenance" && machine.maintenance_flagged_at) {
+    const downMin = (now - new Date(machine.maintenance_flagged_at).getTime()) / 60_000;
+    downtimeLabel = `Down for ${fmtDuration(downMin)}`;
+  }
+
   return (
     <div
       style={{
-        padding: "12px 14px",
+        padding: 0,
         background: tint.bg,
-        border: `1.5px solid ${tint.border}`,
+        border: `2px solid ${tint.border}`,
         borderRadius: 10,
         display: "flex",
         flexDirection: "column",
-        gap: 8,
         position: "relative",
+        overflow: "hidden",
+        // Carving cards lift slightly to telegraph "this is active work"
+        boxShadow:
+          machine.status === "carving"
+            ? "0 4px 14px rgba(37,99,235,0.18)"
+            : machine.status === "maintenance"
+              ? "0 4px 14px rgba(220,38,38,0.18)"
+              : "none",
       }}
     >
-      {/* Top row: machine code + status pill */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
-        <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 14, color: "var(--text)" }}>
-          {machine.machine_code}
-        </span>
-        <span
-          style={{
-            fontSize: 10,
-            fontWeight: 700,
-            padding: "2px 8px",
-            borderRadius: 999,
-            color: tint.fg,
-            background: "rgba(255,255,255,0.7)",
-            border: `1px solid ${tint.border}`,
-            letterSpacing: "0.05em",
-          }}
-        >
-          {tint.label}
-        </span>
-      </div>
-      {machine.operator_name && (
-        <div style={{ fontSize: 10, color: "var(--muted)" }}>👷 {machine.operator_name}</div>
-      )}
+      {/* Top accent bar — colour the entire card edge so cards are
+          distinguishable at a glance even when scanning fast */}
+      <div
+        style={{
+          height: 4,
+          background: tint.accent,
+          opacity: machine.status === "idle" ? 0.4 : 1,
+        }}
+      />
 
-      {/* Body — depends on status */}
-      {machine.status === "idle" && (
-        <>
-          <div style={{ fontSize: 12, color: "var(--muted)", padding: "6px 0", textAlign: "center" }}>
-            {queueLength > 0 ? `${queueLength} slab${queueLength !== 1 ? "s" : ""} in queue` : "Nothing queued"}
-          </div>
-          <button
-            type="button"
-            onClick={onLoad}
-            disabled={queueLength === 0}
-            className="primary-button"
-            style={{
-              fontSize: 13,
-              padding: "10px 14px",
-              fontWeight: 700,
-              opacity: queueLength > 0 ? 1 : 0.5,
-            }}
-          >
-            ▶ Load slab
-          </button>
-          <button
-            type="button"
-            onClick={onMaintenance}
-            className="ghost-button"
-            style={{ fontSize: 11, padding: "6px 10px" }}
-          >
-            🔧 Flag maintenance
-          </button>
-        </>
-      )}
-
-      {machine.status === "carving" && job && (
-        <>
-          <div
-            style={{
-              padding: "8px 10px",
-              background: "rgba(255,255,255,0.5)",
-              border: "1px solid rgba(37,99,235,0.2)",
-              borderRadius: 6,
-            }}
-          >
-            <div style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 13 }}>
-              {job.slab_id}
-            </div>
-            {job.slab && (
-              <div style={{ fontSize: 11, color: "var(--muted)" }}>
-                {job.slab.temple} · {dimStr(job.slab)}
-              </div>
-            )}
-            {remainingLabel && (
-              <div
-                style={{
-                  marginTop: 4,
-                  fontSize: 12,
-                  fontWeight: 700,
-                  color: remainingColor!,
-                  fontFamily: "ui-monospace, monospace",
-                }}
-              >
-                ⏱ {remainingLabel}
-              </div>
+      <div style={{ padding: "10px 12px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
+        {/* Header: BIG machine code + prominent status pill */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+            <span
+              style={{
+                fontFamily: "ui-monospace, monospace",
+                fontWeight: 800,
+                fontSize: 18,
+                color: "var(--text)",
+                lineHeight: 1,
+              }}
+            >
+              {machine.machine_code}
+            </span>
+            {machine.operator_name && (
+              <span style={{ fontSize: 10, color: "var(--muted)" }}>· {machine.operator_name}</span>
             )}
           </div>
-          <button
-            type="button"
-            onClick={onComplete}
-            className="primary-button"
-            style={{ fontSize: 13, padding: "10px 14px", fontWeight: 700 }}
-          >
-            ✓ Mark complete + unload
-          </button>
-        </>
-      )}
-
-      {machine.status === "maintenance" && (
-        <>
-          <div
+          <span
             style={{
-              padding: "8px 10px",
-              background: "rgba(255,255,255,0.5)",
-              border: "1px solid rgba(220,38,38,0.2)",
-              borderRadius: 6,
+              fontSize: 10,
+              fontWeight: 800,
+              padding: "3px 10px",
+              borderRadius: 999,
+              color: "#fff",
+              background: tint.accent,
+              letterSpacing: "0.07em",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              opacity: machine.status === "idle" ? 0.85 : 1,
             }}
           >
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#b91c1c", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-              Reason
+            <span style={{ fontSize: 9 }}>{tint.icon}</span>
+            {tint.label}
+          </span>
+        </div>
+
+        {/* Body — depends on status */}
+        {machine.status === "idle" && (
+          <>
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--muted)",
+                padding: "12px 0",
+                textAlign: "center",
+                fontStyle: "italic",
+              }}
+            >
+              {queueLength > 0
+                ? `${queueLength} slab${queueLength !== 1 ? "s" : ""} waiting`
+                : "Nothing in queue"}
             </div>
-            <div style={{ fontSize: 12, color: "var(--text)", marginTop: 2 }}>
-              {machine.maintenance_reason ?? "—"}
+            <button
+              type="button"
+              onClick={onLoad}
+              disabled={queueLength === 0}
+              className="primary-button"
+              style={{
+                fontSize: 13,
+                padding: "9px 14px",
+                fontWeight: 700,
+                opacity: queueLength > 0 ? 1 : 0.5,
+              }}
+            >
+              ▶ Load slab
+            </button>
+            <button
+              type="button"
+              onClick={onMaintenance}
+              className="ghost-button"
+              style={{ fontSize: 11, padding: "6px 10px" }}
+            >
+              🔧 Flag maintenance
+            </button>
+          </>
+        )}
+
+        {machine.status === "carving" && job && (
+          <>
+            <div
+              style={{
+                padding: "10px 12px",
+                background: "rgba(255,255,255,0.85)",
+                border: "1px solid rgba(37,99,235,0.25)",
+                borderRadius: 6,
+              }}
+            >
+              <div style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 13 }}>
+                {job.slab_id}
+              </div>
+              {job.slab && (
+                <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+                  {job.slab.temple} · {dimStr(job.slab)}
+                </div>
+              )}
+              {remainingLabel && (
+                <div
+                  style={{
+                    marginTop: 6,
+                    fontSize: 13,
+                    fontWeight: 800,
+                    color: remainingColor!,
+                    fontFamily: "ui-monospace, monospace",
+                  }}
+                >
+                  ⏱ {remainingLabel}
+                </div>
+              )}
+              {progressPct != null && (
+                <div
+                  style={{
+                    marginTop: 6,
+                    height: 4,
+                    background: "rgba(37,99,235,0.15)",
+                    borderRadius: 2,
+                    overflow: "hidden",
+                  }}
+                >
+                  <div
+                    style={{
+                      height: "100%",
+                      width: `${progressPct}%`,
+                      background: progressPct > 100 ? "#dc2626" : "#2563eb",
+                      transition: "width 0.5s",
+                    }}
+                  />
+                </div>
+              )}
             </div>
+            <button
+              type="button"
+              onClick={onComplete}
+              className="primary-button"
+              style={{ fontSize: 13, padding: "10px 14px", fontWeight: 700 }}
+            >
+              ✓ Mark complete + unload
+            </button>
+          </>
+        )}
+
+        {machine.status === "maintenance" && (
+          <>
+            <div
+              style={{
+                padding: "10px 12px",
+                background: "rgba(255,255,255,0.85)",
+                border: "1px solid rgba(220,38,38,0.25)",
+                borderRadius: 6,
+              }}
+            >
+              {downtimeLabel && (
+                <div
+                  style={{
+                    fontSize: 14,
+                    fontWeight: 800,
+                    color: "#b91c1c",
+                    fontFamily: "ui-monospace, monospace",
+                    marginBottom: 6,
+                  }}
+                >
+                  ⏱ {downtimeLabel}
+                </div>
+              )}
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#b91c1c", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                Reason
+              </div>
+              <div style={{ fontSize: 12, color: "var(--text)", marginTop: 2 }}>
+                {machine.maintenance_reason ?? "—"}
+              </div>
             {machine.maintenance_flagged_at && (
               <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 4 }}>
                 Flagged {new Date(machine.maintenance_flagged_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
@@ -703,11 +834,12 @@ function MachineCard({
         </>
       )}
 
-      {machine.status === "inactive" && (
-        <div style={{ fontSize: 12, color: "var(--muted)", padding: "8px 0", textAlign: "center" }}>
-          Machine deactivated
-        </div>
-      )}
+        {machine.status === "inactive" && (
+          <div style={{ fontSize: 12, color: "var(--muted)", padding: "8px 0", textAlign: "center" }}>
+            Machine deactivated
+          </div>
+        )}
+      </div>
     </div>
   );
 }
