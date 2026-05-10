@@ -8,6 +8,14 @@ Reverse-chronological. Most recent at top. Append to TOP when shipping new work.
 
 ## Recent (this Claude session)
 
+### `ec4ab64` · Vendor save: surface machine sync errors
+Daksh hit "adding machine in vendor not working". The machine
+insert/upsert in `createVendorAction` + `updateVendorAction` had
+try/catch blocks that just console.error'd and proceeded — silent
+failure. Now the real Supabase error is surfaced via toast
+("Machine sync failed: …"). Awaiting his retry to see the actual
+underlying error.
+
 ### `ddf2aa8` · TV mode discoverability + dark/light + cleaner Active tab
 - Removed the embedded Floor View vendor sections from the Active
   tab; replaced with a single "📺 Open Floor View" link card at the
