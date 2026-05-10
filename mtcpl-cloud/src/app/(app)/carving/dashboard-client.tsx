@@ -65,6 +65,16 @@ type Vendor = {
   name: string;
   vendor_type: "CNC" | "Manual";
   machines: Array<{ id: string; machine_code: string }>;
+  /** Live machine status counts + queue depth, surfaced in the
+   *  Assign modal so the carving head can pick a vendor with idle
+   *  capacity. */
+  live: {
+    free: number;
+    busy: number;
+    maintenance: number;
+    total: number;
+    queued: number;
+  };
 };
 
 export function CarvingDashboardClient({

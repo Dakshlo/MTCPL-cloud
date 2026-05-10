@@ -175,24 +175,33 @@ export async function assignCarvingJobAction(formData: FormData) {
 
   const slabId = txt(formData, "slab_id");
   const vendorId = txt(formData, "vendor_id");
-  const cncMachineId = txt(formData, "cnc_machine_id") || null;
-  const deadlineDays = num(formData, "deadline_days", 7);
   const note = txt(formData, "note") || null;
+  // CNC ops: urgency + rough estimated carving minutes from the
+  // carving head. Machine is NOT picked here — the vendor (CNC
+  // supervisor) decides which of their machines to load it on.
+  const urgency = txt(formData, "urgency") === "urgent" ? "urgent" : "normal";
+  const estimatedMinutes = Math.max(0, num(formData, "estimated_minutes", 0));
 
   if (!slabId || !vendorId) {
     redirect("/carving?toast=Missing+slab+or+vendor");
   }
 
-  // Load vendor so we can snapshot name/type into carving_items
+  // Load vendor so we can snapshot name/type into carving_items.
+  // We only allow CNC vendors in this Phase 3 flow (Manual / Outsource
+  // are paused for now per business decision).
   const { data: vendor } = await admin
     .from("vendors")
-    .select("id, name, vendor_type")
+    .select("id, name, vendor_type, is_active")
     .eq("id", vendorId)
     .single();
 
   if (!vendor) redirect("/carving?toast=Vendor+not+found");
-
-  const dueAt = new Date(Date.now() + deadlineDays * 24 * 3600 * 1000).toISOString();
+  if ((vendor as { vendor_type: string }).vendor_type !== "CNC") {
+    redirect("/carving?toast=Only+CNC+vendors+supported+for+now");
+  }
+  if (!(vendor as { is_active: boolean }).is_active) {
+    redirect("/carving?toast=Vendor+is+inactive");
+  }
 
   // Race guard: slab must currently be cut_done
   const { data: slabRow, error: slabErr } = await admin
@@ -210,13 +219,14 @@ export async function assignCarvingJobAction(formData: FormData) {
     .insert({
       slab_requirement_id: slabId,
       vendor_id: vendorId,
-      vendor_name: vendor.name,
-      vendor_type: vendor.vendor_type,
-      cnc_machine_id: cncMachineId,
+      vendor_name: (vendor as { name: string }).name,
+      vendor_type: (vendor as { vendor_type: string }).vendor_type,
+      // cnc_machine_id intentionally null — vendor picks at load time.
+      cnc_machine_id: null,
       note,
       status: "carving_assigned",
-      deadline_days: deadlineDays,
-      due_at: dueAt,
+      urgency,
+      estimated_minutes: estimatedMinutes || null,
       assigned_by: profile.id,
     })
     .select("id")
@@ -231,11 +241,304 @@ export async function assignCarvingJobAction(formData: FormData) {
     redirect(`/carving?toast=${encodeURIComponent(itemErr?.message ?? "Failed to create job")}`);
   }
 
-  await recordEvent(item.id, "assigned", profile.id, `Assigned to ${vendor.name} · ${deadlineDays}d deadline`);
-  await logAudit(profile.id, "carving_assigned", "carving_item", item.id, { slab_id: slabId, vendor_id: vendorId, deadline_days: deadlineDays });
+  const eta = estimatedMinutes ? `${estimatedMinutes}min` : "no eta";
+  const urgencyTag = urgency === "urgent" ? " · ⚡ URGENT" : "";
+  await recordEvent(item.id, "assigned", profile.id, `Queued for ${(vendor as { name: string }).name} · ${eta}${urgencyTag}`);
+  await logAudit(profile.id, "carving_assigned", "carving_item", item.id, { slab_id: slabId, vendor_id: vendorId, urgency, estimated_minutes: estimatedMinutes });
 
   refreshAll();
-  redirect("/carving?tab=active&toast=Job+assigned");
+  redirect("/carving?tab=active&toast=Job+queued");
+}
+
+// ── CNC ops: load slab on a specific machine ────────────────────────
+//
+// Vendor (CNC supervisor) picks a slab from their queue and loads it
+// onto a free CNC. Atomic side-effects:
+//   1. carving_items: status → carving_in_progress, cnc_machine_id,
+//      loaded_at, loaded_by, vendor_estimated_minutes (vendor's tighter
+//      estimate; defaults to the carving head's estimated_minutes)
+//   2. cnc_machines: status → 'carving', current_carving_item_id
+//   3. cnc_machine_events: event 'loaded'
+//   4. slab_requirements: status → carving_in_progress
+//
+// Race guards: machine must currently be 'idle', carving item must
+// currently be 'carving_assigned' with no cnc_machine_id.
+export async function loadSlabOnMachineAction(formData: FormData) {
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "vendor"]);
+  const admin = createAdminSupabaseClient();
+
+  const carvingItemId = txt(formData, "carving_item_id");
+  const machineId = txt(formData, "cnc_machine_id");
+  const vendorEstMinutes = Math.max(0, num(formData, "vendor_estimated_minutes", 0));
+
+  if (!carvingItemId || !machineId) {
+    redirect("/vendor?toast=Missing+slab+or+machine");
+  }
+
+  // Load both rows so we can sanity-check vendor ownership (machine
+  // must belong to the same vendor as the carving item).
+  const [{ data: ci }, { data: mc }] = await Promise.all([
+    admin.from("carving_items").select("id, vendor_id, status, cnc_machine_id, slab_requirement_id, estimated_minutes").eq("id", carvingItemId).maybeSingle(),
+    admin.from("cnc_machines").select("id, vendor_id, status, is_active").eq("id", machineId).maybeSingle(),
+  ]);
+
+  if (!ci) redirect("/vendor?toast=Carving+job+not+found");
+  if (!mc) redirect("/vendor?toast=Machine+not+found");
+  const item = ci as { id: string; vendor_id: string; status: string; cnc_machine_id: string | null; slab_requirement_id: string; estimated_minutes: number | null };
+  const machine = mc as { id: string; vendor_id: string; status: string; is_active: boolean };
+  if (item.vendor_id !== machine.vendor_id) {
+    redirect("/vendor?toast=Machine+belongs+to+a+different+vendor");
+  }
+  if (!machine.is_active) redirect("/vendor?toast=Machine+is+inactive");
+  if (machine.status !== "idle") redirect("/vendor?toast=Machine+is+not+idle");
+  if (item.status !== "carving_assigned" || item.cnc_machine_id) {
+    redirect("/vendor?toast=Job+is+not+in+queue");
+  }
+
+  const now = new Date().toISOString();
+  const finalVendorEst = vendorEstMinutes || item.estimated_minutes || null;
+
+  // Flip carving_items first. Race-guard: only update if status is
+  // still carving_assigned (avoids the rare two-phones-at-once case).
+  const { data: updatedCi } = await admin
+    .from("carving_items")
+    .update({
+      status: "carving_in_progress",
+      cnc_machine_id: machineId,
+      loaded_at: now,
+      loaded_by: profile.id,
+      vendor_estimated_minutes: finalVendorEst,
+    })
+    .eq("id", carvingItemId)
+    .eq("status", "carving_assigned")
+    .is("cnc_machine_id", null)
+    .select("id");
+
+  if (!updatedCi?.length) {
+    redirect("/vendor?toast=Slab+already+loaded+or+state+changed");
+  }
+
+  // Flip the machine.
+  await admin
+    .from("cnc_machines")
+    .update({
+      status: "carving",
+      current_carving_item_id: carvingItemId,
+    })
+    .eq("id", machineId)
+    .eq("status", "idle");
+
+  // Slab table mirrors the carving_items state.
+  await admin
+    .from("slab_requirements")
+    .update({ status: "carving_in_progress", updated_by: profile.id, updated_at: now })
+    .eq("id", item.slab_requirement_id);
+
+  // Audit trails — both per-item (carving_job_events) + per-machine
+  // (cnc_machine_events).
+  await recordEvent(carvingItemId, "loaded", profile.id, `Loaded on machine · ETA ${finalVendorEst ?? "?"}min`);
+  await admin.from("cnc_machine_events").insert({
+    cnc_machine_id: machineId,
+    event_type: "loaded",
+    carving_item_id: carvingItemId,
+    user_id: profile.id,
+    message: `ETA ${finalVendorEst ?? "?"}min`,
+  });
+  await logAudit(profile.id, "carving_loaded", "carving_item", carvingItemId, {
+    machine_id: machineId,
+    vendor_estimated_minutes: finalVendorEst,
+  });
+
+  refreshAll();
+  redirect("/vendor?toast=Slab+loaded");
+}
+
+// ── Complete + unload — vendor marks done after the cut ────────────
+//
+// Atomic:
+//   1. carving_items: completed_at, unloaded_at, unloaded_by,
+//      temporary_location
+//   2. cnc_machines: status → 'idle', current_carving_item_id → null
+//   3. cnc_machine_events: 'unloaded'
+//   4. slab_requirements unchanged — the team approval step is what
+//      flips the slab to 'completed'.
+export async function completeAndUnloadAction(formData: FormData) {
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "vendor"]);
+  const admin = createAdminSupabaseClient();
+
+  const carvingItemId = txt(formData, "carving_item_id");
+  const tempLocation = txt(formData, "temporary_location");
+
+  if (!carvingItemId) redirect("/vendor?toast=Missing+job+id");
+  if (!tempLocation) redirect("/vendor?toast=Temporary+location+is+required");
+
+  const { data: ci } = await admin
+    .from("carving_items")
+    .select("id, status, cnc_machine_id, slab_requirement_id, completed_at")
+    .eq("id", carvingItemId)
+    .maybeSingle();
+
+  if (!ci) redirect("/vendor?toast=Job+not+found");
+  const item = ci as { id: string; status: string; cnc_machine_id: string | null; slab_requirement_id: string; completed_at: string | null };
+  if (item.completed_at) redirect("/vendor?toast=Already+marked+complete");
+  if (!item.cnc_machine_id) redirect("/vendor?toast=Job+is+not+loaded+on+a+machine");
+
+  const now = new Date().toISOString();
+
+  await admin
+    .from("carving_items")
+    .update({
+      completed_at: now,
+      unloaded_at: now,
+      unloaded_by: profile.id,
+      temporary_location: tempLocation,
+    })
+    .eq("id", carvingItemId);
+
+  await admin
+    .from("cnc_machines")
+    .update({ status: "idle", current_carving_item_id: null })
+    .eq("id", item.cnc_machine_id);
+
+  await recordEvent(carvingItemId, "completed", profile.id, `Unloaded · location: ${tempLocation}`);
+  await admin.from("cnc_machine_events").insert({
+    cnc_machine_id: item.cnc_machine_id,
+    event_type: "unloaded",
+    carving_item_id: carvingItemId,
+    user_id: profile.id,
+    message: `Unloaded · ${tempLocation}`,
+  });
+  await logAudit(profile.id, "carving_completed", "carving_item", carvingItemId, {
+    temporary_location: tempLocation,
+  });
+
+  refreshAll();
+  redirect("/vendor?toast=Slab+unloaded+%E2%80%94+awaiting+team+review");
+}
+
+// Update temporary location after unload (e.g., slab moved across
+// the yard).
+export async function updateTemporaryLocationAction(formData: FormData) {
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "vendor"]);
+  const admin = createAdminSupabaseClient();
+
+  const carvingItemId = txt(formData, "carving_item_id");
+  const tempLocation = txt(formData, "temporary_location");
+
+  if (!carvingItemId) redirect("/vendor?toast=Missing+job+id");
+
+  await admin
+    .from("carving_items")
+    .update({ temporary_location: tempLocation || null })
+    .eq("id", carvingItemId);
+
+  await recordEvent(carvingItemId, "location_updated", profile.id, `Temp location: ${tempLocation || "(cleared)"}`);
+  await logAudit(profile.id, "carving_temp_location_updated", "carving_item", carvingItemId, {
+    temporary_location: tempLocation,
+  });
+
+  refreshAll();
+  redirect("/vendor?toast=Location+saved");
+}
+
+// ── Maintenance: flag / resolve a CNC machine ──────────────────────
+//
+// Reasons are a fixed dropdown list — kept in sync between the form
+// and this action. We don't gate against currently-carving here:
+// instead the UI prevents picking maintenance on a busy machine. This
+// guard is the safety net.
+const MAINTENANCE_REASONS = new Set([
+  "tool_change",
+  "spindle_issue",
+  "electrical",
+  "coolant",
+  "scheduled_service",
+  "other",
+]);
+
+export async function flagMaintenanceAction(formData: FormData) {
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "vendor"]);
+  const admin = createAdminSupabaseClient();
+
+  const machineId = txt(formData, "cnc_machine_id");
+  const reason = txt(formData, "reason");
+  const detail = txt(formData, "detail");
+
+  if (!machineId) redirect("/vendor?toast=Missing+machine+id");
+  if (!MAINTENANCE_REASONS.has(reason)) {
+    redirect("/vendor?toast=Pick+a+maintenance+reason");
+  }
+
+  const { data: m } = await admin
+    .from("cnc_machines")
+    .select("id, status")
+    .eq("id", machineId)
+    .maybeSingle();
+  if (!m) redirect("/vendor?toast=Machine+not+found");
+  if ((m as { status: string }).status === "carving") {
+    redirect("/vendor?toast=Unload+the+slab+before+flagging+maintenance");
+  }
+
+  const now = new Date().toISOString();
+  await admin
+    .from("cnc_machines")
+    .update({
+      status: "maintenance",
+      maintenance_reason: detail ? `${reason}: ${detail}` : reason,
+      maintenance_flagged_at: now,
+      maintenance_flagged_by: profile.id,
+    })
+    .eq("id", machineId);
+
+  await admin.from("cnc_machine_events").insert({
+    cnc_machine_id: machineId,
+    event_type: "maintenance_start",
+    reason,
+    message: detail || null,
+    user_id: profile.id,
+  });
+  await logAudit(profile.id, "cnc_maintenance_start", "cnc_machine", machineId, {
+    reason,
+    detail,
+  });
+
+  refreshAll();
+  redirect("/vendor?toast=Machine+flagged+for+maintenance");
+}
+
+export async function resolveMaintenanceAction(formData: FormData) {
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "vendor"]);
+  const admin = createAdminSupabaseClient();
+
+  const machineId = txt(formData, "cnc_machine_id");
+  if (!machineId) redirect("/vendor?toast=Missing+machine+id");
+
+  const { data: m } = await admin
+    .from("cnc_machines")
+    .select("id, status")
+    .eq("id", machineId)
+    .maybeSingle();
+  if (!m) redirect("/vendor?toast=Machine+not+found");
+
+  await admin
+    .from("cnc_machines")
+    .update({
+      status: "idle",
+      maintenance_reason: null,
+      maintenance_flagged_at: null,
+      maintenance_flagged_by: null,
+    })
+    .eq("id", machineId);
+
+  await admin.from("cnc_machine_events").insert({
+    cnc_machine_id: machineId,
+    event_type: "maintenance_end",
+    user_id: profile.id,
+  });
+  await logAudit(profile.id, "cnc_maintenance_end", "cnc_machine", machineId, {});
+
+  refreshAll();
+  redirect("/vendor?toast=Machine+back+online");
 }
 
 export async function approveCarvingJobAction(formData: FormData) {

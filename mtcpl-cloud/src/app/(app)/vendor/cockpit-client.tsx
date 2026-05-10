@@ -1,0 +1,1166 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import {
+  loadSlabOnMachineAction,
+  completeAndUnloadAction,
+  flagMaintenanceAction,
+  resolveMaintenanceAction,
+  updateTemporaryLocationAction,
+} from "../carving/actions";
+
+// ── Types — kept here so server page can import them ──────────────
+
+export type SlabLite = {
+  id: string;
+  label: string | null;
+  temple: string;
+  stone: string | null;
+  length_in: number;
+  width_in: number;
+  thickness_in: number;
+};
+
+export type CarvingJobLite = {
+  id: string;
+  slab_id: string;
+  status: string;
+  urgency: "normal" | "urgent";
+  estimated_minutes: number | null;
+  vendor_estimated_minutes: number | null;
+  cnc_machine_id: string | null;
+  loaded_at: string | null;
+  assigned_at: string;
+  note: string | null;
+  slab: SlabLite | null;
+};
+
+export type CncMachineLive = {
+  id: string;
+  machine_code: string;
+  operator_name: string | null;
+  status: "idle" | "carving" | "maintenance" | "inactive";
+  current_job: CarvingJobLite | null;
+  maintenance_reason: string | null;
+  maintenance_flagged_at: string | null;
+};
+
+type Vendor = { id: string; name: string };
+
+// ── Helpers ─────────────────────────────────────────────────────────
+
+const STATUS_TINT: Record<string, { bg: string; border: string; fg: string; label: string }> = {
+  idle: { bg: "rgba(22,163,74,0.08)", border: "rgba(22,163,74,0.35)", fg: "#15803d", label: "IDLE" },
+  carving: { bg: "rgba(37,99,235,0.06)", border: "rgba(37,99,235,0.4)", fg: "#1d4ed8", label: "CARVING" },
+  maintenance: { bg: "rgba(220,38,38,0.06)", border: "rgba(220,38,38,0.4)", fg: "#b91c1c", label: "MAINTENANCE" },
+  inactive: { bg: "var(--surface-alt)", border: "var(--border)", fg: "var(--muted)", label: "INACTIVE" },
+};
+
+const MAINTENANCE_REASONS: Array<{ value: string; label: string }> = [
+  { value: "tool_change", label: "Tool change" },
+  { value: "spindle_issue", label: "Spindle issue" },
+  { value: "electrical", label: "Electrical" },
+  { value: "coolant", label: "Coolant / cleaning" },
+  { value: "scheduled_service", label: "Scheduled service" },
+  { value: "other", label: "Other (write detail below)" },
+];
+
+function fmtDuration(minutes: number): string {
+  const m = Math.abs(Math.round(minutes));
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  return mm > 0 ? `${h}h ${mm}m` : `${h}h`;
+}
+
+function dimStr(s: SlabLite | null): string {
+  if (!s) return "—";
+  return `${s.length_in}×${s.width_in}×${s.thickness_in}″`;
+}
+
+// ── Main client component ───────────────────────────────────────────
+
+export function VendorCockpitClient({
+  vendor,
+  machines,
+  queue,
+  recent,
+  otherVendors,
+  isStaffView,
+  toast,
+}: {
+  vendor: Vendor;
+  machines: CncMachineLive[];
+  queue: CarvingJobLite[];
+  recent: Array<{
+    id: string;
+    slab_id: string;
+    completed_at: string | null;
+    temporary_location: string | null;
+    review_approved_at: string | null;
+    review_notes: string | null;
+    slab: SlabLite | null;
+  }>;
+  otherVendors: Vendor[];
+  isStaffView: boolean;
+  toast: string | null;
+}) {
+  const router = useRouter();
+  const [now, setNow] = useState<number>(Date.now());
+
+  // Tick every 30s so countdown timers refresh without a page reload.
+  // 30s is plenty — these are real-world hours-long carves, not seconds.
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Modal state — only one open at a time.
+  const [loadFor, setLoadFor] = useState<{ machine: CncMachineLive } | null>(null);
+  const [completeFor, setCompleteFor] = useState<CncMachineLive | null>(null);
+  const [maintenanceFor, setMaintenanceFor] = useState<CncMachineLive | null>(null);
+  const [editLocFor, setEditLocFor] = useState<{
+    id: string;
+    slab_id: string;
+    temporary_location: string | null;
+  } | null>(null);
+
+  const totals = useMemo(() => {
+    let idle = 0,
+      carving = 0,
+      maintenance = 0;
+    for (const m of machines) {
+      if (m.status === "idle") idle++;
+      else if (m.status === "carving") carving++;
+      else if (m.status === "maintenance") maintenance++;
+    }
+    return { idle, carving, maintenance, total: machines.length };
+  }, [machines]);
+
+  return (
+    <div style={{ paddingBottom: 80 }}>
+      {/* Toast */}
+      {toast && (
+        <div
+          style={{
+            position: "sticky",
+            top: 0,
+            zIndex: 5,
+            margin: "-12px 0 12px",
+            padding: "10px 14px",
+            background: "rgba(22,163,74,0.12)",
+            border: "1px solid rgba(22,163,74,0.4)",
+            borderRadius: 8,
+            color: "#15803d",
+            fontSize: 13,
+            fontWeight: 600,
+          }}
+        >
+          ✓ {decodeURIComponent(toast)}
+        </div>
+      )}
+
+      {/* Header card — vendor + totals */}
+      <div
+        style={{
+          background: "linear-gradient(135deg, #1a1a1a 0%, #2D2410 60%, #6b4f18 100%)",
+          borderRadius: 12,
+          padding: "18px 20px",
+          color: "#fff",
+          marginBottom: 16,
+          boxShadow: "0 4px 16px rgba(45,36,16,0.2)",
+        }}
+      >
+        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 600 }}>
+          CNC Cockpit
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 10, marginTop: 4 }}>
+          <div style={{ fontSize: 22, fontWeight: 700, color: "#fff", letterSpacing: "-0.3px" }}>
+            {vendor.name}
+          </div>
+          {isStaffView && otherVendors.length > 0 && (
+            <select
+              value={vendor.id}
+              onChange={(e) => router.push(`/vendor?vendor_id=${e.target.value}`)}
+              style={{
+                background: "rgba(255,255,255,0.1)",
+                color: "#fff",
+                border: "1px solid rgba(255,255,255,0.2)",
+                borderRadius: 6,
+                padding: "5px 10px",
+                fontSize: 12,
+              }}
+            >
+              <option value={vendor.id}>{vendor.name}</option>
+              {otherVendors.map((v) => (
+                <option key={v.id} value={v.id} style={{ color: "#000" }}>
+                  {v.name}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+        <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
+          <Stat label="Idle" value={totals.idle} fg="#22c55e" />
+          <Stat label="Carving" value={totals.carving} fg="#60a5fa" />
+          <Stat label="Maintenance" value={totals.maintenance} fg="#f87171" />
+          <Stat label="Queue" value={queue.length} fg="#fbbf24" />
+        </div>
+      </div>
+
+      {/* Queue */}
+      <Section title="Queue" subtitle={`${queue.length} slab${queue.length !== 1 ? "s" : ""} waiting to load`}>
+        {queue.length === 0 ? (
+          <Empty text="Queue is clear. Carving head will assign more as slabs become available." />
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {queue.map((job) => (
+              <QueueRow
+                key={job.id}
+                job={job}
+                hasIdleMachine={totals.idle > 0}
+                onLoad={() => {
+                  // Pick first idle machine as the default selection
+                  const firstIdle = machines.find((m) => m.status === "idle");
+                  if (firstIdle) setLoadFor({ machine: firstIdle });
+                }}
+              />
+            ))}
+          </div>
+        )}
+      </Section>
+
+      {/* Machine grid */}
+      <Section title="Machines" subtitle={`${machines.length} CNC${machines.length !== 1 ? "s" : ""}`}>
+        {machines.length === 0 ? (
+          <Empty text="No machines configured for this vendor. Add some in Manage Vendors." />
+        ) : (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+              gap: 10,
+            }}
+          >
+            {machines.map((m) => (
+              <MachineCard
+                key={m.id}
+                machine={m}
+                queueLength={queue.length}
+                now={now}
+                onLoad={() => setLoadFor({ machine: m })}
+                onComplete={() => setCompleteFor(m)}
+                onMaintenance={() => setMaintenanceFor(m)}
+              />
+            ))}
+          </div>
+        )}
+      </Section>
+
+      {/* Recent completed */}
+      {recent.length > 0 && (
+        <Section title="Recently completed" subtitle="Last 10 unloaded — awaiting team review unless approved">
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {recent.map((r) => (
+              <div
+                key={r.id}
+                style={{
+                  padding: "10px 12px",
+                  background: r.review_notes
+                    ? "rgba(220,38,38,0.05)"
+                    : r.review_approved_at
+                      ? "rgba(22,163,74,0.05)"
+                      : "var(--surface)",
+                  border: `1px solid ${r.review_notes ? "rgba(220,38,38,0.2)" : "var(--border)"}`,
+                  borderRadius: 8,
+                  display: "flex",
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                  gap: 10,
+                }}
+              >
+                <div style={{ flex: "1 1 180px", minWidth: 0 }}>
+                  <div style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 13 }}>
+                    {r.slab_id}
+                  </div>
+                  {r.slab && (
+                    <div style={{ fontSize: 11, color: "var(--muted)" }}>
+                      {r.slab.temple} · {dimStr(r.slab)}
+                    </div>
+                  )}
+                  <div style={{ fontSize: 10, color: "var(--muted-light)", marginTop: 2 }}>
+                    📍 {r.temporary_location ?? "—"}
+                  </div>
+                </div>
+                <div style={{ fontSize: 11, color: "var(--muted)", whiteSpace: "nowrap" }}>
+                  {r.review_approved_at ? (
+                    <span style={{ color: "#15803d", fontWeight: 600 }}>✔ approved</span>
+                  ) : r.review_notes ? (
+                    <span style={{ color: "#b91c1c", fontWeight: 600 }}>✗ rejected</span>
+                  ) : (
+                    "in review"
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setEditLocFor({
+                      id: r.id,
+                      slab_id: r.slab_id,
+                      temporary_location: r.temporary_location,
+                    })
+                  }
+                  className="ghost-button"
+                  style={{ fontSize: 11, padding: "4px 10px", flexShrink: 0 }}
+                >
+                  Edit location
+                </button>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* ── Modals ── */}
+      {loadFor && (
+        <LoadModal
+          machine={loadFor.machine}
+          machines={machines}
+          queue={queue}
+          onClose={() => setLoadFor(null)}
+        />
+      )}
+      {completeFor && completeFor.current_job && (
+        <CompleteModal
+          machine={completeFor}
+          job={completeFor.current_job}
+          onClose={() => setCompleteFor(null)}
+        />
+      )}
+      {maintenanceFor && (
+        <MaintenanceModal machine={maintenanceFor} onClose={() => setMaintenanceFor(null)} />
+      )}
+      {editLocFor && (
+        <EditLocationModal
+          itemId={editLocFor.id}
+          slabId={editLocFor.slab_id}
+          currentLocation={editLocFor.temporary_location}
+          onClose={() => setEditLocFor(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Layout helpers ──────────────────────────────────────────────────
+
+function Section({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section style={{ marginBottom: 18 }}>
+      <div style={{ marginBottom: 8 }}>
+        <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>{title}</h2>
+        {subtitle && (
+          <p className="muted" style={{ margin: "2px 0 0", fontSize: 12 }}>
+            {subtitle}
+          </p>
+        )}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function Empty({ text }: { text: string }) {
+  return (
+    <div
+      style={{
+        padding: "20px 16px",
+        textAlign: "center",
+        color: "var(--muted-light)",
+        fontSize: 13,
+        background: "var(--surface)",
+        border: "1px dashed var(--border)",
+        borderRadius: 8,
+      }}
+    >
+      {text}
+    </div>
+  );
+}
+
+function Stat({ label, value, fg }: { label: string; value: number; fg: string }) {
+  return (
+    <div
+      style={{
+        padding: "8px 14px",
+        background: "rgba(255,255,255,0.08)",
+        borderRadius: 8,
+        minWidth: 64,
+      }}
+    >
+      <div style={{ fontSize: 10, color: "rgba(255,255,255,0.55)", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 600 }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 22, fontWeight: 700, color: fg, lineHeight: 1.1, marginTop: 2 }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+// ── Queue row ───────────────────────────────────────────────────────
+
+function QueueRow({
+  job,
+  hasIdleMachine,
+  onLoad,
+}: {
+  job: CarvingJobLite;
+  hasIdleMachine: boolean;
+  onLoad: () => void;
+}) {
+  const isUrgent = job.urgency === "urgent";
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "10px 12px",
+        background: isUrgent ? "rgba(220,38,38,0.04)" : "var(--surface)",
+        border: `1px solid ${isUrgent ? "rgba(220,38,38,0.3)" : "var(--border)"}`,
+        borderRadius: 8,
+        flexWrap: "wrap",
+      }}
+    >
+      <div style={{ flex: "1 1 180px", minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          {isUrgent && (
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 800,
+                padding: "2px 8px",
+                borderRadius: 999,
+                background: "#dc2626",
+                color: "#fff",
+                letterSpacing: "0.05em",
+              }}
+            >
+              ⚡ URGENT
+            </span>
+          )}
+          <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 13 }}>
+            {job.slab_id}
+          </span>
+        </div>
+        {job.slab && (
+          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+            {job.slab.temple} · {dimStr(job.slab)}
+          </div>
+        )}
+        {job.estimated_minutes && (
+          <div style={{ fontSize: 10, color: "var(--muted-light)", marginTop: 2 }}>
+            ETA from carving head: {fmtDuration(job.estimated_minutes)}
+          </div>
+        )}
+        {job.note && (
+          <div style={{ fontSize: 11, color: "var(--text)", marginTop: 4, fontStyle: "italic" }}>
+            “{job.note}”
+          </div>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={onLoad}
+        disabled={!hasIdleMachine}
+        className="primary-button"
+        style={{
+          fontSize: 12,
+          padding: "8px 14px",
+          opacity: hasIdleMachine ? 1 : 0.5,
+          cursor: hasIdleMachine ? "pointer" : "not-allowed",
+          flexShrink: 0,
+        }}
+        title={hasIdleMachine ? "Load to a CNC" : "All machines busy or in maintenance"}
+      >
+        Load to CNC →
+      </button>
+    </div>
+  );
+}
+
+// ── Machine card ────────────────────────────────────────────────────
+
+function MachineCard({
+  machine,
+  queueLength,
+  now,
+  onLoad,
+  onComplete,
+  onMaintenance,
+}: {
+  machine: CncMachineLive;
+  queueLength: number;
+  now: number;
+  onLoad: () => void;
+  onComplete: () => void;
+  onMaintenance: () => void;
+}) {
+  const tint = STATUS_TINT[machine.status];
+  const job = machine.current_job;
+
+  // Countdown for in-progress jobs.
+  let remainingLabel: string | null = null;
+  let remainingColor: string | null = null;
+  if (machine.status === "carving" && job?.loaded_at) {
+    const eta = job.vendor_estimated_minutes ?? job.estimated_minutes ?? null;
+    if (eta) {
+      const elapsedMin = (now - new Date(job.loaded_at).getTime()) / 60_000;
+      const remaining = eta - elapsedMin;
+      if (remaining >= 0) {
+        remainingLabel = `${fmtDuration(remaining)} remaining`;
+        remainingColor = remaining <= 15 ? "#b45309" : "#1d4ed8";
+      } else {
+        remainingLabel = `${fmtDuration(remaining)} over`;
+        remainingColor = "#b91c1c";
+      }
+    } else {
+      const elapsedMin = (now - new Date(job.loaded_at).getTime()) / 60_000;
+      remainingLabel = `${fmtDuration(elapsedMin)} elapsed`;
+      remainingColor = "var(--muted)";
+    }
+  }
+
+  return (
+    <div
+      style={{
+        padding: "12px 14px",
+        background: tint.bg,
+        border: `1.5px solid ${tint.border}`,
+        borderRadius: 10,
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+        position: "relative",
+      }}
+    >
+      {/* Top row: machine code + status pill */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+        <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 14, color: "var(--text)" }}>
+          {machine.machine_code}
+        </span>
+        <span
+          style={{
+            fontSize: 10,
+            fontWeight: 700,
+            padding: "2px 8px",
+            borderRadius: 999,
+            color: tint.fg,
+            background: "rgba(255,255,255,0.7)",
+            border: `1px solid ${tint.border}`,
+            letterSpacing: "0.05em",
+          }}
+        >
+          {tint.label}
+        </span>
+      </div>
+      {machine.operator_name && (
+        <div style={{ fontSize: 10, color: "var(--muted)" }}>👷 {machine.operator_name}</div>
+      )}
+
+      {/* Body — depends on status */}
+      {machine.status === "idle" && (
+        <>
+          <div style={{ fontSize: 12, color: "var(--muted)", padding: "6px 0", textAlign: "center" }}>
+            {queueLength > 0 ? `${queueLength} slab${queueLength !== 1 ? "s" : ""} in queue` : "Nothing queued"}
+          </div>
+          <button
+            type="button"
+            onClick={onLoad}
+            disabled={queueLength === 0}
+            className="primary-button"
+            style={{
+              fontSize: 13,
+              padding: "10px 14px",
+              fontWeight: 700,
+              opacity: queueLength > 0 ? 1 : 0.5,
+            }}
+          >
+            ▶ Load slab
+          </button>
+          <button
+            type="button"
+            onClick={onMaintenance}
+            className="ghost-button"
+            style={{ fontSize: 11, padding: "6px 10px" }}
+          >
+            🔧 Flag maintenance
+          </button>
+        </>
+      )}
+
+      {machine.status === "carving" && job && (
+        <>
+          <div
+            style={{
+              padding: "8px 10px",
+              background: "rgba(255,255,255,0.5)",
+              border: "1px solid rgba(37,99,235,0.2)",
+              borderRadius: 6,
+            }}
+          >
+            <div style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 13 }}>
+              {job.slab_id}
+            </div>
+            {job.slab && (
+              <div style={{ fontSize: 11, color: "var(--muted)" }}>
+                {job.slab.temple} · {dimStr(job.slab)}
+              </div>
+            )}
+            {remainingLabel && (
+              <div
+                style={{
+                  marginTop: 4,
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: remainingColor!,
+                  fontFamily: "ui-monospace, monospace",
+                }}
+              >
+                ⏱ {remainingLabel}
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onComplete}
+            className="primary-button"
+            style={{ fontSize: 13, padding: "10px 14px", fontWeight: 700 }}
+          >
+            ✓ Mark complete + unload
+          </button>
+        </>
+      )}
+
+      {machine.status === "maintenance" && (
+        <>
+          <div
+            style={{
+              padding: "8px 10px",
+              background: "rgba(255,255,255,0.5)",
+              border: "1px solid rgba(220,38,38,0.2)",
+              borderRadius: 6,
+            }}
+          >
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#b91c1c", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              Reason
+            </div>
+            <div style={{ fontSize: 12, color: "var(--text)", marginTop: 2 }}>
+              {machine.maintenance_reason ?? "—"}
+            </div>
+            {machine.maintenance_flagged_at && (
+              <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 4 }}>
+                Flagged {new Date(machine.maintenance_flagged_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+              </div>
+            )}
+          </div>
+          <form
+            action={resolveMaintenanceAction}
+            onSubmit={(e) => {
+              if (!confirm(`Mark ${machine.machine_code} as back online?`)) {
+                e.preventDefault();
+              }
+            }}
+          >
+            <input type="hidden" name="cnc_machine_id" value={machine.id} />
+            <button
+              type="submit"
+              className="primary-button"
+              style={{ fontSize: 13, padding: "10px 14px", fontWeight: 700, width: "100%" }}
+            >
+              ✓ Back online
+            </button>
+          </form>
+        </>
+      )}
+
+      {machine.status === "inactive" && (
+        <div style={{ fontSize: 12, color: "var(--muted)", padding: "8px 0", textAlign: "center" }}>
+          Machine deactivated
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Modals ──────────────────────────────────────────────────────────
+
+function ModalShell({
+  title,
+  subtitle,
+  children,
+  onClose,
+}: {
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+  onClose: () => void;
+}) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // Esc closes
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      onMouseDown={(e) => {
+        if (dialogRef.current && !dialogRef.current.contains(e.target as Node)) {
+          onClose();
+        }
+      }}
+      style={{
+        position: "fixed",
+        top: 0,
+        left: "var(--content-left)",
+        right: 0,
+        bottom: 0,
+        background: "rgba(15,12,6,0.55)",
+        backdropFilter: "blur(2px)",
+        zIndex: 1000,
+        display: "flex",
+        alignItems: "flex-end",
+        justifyContent: "center",
+        padding: "0 0 0 0",
+      }}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        style={{
+          background: "var(--surface)",
+          border: "1px solid var(--border)",
+          borderRadius: "12px 12px 0 0",
+          boxShadow: "0 -18px 60px rgba(0,0,0,0.45)",
+          width: "100%",
+          maxWidth: 520,
+          maxHeight: "92vh",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            padding: "14px 18px",
+            borderBottom: "1px solid var(--border)",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            gap: 12,
+          }}
+        >
+          <div>
+            <h2 style={{ margin: 0, fontSize: 17 }}>{title}</h2>
+            {subtitle && (
+              <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>
+                {subtitle}
+              </p>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              fontSize: 18,
+              border: "none",
+              background: "transparent",
+              cursor: "pointer",
+              color: "var(--muted)",
+              padding: 4,
+            }}
+          >
+            ✕
+          </button>
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", padding: "14px 16px 18px" }}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function LoadModal({
+  machine,
+  machines,
+  queue,
+  onClose,
+}: {
+  machine: CncMachineLive;
+  machines: CncMachineLive[];
+  queue: CarvingJobLite[];
+  onClose: () => void;
+}) {
+  const [machineId, setMachineId] = useState(machine.id);
+  const [carvingItemId, setCarvingItemId] = useState<string>(queue[0]?.id ?? "");
+  const selectedJob = queue.find((q) => q.id === carvingItemId) ?? null;
+  const idleMachines = machines.filter((m) => m.status === "idle");
+  const [hours, setHours] = useState<string>("");
+  const [minutes, setMinutes] = useState<string>("");
+  const totalMinutes = (Number(hours) || 0) * 60 + (Number(minutes) || 0);
+
+  // When user picks a different slab, prefill estimate from carving
+  // head's number (vendor can adjust).
+  useEffect(() => {
+    if (selectedJob?.estimated_minutes) {
+      const m = selectedJob.estimated_minutes;
+      setHours(String(Math.floor(m / 60) || ""));
+      setMinutes(String(m % 60 || ""));
+    } else {
+      setHours("");
+      setMinutes("");
+    }
+  }, [selectedJob?.id, selectedJob?.estimated_minutes]);
+
+  return (
+    <ModalShell title="Load slab onto CNC" subtitle="Pick the slab and machine, then enter your tighter ETA." onClose={onClose}>
+      {queue.length === 0 ? (
+        <Empty text="Queue is empty — nothing to load." />
+      ) : (
+        <form action={loadSlabOnMachineAction} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {/* Slab picker */}
+          <div>
+            <Label>Slab to load</Label>
+            <input type="hidden" name="carving_item_id" value={carvingItemId} />
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 220, overflowY: "auto" }}>
+              {queue.map((q) => {
+                const isSelected = q.id === carvingItemId;
+                const isUrgent = q.urgency === "urgent";
+                return (
+                  <button
+                    type="button"
+                    key={q.id}
+                    onClick={() => setCarvingItemId(q.id)}
+                    style={{
+                      textAlign: "left",
+                      padding: "8px 10px",
+                      background: isSelected ? "rgba(180,115,51,0.08)" : "var(--surface)",
+                      border: `1.5px solid ${isSelected ? "var(--gold-dark)" : "var(--border)"}`,
+                      borderRadius: 6,
+                      cursor: "pointer",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      {isUrgent && (
+                        <span style={{ fontSize: 9, fontWeight: 800, padding: "1px 6px", borderRadius: 999, background: "#dc2626", color: "#fff" }}>
+                          ⚡
+                        </span>
+                      )}
+                      <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 12 }}>
+                        {q.slab_id}
+                      </span>
+                    </div>
+                    {q.slab && (
+                      <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
+                        {q.slab.temple} · {dimStr(q.slab)}
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Machine picker */}
+          <div>
+            <Label>CNC machine</Label>
+            <input type="hidden" name="cnc_machine_id" value={machineId} />
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {idleMachines.map((m) => {
+                const isSelected = m.id === machineId;
+                return (
+                  <button
+                    type="button"
+                    key={m.id}
+                    onClick={() => setMachineId(m.id)}
+                    style={{
+                      padding: "6px 12px",
+                      fontFamily: "ui-monospace, monospace",
+                      fontWeight: 700,
+                      fontSize: 12,
+                      border: `1.5px solid ${isSelected ? "var(--gold-dark)" : "var(--border)"}`,
+                      background: isSelected ? "rgba(180,115,51,0.1)" : "var(--surface)",
+                      color: "var(--text)",
+                      borderRadius: 6,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {m.machine_code}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Vendor's estimated time — defaults from carving head */}
+          <div>
+            <Label>Your estimated time</Label>
+            <input type="hidden" name="vendor_estimated_minutes" value={totalMinutes || ""} />
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                type="number"
+                min="0"
+                max="200"
+                value={hours}
+                onChange={(e) => setHours(e.target.value)}
+                placeholder="0"
+                style={{ width: 70, padding: "8px 10px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
+              />
+              <span style={{ fontSize: 12, color: "var(--muted)" }}>hr</span>
+              <input
+                type="number"
+                min="0"
+                max="59"
+                value={minutes}
+                onChange={(e) => setMinutes(e.target.value)}
+                placeholder="0"
+                style={{ width: 70, padding: "8px 10px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
+              />
+              <span style={{ fontSize: 12, color: "var(--muted)" }}>min</span>
+            </div>
+            {selectedJob?.estimated_minutes != null && (
+              <div style={{ fontSize: 10, color: "var(--muted-light)", marginTop: 4 }}>
+                Carving head estimated: {fmtDuration(selectedJob.estimated_minutes)}
+              </div>
+            )}
+          </div>
+
+          <button type="submit" className="primary-button" style={{ fontSize: 14, padding: "12px 16px", fontWeight: 700 }}>
+            ▶ Load now
+          </button>
+        </form>
+      )}
+    </ModalShell>
+  );
+}
+
+function CompleteModal({
+  machine,
+  job,
+  onClose,
+}: {
+  machine: CncMachineLive;
+  job: CarvingJobLite;
+  onClose: () => void;
+}) {
+  const [tempLocation, setTempLocation] = useState("");
+
+  return (
+    <ModalShell
+      title="Mark complete + unload"
+      subtitle={`Machine ${machine.machine_code} · ${job.slab_id}`}
+      onClose={onClose}
+    >
+      <form action={completeAndUnloadAction} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <input type="hidden" name="carving_item_id" value={job.id} />
+
+        {job.slab && (
+          <div
+            style={{
+              padding: "10px 12px",
+              background: "var(--surface-alt)",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+            }}
+          >
+            <div style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 13 }}>
+              {job.slab_id}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--muted)" }}>
+              {job.slab.temple} · {dimStr(job.slab)}
+            </div>
+          </div>
+        )}
+
+        <div>
+          <Label>Where is the slab now? *</Label>
+          <input
+            type="text"
+            name="temporary_location"
+            required
+            autoFocus
+            value={tempLocation}
+            onChange={(e) => setTempLocation(e.target.value)}
+            placeholder="e.g. Polishing area · Yard 2 · vendor's truck"
+            style={{ width: "100%", padding: "10px 12px", fontSize: 14, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
+          />
+          <div style={{ fontSize: 10, color: "var(--muted-light)", marginTop: 4 }}>
+            Required so the team can find it for review. You can edit this later.
+          </div>
+        </div>
+
+        <button type="submit" className="primary-button" style={{ fontSize: 14, padding: "12px 16px", fontWeight: 700 }}>
+          ✓ Mark complete + unload
+        </button>
+      </form>
+    </ModalShell>
+  );
+}
+
+function MaintenanceModal({
+  machine,
+  onClose,
+}: {
+  machine: CncMachineLive;
+  onClose: () => void;
+}) {
+  const [reason, setReason] = useState<string>("");
+  const [detail, setDetail] = useState<string>("");
+
+  return (
+    <ModalShell
+      title="Flag for maintenance"
+      subtitle={`Machine ${machine.machine_code} will go offline.`}
+      onClose={onClose}
+    >
+      <form action={flagMaintenanceAction} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <input type="hidden" name="cnc_machine_id" value={machine.id} />
+
+        <div>
+          <Label>Reason</Label>
+          <input type="hidden" name="reason" value={reason} />
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {MAINTENANCE_REASONS.map((r) => {
+              const isSelected = reason === r.value;
+              return (
+                <button
+                  type="button"
+                  key={r.value}
+                  onClick={() => setReason(r.value)}
+                  style={{
+                    textAlign: "left",
+                    padding: "10px 12px",
+                    background: isSelected ? "rgba(220,38,38,0.06)" : "var(--surface)",
+                    border: `1.5px solid ${isSelected ? "#dc2626" : "var(--border)"}`,
+                    borderRadius: 6,
+                    cursor: "pointer",
+                    fontSize: 13,
+                    fontWeight: isSelected ? 700 : 500,
+                    color: "var(--text)",
+                  }}
+                >
+                  {r.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div>
+          <Label>Detail (optional)</Label>
+          <textarea
+            name="detail"
+            value={detail}
+            onChange={(e) => setDetail(e.target.value)}
+            rows={2}
+            placeholder="Anything specific the office should know"
+            style={{ width: "100%", padding: "8px 12px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)", resize: "vertical", fontFamily: "inherit" }}
+          />
+        </div>
+
+        <button
+          type="submit"
+          className="primary-button"
+          disabled={!reason}
+          style={{
+            fontSize: 14,
+            padding: "12px 16px",
+            fontWeight: 700,
+            background: "#dc2626",
+            opacity: reason ? 1 : 0.5,
+          }}
+        >
+          🔧 Flag maintenance
+        </button>
+      </form>
+    </ModalShell>
+  );
+}
+
+function EditLocationModal({
+  itemId,
+  slabId,
+  currentLocation,
+  onClose,
+}: {
+  itemId: string;
+  slabId: string;
+  currentLocation: string | null;
+  onClose: () => void;
+}) {
+  const [loc, setLoc] = useState(currentLocation ?? "");
+
+  return (
+    <ModalShell
+      title="Update slab location"
+      subtitle={slabId}
+      onClose={onClose}
+    >
+      <form action={updateTemporaryLocationAction} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <input type="hidden" name="carving_item_id" value={itemId} />
+        <div>
+          <Label>Where is the slab now?</Label>
+          <input
+            type="text"
+            name="temporary_location"
+            autoFocus
+            value={loc}
+            onChange={(e) => setLoc(e.target.value)}
+            placeholder="e.g. Polishing area · Yard 2"
+            style={{ width: "100%", padding: "10px 12px", fontSize: 14, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
+          />
+        </div>
+        <button type="submit" className="primary-button" style={{ fontSize: 14, padding: "12px 16px", fontWeight: 700 }}>
+          Save
+        </button>
+      </form>
+    </ModalShell>
+  );
+}
+
+// ── Tiny presentational helpers ────────────────────────────────────
+
+function Label({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        fontSize: 11,
+        fontWeight: 700,
+        color: "var(--muted)",
+        textTransform: "uppercase",
+        letterSpacing: "0.06em",
+        marginBottom: 6,
+      }}
+    >
+      {children}
+    </div>
+  );
+}

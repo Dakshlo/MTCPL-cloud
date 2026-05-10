@@ -1,241 +1,241 @@
-import Link from "next/link";
+/**
+ * Vendor cockpit — mobile-first CNC supervisor view.
+ *
+ * The vendor (e.g. Vivek) supervises N CNC machines. They land here
+ * and see:
+ *   1. Top: vendor + live machine status totals
+ *   2. Queue: slabs assigned but not yet loaded — sorted by urgency
+ *      then assigned_at
+ *   3. Machines: a grid of cards (one per CNC) — colour-coded by
+ *      status. Idle → "Load slab" CTA. Carving → slab info +
+ *      countdown. Maintenance → reason + "Resolve" CTA.
+ *   4. Recent completed: last 10 unloaded jobs (awaiting team review)
+ *
+ * Server-renders all data; client component (vendor-cockpit-client)
+ * owns the modals and the live timer ticking.
+ */
+
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { VendorCockpitClient, type CarvingJobLite, type CncMachineLive, type SlabLite } from "./cockpit-client";
 
-export default async function VendorPortalPage() {
-  const { profile } = await requireAuth(["vendor", "developer"]);
+type SearchParams = Promise<{ vendor_id?: string; toast?: string }>;
+
+export default async function VendorPortalPage({ searchParams }: { searchParams: SearchParams }) {
+  // Vendor portal also accessible by carving_head + dev/owner so they
+  // can see what their vendors are doing without role-switching.
+  const { profile } = await requireAuth(["vendor", "developer", "owner", "carving_head"]);
+  const params = await searchParams;
   const admin = createAdminSupabaseClient();
 
-  // For developer testing: if no vendor_id, show all jobs
-  // For real vendor users: scope to their vendor_id
-  const isScoped = profile.role !== "developer" || !!profile.vendor_id;
-  const vendorId = profile.vendor_id;
-
-  let activeQuery = admin
-    .from("carving_items")
-    .select("id, slab_requirement_id, vendor_id, vendor_name, cnc_machine_id, status, due_at, assigned_at, progress_phase, note, review_notes, completed_at")
-    .in("status", ["carving_assigned", "carving_in_progress"]);
-  if (isScoped && vendorId) activeQuery = activeQuery.eq("vendor_id", vendorId);
-
-  let reviewQuery = admin
-    .from("carving_items")
-    .select("id, slab_requirement_id, vendor_id, vendor_name, cnc_machine_id, status, due_at, completed_at")
-    .not("completed_at", "is", null)
-    .is("review_approved_at", null);
-  if (isScoped && vendorId) reviewQuery = reviewQuery.eq("vendor_id", vendorId);
-
-  let historyQuery = admin
-    .from("carving_items")
-    .select("id, slab_requirement_id, status, review_approved_at")
-    .not("review_approved_at", "is", null)
-    .order("review_approved_at", { ascending: false })
-    .limit(20);
-  if (isScoped && vendorId) historyQuery = historyQuery.eq("vendor_id", vendorId);
-
-  const [{ data: activeJobs }, { data: reviewJobs }, { data: historyJobs }, { data: machines }] = await Promise.all([
-    activeQuery,
-    reviewQuery,
-    historyQuery,
-    vendorId
-      ? admin.from("cnc_machines").select("id, machine_code").eq("vendor_id", vendorId).eq("is_active", true)
-      : Promise.resolve({ data: [] }),
-  ]);
-
-  // Load slab info for display
-  const slabIds = [
-    ...new Set([
-      ...(activeJobs ?? []).map((j) => j.slab_requirement_id),
-      ...(reviewJobs ?? []).map((j) => j.slab_requirement_id),
-    ]),
-  ];
-  type SlabRow = {
-    id: string;
-    label: string;
-    temple: string;
-    length_ft: number;
-    width_ft: number;
-    thickness_ft: number;
-  };
-  const { data: slabs } = slabIds.length > 0
-    ? await admin.from("slab_requirements").select("id, label, temple, length_ft, width_ft, thickness_ft").in("id", slabIds)
-    : { data: [] as SlabRow[] };
-  const slabById = new Map<string, SlabRow>();
-  for (const s of (slabs ?? []) as SlabRow[]) slabById.set(s.id, s);
-
-  const machineCodeById = new Map<string, string>();
-  for (const m of machines ?? []) machineCodeById.set(m.id, m.machine_code);
-
-  // Group active jobs by machine if any CNC machines exist
-  const hasMachines = machines && machines.length > 0;
-
-  function daysUntil(iso: string | null) {
-    if (!iso) return null;
-    return Math.ceil((new Date(iso).getTime() - Date.now()) / 86400000);
+  // Resolve which vendor we're viewing.
+  // - Vendor role: scoped to their own vendor_id.
+  // - Other roles: pick from ?vendor_id=... or pick first CNC vendor.
+  let vendorId: string | null = profile.vendor_id ?? null;
+  if (profile.role !== "vendor") {
+    if (params.vendor_id) vendorId = params.vendor_id;
+    else if (!vendorId) {
+      const { data: firstVendor } = await admin
+        .from("vendors")
+        .select("id")
+        .eq("vendor_type", "CNC")
+        .eq("is_active", true)
+        .order("name")
+        .limit(1)
+        .maybeSingle();
+      vendorId = (firstVendor as { id?: string } | null)?.id ?? null;
+    }
   }
 
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20, paddingBottom: 32 }}>
-      <div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <h1 style={{ margin: 0, fontSize: 22 }}>My Carving Jobs</h1>
-          <span className="role-pill" style={{ background: "var(--gold)", color: "#fff", fontWeight: 700, fontSize: 10 }}>
-            DEV-ONLY
-          </span>
-        </div>
-        <p className="muted" style={{ margin: "4px 0 0", fontSize: 13 }}>
-          {profile.vendor_name
-            ? `Vendor portal for ${profile.vendor_name}`
-            : profile.role === "developer"
-            ? "Developer testing view — showing all vendor jobs"
-            : "Your profile isn't linked to a vendor. Contact the team office."}
+  // No vendor binding — fall back to a friendly empty page.
+  if (!vendorId) {
+    return (
+      <div style={{ padding: 24 }}>
+        <h1 style={{ margin: 0, fontSize: 22 }}>My CNC Cockpit</h1>
+        <p className="muted" style={{ marginTop: 8, fontSize: 13 }}>
+          No vendor binding for your profile. Contact the team office.
         </p>
       </div>
+    );
+  }
 
-      {/* Active jobs */}
-      <section className="page-card">
-        <h2 style={{ margin: "0 0 12px", fontSize: 15 }}>
-          Active jobs ({(activeJobs ?? []).length})
-        </h2>
-        {(activeJobs ?? []).length === 0 ? (
-          <div style={{ textAlign: "center", padding: "24px 0", color: "var(--muted-light)", fontSize: 13 }}>
-            No active jobs right now.
-          </div>
-        ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 10 }}>
-            {(activeJobs ?? []).map((j) => {
-              const slab = slabById.get(j.slab_requirement_id);
-              const days = daysUntil(j.due_at);
-              const overdue = days !== null && days < 0;
-              const wasRejected = !!j.review_notes;
-              return (
-                <Link
-                  key={j.id}
-                  href={`/vendor/${j.id}`}
-                  style={{
-                    textDecoration: "none",
-                    padding: "14px 16px",
-                    background: wasRejected ? "rgba(220,38,38,0.04)" : "var(--surface)",
-                    border: `1px solid ${wasRejected ? "rgba(220,38,38,0.3)" : overdue ? "rgba(220,38,38,0.2)" : "var(--border)"}`,
-                    borderRadius: 10,
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 6,
-                  }}
-                >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 13 }}>
-                      {j.slab_requirement_id}
-                    </span>
-                    <span className="role-pill" style={{ fontSize: 9 }}>{j.status}</span>
-                  </div>
-                  {slab && (
-                    <>
-                      <div style={{ fontSize: 12, fontWeight: 600 }}>{slab.temple}</div>
-                      <div className="muted" style={{ fontSize: 11 }}>{slab.label}</div>
-                      <div className="muted" style={{ fontSize: 10, fontFamily: "ui-monospace, monospace" }}>
-                        {slab.length_ft}×{slab.width_ft}×{slab.thickness_ft}&Prime;
-                      </div>
-                    </>
-                  )}
-                  {j.cnc_machine_id && (
-                    <div style={{ fontSize: 10, color: "var(--muted)" }}>
-                      Machine: {machineCodeById.get(j.cnc_machine_id) ?? "—"}
-                    </div>
-                  )}
-                  {j.progress_phase && (
-                    <div style={{ fontSize: 11, color: "#D97706", fontWeight: 600 }}>
-                      Phase: {j.progress_phase}
-                    </div>
-                  )}
-                  <div style={{
-                    marginTop: 4,
-                    fontSize: 11,
-                    fontWeight: 700,
-                    color: overdue ? "#DC2626" : days !== null && days <= 2 ? "#D97706" : "#16A34A",
-                  }}>
-                    {days === null ? "No deadline" : overdue ? `⚠ Overdue by ${Math.abs(days)} days` : days === 0 ? "Due today" : `${days} days left`}
-                  </div>
-                  {wasRejected && (
-                    <div style={{ marginTop: 6, padding: "6px 8px", background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.2)", borderRadius: 4, fontSize: 11, color: "#991b1b" }}>
-                      <strong>Rework needed:</strong> {j.review_notes}
-                    </div>
-                  )}
-                </Link>
-              );
-            })}
-          </div>
-        )}
-      </section>
+  const [
+    { data: vendor },
+    { data: machines },
+    { data: queueAndActive },
+    { data: completedRecent },
+    { data: vendorPickerRows },
+  ] = await Promise.all([
+    admin
+      .from("vendors")
+      .select("id, name, vendor_type, is_active")
+      .eq("id", vendorId)
+      .maybeSingle(),
+    admin
+      .from("cnc_machines")
+      .select("id, machine_code, operator_name, status, is_active, current_carving_item_id, maintenance_reason, maintenance_flagged_at")
+      .eq("vendor_id", vendorId)
+      .eq("is_active", true)
+      .order("machine_code"),
+    // Queue (carving_assigned, no machine) + Active (carving_in_progress)
+    // pulled together so we can split client-side.
+    admin
+      .from("carving_items")
+      .select("id, slab_requirement_id, status, urgency, estimated_minutes, vendor_estimated_minutes, cnc_machine_id, loaded_at, assigned_at, note")
+      .eq("vendor_id", vendorId)
+      .in("status", ["carving_assigned", "carving_in_progress"])
+      .order("assigned_at", { ascending: true }),
+    admin
+      .from("carving_items")
+      .select("id, slab_requirement_id, completed_at, temporary_location, review_approved_at, review_notes")
+      .eq("vendor_id", vendorId)
+      .not("completed_at", "is", null)
+      .order("completed_at", { ascending: false })
+      .limit(10),
+    // Vendor picker for non-vendor roles (dev/owner/carving_head can
+    // switch which vendor they're viewing).
+    profile.role !== "vendor"
+      ? admin
+          .from("vendors")
+          .select("id, name")
+          .eq("vendor_type", "CNC")
+          .eq("is_active", true)
+          .order("name")
+      : Promise.resolve({ data: null }),
+  ]);
 
-      {/* Awaiting review */}
-      {(reviewJobs ?? []).length > 0 && (
-        <section className="page-card">
-          <h2 style={{ margin: "0 0 12px", fontSize: 15 }}>
-            Awaiting team review ({(reviewJobs ?? []).length})
-          </h2>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 8 }}>
-            {(reviewJobs ?? []).map((j) => {
-              const slab = slabById.get(j.slab_requirement_id);
-              return (
-                <Link
-                  key={j.id}
-                  href={`/vendor/${j.id}`}
-                  style={{
-                    textDecoration: "none",
-                    padding: "12px 14px",
-                    background: "var(--surface-alt)",
-                    border: "1px solid var(--border)",
-                    borderRadius: 8,
-                  }}
-                >
-                  <div style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 12 }}>
-                    {j.slab_requirement_id}
-                  </div>
-                  {slab && <div style={{ fontSize: 11, color: "var(--muted)" }}>{slab.temple}</div>}
-                  <div style={{ fontSize: 10, color: "#16A34A", marginTop: 4 }}>
-                    Completed {j.completed_at ? new Date(j.completed_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "—"}
-                  </div>
-                </Link>
-              );
-            })}
-          </div>
-        </section>
-      )}
+  if (!vendor) {
+    return (
+      <div style={{ padding: 24 }}>
+        <h1 style={{ margin: 0, fontSize: 22 }}>Vendor not found</h1>
+      </div>
+    );
+  }
 
-      {/* Recent history */}
-      {(historyJobs ?? []).length > 0 && (
-        <section className="page-card">
-          <h2 style={{ margin: "0 0 12px", fontSize: 15 }}>
-            Recently approved ({(historyJobs ?? []).length})
-          </h2>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            {(historyJobs ?? []).map((j) => (
-              <div key={j.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "6px 10px", background: "var(--surface-alt)", borderRadius: 4 }}>
-                <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 600 }}>{j.slab_requirement_id}</span>
-                <span className="muted">
-                  {j.status === "dispatched" ? "🚚 Dispatched" : "✔ Approved"}
-                  {j.review_approved_at && ` · ${new Date(j.review_approved_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`}
-                </span>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
+  // Hydrate slab info for everything we'll display.
+  const slabIds = [
+    ...(queueAndActive ?? []).map((j) => (j as { slab_requirement_id: string }).slab_requirement_id),
+    ...(completedRecent ?? []).map((j) => (j as { slab_requirement_id: string }).slab_requirement_id),
+  ];
+  const uniqueSlabIds = [...new Set(slabIds)];
+  const slabById = new Map<string, SlabLite>();
+  if (uniqueSlabIds.length > 0) {
+    const { data: slabs } = await admin
+      .from("slab_requirements")
+      .select("id, label, temple, stone, length_ft, width_ft, thickness_ft")
+      .in("id", uniqueSlabIds);
+    for (const s of (slabs ?? []) as Array<{
+      id: string;
+      label: string | null;
+      temple: string | null;
+      stone: string | null;
+      length_ft: number | string;
+      width_ft: number | string;
+      thickness_ft: number | string;
+    }>) {
+      slabById.set(s.id, {
+        id: s.id,
+        label: s.label,
+        temple: s.temple ?? "—",
+        stone: s.stone,
+        length_in: Number(s.length_ft) || 0,
+        width_in: Number(s.width_ft) || 0,
+        thickness_in: Number(s.thickness_ft) || 0,
+      });
+    }
+  }
 
-      {hasMachines && (
-        <section className="page-card">
-          <h3 style={{ margin: "0 0 8px", fontSize: 13, textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--muted)" }}>
-            My CNC machines
-          </h3>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {machines!.map((m) => (
-              <span key={m.id} className="role-pill" style={{ fontSize: 11 }}>
-                {m.machine_code}
-              </span>
-            ))}
-          </div>
-        </section>
-      )}
-    </div>
+  // Reshape rows for the client component.
+  const queue: CarvingJobLite[] = [];
+  const activeByMachine = new Map<string, CarvingJobLite>();
+  for (const row of (queueAndActive ?? []) as Array<{
+    id: string;
+    slab_requirement_id: string;
+    status: string;
+    urgency: string;
+    estimated_minutes: number | null;
+    vendor_estimated_minutes: number | null;
+    cnc_machine_id: string | null;
+    loaded_at: string | null;
+    assigned_at: string;
+    note: string | null;
+  }>) {
+    const slab = slabById.get(row.slab_requirement_id) ?? null;
+    const job: CarvingJobLite = {
+      id: row.id,
+      slab_id: row.slab_requirement_id,
+      status: row.status,
+      urgency: row.urgency === "urgent" ? "urgent" : "normal",
+      estimated_minutes: row.estimated_minutes,
+      vendor_estimated_minutes: row.vendor_estimated_minutes,
+      cnc_machine_id: row.cnc_machine_id,
+      loaded_at: row.loaded_at,
+      assigned_at: row.assigned_at,
+      note: row.note,
+      slab,
+    };
+    if (row.status === "carving_assigned") queue.push(job);
+    else if (row.cnc_machine_id) activeByMachine.set(row.cnc_machine_id, job);
+  }
+  // Sort the queue: urgent first, then oldest assigned first.
+  queue.sort((a, b) => {
+    if (a.urgency !== b.urgency) return a.urgency === "urgent" ? -1 : 1;
+    return new Date(a.assigned_at).getTime() - new Date(b.assigned_at).getTime();
+  });
+
+  // Build machine cards with their currently-loaded job (if any).
+  const machineCards: CncMachineLive[] = ((machines ?? []) as Array<{
+    id: string;
+    machine_code: string;
+    operator_name: string | null;
+    status: string;
+    current_carving_item_id: string | null;
+    maintenance_reason: string | null;
+    maintenance_flagged_at: string | null;
+  }>).map((m) => ({
+    id: m.id,
+    machine_code: m.machine_code,
+    operator_name: m.operator_name,
+    status:
+      m.status === "carving" || m.status === "maintenance" || m.status === "inactive"
+        ? m.status
+        : "idle",
+    current_job: activeByMachine.get(m.id) ?? null,
+    maintenance_reason: m.maintenance_reason,
+    maintenance_flagged_at: m.maintenance_flagged_at,
+  }));
+
+  const recent = ((completedRecent ?? []) as Array<{
+    id: string;
+    slab_requirement_id: string;
+    completed_at: string | null;
+    temporary_location: string | null;
+    review_approved_at: string | null;
+    review_notes: string | null;
+  }>).map((r) => ({
+    id: r.id,
+    slab_id: r.slab_requirement_id,
+    completed_at: r.completed_at,
+    temporary_location: r.temporary_location,
+    review_approved_at: r.review_approved_at,
+    review_notes: r.review_notes,
+    slab: slabById.get(r.slab_requirement_id) ?? null,
+  }));
+
+  const vendorRow = vendor as { id: string; name: string };
+  const otherVendors = ((vendorPickerRows as { id: string; name: string }[] | null) ?? []).filter(
+    (v) => v.id !== vendorId,
+  );
+
+  return (
+    <VendorCockpitClient
+      vendor={{ id: vendorRow.id, name: vendorRow.name }}
+      machines={machineCards}
+      queue={queue}
+      recent={recent}
+      otherVendors={otherVendors}
+      isStaffView={profile.role !== "vendor"}
+      toast={params.toast ?? null}
+    />
   );
 }

@@ -50,17 +50,21 @@ export default async function CarvingDashboardPage({
       .not("review_approved_at", "is", null)
       .order("review_approved_at", { ascending: false })
       .limit(200),
-    // Carving page only — block_vendor type is for the block-side
-    // workflow and must never appear in the carving Assign modal.
+    // Carving page is now CNC-only. Manual / Outsource vendors are
+    // paused for the Phase 3 CNC ops rollout — they'll come back
+    // later if needed. block_vendor type is for the block side and
+    // must never appear here.
     admin
       .from("vendors")
       .select("id, name, vendor_type, is_active")
       .eq("is_active", true)
-      .neq("vendor_type", "block_vendor")
+      .eq("vendor_type", "CNC")
       .order("name"),
+    // Pull live machine status too so the assign modal can show
+    // "Vivek · 3/10 free · 8 queued" per vendor.
     admin
       .from("cnc_machines")
-      .select("id, vendor_id, machine_code, is_active")
+      .select("id, vendor_id, machine_code, is_active, status")
       .eq("is_active", true),
     // Stone palettes for 3D slab thumbnails on the cards
     admin
@@ -136,16 +140,56 @@ export default async function CarvingDashboardPage({
   for (const j of doneJobsEnriched) if (j.temple) templeSet.add(j.temple);
   const templeNames = [...templeSet].sort();
 
-  // Enrich vendors with their machines
-  const vendorsEnriched = (vendors ?? []).map((v) => ({
-    id: v.id,
-    name: v.name,
-    vendor_type: v.vendor_type as "CNC" | "Manual",
-    machines: (machines ?? []).filter((m) => m.vendor_id === v.id).map((m) => ({
-      id: m.id,
-      machine_code: m.machine_code,
-    })),
-  }));
+  // Per-vendor live counts for the Assign modal — count by status.
+  // status values come from cnc_machines.status: 'idle' | 'carving'
+  // | 'maintenance' | 'inactive'.
+  const machineCountsByVendor = new Map<
+    string,
+    { idle: number; carving: number; maintenance: number; total: number }
+  >();
+  for (const m of machines ?? []) {
+    const counts = machineCountsByVendor.get(m.vendor_id) ?? {
+      idle: 0,
+      carving: 0,
+      maintenance: 0,
+      total: 0,
+    };
+    counts.total += 1;
+    const st = (m as { status?: string }).status ?? "idle";
+    if (st === "carving") counts.carving += 1;
+    else if (st === "maintenance") counts.maintenance += 1;
+    else counts.idle += 1;
+    machineCountsByVendor.set(m.vendor_id, counts);
+  }
+
+  // Per-vendor queue depth (carving_items still waiting to be loaded).
+  const queuedByVendor = new Map<string, number>();
+  for (const j of activeJobsEnriched) {
+    if (j.status === "carving_assigned") {
+      queuedByVendor.set(j.vendor_id, (queuedByVendor.get(j.vendor_id) ?? 0) + 1);
+    }
+  }
+
+  // Enrich vendors with their machines + live counts
+  const vendorsEnriched = (vendors ?? []).map((v) => {
+    const counts = machineCountsByVendor.get(v.id) ?? { idle: 0, carving: 0, maintenance: 0, total: 0 };
+    return {
+      id: v.id,
+      name: v.name,
+      vendor_type: v.vendor_type as "CNC" | "Manual",
+      machines: (machines ?? []).filter((m) => m.vendor_id === v.id).map((m) => ({
+        id: m.id,
+        machine_code: m.machine_code,
+      })),
+      live: {
+        free: counts.idle,
+        busy: counts.carving,
+        maintenance: counts.maintenance,
+        total: counts.total,
+        queued: queuedByVendor.get(v.id) ?? 0,
+      },
+    };
+  });
 
   // Build a machine-code map for display
   const machineCodeById: Record<string, string> = {};
