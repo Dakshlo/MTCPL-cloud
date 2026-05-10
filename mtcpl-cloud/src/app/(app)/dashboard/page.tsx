@@ -6,6 +6,7 @@ import { canTransferPlannedSlabs } from "@/lib/cutting-permissions";
 import { PushPanel } from "./push-panel";
 import { AskAiEntryCard } from "@/components/ask-ai-entry-card";
 import { BlockJourneyEntryCard } from "@/components/block-journey-entry-card";
+import { IdSearchEntryCard } from "@/components/id-search-entry-card";
 import { PeekSection } from "@/components/peek-section";
 import { PeekIframe } from "@/components/peek-iframe";
 
@@ -257,15 +258,21 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
         </div>
       </div>
 
-      {/* ── ASK AI ENTRY ── */}
-      {/* Two "insight" entry cards side by side on wide screens; stack
-          on narrow screens thanks to flexWrap. */}
+      {/* ── ASK AI / BLOCK JOURNEY / ID LOOKUP ENTRIES ──
+          Three "insight" entry cards. They flow side-by-side on wide
+          screens and stack on narrow screens via flexWrap. ID Lookup
+          opens as a center-peek modal so the owner can quickly look
+          up any slab/block id stencilled on the floor without leaving
+          the dashboard. */}
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
         <div style={{ flex: "1 1 320px", minWidth: 0 }}>
           <AskAiEntryCard />
         </div>
         <div style={{ flex: "1 1 320px", minWidth: 0 }}>
           <BlockJourneyEntryCard />
+        </div>
+        <div style={{ flex: "1 1 320px", minWidth: 0 }}>
+          <IdSearchEntryCard />
         </div>
       </div>
 
