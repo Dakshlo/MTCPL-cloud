@@ -19,6 +19,8 @@
 import { useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AssignModal } from "./assign-modal";
+import { IsoBlockStaticSVG } from "@/components/iso-block-static";
+import type { StoneTypeDef } from "@/lib/stone-utils";
 
 type UnassignedSlab = {
   id: string;
@@ -38,6 +40,12 @@ type JobRow = {
   slab_requirement_id: string;
   temple: string;
   slab_label: string | null;
+  // Slab dimensions + stone are needed to render the 3D thumbnail on
+  // each job card. Plumbed through from page.tsx → enrich().
+  stone: string | null;
+  length_ft: number;
+  width_ft: number;
+  thickness_ft: number;
   vendor_id: string;
   vendor_name: string;
   vendor_type: "CNC" | "Manual";
@@ -69,6 +77,7 @@ export function CarvingDashboardClient({
   machineCodeById,
   templeNames,
   templeFilter,
+  stoneTypes,
 }: {
   tab: "unassigned" | "active" | "review" | "done";
   unassignedSlabs: UnassignedSlab[];
@@ -81,6 +90,8 @@ export function CarvingDashboardClient({
   templeNames: string[];
   /** Currently-selected temple filter. "" or "all" means no filter. */
   templeFilter: string;
+  /** Stone palette definitions for the 3D thumbnails on cards. */
+  stoneTypes: StoneTypeDef[];
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -199,6 +210,7 @@ export function CarvingDashboardClient({
       {tab === "unassigned" && (
         <UnassignedByTemple
           slabs={filteredUnassigned}
+          stoneTypes={stoneTypes}
           onAssign={(s) => setAssigning(s)}
         />
       )}
@@ -207,7 +219,8 @@ export function CarvingDashboardClient({
         <JobsByTemple
           jobs={filteredActive}
           machineCodeById={machineCodeById}
-          columns={["deadline", "phase"]}
+          stoneTypes={stoneTypes}
+          fields={["deadline", "phase"]}
           emptyMessage="No active carving jobs. Assign some slabs from the Unassigned tab."
           fmtDate={fmtDate}
           daysUntil={daysUntil}
@@ -218,7 +231,8 @@ export function CarvingDashboardClient({
         <JobsByTemple
           jobs={filteredReview}
           machineCodeById={machineCodeById}
-          columns={["completed"]}
+          stoneTypes={stoneTypes}
+          fields={["completed"]}
           emptyMessage="Nothing waiting for review. When a vendor marks a job complete, it lands here."
           fmtDate={fmtDate}
           daysUntil={daysUntil}
@@ -229,7 +243,8 @@ export function CarvingDashboardClient({
         <JobsByTemple
           jobs={filteredDone}
           machineCodeById={machineCodeById}
-          columns={["approved", "location", "ready"]}
+          stoneTypes={stoneTypes}
+          fields={["approved", "location", "ready"]}
           emptyMessage="No slabs in Carving Done yet."
           fmtDate={fmtDate}
           daysUntil={daysUntil}
@@ -243,13 +258,66 @@ export function CarvingDashboardClient({
   );
 }
 
+// ─── Slab 3D thumbnail (used on cards) ─────────────────────────────────
+// Renders a single slab as a 3D box. We treat the slab dimensions as
+// the "block" passed to IsoBlockStaticSVG and pass an empty placed
+// array — gives us a clean coloured box with the right proportions.
+// Stone palette comes from stoneTypes (with built-in fallback).
+function SlabThumb({
+  stone,
+  l,
+  w,
+  t,
+  stoneTypes,
+  size = 130,
+}: {
+  stone: string | null;
+  l: number;
+  w: number;
+  t: number;
+  stoneTypes: StoneTypeDef[];
+  size?: number;
+}) {
+  // Guard against zero dims (would crash the SVG math)
+  if (!l || !w || !t) {
+    return (
+      <div
+        style={{
+          height: size * 0.65,
+          background: "var(--surface-alt)",
+          borderRadius: 6,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "var(--muted-light)",
+          fontSize: 11,
+        }}
+      >
+        no dimensions
+      </div>
+    );
+  }
+  return (
+    <div style={{ background: "var(--surface-alt)", borderRadius: 6, padding: 4 }}>
+      <IsoBlockStaticSVG
+        block={{ l, w, h: t, stone: stone ?? "" }}
+        placed={[]}
+        size={size}
+        stoneTypes={stoneTypes}
+      />
+    </div>
+  );
+}
+
 // ─── Unassigned tab — grouped by temple ─────────────────────────────────
 
 function UnassignedByTemple({
   slabs,
+  stoneTypes,
   onAssign,
 }: {
   slabs: UnassignedSlab[];
+  stoneTypes: StoneTypeDef[];
   onAssign: (s: UnassignedSlab) => void;
 }) {
   const groups = useMemo(() => groupByTemple(slabs, (s) => s.temple), [slabs]);
@@ -328,9 +396,16 @@ function UnassignedByTemple({
                   borderRadius: 10,
                   display: "flex",
                   flexDirection: "column",
-                  gap: 6,
+                  gap: 8,
                 }}
               >
+                <SlabThumb
+                  stone={s.stone}
+                  l={Number(s.length_ft)}
+                  w={Number(s.width_ft)}
+                  t={Number(s.thickness_ft)}
+                  stoneTypes={stoneTypes}
+                />
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                   <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 13 }}>
                     {s.priority && "⚡ "}
@@ -357,7 +432,7 @@ function UnassignedByTemple({
                   type="button"
                   onClick={() => onAssign(s)}
                   className="primary-button"
-                  style={{ marginTop: 6, fontSize: 12, padding: "6px 12px" }}
+                  style={{ marginTop: 4, fontSize: 12, padding: "6px 12px" }}
                 >
                   Assign to Vendor →
                 </button>
@@ -375,14 +450,17 @@ function UnassignedByTemple({
 function JobsByTemple({
   jobs,
   machineCodeById,
-  columns,
+  stoneTypes,
+  fields,
   emptyMessage,
   fmtDate,
   daysUntil,
 }: {
   jobs: JobRow[];
   machineCodeById: Record<string, string>;
-  columns: Array<"deadline" | "phase" | "completed" | "approved" | "location" | "ready">;
+  stoneTypes: StoneTypeDef[];
+  /** Which phase-specific status fields to render on the card. */
+  fields: Array<"deadline" | "phase" | "completed" | "approved" | "location" | "ready">;
   emptyMessage: string;
   fmtDate: (iso: string | null) => string;
   daysUntil: (iso: string | null) => number | null;
@@ -442,171 +520,204 @@ function JobsByTemple({
               {items.length}
             </span>
           </summary>
-          <section
-            className="page-card"
+          <div
             style={{
-              padding: 0,
-              overflow: "hidden",
+              background: "var(--bg)",
+              border: "1px solid var(--border)",
               borderTop: "none",
               borderRadius: "0 0 10px 10px",
+              padding: 12,
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(290px, 1fr))",
+              gap: 10,
             }}
           >
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-              <thead>
-                <tr style={{ background: "var(--surface-alt)" }}>
-                  {["Slab", "Vendor", "Machine", ...columns.map((c) => c[0].toUpperCase() + c.slice(1))].map((h) => (
-                    <th
-                      key={h}
+            {items.map((j) => {
+              const days = daysUntil(j.due_at);
+              const overdue = days !== null && days < 0;
+              const goToDetail = () => router.push(`/carving/${j.id}`);
+              return (
+                <div
+                  key={j.id}
+                  onClick={goToDetail}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      goToDetail();
+                    }
+                  }}
+                  role="link"
+                  tabIndex={0}
+                  style={{
+                    padding: "12px 14px",
+                    background: "var(--surface)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 10,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                    cursor: "pointer",
+                    transition: "border-color 0.12s, background 0.12s",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "var(--surface-alt)";
+                    e.currentTarget.style.borderColor = "var(--gold-dark)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "var(--surface)";
+                    e.currentTarget.style.borderColor = "var(--border)";
+                  }}
+                >
+                  {/* 3D slab thumbnail */}
+                  <SlabThumb
+                    stone={j.stone}
+                    l={j.length_ft}
+                    w={j.width_ft}
+                    t={j.thickness_ft}
+                    stoneTypes={stoneTypes}
+                  />
+
+                  {/* Header: slab id + stone */}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 13 }}>
+                      {j.slab_requirement_id}
+                    </span>
+                    {j.stone && (
+                      <span className="role-pill" style={{ fontSize: 10 }}>
+                        {j.stone}
+                      </span>
+                    )}
+                  </div>
+
+                  {j.slab_label && (
+                    <div style={{ fontSize: 11, color: "var(--muted)" }}>{j.slab_label}</div>
+                  )}
+
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: "var(--muted-light)",
+                      fontFamily: "ui-monospace, monospace",
+                    }}
+                  >
+                    {j.length_ft}×{j.width_ft}×{j.thickness_ft}&Prime;
+                  </div>
+
+                  {/* Vendor + machine */}
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      paddingTop: 6,
+                      borderTop: "1px dashed var(--border-light)",
+                      fontSize: 12,
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 600 }}>{j.vendor_name}</div>
+                      <div style={{ fontSize: 10, color: "var(--muted)" }}>{j.vendor_type}</div>
+                    </div>
+                    <div
                       style={{
-                        padding: "10px 14px",
-                        textAlign: "left",
-                        fontSize: 10,
-                        fontWeight: 700,
+                        fontFamily: "ui-monospace, monospace",
+                        fontSize: 11,
                         color: "var(--muted)",
-                        textTransform: "uppercase",
-                        letterSpacing: "0.07em",
-                        whiteSpace: "nowrap",
                       }}
                     >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((j) => {
-                  const days = daysUntil(j.due_at);
-                  const overdue = days !== null && days < 0;
-                  // Whole-row click target: pressing anywhere in the row
-                  // navigates to the job detail page. Cmd/Ctrl-click and
-                  // middle-click still open in a new tab via the keyboard
-                  // handler below.
-                  const goToDetail = () => router.push(`/carving/${j.id}`);
-                  return (
-                    <tr
-                      key={j.id}
-                      onClick={goToDetail}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          goToDetail();
-                        }
-                      }}
-                      role="link"
-                      tabIndex={0}
-                      style={{
-                        borderTop: "1px solid var(--border-light)",
-                        cursor: "pointer",
-                      }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-alt)")}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-                    >
-                      <td
+                      {j.cnc_machine_id ? machineCodeById[j.cnc_machine_id] ?? "" : ""}
+                    </div>
+                  </div>
+
+                  {/* Phase-specific footer rows */}
+                  {fields.includes("deadline") && (
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: 12 }}>
+                      <span className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                        Deadline
+                      </span>
+                      <span
                         style={{
-                          padding: "10px 14px",
-                          fontFamily: "ui-monospace, monospace",
-                          fontWeight: 700,
+                          fontWeight: 600,
+                          color: overdue
+                            ? "#DC2626"
+                            : days !== null && days <= 2
+                              ? "#D97706"
+                              : "var(--text)",
                         }}
                       >
-                        <span style={{ color: "var(--text)" }}>{j.slab_requirement_id}</span>
-                        {j.slab_label && (
-                          <div
-                            style={{
-                              fontSize: 11,
-                              color: "var(--muted)",
-                              fontWeight: 400,
-                              marginTop: 2,
-                              fontFamily: "inherit",
-                            }}
-                          >
-                            {j.slab_label}
-                          </div>
+                        {days === null
+                          ? "—"
+                          : overdue
+                            ? `Overdue ${Math.abs(days)}d`
+                            : days === 0
+                              ? "Due today"
+                              : `${days}d`}
+                        <span style={{ fontSize: 10, color: "var(--muted)", marginLeft: 6 }}>
+                          {fmtDate(j.due_at)}
+                        </span>
+                      </span>
+                    </div>
+                  )}
+                  {fields.includes("phase") && j.progress_phase && (
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                      <span className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                        Phase
+                      </span>
+                      <span style={{ fontWeight: 600 }}>{j.progress_phase}</span>
+                    </div>
+                  )}
+                  {fields.includes("completed") && (
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                      <span className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                        Completed
+                      </span>
+                      <span style={{ color: "var(--text)" }}>{fmtDate(j.completed_at)}</span>
+                    </div>
+                  )}
+                  {fields.includes("approved") && (
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                      <span className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                        Approved
+                      </span>
+                      <span style={{ color: "var(--text)" }}>
+                        {j.status === "dispatched"
+                          ? "✓ Dispatched"
+                          : fmtDate(j.review_approved_at ?? null)}
+                      </span>
+                    </div>
+                  )}
+                  {fields.includes("location") && (
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                      <span className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                        Location
+                      </span>
+                      <span>
+                        {j.location ? (
+                          <span style={{ color: "var(--text)" }}>📍 {j.location}</span>
+                        ) : (
+                          <span style={{ color: "#D97706", fontStyle: "italic" }}>not set</span>
                         )}
-                      </td>
-                      <td style={{ padding: "10px 14px" }}>
-                        <div style={{ fontWeight: 600 }}>{j.vendor_name}</div>
-                        <div style={{ fontSize: 11, color: "var(--muted)" }}>{j.vendor_type}</div>
-                      </td>
-                      <td
-                        style={{
-                          padding: "10px 14px",
-                          fontFamily: "ui-monospace, monospace",
-                          fontSize: 11,
-                          color: "var(--muted)",
-                        }}
-                      >
-                        {j.cnc_machine_id ? machineCodeById[j.cnc_machine_id] ?? "—" : "—"}
-                      </td>
-                      {columns.includes("deadline") && (
-                        <td style={{ padding: "10px 14px", fontSize: 12 }}>
-                          <span
-                            style={{
-                              fontWeight: 600,
-                              color: overdue
-                                ? "#DC2626"
-                                : days !== null && days <= 2
-                                  ? "#D97706"
-                                  : "var(--text)",
-                            }}
-                          >
-                            {days === null
-                              ? "—"
-                              : overdue
-                                ? `Overdue by ${Math.abs(days)}d`
-                                : days === 0
-                                  ? "Due today"
-                                  : `${days}d`}
-                          </span>
-                          <div style={{ fontSize: 10, color: "var(--muted)" }}>{fmtDate(j.due_at)}</div>
-                        </td>
+                      </span>
+                    </div>
+                  )}
+                  {fields.includes("ready") && (
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                      <span className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                        Status
+                      </span>
+                      {j.status === "dispatched" ? (
+                        <span style={{ color: "var(--muted)" }}>✓ Dispatched</span>
+                      ) : j.ready_to_dispatch_at ? (
+                        <span style={{ color: "#15803d", fontWeight: 600 }}>✓ Ready</span>
+                      ) : (
+                        <span style={{ color: "#D97706", fontWeight: 600 }}>Awaiting location</span>
                       )}
-                      {columns.includes("phase") && (
-                        <td style={{ padding: "10px 14px", fontSize: 12, color: "var(--muted)" }}>
-                          {j.progress_phase ?? "—"}
-                        </td>
-                      )}
-                      {columns.includes("completed") && (
-                        <td style={{ padding: "10px 14px", fontSize: 12, color: "var(--muted)" }}>
-                          {fmtDate(j.completed_at)}
-                        </td>
-                      )}
-                      {columns.includes("approved") && (
-                        <td style={{ padding: "10px 14px", fontSize: 12, color: "var(--muted)" }}>
-                          {j.status === "dispatched"
-                            ? "✓ Dispatched"
-                            : fmtDate(j.review_approved_at ?? null)}
-                        </td>
-                      )}
-                      {columns.includes("location") && (
-                        <td style={{ padding: "10px 14px", fontSize: 12, color: "var(--muted)" }}>
-                          {j.location ? (
-                            <span style={{ color: "var(--text)" }}>📍 {j.location}</span>
-                          ) : (
-                            <span style={{ color: "#D97706", fontStyle: "italic" }}>not set</span>
-                          )}
-                        </td>
-                      )}
-                      {columns.includes("ready") && (
-                        <td style={{ padding: "10px 14px", fontSize: 12 }}>
-                          {j.status === "dispatched" ? (
-                            <span style={{ color: "var(--muted)" }}>✓ Dispatched</span>
-                          ) : j.ready_to_dispatch_at ? (
-                            <span style={{ color: "#15803d", fontWeight: 600 }}>
-                              ✓ Ready
-                            </span>
-                          ) : (
-                            <span style={{ color: "#D97706", fontWeight: 600 }}>
-                              Awaiting location
-                            </span>
-                          )}
-                        </td>
-                      )}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </section>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </details>
       ))}
     </>

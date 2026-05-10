@@ -24,6 +24,7 @@ export default async function CarvingDashboardPage({
     { data: doneJobs },
     { data: vendors },
     { data: machines },
+    { data: stoneTypes },
   ] = await Promise.all([
     admin
       .from("slab_requirements")
@@ -58,6 +59,12 @@ export default async function CarvingDashboardPage({
       .from("cnc_machines")
       .select("id, vendor_id, machine_code, is_active")
       .eq("is_active", true),
+    // Stone palettes for 3D slab thumbnails on the cards
+    admin
+      .from("stone_types")
+      .select("id, name, color_top, color_front, color_side, sort_order, is_active")
+      .order("sort_order")
+      .order("name"),
   ]);
 
   // Enrich jobs with temple + slab label — job rows on carving_items
@@ -69,23 +76,47 @@ export default async function CarvingDashboardPage({
   ].filter(Boolean);
   const uniqueSlabReqIds = [...new Set(allJobSlabReqIds)];
 
-  let slabTempleMap = new Map<string, { temple: string; label: string | null }>();
+  // Pull dimensions + stone too so the dashboard cards can render a
+  // 3D thumbnail of each slab. Stone name is the key into stoneTypes
+  // for the palette; dimensions drive the proportions of the box.
+  let slabInfoMap = new Map<
+    string,
+    {
+      temple: string;
+      label: string | null;
+      stone: string | null;
+      length_ft: number;
+      width_ft: number;
+      thickness_ft: number;
+    }
+  >();
   if (uniqueSlabReqIds.length > 0) {
     const { data: slabRows } = await admin
       .from("slab_requirements")
-      .select("id, temple, label")
+      .select("id, temple, label, stone, length_ft, width_ft, thickness_ft")
       .in("id", uniqueSlabReqIds);
     for (const s of slabRows ?? []) {
-      slabTempleMap.set(s.id, { temple: s.temple ?? "(no temple)", label: s.label });
+      slabInfoMap.set(s.id, {
+        temple: s.temple ?? "(no temple)",
+        label: s.label,
+        stone: s.stone ?? null,
+        length_ft: Number(s.length_ft) || 0,
+        width_ft: Number(s.width_ft) || 0,
+        thickness_ft: Number(s.thickness_ft) || 0,
+      });
     }
   }
 
   function enrich<J extends { slab_requirement_id: string; cnc_machine_id?: string | null }>(job: J) {
-    const info = slabTempleMap.get(job.slab_requirement_id);
+    const info = slabInfoMap.get(job.slab_requirement_id);
     return {
       ...job,
       temple: info?.temple ?? "(no temple)",
       slab_label: info?.label ?? null,
+      stone: info?.stone ?? null,
+      length_ft: info?.length_ft ?? 0,
+      width_ft: info?.width_ft ?? 0,
+      thickness_ft: info?.thickness_ft ?? 0,
       vendor_type: (job as unknown as { vendor_type: string }).vendor_type as "CNC" | "Manual",
     };
   }
@@ -208,6 +239,7 @@ export default async function CarvingDashboardPage({
         machineCodeById={machineCodeById}
         templeNames={templeNames}
         templeFilter={templeFilter}
+        stoneTypes={stoneTypes ?? []}
       />
     </div>
   );

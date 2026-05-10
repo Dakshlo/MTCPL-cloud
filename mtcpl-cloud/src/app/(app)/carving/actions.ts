@@ -170,7 +170,7 @@ export async function deactivateVendorAction(formData: FormData) {
 // ── Carving job lifecycle ───────────────────────────────────────────
 
 export async function assignCarvingJobAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head"]);
   const admin = createAdminSupabaseClient();
 
   const slabId = txt(formData, "slab_id");
@@ -239,7 +239,7 @@ export async function assignCarvingJobAction(formData: FormData) {
 }
 
 export async function approveCarvingJobAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head"]);
   const admin = createAdminSupabaseClient();
   const jobId = txt(formData, "job_id");
   const notes = txt(formData, "notes") || null;
@@ -278,7 +278,7 @@ export async function approveCarvingJobAction(formData: FormData) {
 }
 
 export async function markReadyToDispatchAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head"]);
   const admin = createAdminSupabaseClient();
   const jobId = txt(formData, "job_id");
   const location = txt(formData, "location");
@@ -333,7 +333,7 @@ export async function markReadyToDispatchAction(formData: FormData) {
 }
 
 export async function updateCarvingLocationAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head"]);
   const admin = createAdminSupabaseClient();
   const jobId = txt(formData, "job_id");
   const location = txt(formData, "location");
@@ -349,7 +349,7 @@ export async function updateCarvingLocationAction(formData: FormData) {
 }
 
 export async function rejectCarvingJobAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head"]);
   const admin = createAdminSupabaseClient();
   const jobId = txt(formData, "job_id");
   const notes = txt(formData, "notes");
@@ -378,7 +378,7 @@ export async function rejectCarvingJobAction(formData: FormData) {
 // detail page. See migration 014 for the schema change.
 
 export async function cancelCarvingJobAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head"]);
   const admin = createAdminSupabaseClient();
   const jobId = txt(formData, "job_id");
 

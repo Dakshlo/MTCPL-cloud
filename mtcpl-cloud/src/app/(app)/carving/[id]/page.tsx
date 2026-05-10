@@ -13,7 +13,7 @@ import {
 } from "../actions";
 
 export default async function CarvingJobDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireAuth(["developer", "owner"]);
+  await requireAuth(["developer", "owner", "carving_head"]);
   const { id } = await params;
   const admin = createAdminSupabaseClient();
 
