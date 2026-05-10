@@ -8,7 +8,7 @@ Reverse-chronological. Most recent at top. Append to TOP when shipping new work.
 
 ## Recent (this Claude session)
 
-### NEXT (this commit) · TV mode discoverability + dark/light + cleaner Active tab
+### `ddf2aa8` · TV mode discoverability + dark/light + cleaner Active tab
 - Removed the embedded Floor View vendor sections from the Active
   tab; replaced with a single "📺 Open Floor View" link card at the
   top. Active tab is now focused on the job cards.
