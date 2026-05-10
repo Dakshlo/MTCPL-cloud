@@ -17,12 +17,13 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
   const { id } = await params;
   const admin = createAdminSupabaseClient();
 
-  const [{ data: job }, { data: events }] = await Promise.all([
-    admin
-      .from("carving_items")
-      .select("id, slab_requirement_id, vendor_id, vendor_name, vendor_type, cnc_machine_id, note, status, deadline_days, due_at, assigned_by, assigned_at, completed_at, progress_phase, review_approved_at, review_approved_by, review_notes, photo_urls, location, ready_to_dispatch_at, ready_to_dispatch_by")
-      .eq("id", id)
-      .single(),
+  // We use select("*") rather than enumerating columns so a stale prod
+  // schema (missing photo_urls / ready_to_dispatch_by / etc.) doesn't
+  // make the whole query return null. Previously a single missing
+  // column would silently 404 every job — now we either render with
+  // whatever exists, or surface the real error message.
+  const [{ data: job, error: jobErr }, { data: events }] = await Promise.all([
+    admin.from("carving_items").select("*").eq("id", id).maybeSingle(),
     admin
       .from("carving_job_events")
       .select("id, event_type, message, created_at, user_id")
@@ -30,19 +31,53 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
       .order("created_at", { ascending: false }),
   ]);
 
+  if (jobErr) {
+    // Surface the real Supabase error rather than 404'ing — much easier
+    // to diagnose schema drift / RLS / connection issues this way.
+    throw new Error(
+      `Carving job query failed: ${jobErr.message}` +
+        (jobErr.code ? ` (code ${jobErr.code})` : ""),
+    );
+  }
   if (!job) notFound();
 
+  // Re-type the row. select("*") gives us a generic object; cast to a
+  // shape the JSX below can read. Fields that might not exist on prod
+  // are marked optional so missing-column scenarios just render blank
+  // instead of throwing.
+  const jobRow = job as {
+    id: string;
+    slab_requirement_id: string;
+    vendor_name: string;
+    vendor_type: string;
+    cnc_machine_id: string | null;
+    note: string | null;
+    status: string;
+    due_at: string | null;
+    assigned_by: string | null;
+    assigned_at: string;
+    completed_at: string | null;
+    progress_phase?: string | null;
+    review_approved_at?: string | null;
+    review_notes?: string | null;
+    photo_urls?: string[] | null;
+    location?: string | null;
+    ready_to_dispatch_at?: string | null;
+  };
+
+  // .maybeSingle() — slab_requirement might have been deleted/merged.
+  // Render gracefully when null instead of crashing the page.
   const [{ data: slab }, { data: machine }, { data: assignedByProfile }, { data: eventUserProfiles }] = await Promise.all([
     admin
       .from("slab_requirements")
       .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, source_block_id")
-      .eq("id", job.slab_requirement_id)
-      .single(),
-    job.cnc_machine_id
-      ? admin.from("cnc_machines").select("machine_code, operator_name").eq("id", job.cnc_machine_id).single()
+      .eq("id", jobRow.slab_requirement_id)
+      .maybeSingle(),
+    jobRow.cnc_machine_id
+      ? admin.from("cnc_machines").select("machine_code, operator_name").eq("id", jobRow.cnc_machine_id).maybeSingle()
       : Promise.resolve({ data: null }),
-    job.assigned_by
-      ? admin.from("profiles").select("full_name").eq("id", job.assigned_by).single()
+    jobRow.assigned_by
+      ? admin.from("profiles").select("full_name").eq("id", jobRow.assigned_by).maybeSingle()
       : Promise.resolve({ data: null }),
     admin
       .from("profiles")
@@ -58,13 +93,13 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
     user_name: e.user_id ? nameById.get(e.user_id) ?? null : null,
   }));
 
-  const photoUrls = (job.photo_urls ?? []) as string[];
-  const daysUntilDeadline = job.due_at ? Math.ceil((new Date(job.due_at).getTime() - Date.now()) / 86400000) : null;
+  const photoUrls = (jobRow.photo_urls ?? []) as string[];
+  const daysUntilDeadline = jobRow.due_at ? Math.ceil((new Date(jobRow.due_at).getTime() - Date.now()) / 86400000) : null;
   const overdue = daysUntilDeadline !== null && daysUntilDeadline < 0;
-  const inReview = !!job.completed_at && !job.review_approved_at;
-  const approved = !!job.review_approved_at;
-  const readyToDispatch = !!job.ready_to_dispatch_at;
-  const dispatched = job.status === "dispatched";
+  const inReview = !!jobRow.completed_at && !jobRow.review_approved_at;
+  const approved = !!jobRow.review_approved_at;
+  const readyToDispatch = !!jobRow.ready_to_dispatch_at;
+  const dispatched = jobRow.status === "dispatched";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20, paddingBottom: 32 }}>
@@ -73,7 +108,7 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
           ← Back to Carving
         </Link>
         <h1 style={{ margin: "6px 0 0", fontSize: 22 }}>
-          Carving Job · <code style={{ fontFamily: "ui-monospace, monospace", color: "var(--gold-dark)" }}>{job.slab_requirement_id}</code>
+          Carving Job · <code style={{ fontFamily: "ui-monospace, monospace", color: "var(--gold-dark)" }}>{jobRow.slab_requirement_id}</code>
         </h1>
       </div>
 
@@ -106,7 +141,7 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
             <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 13 }}>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span className="muted">Vendor</span>
-                <span style={{ fontWeight: 600 }}>{job.vendor_name} ({job.vendor_type})</span>
+                <span style={{ fontWeight: 600 }}>{jobRow.vendor_name} ({jobRow.vendor_type})</span>
               </div>
               {machine && (
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
@@ -118,7 +153,7 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
               )}
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span className="muted">Assigned</span>
-                <span>{new Date(job.assigned_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</span>
+                <span>{new Date(jobRow.assigned_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</span>
               </div>
               {assignedByProfile && (
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
@@ -129,37 +164,37 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span className="muted">Deadline</span>
                 <span style={{ fontWeight: 700, color: overdue ? "#DC2626" : daysUntilDeadline !== null && daysUntilDeadline <= 2 ? "#D97706" : "var(--text)" }}>
-                  {job.due_at
-                    ? `${new Date(job.due_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}${overdue ? ` (overdue by ${Math.abs(daysUntilDeadline!)}d)` : daysUntilDeadline !== null ? ` (${daysUntilDeadline}d)` : ""}`
+                  {jobRow.due_at
+                    ? `${new Date(jobRow.due_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}${overdue ? ` (overdue by ${Math.abs(daysUntilDeadline!)}d)` : daysUntilDeadline !== null ? ` (${daysUntilDeadline}d)` : ""}`
                     : "—"}
                 </span>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span className="muted">Status</span>
-                <span className="role-pill">{job.status}</span>
+                <span className="role-pill">{jobRow.status}</span>
               </div>
-              {job.progress_phase && (
+              {jobRow.progress_phase && (
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
                   <span className="muted">Current phase</span>
-                  <span style={{ fontWeight: 600 }}>{job.progress_phase}</span>
+                  <span style={{ fontWeight: 600 }}>{jobRow.progress_phase}</span>
                 </div>
               )}
-              {job.location && (
+              {jobRow.location && (
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
                   <span className="muted">Location</span>
-                  <span style={{ fontWeight: 600 }}>📍 {job.location}</span>
+                  <span style={{ fontWeight: 600 }}>📍 {jobRow.location}</span>
                 </div>
               )}
-              {job.note && (
+              {jobRow.note && (
                 <div style={{ marginTop: 6, padding: "8px 10px", background: "var(--surface-alt)", borderRadius: 6 }}>
                   <div className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.06em" }}>Assignment note</div>
-                  <div style={{ fontSize: 12, marginTop: 2 }}>{job.note}</div>
+                  <div style={{ fontSize: 12, marginTop: 2 }}>{jobRow.note}</div>
                 </div>
               )}
-              {job.review_notes && (
+              {jobRow.review_notes && (
                 <div style={{ marginTop: 6, padding: "8px 10px", background: "rgba(220,38,38,0.06)", border: "1px solid rgba(220,38,38,0.2)", borderRadius: 6 }}>
                   <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.06em", color: "#991b1b", fontWeight: 700 }}>Review notes</div>
-                  <div style={{ fontSize: 12, marginTop: 2, color: "#991b1b" }}>{job.review_notes}</div>
+                  <div style={{ fontSize: 12, marginTop: 2, color: "#991b1b" }}>{jobRow.review_notes}</div>
                 </div>
               )}
             </div>
@@ -195,7 +230,7 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
               {inReview && (
                 <>
                   <form action={approveCarvingJobAction} style={{ display: "flex", gap: 6 }}>
-                    <input type="hidden" name="job_id" value={job.id} />
+                    <input type="hidden" name="job_id" value={jobRow.id} />
                     <input
                       type="text"
                       name="notes"
@@ -207,7 +242,7 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
                     </button>
                   </form>
                   <form action={rejectCarvingJobAction} style={{ display: "flex", gap: 6 }}>
-                    <input type="hidden" name="job_id" value={job.id} />
+                    <input type="hidden" name="job_id" value={jobRow.id} />
                     <input
                       type="text"
                       name="notes"
@@ -233,13 +268,13 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
                     ✔ Approved — now record where the slab is and mark it ready for dispatch.
                   </div>
                   <form action={markReadyToDispatchAction} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <input type="hidden" name="job_id" value={job.id} />
+                    <input type="hidden" name="job_id" value={jobRow.id} />
                     <input
                       type="text"
                       name="location"
                       required
                       placeholder="Slab location (e.g. Yard 3, Vendor's facility, Truck #UP14-7821)"
-                      defaultValue={job.location ?? ""}
+                      defaultValue={jobRow.location ?? ""}
                       style={{ fontSize: 12, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
                     />
                     <button type="submit" className="primary-button" style={{ fontSize: 12, padding: "8px 14px" }}>
@@ -258,12 +293,12 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
                     ✓ Ready for dispatch — visible in <Link href="/dispatch" style={{ color: "#15803d", textDecoration: "underline" }}>Dispatch Station</Link>.
                   </div>
                   <form action={updateCarvingLocationAction} style={{ display: "flex", gap: 6 }}>
-                    <input type="hidden" name="job_id" value={job.id} />
+                    <input type="hidden" name="job_id" value={jobRow.id} />
                     <input
                       type="text"
                       name="location"
                       placeholder="Slab location"
-                      defaultValue={job.location ?? ""}
+                      defaultValue={jobRow.location ?? ""}
                       style={{ flex: 1, fontSize: 12, padding: "6px 10px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
                     />
                     <button type="submit" className="ghost-button" style={{ fontSize: 12, padding: "6px 14px" }}>
@@ -281,7 +316,7 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
 
               {!inReview && !approved && !dispatched && (
                 <form action={cancelCarvingJobAction}>
-                  <input type="hidden" name="job_id" value={job.id} />
+                  <input type="hidden" name="job_id" value={jobRow.id} />
                   <ConfirmButton
                     message="Cancel this assignment? Slab returns to cut_done."
                     className="ghost-button danger-ghost"
