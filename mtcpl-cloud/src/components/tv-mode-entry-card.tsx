@@ -1,7 +1,14 @@
+"use client";
+
 import Link from "next/link";
 
 /**
  * Dashboard entry card for the carving Floor TV mode.
+ *
+ * Marked "use client" because the hover lift uses inline event
+ * handlers (onMouseEnter / onMouseLeave) — those aren't allowed on
+ * server components and would crash the dashboard at runtime
+ * without this directive.
  *
  * Owner + developer only — sits alongside Ask AI / Block Journey /
  * ID Lookup. Opens /carving/floor?mode=tv in a new tab so the
