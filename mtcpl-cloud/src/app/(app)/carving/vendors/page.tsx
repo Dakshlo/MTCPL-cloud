@@ -12,7 +12,13 @@ export default async function VendorDirectoryPage() {
     { data: machines },
     { data: activeJobs },
   ] = await Promise.all([
-    admin.from("vendors").select("id, name, vendor_type, is_active, created_at").order("name"),
+    // Exclude block_vendor — this page is for CARVING vendors only
+    // (CNC, Manual, Outsource). Block-side vendors live elsewhere.
+    admin
+      .from("vendors")
+      .select("id, name, vendor_type, is_active, created_at")
+      .neq("vendor_type", "block_vendor")
+      .order("name"),
     admin.from("cnc_machines").select("id, vendor_id, machine_code, operator_name, is_active"),
     admin.from("carving_items").select("vendor_id, status").in("status", ["carving_assigned", "carving_in_progress"]),
   ]);

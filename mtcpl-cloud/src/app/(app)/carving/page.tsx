@@ -50,10 +50,13 @@ export default async function CarvingDashboardPage({
       .not("review_approved_at", "is", null)
       .order("review_approved_at", { ascending: false })
       .limit(200),
+    // Carving page only — block_vendor type is for the block-side
+    // workflow and must never appear in the carving Assign modal.
     admin
       .from("vendors")
       .select("id, name, vendor_type, is_active")
       .eq("is_active", true)
+      .neq("vendor_type", "block_vendor")
       .order("name"),
     admin
       .from("cnc_machines")
