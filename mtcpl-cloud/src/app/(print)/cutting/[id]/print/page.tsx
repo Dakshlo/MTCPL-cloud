@@ -1177,6 +1177,35 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
             </tbody>
           </table>
 
+          {/* Stock location — operator writes WHERE the cut slabs
+              were physically placed. Office staff types this into
+              the system later so the carving / dispatch teams can
+              find the slabs. Bilingual heading, generous write line
+              so it's hard to miss. */}
+          <div
+            style={{
+              marginTop: 18,
+              padding: "10px 12px",
+              border: "2px solid #b87333",
+              borderRadius: 6,
+              background: "#fffaf0",
+            }}
+          >
+            <div style={{ fontSize: 14, fontWeight: 800, color: "#1a1a1a", lineHeight: 1.2 }}>
+              📍 Stock location · slabs कहाँ रखीं?
+            </div>
+            <div style={{ fontSize: 11, color: "#444", marginTop: 2, fontWeight: 500 }}>
+              जहाँ saw से उठाकर slabs रखी गयीं — yard / area / pickup point का नाम लिखें
+            </div>
+            <div
+              style={{
+                borderBottom: "2px solid #1a1a1a",
+                height: 30,
+                marginTop: 8,
+              }}
+            />
+          </div>
+
           {/* Sign-off row */}
           <div className="signoff-row">
             <div className="signoff-field">

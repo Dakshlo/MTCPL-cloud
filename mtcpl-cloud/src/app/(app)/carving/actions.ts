@@ -75,13 +75,18 @@ export async function createVendorAction(formData: FormData) {
   // If CNC, insert machines
   if (vendorType === "CNC" && machinesJson) {
     try {
-      const machines = JSON.parse(machinesJson) as Array<{ machine_code: string; operator_name?: string }>;
+      const machines = JSON.parse(machinesJson) as Array<{
+        machine_code: string;
+        operator_name?: string;
+        machine_type?: "single_head" | "multi_head_2" | "lathe";
+      }>;
       const rows = machines
         .filter((m) => m.machine_code.trim())
         .map((m) => ({
           vendor_id: vendor.id,
           machine_code: m.machine_code.trim(),
           operator_name: m.operator_name?.trim() || null,
+          machine_type: m.machine_type ?? "single_head",
           is_active: true,
         }));
       if (rows.length > 0) {
@@ -131,6 +136,7 @@ export async function updateVendorAction(formData: FormData) {
         id?: string;
         machine_code: string;
         operator_name?: string;
+        machine_type?: "single_head" | "multi_head_2" | "lathe";
         is_active?: boolean;
         _delete?: boolean;
       }>;
@@ -149,6 +155,7 @@ export async function updateVendorAction(formData: FormData) {
           vendor_id: vendorId,
           machine_code: m.machine_code.trim(),
           operator_name: m.operator_name?.trim() || null,
+          machine_type: m.machine_type ?? "single_head",
           is_active: m.is_active ?? true,
         }));
 

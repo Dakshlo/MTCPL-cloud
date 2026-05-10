@@ -73,7 +73,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
       .maybeSingle(),
     admin
       .from("cnc_machines")
-      .select("id, machine_code, operator_name, status, is_active, current_carving_item_id, maintenance_reason, maintenance_flagged_at")
+      .select("id, machine_code, operator_name, status, is_active, current_carving_item_id, maintenance_reason, maintenance_flagged_at, machine_type")
       .eq("vendor_id", vendorId)
       .eq("is_active", true)
       .order("machine_code"),
@@ -192,6 +192,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
     current_carving_item_id: string | null;
     maintenance_reason: string | null;
     maintenance_flagged_at: string | null;
+    machine_type: string | null;
   }>).map((m) => ({
     id: m.id,
     machine_code: m.machine_code,
@@ -203,6 +204,10 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
     current_job: activeByMachine.get(m.id) ?? null,
     maintenance_reason: m.maintenance_reason,
     maintenance_flagged_at: m.maintenance_flagged_at,
+    machine_type:
+      m.machine_type === "multi_head_2" || m.machine_type === "lathe"
+        ? m.machine_type
+        : "single_head",
   }));
 
   const recent = ((completedRecent ?? []) as Array<{

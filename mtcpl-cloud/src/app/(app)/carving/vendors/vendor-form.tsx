@@ -3,12 +3,23 @@
 import { useState } from "react";
 import { createVendorAction, updateVendorAction } from "../actions";
 
+type MachineType = "single_head" | "multi_head_2" | "lathe";
+
 type Machine = {
   id?: string;
   machine_code: string;
   operator_name?: string;
   is_active?: boolean;
+  /** Migration 021 — single_head (default), multi_head_2 (couples
+   *  two heads on identical slabs), or lathe (turning machines). */
+  machine_type?: MachineType;
   _delete?: boolean;
+};
+
+const MACHINE_TYPE_LABEL: Record<MachineType, string> = {
+  single_head: "Single head",
+  multi_head_2: "2-head (mirrored)",
+  lathe: "Lathe",
 };
 
 export function VendorForm({
@@ -31,7 +42,10 @@ export function VendorForm({
   const [machines, setMachines] = useState<Machine[]>(initial?.machines ?? []);
 
   function addMachine() {
-    setMachines((prev) => [...prev, { machine_code: "", operator_name: "", is_active: true }]);
+    setMachines((prev) => [
+      ...prev,
+      { machine_code: "", operator_name: "", is_active: true, machine_type: "single_head" },
+    ]);
   }
 
   function updateMachine(idx: number, patch: Partial<Machine>) {
@@ -161,6 +175,19 @@ export function VendorForm({
                         onChange={(e) => updateMachine(idx, { operator_name: e.target.value })}
                         style={{ fontSize: 12, padding: "5px 9px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--surface)", color: "var(--text)", width: "100%" }}
                       />
+                    </label>
+                    <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Type</span>
+                      <select
+                        value={m.machine_type ?? "single_head"}
+                        onChange={(e) => updateMachine(idx, { machine_type: e.target.value as MachineType })}
+                        style={{ fontSize: 12, padding: "5px 7px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--surface)", color: "var(--text)" }}
+                        title="Single-head: one slab at a time. 2-head: loads two identical slabs together. Lathe: turning machine for round work."
+                      >
+                        {(["single_head", "multi_head_2", "lathe"] as const).map((t) => (
+                          <option key={t} value={t}>{MACHINE_TYPE_LABEL[t]}</option>
+                        ))}
+                      </select>
                     </label>
                     <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
                       <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Status</span>

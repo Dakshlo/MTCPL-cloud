@@ -43,7 +43,7 @@ type Vendor = {
 
 type Slab = {
   id: string;
-  label: string;
+  label: string | null;
   temple: string;
   stone: string | null;
   length_ft: number;

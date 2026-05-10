@@ -17,9 +17,47 @@ export default async function CarvingDashboardPage({
   const tab: Tab = (params.tab as Tab) || "unassigned";
   const templeFilter = params.temple ?? "";
 
+  // Paginated fetcher for unassigned slabs — Supabase's PostgREST
+  // caps single .select() at 1000 rows. Once cut_done count crosses
+  // that, the page silently truncated (the user noticed exactly
+  // 500). Loop in 1000-row pages so we always get the full set.
+  type UnassignedRow = {
+    id: string;
+    label: string | null;
+    temple: string;
+    stone: string | null;
+    length_ft: number;
+    width_ft: number;
+    thickness_ft: number;
+    status: string;
+    priority: boolean | null;
+    source_block_id: string | null;
+    updated_at: string | null;
+  };
+  async function fetchAllUnassignedSlabs(): Promise<UnassignedRow[]> {
+    const PAGE = 1000;
+    const out: UnassignedRow[] = [];
+    for (let offset = 0; offset < 50000; offset += PAGE) {
+      const { data, error } = await admin
+        .from("slab_requirements")
+        .select(
+          "id, label, temple, stone, length_ft, width_ft, thickness_ft, status, priority, source_block_id, updated_at",
+        )
+        .eq("status", "cut_done")
+        .order("priority", { ascending: false })
+        .order("created_at", { ascending: true })
+        .range(offset, offset + PAGE - 1);
+      if (error) throw new Error(error.message);
+      if (!data || data.length === 0) break;
+      out.push(...(data as UnassignedRow[]));
+      if (data.length < PAGE) break;
+    }
+    return out;
+  }
+
   // Load everything we need for all tabs in parallel
   const [
-    { data: unassignedSlabs },
+    unassignedSlabsAll,
     { data: activeJobs },
     { data: reviewJobs },
     { data: doneJobs },
@@ -27,13 +65,7 @@ export default async function CarvingDashboardPage({
     { data: machines },
     { data: stoneTypes },
   ] = await Promise.all([
-    admin
-      .from("slab_requirements")
-      .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, status, priority, source_block_id, updated_at")
-      .eq("status", "cut_done")
-      .order("priority", { ascending: false })
-      .order("created_at", { ascending: true })
-      .limit(500),
+    fetchAllUnassignedSlabs(),
     admin
       .from("carving_items")
       .select("id, slab_requirement_id, vendor_id, vendor_name, vendor_type, status, due_at, assigned_at, completed_at, progress_phase, cnc_machine_id")
@@ -138,7 +170,7 @@ export default async function CarvingDashboardPage({
 
   // Build list of all temples across every dataset for the filter dropdown.
   const templeSet = new Set<string>();
-  for (const s of unassignedSlabs ?? []) if (s.temple) templeSet.add(s.temple);
+  for (const s of unassignedSlabsAll ?? []) if (s.temple) templeSet.add(s.temple);
   for (const j of activeJobsEnriched) if (j.temple) templeSet.add(j.temple);
   for (const j of reviewJobsEnriched) if (j.temple) templeSet.add(j.temple);
   for (const j of doneJobsEnriched) if (j.temple) templeSet.add(j.temple);
@@ -239,7 +271,7 @@ export default async function CarvingDashboardPage({
   for (const m of machines ?? []) machineCodeById[m.id] = m.machine_code;
 
   const counts = {
-    unassigned: (unassignedSlabs ?? []).length,
+    unassigned: (unassignedSlabsAll ?? []).length,
     active: activeJobsEnriched.length,
     review: reviewJobsEnriched.length,
     done: doneJobsEnriched.length,
@@ -315,7 +347,7 @@ export default async function CarvingDashboardPage({
 
       <CarvingDashboardClient
         tab={tab}
-        unassignedSlabs={unassignedSlabs ?? []}
+        unassignedSlabs={unassignedSlabsAll ?? []}
         activeJobs={activeJobsEnriched}
         reviewJobs={reviewJobsEnriched}
         doneJobs={doneJobsEnriched}

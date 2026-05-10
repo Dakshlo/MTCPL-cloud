@@ -44,6 +44,9 @@ export type CncMachineLive = {
   current_job: CarvingJobLite | null;
   maintenance_reason: string | null;
   maintenance_flagged_at: string | null;
+  /** Migration 021: 'single_head' (default), 'multi_head_2' (loads
+   *  two identical slabs in lockstep), or 'lathe' (turning machine). */
+  machine_type: "single_head" | "multi_head_2" | "lathe";
 };
 
 type Vendor = { id: string; name: string };
@@ -651,6 +654,32 @@ function MachineCard({
             >
               {machine.machine_code}
             </span>
+            {/* Machine type — small pill so the supervisor can tell
+                a 2-head from a single-head from a lathe at a glance.
+                Single-head is the default and stays unlabelled to
+                keep the card uncluttered. */}
+            {machine.machine_type !== "single_head" && (
+              <span
+                style={{
+                  fontSize: 9,
+                  fontWeight: 700,
+                  padding: "1px 6px",
+                  borderRadius: 4,
+                  background: machine.machine_type === "lathe" ? "rgba(124,58,237,0.15)" : "rgba(180,115,51,0.15)",
+                  color: machine.machine_type === "lathe" ? "#7c3aed" : "#b45309",
+                  letterSpacing: "0.05em",
+                  textTransform: "uppercase",
+                  fontFamily: "ui-monospace, monospace",
+                }}
+                title={
+                  machine.machine_type === "multi_head_2"
+                    ? "2-head CNC: loads two identical slabs in lockstep"
+                    : "Lathe: turning machine for round work"
+                }
+              >
+                {machine.machine_type === "multi_head_2" ? "2× HEAD" : "LATHE"}
+              </span>
+            )}
             {machine.operator_name && (
               <span style={{ fontSize: 10, color: "var(--muted)" }}>· {machine.operator_name}</span>
             )}

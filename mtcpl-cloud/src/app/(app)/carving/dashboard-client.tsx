@@ -24,14 +24,14 @@ import type { StoneTypeDef } from "@/lib/stone-utils";
 
 type UnassignedSlab = {
   id: string;
-  label: string;
+  label: string | null;
   temple: string;
   stone: string | null;
   length_ft: number;
   width_ft: number;
   thickness_ft: number;
   status: string;
-  priority: boolean;
+  priority: boolean | null;
   source_block_id: string | null;
   /** Last time this slab's row changed — for slabs in cut_done this
    *  is effectively when it became "ready" (status flipped). Drives
@@ -188,7 +188,7 @@ export function CarvingDashboardClient({
     slab_label?: string | null;
     temple: string;
     stone: string | null;
-    priority?: boolean;
+    priority?: boolean | null;
   }): boolean {
     if (templeFilter && templeFilter !== "all" && item.temple !== templeFilter) return false;
     if (stoneFilter !== "all" && item.stone !== stoneFilter) return false;
@@ -778,6 +778,40 @@ function UnassignedByTemple({
         {s.length_ft}×{s.width_ft}×{s.thickness_ft}&Prime;
         {s.source_block_id && ` · ${s.source_block_id}`}
       </div>
+      {/* Ready-since pill — tells the carving head how long this
+          slab has been sitting in cut_done. Older = more pressure. */}
+      {s.updated_at && (() => {
+        const ageMs = Date.now() - new Date(s.updated_at).getTime();
+        const ageDays = Math.floor(ageMs / 86400000);
+        const tone =
+          ageDays >= 14
+            ? { fg: "#991b1b", bg: "rgba(220,38,38,0.08)", icon: "⚠" }
+            : ageDays >= 7
+              ? { fg: "#b45309", bg: "rgba(217,119,6,0.08)", icon: "⏳" }
+              : { fg: "#15803d", bg: "rgba(22,163,74,0.08)", icon: "✓" };
+        const label =
+          ageDays === 0
+            ? "ready today"
+            : ageDays === 1
+              ? "ready 1 day ago"
+              : `ready ${ageDays} days ago`;
+        return (
+          <div
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              color: tone.fg,
+              background: tone.bg,
+              padding: "3px 7px",
+              borderRadius: 5,
+              alignSelf: "flex-start",
+              fontFamily: "ui-monospace, monospace",
+            }}
+          >
+            {tone.icon} {label}
+          </div>
+        );
+      })()}
       <button
         type="button"
         onClick={() => onAssign(s)}

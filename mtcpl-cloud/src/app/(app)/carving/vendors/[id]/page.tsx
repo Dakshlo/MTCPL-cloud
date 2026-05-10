@@ -13,7 +13,7 @@ export default async function VendorDetailPage({ params }: { params: Promise<{ i
 
   const [{ data: vendor }, { data: machines }, { data: jobs }] = await Promise.all([
     admin.from("vendors").select("id, name, vendor_type, is_active").eq("id", id).single(),
-    admin.from("cnc_machines").select("id, machine_code, operator_name, is_active").eq("vendor_id", id).order("machine_code"),
+    admin.from("cnc_machines").select("id, machine_code, operator_name, is_active, machine_type").eq("vendor_id", id).order("machine_code"),
     admin.from("carving_items").select("id, status, assigned_at, due_at, slab_requirement_id").eq("vendor_id", id).order("assigned_at", { ascending: false }).limit(50),
   ]);
 
@@ -24,6 +24,10 @@ export default async function VendorDetailPage({ params }: { params: Promise<{ i
     machine_code: m.machine_code,
     operator_name: m.operator_name ?? "",
     is_active: m.is_active,
+    machine_type: ((m as { machine_type?: string }).machine_type ?? "single_head") as
+      | "single_head"
+      | "multi_head_2"
+      | "lathe",
   }));
 
   return (
