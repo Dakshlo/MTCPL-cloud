@@ -90,12 +90,6 @@ const navEntries: NavEntry[] = [
     roles: ["developer", "owner", "carving_head"],
   },
   {
-    href: "/carving/reports",
-    label: "CNC Report",
-    icon: "📊",
-    roles: ["developer", "owner", "carving_head"],
-  },
-  {
     href: "/dispatch",
     label: "Dispatch",
     icon: "🚚",
