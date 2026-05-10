@@ -78,6 +78,7 @@ type Vendor = {
     id: string;
     machine_code: string;
     status: "idle" | "carving" | "maintenance" | "inactive";
+    machine_type?: "single_head" | "multi_head_2" | "lathe";
   }>;
   /** Live machine status counts + queue depth, surfaced in the
    *  Assign modal so the carving head can pick a vendor with idle
@@ -126,9 +127,9 @@ export function CarvingDashboardClient({
   const [peekJob, setPeekJob] = useState<JobRow | null>(null);
 
   // ── Filter / view state ──────────────────────────────────────────
-  // Search across slab id, label, and temple. Lower-cased compare.
+  // Single search box covers slab id, label, description, temple,
+  // stone, vendor name, status. Lower-cased compare.
   const [query, setQuery] = useState("");
-  const [stoneFilter, setStoneFilter] = useState("all");
   const [priorityOnly, setPriorityOnly] = useState(false);
   // Unassigned tab can render either temple-grouped (default, good
   // when the carving head is working through one temple at a time)
@@ -176,40 +177,43 @@ export function CarvingDashboardClient({
     router.replace(q ? `/carving?${q}` : "/carving");
   }
 
-  // Stones derived from the actual data — saves us plumbing another
-  // list from the server. Sorted alphabetically.
-  const stoneNames = useMemo(() => {
-    const set = new Set<string>();
-    for (const s of unassignedSlabs) if (s.stone) set.add(s.stone);
-    for (const j of activeJobs) if (j.stone) set.add(j.stone);
-    for (const j of reviewJobs) if (j.stone) set.add(j.stone);
-    for (const j of doneJobs) if (j.stone) set.add(j.stone);
-    return [...set].sort();
-  }, [unassignedSlabs, activeJobs, reviewJobs, doneJobs]);
-
   const queryNorm = query.trim().toLowerCase();
 
-  // Generic filter that works on both unassigned slabs and job rows.
-  // Pulls the right id/label fields off either shape.
+  // Single fat filter — temple + stone dropdowns were dropped per
+  // the carving head's request: "just keep search bar". Search now
+  // matches across slab id / label / description / temple / stone /
+  // vendor name / status so the user can find anything by typing.
   function matches(item: {
     id?: string;
     slab_requirement_id?: string;
     label?: string | null;
     slab_label?: string | null;
+    slab_description?: string | null;
     temple: string;
     stone: string | null;
+    vendor_name?: string;
+    status?: string;
     priority?: boolean | null;
+    source_block_id?: string | null;
   }): boolean {
-    if (templeFilter && templeFilter !== "all" && item.temple !== templeFilter) return false;
-    if (stoneFilter !== "all" && item.stone !== stoneFilter) return false;
     if (priorityOnly && !item.priority) return false;
     if (queryNorm) {
-      const id = (item.id ?? item.slab_requirement_id ?? "").toLowerCase();
-      const lbl = (item.label ?? item.slab_label ?? "").toLowerCase();
-      const tem = item.temple.toLowerCase();
-      if (!id.includes(queryNorm) && !lbl.includes(queryNorm) && !tem.includes(queryNorm)) {
-        return false;
-      }
+      const haystack = [
+        item.id,
+        item.slab_requirement_id,
+        item.label,
+        item.slab_label,
+        item.slab_description,
+        item.temple,
+        item.stone,
+        item.vendor_name,
+        item.status,
+        item.source_block_id,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+        .toLowerCase();
+      if (!haystack.includes(queryNorm)) return false;
     }
     return true;
   }
@@ -227,36 +231,29 @@ export function CarvingDashboardClient({
   const filteredUnassigned = useMemo(
     () => unassignedSlabs.filter((s) => matches(s) && passesDate(s.updated_at)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [unassignedSlabs, templeFilter, stoneFilter, priorityOnly, queryNorm, dateFilter],
+    [unassignedSlabs, priorityOnly, queryNorm, dateFilter],
   );
   const filteredActive = useMemo(
     () => activeJobs.filter((j) => matches(j) && passesDate(j.assigned_at)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activeJobs, templeFilter, stoneFilter, priorityOnly, queryNorm, dateFilter],
+    [activeJobs, priorityOnly, queryNorm, dateFilter],
   );
   const filteredReview = useMemo(
     () => reviewJobs.filter((j) => matches(j) && passesDate(j.completed_at)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [reviewJobs, templeFilter, stoneFilter, priorityOnly, queryNorm, dateFilter],
+    [reviewJobs, priorityOnly, queryNorm, dateFilter],
   );
   const filteredDone = useMemo(
     () => doneJobs.filter((j) => matches(j) && passesDate(j.review_approved_at ?? null)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [doneJobs, templeFilter, stoneFilter, priorityOnly, queryNorm, dateFilter],
+    [doneJobs, priorityOnly, queryNorm, dateFilter],
   );
 
-  const hasAnyFilter =
-    queryNorm.length > 0 ||
-    (templeFilter && templeFilter !== "all") ||
-    stoneFilter !== "all" ||
-    priorityOnly ||
-    dateFilter !== "all";
+  const hasAnyFilter = queryNorm.length > 0 || priorityOnly || dateFilter !== "all";
 
   function clearAllFilters() {
     setQuery("");
-    setStoneFilter("all");
     setPriorityOnly(false);
-    setTempleFilter("all");
     setDateFilter("all");
   }
 
@@ -312,23 +309,26 @@ export function CarvingDashboardClient({
           boxShadow: "0 2px 8px rgba(0,0,0,0.04)",
         }}
       >
-        {/* Search — primary control, gets the most weight */}
+        {/* One big search bar — the only filter the user wants here.
+            Matches slab id, label, description, temple, stone, vendor
+            name, status, source block. Temple + stone dropdowns are
+            gone; just type into the search to narrow down. */}
         <div
           style={{
             position: "relative",
-            flex: "1 1 280px",
-            minWidth: 220,
+            flex: "1 1 320px",
+            minWidth: 240,
           }}
         >
           <span
             style={{
               position: "absolute",
-              left: 10,
+              left: 12,
               top: "50%",
               transform: "translateY(-50%)",
               color: "var(--muted)",
               pointerEvents: "none",
-              fontSize: 14,
+              fontSize: 16,
             }}
           >
             🔎
@@ -338,13 +338,13 @@ export function CarvingDashboardClient({
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search slab id, label or temple…   (press / to focus)"
+            placeholder="Search anything — slab id, temple, stone, vendor, label…   (press / to focus)"
             style={{
               width: "100%",
-              padding: "8px 32px 8px 32px",
-              fontSize: 13,
+              padding: "10px 36px 10px 38px",
+              fontSize: 14,
               border: "1px solid var(--border)",
-              borderRadius: 6,
+              borderRadius: 8,
               background: "var(--bg)",
               color: "var(--text)",
             }}
@@ -355,7 +355,7 @@ export function CarvingDashboardClient({
               onClick={() => setQuery("")}
               style={{
                 position: "absolute",
-                right: 6,
+                right: 8,
                 top: "50%",
                 transform: "translateY(-50%)",
                 background: "transparent",
@@ -371,54 +371,6 @@ export function CarvingDashboardClient({
             </button>
           )}
         </div>
-
-        {/* Temple */}
-        <select
-          value={templeFilter || "all"}
-          onChange={(e) => setTempleFilter(e.target.value)}
-          title="Filter by temple"
-          style={{
-            fontSize: 12,
-            padding: "7px 10px",
-            border: "1px solid var(--border)",
-            borderRadius: 6,
-            background: "var(--bg)",
-            color: "var(--text)",
-            minWidth: 160,
-          }}
-        >
-          <option value="all">All temples</option>
-          {templeNames.map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
-          ))}
-        </select>
-
-        {/* Stone */}
-        {stoneNames.length > 0 && (
-          <select
-            value={stoneFilter}
-            onChange={(e) => setStoneFilter(e.target.value)}
-            title="Filter by stone"
-            style={{
-              fontSize: 12,
-              padding: "7px 10px",
-              border: "1px solid var(--border)",
-              borderRadius: 6,
-              background: "var(--bg)",
-              color: "var(--text)",
-              minWidth: 120,
-            }}
-          >
-            <option value="all">All stones</option>
-            {stoneNames.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-        )}
 
         {/* Priority toggle */}
         <button

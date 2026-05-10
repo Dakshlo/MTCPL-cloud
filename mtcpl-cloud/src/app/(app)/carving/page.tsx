@@ -97,10 +97,11 @@ export default async function CarvingDashboardPage({
       .eq("vendor_type", "CNC")
       .order("name"),
     // Pull live machine status too so the assign modal can show
-    // "Vivek · 3/10 free · 8 queued" per vendor.
+    // "Vivek · 3/10 free · 8 queued" per vendor. machine_type also
+    // surfaces in the per-machine pills (single / 2-head / lathe).
     admin
       .from("cnc_machines")
-      .select("id, vendor_id, machine_code, is_active, status")
+      .select("id, vendor_id, machine_code, is_active, status, machine_type")
       .eq("is_active", true),
     // Stone palettes for 3D slab thumbnails on the cards
     admin
@@ -251,6 +252,7 @@ export default async function CarvingDashboardPage({
           .filter((m) => m.vendor_id === v.id)
           .map((m) => {
             const st = (m as { status?: string }).status ?? "idle";
+            const mt = (m as { machine_type?: string }).machine_type ?? "single_head";
             return {
               id: m.id,
               machine_code: m.machine_code,
@@ -258,6 +260,10 @@ export default async function CarvingDashboardPage({
                 st === "carving" || st === "maintenance" || st === "inactive"
                   ? (st as "carving" | "maintenance" | "inactive")
                   : ("idle" as const),
+              machine_type:
+                mt === "multi_head_2" || mt === "lathe"
+                  ? (mt as "multi_head_2" | "lathe")
+                  : ("single_head" as const),
             };
           }),
         live: {

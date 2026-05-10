@@ -25,6 +25,9 @@ type Machine = {
   id: string;
   machine_code: string;
   status: "idle" | "carving" | "maintenance" | "inactive";
+  /** Migration 021: 'single_head' | 'multi_head_2' | 'lathe'. Decides
+   *  the small type pill on each machine tile in the picker. */
+  machine_type?: "single_head" | "multi_head_2" | "lathe";
 };
 
 type Vendor = {
@@ -321,6 +324,12 @@ export function AssignModal({
                   >
                     {selectedVendor.machines.map((m) => {
                       const tint = MACHINE_TINT[m.status];
+                      const typeLabel =
+                        m.machine_type === "multi_head_2"
+                          ? "2× HEAD"
+                          : m.machine_type === "lathe"
+                            ? "LATHE"
+                            : null;
                       return (
                         <div
                           key={m.id}
@@ -336,9 +345,29 @@ export function AssignModal({
                             gap: 2,
                           }}
                         >
-                          <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>
-                            {m.machine_code}
-                          </span>
+                          <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>
+                              {m.machine_code}
+                            </span>
+                            {typeLabel && (
+                              <span
+                                style={{
+                                  fontSize: 8,
+                                  fontWeight: 800,
+                                  padding: "0px 5px",
+                                  borderRadius: 3,
+                                  background:
+                                    m.machine_type === "lathe"
+                                      ? "rgba(124,58,237,0.15)"
+                                      : "rgba(180,115,51,0.18)",
+                                  color: m.machine_type === "lathe" ? "#7c3aed" : "#b45309",
+                                  letterSpacing: "0.06em",
+                                }}
+                              >
+                                {typeLabel}
+                              </span>
+                            )}
+                          </div>
                           <span
                             style={{
                               fontSize: 9,

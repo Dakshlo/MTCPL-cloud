@@ -81,6 +81,12 @@ const navEntries: NavEntry[] = [
     roles: ["developer", "owner", "carving_head"],
   },
   {
+    href: "/carving/floor",
+    label: "Floor View",
+    icon: "📺",
+    roles: ["developer", "owner", "carving_head"],
+  },
+  {
     href: "/dispatch",
     label: "Dispatch",
     icon: "🚚",
@@ -163,6 +169,11 @@ export function Sidebar({
     if (href === "/slabs") return pathname === "/slabs";
     // /slabs/ready is its own top-level item
     if (href === "/slabs/ready") return pathname.startsWith("/slabs/ready");
+    // /carving owns the Carving Jobs nav. /carving/floor + /carving/[id]
+    // are sub-routes that should NOT light up the parent (Floor View
+    // gets its own pill, detail pages don't need either lit).
+    if (href === "/carving") return pathname === "/carving";
+    if (href === "/carving/floor") return pathname.startsWith("/carving/floor");
     return pathname === href || pathname.startsWith(href + "/");
   }
 
