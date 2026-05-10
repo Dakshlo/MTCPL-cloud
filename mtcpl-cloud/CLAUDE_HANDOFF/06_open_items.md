@@ -104,4 +104,9 @@ These were proposed but Daksh said "later" or "phases":
 
 ## Things that currently DON'T work (or work differently than expected)
 
-None known as of `d169407`. If something breaks, add it here with the date and what was expected vs observed.
+None known as of `901602d`. If something breaks, add it here with the date and what was expected vs observed.
+
+### Lessons from past breakages
+
+- **`use client` is required for any inline event handlers** (onClick, onMouseEnter, onChange, etc.). If you add a handler to a component without that directive, /dashboard or whatever page renders the component will 500. We hit this with TvModeEntryCard (commit `ddf2aa8` → hotfix `901602d`). Always check.
+- **Server actions silently swallowing errors** — wraps that just `console.error` and continue mean users see "saved" with nothing actually saved. Always surface via toast. We hit this with vendor machine sync (`ec4ab64`).

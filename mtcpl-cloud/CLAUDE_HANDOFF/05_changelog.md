@@ -8,6 +8,13 @@ Reverse-chronological. Most recent at top. Append to TOP when shipping new work.
 
 ## Recent (this Claude session)
 
+### `901602d` · hotfix: TvModeEntryCard needs 'use client'
+The /dashboard route was 500-ing for everyone after the previous
+TV Mode card was added — the card had onMouseEnter / onMouseLeave
+handlers but no 'use client' directive, so React Server Components
+crashed at render. Added the directive. Production was down for
+~30 minutes between ddf2aa8 and 901602d.
+
 ### `ec4ab64` · Vendor save: surface machine sync errors
 Daksh hit "adding machine in vendor not working". The machine
 insert/upsert in `createVendorAction` + `updateVendorAction` had
