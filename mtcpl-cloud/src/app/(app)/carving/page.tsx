@@ -305,14 +305,25 @@ export default async function CarvingDashboardPage({
         <VendorsManagerPeek vendors={vendorsForPeek} />
       </div>
 
-      {/* Tabs */}
-      <div style={{ display: "flex", gap: 2, borderBottom: "2px solid var(--border)" }}>
+      {/* Tabs — solid pill style. Active tab = filled gold; inactive
+          = soft hover. Single colour family so the carving head's eye
+          isn't pulled in four directions like the old per-tab tints. */}
+      <div
+        style={{
+          display: "inline-flex",
+          gap: 4,
+          padding: 4,
+          background: "var(--surface-alt)",
+          border: "1px solid var(--border)",
+          borderRadius: 10,
+        }}
+      >
         {([
-          { key: "unassigned", label: "Unassigned", count: counts.unassigned, color: "#D97706" },
-          { key: "active", label: "Active", count: counts.active, color: "#2563EB" },
-          { key: "review", label: "Awaiting Review", count: counts.review, color: "#DC2626" },
-          { key: "done", label: "Carving Done", count: counts.done, color: "#16A34A" },
-        ] as Array<{ key: Tab; label: string; count: number; color: string }>).map((t) => {
+          { key: "unassigned", label: "Unassigned", count: counts.unassigned },
+          { key: "active", label: "Active", count: counts.active },
+          { key: "review", label: "Awaiting Review", count: counts.review },
+          { key: "done", label: "Carving Done", count: counts.done },
+        ] as Array<{ key: Tab; label: string; count: number }>).map((t) => {
           const active = tab === t.key;
           // Preserve temple filter when switching tabs
           const hrefParams = new URLSearchParams();
@@ -323,29 +334,32 @@ export default async function CarvingDashboardPage({
               key={t.key}
               href={`/carving?${hrefParams.toString()}`}
               style={{
-                padding: "9px 18px",
+                padding: "8px 16px",
                 fontSize: 13,
-                fontWeight: active ? 700 : 500,
-                color: active ? t.color : "var(--muted)",
-                borderBottom: active ? `2px solid ${t.color}` : "2px solid transparent",
-                marginBottom: -2,
+                fontWeight: 700,
+                color: active ? "#fff" : "var(--muted)",
+                background: active ? "var(--gold-dark)" : "transparent",
+                borderRadius: 8,
                 textDecoration: "none",
                 display: "inline-flex",
                 alignItems: "center",
-                gap: 7,
+                gap: 8,
+                transition: "background 0.12s, color 0.12s",
               }}
             >
               {t.label}
               <span
                 style={{
-                  background: active ? t.color : "var(--border)",
+                  background: active ? "rgba(255,255,255,0.25)" : "var(--bg)",
                   color: active ? "#fff" : "var(--muted)",
-                  borderRadius: 10,
+                  border: active ? "none" : "1px solid var(--border)",
+                  borderRadius: 999,
                   fontSize: 11,
                   fontWeight: 700,
-                  padding: "1px 7px",
-                  minWidth: 20,
+                  padding: "1px 8px",
+                  minWidth: 22,
                   textAlign: "center",
+                  fontFamily: "ui-monospace, monospace",
                 }}
               >
                 {t.count}

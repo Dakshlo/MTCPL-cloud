@@ -20,7 +20,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AssignModal } from "./assign-modal";
-import { approveCarvingJobAction, rejectCarvingJobAction } from "./actions";
+import {
+  approveCarvingJobAction,
+  rejectCarvingJobAction,
+  getJobEvents,
+  type JobEvent,
+} from "./actions";
 import { IsoBlockStaticSVG } from "@/components/iso-block-static";
 import type { StoneTypeDef } from "@/lib/stone-utils";
 
@@ -820,65 +825,268 @@ function UnassignedByTemple({
     );
   }
 
+  // Grouped view — temple cards. Click a card → center-peek modal
+  // with the slabs inside that temple. Cards show count + a
+  // priority-aware summary so the carving head can scan which
+  // temples have urgent work without expanding everything.
+  return (
+    <TempleCardGrid
+      groups={groups}
+      stoneTypes={stoneTypes}
+      slabsTotal={slabs.length}
+      onAssign={onAssign}
+      renderCard={renderCard}
+    />
+  );
+  void openByDefault; // unused after card refactor
+}
+
+// ─── Temple cards — clickable squares; one per temple group.
+// Clicking opens a center-peek modal containing the slab cards.
+function TempleCardGrid({
+  groups,
+  slabsTotal,
+  renderCard,
+}: {
+  groups: Array<{ temple: string; items: UnassignedSlab[] }>;
+  stoneTypes: StoneTypeDef[];
+  slabsTotal: number;
+  onAssign: (s: UnassignedSlab) => void;
+  renderCard: (s: UnassignedSlab) => React.ReactNode;
+}) {
+  const [openTemple, setOpenTemple] = useState<string | null>(null);
+  const openGroup = openTemple ? groups.find((g) => g.temple === openTemple) ?? null : null;
+
   return (
     <>
       <p className="muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
-        {slabs.length} slab{slabs.length > 1 ? "s" : ""} across {groups.length} temple{groups.length > 1 ? "s" : ""}.
-        Assign each to a carving vendor.
+        {slabsTotal} slab{slabsTotal !== 1 ? "s" : ""} across {groups.length} temple
+        {groups.length !== 1 ? "s" : ""}. Click a temple to view + assign its slabs.
       </p>
-      {groups.map(({ temple, items }) => (
-        <details key={temple} open={openByDefault} style={{ marginBottom: 10 }}>
-          <summary
-            style={{
-              cursor: "pointer",
-              padding: "10px 14px",
-              background: "var(--surface)",
-              border: "1px solid var(--border)",
-              borderRadius: "10px 10px 0 0",
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              userSelect: "none",
-              listStyle: "none",
-            }}
-          >
-            <span style={{ fontSize: 11 }}>▾</span>
-            <span style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>🏛 {temple}</span>
-            <span
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+          gap: 10,
+        }}
+      >
+        {groups.map(({ temple, items }) => {
+          const urgent = items.filter((s) => s.priority).length;
+          return (
+            <button
+              key={temple}
+              type="button"
+              onClick={() => setOpenTemple(temple)}
               style={{
-                fontSize: 11,
-                fontWeight: 700,
-                padding: "2px 9px",
-                borderRadius: 999,
-                background: "var(--gold-dark)",
-                color: "#fff",
-                fontFamily: "ui-monospace, monospace",
-                minWidth: 24,
-                textAlign: "center",
+                textAlign: "left",
+                padding: "14px 16px",
+                background: urgent > 0 ? "rgba(220,38,38,0.04)" : "var(--surface)",
+                border: `1.5px solid ${urgent > 0 ? "rgba(220,38,38,0.3)" : "var(--border)"}`,
+                borderRadius: 10,
+                cursor: "pointer",
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+                transition: "border-color 0.12s, background 0.12s, transform 0.08s",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = "var(--gold-dark)";
+                e.currentTarget.style.background = "var(--surface-alt)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor =
+                  urgent > 0 ? "rgba(220,38,38,0.3)" : "var(--border)";
+                e.currentTarget.style.background =
+                  urgent > 0 ? "rgba(220,38,38,0.04)" : "var(--surface)";
               }}
             >
-              {items.length}
-            </span>
-          </summary>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                <span style={{ fontSize: 11, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>
+                  🏛 Temple
+                </span>
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    padding: "2px 10px",
+                    borderRadius: 999,
+                    background: "var(--gold-dark)",
+                    color: "#fff",
+                    fontFamily: "ui-monospace, monospace",
+                    minWidth: 26,
+                    textAlign: "center",
+                  }}
+                >
+                  {items.length}
+                </span>
+              </div>
+              <div
+                style={{
+                  fontSize: 15,
+                  fontWeight: 700,
+                  color: "var(--text)",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  display: "-webkit-box",
+                  WebkitLineClamp: 2,
+                  WebkitBoxOrient: "vertical",
+                }}
+              >
+                {temple}
+              </div>
+              {urgent > 0 && (
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: "#dc2626",
+                    background: "rgba(220,38,38,0.1)",
+                    padding: "3px 8px",
+                    borderRadius: 5,
+                    alignSelf: "flex-start",
+                  }}
+                >
+                  ⚡ {urgent} priority
+                </div>
+              )}
+              <div style={{ marginTop: "auto", fontSize: 11, color: "var(--gold-dark)", fontWeight: 600 }}>
+                Open & assign →
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {openGroup && (
+        <TempleSlabsPeek
+          temple={openGroup.temple}
+          slabs={openGroup.items}
+          renderCard={renderCard}
+          onClose={() => setOpenTemple(null)}
+        />
+      )}
+    </>
+  );
+}
+
+// Center-peek modal that shows all slabs in one temple as the same
+// card grid the flat view uses. Clicking a slab card's "Assign to
+// Vendor" still opens the AssignModal stacked over this peek.
+function TempleSlabsPeek({
+  temple,
+  slabs,
+  renderCard,
+  onClose,
+}: {
+  temple: string;
+  slabs: UnassignedSlab[];
+  renderCard: (s: UnassignedSlab) => React.ReactNode;
+  onClose: () => void;
+}) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      onMouseDown={(e) => {
+        if (dialogRef.current && !dialogRef.current.contains(e.target as Node)) {
+          onClose();
+        }
+      }}
+      style={{
+        position: "fixed",
+        top: 0,
+        left: "var(--content-left)",
+        right: 0,
+        bottom: 0,
+        background: "rgba(15,12,6,0.55)",
+        backdropFilter: "blur(2px)",
+        zIndex: 1000,
+        display: "flex",
+        alignItems: "flex-start",
+        justifyContent: "center",
+        paddingTop: "5vh",
+        paddingLeft: 12,
+        paddingRight: 12,
+      }}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        style={{
+          background: "var(--surface)",
+          border: "1px solid var(--border)",
+          borderRadius: 12,
+          boxShadow: "0 18px 60px rgba(0,0,0,0.45)",
+          width: "100%",
+          maxWidth: 960,
+          maxHeight: "90vh",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            padding: "14px 18px",
+            borderBottom: "1px solid var(--border)",
+            background: "var(--bg)",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            gap: 12,
+          }}
+        >
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>
+              🏛 Temple
+            </div>
+            <h2 style={{ margin: "2px 0 0", fontSize: 17 }}>
+              {temple}
+            </h2>
+            <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>
+              {slabs.length} slab{slabs.length !== 1 ? "s" : ""} ready to assign
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              fontSize: 18,
+              border: "none",
+              background: "transparent",
+              cursor: "pointer",
+              color: "var(--muted)",
+              padding: 4,
+            }}
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
           <div
             style={{
-              background: "var(--bg)",
-              border: "1px solid var(--border)",
-              borderTop: "none",
-              borderRadius: "0 0 10px 10px",
-              padding: 10,
               display: "grid",
-              // Compact card width — fits 4–5 cards per row on a
-              // typical desktop instead of 3.
               gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
               gap: 8,
             }}
           >
-            {items.map(renderCard)}
+            {slabs.map(renderCard)}
           </div>
-        </details>
-      ))}
-    </>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1444,36 +1652,21 @@ function JobDetailPeek({
               </div>
             )}
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <Link
-              href={`/carving/${job.id}`}
-              style={{
-                fontSize: 11,
-                color: "var(--gold-dark)",
-                fontWeight: 600,
-                textDecoration: "none",
-                whiteSpace: "nowrap",
-              }}
-              title="Open full detail page (incl. event timeline)"
-            >
-              Open full ↗
-            </Link>
-            <button
-              type="button"
-              onClick={onClose}
-              style={{
-                fontSize: 18,
-                border: "none",
-                background: "transparent",
-                cursor: "pointer",
-                color: "var(--muted)",
-                padding: 4,
-              }}
-              aria-label="Close"
-            >
-              ✕
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              fontSize: 18,
+              border: "none",
+              background: "transparent",
+              cursor: "pointer",
+              color: "var(--muted)",
+              padding: 4,
+            }}
+            aria-label="Close"
+          >
+            ✕
+          </button>
         </div>
 
         {/* Body */}
@@ -1567,8 +1760,11 @@ function JobDetailPeek({
 
           {/* Status banner — context-specific */}
           {inReview && (
-            <ApproveRejectForms jobId={job.id} />
+            <ApproveRejectForms jobId={job.id} onDone={onClose} />
           )}
+          {/* Event timeline — server-action fetched on mount.
+              Lazy so opening the peek stays instant. */}
+          <JobTimelineSection jobId={job.id} />
           {approved && !dispatched && (
             <div
               style={{
@@ -1609,14 +1805,57 @@ function JobDetailPeek({
   );
 }
 
-// Inline approve/reject forms inside the peek. Reuses the same
-// server actions as the full detail page; on success the action
-// redirects to /carving/[id] which Next.js handles transparently.
-function ApproveRejectForms({ jobId }: { jobId: string }) {
+// Inline approve/reject forms inside the peek. Forms send `stay=1`
+// so the server action skips its redirect; on success we close the
+// modal and refresh the route, which keeps the carving head on the
+// Awaiting Review tab instead of bouncing them to the detail page.
+function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => void }) {
+  const router = useRouter();
+  const [pending, setPending] = useState<{ kind: "approve" | "reject" | null; err: string | null }>({ kind: null, err: null });
+
+  function submit(kind: "approve" | "reject", e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setPending({ kind, err: null });
+    const fd = new FormData(e.currentTarget);
+    fd.set("stay", "1");
+    const action = kind === "approve" ? approveCarvingJobAction : rejectCarvingJobAction;
+    action(fd)
+      .then(() => {
+        // Close the modal first so the user sees the list refresh
+        // beneath them. router.refresh re-runs server data fetching
+        // for the current route — the row leaves Awaiting Review.
+        onDone();
+        router.refresh();
+      })
+      .catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        setPending({ kind: null, err: msg });
+      });
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <form action={approveCarvingJobAction} style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+      {pending.err && (
+        <div
+          role="alert"
+          style={{
+            padding: "8px 12px",
+            background: "rgba(220,38,38,0.08)",
+            border: "1px solid rgba(220,38,38,0.25)",
+            color: "#991b1b",
+            borderRadius: 8,
+            fontSize: 12,
+          }}
+        >
+          ⚠ {pending.err}
+        </div>
+      )}
+      <form
+        onSubmit={(e) => submit("approve", e)}
+        style={{ display: "flex", gap: 8, alignItems: "stretch" }}
+      >
         <input type="hidden" name="job_id" value={jobId} />
+        <input type="hidden" name="stay" value="1" />
         <input
           type="text"
           name="notes"
@@ -1633,14 +1872,25 @@ function ApproveRejectForms({ jobId }: { jobId: string }) {
         />
         <button
           type="submit"
+          disabled={pending.kind !== null}
           className="primary-button"
-          style={{ fontSize: 14, padding: "10px 22px", fontWeight: 700, whiteSpace: "nowrap" }}
+          style={{
+            fontSize: 14,
+            padding: "10px 22px",
+            fontWeight: 700,
+            whiteSpace: "nowrap",
+            opacity: pending.kind !== null ? 0.6 : 1,
+          }}
         >
-          ✔ Approve
+          {pending.kind === "approve" ? "Approving…" : "✔ Approve"}
         </button>
       </form>
-      <form action={rejectCarvingJobAction} style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+      <form
+        onSubmit={(e) => submit("reject", e)}
+        style={{ display: "flex", gap: 8, alignItems: "stretch" }}
+      >
         <input type="hidden" name="job_id" value={jobId} />
+        <input type="hidden" name="stay" value="1" />
         <input
           type="text"
           name="notes"
@@ -1658,13 +1908,125 @@ function ApproveRejectForms({ jobId }: { jobId: string }) {
         />
         <button
           type="submit"
+          disabled={pending.kind !== null}
           className="ghost-button danger-ghost"
-          style={{ fontSize: 14, padding: "10px 22px", fontWeight: 700, whiteSpace: "nowrap" }}
+          style={{
+            fontSize: 14,
+            padding: "10px 22px",
+            fontWeight: 700,
+            whiteSpace: "nowrap",
+            opacity: pending.kind !== null ? 0.6 : 1,
+          }}
         >
-          ✗ Reject
+          {pending.kind === "reject" ? "Rejecting…" : "✗ Reject"}
         </button>
       </form>
     </div>
+  );
+}
+
+// Lazy-loaded event timeline for the peek. Calls the server action
+// on mount; renders a small chronological list. Same content as the
+// legacy /carving/[id] detail page's event timeline so users don't
+// need to leave the peek to see history.
+function JobTimelineSection({ jobId }: { jobId: string }) {
+  const [events, setEvents] = useState<JobEvent[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getJobEvents(jobId)
+      .then((es) => {
+        if (!cancelled) setEvents(es);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [jobId]);
+
+  return (
+    <section
+      style={{
+        padding: "12px 14px",
+        background: "var(--bg)",
+        border: "1px solid var(--border)",
+        borderRadius: 8,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          fontWeight: 700,
+          color: "var(--muted)",
+          textTransform: "uppercase",
+          letterSpacing: "0.07em",
+          marginBottom: 8,
+        }}
+      >
+        Event timeline
+      </div>
+      {error ? (
+        <div style={{ fontSize: 12, color: "#991b1b" }}>⚠ {error}</div>
+      ) : !events ? (
+        <div className="muted" style={{ fontSize: 12 }}>Loading…</div>
+      ) : events.length === 0 ? (
+        <div className="muted" style={{ fontSize: 12 }}>No events recorded.</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {events.map((e) => {
+            const when = new Date(e.created_at).toLocaleString("en-IN", {
+              day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
+            });
+            const colour =
+              e.event_type === "approved" ? "#15803d"
+                : e.event_type === "rejected" ? "#b91c1c"
+                  : e.event_type === "completed" ? "#15803d"
+                    : e.event_type === "loaded" ? "#1d4ed8"
+                      : e.event_type === "assigned" ? "#b45309"
+                        : "var(--muted)";
+            return (
+              <div
+                key={e.id}
+                style={{
+                  display: "flex",
+                  gap: 10,
+                  padding: "6px 8px",
+                  background: "var(--surface)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                  alignItems: "flex-start",
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 800,
+                    color: colour,
+                    letterSpacing: "0.05em",
+                    textTransform: "uppercase",
+                    flexShrink: 0,
+                    minWidth: 80,
+                  }}
+                >
+                  {e.event_type.replace(/_/g, " ")}
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  {e.message && (
+                    <div style={{ fontSize: 12, color: "var(--text)" }}>{e.message}</div>
+                  )}
+                  <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
+                    {when}{e.user_name ? ` · ${e.user_name}` : ""}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
   );
 }
 

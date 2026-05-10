@@ -433,6 +433,186 @@ export async function loadSlabOnMachineAction(formData: FormData) {
   redirect("/vendor?toast=Slab+loaded");
 }
 
+// ── 2-head CNC: load TWO identical slabs simultaneously ───────────
+//
+// On a multi_head_2 machine both heads carve the same shape on
+// IDENTICAL slabs in lockstep — same temple, same label, same
+// L/W/T. The vendor picks two queued items, this action validates
+// the match and atomically loads BOTH onto the machine.
+//
+// Subsequent unload finishes both at once (see completeAndUnload
+// below — when the machine is multi_head_2 it pairs and unloads
+// every active item on it).
+export async function loadTwoSlabsOnMultiHeadAction(formData: FormData) {
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "vendor"]);
+  const admin = createAdminSupabaseClient();
+
+  const carvingItemAId = txt(formData, "carving_item_a_id");
+  const carvingItemBId = txt(formData, "carving_item_b_id");
+  const machineId = txt(formData, "cnc_machine_id");
+  const vendorEstMinutes = Math.max(0, num(formData, "vendor_estimated_minutes", 0));
+
+  if (!carvingItemAId || !carvingItemBId || !machineId) {
+    redirect("/vendor?toast=Pick+two+slabs+and+a+machine");
+  }
+  if (carvingItemAId === carvingItemBId) {
+    redirect("/vendor?toast=Pick+TWO+different+slabs");
+  }
+
+  const [{ data: itemA }, { data: itemB }, { data: mc }] = await Promise.all([
+    admin
+      .from("carving_items")
+      .select("id, vendor_id, status, cnc_machine_id, slab_requirement_id, estimated_minutes")
+      .eq("id", carvingItemAId)
+      .maybeSingle(),
+    admin
+      .from("carving_items")
+      .select("id, vendor_id, status, cnc_machine_id, slab_requirement_id, estimated_minutes")
+      .eq("id", carvingItemBId)
+      .maybeSingle(),
+    admin
+      .from("cnc_machines")
+      .select("id, vendor_id, status, is_active, machine_type")
+      .eq("id", machineId)
+      .maybeSingle(),
+  ]);
+
+  if (!itemA || !itemB) redirect("/vendor?toast=One+of+the+jobs+was+not+found");
+  if (!mc) redirect("/vendor?toast=Machine+not+found");
+  const a = itemA as { id: string; vendor_id: string; status: string; cnc_machine_id: string | null; slab_requirement_id: string; estimated_minutes: number | null };
+  const b = itemB as { id: string; vendor_id: string; status: string; cnc_machine_id: string | null; slab_requirement_id: string; estimated_minutes: number | null };
+  const m = mc as { id: string; vendor_id: string; status: string; is_active: boolean; machine_type: string | null };
+
+  if (m.machine_type !== "multi_head_2") {
+    redirect("/vendor?toast=This+action+is+only+for+2-head+machines");
+  }
+  if (!m.is_active) redirect("/vendor?toast=Machine+is+inactive");
+  if (m.status !== "idle") redirect("/vendor?toast=Machine+is+not+idle");
+  if (a.vendor_id !== m.vendor_id || b.vendor_id !== m.vendor_id) {
+    redirect("/vendor?toast=One+of+the+jobs+belongs+to+a+different+vendor");
+  }
+  if (a.status !== "carving_assigned" || a.cnc_machine_id || b.status !== "carving_assigned" || b.cnc_machine_id) {
+    redirect("/vendor?toast=One+of+the+jobs+is+not+in+queue");
+  }
+
+  // Validate identical slab geometry. Two cylinders on a 2-head CNC
+  // must have matching L/W/T or they won't sit in the jig together.
+  const { data: slabRows } = await admin
+    .from("slab_requirements")
+    .select("id, label, temple, length_ft, width_ft, thickness_ft")
+    .in("id", [a.slab_requirement_id, b.slab_requirement_id]);
+  if (!slabRows || slabRows.length !== 2) {
+    redirect("/vendor?toast=Could+not+load+slab+geometry+for+matching");
+  }
+  const slabA = (slabRows as Array<{
+    id: string; label: string | null; temple: string;
+    length_ft: number | string; width_ft: number | string; thickness_ft: number | string;
+  }>).find((s) => s.id === a.slab_requirement_id)!;
+  const slabB = (slabRows as Array<{
+    id: string; label: string | null; temple: string;
+    length_ft: number | string; width_ft: number | string; thickness_ft: number | string;
+  }>).find((s) => s.id === b.slab_requirement_id)!;
+
+  const dimsMatch =
+    Number(slabA.length_ft) === Number(slabB.length_ft) &&
+    Number(slabA.width_ft) === Number(slabB.width_ft) &&
+    Number(slabA.thickness_ft) === Number(slabB.thickness_ft);
+  const labelMatch = (slabA.label ?? "") === (slabB.label ?? "");
+  const templeMatch = (slabA.temple ?? "") === (slabB.temple ?? "");
+  if (!dimsMatch || !labelMatch || !templeMatch) {
+    redirect(
+      `/vendor?toast=${encodeURIComponent(
+        "2-head load needs IDENTICAL slabs (same L×W×T + temple + label). Pick a matching pair from the queue.",
+      )}`,
+    );
+  }
+
+  const now = new Date().toISOString();
+  const finalEst = vendorEstMinutes || a.estimated_minutes || b.estimated_minutes || null;
+
+  // Flip both items + machine atomically. Race-guard on each item.
+  const updateOne = async (id: string) =>
+    admin
+      .from("carving_items")
+      .update({
+        status: "carving_in_progress",
+        cnc_machine_id: machineId,
+        loaded_at: now,
+        loaded_by: profile.id,
+        vendor_estimated_minutes: finalEst,
+      })
+      .eq("id", id)
+      .eq("status", "carving_assigned")
+      .is("cnc_machine_id", null)
+      .select("id");
+
+  const [{ data: updA }, { data: updB }] = await Promise.all([updateOne(a.id), updateOne(b.id)]);
+  if (!updA?.length || !updB?.length) {
+    // Roll back the one that succeeded if the other didn't.
+    if (updA?.length) {
+      await admin
+        .from("carving_items")
+        .update({
+          status: "carving_assigned",
+          cnc_machine_id: null,
+          loaded_at: null,
+          loaded_by: null,
+          vendor_estimated_minutes: null,
+        })
+        .eq("id", a.id);
+    }
+    if (updB?.length) {
+      await admin
+        .from("carving_items")
+        .update({
+          status: "carving_assigned",
+          cnc_machine_id: null,
+          loaded_at: null,
+          loaded_by: null,
+          vendor_estimated_minutes: null,
+        })
+        .eq("id", b.id);
+    }
+    redirect("/vendor?toast=Could+not+claim+both+slabs+(state+changed).+Refresh+and+retry.");
+  }
+
+  // Machine + slab status flips. Machine.current_carving_item_id
+  // points at the first head's item; the second is implicit
+  // (we'll fetch all carving_items where cnc_machine_id=m.id when
+  // we need both).
+  await admin
+    .from("cnc_machines")
+    .update({ status: "carving", current_carving_item_id: a.id })
+    .eq("id", machineId)
+    .eq("status", "idle");
+
+  await admin
+    .from("slab_requirements")
+    .update({ status: "carving_in_progress", updated_by: profile.id, updated_at: now })
+    .in("id", [a.slab_requirement_id, b.slab_requirement_id]);
+
+  // Audit on both items + the machine.
+  await Promise.all([
+    recordEvent(a.id, "loaded", profile.id, `2-head load (paired with ${b.id}) · ETA ${finalEst ?? "?"}min`),
+    recordEvent(b.id, "loaded", profile.id, `2-head load (paired with ${a.id}) · ETA ${finalEst ?? "?"}min`),
+  ]);
+  await admin.from("cnc_machine_events").insert({
+    cnc_machine_id: machineId,
+    event_type: "loaded",
+    carving_item_id: a.id,
+    user_id: profile.id,
+    message: `2-head load · pair ${a.id} + ${b.id} · ETA ${finalEst ?? "?"}min`,
+  });
+  await logAudit(profile.id, "carving_loaded_pair", "carving_item", a.id, {
+    machine_id: machineId,
+    paired_with: b.id,
+    vendor_estimated_minutes: finalEst,
+  });
+
+  refreshAll();
+  redirect("/vendor?toast=Both+slabs+loaded");
+}
+
 // ── Complete + unload — vendor marks done after the cut ────────────
 //
 // Atomic:
@@ -465,6 +645,31 @@ export async function completeAndUnloadAction(formData: FormData) {
 
   const now = new Date().toISOString();
 
+  // 2-head machines load + unload as a paired set. If the machine
+  // is multi_head_2, find every active item on this machine and
+  // complete them together so neither head is left in a half-state.
+  const { data: machineRow } = await admin
+    .from("cnc_machines")
+    .select("id, machine_type")
+    .eq("id", item.cnc_machine_id)
+    .maybeSingle();
+  const isMultiHead = (machineRow as { machine_type?: string } | null)?.machine_type === "multi_head_2";
+
+  const idsToComplete = [carvingItemId];
+  if (isMultiHead) {
+    const { data: pair } = await admin
+      .from("carving_items")
+      .select("id, slab_requirement_id")
+      .eq("cnc_machine_id", item.cnc_machine_id)
+      .eq("status", "carving_in_progress")
+      .is("completed_at", null);
+    for (const r of (pair ?? []) as Array<{ id: string }>) {
+      if (r.id !== carvingItemId) idsToComplete.push(r.id);
+    }
+  }
+
+  // Update every paired item with the same completed/unloaded stamp
+  // + temp location so the pair lands in Awaiting Review together.
   await admin
     .from("carving_items")
     .update({
@@ -473,27 +678,38 @@ export async function completeAndUnloadAction(formData: FormData) {
       unloaded_by: profile.id,
       temporary_location: tempLocation,
     })
-    .eq("id", carvingItemId);
+    .in("id", idsToComplete);
 
   await admin
     .from("cnc_machines")
     .update({ status: "idle", current_carving_item_id: null })
     .eq("id", item.cnc_machine_id);
 
-  await recordEvent(carvingItemId, "completed", profile.id, `Unloaded · location: ${tempLocation}`);
+  // Audit each item separately so the timeline records both unloads.
+  for (const id of idsToComplete) {
+    await recordEvent(id, "completed", profile.id, `Unloaded · location: ${tempLocation}${idsToComplete.length > 1 ? " (2-head pair)" : ""}`);
+  }
   await admin.from("cnc_machine_events").insert({
     cnc_machine_id: item.cnc_machine_id,
     event_type: "unloaded",
     carving_item_id: carvingItemId,
     user_id: profile.id,
-    message: `Unloaded · ${tempLocation}`,
+    message:
+      idsToComplete.length > 1
+        ? `Unloaded 2-head pair · ${tempLocation}`
+        : `Unloaded · ${tempLocation}`,
   });
   await logAudit(profile.id, "carving_completed", "carving_item", carvingItemId, {
     temporary_location: tempLocation,
+    paired_count: idsToComplete.length,
   });
 
   refreshAll();
-  redirect("/vendor?toast=Slab+unloaded+%E2%80%94+awaiting+team+review");
+  redirect(
+    idsToComplete.length > 1
+      ? "/vendor?toast=Both+slabs+unloaded+%E2%80%94+awaiting+team+review"
+      : "/vendor?toast=Slab+unloaded+%E2%80%94+awaiting+team+review",
+  );
 }
 
 // Update temporary location after unload (e.g., slab moved across
@@ -626,8 +842,15 @@ export async function approveCarvingJobAction(formData: FormData) {
   const admin = createAdminSupabaseClient();
   const jobId = txt(formData, "job_id");
   const notes = txt(formData, "notes") || null;
+  // When the action is called from the JobDetailPeek modal we don't
+  // want to redirect — the modal closes itself + parent revalidates
+  // in place. Set `stay=1` from the form to opt out of the redirect.
+  const stay = txt(formData, "stay") === "1";
 
-  if (!jobId) redirect("/carving?toast=Missing+job+id");
+  if (!jobId) {
+    if (stay) return;
+    redirect("/carving?toast=Missing+job+id");
+  }
 
   // Use select("*") + maybeSingle so a stale prod schema (missing
   // optional columns like temporary_location) doesn't make the
@@ -641,11 +864,11 @@ export async function approveCarvingJobAction(formData: FormData) {
     .maybeSingle();
 
   if (readErr) {
-    redirect(
-      `/carving?toast=${encodeURIComponent(`Approve failed: ${readErr.message}`)}`,
-    );
+    if (stay) throw new Error(`Approve failed: ${readErr.message}`);
+    redirect(`/carving?toast=${encodeURIComponent(`Approve failed: ${readErr.message}`)}`);
   }
   if (!job) {
+    if (stay) throw new Error(`Job not found (id ${jobId.slice(0, 8)}…)`);
     redirect(`/carving?toast=Job+not+found+(id+${encodeURIComponent(jobId.slice(0, 8))}…)`);
   }
   const j = job as {
@@ -656,6 +879,7 @@ export async function approveCarvingJobAction(formData: FormData) {
     location?: string | null;
   };
   if (!j.completed_at) {
+    if (stay) throw new Error("Vendor hasn't marked it complete yet");
     redirect(`/carving/${jobId}?toast=Vendor+hasn%27t+marked+it+complete+yet`);
   }
 
@@ -682,9 +906,8 @@ export async function approveCarvingJobAction(formData: FormData) {
     })
     .eq("id", jobId);
   if (updateErr) {
-    redirect(
-      `/carving?toast=${encodeURIComponent(`Approve failed: ${updateErr.message}`)}`,
-    );
+    if (stay) throw new Error(`Approve failed: ${updateErr.message}`);
+    redirect(`/carving?toast=${encodeURIComponent(`Approve failed: ${updateErr.message}`)}`);
   }
 
   // Flip the slab to 'completed' so it surfaces in the Dispatch
@@ -705,6 +928,7 @@ export async function approveCarvingJobAction(formData: FormData) {
   });
 
   refreshAll();
+  if (stay) return;
   redirect(`/carving/${jobId}?toast=Approved+%E2%80%94+ready+for+dispatch`);
 }
 
@@ -784,8 +1008,12 @@ export async function rejectCarvingJobAction(formData: FormData) {
   const admin = createAdminSupabaseClient();
   const jobId = txt(formData, "job_id");
   const notes = txt(formData, "notes");
+  const stay = txt(formData, "stay") === "1";
 
-  if (!jobId || !notes) redirect(`/carving/${jobId}?toast=Rejection+notes+required`);
+  if (!jobId || !notes) {
+    if (stay) throw new Error("Rejection notes required");
+    redirect(`/carving/${jobId}?toast=Rejection+notes+required`);
+  }
 
   await admin
     .from("carving_items")
@@ -800,6 +1028,7 @@ export async function rejectCarvingJobAction(formData: FormData) {
   await logAudit(profile.id, "carving_rejected", "carving_item", jobId, { notes });
 
   refreshAll();
+  if (stay) return;
   redirect(`/carving/${jobId}?toast=Rejected+-+sent+back+to+vendor`);
 }
 
@@ -832,6 +1061,56 @@ export async function cancelCarvingJobAction(formData: FormData) {
 
   refreshAll();
   redirect("/carving?toast=Assignment+cancelled");
+}
+
+// ── Job event timeline — used by JobDetailPeek modal ─────────────
+//
+// Returns the carving_job_events for a single carving_item, with
+// user names hydrated. Same shape the legacy /carving/[id] detail
+// page renders, just delivered as a server-action call so the peek
+// modal can mount it without a route navigation.
+export type JobEvent = {
+  id: string;
+  event_type: string;
+  message: string | null;
+  created_at: string;
+  user_name: string | null;
+};
+
+export async function getJobEvents(jobId: string): Promise<JobEvent[]> {
+  await requireAuth(["developer", "owner", "carving_head"]);
+  const admin = createAdminSupabaseClient();
+
+  const { data: events } = await admin
+    .from("carving_job_events")
+    .select("id, event_type, message, created_at, user_id")
+    .eq("carving_item_id", jobId)
+    .order("created_at", { ascending: false })
+    .limit(200);
+
+  const userIds = [
+    ...new Set(
+      ((events ?? []) as { user_id: string | null }[])
+        .map((e) => e.user_id)
+        .filter(Boolean) as string[],
+    ),
+  ];
+  const { data: profs } = userIds.length > 0
+    ? await admin.from("profiles").select("id, full_name").in("id", userIds)
+    : { data: [] as { id: string; full_name: string | null }[] };
+  const nameById = new Map<string, string>();
+  for (const p of profs ?? []) nameById.set(p.id, p.full_name ?? "—");
+
+  return ((events ?? []) as Array<{
+    id: string; event_type: string; message: string | null;
+    created_at: string; user_id: string | null;
+  }>).map((e) => ({
+    id: e.id,
+    event_type: e.event_type,
+    message: e.message,
+    created_at: e.created_at,
+    user_name: e.user_id ? nameById.get(e.user_id) ?? null : null,
+  }));
 }
 
 // ── Machine history — events + computed aggregates ────────────────

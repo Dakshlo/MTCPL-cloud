@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   loadSlabOnMachineAction,
+  loadTwoSlabsOnMultiHeadAction,
   completeAndUnloadAction,
   flagMaintenanceAction,
   resolveMaintenanceAction,
@@ -1049,7 +1050,13 @@ function LoadModal({
   onClose: () => void;
 }) {
   const [machineId, setMachineId] = useState(machine.id);
+  const selectedMachine = machines.find((m) => m.id === machineId) ?? machine;
+  const isTwoHead = selectedMachine.machine_type === "multi_head_2";
+
   const [carvingItemId, setCarvingItemId] = useState<string>(queue[0]?.id ?? "");
+  // Second slab id for 2-head loads. Filtered to "matches first" so
+  // the vendor can't accidentally pair non-identical slabs.
+  const [carvingItemBId, setCarvingItemBId] = useState<string>("");
   const selectedJob = queue.find((q) => q.id === carvingItemId) ?? null;
   const idleMachines = machines.filter((m) => m.status === "idle");
   // Days + hours pickers — carving runs span hours to multiple days,
@@ -1057,6 +1064,26 @@ function LoadModal({
   const [days, setDays] = useState<string>("");
   const [hours, setHours] = useState<string>("");
   const totalMinutes = (Number(days) || 0) * 60 * 24 + (Number(hours) || 0) * 60;
+
+  // Slabs that match the primary one's L×W×T + temple + label —
+  // these are the only valid second-head pairings on a 2-head load.
+  const matchingPair = isTwoHead && selectedJob?.slab
+    ? queue.filter(
+        (q) =>
+          q.id !== carvingItemId &&
+          q.slab &&
+          q.slab.length_in === selectedJob.slab!.length_in &&
+          q.slab.width_in === selectedJob.slab!.width_in &&
+          q.slab.thickness_in === selectedJob.slab!.thickness_in &&
+          (q.slab.temple ?? "") === (selectedJob.slab!.temple ?? "") &&
+          (q.slab.label ?? "") === (selectedJob.slab!.label ?? ""),
+      )
+    : [];
+
+  // Reset pair selection when primary changes or machine type changes.
+  useEffect(() => {
+    setCarvingItemBId("");
+  }, [carvingItemId, isTwoHead]);
 
   // When user picks a different slab, prefill estimate from carving
   // head's number (vendor can adjust).
@@ -1074,15 +1101,88 @@ function LoadModal({
   }, [selectedJob?.id, selectedJob?.estimated_minutes]);
 
   return (
-    <ModalShell title="Load slab onto CNC" subtitle="Pick the slab and machine, then enter your tighter ETA." onClose={onClose}>
+    <ModalShell
+      title={isTwoHead ? "Load 2 identical slabs (2-head CNC)" : "Load slab onto CNC"}
+      subtitle={
+        isTwoHead
+          ? "Both heads carve the same shape — pick two slabs with identical L×W×T + temple + label."
+          : "Pick the slab and machine, then enter your tighter ETA."
+      }
+      onClose={onClose}
+    >
       {queue.length === 0 ? (
         <Empty text="Queue is empty — nothing to load." />
       ) : (
-        <form action={loadSlabOnMachineAction} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          {/* Slab picker */}
+        <form
+          action={isTwoHead ? loadTwoSlabsOnMultiHeadAction : loadSlabOnMachineAction}
+          style={{ display: "flex", flexDirection: "column", gap: 14 }}
+        >
+          {/* Machine picker — first so the form layout reflects what
+              the vendor's about to load onto. Switching to a 2-head
+              machine swaps the slab picker into pair mode. */}
           <div>
-            <Label>Slab to load</Label>
-            <input type="hidden" name="carving_item_id" value={carvingItemId} />
+            <Label>CNC machine</Label>
+            <input type="hidden" name="cnc_machine_id" value={machineId} />
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {idleMachines.map((m) => {
+                const isSelected = m.id === machineId;
+                const typeLabel =
+                  m.machine_type === "multi_head_2" ? "2× HEAD"
+                    : m.machine_type === "lathe" ? "LATHE"
+                      : null;
+                return (
+                  <button
+                    type="button"
+                    key={m.id}
+                    onClick={() => setMachineId(m.id)}
+                    style={{
+                      padding: "6px 12px",
+                      fontFamily: "ui-monospace, monospace",
+                      fontWeight: 700,
+                      fontSize: 12,
+                      border: `1.5px solid ${isSelected ? "var(--gold-dark)" : "var(--border)"}`,
+                      background: isSelected ? "rgba(180,115,51,0.1)" : "var(--surface)",
+                      color: "var(--text)",
+                      borderRadius: 6,
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 5,
+                    }}
+                  >
+                    {m.machine_code}
+                    {typeLabel && (
+                      <span
+                        style={{
+                          fontSize: 8,
+                          fontWeight: 800,
+                          padding: "0 5px",
+                          borderRadius: 3,
+                          background:
+                            m.machine_type === "lathe"
+                              ? "rgba(124,58,237,0.15)"
+                              : "rgba(180,115,51,0.18)",
+                          color: m.machine_type === "lathe" ? "#7c3aed" : "#b45309",
+                          letterSpacing: "0.05em",
+                        }}
+                      >
+                        {typeLabel}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Primary slab picker */}
+          <div>
+            <Label>{isTwoHead ? "Slab A (head 1)" : "Slab to load"}</Label>
+            <input
+              type="hidden"
+              name={isTwoHead ? "carving_item_a_id" : "carving_item_id"}
+              value={carvingItemId}
+            />
             <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 220, overflowY: "auto" }}>
               {queue.map((q) => {
                 const isSelected = q.id === carvingItemId;
@@ -1122,36 +1222,61 @@ function LoadModal({
             </div>
           </div>
 
-          {/* Machine picker */}
-          <div>
-            <Label>CNC machine</Label>
-            <input type="hidden" name="cnc_machine_id" value={machineId} />
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {idleMachines.map((m) => {
-                const isSelected = m.id === machineId;
-                return (
-                  <button
-                    type="button"
-                    key={m.id}
-                    onClick={() => setMachineId(m.id)}
-                    style={{
-                      padding: "6px 12px",
-                      fontFamily: "ui-monospace, monospace",
-                      fontWeight: 700,
-                      fontSize: 12,
-                      border: `1.5px solid ${isSelected ? "var(--gold-dark)" : "var(--border)"}`,
-                      background: isSelected ? "rgba(180,115,51,0.1)" : "var(--surface)",
-                      color: "var(--text)",
-                      borderRadius: 6,
-                      cursor: "pointer",
-                    }}
-                  >
-                    {m.machine_code}
-                  </button>
-                );
-              })}
+          {/* Pair picker — only shows for 2-head machines. We filter
+              the queue down to slabs that have IDENTICAL geometry +
+              temple + label as the primary, since the heads run
+              the same toolpath. */}
+          {isTwoHead && (
+            <div>
+              <Label>Slab B (head 2 — must match A)</Label>
+              <input type="hidden" name="carving_item_b_id" value={carvingItemBId} />
+              {matchingPair.length === 0 ? (
+                <div
+                  style={{
+                    padding: "8px 12px",
+                    background: "rgba(217,119,6,0.06)",
+                    border: "1px solid rgba(217,119,6,0.25)",
+                    borderRadius: 6,
+                    fontSize: 12,
+                    color: "#b45309",
+                  }}
+                >
+                  No matching slab in the queue. 2-head loads need a second
+                  slab with the same dimensions, temple, and label.
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 200, overflowY: "auto" }}>
+                  {matchingPair.map((q) => {
+                    const isSelected = q.id === carvingItemBId;
+                    return (
+                      <button
+                        type="button"
+                        key={q.id}
+                        onClick={() => setCarvingItemBId(q.id)}
+                        style={{
+                          textAlign: "left",
+                          padding: "8px 10px",
+                          background: isSelected ? "rgba(180,115,51,0.08)" : "var(--surface)",
+                          border: `1.5px solid ${isSelected ? "var(--gold-dark)" : "var(--border)"}`,
+                          borderRadius: 6,
+                          cursor: "pointer",
+                        }}
+                      >
+                        <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 12 }}>
+                          {q.slab_id}
+                        </span>
+                        {q.slab && (
+                          <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
+                            {q.slab.temple} · {dimStr(q.slab)}
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-          </div>
+          )}
 
           {/* Vendor's estimated time — defaults from carving head.
               Days + hours range so it works for short pieces and
@@ -1193,8 +1318,18 @@ function LoadModal({
             )}
           </div>
 
-          <button type="submit" className="primary-button" style={{ fontSize: 14, padding: "12px 16px", fontWeight: 700 }}>
-            ▶ Load now
+          <button
+            type="submit"
+            className="primary-button"
+            disabled={isTwoHead && !carvingItemBId}
+            style={{
+              fontSize: 14,
+              padding: "12px 16px",
+              fontWeight: 700,
+              opacity: isTwoHead && !carvingItemBId ? 0.5 : 1,
+            }}
+          >
+            {isTwoHead ? "▶ Load both heads" : "▶ Load now"}
           </button>
         </form>
       )}

@@ -152,6 +152,10 @@ export function FloorViewClient({
   }
 
   // ── TV mode — single vendor full-screen, big text, auto-rotate ──
+  // Renders as a position:fixed overlay that covers the entire
+  // viewport, including the sidebar and topbar. Light theme so it
+  // reads better on a wall TV under fluorescent lighting (the dark
+  // gradient was washing out from a distance).
   if (mode === "tv") {
     const v = vendors[tvIndex];
     return (
@@ -159,14 +163,19 @@ export function FloorViewClient({
         onMouseEnter={() => setPaused(true)}
         onMouseLeave={() => setPaused(false)}
         style={{
-          minHeight: "calc(100vh - 80px)",
-          background: "linear-gradient(180deg, #0f0c06 0%, #1a1a1a 100%)",
-          color: "#fff",
-          margin: "-20px -20px 0",
-          padding: "20px 28px 40px",
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: "linear-gradient(180deg, #fafaf5 0%, #f0ece1 100%)",
+          color: "#1a1a1a",
+          padding: "16px 24px 24px",
           display: "flex",
           flexDirection: "column",
-          gap: 18,
+          gap: 16,
+          zIndex: 9999,
+          overflowY: "auto",
         }}
       >
         <TvHeader
@@ -295,22 +304,22 @@ function TvHeader({
         gap: 12,
         alignItems: "center",
         justifyContent: "space-between",
-        paddingBottom: 8,
-        borderBottom: "1px solid rgba(255,255,255,0.1)",
+        paddingBottom: 10,
+        borderBottom: "1px solid rgba(0,0,0,0.08)",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <span style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>
-          📺 TV mode · auto-rotate {paused ? "(paused)" : `every ${rotateSec}s`}
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span style={{ fontSize: 11, color: "#8a7a55", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>
+          📺 TV mode · {paused ? "paused" : `auto-rotate every ${rotateSec}s`}
         </span>
         <button
           type="button"
           onClick={() => setPaused(!paused)}
           style={{
-            background: "rgba(255,255,255,0.1)",
-            color: "#fff",
-            border: "1px solid rgba(255,255,255,0.2)",
-            padding: "4px 10px",
+            background: "#fff",
+            color: "#1a1a1a",
+            border: "1px solid rgba(0,0,0,0.12)",
+            padding: "5px 12px",
             fontSize: 11,
             fontWeight: 700,
             borderRadius: 6,
@@ -323,16 +332,16 @@ function TvHeader({
           value={rotateSec}
           onChange={(e) => setRotateSec(Number(e.target.value))}
           style={{
-            background: "rgba(255,255,255,0.1)",
-            color: "#fff",
-            border: "1px solid rgba(255,255,255,0.2)",
-            padding: "4px 10px",
+            background: "#fff",
+            color: "#1a1a1a",
+            border: "1px solid rgba(0,0,0,0.12)",
+            padding: "5px 10px",
             fontSize: 11,
             borderRadius: 6,
           }}
         >
           {[10, 15, 20, 30, 45, 60].map((s) => (
-            <option key={s} value={s} style={{ color: "#000" }}>
+            <option key={s} value={s}>
               {s}s
             </option>
           ))}
@@ -351,7 +360,7 @@ function TvHeader({
               borderRadius: "50%",
               border: "none",
               cursor: "pointer",
-              background: i === tvIndex ? "#E8C572" : "rgba(255,255,255,0.25)",
+              background: i === tvIndex ? "#b87333" : "rgba(0,0,0,0.18)",
               transition: "background 0.2s",
               padding: 0,
             }}
@@ -359,19 +368,19 @@ function TvHeader({
           />
         ))}
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-        <TvStat label="Free" value={fleetTotals.idle} fg="#22c55e" />
-        <TvStat label="Carving" value={fleetTotals.carving} fg="#60a5fa" />
-        <TvStat label="Maint" value={fleetTotals.maintenance} fg="#f87171" />
-        <TvStat label="Queue" value={fleetTotals.queue} fg="#fbbf24" />
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+        <TvStat label="Free" value={fleetTotals.idle} fg="#15803d" />
+        <TvStat label="Carving" value={fleetTotals.carving} fg="#1d4ed8" />
+        <TvStat label="Maint" value={fleetTotals.maintenance} fg="#b91c1c" />
+        <TvStat label="Queue" value={fleetTotals.queue} fg="#b45309" />
         <button
           type="button"
           onClick={() => setMode("grid")}
           style={{
-            background: "rgba(255,255,255,0.12)",
+            background: "#1a1a1a",
             color: "#fff",
-            border: "1px solid rgba(255,255,255,0.25)",
-            padding: "6px 12px",
+            border: "none",
+            padding: "7px 14px",
             fontSize: 11,
             fontWeight: 700,
             borderRadius: 6,
@@ -388,6 +397,14 @@ function TvHeader({
 // ── Vendor sections ────────────────────────────────────────────────
 
 function VendorGridSection({ vendor, now }: { vendor: FloorVendor; now: number }) {
+  // Subgroups by machine type — single → 2× head → lathe.
+  const grouped = groupMachinesByType(vendor.machines);
+  // Queue and "done last 24h" are collapsed by default per request;
+  // expanded via per-section state. The carving head can pop them
+  // open per-vendor without scrolling past noise.
+  const [queueOpen, setQueueOpen] = useState(false);
+  const [doneOpen, setDoneOpen] = useState(false);
+
   return (
     <section
       style={{
@@ -412,49 +429,165 @@ function VendorGridSection({ vendor, now }: { vendor: FloorVendor; now: number }
         <VendorStatRow totals={vendor.totals} />
       </div>
 
-      {/* Compact machine grid */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
-          gap: 8,
-        }}
-      >
-        {vendor.machines.map((m) => (
-          <CompactMachineTile key={m.id} machine={m} now={now} />
-        ))}
-      </div>
+      {/* Machine subgroups — labelled when more than one type is in
+          play so the carving head can scan single vs 2-head vs lathe
+          at a glance. Single-type vendors stay flat. */}
+      {grouped.map((g) => (
+        <div key={g.type} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {grouped.length > 1 && (
+            <div
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                color: "var(--muted)",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+              }}
+            >
+              {g.label} · {g.machines.length}
+            </div>
+          )}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+              gap: 8,
+            }}
+          >
+            {g.machines.map((m) => (
+              <CompactMachineTile key={m.id} machine={m} now={now} />
+            ))}
+          </div>
+        </div>
+      ))}
 
-      {/* Queue + last-24h completed sit side-by-side under the
-          machines so the carving head can see at a glance both
-          what's waiting and what just finished. */}
+      {/* Collapsible queue + done lists. Headers stay visible with
+          counts so the carving head sees the activity without the
+          full row-by-row clutter. Click ▸ to expand. */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        <QueueList queue={vendor.queue} dark={false} />
-        <RecentList recent={vendor.recentCompleted} dark={false} />
+        <CollapsibleList
+          title="📋 Queue"
+          count={vendor.queue.length}
+          accent={vendor.queue.length > 0 ? "#b45309" : "var(--muted)"}
+          open={queueOpen}
+          onToggle={() => setQueueOpen((o) => !o)}
+        >
+          <QueueList queue={vendor.queue} dark={false} noHeader />
+        </CollapsibleList>
+        <CollapsibleList
+          title="✓ Done · last 24h"
+          count={vendor.recentCompleted.length}
+          accent={vendor.recentCompleted.length > 0 ? "#15803d" : "var(--muted)"}
+          open={doneOpen}
+          onToggle={() => setDoneOpen((o) => !o)}
+        >
+          <RecentList recent={vendor.recentCompleted} dark={false} noHeader />
+        </CollapsibleList>
       </div>
     </section>
+  );
+}
+
+// Header bar that shows title + count and toggles the children open
+// or closed. Used for queue + done-24h sections on each vendor card.
+function CollapsibleList({
+  title,
+  count,
+  accent,
+  open,
+  onToggle,
+  children,
+}: {
+  title: string;
+  count: number;
+  accent: string;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        background: "var(--surface-alt)",
+        border: "1px solid var(--border)",
+        borderRadius: 6,
+        overflow: "hidden",
+      }}
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        style={{
+          width: "100%",
+          padding: "6px 10px",
+          background: "transparent",
+          border: "none",
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 6,
+          fontSize: 11,
+          fontWeight: 700,
+          color: "var(--muted)",
+          textTransform: "uppercase",
+          letterSpacing: "0.07em",
+          textAlign: "left",
+        }}
+      >
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 9, opacity: 0.7 }}>{open ? "▾" : "▸"}</span>
+          {title}
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              padding: "1px 8px",
+              borderRadius: 999,
+              background: count > 0 ? accent : "var(--border)",
+              color: count > 0 ? "#fff" : "var(--muted)",
+              fontFamily: "ui-monospace, monospace",
+            }}
+          >
+            {count}
+          </span>
+        </span>
+      </button>
+      {open && (
+        <div style={{ padding: "0 8px 8px" }}>
+          {children}
+        </div>
+      )}
+    </div>
   );
 }
 
 // Queue list — small chips for each waiting slab. Urgent ones
 // get a red tint. Truncates to 6 with a "+N more" affordance for
 // the grid view; pass `compact={false}` to show all (TV mode).
-function QueueList({ queue, dark, compact = true }: { queue: FloorQueueItem[]; dark: boolean; compact?: boolean }) {
+// When `noHeader` is set the outer title pill is skipped — used
+// when wrapped in CollapsibleList which renders its own header.
+function QueueList({ queue, dark, compact = true, noHeader = false }: { queue: FloorQueueItem[]; dark: boolean; compact?: boolean; noHeader?: boolean }) {
   const visible = compact ? queue.slice(0, 6) : queue;
   const overflow = queue.length - visible.length;
   const titleColor = dark ? "rgba(255,255,255,0.55)" : "var(--muted)";
   const sectionBg = dark ? "rgba(255,255,255,0.05)" : "var(--surface-alt)";
   return (
     <div
-      style={{
-        background: sectionBg,
-        borderRadius: 6,
-        padding: "8px 10px",
-        display: "flex",
-        flexDirection: "column",
-        gap: 6,
-      }}
+      style={
+        noHeader
+          ? { display: "flex", flexDirection: "column", gap: 6 }
+          : {
+              background: sectionBg,
+              borderRadius: 6,
+              padding: "8px 10px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+            }
+      }
     >
+      {!noHeader && (
       <div
         style={{
           fontSize: 10,
@@ -487,6 +620,7 @@ function QueueList({ queue, dark, compact = true }: { queue: FloorQueueItem[]; d
           </span>
         )}
       </div>
+      )}
       {queue.length === 0 ? (
         <div style={{ fontSize: 11, color: titleColor, fontStyle: "italic" }}>
           Nothing queued
@@ -527,6 +661,10 @@ function QueueList({ queue, dark, compact = true }: { queue: FloorQueueItem[]; d
                   }}
                 >
                   · {q.slab.temple} · {q.slab.length_in}×{q.slab.width_in}″
+                  {(() => {
+                    const cft = (q.slab.length_in * q.slab.width_in * q.slab.thickness_in) / 1728;
+                    return cft > 0 ? ` · ${cft.toFixed(2)} CFT` : "";
+                  })()}
                 </span>
               )}
             </div>
@@ -544,22 +682,27 @@ function QueueList({ queue, dark, compact = true }: { queue: FloorQueueItem[]; d
 
 // Recent (last 24h) completed list — same shape as QueueList for
 // visual symmetry under the machine grid.
-function RecentList({ recent, dark, compact = true }: { recent: FloorRecent[]; dark: boolean; compact?: boolean }) {
+function RecentList({ recent, dark, compact = true, noHeader = false }: { recent: FloorRecent[]; dark: boolean; compact?: boolean; noHeader?: boolean }) {
   const visible = compact ? recent.slice(0, 6) : recent;
   const overflow = recent.length - visible.length;
   const titleColor = dark ? "rgba(255,255,255,0.55)" : "var(--muted)";
   const sectionBg = dark ? "rgba(255,255,255,0.05)" : "var(--surface-alt)";
   return (
     <div
-      style={{
-        background: sectionBg,
-        borderRadius: 6,
-        padding: "8px 10px",
-        display: "flex",
-        flexDirection: "column",
-        gap: 6,
-      }}
+      style={
+        noHeader
+          ? { display: "flex", flexDirection: "column", gap: 6 }
+          : {
+              background: sectionBg,
+              borderRadius: 6,
+              padding: "8px 10px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+            }
+      }
     >
+      {!noHeader && (
       <div
         style={{
           fontSize: 10,
@@ -587,6 +730,7 @@ function RecentList({ recent, dark, compact = true }: { recent: FloorRecent[]; d
           {recent.length}
         </span>
       </div>
+      )}
       {recent.length === 0 ? (
         <div style={{ fontSize: 11, color: titleColor, fontStyle: "italic" }}>
           Nothing finished in the last day
@@ -620,6 +764,10 @@ function RecentList({ recent, dark, compact = true }: { recent: FloorRecent[]; d
                 }}
               >
                 {r.slab && `· ${r.slab.temple}`}
+                {r.slab && (() => {
+                  const cft = (r.slab!.length_in * r.slab!.width_in * r.slab!.thickness_in) / 1728;
+                  return cft > 0 ? ` · ${cft.toFixed(2)} CFT` : "";
+                })()}
                 {" · "}
                 {fmtAgo(Date.now() - new Date(r.completed_at).getTime())}
               </span>
@@ -651,6 +799,10 @@ function fmtAgo(ms: number): string {
 // keyframe animation re-runs on every advance (CSS `animation`
 // only fires once per mount).
 function VendorTvSlide({ vendor, now, slideKey }: { vendor: FloorVendor; now: number; slideKey: number }) {
+  // Group machines by type so multi-head + lathe rows are visually
+  // separate from single-head rows on the wall TV — easier to scan
+  // from across the shop.
+  const grouped = groupMachinesByType(vendor.machines);
   return (
     <div
       key={slideKey}
@@ -658,47 +810,64 @@ function VendorTvSlide({ vendor, now, slideKey }: { vendor: FloorVendor; now: nu
         display: "flex",
         flexDirection: "column",
         gap: 18,
-        // Slide-in-from-right effect on every mount. 360ms is fast
-        // enough to feel snappy but slow enough to be perceptible.
         animation: "tv-slide-in 360ms cubic-bezier(0.22, 1, 0.36, 1)",
       }}
     >
       <style>{`
         @keyframes tv-slide-in {
-          from { transform: translateX(40px); opacity: 0; }
+          from { transform: translateX(60px); opacity: 0; }
           to   { transform: translateX(0);    opacity: 1; }
         }
       `}</style>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 14 }}>
-        <span style={{ fontSize: 36, fontWeight: 800, letterSpacing: "-0.5px" }}>
+        <span style={{ fontSize: 40, fontWeight: 800, letterSpacing: "-0.6px", color: "#1a1a1a" }}>
           {vendor.name}
         </span>
-        <span style={{ fontSize: 14, color: "rgba(255,255,255,0.55)", fontWeight: 600 }}>
+        <span style={{ fontSize: 14, color: "#8a7a55", fontWeight: 600 }}>
           {vendor.totals.total} CNC{vendor.totals.total !== 1 ? "s" : ""}
         </span>
-        <div style={{ marginLeft: "auto", display: "flex", gap: 12 }}>
-          <TvBigStat label="Free" value={vendor.totals.idle} fg="#22c55e" />
-          <TvBigStat label="Carving" value={vendor.totals.carving} fg="#60a5fa" />
-          <TvBigStat label="Maint" value={vendor.totals.maintenance} fg="#f87171" />
-          <TvBigStat label="Queue" value={vendor.totals.queue} fg="#fbbf24" />
-          <TvBigStat label="Today" value={vendor.totals.today} fg="#E8C572" />
+        <div style={{ marginLeft: "auto", display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <TvBigStat label="Free" value={vendor.totals.idle} fg="#15803d" />
+          <TvBigStat label="Carving" value={vendor.totals.carving} fg="#1d4ed8" />
+          <TvBigStat label="Maint" value={vendor.totals.maintenance} fg="#b91c1c" />
+          <TvBigStat label="Queue" value={vendor.totals.queue} fg="#b45309" />
+          <TvBigStat label="Today" value={vendor.totals.today} fg="#b87333" />
         </div>
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
-          gap: 14,
-        }}
-      >
-        {vendor.machines.map((m) => (
-          <TvMachineTile key={m.id} machine={m} now={now} />
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        {grouped.map((g) => (
+          <div key={g.type} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {grouped.length > 1 && (
+              <div
+                style={{
+                  fontSize: 12,
+                  fontWeight: 800,
+                  color: "#8a7a55",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.1em",
+                }}
+              >
+                {g.label} ({g.machines.length})
+              </div>
+            )}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+                gap: 12,
+              }}
+            >
+              {g.machines.map((m) => (
+                <TvMachineTile key={m.id} machine={m} now={now} />
+              ))}
+            </div>
+          </div>
         ))}
       </div>
 
-      {/* Queue + last-24h completed — fills the lower part of the
-          screen so the TV isn't a tall black void below the cards. */}
+      {/* Queue + last-24h completed fills the lower part of the
+          screen so the TV isn't a void below the cards. */}
       <div
         style={{
           display: "grid",
@@ -707,8 +876,8 @@ function VendorTvSlide({ vendor, now, slideKey }: { vendor: FloorVendor; now: nu
           marginTop: 4,
         }}
       >
-        <QueueList queue={vendor.queue} dark compact={false} />
-        <RecentList recent={vendor.recentCompleted} dark compact={false} />
+        <QueueList queue={vendor.queue} dark={false} compact={false} />
+        <RecentList recent={vendor.recentCompleted} dark={false} compact={false} />
       </div>
     </div>
   );
@@ -818,27 +987,47 @@ function CompactMachineTile({ machine, now }: { machine: FloorMachine; now: numb
 }
 
 function TvMachineTile({ machine, now }: { machine: FloorMachine; now: number }) {
-  const tint = STATUS_TINT[machine.status];
-  // TV uses inverted colours since the background is dark.
+  // Light TV palette — softer tints for daylight viewing.
   const cardBg =
     machine.status === "carving"
-      ? "rgba(37,99,235,0.18)"
+      ? "linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%)"
       : machine.status === "maintenance"
-        ? "rgba(220,38,38,0.18)"
+        ? "linear-gradient(180deg, #fef2f2 0%, #fee2e2 100%)"
         : machine.status === "idle"
-          ? "rgba(22,163,74,0.12)"
-          : "rgba(255,255,255,0.05)";
+          ? "#fff"
+          : "#f5f5f0";
+  const cardBorder =
+    machine.status === "carving"
+      ? "#2563eb"
+      : machine.status === "maintenance"
+        ? "#dc2626"
+        : machine.status === "idle"
+          ? "#cbd5e1"
+          : "#e5e7eb";
+  const accent =
+    machine.status === "carving"
+      ? "#2563eb"
+      : machine.status === "maintenance"
+        ? "#dc2626"
+        : machine.status === "idle"
+          ? "#16a34a"
+          : "#9ca3af";
+  const label = STATUS_TINT[machine.status].label;
   return (
     <div
       style={{
-        padding: 16,
+        padding: 18,
         background: cardBg,
-        border: `2px solid ${tint.border}`,
-        borderRadius: 12,
+        border: `2px solid ${cardBorder}`,
+        borderRadius: 14,
         display: "flex",
         flexDirection: "column",
-        gap: 8,
-        minHeight: 140,
+        gap: 10,
+        minHeight: 150,
+        boxShadow:
+          machine.status === "carving" || machine.status === "maintenance"
+            ? "0 2px 12px rgba(0,0,0,0.06)"
+            : "none",
       }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
@@ -846,8 +1035,8 @@ function TvMachineTile({ machine, now }: { machine: FloorMachine; now: number })
           style={{
             fontFamily: "ui-monospace, monospace",
             fontWeight: 800,
-            fontSize: 28,
-            color: "#fff",
+            fontSize: 32,
+            color: "#1a1a1a",
             letterSpacing: "-0.5px",
           }}
         >
@@ -860,11 +1049,11 @@ function TvMachineTile({ machine, now }: { machine: FloorMachine; now: number })
             padding: "4px 12px",
             borderRadius: 999,
             color: "#fff",
-            background: tint.accent,
+            background: accent,
             letterSpacing: "0.08em",
           }}
         >
-          {tint.label}
+          {label}
         </span>
       </div>
       {machine.machine_type !== "single_head" && (
@@ -872,30 +1061,35 @@ function TvMachineTile({ machine, now }: { machine: FloorMachine; now: number })
           style={{
             fontSize: 11,
             fontWeight: 800,
-            padding: "2px 8px",
+            padding: "3px 9px",
             borderRadius: 4,
-            background: machine.machine_type === "lathe" ? "rgba(167,139,250,0.25)" : "rgba(232,197,114,0.2)",
-            color: machine.machine_type === "lathe" ? "#c4b5fd" : "#E8C572",
+            background: machine.machine_type === "lathe" ? "rgba(124,58,237,0.12)" : "rgba(180,115,51,0.15)",
+            color: machine.machine_type === "lathe" ? "#7c3aed" : "#b45309",
             letterSpacing: "0.08em",
             alignSelf: "flex-start",
+            fontFamily: "ui-monospace, monospace",
           }}
         >
           {machine.machine_type === "multi_head_2" ? "2× HEAD" : "LATHE"}
         </span>
       )}
       {machine.operator_name && (
-        <div style={{ fontSize: 14, color: "rgba(255,255,255,0.7)" }}>
+        <div style={{ fontSize: 13, color: "#666" }}>
           👷 {machine.operator_name}
         </div>
       )}
       {machine.status === "carving" && machine.current_job && (
-        <div style={{ marginTop: "auto", paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.15)" }}>
-          <div style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 16, color: "#fff" }}>
+        <div style={{ marginTop: "auto", paddingTop: 8, borderTop: "1px solid rgba(0,0,0,0.08)" }}>
+          <div style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 16, color: "#1a1a1a" }}>
             {machine.current_job.slab_id}
           </div>
           {machine.current_job.slab && (
-            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)" }}>
+            <div style={{ fontSize: 12, color: "#666" }}>
               {machine.current_job.slab.temple} · {machine.current_job.slab.length_in}×{machine.current_job.slab.width_in}″
+              {(() => {
+                const cft = (machine.current_job!.slab!.length_in * machine.current_job!.slab!.width_in * machine.current_job!.slab!.thickness_in) / 1728;
+                return cft > 0 ? ` · ${cft.toFixed(2)} CFT` : "";
+              })()}
             </div>
           )}
           {machine.current_job.loaded_at && (() => {
@@ -913,7 +1107,7 @@ function TvMachineTile({ machine, now }: { machine: FloorMachine; now: number })
                   marginTop: 6,
                 }}
               >
-                <span style={{ fontSize: 16, fontWeight: 800, color: "#93c5fd" }}>
+                <span style={{ fontSize: 16, fontWeight: 800, color: "#1d4ed8" }}>
                   ▶ {fmtDuration(elapsed)}
                 </span>
                 {remaining != null && (
@@ -921,7 +1115,7 @@ function TvMachineTile({ machine, now }: { machine: FloorMachine; now: number })
                     style={{
                       fontSize: 18,
                       fontWeight: 800,
-                      color: remaining < 0 ? "#fca5a5" : remaining < 15 ? "#fbbf24" : "#93c5fd",
+                      color: remaining < 0 ? "#dc2626" : remaining < 15 ? "#b45309" : "#1d4ed8",
                     }}
                   >
                     ⏱ {remaining < 0 ? `${fmtDuration(remaining)} over` : fmtDuration(remaining) + " left"}
@@ -933,22 +1127,42 @@ function TvMachineTile({ machine, now }: { machine: FloorMachine; now: number })
         </div>
       )}
       {machine.status === "maintenance" && (
-        <div style={{ marginTop: "auto", paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.15)" }}>
+        <div style={{ marginTop: "auto", paddingTop: 8, borderTop: "1px solid rgba(0,0,0,0.08)" }}>
           {machine.maintenance_flagged_at && (() => {
             const downMin = (now - new Date(machine.maintenance_flagged_at).getTime()) / 60000;
             return (
-              <div style={{ fontSize: 16, fontWeight: 700, color: "#fca5a5", fontFamily: "ui-monospace, monospace" }}>
+              <div style={{ fontSize: 16, fontWeight: 800, color: "#b91c1c", fontFamily: "ui-monospace, monospace" }}>
                 ⏱ down for {fmtDuration(downMin)}
               </div>
             );
           })()}
-          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.55)", marginTop: 4 }}>
+          <div style={{ fontSize: 13, color: "#666", marginTop: 4 }}>
             {machine.maintenance_reason ?? "—"}
           </div>
         </div>
       )}
     </div>
   );
+}
+
+// Group machines by their type so the cockpit + TV slide can show
+// "Single Head", "2× HEAD", "Lathe" subgroups instead of one
+// undifferentiated grid. Sorted: single → 2× head → lathe.
+function groupMachinesByType(machines: FloorMachine[]): Array<{ type: FloorMachine["machine_type"]; label: string; machines: FloorMachine[] }> {
+  const buckets: Record<FloorMachine["machine_type"], FloorMachine[]> = {
+    single_head: [],
+    multi_head_2: [],
+    lathe: [],
+  };
+  for (const m of machines) buckets[m.machine_type].push(m);
+  const order: Array<{ type: FloorMachine["machine_type"]; label: string }> = [
+    { type: "single_head", label: "Single head" },
+    { type: "multi_head_2", label: "2× head" },
+    { type: "lathe", label: "Lathe" },
+  ];
+  return order
+    .map((o) => ({ type: o.type, label: o.label, machines: buckets[o.type] }))
+    .filter((g) => g.machines.length > 0);
 }
 
 // ── Stat tiles ─────────────────────────────────────────────────────
@@ -968,8 +1182,8 @@ function Stat({ label, value, fg }: { label: string; value: number; fg: string }
 
 function TvStat({ label, value, fg }: { label: string; value: number; fg: string }) {
   return (
-    <div style={{ padding: "6px 14px", background: "rgba(255,255,255,0.08)", borderRadius: 8, minWidth: 70, textAlign: "center" }}>
-      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>
+    <div style={{ padding: "6px 14px", background: "#fff", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 8, minWidth: 70, textAlign: "center" }}>
+      <div style={{ fontSize: 11, color: "#8a7a55", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>
         {label}
       </div>
       <div style={{ fontSize: 22, fontWeight: 800, color: fg, lineHeight: 1.1, marginTop: 2 }}>
@@ -981,8 +1195,8 @@ function TvStat({ label, value, fg }: { label: string; value: number; fg: string
 
 function TvBigStat({ label, value, fg }: { label: string; value: number; fg: string }) {
   return (
-    <div style={{ padding: "10px 18px", background: "rgba(255,255,255,0.08)", borderRadius: 10, textAlign: "center", minWidth: 88 }}>
-      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700 }}>
+    <div style={{ padding: "10px 18px", background: "#fff", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 10, textAlign: "center", minWidth: 88 }}>
+      <div style={{ fontSize: 11, color: "#8a7a55", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700 }}>
         {label}
       </div>
       <div style={{ fontSize: 32, fontWeight: 800, color: fg, lineHeight: 1, marginTop: 4, fontFamily: "ui-monospace, monospace" }}>
