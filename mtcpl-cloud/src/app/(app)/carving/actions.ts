@@ -36,9 +36,15 @@ async function recordEvent(
 
 function refreshAll() {
   revalidatePath("/carving");
+  // Dynamic-segment revalidation — without this, the detail page
+  // /carving/[id] stayed cached after an approve and showed the
+  // stale Approve form (giving the impression the action didn't
+  // run).
+  revalidatePath("/carving/[id]", "page");
   revalidatePath("/carving/vendors");
   revalidatePath("/dashboard");
   revalidatePath("/vendor");
+  revalidatePath("/dispatch");
 }
 
 // ── Vendor CRUD (team-side) ─────────────────────────────────────────
@@ -616,21 +622,35 @@ export async function approveCarvingJobAction(formData: FormData) {
 
   if (!jobId) redirect("/carving?toast=Missing+job+id");
 
-  const { data: job } = await admin
+  // Use select("*") + maybeSingle so a stale prod schema (missing
+  // optional columns like temporary_location) doesn't make the
+  // whole row come back as null — that bug would surface as a
+  // misleading "Job not found" toast. Surface the real Supabase
+  // error if any so we can debug schema drift.
+  const { data: job, error: readErr } = await admin
     .from("carving_items")
-    .select("id, slab_requirement_id, completed_at, temporary_location, location")
+    .select("*")
     .eq("id", jobId)
     .maybeSingle();
 
-  if (!job) redirect("/carving?toast=Job+not+found");
+  if (readErr) {
+    redirect(
+      `/carving?toast=${encodeURIComponent(`Approve failed: ${readErr.message}`)}`,
+    );
+  }
+  if (!job) {
+    redirect(`/carving?toast=Job+not+found+(id+${encodeURIComponent(jobId.slice(0, 8))}…)`);
+  }
   const j = job as {
     id: string;
     slab_requirement_id: string;
     completed_at: string | null;
-    temporary_location: string | null;
-    location: string | null;
+    temporary_location?: string | null;
+    location?: string | null;
   };
-  if (!j.completed_at) redirect(`/carving/${jobId}?toast=Vendor+hasn%27t+marked+it+complete+yet`);
+  if (!j.completed_at) {
+    redirect(`/carving/${jobId}?toast=Vendor+hasn%27t+marked+it+complete+yet`);
+  }
 
   // Phase 3 simplification: approval now auto-marks the slab as
   // ready-for-dispatch using the vendor's temporary_location (set
@@ -640,7 +660,9 @@ export async function approveCarvingJobAction(formData: FormData) {
   const now = new Date().toISOString();
   const finalLocation = j.temporary_location ?? j.location ?? "Carving area";
 
-  await admin
+  // Surface the actual error if the update fails (could be a
+  // missing column on prod schema if migration 014 wasn't run).
+  const { error: updateErr } = await admin
     .from("carving_items")
     .update({
       review_approved_at: now,
@@ -652,13 +674,22 @@ export async function approveCarvingJobAction(formData: FormData) {
       ready_to_dispatch_by: profile.id,
     })
     .eq("id", jobId);
+  if (updateErr) {
+    redirect(
+      `/carving?toast=${encodeURIComponent(`Approve failed: ${updateErr.message}`)}`,
+    );
+  }
 
   // Flip the slab to 'completed' so it surfaces in the Dispatch
-  // Station "Ready" tab.
-  await admin
-    .from("slab_requirements")
-    .update({ status: "completed", updated_by: profile.id, updated_at: now })
-    .eq("id", j.slab_requirement_id);
+  // Station "Ready" tab. Soft-fail here — slab might already be
+  // 'completed' or may have been deleted; we don't want to undo the
+  // approve we just wrote.
+  if (j.slab_requirement_id) {
+    await admin
+      .from("slab_requirements")
+      .update({ status: "completed", updated_by: profile.id, updated_at: now })
+      .eq("id", j.slab_requirement_id);
+  }
 
   await recordEvent(jobId, "approved", profile.id, `Approved + ready for dispatch · ${finalLocation}${notes ? ` · ${notes}` : ""}`);
   await logAudit(profile.id, "carving_approved", "carving_item", jobId, {

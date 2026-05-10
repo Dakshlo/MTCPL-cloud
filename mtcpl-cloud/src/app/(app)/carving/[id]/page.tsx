@@ -228,29 +228,37 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {inReview && (
                 <>
-                  <form action={approveCarvingJobAction} style={{ display: "flex", gap: 6 }}>
+                  <form action={approveCarvingJobAction} style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
                     <input type="hidden" name="job_id" value={jobRow.id} />
                     <input
                       type="text"
                       name="notes"
                       placeholder="Approval notes (optional)"
-                      style={{ flex: 1, fontSize: 12, padding: "6px 10px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
+                      style={{ flex: 1, fontSize: 13, padding: "10px 12px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
                     />
-                    <button type="submit" className="primary-button" style={{ fontSize: 12, padding: "6px 14px" }}>
+                    <button
+                      type="submit"
+                      className="primary-button"
+                      style={{ fontSize: 14, padding: "10px 22px", fontWeight: 700, whiteSpace: "nowrap" }}
+                    >
                       ✔ Approve
                     </button>
                   </form>
-                  <form action={rejectCarvingJobAction} style={{ display: "flex", gap: 6 }}>
+                  <form action={rejectCarvingJobAction} style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
                     <input type="hidden" name="job_id" value={jobRow.id} />
                     <input
                       type="text"
                       name="notes"
                       required
                       placeholder="Rejection reason (required)"
-                      style={{ flex: 1, fontSize: 12, padding: "6px 10px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
+                      style={{ flex: 1, fontSize: 13, padding: "10px 12px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
                     />
-                    <button type="submit" className="ghost-button danger-ghost" style={{ fontSize: 12, padding: "6px 14px" }}>
-                      Reject
+                    <button
+                      type="submit"
+                      className="ghost-button danger-ghost"
+                      style={{ fontSize: 14, padding: "10px 22px", fontWeight: 700, whiteSpace: "nowrap" }}
+                    >
+                      ✗ Reject
                     </button>
                   </form>
                 </>

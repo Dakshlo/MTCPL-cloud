@@ -124,6 +124,10 @@ export function CarvingDashboardClient({
   // when the carving head is working through one temple at a time)
   // or as a flat searchable grid (better with a query active).
   const [viewMode, setViewMode] = useState<"grouped" | "flat">("grouped");
+  // Active / Awaiting Review / Carving Done can be grouped by vendor
+  // (default — what the carving head usually wants) or by temple.
+  // The Unassigned tab is always temple-or-flat (no vendor yet).
+  const [jobsGroupBy, setJobsGroupBy] = useState<"vendor" | "temple">("vendor");
   // Date filter — meaning depends on tab:
   //   unassigned → "ready since" (slab.updated_at)
   //   active     → "assigned in"
@@ -426,9 +430,11 @@ export function CarvingDashboardClient({
           ⚡ Priority
         </button>
 
-        {/* View toggle (unassigned tab only — other tabs always
-            grouped since they're already small enough) */}
-        {tab === "unassigned" && (
+        {/* View toggle.
+            Unassigned tab: Grouped (by temple) vs Flat list.
+            Other tabs: Vendor vs Temple grouping (vendor = default
+            since the carving head usually works per-vendor). */}
+        {tab === "unassigned" ? (
           <div style={{ display: "flex", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
             {(
               [
@@ -447,6 +453,33 @@ export function CarvingDashboardClient({
                   border: "none",
                   background: viewMode === m.v ? "var(--gold-dark)" : "var(--bg)",
                   color: viewMode === m.v ? "#fff" : "var(--muted)",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div style={{ display: "flex", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
+            {(
+              [
+                { v: "vendor", label: "👷 By vendor" },
+                { v: "temple", label: "🏛 By temple" },
+              ] as const
+            ).map((m) => (
+              <button
+                key={m.v}
+                type="button"
+                onClick={() => setJobsGroupBy(m.v)}
+                style={{
+                  padding: "7px 10px",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  border: "none",
+                  background: jobsGroupBy === m.v ? "var(--gold-dark)" : "var(--bg)",
+                  color: jobsGroupBy === m.v ? "#fff" : "var(--muted)",
                   cursor: "pointer",
                   whiteSpace: "nowrap",
                 }}
@@ -556,6 +589,7 @@ export function CarvingDashboardClient({
           jobs={filteredActive}
           machineCodeById={machineCodeById}
           stoneTypes={stoneTypes}
+          groupBy={jobsGroupBy}
           fields={["deadline", "phase"]}
           emptyMessage="No active carving jobs. Assign some slabs from the Unassigned tab."
           fmtDate={fmtDate}
@@ -568,6 +602,7 @@ export function CarvingDashboardClient({
           jobs={filteredReview}
           machineCodeById={machineCodeById}
           stoneTypes={stoneTypes}
+          groupBy={jobsGroupBy}
           fields={["completed"]}
           emptyMessage="Nothing waiting for review. When a vendor marks a job complete, it lands here."
           fmtDate={fmtDate}
@@ -580,6 +615,7 @@ export function CarvingDashboardClient({
           jobs={filteredDone}
           machineCodeById={machineCodeById}
           stoneTypes={stoneTypes}
+          groupBy={jobsGroupBy}
           fields={["approved", "location", "ready"]}
           emptyMessage="No slabs in Carving Done yet."
           fmtDate={fmtDate}
@@ -746,7 +782,7 @@ function UnassignedByTemple({
         type="button"
         onClick={() => onAssign(s)}
         className="primary-button"
-        style={{ marginTop: 2, fontSize: 11, padding: "5px 10px" }}
+        style={{ marginTop: 4, fontSize: 13, padding: "9px 12px", fontWeight: 700 }}
       >
         Assign to Vendor →
       </button>
@@ -844,6 +880,7 @@ function JobsByTemple({
   jobs,
   machineCodeById,
   stoneTypes,
+  groupBy,
   fields,
   emptyMessage,
   fmtDate,
@@ -852,6 +889,10 @@ function JobsByTemple({
   jobs: JobRow[];
   machineCodeById: Record<string, string>;
   stoneTypes: StoneTypeDef[];
+  /** What to group jobs under — 'vendor' is the carving head's
+   *  default (they usually work per-vendor); 'temple' for when a
+   *  specific temple's status is the question. */
+  groupBy: "vendor" | "temple";
   /** Which phase-specific status fields to render on the card. */
   fields: Array<"deadline" | "phase" | "completed" | "approved" | "location" | "ready">;
   emptyMessage: string;
@@ -859,7 +900,15 @@ function JobsByTemple({
   daysUntil: (iso: string | null) => number | null;
 }) {
   const router = useRouter();
-  const groups = useMemo(() => groupByTemple(jobs, (j) => j.temple), [jobs]);
+  // Group key + display label depend on groupBy.
+  const groups = useMemo(() => {
+    if (groupBy === "vendor") {
+      return groupByKey(jobs, (j) => j.vendor_name || "(no vendor)");
+    }
+    return groupByKey(jobs, (j) => j.temple);
+  }, [jobs, groupBy]);
+  const groupIcon = groupBy === "vendor" ? "👷" : "🏛";
+  const groupNoun = groupBy === "vendor" ? "vendor" : "temple";
 
   if (jobs.length === 0) {
     return (
@@ -876,11 +925,11 @@ function JobsByTemple({
   return (
     <>
       <p className="muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
-        {jobs.length} job{jobs.length > 1 ? "s" : ""} across {groups.length} temple
+        {jobs.length} job{jobs.length > 1 ? "s" : ""} across {groups.length} {groupNoun}
         {groups.length > 1 ? "s" : ""}.
       </p>
-      {groups.map(({ temple, items }) => (
-        <details key={temple} open={openByDefault} style={{ marginBottom: 10 }}>
+      {groups.map(({ key, items }) => (
+        <details key={key} open={openByDefault} style={{ marginBottom: 10 }}>
           <summary
             style={{
               cursor: "pointer",
@@ -896,7 +945,9 @@ function JobsByTemple({
             }}
           >
             <span style={{ fontSize: 11 }}>▾</span>
-            <span style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>🏛 {temple}</span>
+            <span style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>
+              {groupIcon} {key}
+            </span>
             <span
               style={{
                 fontSize: 11,
@@ -1125,6 +1176,21 @@ function JobsByTemple({
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
+
+// Generic grouping helper — used by JobsByTemple to group on any key
+// (vendor name, temple, etc). Returns groups sorted alphabetically by
+// key so the layout is stable across renders.
+function groupByKey<T>(items: T[], getKey: (item: T) => string): Array<{ key: string; items: T[] }> {
+  const map = new Map<string, T[]>();
+  for (const item of items) {
+    const k = getKey(item) || "(unknown)";
+    if (!map.has(k)) map.set(k, []);
+    map.get(k)!.push(item);
+  }
+  return [...map.entries()]
+    .map(([key, items]) => ({ key, items }))
+    .sort((a, b) => a.key.localeCompare(b.key));
+}
 
 function groupByTemple<T>(items: T[], getTemple: (item: T) => string): Array<{ temple: string; items: T[] }> {
   const map = new Map<string, T[]>();
