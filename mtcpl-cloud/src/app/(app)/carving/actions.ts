@@ -168,23 +168,46 @@ export async function updateVendorAction(formData: FormData) {
         if (dErr) throw new Error(`delete failed: ${dErr.message}`);
       }
 
-      // Upsert the rest. New rows (no `m.id`) get a fresh UUID
-      // generated app-side — see migration 022 for the backstory.
-      // We were hitting a NOT-NULL constraint on cnc_machines.id
-      // because the column's gen_random_uuid() default was missing
-      // on the prod DB. The migration restores the default; this
-      // app-side fallback ensures inserts work even on a DB where
-      // the default is somehow still absent.
+      // Look up rows already in the DB for this vendor so we can map
+      // existing (vendor_id, machine_code) → id. If the form sends a
+      // machine without an `id` but a row with that code already
+      // exists for this vendor, we use the existing id so the upsert
+      // UPDATES the row instead of trying to INSERT a new one (which
+      // would violate the unique (vendor_id, machine_code) constraint).
+      // This handles three failure modes:
+      //   1. Pre-fix partial saves left orphan rows that the form
+      //      doesn't know the id of.
+      //   2. Two browser tabs racing each other.
+      //   3. User typing the same code as an inactive deleted row.
+      const { data: existingForVendor } = await admin
+        .from("cnc_machines")
+        .select("id, machine_code")
+        .eq("vendor_id", vendorId);
+      const codeToExistingId = new Map<string, string>();
+      for (const row of existingForVendor ?? []) {
+        codeToExistingId.set(row.machine_code, row.id);
+      }
+
+      // Upsert the rest. Order of preference for the row's id:
+      //   1. id supplied by the form (existing row being updated)
+      //   2. id we just looked up by (vendor_id, machine_code)
+      //   3. a fresh UUID (genuinely new row)
+      // Migration 022 also restores gen_random_uuid() as the column
+      // default — this app-side path is the second line of defence.
       const toUpsert = machines
         .filter((m) => !m._delete && m.machine_code.trim())
-        .map((m) => ({
-          id: m.id || crypto.randomUUID(),
-          vendor_id: vendorId,
-          machine_code: m.machine_code.trim(),
-          operator_name: m.operator_name?.trim() || null,
-          machine_type: m.machine_type ?? "single_head",
-          is_active: m.is_active ?? true,
-        }));
+        .map((m) => {
+          const code = m.machine_code.trim();
+          const id = m.id || codeToExistingId.get(code) || crypto.randomUUID();
+          return {
+            id,
+            vendor_id: vendorId,
+            machine_code: code,
+            operator_name: m.operator_name?.trim() || null,
+            machine_type: m.machine_type ?? "single_head",
+            is_active: m.is_active ?? true,
+          };
+        });
 
       if (toUpsert.length > 0) {
         const { error: mErr } = await admin.from("cnc_machines").upsert(toUpsert);
