@@ -220,7 +220,7 @@ export function AddSlabForm({
             <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
               <button type="button" className="qty-btn" onClick={() => setQty(q => Math.max(1, q - 1))} disabled={qty <= 1}>−</button>
               <span className="cft-value" style={{ minWidth: 36, textAlign: "center", fontSize: 15, fontWeight: 700 }}>{qty}</span>
-              <button type="button" className="qty-btn" onClick={() => setQty(q => Math.min(50, q + 1))} disabled={qty >= 50}>+</button>
+              <button type="button" className="qty-btn" onClick={() => setQty(q => Math.min(100, q + 1))} disabled={qty >= 100}>+</button>
             </div>
             <input type="hidden" name="quantity" value={qty} />
           </div>

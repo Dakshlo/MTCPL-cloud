@@ -29,7 +29,7 @@ export async function addSlabAction(formData: FormData) {
   const temple = text(formData, "temple");
   if (!temple) toast("/slabs", "Temple is required");
 
-  const qty = Math.min(50, Math.max(1, parseInt(text(formData, "quantity") || "1", 10)));
+  const qty = Math.min(100, Math.max(1, parseInt(text(formData, "quantity") || "1", 10)));
 
   // Get prefix from temples table
   const { data: templeRow } = await supabase.from("temples").select("code_prefix").eq("name", temple).single();
