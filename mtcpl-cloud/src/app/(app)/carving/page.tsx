@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { CarvingDashboardClient } from "./dashboard-client";
+import { VendorsManagerPeek } from "./vendors-manager-peek";
 
 type Tab = "unassigned" | "active" | "review" | "done";
 
@@ -28,7 +29,7 @@ export default async function CarvingDashboardPage({
   ] = await Promise.all([
     admin
       .from("slab_requirements")
-      .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, status, priority, source_block_id")
+      .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, status, priority, source_block_id, updated_at")
       .eq("status", "cut_done")
       .order("priority", { ascending: false })
       .order("created_at", { ascending: true })
@@ -54,10 +55,13 @@ export default async function CarvingDashboardPage({
     // paused for the Phase 3 CNC ops rollout — they'll come back
     // later if needed. block_vendor type is for the block side and
     // must never appear here.
+    //
+    // We pull ALL CNC vendors (including inactive) so the manage
+    // peek modal can show + reactivate them. The Assign modal
+    // filters out inactive ones client-side.
     admin
       .from("vendors")
       .select("id, name, vendor_type, is_active")
-      .eq("is_active", true)
       .eq("vendor_type", "CNC")
       .order("name"),
     // Pull live machine status too so the assign modal can show
@@ -170,38 +174,65 @@ export default async function CarvingDashboardPage({
     }
   }
 
-  // Enrich vendors with their machines (incl. live status) + live
-  // counts. The per-machine status flows through to the assign modal
-  // so the carving head can see exactly which CNCs are free / busy /
-  // in maintenance before picking a vendor.
-  const vendorsEnriched = (vendors ?? []).map((v) => {
+  // Active jobs (queued + in-progress) per vendor, for the manage
+  // peek modal display.
+  const activeJobsByVendor = new Map<string, number>();
+  for (const j of activeJobsEnriched) {
+    activeJobsByVendor.set(j.vendor_id, (activeJobsByVendor.get(j.vendor_id) ?? 0) + 1);
+  }
+
+  // Vendor rows for the manage peek modal — includes inactive ones
+  // so they can be reactivated. Drop block_vendor leftovers in case
+  // the data has any sneak-throughs (the query already filters).
+  const vendorsForPeek = (vendors ?? []).map((v) => {
     const counts = machineCountsByVendor.get(v.id) ?? { idle: 0, carving: 0, maintenance: 0, total: 0 };
     return {
       id: v.id,
       name: v.name,
-      vendor_type: v.vendor_type as "CNC" | "Manual",
-      machines: (machines ?? [])
-        .filter((m) => m.vendor_id === v.id)
-        .map((m) => {
-          const st = (m as { status?: string }).status ?? "idle";
-          return {
-            id: m.id,
-            machine_code: m.machine_code,
-            status:
-              st === "carving" || st === "maintenance" || st === "inactive"
-                ? (st as "carving" | "maintenance" | "inactive")
-                : ("idle" as const),
-          };
-        }),
-      live: {
-        free: counts.idle,
-        busy: counts.carving,
-        maintenance: counts.maintenance,
-        total: counts.total,
-        queued: queuedByVendor.get(v.id) ?? 0,
-      },
+      is_active: v.is_active,
+      machines: counts.total,
+      busy: counts.carving,
+      maintenance: counts.maintenance,
+      free: counts.idle,
+      active_jobs: activeJobsByVendor.get(v.id) ?? 0,
     };
   });
+
+  // Enrich vendors with their machines (incl. live status) + live
+  // counts. The per-machine status flows through to the assign modal
+  // so the carving head can see exactly which CNCs are free / busy /
+  // in maintenance before picking a vendor. Inactive vendors are
+  // dropped here — you can't assign to a deactivated vendor.
+  const vendorsEnriched = (vendors ?? [])
+    .filter((v) => v.is_active)
+    .map((v) => {
+      const counts = machineCountsByVendor.get(v.id) ?? { idle: 0, carving: 0, maintenance: 0, total: 0 };
+      return {
+        id: v.id,
+        name: v.name,
+        vendor_type: v.vendor_type as "CNC" | "Manual",
+        machines: (machines ?? [])
+          .filter((m) => m.vendor_id === v.id)
+          .map((m) => {
+            const st = (m as { status?: string }).status ?? "idle";
+            return {
+              id: m.id,
+              machine_code: m.machine_code,
+              status:
+                st === "carving" || st === "maintenance" || st === "inactive"
+                  ? (st as "carving" | "maintenance" | "inactive")
+                  : ("idle" as const),
+            };
+          }),
+        live: {
+          free: counts.idle,
+          busy: counts.carving,
+          maintenance: counts.maintenance,
+          total: counts.total,
+          queued: queuedByVendor.get(v.id) ?? 0,
+        },
+      };
+    });
 
   // Build a machine-code map for display
   const machineCodeById: Record<string, string> = {};
@@ -229,13 +260,7 @@ export default async function CarvingDashboardPage({
             Phase 2 module · assign cut slabs to carving vendors, track progress, approve and dispatch
           </p>
         </div>
-        <Link
-          href="/carving/vendors"
-          className="ghost-button"
-          style={{ fontSize: 12, padding: "6px 14px", textDecoration: "none" }}
-        >
-          Manage Vendors →
-        </Link>
+        <VendorsManagerPeek vendors={vendorsForPeek} />
       </div>
 
       {/* Tabs */}

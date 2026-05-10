@@ -102,8 +102,12 @@ export async function updateVendorAction(formData: FormData) {
   const vendorType = txt(formData, "vendor_type") as "CNC" | "Manual" | "Outsource";
   const isActive = txt(formData, "is_active") === "true";
   const machinesJson = txt(formData, "machines_json");
+  // Caller can pass redirect_to to land back where they came from
+  // (carving page peek modal sends "/carving"). Defaults to the
+  // vendor's detail page for back-compat with the old form.
+  const redirectTo = txt(formData, "redirect_to") || `/carving/vendors/${vendorId}`;
 
-  if (!vendorId || !name) redirect(`/carving/vendors/${vendorId}?toast=Missing+fields`);
+  if (!vendorId || !name) redirect(`${redirectTo}?toast=Missing+fields`);
 
   const { error } = await admin
     .from("vendors")
@@ -111,7 +115,7 @@ export async function updateVendorAction(formData: FormData) {
     .eq("id", vendorId);
 
   if (error) {
-    redirect(`/carving/vendors/${vendorId}?toast=${encodeURIComponent(error.message)}`);
+    redirect(`${redirectTo}?toast=${encodeURIComponent(error.message)}`);
   }
 
   // Sync machines for CNC vendors
@@ -153,18 +157,81 @@ export async function updateVendorAction(formData: FormData) {
 
   await logAudit(profile.id, "vendor_updated", "vendor", vendorId, { name });
   refreshAll();
-  redirect(`/carving/vendors/${vendorId}?toast=Vendor+saved`);
+  redirect(`${redirectTo}?toast=Vendor+saved`);
 }
 
 export async function deactivateVendorAction(formData: FormData) {
   const { profile } = await requireAuth(["developer", "owner"]);
   const admin = createAdminSupabaseClient();
   const vendorId = txt(formData, "vendor_id");
+  const redirectTo = txt(formData, "redirect_to") || "/carving/vendors";
 
   await admin.from("vendors").update({ is_active: false }).eq("id", vendorId);
   await logAudit(profile.id, "vendor_deactivated", "vendor", vendorId, {});
   refreshAll();
-  redirect("/carving/vendors?toast=Vendor+deactivated");
+  redirect(`${redirectTo}?toast=Vendor+deactivated`);
+}
+
+export async function reactivateVendorAction(formData: FormData) {
+  const { profile } = await requireAuth(["developer", "owner"]);
+  const admin = createAdminSupabaseClient();
+  const vendorId = txt(formData, "vendor_id");
+  const redirectTo = txt(formData, "redirect_to") || "/carving/vendors";
+
+  await admin.from("vendors").update({ is_active: true }).eq("id", vendorId);
+  await logAudit(profile.id, "vendor_reactivated", "vendor", vendorId, {});
+  refreshAll();
+  redirect(`${redirectTo}?toast=Vendor+reactivated`);
+}
+
+// Hard-delete a vendor. Only allowed when the vendor has no carving
+// items referencing it AND no machines (cascading delete on machines
+// would lose history we want to keep). If either guard fails, falls
+// back to a deactivate so the carving head doesn't have to think
+// about which command to run.
+export async function deleteVendorAction(formData: FormData) {
+  const { profile } = await requireAuth(["developer", "owner"]);
+  const admin = createAdminSupabaseClient();
+  const vendorId = txt(formData, "vendor_id");
+  const redirectTo = txt(formData, "redirect_to") || "/carving/vendors";
+
+  if (!vendorId) redirect(`${redirectTo}?toast=Missing+vendor+id`);
+
+  const [{ count: itemCount }, { count: machineCount }] = await Promise.all([
+    admin
+      .from("carving_items")
+      .select("id", { count: "exact", head: true })
+      .eq("vendor_id", vendorId),
+    admin
+      .from("cnc_machines")
+      .select("id", { count: "exact", head: true })
+      .eq("vendor_id", vendorId),
+  ]);
+
+  if ((itemCount ?? 0) > 0 || (machineCount ?? 0) > 0) {
+    // Has history — soft-delete instead so audit trails stay intact.
+    await admin.from("vendors").update({ is_active: false }).eq("id", vendorId);
+    await logAudit(profile.id, "vendor_soft_deleted", "vendor", vendorId, {
+      reason: "has_history",
+      carving_items: itemCount ?? 0,
+      machines: machineCount ?? 0,
+    });
+    refreshAll();
+    redirect(
+      `${redirectTo}?toast=${encodeURIComponent(
+        `Vendor has ${itemCount} job(s) and ${machineCount} machine(s) — deactivated instead`,
+      )}`,
+    );
+  }
+
+  // Truly no history — safe to hard delete.
+  const { error } = await admin.from("vendors").delete().eq("id", vendorId);
+  if (error) {
+    redirect(`${redirectTo}?toast=${encodeURIComponent(error.message)}`);
+  }
+  await logAudit(profile.id, "vendor_deleted", "vendor", vendorId, {});
+  refreshAll();
+  redirect(`${redirectTo}?toast=Vendor+deleted`);
 }
 
 // ── Carving job lifecycle ───────────────────────────────────────────

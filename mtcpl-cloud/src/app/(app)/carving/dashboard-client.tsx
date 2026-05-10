@@ -33,6 +33,10 @@ type UnassignedSlab = {
   status: string;
   priority: boolean;
   source_block_id: string | null;
+  /** Last time this slab's row changed — for slabs in cut_done this
+   *  is effectively when it became "ready" (status flipped). Drives
+   *  the "Ready in last X days" date filter on the carving toolbar. */
+  updated_at?: string | null;
 };
 
 type JobRow = {
@@ -120,6 +124,13 @@ export function CarvingDashboardClient({
   // when the carving head is working through one temple at a time)
   // or as a flat searchable grid (better with a query active).
   const [viewMode, setViewMode] = useState<"grouped" | "flat">("grouped");
+  // Date filter — meaning depends on tab:
+  //   unassigned → "ready since" (slab.updated_at)
+  //   active     → "assigned in"
+  //   review     → "completed in"
+  //   done       → "approved in"
+  // Default 'all' keeps the old behaviour.
+  const [dateFilter, setDateFilter] = useState<"all" | "1d" | "2d" | "7d" | "30d">("all");
 
   // Cmd/Ctrl-K or `/` focuses the search input — power users can fly.
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -189,39 +200,61 @@ export function CarvingDashboardClient({
     return true;
   }
 
+  // Date filter helper — returns true if the row falls within the
+  // currently-selected date window. `all` always passes.
+  function passesDate(iso: string | null | undefined): boolean {
+    if (dateFilter === "all") return true;
+    if (!iso) return false;
+    const days =
+      dateFilter === "1d" ? 1 : dateFilter === "2d" ? 2 : dateFilter === "7d" ? 7 : 30;
+    return Date.now() - new Date(iso).getTime() <= days * 86400000;
+  }
+
   const filteredUnassigned = useMemo(
-    () => unassignedSlabs.filter(matches),
+    () => unassignedSlabs.filter((s) => matches(s) && passesDate(s.updated_at)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [unassignedSlabs, templeFilter, stoneFilter, priorityOnly, queryNorm],
+    [unassignedSlabs, templeFilter, stoneFilter, priorityOnly, queryNorm, dateFilter],
   );
   const filteredActive = useMemo(
-    () => activeJobs.filter(matches),
+    () => activeJobs.filter((j) => matches(j) && passesDate(j.assigned_at)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activeJobs, templeFilter, stoneFilter, priorityOnly, queryNorm],
+    [activeJobs, templeFilter, stoneFilter, priorityOnly, queryNorm, dateFilter],
   );
   const filteredReview = useMemo(
-    () => reviewJobs.filter(matches),
+    () => reviewJobs.filter((j) => matches(j) && passesDate(j.completed_at)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [reviewJobs, templeFilter, stoneFilter, priorityOnly, queryNorm],
+    [reviewJobs, templeFilter, stoneFilter, priorityOnly, queryNorm, dateFilter],
   );
   const filteredDone = useMemo(
-    () => doneJobs.filter(matches),
+    () => doneJobs.filter((j) => matches(j) && passesDate(j.review_approved_at ?? null)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [doneJobs, templeFilter, stoneFilter, priorityOnly, queryNorm],
+    [doneJobs, templeFilter, stoneFilter, priorityOnly, queryNorm, dateFilter],
   );
 
   const hasAnyFilter =
     queryNorm.length > 0 ||
     (templeFilter && templeFilter !== "all") ||
     stoneFilter !== "all" ||
-    priorityOnly;
+    priorityOnly ||
+    dateFilter !== "all";
 
   function clearAllFilters() {
     setQuery("");
     setStoneFilter("all");
     setPriorityOnly(false);
     setTempleFilter("all");
+    setDateFilter("all");
   }
+
+  // Label for the date pill row depends on which tab is active.
+  const dateFilterLabel =
+    tab === "unassigned"
+      ? "Ready in"
+      : tab === "active"
+        ? "Assigned in"
+        : tab === "review"
+          ? "Completed in"
+          : "Approved in";
 
   function fmtDate(iso: string | null) {
     if (!iso) return "—";
@@ -448,6 +481,59 @@ export function CarvingDashboardClient({
             </button>
           )}
         </div>
+      </div>
+
+      {/* Date filter pill row — second line in the toolbar so it
+          doesn't crowd the search input. Label updates per tab so
+          it reads naturally ("Ready in last 7 days" on Unassigned,
+          "Assigned in" on Active, etc). */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "8px 12px",
+          marginTop: 6,
+          background: "var(--surface)",
+          border: "1px solid var(--border)",
+          borderRadius: 10,
+          flexWrap: "wrap",
+        }}
+      >
+        <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+          {dateFilterLabel}
+        </span>
+        {(
+          [
+            { v: "all", label: "All time" },
+            { v: "1d", label: "Today" },
+            { v: "2d", label: "Last 2d" },
+            { v: "7d", label: "Last 7d" },
+            { v: "30d", label: "Last 30d" },
+          ] as const
+        ).map((opt) => {
+          const isSelected = dateFilter === opt.v;
+          return (
+            <button
+              key={opt.v}
+              type="button"
+              onClick={() => setDateFilter(opt.v)}
+              style={{
+                padding: "5px 12px",
+                fontSize: 11,
+                fontWeight: isSelected ? 700 : 500,
+                border: `1.5px solid ${isSelected ? "var(--gold-dark)" : "var(--border)"}`,
+                background: isSelected ? "rgba(180,115,51,0.1)" : "var(--bg)",
+                color: isSelected ? "var(--gold-dark)" : "var(--muted)",
+                borderRadius: 999,
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

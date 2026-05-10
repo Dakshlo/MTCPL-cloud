@@ -1,0 +1,451 @@
+"use client";
+
+/**
+ * Center-peek vendor manager surfaced from the Carving Jobs page
+ * header. The carving head doesn't have to leave their working view
+ * to add / rename / deactivate / delete a vendor — common ops are
+ * one click away. Deeper edits (machine sub-list, etc.) still link
+ * out to /carving/vendors/[id] for the full form.
+ *
+ * Hard delete is only allowed when a vendor has zero machines AND
+ * zero carving_items referencing it; the server action falls back
+ * to a soft-delete (is_active=false) otherwise so we never lose
+ * history.
+ */
+
+import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import {
+  createVendorAction,
+  updateVendorAction,
+  deactivateVendorAction,
+  reactivateVendorAction,
+  deleteVendorAction,
+} from "./actions";
+
+type VendorRow = {
+  id: string;
+  name: string;
+  is_active: boolean;
+  machines: number;
+  busy: number;
+  maintenance: number;
+  free: number;
+  active_jobs: number;
+};
+
+export function VendorsManagerPeek({ vendors }: { vendors: VendorRow[] }) {
+  const [open, setOpen] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // Esc closes
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  // Sort: active first, then by name
+  const sorted = [...vendors].sort((a, b) => {
+    if (a.is_active !== b.is_active) return a.is_active ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  const activeCount = vendors.filter((v) => v.is_active).length;
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        style={{
+          fontSize: 12,
+          padding: "6px 14px",
+          background: "var(--surface)",
+          border: "1px solid var(--border)",
+          color: "var(--gold-dark)",
+          fontWeight: 600,
+          borderRadius: 6,
+          cursor: "pointer",
+          whiteSpace: "nowrap",
+        }}
+      >
+        👥 Manage Vendors ({activeCount})
+      </button>
+
+      {open && (
+        <div
+          onMouseDown={(e) => {
+            if (dialogRef.current && !dialogRef.current.contains(e.target as Node)) {
+              setOpen(false);
+            }
+          }}
+          style={{
+            position: "fixed",
+            top: 0,
+            left: "var(--content-left)",
+            right: 0,
+            bottom: 0,
+            background: "rgba(15, 12, 6, 0.55)",
+            backdropFilter: "blur(2px)",
+            zIndex: 1000,
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "center",
+            paddingTop: "6vh",
+            paddingLeft: 12,
+            paddingRight: 12,
+          }}
+        >
+          <div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            style={{
+              background: "var(--surface)",
+              border: "1px solid var(--border)",
+              borderRadius: 12,
+              boxShadow: "0 18px 60px rgba(0,0,0,0.45)",
+              width: "100%",
+              maxWidth: 720,
+              maxHeight: "84vh",
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+            }}
+          >
+            {/* Header */}
+            <div
+              style={{
+                padding: "14px 18px",
+                borderBottom: "1px solid var(--border)",
+                background: "var(--bg)",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "flex-start",
+                gap: 12,
+              }}
+            >
+              <div>
+                <h2 style={{ margin: 0, fontSize: 17 }}>👥 Manage CNC Vendors</h2>
+                <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>
+                  Add, rename, deactivate or delete vendors without leaving the
+                  carving page.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                style={{
+                  fontSize: 18,
+                  border: "none",
+                  background: "transparent",
+                  cursor: "pointer",
+                  color: "var(--muted)",
+                  padding: 4,
+                }}
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Body */}
+            <div style={{ flex: 1, overflowY: "auto", padding: "14px 18px 18px", display: "flex", flexDirection: "column", gap: 16 }}>
+              {/* Add vendor */}
+              <AddVendorRow />
+
+              {/* Vendor list */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: "var(--muted)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.06em",
+                  }}
+                >
+                  {sorted.length} vendor{sorted.length !== 1 ? "s" : ""}
+                </div>
+                {sorted.length === 0 ? (
+                  <div
+                    style={{
+                      padding: "16px 14px",
+                      textAlign: "center",
+                      color: "var(--muted-light)",
+                      fontSize: 12,
+                      background: "var(--surface-alt)",
+                      borderRadius: 8,
+                    }}
+                  >
+                    No CNC vendors yet. Add one above to get started.
+                  </div>
+                ) : (
+                  sorted.map((v) => <VendorRowCard key={v.id} v={v} />)
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ── Add vendor — inline minimal form ───────────────────────────────
+
+function AddVendorRow() {
+  const [name, setName] = useState("");
+  const valid = name.trim().length > 0;
+  return (
+    <form
+      action={createVendorAction}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "10px 12px",
+        background: "rgba(180,115,51,0.06)",
+        border: "1px dashed var(--gold-dark)",
+        borderRadius: 8,
+        flexWrap: "wrap",
+      }}
+    >
+      {/* Always CNC for now (Manual / Outsource paused per business decision) */}
+      <input type="hidden" name="vendor_type" value="CNC" />
+      <input type="hidden" name="machines_json" value="[]" />
+      <span style={{ fontSize: 11, fontWeight: 700, color: "var(--gold-dark)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+        + New CNC vendor
+      </span>
+      <input
+        type="text"
+        name="name"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="Vendor name (e.g. Vivek)"
+        required
+        style={{
+          flex: "1 1 200px",
+          minWidth: 180,
+          padding: "7px 10px",
+          fontSize: 13,
+          border: "1px solid var(--border)",
+          borderRadius: 6,
+          background: "var(--bg)",
+          color: "var(--text)",
+        }}
+      />
+      <button
+        type="submit"
+        className="primary-button"
+        disabled={!valid}
+        style={{ fontSize: 12, padding: "7px 14px", opacity: valid ? 1 : 0.5 }}
+      >
+        Create
+      </button>
+    </form>
+  );
+}
+
+// ── Vendor row — rename inline + edit/deactivate/delete ────────────
+
+function VendorRowCard({ v }: { v: VendorRow }) {
+  const [renaming, setRenaming] = useState(false);
+  const [name, setName] = useState(v.name);
+  const canHardDelete = v.machines === 0 && v.active_jobs === 0;
+
+  return (
+    <div
+      style={{
+        padding: "10px 12px",
+        background: v.is_active ? "var(--surface)" : "var(--surface-alt)",
+        border: "1px solid var(--border)",
+        borderRadius: 8,
+        opacity: v.is_active ? 1 : 0.7,
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+      }}
+    >
+      {/* Row 1: name + status + main actions */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        {renaming ? (
+          // Rename form — submits the existing updateVendorAction with
+          // just the name change. We pass empty machines_json so the
+          // existing-machine-sync logic on the server is skipped.
+          <RenameForm v={v} name={name} setName={setName} onDone={() => setRenaming(false)} />
+        ) : (
+          <>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  fontWeight: 700,
+                  fontSize: 14,
+                  color: "var(--text)",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {v.name}
+                {!v.is_active && (
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "#dc2626", marginLeft: 8 }}>
+                    INACTIVE
+                  </span>
+                )}
+              </div>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "var(--muted)",
+                  fontFamily: "ui-monospace, monospace",
+                  marginTop: 2,
+                }}
+              >
+                {v.machines} machine{v.machines !== 1 ? "s" : ""}
+                {v.busy > 0 && ` · ${v.busy} carving`}
+                {v.maintenance > 0 && ` · ${v.maintenance} maint`}
+                {v.free > 0 && ` · ${v.free} free`}
+                {v.active_jobs > 0 && ` · ${v.active_jobs} active job${v.active_jobs !== 1 ? "s" : ""}`}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setName(v.name);
+                setRenaming(true);
+              }}
+              className="ghost-button"
+              style={{ fontSize: 11, padding: "5px 10px" }}
+            >
+              ✎ Rename
+            </button>
+            <Link
+              href={`/carving/vendors/${v.id}`}
+              className="ghost-button"
+              style={{ fontSize: 11, padding: "5px 10px", textDecoration: "none" }}
+            >
+              ⚙ Machines
+            </Link>
+            {v.is_active ? (
+              <form action={deactivateVendorAction} style={{ display: "inline" }}>
+                <input type="hidden" name="vendor_id" value={v.id} />
+                <input type="hidden" name="redirect_to" value="/carving" />
+                <button
+                  type="submit"
+                  onClick={(e) => {
+                    if (!confirm(`Deactivate ${v.name}? Existing jobs and machines stay intact, but they won't be assignable.`)) {
+                      e.preventDefault();
+                    }
+                  }}
+                  className="ghost-button"
+                  style={{ fontSize: 11, padding: "5px 10px", color: "#b45309" }}
+                >
+                  ⊘ Deactivate
+                </button>
+              </form>
+            ) : (
+              <form action={reactivateVendorAction} style={{ display: "inline" }}>
+                <input type="hidden" name="vendor_id" value={v.id} />
+                <input type="hidden" name="redirect_to" value="/carving" />
+                <button
+                  type="submit"
+                  className="ghost-button"
+                  style={{ fontSize: 11, padding: "5px 10px", color: "#15803d" }}
+                >
+                  ✓ Reactivate
+                </button>
+              </form>
+            )}
+            <form action={deleteVendorAction} style={{ display: "inline" }}>
+              <input type="hidden" name="vendor_id" value={v.id} />
+              <input type="hidden" name="redirect_to" value="/carving" />
+              <button
+                type="submit"
+                onClick={(e) => {
+                  const msg = canHardDelete
+                    ? `Delete ${v.name} permanently? This cannot be undone.`
+                    : `${v.name} has machines or jobs and can't be deleted. It will be deactivated instead. Continue?`;
+                  if (!confirm(msg)) e.preventDefault();
+                }}
+                className="ghost-button danger-ghost"
+                style={{ fontSize: 11, padding: "5px 10px" }}
+              >
+                🗑 Delete
+              </button>
+            </form>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Rename inline form — uses updateVendorAction with the existing
+// vendor_type / is_active / machines_json so only the name changes.
+// Empty machines_json signals "don't touch the machine list".
+function RenameForm({
+  v,
+  name,
+  setName,
+  onDone,
+}: {
+  v: VendorRow;
+  name: string;
+  setName: (s: string) => void;
+  onDone: () => void;
+}) {
+  const valid = name.trim().length > 0 && name.trim() !== v.name;
+  return (
+    <form
+      action={updateVendorAction}
+      style={{ display: "flex", alignItems: "center", gap: 6, flex: 1 }}
+    >
+      <input type="hidden" name="vendor_id" value={v.id} />
+      <input type="hidden" name="vendor_type" value="CNC" />
+      <input type="hidden" name="is_active" value={String(v.is_active)} />
+      <input type="hidden" name="machines_json" value="" />
+      <input
+        type="text"
+        name="name"
+        autoFocus
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        required
+        style={{
+          flex: 1,
+          padding: "6px 10px",
+          fontSize: 13,
+          fontWeight: 700,
+          border: "1px solid var(--gold-dark)",
+          borderRadius: 6,
+          background: "var(--bg)",
+          color: "var(--text)",
+        }}
+      />
+      <button
+        type="submit"
+        disabled={!valid}
+        className="primary-button"
+        style={{ fontSize: 11, padding: "5px 10px", opacity: valid ? 1 : 0.5 }}
+      >
+        Save
+      </button>
+      <button
+        type="button"
+        onClick={onDone}
+        className="ghost-button"
+        style={{ fontSize: 11, padding: "5px 10px" }}
+      >
+        Cancel
+      </button>
+    </form>
+  );
+}
