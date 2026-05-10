@@ -17,8 +17,10 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AssignModal } from "./assign-modal";
+import { approveCarvingJobAction, rejectCarvingJobAction } from "./actions";
 import { IsoBlockStaticSVG } from "@/components/iso-block-static";
 import type { StoneTypeDef } from "@/lib/stone-utils";
 
@@ -44,6 +46,10 @@ type JobRow = {
   slab_requirement_id: string;
   temple: string;
   slab_label: string | null;
+  /** Free-text description per slab (e.g. "NE corner, set 2"). Surfaces
+   *  on the card so the carving head doesn't have to drill into the
+   *  detail page just to read the design note. */
+  slab_description?: string | null;
   // Slab dimensions + stone are needed to render the 3D thumbnail on
   // each job card. Plumbed through from page.tsx → enrich().
   stone: string | null;
@@ -114,6 +120,10 @@ export function CarvingDashboardClient({
   const router = useRouter();
   const searchParams = useSearchParams();
   const [assigning, setAssigning] = useState<UnassignedSlab | null>(null);
+  // Job detail peek — opened by clicking any card on Active /
+  // Awaiting Review / Carving Done. Center modal with slab info,
+  // assignment, and inline approve/reject forms.
+  const [peekJob, setPeekJob] = useState<JobRow | null>(null);
 
   // ── Filter / view state ──────────────────────────────────────────
   // Search across slab id, label, and temple. Lower-cased compare.
@@ -594,6 +604,7 @@ export function CarvingDashboardClient({
           emptyMessage="No active carving jobs. Assign some slabs from the Unassigned tab."
           fmtDate={fmtDate}
           daysUntil={daysUntil}
+          onOpenJob={(j) => setPeekJob(j)}
         />
       )}
 
@@ -607,6 +618,7 @@ export function CarvingDashboardClient({
           emptyMessage="Nothing waiting for review. When a vendor marks a job complete, it lands here."
           fmtDate={fmtDate}
           daysUntil={daysUntil}
+          onOpenJob={(j) => setPeekJob(j)}
         />
       )}
 
@@ -620,11 +632,21 @@ export function CarvingDashboardClient({
           emptyMessage="No slabs in Carving Done yet."
           fmtDate={fmtDate}
           daysUntil={daysUntil}
+          onOpenJob={(j) => setPeekJob(j)}
         />
       )}
 
       {assigning && (
         <AssignModal slab={assigning} vendors={vendors} onClose={() => setAssigning(null)} />
+      )}
+
+      {peekJob && (
+        <JobDetailPeek
+          job={peekJob}
+          machineCodeById={machineCodeById}
+          stoneTypes={stoneTypes}
+          onClose={() => setPeekJob(null)}
+        />
       )}
     </>
   );
@@ -919,6 +941,7 @@ function JobsByTemple({
   emptyMessage,
   fmtDate,
   daysUntil,
+  onOpenJob,
 }: {
   jobs: JobRow[];
   machineCodeById: Record<string, string>;
@@ -932,15 +955,46 @@ function JobsByTemple({
   emptyMessage: string;
   fmtDate: (iso: string | null) => string;
   daysUntil: (iso: string | null) => number | null;
+  /** Click handler — opens the JobDetailPeek modal. The card is
+   *  no longer a navigation target; clicking opens the peek. */
+  onOpenJob: (job: JobRow) => void;
 }) {
-  const router = useRouter();
-  // Group key + display label depend on groupBy.
+  // 30-second tick so the "waiting since" timer in the Awaiting
+  // Review tab updates without a full reload.
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Pick the date that defines "most recent activity" for the
+  // current tab — drives both card sort within a group AND the
+  // group sort itself. Falls back to assigned_at.
+  const primaryDate = (j: JobRow): number => {
+    if (fields.includes("approved") && j.review_approved_at) return new Date(j.review_approved_at).getTime();
+    if (fields.includes("completed") && j.completed_at) return new Date(j.completed_at).getTime();
+    return new Date(j.assigned_at).getTime();
+  };
+
+  // Group key + display label depend on groupBy. Within each group
+  // we sort items latest-first; the groups themselves sort by their
+  // most-recent item so the "freshest" vendor/temple is at top.
   const groups = useMemo(() => {
-    if (groupBy === "vendor") {
-      return groupByKey(jobs, (j) => j.vendor_name || "(no vendor)");
+    const grouped = groupBy === "vendor"
+      ? groupByKey(jobs, (j) => j.vendor_name || "(no vendor)")
+      : groupByKey(jobs, (j) => j.temple);
+    // Sort items inside each group by latest activity desc.
+    for (const g of grouped) {
+      g.items.sort((a, b) => primaryDate(b) - primaryDate(a));
     }
-    return groupByKey(jobs, (j) => j.temple);
-  }, [jobs, groupBy]);
+    // Sort groups by their freshest item desc.
+    return grouped.sort((a, b) => {
+      const aMax = Math.max(...a.items.map(primaryDate));
+      const bMax = Math.max(...b.items.map(primaryDate));
+      return bMax - aMax;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobs, groupBy, fields.join(",")]);
   const groupIcon = groupBy === "vendor" ? "👷" : "🏛";
   const groupNoun = groupBy === "vendor" ? "vendor" : "temple";
 
@@ -1015,18 +1069,18 @@ function JobsByTemple({
             {items.map((j) => {
               const days = daysUntil(j.due_at);
               const overdue = days !== null && days < 0;
-              const goToDetail = () => router.push(`/carving/${j.id}`);
+              const openPeek = () => onOpenJob(j);
               return (
                 <div
                   key={j.id}
-                  onClick={goToDetail}
+                  onClick={openPeek}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
-                      goToDetail();
+                      openPeek();
                     }
                   }}
-                  role="link"
+                  role="button"
                   tabIndex={0}
                   style={{
                     padding: "8px 10px",
@@ -1069,9 +1123,43 @@ function JobsByTemple({
                     )}
                   </div>
 
+                  {/* Temple — primary identifying context for the
+                      carving head. Always visible (was missing from
+                      the card before; user could only see slab id). */}
+                  <div
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: "var(--text)",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    🏛 {j.temple}
+                  </div>
                   {j.slab_label && (
                     <div style={{ fontSize: 10, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {j.slab_label}
+                    </div>
+                  )}
+                  {/* Free-text description — gives context the carving
+                      head needs to brief the vendor (e.g. "NE corner,
+                      set 2"). Two-line clamp keeps card height stable. */}
+                  {j.slab_description && (
+                    <div
+                      style={{
+                        fontSize: 10,
+                        color: "var(--muted)",
+                        fontStyle: "italic",
+                        display: "-webkit-box",
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: "vertical",
+                        overflow: "hidden",
+                      }}
+                      title={j.slab_description}
+                    >
+                      “{j.slab_description}”
                     </div>
                   )}
 
@@ -1084,6 +1172,43 @@ function JobsByTemple({
                   >
                     {j.length_ft}×{j.width_ft}×{j.thickness_ft}&Prime;
                   </div>
+
+                  {/* Awaiting-review timer — counts UP from completed_at
+                      so the carving head can see at a glance how long
+                      a job has been blocked on approval. Only renders
+                      on the review tab (fields includes 'completed'). */}
+                  {fields.includes("completed") && j.completed_at && (() => {
+                    const waitingMin = (now - new Date(j.completed_at).getTime()) / 60000;
+                    const tone =
+                      waitingMin >= 60 * 24
+                        ? { fg: "#991b1b", bg: "rgba(220,38,38,0.08)", icon: "⚠" }
+                        : waitingMin >= 60 * 4
+                          ? { fg: "#b45309", bg: "rgba(217,119,6,0.08)", icon: "⏳" }
+                          : { fg: "#15803d", bg: "rgba(22,163,74,0.08)", icon: "⏱" };
+                    const label =
+                      waitingMin < 60
+                        ? `${Math.max(0, Math.round(waitingMin))}m`
+                        : waitingMin < 60 * 24
+                          ? `${Math.floor(waitingMin / 60)}h ${Math.round(waitingMin % 60)}m`
+                          : `${Math.floor(waitingMin / (60 * 24))}d ${Math.floor((waitingMin % (60 * 24)) / 60)}h`;
+                    return (
+                      <div
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 700,
+                          color: tone.fg,
+                          background: tone.bg,
+                          padding: "3px 8px",
+                          borderRadius: 5,
+                          alignSelf: "flex-start",
+                          fontFamily: "ui-monospace, monospace",
+                        }}
+                        title={`Awaiting approval since ${new Date(j.completed_at).toLocaleString("en-IN")}`}
+                      >
+                        {tone.icon} waiting {label}
+                      </div>
+                    );
+                  })()}
 
                   {/* Vendor + machine */}
                   <div
@@ -1236,4 +1361,409 @@ function groupByTemple<T>(items: T[], getTemple: (item: T) => string): Array<{ t
   return [...map.entries()]
     .map(([temple, items]) => ({ temple, items }))
     .sort((a, b) => a.temple.localeCompare(b.temple));
+}
+
+// ─── Job detail peek modal ──────────────────────────────────────────
+//
+// Center-peek dialog opened by clicking any card on Active / Awaiting
+// Review / Carving Done. Shows everything the carving head usually
+// needs without leaving the dashboard:
+//   • Slab thumbnail + dimensions + temple + label + description
+//   • Assignment summary (vendor, machine, urgency, deadline, status)
+//   • Inline approve / reject forms when status = awaiting review
+//   • Approved + ready / dispatched info banners when applicable
+//   • "Open full job ↗" link to /carving/[id] for the event timeline
+//
+// We deliberately rely only on the JobRow already in memory — no
+// extra fetch — so opening the peek is instant.
+function JobDetailPeek({
+  job,
+  machineCodeById,
+  stoneTypes,
+  onClose,
+}: {
+  job: JobRow;
+  machineCodeById: Record<string, string>;
+  stoneTypes: StoneTypeDef[];
+  onClose: () => void;
+}) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const inReview = !!job.completed_at && !job.review_approved_at;
+  const approved = !!job.review_approved_at;
+  const dispatched = job.status === "dispatched";
+  const machineCode = job.cnc_machine_id ? machineCodeById[job.cnc_machine_id] ?? null : null;
+
+  const fmtDate = (iso: string | null | undefined) =>
+    iso ? new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—";
+  const fmtDateTime = (iso: string | null | undefined) =>
+    iso
+      ? new Date(iso).toLocaleString("en-IN", {
+          day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
+        })
+      : "—";
+
+  return (
+    <div
+      onMouseDown={(e) => {
+        if (dialogRef.current && !dialogRef.current.contains(e.target as Node)) {
+          onClose();
+        }
+      }}
+      style={{
+        position: "fixed",
+        top: 0,
+        left: "var(--content-left)",
+        right: 0,
+        bottom: 0,
+        background: "rgba(15, 12, 6, 0.55)",
+        backdropFilter: "blur(2px)",
+        zIndex: 1000,
+        display: "flex",
+        alignItems: "flex-start",
+        justifyContent: "center",
+        paddingTop: "5vh",
+        paddingLeft: 12,
+        paddingRight: 12,
+      }}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        style={{
+          background: "var(--surface)",
+          border: "1px solid var(--border)",
+          borderRadius: 12,
+          boxShadow: "0 18px 60px rgba(0,0,0,0.45)",
+          width: "100%",
+          maxWidth: 640,
+          maxHeight: "90vh",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
+        {/* Header strip — slab id big, status pill on the right */}
+        <div
+          style={{
+            padding: "16px 20px",
+            background:
+              "linear-gradient(180deg, var(--bg) 0%, var(--surface) 100%)",
+            borderBottom: "1px solid var(--border)",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            gap: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <code
+                style={{
+                  fontFamily: "ui-monospace, monospace",
+                  fontWeight: 800,
+                  fontSize: 18,
+                  color: "var(--text)",
+                }}
+              >
+                {job.slab_requirement_id}
+              </code>
+              <StatusPill status={job.status} />
+            </div>
+            <div style={{ fontSize: 13, fontWeight: 600, marginTop: 4, color: "var(--text)" }}>
+              🏛 {job.temple}
+            </div>
+            {job.slab_label && (
+              <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 1 }}>
+                {job.slab_label}
+              </div>
+            )}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Link
+              href={`/carving/${job.id}`}
+              style={{
+                fontSize: 11,
+                color: "var(--gold-dark)",
+                fontWeight: 600,
+                textDecoration: "none",
+                whiteSpace: "nowrap",
+              }}
+              title="Open full detail page (incl. event timeline)"
+            >
+              Open full ↗
+            </Link>
+            <button
+              type="button"
+              onClick={onClose}
+              style={{
+                fontSize: 18,
+                border: "none",
+                background: "transparent",
+                cursor: "pointer",
+                color: "var(--muted)",
+                padding: 4,
+              }}
+              aria-label="Close"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px 20px", display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* Slab — thumbnail + key facts grid */}
+          <section
+            style={{
+              display: "grid",
+              gridTemplateColumns: "120px 1fr",
+              gap: 14,
+              alignItems: "stretch",
+            }}
+          >
+            <div style={{ minHeight: 120 }}>
+              <SlabThumb
+                stone={job.stone}
+                l={job.length_ft}
+                w={job.width_ft}
+                t={job.thickness_ft}
+                stoneTypes={stoneTypes}
+              />
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 13 }}>
+              <Field label="Dimensions">
+                <span style={{ fontFamily: "ui-monospace, monospace" }}>
+                  {job.length_ft}×{job.width_ft}×{job.thickness_ft}″
+                </span>
+              </Field>
+              {job.stone && <Field label="Stone">{job.stone}</Field>}
+              {job.slab_description && (
+                <Field label="Description">
+                  <span style={{ fontStyle: "italic", color: "var(--muted)" }}>
+                    “{job.slab_description}”
+                  </span>
+                </Field>
+              )}
+            </div>
+          </section>
+
+          {/* Assignment */}
+          <section
+            style={{
+              padding: "12px 14px",
+              background: "var(--bg)",
+              border: "1px solid var(--border)",
+              borderRadius: 8,
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+              fontSize: 13,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                color: "var(--muted)",
+                textTransform: "uppercase",
+                letterSpacing: "0.07em",
+                marginBottom: 2,
+              }}
+            >
+              Assignment
+            </div>
+            <Field label="Vendor">
+              <strong>{job.vendor_name}</strong>
+              <span className="muted" style={{ marginLeft: 6, fontSize: 11 }}>
+                ({job.vendor_type})
+              </span>
+            </Field>
+            {machineCode && (
+              <Field label="Machine">
+                <span style={{ fontFamily: "ui-monospace, monospace" }}>{machineCode}</span>
+              </Field>
+            )}
+            <Field label="Assigned">{fmtDate(job.assigned_at)}</Field>
+            {job.due_at && <Field label="Due">{fmtDate(job.due_at)}</Field>}
+            {job.progress_phase && <Field label="Phase">{job.progress_phase}</Field>}
+            {job.completed_at && (
+              <Field label="Vendor completed">{fmtDateTime(job.completed_at)}</Field>
+            )}
+            {job.review_approved_at && (
+              <Field label="Approved">{fmtDateTime(job.review_approved_at)}</Field>
+            )}
+            {job.location && (
+              <Field label="Location">
+                <span style={{ color: "#15803d", fontWeight: 600 }}>📍 {job.location}</span>
+              </Field>
+            )}
+          </section>
+
+          {/* Status banner — context-specific */}
+          {inReview && (
+            <ApproveRejectForms jobId={job.id} />
+          )}
+          {approved && !dispatched && (
+            <div
+              style={{
+                padding: "12px 14px",
+                background: "rgba(22,163,74,0.08)",
+                border: "1px solid rgba(22,163,74,0.25)",
+                borderRadius: 8,
+                fontSize: 13,
+                color: "#15803d",
+                fontWeight: 600,
+              }}
+            >
+              ✓ Approved &amp; ready for dispatch — visible in{" "}
+              <Link href="/dispatch" style={{ color: "#15803d", textDecoration: "underline" }}>
+                Dispatch Station
+              </Link>
+              .
+            </div>
+          )}
+          {dispatched && (
+            <div
+              style={{
+                padding: "12px 14px",
+                background: "rgba(37,99,235,0.08)",
+                border: "1px solid rgba(37,99,235,0.25)",
+                borderRadius: 8,
+                fontSize: 13,
+                color: "#1d4ed8",
+                fontWeight: 600,
+              }}
+            >
+              🚚 This slab has been dispatched.
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Inline approve/reject forms inside the peek. Reuses the same
+// server actions as the full detail page; on success the action
+// redirects to /carving/[id] which Next.js handles transparently.
+function ApproveRejectForms({ jobId }: { jobId: string }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <form action={approveCarvingJobAction} style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+        <input type="hidden" name="job_id" value={jobId} />
+        <input
+          type="text"
+          name="notes"
+          placeholder="Approval notes (optional)"
+          style={{
+            flex: 1,
+            fontSize: 13,
+            padding: "10px 12px",
+            border: "1px solid var(--border)",
+            borderRadius: 6,
+            background: "var(--bg)",
+            color: "var(--text)",
+          }}
+        />
+        <button
+          type="submit"
+          className="primary-button"
+          style={{ fontSize: 14, padding: "10px 22px", fontWeight: 700, whiteSpace: "nowrap" }}
+        >
+          ✔ Approve
+        </button>
+      </form>
+      <form action={rejectCarvingJobAction} style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+        <input type="hidden" name="job_id" value={jobId} />
+        <input
+          type="text"
+          name="notes"
+          required
+          placeholder="Rejection reason (required)"
+          style={{
+            flex: 1,
+            fontSize: 13,
+            padding: "10px 12px",
+            border: "1px solid var(--border)",
+            borderRadius: 6,
+            background: "var(--bg)",
+            color: "var(--text)",
+          }}
+        />
+        <button
+          type="submit"
+          className="ghost-button danger-ghost"
+          style={{ fontSize: 14, padding: "10px 22px", fontWeight: 700, whiteSpace: "nowrap" }}
+        >
+          ✗ Reject
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function StatusPill({ status }: { status: string }) {
+  const tone =
+    status === "completed"
+      ? { fg: "#15803d", bg: "rgba(22,163,74,0.12)" }
+      : status === "dispatched"
+        ? { fg: "#1d4ed8", bg: "rgba(37,99,235,0.12)" }
+        : status === "carving_in_progress"
+          ? { fg: "#2563eb", bg: "rgba(37,99,235,0.1)" }
+          : status === "carving_assigned"
+            ? { fg: "#b45309", bg: "rgba(217,119,6,0.1)" }
+            : { fg: "var(--muted)", bg: "var(--surface-alt)" };
+  return (
+    <span
+      style={{
+        fontSize: 10,
+        fontWeight: 800,
+        padding: "3px 10px",
+        borderRadius: 999,
+        color: tone.fg,
+        background: tone.bg,
+        textTransform: "uppercase",
+        letterSpacing: "0.06em",
+        fontFamily: "ui-monospace, monospace",
+      }}
+    >
+      {status.replace(/_/g, " ")}
+    </span>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
+      <span
+        style={{
+          fontSize: 10,
+          fontWeight: 700,
+          color: "var(--muted)",
+          textTransform: "uppercase",
+          letterSpacing: "0.05em",
+          flexShrink: 0,
+        }}
+      >
+        {label}
+      </span>
+      <span style={{ fontSize: 13, color: "var(--text)", textAlign: "right", minWidth: 0 }}>
+        {children}
+      </span>
+    </div>
+  );
 }

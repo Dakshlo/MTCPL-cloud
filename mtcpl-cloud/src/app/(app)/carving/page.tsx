@@ -119,14 +119,16 @@ export default async function CarvingDashboardPage({
   ].filter(Boolean);
   const uniqueSlabReqIds = [...new Set(allJobSlabReqIds)];
 
-  // Pull dimensions + stone too so the dashboard cards can render a
-  // 3D thumbnail of each slab. Stone name is the key into stoneTypes
+  // Pull dimensions + stone + description so the dashboard cards
+  // can render a 3D thumbnail and surface free-text per-slab notes
+  // (e.g. "NE corner, set 2"). Stone name is the key into stoneTypes
   // for the palette; dimensions drive the proportions of the box.
   let slabInfoMap = new Map<
     string,
     {
       temple: string;
       label: string | null;
+      description: string | null;
       stone: string | null;
       length_ft: number;
       width_ft: number;
@@ -136,12 +138,13 @@ export default async function CarvingDashboardPage({
   if (uniqueSlabReqIds.length > 0) {
     const { data: slabRows } = await admin
       .from("slab_requirements")
-      .select("id, temple, label, stone, length_ft, width_ft, thickness_ft")
+      .select("id, temple, label, description, stone, length_ft, width_ft, thickness_ft")
       .in("id", uniqueSlabReqIds);
     for (const s of slabRows ?? []) {
       slabInfoMap.set(s.id, {
         temple: s.temple ?? "(no temple)",
         label: s.label,
+        description: (s as { description?: string | null }).description ?? null,
         stone: s.stone ?? null,
         length_ft: Number(s.length_ft) || 0,
         width_ft: Number(s.width_ft) || 0,
@@ -156,6 +159,7 @@ export default async function CarvingDashboardPage({
       ...job,
       temple: info?.temple ?? "(no temple)",
       slab_label: info?.label ?? null,
+      slab_description: info?.description ?? null,
       stone: info?.stone ?? null,
       length_ft: info?.length_ft ?? 0,
       width_ft: info?.width_ft ?? 0,
