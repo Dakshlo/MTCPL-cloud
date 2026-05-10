@@ -263,27 +263,30 @@ export function CarvingDashboardClient({
 // the "block" passed to IsoBlockStaticSVG and pass an empty placed
 // array — gives us a clean coloured box with the right proportions.
 // Stone palette comes from stoneTypes (with built-in fallback).
+//
+// The SVG inside IsoBlockStaticSVG fills its container at 100% width,
+// so the thumbnail's footprint is controlled by the OUTER wrapper —
+// fixed-height row with a small inner box that the SVG fits into.
+// Keeps every card the same height regardless of slab proportions.
 function SlabThumb({
   stone,
   l,
   w,
   t,
   stoneTypes,
-  size = 130,
 }: {
   stone: string | null;
   l: number;
   w: number;
   t: number;
   stoneTypes: StoneTypeDef[];
-  size?: number;
 }) {
   // Guard against zero dims (would crash the SVG math)
   if (!l || !w || !t) {
     return (
       <div
         style={{
-          height: size * 0.65,
+          height: 70,
           background: "var(--surface-alt)",
           borderRadius: 6,
           display: "flex",
@@ -298,13 +301,25 @@ function SlabThumb({
     );
   }
   return (
-    <div style={{ background: "var(--surface-alt)", borderRadius: 6, padding: 4 }}>
-      <IsoBlockStaticSVG
-        block={{ l, w, h: t, stone: stone ?? "" }}
-        placed={[]}
-        size={size}
-        stoneTypes={stoneTypes}
-      />
+    <div
+      style={{
+        height: 80,
+        background: "var(--surface-alt)",
+        borderRadius: 6,
+        padding: 4,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <div style={{ width: 90, maxHeight: 72, display: "flex" }}>
+        <IsoBlockStaticSVG
+          block={{ l, w, h: t, stone: stone ?? "" }}
+          placed={[]}
+          size={90}
+          stoneTypes={stoneTypes}
+        />
+      </div>
     </div>
   );
 }
@@ -380,23 +395,25 @@ function UnassignedByTemple({
               border: "1px solid var(--border)",
               borderTop: "none",
               borderRadius: "0 0 10px 10px",
-              padding: 12,
+              padding: 10,
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(290px, 1fr))",
-              gap: 10,
+              // Compact card width — fits 4–5 cards per row on a
+              // typical desktop instead of 3.
+              gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+              gap: 8,
             }}
           >
             {items.map((s) => (
               <div
                 key={s.id}
                 style={{
-                  padding: "12px 14px",
+                  padding: "8px 10px",
                   background: s.priority ? "rgba(220,38,38,0.04)" : "var(--surface)",
                   border: `1px solid ${s.priority ? "rgba(220,38,38,0.2)" : "var(--border)"}`,
-                  borderRadius: 10,
+                  borderRadius: 8,
                   display: "flex",
                   flexDirection: "column",
-                  gap: 8,
+                  gap: 6,
                 }}
               >
                 <SlabThumb
@@ -406,33 +423,35 @@ function UnassignedByTemple({
                   t={Number(s.thickness_ft)}
                   stoneTypes={stoneTypes}
                 />
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 13 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+                  <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {s.priority && "⚡ "}
                     {s.id}
                   </span>
                   {s.stone && (
-                    <span className="role-pill" style={{ fontSize: 10 }}>
+                    <span className="role-pill" style={{ fontSize: 9, padding: "1px 6px", flexShrink: 0 }}>
                       {s.stone}
                     </span>
                   )}
                 </div>
-                <div style={{ fontSize: 11, color: "var(--muted)" }}>{s.label}</div>
+                {s.label && (
+                  <div style={{ fontSize: 10, color: "var(--muted)" }}>{s.label}</div>
+                )}
                 <div
                   style={{
-                    fontSize: 11,
+                    fontSize: 10,
                     color: "var(--muted-light)",
                     fontFamily: "ui-monospace, monospace",
                   }}
                 >
                   {s.length_ft}×{s.width_ft}×{s.thickness_ft}&Prime;
-                  {s.source_block_id && ` · from ${s.source_block_id}`}
+                  {s.source_block_id && ` · ${s.source_block_id}`}
                 </div>
                 <button
                   type="button"
                   onClick={() => onAssign(s)}
                   className="primary-button"
-                  style={{ marginTop: 4, fontSize: 12, padding: "6px 12px" }}
+                  style={{ marginTop: 2, fontSize: 11, padding: "5px 10px" }}
                 >
                   Assign to Vendor →
                 </button>
@@ -526,10 +545,12 @@ function JobsByTemple({
               border: "1px solid var(--border)",
               borderTop: "none",
               borderRadius: "0 0 10px 10px",
-              padding: 12,
+              padding: 10,
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(290px, 1fr))",
-              gap: 10,
+              // Compact card width — fits 4–5 cards per row on a
+              // typical desktop instead of 3.
+              gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+              gap: 8,
             }}
           >
             {items.map((j) => {
@@ -549,13 +570,13 @@ function JobsByTemple({
                   role="link"
                   tabIndex={0}
                   style={{
-                    padding: "12px 14px",
+                    padding: "8px 10px",
                     background: "var(--surface)",
                     border: "1px solid var(--border)",
-                    borderRadius: 10,
+                    borderRadius: 8,
                     display: "flex",
                     flexDirection: "column",
-                    gap: 8,
+                    gap: 6,
                     cursor: "pointer",
                     transition: "border-color 0.12s, background 0.12s",
                   }}
@@ -578,24 +599,26 @@ function JobsByTemple({
                   />
 
                   {/* Header: slab id + stone */}
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 13 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+                    <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {j.slab_requirement_id}
                     </span>
                     {j.stone && (
-                      <span className="role-pill" style={{ fontSize: 10 }}>
+                      <span className="role-pill" style={{ fontSize: 9, padding: "1px 6px", flexShrink: 0 }}>
                         {j.stone}
                       </span>
                     )}
                   </div>
 
                   {j.slab_label && (
-                    <div style={{ fontSize: 11, color: "var(--muted)" }}>{j.slab_label}</div>
+                    <div style={{ fontSize: 10, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {j.slab_label}
+                    </div>
                   )}
 
                   <div
                     style={{
-                      fontSize: 11,
+                      fontSize: 10,
                       color: "var(--muted-light)",
                       fontFamily: "ui-monospace, monospace",
                     }}
@@ -609,20 +632,24 @@ function JobsByTemple({
                       display: "flex",
                       justifyContent: "space-between",
                       alignItems: "center",
-                      paddingTop: 6,
+                      paddingTop: 4,
                       borderTop: "1px dashed var(--border-light)",
-                      fontSize: 12,
+                      fontSize: 11,
+                      gap: 6,
                     }}
                   >
-                    <div>
-                      <div style={{ fontWeight: 600 }}>{j.vendor_name}</div>
-                      <div style={{ fontSize: 10, color: "var(--muted)" }}>{j.vendor_type}</div>
+                    <div style={{ minWidth: 0, overflow: "hidden" }}>
+                      <div style={{ fontWeight: 600, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {j.vendor_name}
+                      </div>
+                      <div style={{ fontSize: 9, color: "var(--muted)" }}>{j.vendor_type}</div>
                     </div>
                     <div
                       style={{
                         fontFamily: "ui-monospace, monospace",
-                        fontSize: 11,
+                        fontSize: 10,
                         color: "var(--muted)",
+                        flexShrink: 0,
                       }}
                     >
                       {j.cnc_machine_id ? machineCodeById[j.cnc_machine_id] ?? "" : ""}
@@ -631,8 +658,8 @@ function JobsByTemple({
 
                   {/* Phase-specific footer rows */}
                   {fields.includes("deadline") && (
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: 12 }}>
-                      <span className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: 10 }}>
+                      <span className="muted" style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: "0.06em" }}>
                         Deadline
                       </span>
                       <span
@@ -652,31 +679,30 @@ function JobsByTemple({
                             : days === 0
                               ? "Due today"
                               : `${days}d`}
-                        <span style={{ fontSize: 10, color: "var(--muted)", marginLeft: 6 }}>
-                          {fmtDate(j.due_at)}
-                        </span>
                       </span>
                     </div>
                   )}
                   {fields.includes("phase") && j.progress_phase && (
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
-                      <span className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, gap: 6 }}>
+                      <span className="muted" style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: "0.06em" }}>
                         Phase
                       </span>
-                      <span style={{ fontWeight: 600 }}>{j.progress_phase}</span>
+                      <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+                        {j.progress_phase}
+                      </span>
                     </div>
                   )}
                   {fields.includes("completed") && (
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
-                      <span className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10 }}>
+                      <span className="muted" style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: "0.06em" }}>
                         Completed
                       </span>
                       <span style={{ color: "var(--text)" }}>{fmtDate(j.completed_at)}</span>
                     </div>
                   )}
                   {fields.includes("approved") && (
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
-                      <span className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10 }}>
+                      <span className="muted" style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: "0.06em" }}>
                         Approved
                       </span>
                       <span style={{ color: "var(--text)" }}>
@@ -687,11 +713,11 @@ function JobsByTemple({
                     </div>
                   )}
                   {fields.includes("location") && (
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
-                      <span className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, gap: 6 }}>
+                      <span className="muted" style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: "0.06em" }}>
                         Location
                       </span>
-                      <span>
+                      <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {j.location ? (
                           <span style={{ color: "var(--text)" }}>📍 {j.location}</span>
                         ) : (
@@ -701,8 +727,8 @@ function JobsByTemple({
                     </div>
                   )}
                   {fields.includes("ready") && (
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
-                      <span className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10 }}>
+                      <span className="muted" style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: "0.06em" }}>
                         Status
                       </span>
                       {j.status === "dispatched" ? (
