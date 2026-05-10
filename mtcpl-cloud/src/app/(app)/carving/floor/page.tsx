@@ -59,20 +59,35 @@ export default async function CarvingFloorPage({ searchParams }: { searchParams:
       )
       .in("status", ["carving_assigned", "carving_in_progress"])
       .order("assigned_at", { ascending: true }),
-    // Last 30 completed across all vendors — drives the "today's
-    // output" tile per vendor.
+    // Recent completed across all vendors — drives BOTH the "today's
+    // output" stat and the "Last 24h completed" list per vendor on
+    // the Floor View. We need slab_requirement_id so the list can
+    // show which slab each row is.
     admin
       .from("carving_items")
-      .select("id, vendor_id, completed_at, review_approved_at")
+      .select("id, vendor_id, slab_requirement_id, completed_at, review_approved_at")
       .not("completed_at", "is", null)
       .order("completed_at", { ascending: false })
       .limit(500),
   ]);
 
-  // Slab info for queue + active rows so the cockpit can show
-  // dimensions + temple beside each slab.
+  // Cut-off for the "last 24h completed" list — only those rows
+  // need slab info, and we filter the bigger `completed` set by
+  // this timestamp before showing.
+  const startOfTodayMs = new Date().setHours(0, 0, 0, 0);
+  const last24hMs = Date.now() - 24 * 60 * 60 * 1000;
+
+  // Slab info for queue + active + last-24h-completed rows so the
+  // floor can show dimensions + temple beside each slab.
+  const completedRecent24h = ((completed ?? []) as Array<{
+    vendor_id: string; slab_requirement_id: string; completed_at: string | null;
+  }>).filter((c) => c.completed_at && new Date(c.completed_at).getTime() >= last24hMs);
+
   const slabIds = [
-    ...new Set(((jobs ?? []) as { slab_requirement_id: string }[]).map((j) => j.slab_requirement_id)),
+    ...new Set([
+      ...((jobs ?? []) as { slab_requirement_id: string }[]).map((j) => j.slab_requirement_id),
+      ...completedRecent24h.map((c) => c.slab_requirement_id),
+    ]),
   ];
   const slabById = new Map<string, {
     id: string;
@@ -110,7 +125,6 @@ export default async function CarvingFloorPage({ searchParams }: { searchParams:
   }
 
   // Build per-vendor data shape consumed by the client component.
-  const startOfTodayMs = new Date().setHours(0, 0, 0, 0);
   const floorVendors: FloorVendor[] = ((vendors ?? []) as Array<{ id: string; name: string }>).map((v) => {
     const vMachines = ((machines ?? []) as Array<{
       id: string; vendor_id: string; machine_code: string;
@@ -184,6 +198,16 @@ export default async function CarvingFloorPage({ searchParams }: { searchParams:
     }>).filter((c) => c.vendor_id === v.id && c.completed_at)
       .filter((c) => new Date(c.completed_at!).getTime() >= startOfTodayMs).length;
 
+    // Last-24h completed list — slab id + when, sorted newest first.
+    const recentCompleted = completedRecent24h
+      .filter((c) => c.vendor_id === v.id)
+      .map((c) => ({
+        slab_id: c.slab_requirement_id,
+        completed_at: c.completed_at!,
+        slab: slabById.get(c.slab_requirement_id) ?? null,
+      }))
+      .sort((a, b) => new Date(b.completed_at).getTime() - new Date(a.completed_at).getTime());
+
     const totals = {
       total: machineCards.length,
       idle: machineCards.filter((m) => m.status === "idle").length,
@@ -198,6 +222,7 @@ export default async function CarvingFloorPage({ searchParams }: { searchParams:
       name: v.name,
       machines: machineCards,
       queue,
+      recentCompleted,
       totals,
     };
   });

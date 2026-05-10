@@ -40,11 +40,18 @@ export type FloorQueueItem = {
   slab: FloorSlab | null;
 };
 
+export type FloorRecent = {
+  slab_id: string;
+  completed_at: string;
+  slab: FloorSlab | null;
+};
+
 export type FloorVendor = {
   id: string;
   name: string;
   machines: FloorMachine[];
   queue: FloorQueueItem[];
+  recentCompleted: FloorRecent[];
   totals: {
     total: number;
     idle: number;
@@ -71,7 +78,7 @@ function fmtDuration(minutes: number): string {
 }
 
 const STATUS_TINT: Record<FloorMachine["status"], { bg: string; border: string; fg: string; accent: string; label: string }> = {
-  idle: { bg: "var(--surface)", border: "var(--border)", fg: "#15803d", accent: "#16a34a", label: "AVAILABLE" },
+  idle: { bg: "var(--surface)", border: "var(--border)", fg: "#15803d", accent: "#16a34a", label: "FREE" },
   carving: { bg: "rgba(37,99,235,0.06)", border: "rgba(37,99,235,0.5)", fg: "#1d4ed8", accent: "#2563eb", label: "RUNNING" },
   maintenance: { bg: "rgba(220,38,38,0.06)", border: "rgba(220,38,38,0.5)", fg: "#b91c1c", accent: "#dc2626", label: "DOWN" },
   inactive: { bg: "var(--surface-alt)", border: "var(--border)", fg: "var(--muted)", accent: "var(--muted)", label: "OFFLINE" },
@@ -175,7 +182,7 @@ export function FloorViewClient({
           fleetTotals={fleetTotals}
         />
 
-        <VendorTvSlide vendor={v} now={now} />
+        <VendorTvSlide vendor={v} now={now} slideKey={tvIndex} />
       </div>
     );
   }
@@ -231,7 +238,7 @@ function GridHeader({
         </div>
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-        <Stat label="Idle" value={fleetTotals.idle} fg="#22c55e" />
+        <Stat label="Free" value={fleetTotals.idle} fg="#22c55e" />
         <Stat label="Carving" value={fleetTotals.carving} fg="#60a5fa" />
         <Stat label="Maint" value={fleetTotals.maintenance} fg="#f87171" />
         <Stat label="Queue" value={fleetTotals.queue} fg="#fbbf24" />
@@ -353,7 +360,7 @@ function TvHeader({
         ))}
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-        <TvStat label="Idle" value={fleetTotals.idle} fg="#22c55e" />
+        <TvStat label="Free" value={fleetTotals.idle} fg="#22c55e" />
         <TvStat label="Carving" value={fleetTotals.carving} fg="#60a5fa" />
         <TvStat label="Maint" value={fleetTotals.maintenance} fg="#f87171" />
         <TvStat label="Queue" value={fleetTotals.queue} fg="#fbbf24" />
@@ -418,32 +425,250 @@ function VendorGridSection({ vendor, now }: { vendor: FloorVendor; now: number }
         ))}
       </div>
 
-      {vendor.queue.length > 0 && (
-        <div
-          style={{
-            fontSize: 11,
-            color: "var(--muted)",
-            background: "var(--surface-alt)",
-            padding: "6px 10px",
-            borderRadius: 6,
-          }}
-        >
-          📋 {vendor.queue.length} slab{vendor.queue.length !== 1 ? "s" : ""} in queue
-          {vendor.queue.some((q) => q.urgency === "urgent") && (
-            <span style={{ color: "#dc2626", fontWeight: 700, marginLeft: 8 }}>
-              · {vendor.queue.filter((q) => q.urgency === "urgent").length} urgent
-            </span>
-          )}
-        </div>
-      )}
+      {/* Queue + last-24h completed sit side-by-side under the
+          machines so the carving head can see at a glance both
+          what's waiting and what just finished. */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <QueueList queue={vendor.queue} dark={false} />
+        <RecentList recent={vendor.recentCompleted} dark={false} />
+      </div>
     </section>
   );
 }
 
-// TV slide — bigger machine cards, designed for distance viewing.
-function VendorTvSlide({ vendor, now }: { vendor: FloorVendor; now: number }) {
+// Queue list — small chips for each waiting slab. Urgent ones
+// get a red tint. Truncates to 6 with a "+N more" affordance for
+// the grid view; pass `compact={false}` to show all (TV mode).
+function QueueList({ queue, dark, compact = true }: { queue: FloorQueueItem[]; dark: boolean; compact?: boolean }) {
+  const visible = compact ? queue.slice(0, 6) : queue;
+  const overflow = queue.length - visible.length;
+  const titleColor = dark ? "rgba(255,255,255,0.55)" : "var(--muted)";
+  const sectionBg = dark ? "rgba(255,255,255,0.05)" : "var(--surface-alt)";
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+    <div
+      style={{
+        background: sectionBg,
+        borderRadius: 6,
+        padding: "8px 10px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          fontWeight: 700,
+          color: titleColor,
+          textTransform: "uppercase",
+          letterSpacing: "0.07em",
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+        }}
+      >
+        📋 Queue
+        <span
+          style={{
+            fontSize: 10,
+            fontWeight: 700,
+            padding: "1px 8px",
+            borderRadius: 999,
+            background: queue.length > 0 ? "#fbbf24" : (dark ? "rgba(255,255,255,0.15)" : "var(--border)"),
+            color: queue.length > 0 ? "#1a1a1a" : titleColor,
+            fontFamily: "ui-monospace, monospace",
+          }}
+        >
+          {queue.length}
+        </span>
+        {queue.some((q) => q.urgency === "urgent") && (
+          <span style={{ color: "#dc2626", fontSize: 10, fontWeight: 800 }}>
+            ⚡ {queue.filter((q) => q.urgency === "urgent").length} URGENT
+          </span>
+        )}
+      </div>
+      {queue.length === 0 ? (
+        <div style={{ fontSize: 11, color: titleColor, fontStyle: "italic" }}>
+          Nothing queued
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+          {visible.map((q) => (
+            <div
+              key={q.id}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "3px 6px",
+                background: q.urgency === "urgent"
+                  ? (dark ? "rgba(220,38,38,0.18)" : "rgba(220,38,38,0.08)")
+                  : "transparent",
+                borderRadius: 4,
+                fontSize: 11,
+                fontFamily: "ui-monospace, monospace",
+              }}
+            >
+              {q.urgency === "urgent" && (
+                <span style={{ color: "#dc2626", fontWeight: 800 }}>⚡</span>
+              )}
+              <span style={{ fontWeight: 700, color: dark ? "#fff" : "var(--text)", flexShrink: 0 }}>
+                {q.slab_id}
+              </span>
+              {q.slab && (
+                <span
+                  style={{
+                    fontSize: 10,
+                    color: titleColor,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    minWidth: 0,
+                  }}
+                >
+                  · {q.slab.temple} · {q.slab.length_in}×{q.slab.width_in}″
+                </span>
+              )}
+            </div>
+          ))}
+          {overflow > 0 && (
+            <div style={{ fontSize: 10, color: titleColor, fontStyle: "italic", paddingLeft: 6 }}>
+              + {overflow} more
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Recent (last 24h) completed list — same shape as QueueList for
+// visual symmetry under the machine grid.
+function RecentList({ recent, dark, compact = true }: { recent: FloorRecent[]; dark: boolean; compact?: boolean }) {
+  const visible = compact ? recent.slice(0, 6) : recent;
+  const overflow = recent.length - visible.length;
+  const titleColor = dark ? "rgba(255,255,255,0.55)" : "var(--muted)";
+  const sectionBg = dark ? "rgba(255,255,255,0.05)" : "var(--surface-alt)";
+  return (
+    <div
+      style={{
+        background: sectionBg,
+        borderRadius: 6,
+        padding: "8px 10px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          fontWeight: 700,
+          color: titleColor,
+          textTransform: "uppercase",
+          letterSpacing: "0.07em",
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+        }}
+      >
+        ✓ Done · last 24h
+        <span
+          style={{
+            fontSize: 10,
+            fontWeight: 700,
+            padding: "1px 8px",
+            borderRadius: 999,
+            background: recent.length > 0 ? "#16a34a" : (dark ? "rgba(255,255,255,0.15)" : "var(--border)"),
+            color: recent.length > 0 ? "#fff" : titleColor,
+            fontFamily: "ui-monospace, monospace",
+          }}
+        >
+          {recent.length}
+        </span>
+      </div>
+      {recent.length === 0 ? (
+        <div style={{ fontSize: 11, color: titleColor, fontStyle: "italic" }}>
+          Nothing finished in the last day
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+          {visible.map((r) => (
+            <div
+              key={r.slab_id + r.completed_at}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "3px 6px",
+                fontSize: 11,
+                fontFamily: "ui-monospace, monospace",
+              }}
+            >
+              <span style={{ color: "#15803d", fontWeight: 800 }}>✓</span>
+              <span style={{ fontWeight: 700, color: dark ? "#fff" : "var(--text)", flexShrink: 0 }}>
+                {r.slab_id}
+              </span>
+              <span
+                style={{
+                  fontSize: 10,
+                  color: titleColor,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  minWidth: 0,
+                }}
+              >
+                {r.slab && `· ${r.slab.temple}`}
+                {" · "}
+                {fmtAgo(Date.now() - new Date(r.completed_at).getTime())}
+              </span>
+            </div>
+          ))}
+          {overflow > 0 && (
+            <div style={{ fontSize: 10, color: titleColor, fontStyle: "italic", paddingLeft: 6 }}>
+              + {overflow} more
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function fmtAgo(ms: number): string {
+  const min = Math.round(ms / 60000);
+  if (min < 1) return "just now";
+  if (min < 60) return `${min}m ago`;
+  const h = Math.floor(min / 60);
+  const remM = min % 60;
+  if (h < 24) return remM > 0 ? `${h}h ${remM}m ago` : `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+// TV slide — bigger machine cards, designed for distance viewing.
+// `slideKey` forces a fresh React mount each rotation so the
+// keyframe animation re-runs on every advance (CSS `animation`
+// only fires once per mount).
+function VendorTvSlide({ vendor, now, slideKey }: { vendor: FloorVendor; now: number; slideKey: number }) {
+  return (
+    <div
+      key={slideKey}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 18,
+        // Slide-in-from-right effect on every mount. 360ms is fast
+        // enough to feel snappy but slow enough to be perceptible.
+        animation: "tv-slide-in 360ms cubic-bezier(0.22, 1, 0.36, 1)",
+      }}
+    >
+      <style>{`
+        @keyframes tv-slide-in {
+          from { transform: translateX(40px); opacity: 0; }
+          to   { transform: translateX(0);    opacity: 1; }
+        }
+      `}</style>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 14 }}>
         <span style={{ fontSize: 36, fontWeight: 800, letterSpacing: "-0.5px" }}>
           {vendor.name}
@@ -452,7 +677,7 @@ function VendorTvSlide({ vendor, now }: { vendor: FloorVendor; now: number }) {
           {vendor.totals.total} CNC{vendor.totals.total !== 1 ? "s" : ""}
         </span>
         <div style={{ marginLeft: "auto", display: "flex", gap: 12 }}>
-          <TvBigStat label="Idle" value={vendor.totals.idle} fg="#22c55e" />
+          <TvBigStat label="Free" value={vendor.totals.idle} fg="#22c55e" />
           <TvBigStat label="Carving" value={vendor.totals.carving} fg="#60a5fa" />
           <TvBigStat label="Maint" value={vendor.totals.maintenance} fg="#f87171" />
           <TvBigStat label="Queue" value={vendor.totals.queue} fg="#fbbf24" />
@@ -470,6 +695,20 @@ function VendorTvSlide({ vendor, now }: { vendor: FloorVendor; now: number }) {
         {vendor.machines.map((m) => (
           <TvMachineTile key={m.id} machine={m} now={now} />
         ))}
+      </div>
+
+      {/* Queue + last-24h completed — fills the lower part of the
+          screen so the TV isn't a tall black void below the cards. */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: 14,
+          marginTop: 4,
+        }}
+      >
+        <QueueList queue={vendor.queue} dark compact={false} />
+        <RecentList recent={vendor.recentCompleted} dark compact={false} />
       </div>
     </div>
   );
@@ -737,7 +976,7 @@ function TvBigStat({ label, value, fg }: { label: string; value: number; fg: str
 function VendorStatRow({ totals }: { totals: FloorVendor["totals"] }) {
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-      <Tile label="Idle" value={totals.idle} fg="#16a34a" />
+      <Tile label="Free" value={totals.idle} fg="#16a34a" />
       <Tile label="Carving" value={totals.carving} fg="#2563eb" />
       <Tile label="Maint" value={totals.maintenance} fg="#dc2626" />
       <Tile label="Queue" value={totals.queue} fg="#b45309" />

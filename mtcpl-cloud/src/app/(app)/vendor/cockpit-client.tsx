@@ -75,7 +75,7 @@ const STATUS_TINT: Record<
     border: "var(--border)",
     accent: "#16a34a",
     fg: "#15803d",
-    label: "AVAILABLE",
+    label: "FREE",
     icon: "○",
   },
   carving: {
