@@ -8,6 +8,27 @@ Reverse-chronological. Most recent at top. Append to TOP when shipping new work.
 
 ## Recent (this Claude session)
 
+### NEXT (this commit) · TV mode discoverability + dark/light + cleaner Active tab
+- Removed the embedded Floor View vendor sections from the Active
+  tab; replaced with a single "📺 Open Floor View" link card at the
+  top. Active tab is now focused on the job cards.
+- Removed "📺 TV Mode" sidebar entry. Added TV Mode as a 4th entry
+  card on the owner / developer dashboard (`<TvModeEntryCard>` in
+  src/components/tv-mode-entry-card.tsx, opens in a new tab).
+- TV mode now has a 🌙 / ☀ theme toggle in the header. Dark theme
+  (the original gradient) is back as an option; light stays the
+  default. Choice persists via `localStorage["mtcpl_tv_theme"]`.
+- Sidebar `isActive` logic for `/carving/floor` removed (no longer
+  in sidebar — but the route still works). Page itself unchanged.
+
+### `1d051f2` · CLAUDE_HANDOFF folder + CNC Report into Carving Done tab
+Created `CLAUDE_HANDOFF/` at repo root: 8 markdown files
+(README + 01–07) capturing user, business, stack, data model,
+modules, changelog, open items, and resume instructions for a
+fresh Claude. Going forward every commit appends to this folder.
+Sidebar entry "📊 CNC Report" removed; link surfaced on Carving
+Done tab instead.
+
 ### `d169407` · Carving Active tab embed + status ribbons
 Active tab now shows a status ribbon per card (▶ CARVING NOW with running-for/remaining timer, or ⏳ WAITING with urgent chip). Above the cards: an embedded Floor View — fleet stats + per-vendor cockpit sections, with a 📺 TV mode quick-link. Sidebar `Floor View` renamed to `TV Mode` (deep-links to `?mode=tv`). Floor data builder extracted to `src/lib/floor-view-data.ts`.
 

@@ -28,7 +28,6 @@ import {
 } from "./actions";
 import { IsoBlockStaticSVG } from "@/components/iso-block-static";
 import type { StoneTypeDef } from "@/lib/stone-utils";
-import { VendorGridSection, type FloorVendor } from "./floor/floor-client";
 
 type UnassignedSlab = {
   id: string;
@@ -118,7 +117,6 @@ export function CarvingDashboardClient({
   templeNames,
   templeFilter,
   stoneTypes,
-  floorVendors,
 }: {
   tab: "unassigned" | "active" | "review" | "done";
   unassignedSlabs: UnassignedSlab[];
@@ -133,9 +131,6 @@ export function CarvingDashboardClient({
   templeFilter: string;
   /** Stone palette definitions for the 3D thumbnails on cards. */
   stoneTypes: StoneTypeDef[];
-  /** Floor view payload — only sent when on the Active tab. Used to
-   *  render vendor cockpit sections above the active job cards. */
-  floorVendors?: FloorVendor[] | null;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -567,9 +562,54 @@ export function CarvingDashboardClient({
 
       {tab === "active" && (
         <>
-          {floorVendors && floorVendors.length > 0 && (
-            <ActiveFloorEmbed vendors={floorVendors} />
-          )}
+          {/* Single Floor View link — was a full inline cockpit
+              embed, but the user wants the Active tab focused on the
+              job cards. The button takes them to the dedicated
+              /carving/floor page when they need the cockpit view. */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              padding: "10px 14px",
+              marginBottom: 14,
+              background: "var(--surface)",
+              border: "1px solid var(--border)",
+              borderRadius: 10,
+              flexWrap: "wrap",
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: "var(--muted)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.07em",
+                }}
+              >
+                Live operator cockpit
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text)", marginTop: 2 }}>
+                Every vendor&apos;s machines, queue, and last-24h done
+              </div>
+            </div>
+            <Link
+              href="/carving/floor"
+              className="primary-button"
+              style={{
+                fontSize: 13,
+                padding: "8px 16px",
+                fontWeight: 700,
+                textDecoration: "none",
+                whiteSpace: "nowrap",
+              }}
+            >
+              📺 Open Floor View
+            </Link>
+          </div>
           <JobsByTemple
             jobs={filteredActive}
             machineCodeById={machineCodeById}
@@ -2229,108 +2269,3 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-// ─── Active-tab floor embed ─────────────────────────────────────────
-//
-// Renders one VendorGridSection per CNC vendor inline on the Active
-// carving tab so the carving head sees their full floor cockpit
-// (machines + queue + last 24h done) without having to navigate to
-// /carving/floor. The 30s tick is local so its timers stay live.
-function ActiveFloorEmbed({ vendors }: { vendors: FloorVendor[] }) {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(t);
-  }, []);
-
-  // Aggregate fleet totals so the embed has its own header strip.
-  const fleet = useMemo(() => {
-    const acc = { total: 0, idle: 0, carving: 0, maintenance: 0, queue: 0, today: 0 };
-    for (const v of vendors) {
-      acc.total += v.totals.total;
-      acc.idle += v.totals.idle;
-      acc.carving += v.totals.carving;
-      acc.maintenance += v.totals.maintenance;
-      acc.queue += v.totals.queue;
-      acc.today += v.totals.today;
-    }
-    return acc;
-  }, [vendors]);
-
-  return (
-    <section style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 18 }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 10,
-          padding: "10px 14px",
-          background: "linear-gradient(135deg, #2D2410 0%, #4a3a1f 100%)",
-          color: "#fff",
-          borderRadius: 10,
-          flexWrap: "wrap",
-        }}
-      >
-        <div>
-          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>
-            📺 Floor — live
-          </div>
-          <div style={{ fontSize: 16, fontWeight: 700, marginTop: 2 }}>
-            {vendors.length} operator{vendors.length !== 1 ? "s" : ""} · {fleet.total} CNC{fleet.total !== 1 ? "s" : ""}
-          </div>
-        </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-          <FleetTile label="Free" value={fleet.idle} fg="#22c55e" />
-          <FleetTile label="Carving" value={fleet.carving} fg="#60a5fa" />
-          <FleetTile label="Maint" value={fleet.maintenance} fg="#f87171" />
-          <FleetTile label="Queue" value={fleet.queue} fg="#fbbf24" />
-          <FleetTile label="Today" value={fleet.today} fg="#E8C572" />
-        </div>
-        <Link
-          href="/carving/floor?mode=tv"
-          target="_blank"
-          rel="noreferrer"
-          style={{
-            background: "rgba(255,255,255,0.12)",
-            color: "#fff",
-            border: "1px solid rgba(255,255,255,0.25)",
-            padding: "6px 12px",
-            fontSize: 12,
-            fontWeight: 700,
-            borderRadius: 6,
-            textDecoration: "none",
-            whiteSpace: "nowrap",
-          }}
-          title="Open this floor in TV mode (auto-rotate)"
-        >
-          📺 TV mode
-        </Link>
-      </div>
-
-      {vendors.map((v) => (
-        <VendorGridSection key={v.id} vendor={v} now={now} />
-      ))}
-    </section>
-  );
-}
-
-function FleetTile({ label, value, fg }: { label: string; value: number; fg: string }) {
-  return (
-    <div
-      style={{
-        padding: "5px 10px",
-        background: "rgba(255,255,255,0.08)",
-        borderRadius: 6,
-        textAlign: "center",
-        minWidth: 50,
-      }}
-    >
-      <div style={{ fontSize: 9, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>
-        {label}
-      </div>
-      <div style={{ fontSize: 18, fontWeight: 800, color: fg, fontFamily: "ui-monospace, monospace", lineHeight: 1 }}>
-        {value}
-      </div>
-    </div>
-  );
-}

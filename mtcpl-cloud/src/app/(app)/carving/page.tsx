@@ -3,7 +3,6 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { CarvingDashboardClient } from "./dashboard-client";
 import { VendorsManagerPeek } from "./vendors-manager-peek";
-import { buildFloorViewData } from "@/lib/floor-view-data";
 
 type Tab = "unassigned" | "active" | "review" | "done";
 
@@ -383,7 +382,6 @@ export default async function CarvingDashboardPage({
         templeNames={templeNames}
         templeFilter={templeFilter}
         stoneTypes={stoneTypes ?? []}
-        floorVendors={tab === "active" ? await buildFloorViewData() : null}
       />
     </div>
   );

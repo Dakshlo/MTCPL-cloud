@@ -108,6 +108,18 @@ export function FloorViewClient({
   });
   const [paused, setPaused] = useState(false);
   const [now, setNow] = useState(Date.now());
+  // TV theme — light is the default but the user wanted a toggle so
+  // the wall TV can adapt to ambient light. Persists in localStorage
+  // so the choice survives a Vercel redeploy / browser restart.
+  const [tvTheme, setTvTheme] = useState<"light" | "dark">(() => {
+    if (typeof window === "undefined") return "light";
+    return (localStorage.getItem("mtcpl_tv_theme") as "light" | "dark") || "light";
+  });
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("mtcpl_tv_theme", tvTheme);
+    }
+  }, [tvTheme]);
 
   // 30s tick — keeps "Xh Ym remaining" + "Xh Ym down" timers fresh.
   useEffect(() => {
@@ -158,6 +170,7 @@ export function FloorViewClient({
   // gradient was washing out from a distance).
   if (mode === "tv") {
     const v = vendors[tvIndex];
+    const isDark = tvTheme === "dark";
     return (
       <div
         onMouseEnter={() => setPaused(true)}
@@ -168,8 +181,10 @@ export function FloorViewClient({
           left: 0,
           right: 0,
           bottom: 0,
-          background: "linear-gradient(180deg, #fafaf5 0%, #f0ece1 100%)",
-          color: "#1a1a1a",
+          background: isDark
+            ? "linear-gradient(180deg, #0f0c06 0%, #1a1a1a 100%)"
+            : "linear-gradient(180deg, #fafaf5 0%, #f0ece1 100%)",
+          color: isDark ? "#fff" : "#1a1a1a",
           padding: "16px 24px 24px",
           display: "flex",
           flexDirection: "column",
@@ -189,9 +204,11 @@ export function FloorViewClient({
           setTvIndex={setTvIndex}
           vendors={vendors}
           fleetTotals={fleetTotals}
+          tvTheme={tvTheme}
+          setTvTheme={setTvTheme}
         />
 
-        <VendorTvSlide vendor={v} now={now} slideKey={tvIndex} />
+        <VendorTvSlide vendor={v} now={now} slideKey={tvIndex} dark={isDark} />
       </div>
     );
   }
@@ -284,6 +301,8 @@ function TvHeader({
   setTvIndex,
   vendors,
   fleetTotals,
+  tvTheme,
+  setTvTheme,
 }: {
   mode: "grid" | "tv";
   setMode: (m: "grid" | "tv") => void;
@@ -295,7 +314,16 @@ function TvHeader({
   setTvIndex: (n: number) => void;
   vendors: FloorVendor[];
   fleetTotals: FloorVendor["totals"];
+  tvTheme: "light" | "dark";
+  setTvTheme: (t: "light" | "dark") => void;
 }) {
+  const isDark = tvTheme === "dark";
+  // Theme-aware control colours so the chrome reads on either bg.
+  const ctrlBg = isDark ? "rgba(255,255,255,0.08)" : "#fff";
+  const ctrlFg = isDark ? "#fff" : "#1a1a1a";
+  const ctrlBorder = isDark ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.12)";
+  const muted = isDark ? "rgba(255,255,255,0.55)" : "#8a7a55";
+  const dotInactive = isDark ? "rgba(255,255,255,0.25)" : "rgba(0,0,0,0.18)";
   return (
     <div
       style={{
@@ -305,20 +333,20 @@ function TvHeader({
         alignItems: "center",
         justifyContent: "space-between",
         paddingBottom: 10,
-        borderBottom: "1px solid rgba(0,0,0,0.08)",
+        borderBottom: `1px solid ${isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.08)"}`,
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <span style={{ fontSize: 11, color: "#8a7a55", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>
+        <span style={{ fontSize: 11, color: muted, textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>
           📺 TV mode · {paused ? "paused" : `auto-rotate every ${rotateSec}s`}
         </span>
         <button
           type="button"
           onClick={() => setPaused(!paused)}
           style={{
-            background: "#fff",
-            color: "#1a1a1a",
-            border: "1px solid rgba(0,0,0,0.12)",
+            background: ctrlBg,
+            color: ctrlFg,
+            border: `1px solid ${ctrlBorder}`,
             padding: "5px 12px",
             fontSize: 11,
             fontWeight: 700,
@@ -332,20 +360,39 @@ function TvHeader({
           value={rotateSec}
           onChange={(e) => setRotateSec(Number(e.target.value))}
           style={{
-            background: "#fff",
-            color: "#1a1a1a",
-            border: "1px solid rgba(0,0,0,0.12)",
+            background: ctrlBg,
+            color: ctrlFg,
+            border: `1px solid ${ctrlBorder}`,
             padding: "5px 10px",
             fontSize: 11,
             borderRadius: 6,
           }}
         >
           {[10, 15, 20, 30, 45, 60].map((s) => (
-            <option key={s} value={s}>
+            <option key={s} value={s} style={{ color: "#000" }}>
               {s}s
             </option>
           ))}
         </select>
+        {/* Theme toggle. The label always shows the OPPOSITE state so
+            it reads as "tap to switch to X". Persists to localStorage. */}
+        <button
+          type="button"
+          onClick={() => setTvTheme(isDark ? "light" : "dark")}
+          style={{
+            background: ctrlBg,
+            color: ctrlFg,
+            border: `1px solid ${ctrlBorder}`,
+            padding: "5px 12px",
+            fontSize: 11,
+            fontWeight: 700,
+            borderRadius: 6,
+            cursor: "pointer",
+          }}
+          title={isDark ? "Switch to light theme" : "Switch to dark theme"}
+        >
+          {isDark ? "☀ Light" : "🌙 Dark"}
+        </button>
       </div>
       {/* Vendor dots — quick jump */}
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -360,7 +407,7 @@ function TvHeader({
               borderRadius: "50%",
               border: "none",
               cursor: "pointer",
-              background: i === tvIndex ? "#b87333" : "rgba(0,0,0,0.18)",
+              background: i === tvIndex ? "#b87333" : dotInactive,
               transition: "background 0.2s",
               padding: 0,
             }}
@@ -369,17 +416,17 @@ function TvHeader({
         ))}
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-        <TvStat label="Free" value={fleetTotals.idle} fg="#15803d" />
-        <TvStat label="Carving" value={fleetTotals.carving} fg="#1d4ed8" />
-        <TvStat label="Maint" value={fleetTotals.maintenance} fg="#b91c1c" />
-        <TvStat label="Queue" value={fleetTotals.queue} fg="#b45309" />
+        <TvStat label="Free" value={fleetTotals.idle} fg={isDark ? "#22c55e" : "#15803d"} dark={isDark} />
+        <TvStat label="Carving" value={fleetTotals.carving} fg={isDark ? "#60a5fa" : "#1d4ed8"} dark={isDark} />
+        <TvStat label="Maint" value={fleetTotals.maintenance} fg={isDark ? "#f87171" : "#b91c1c"} dark={isDark} />
+        <TvStat label="Queue" value={fleetTotals.queue} fg={isDark ? "#fbbf24" : "#b45309"} dark={isDark} />
         <button
           type="button"
           onClick={() => setMode("grid")}
           style={{
-            background: "#1a1a1a",
+            background: isDark ? "rgba(255,255,255,0.12)" : "#1a1a1a",
             color: "#fff",
-            border: "none",
+            border: isDark ? "1px solid rgba(255,255,255,0.2)" : "none",
             padding: "7px 14px",
             fontSize: 11,
             fontWeight: 700,
@@ -798,11 +845,9 @@ function fmtAgo(ms: number): string {
 // `slideKey` forces a fresh React mount each rotation so the
 // keyframe animation re-runs on every advance (CSS `animation`
 // only fires once per mount).
-function VendorTvSlide({ vendor, now, slideKey }: { vendor: FloorVendor; now: number; slideKey: number }) {
-  // Group machines by type so multi-head + lathe rows are visually
-  // separate from single-head rows on the wall TV — easier to scan
-  // from across the shop.
+function VendorTvSlide({ vendor, now, slideKey, dark }: { vendor: FloorVendor; now: number; slideKey: number; dark: boolean }) {
   const grouped = groupMachinesByType(vendor.machines);
+  const muted = dark ? "rgba(255,255,255,0.55)" : "#8a7a55";
   return (
     <div
       key={slideKey}
@@ -820,18 +865,18 @@ function VendorTvSlide({ vendor, now, slideKey }: { vendor: FloorVendor; now: nu
         }
       `}</style>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 14 }}>
-        <span style={{ fontSize: 40, fontWeight: 800, letterSpacing: "-0.6px", color: "#1a1a1a" }}>
+        <span style={{ fontSize: 40, fontWeight: 800, letterSpacing: "-0.6px", color: dark ? "#fff" : "#1a1a1a" }}>
           {vendor.name}
         </span>
-        <span style={{ fontSize: 14, color: "#8a7a55", fontWeight: 600 }}>
+        <span style={{ fontSize: 14, color: muted, fontWeight: 600 }}>
           {vendor.totals.total} CNC{vendor.totals.total !== 1 ? "s" : ""}
         </span>
         <div style={{ marginLeft: "auto", display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <TvBigStat label="Free" value={vendor.totals.idle} fg="#15803d" />
-          <TvBigStat label="Carving" value={vendor.totals.carving} fg="#1d4ed8" />
-          <TvBigStat label="Maint" value={vendor.totals.maintenance} fg="#b91c1c" />
-          <TvBigStat label="Queue" value={vendor.totals.queue} fg="#b45309" />
-          <TvBigStat label="Today" value={vendor.totals.today} fg="#b87333" />
+          <TvBigStat label="Free" value={vendor.totals.idle} fg={dark ? "#22c55e" : "#15803d"} dark={dark} />
+          <TvBigStat label="Carving" value={vendor.totals.carving} fg={dark ? "#60a5fa" : "#1d4ed8"} dark={dark} />
+          <TvBigStat label="Maint" value={vendor.totals.maintenance} fg={dark ? "#f87171" : "#b91c1c"} dark={dark} />
+          <TvBigStat label="Queue" value={vendor.totals.queue} fg={dark ? "#fbbf24" : "#b45309"} dark={dark} />
+          <TvBigStat label="Today" value={vendor.totals.today} fg={dark ? "#E8C572" : "#b87333"} dark={dark} />
         </div>
       </div>
 
@@ -843,7 +888,7 @@ function VendorTvSlide({ vendor, now, slideKey }: { vendor: FloorVendor; now: nu
                 style={{
                   fontSize: 12,
                   fontWeight: 800,
-                  color: "#8a7a55",
+                  color: muted,
                   textTransform: "uppercase",
                   letterSpacing: "0.1em",
                 }}
@@ -859,7 +904,7 @@ function VendorTvSlide({ vendor, now, slideKey }: { vendor: FloorVendor; now: nu
               }}
             >
               {g.machines.map((m) => (
-                <TvMachineTile key={m.id} machine={m} now={now} />
+                <TvMachineTile key={m.id} machine={m} now={now} dark={dark} />
               ))}
             </div>
           </div>
@@ -876,8 +921,8 @@ function VendorTvSlide({ vendor, now, slideKey }: { vendor: FloorVendor; now: nu
           marginTop: 4,
         }}
       >
-        <QueueList queue={vendor.queue} dark={false} compact={false} />
-        <RecentList recent={vendor.recentCompleted} dark={false} compact={false} />
+        <QueueList queue={vendor.queue} dark={dark} compact={false} />
+        <RecentList recent={vendor.recentCompleted} dark={dark} compact={false} />
       </div>
     </div>
   );
@@ -986,10 +1031,19 @@ function CompactMachineTile({ machine, now }: { machine: FloorMachine; now: numb
   );
 }
 
-function TvMachineTile({ machine, now }: { machine: FloorMachine; now: number }) {
-  // Light TV palette — softer tints for daylight viewing.
-  const cardBg =
-    machine.status === "carving"
+function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: number; dark: boolean }) {
+  // Theme-aware palette. Dark uses translucent overlays on a black
+  // bg; light uses soft pastel gradients. Accent colour matches in
+  // both for consistency.
+  const cardBg = dark
+    ? machine.status === "carving"
+      ? "rgba(37,99,235,0.18)"
+      : machine.status === "maintenance"
+        ? "rgba(220,38,38,0.18)"
+        : machine.status === "idle"
+          ? "rgba(22,163,74,0.12)"
+          : "rgba(255,255,255,0.05)"
+    : machine.status === "carving"
       ? "linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%)"
       : machine.status === "maintenance"
         ? "linear-gradient(180deg, #fef2f2 0%, #fee2e2 100%)"
@@ -1002,8 +1056,8 @@ function TvMachineTile({ machine, now }: { machine: FloorMachine; now: number })
       : machine.status === "maintenance"
         ? "#dc2626"
         : machine.status === "idle"
-          ? "#cbd5e1"
-          : "#e5e7eb";
+          ? (dark ? "rgba(255,255,255,0.18)" : "#cbd5e1")
+          : (dark ? "rgba(255,255,255,0.1)" : "#e5e7eb");
   const accent =
     machine.status === "carving"
       ? "#2563eb"
@@ -1013,6 +1067,10 @@ function TvMachineTile({ machine, now }: { machine: FloorMachine; now: number })
           ? "#16a34a"
           : "#9ca3af";
   const label = STATUS_TINT[machine.status].label;
+  const codeColor = dark ? "#fff" : "#1a1a1a";
+  const subColor = dark ? "rgba(255,255,255,0.7)" : "#666";
+  const sub2Color = dark ? "rgba(255,255,255,0.5)" : "#666";
+  const dividerColor = dark ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.08)";
   return (
     <div
       style={{
@@ -1036,7 +1094,7 @@ function TvMachineTile({ machine, now }: { machine: FloorMachine; now: number })
             fontFamily: "ui-monospace, monospace",
             fontWeight: 800,
             fontSize: 32,
-            color: "#1a1a1a",
+            color: codeColor,
             letterSpacing: "-0.5px",
           }}
         >
@@ -1064,7 +1122,7 @@ function TvMachineTile({ machine, now }: { machine: FloorMachine; now: number })
             padding: "3px 9px",
             borderRadius: 4,
             background: machine.machine_type === "lathe" ? "rgba(124,58,237,0.12)" : "rgba(180,115,51,0.15)",
-            color: machine.machine_type === "lathe" ? "#7c3aed" : "#b45309",
+            color: machine.machine_type === "lathe" ? (dark ? "#c4b5fd" : "#7c3aed") : (dark ? "#fbbf24" : "#b45309"),
             letterSpacing: "0.08em",
             alignSelf: "flex-start",
             fontFamily: "ui-monospace, monospace",
@@ -1074,17 +1132,17 @@ function TvMachineTile({ machine, now }: { machine: FloorMachine; now: number })
         </span>
       )}
       {machine.operator_name && (
-        <div style={{ fontSize: 13, color: "#666" }}>
+        <div style={{ fontSize: 13, color: subColor }}>
           👷 {machine.operator_name}
         </div>
       )}
       {machine.status === "carving" && machine.current_job && (
-        <div style={{ marginTop: "auto", paddingTop: 8, borderTop: "1px solid rgba(0,0,0,0.08)" }}>
-          <div style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 16, color: "#1a1a1a" }}>
+        <div style={{ marginTop: "auto", paddingTop: 8, borderTop: `1px solid ${dividerColor}` }}>
+          <div style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 16, color: codeColor }}>
             {machine.current_job.slab_id}
           </div>
           {machine.current_job.slab && (
-            <div style={{ fontSize: 12, color: "#666" }}>
+            <div style={{ fontSize: 12, color: sub2Color }}>
               {machine.current_job.slab.temple} · {machine.current_job.slab.length_in}×{machine.current_job.slab.width_in}″
               {(() => {
                 const cft = (machine.current_job!.slab!.length_in * machine.current_job!.slab!.width_in * machine.current_job!.slab!.thickness_in) / 1728;
@@ -1107,7 +1165,7 @@ function TvMachineTile({ machine, now }: { machine: FloorMachine; now: number })
                   marginTop: 6,
                 }}
               >
-                <span style={{ fontSize: 16, fontWeight: 800, color: "#1d4ed8" }}>
+                <span style={{ fontSize: 16, fontWeight: 800, color: dark ? "#93c5fd" : "#1d4ed8" }}>
                   ▶ {fmtDuration(elapsed)}
                 </span>
                 {remaining != null && (
@@ -1115,7 +1173,11 @@ function TvMachineTile({ machine, now }: { machine: FloorMachine; now: number })
                     style={{
                       fontSize: 18,
                       fontWeight: 800,
-                      color: remaining < 0 ? "#dc2626" : remaining < 15 ? "#b45309" : "#1d4ed8",
+                      color: remaining < 0
+                        ? (dark ? "#fca5a5" : "#dc2626")
+                        : remaining < 15
+                          ? (dark ? "#fbbf24" : "#b45309")
+                          : (dark ? "#93c5fd" : "#1d4ed8"),
                     }}
                   >
                     ⏱ {remaining < 0 ? `${fmtDuration(remaining)} over` : fmtDuration(remaining) + " left"}
@@ -1127,16 +1189,16 @@ function TvMachineTile({ machine, now }: { machine: FloorMachine; now: number })
         </div>
       )}
       {machine.status === "maintenance" && (
-        <div style={{ marginTop: "auto", paddingTop: 8, borderTop: "1px solid rgba(0,0,0,0.08)" }}>
+        <div style={{ marginTop: "auto", paddingTop: 8, borderTop: `1px solid ${dividerColor}` }}>
           {machine.maintenance_flagged_at && (() => {
             const downMin = (now - new Date(machine.maintenance_flagged_at).getTime()) / 60000;
             return (
-              <div style={{ fontSize: 16, fontWeight: 800, color: "#b91c1c", fontFamily: "ui-monospace, monospace" }}>
+              <div style={{ fontSize: 16, fontWeight: 800, color: dark ? "#fca5a5" : "#b91c1c", fontFamily: "ui-monospace, monospace" }}>
                 ⏱ down for {fmtDuration(downMin)}
               </div>
             );
           })()}
-          <div style={{ fontSize: 13, color: "#666", marginTop: 4 }}>
+          <div style={{ fontSize: 13, color: sub2Color, marginTop: 4 }}>
             {machine.maintenance_reason ?? "—"}
           </div>
         </div>
@@ -1180,10 +1242,17 @@ function Stat({ label, value, fg }: { label: string; value: number; fg: string }
   );
 }
 
-function TvStat({ label, value, fg }: { label: string; value: number; fg: string }) {
+function TvStat({ label, value, fg, dark = false }: { label: string; value: number; fg: string; dark?: boolean }) {
   return (
-    <div style={{ padding: "6px 14px", background: "#fff", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 8, minWidth: 70, textAlign: "center" }}>
-      <div style={{ fontSize: 11, color: "#8a7a55", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>
+    <div style={{
+      padding: "6px 14px",
+      background: dark ? "rgba(255,255,255,0.08)" : "#fff",
+      border: `1px solid ${dark ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.08)"}`,
+      borderRadius: 8,
+      minWidth: 70,
+      textAlign: "center",
+    }}>
+      <div style={{ fontSize: 11, color: dark ? "rgba(255,255,255,0.55)" : "#8a7a55", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>
         {label}
       </div>
       <div style={{ fontSize: 22, fontWeight: 800, color: fg, lineHeight: 1.1, marginTop: 2 }}>
@@ -1193,10 +1262,17 @@ function TvStat({ label, value, fg }: { label: string; value: number; fg: string
   );
 }
 
-function TvBigStat({ label, value, fg }: { label: string; value: number; fg: string }) {
+function TvBigStat({ label, value, fg, dark = false }: { label: string; value: number; fg: string; dark?: boolean }) {
   return (
-    <div style={{ padding: "10px 18px", background: "#fff", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 10, textAlign: "center", minWidth: 88 }}>
-      <div style={{ fontSize: 11, color: "#8a7a55", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700 }}>
+    <div style={{
+      padding: "10px 18px",
+      background: dark ? "rgba(255,255,255,0.08)" : "#fff",
+      border: `1px solid ${dark ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.08)"}`,
+      borderRadius: 10,
+      textAlign: "center",
+      minWidth: 88,
+    }}>
+      <div style={{ fontSize: 11, color: dark ? "rgba(255,255,255,0.55)" : "#8a7a55", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700 }}>
         {label}
       </div>
       <div style={{ fontSize: 32, fontWeight: 800, color: fg, lineHeight: 1, marginTop: 4, fontFamily: "ui-monospace, monospace" }}>

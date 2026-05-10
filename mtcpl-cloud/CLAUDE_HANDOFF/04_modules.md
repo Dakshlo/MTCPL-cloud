@@ -7,10 +7,11 @@ This is the "what does each page do, today" doc. Roles in parentheses are the on
 Greeting header + online users pill. Below:
 
 - **Push Urgent Alert** (`<PushPanel>`) — owner can push priority slabs to a notification feed. Center-peek modal expands the panel.
-- **3 entry cards** in a row:
+- **4 entry cards** in a row:
   - **Ask AI** — links to `/ask-ai`
   - **Block Journey** — opens as iframe peek modal
   - **🔎 ID Lookup** — center-peek modal that searches any slab/block id and shows full info
+  - **📺 TV Mode** — opens `/carving/floor?mode=tv` in a new tab (developer + owner)
 - **Reports row** — Block Report, Block Journey (full views) as iframe peeks
 - **Screen Time Today** — heartbeat-derived per-user minutes, in a peek
 - **Footer** — backup peek for developer
@@ -83,12 +84,14 @@ Server actions live in `src/app/(app)/carving/actions.ts`. Notable:
 
 Two modes:
 
-- **Grid mode** — every CNC vendor's cockpit on one page. Fleet stats, per-vendor sections, machine grid, queue + 24h-completed (collapsed by default).
-- **TV mode** (`?mode=tv`) — full-screen light overlay (covers sidebar + topbar via z-index). One vendor at a time. Auto-rotates every N seconds (10/15/20/30/45/60s). Slide-in animation. Big text designed for wall-display viewing distance.
+- **Grid mode** — every CNC vendor's cockpit on one page. Fleet stats, per-vendor sections, machine grid, queue + 24h-completed (collapsed by default). Linked from Carving Jobs → Active tab via "📺 Open Floor View" button.
+- **TV mode** (`?mode=tv`) — full-screen overlay (covers sidebar + topbar via z-index). One vendor at a time. Auto-rotates every N seconds (10/15/20/30/45/60s). Slide-in animation. Big text designed for wall-display viewing distance.
+  - **Theme toggle** in the header — 🌙 Dark / ☀ Light. Persists in localStorage as `mtcpl_tv_theme`.
+  - Dashboard entry card (developer + owner) opens TV mode in a new tab.
 
-Sidebar entry "📺 TV Mode" deep-links straight to `?mode=tv`. The grid-mode content is also embedded inline on Carving → Active tab.
+The Active tab on Carving Jobs no longer embeds the full floor view; only a button to open it.
 
-Data computation extracted to `src/lib/floor-view-data.ts` — both `/carving/floor` and the Active-tab embed call it.
+Data computation lives in `src/lib/floor-view-data.ts` (used by `/carving/floor`).
 
 ## CNC Report — `/carving/reports` (developer, owner, carving_head)
 
