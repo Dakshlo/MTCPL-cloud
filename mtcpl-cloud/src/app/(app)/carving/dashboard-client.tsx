@@ -1960,6 +1960,24 @@ function JobDetailPeek({
                 {job.slab_label}
               </div>
             )}
+            {/* Link to the full detail page — that's where the
+                Workflow card lives (✅ Mark received, ↔ Transfer,
+                Re-tag work type, Manual start/complete). The peek
+                only shows summary + Approve/Reject; everything
+                else requires the detail page. */}
+            <Link
+              href={`/carving/${job.id}`}
+              style={{
+                display: "inline-block",
+                marginTop: 8,
+                fontSize: 12,
+                fontWeight: 600,
+                color: "var(--gold-dark)",
+                textDecoration: "underline",
+              }}
+            >
+              Open full job ↗
+            </Link>
           </div>
           <button
             type="button"
