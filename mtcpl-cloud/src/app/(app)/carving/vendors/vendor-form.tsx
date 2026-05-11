@@ -10,9 +10,15 @@ type Machine = {
   machine_code: string;
   operator_name?: string;
   is_active?: boolean;
-  /** Migration 021 — single_head (default), multi_head_2 (couples
-   *  two heads on identical slabs), or lathe (turning machines). */
+  /** Migration 021 — single_head (legacy, no live machine uses it),
+   *  multi_head_2 (couples two heads on identical slabs — DEFAULT),
+   *  or lathe (turning machines for cylindrical work). */
   machine_type?: MachineType;
+  /** Migration 024 — per-machine workable-area envelope in inches.
+   *  Empty / null → no limit. Slab beyond any cap can't load. */
+  max_length_in?: number | string | null;
+  max_width_in?: number | string | null;
+  max_thickness_in?: number | string | null;
   _delete?: boolean;
 };
 
@@ -21,6 +27,11 @@ const MACHINE_TYPE_LABEL: Record<MachineType, string> = {
   multi_head_2: "2-head (mirrored)",
   lathe: "Lathe",
 };
+
+// User-selectable types in the picker. Single-head is legacy and
+// not exposed — any legacy row with that value keeps it via the
+// fallback rendering, but new rows default to multi_head_2.
+const SELECTABLE_TYPES: MachineType[] = ["multi_head_2", "lathe"];
 
 export function VendorForm({
   initial,
@@ -44,7 +55,15 @@ export function VendorForm({
   function addMachine() {
     setMachines((prev) => [
       ...prev,
-      { machine_code: "", operator_name: "", is_active: true, machine_type: "single_head" },
+      {
+        machine_code: "",
+        operator_name: "",
+        is_active: true,
+        machine_type: "multi_head_2",
+        max_length_in: null,
+        max_width_in: null,
+        max_thickness_in: null,
+      },
     ]);
   }
 
@@ -179,15 +198,64 @@ export function VendorForm({
                     <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
                       <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Type</span>
                       <select
-                        value={m.machine_type ?? "single_head"}
+                        value={m.machine_type ?? "multi_head_2"}
                         onChange={(e) => updateMachine(idx, { machine_type: e.target.value as MachineType })}
                         style={{ fontSize: 12, padding: "5px 7px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--surface)", color: "var(--text)" }}
-                        title="Single-head: one slab at a time. 2-head: loads two identical slabs together. Lathe: turning machine for round work."
+                        title="2-head: two heads on identical slabs (also runs solo with one head off). Lathe: turning machine for cylindrical work."
                       >
-                        {(["single_head", "multi_head_2", "lathe"] as const).map((t) => (
+                        {SELECTABLE_TYPES.map((t) => (
                           <option key={t} value={t}>{MACHINE_TYPE_LABEL[t]}</option>
                         ))}
+                        {/* If a legacy row has machine_type='single_head',
+                            keep it visible (and selected) so saving doesn't
+                            silently rewrite it. New machines default to
+                            multi_head_2. */}
+                        {m.machine_type === "single_head" && (
+                          <option value="single_head">{MACHINE_TYPE_LABEL.single_head} (legacy)</option>
+                        )}
                       </select>
+                    </label>
+                    <label style={{ display: "flex", flexDirection: "column", gap: 3, flex: "0 0 60px" }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }} title="Slab length larger than this can't fit. Leave blank for no limit.">
+                        Max L ″
+                      </span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.5"
+                        placeholder="—"
+                        value={m.max_length_in ?? ""}
+                        onChange={(e) => updateMachine(idx, { max_length_in: e.target.value === "" ? null : Number(e.target.value) })}
+                        style={{ fontSize: 12, padding: "5px 7px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--surface)", color: "var(--text)", width: "100%" }}
+                      />
+                    </label>
+                    <label style={{ display: "flex", flexDirection: "column", gap: 3, flex: "0 0 60px" }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }} title="Slab width larger than this can't fit. Leave blank for no limit.">
+                        Max W ″
+                      </span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.5"
+                        placeholder="—"
+                        value={m.max_width_in ?? ""}
+                        onChange={(e) => updateMachine(idx, { max_width_in: e.target.value === "" ? null : Number(e.target.value) })}
+                        style={{ fontSize: 12, padding: "5px 7px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--surface)", color: "var(--text)", width: "100%" }}
+                      />
+                    </label>
+                    <label style={{ display: "flex", flexDirection: "column", gap: 3, flex: "0 0 60px" }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }} title="Slab thickness larger than this can't fit (gantry clearance). Leave blank for no limit.">
+                        Max T ″
+                      </span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.5"
+                        placeholder="—"
+                        value={m.max_thickness_in ?? ""}
+                        onChange={(e) => updateMachine(idx, { max_thickness_in: e.target.value === "" ? null : Number(e.target.value) })}
+                        style={{ fontSize: 12, padding: "5px 7px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--surface)", color: "var(--text)", width: "100%" }}
+                      />
                     </label>
                     <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
                       <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Status</span>

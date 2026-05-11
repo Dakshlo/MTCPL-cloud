@@ -19,6 +19,61 @@ function num(formData: FormData, key: string, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+// Parse a per-machine dimension cap from machines_json. Empty string
+// / null / undefined / NaN / non-positive → NULL (no limit). Used by
+// createVendorAction + updateVendorAction for max_length_in,
+// max_width_in, max_thickness_in (migration 024).
+function parseDim(v: number | string | null | undefined): number | null {
+  if (v == null || v === "") return null;
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+// Orientation-agnostic slab-vs-bed fit check (migration 024).
+// Returns an error string when the slab can't fit, NULL if all OK.
+// Length / width compare in matched long-vs-long, short-vs-short
+// pairs so a 30×50 slab still fits a 50×30 bed. Thickness is a
+// direct compare. NULL caps = no limit. NULL slab dim = treat as 0
+// (slab DB rows are NOT NULL but defensive).
+function checkSlabFits(
+  slab: { length_ft: number | string; width_ft: number | string; thickness_ft: number | string } | null,
+  machine: {
+    machine_code: string | null;
+    max_length_in: number | string | null;
+    max_width_in: number | string | null;
+    max_thickness_in: number | string | null;
+  },
+): string | null {
+  if (!slab) return null; // can't check; let the load proceed
+  const slabL = Number(slab.length_ft) || 0;
+  const slabW = Number(slab.width_ft) || 0;
+  const slabT = Number(slab.thickness_ft) || 0;
+  const slabLong = Math.max(slabL, slabW);
+  const slabShort = Math.min(slabL, slabW);
+
+  const maxL = parseDim(machine.max_length_in);
+  const maxW = parseDim(machine.max_width_in);
+  const maxT = parseDim(machine.max_thickness_in);
+
+  // No L/W caps set → skip the bed-area check.
+  if (maxL != null || maxW != null) {
+    const bedLong = Math.max(maxL ?? Infinity, maxW ?? Infinity);
+    const bedShort = Math.min(maxL ?? Infinity, maxW ?? Infinity);
+    if (slabLong > bedLong || slabShort > bedShort) {
+      const code = machine.machine_code ?? "machine";
+      const maxLStr = maxL ?? "—";
+      const maxWStr = maxW ?? "—";
+      const maxTStr = maxT ?? "—";
+      return `Slab ${slabL}×${slabW}×${slabT}″ exceeds ${code}'s bed (${maxLStr}×${maxWStr}×${maxTStr}″)`;
+    }
+  }
+  if (maxT != null && slabT > maxT) {
+    const code = machine.machine_code ?? "machine";
+    return `Slab thickness ${slabT}″ exceeds ${code}'s max thickness ${maxT}″`;
+  }
+  return null;
+}
+
 async function recordEvent(
   carvingItemId: string,
   eventType: string,
@@ -82,6 +137,9 @@ export async function createVendorAction(formData: FormData) {
         machine_code: string;
         operator_name?: string;
         machine_type?: "single_head" | "multi_head_2" | "lathe";
+        max_length_in?: number | string | null;
+        max_width_in?: number | string | null;
+        max_thickness_in?: number | string | null;
       }>;
       const rows = machines
         .filter((m) => m.machine_code.trim())
@@ -95,7 +153,15 @@ export async function createVendorAction(formData: FormData) {
           vendor_id: vendor.id,
           machine_code: m.machine_code.trim(),
           operator_name: m.operator_name?.trim() || null,
-          machine_type: m.machine_type ?? "single_head",
+          // Default new machines to multi_head_2 — the fleet has no
+          // single_head machines in real use. Migration 024 keeps
+          // single_head as a legal enum value for any legacy rows.
+          machine_type: m.machine_type ?? "multi_head_2",
+          // Per-machine dimension caps from migration 024. Empty
+          // string / undefined / null → NULL (no limit).
+          max_length_in: parseDim(m.max_length_in),
+          max_width_in: parseDim(m.max_width_in),
+          max_thickness_in: parseDim(m.max_thickness_in),
           is_active: true,
         }));
       if (rows.length > 0) {
@@ -157,6 +223,9 @@ export async function updateVendorAction(formData: FormData) {
         machine_code: string;
         operator_name?: string;
         machine_type?: "single_head" | "multi_head_2" | "lathe";
+        max_length_in?: number | string | null;
+        max_width_in?: number | string | null;
+        max_thickness_in?: number | string | null;
         is_active?: boolean;
         _delete?: boolean;
       }>;
@@ -204,7 +273,13 @@ export async function updateVendorAction(formData: FormData) {
             vendor_id: vendorId,
             machine_code: code,
             operator_name: m.operator_name?.trim() || null,
-            machine_type: m.machine_type ?? "single_head",
+            // Default new machines to multi_head_2 — the fleet only
+            // has multi_head_2 + lathe in real use.
+            machine_type: m.machine_type ?? "multi_head_2",
+            // Per-machine dimension caps (migration 024).
+            max_length_in: parseDim(m.max_length_in),
+            max_width_in: parseDim(m.max_width_in),
+            max_thickness_in: parseDim(m.max_thickness_in),
             is_active: m.is_active ?? true,
           };
         });
@@ -317,14 +392,26 @@ export async function assignCarvingJobAction(formData: FormData) {
   // supervisor) decides which of their machines to load it on.
   const urgency = txt(formData, "urgency") === "urgent" ? "urgent" : "normal";
   const estimatedMinutes = Math.max(0, num(formData, "estimated_minutes", 0));
+  // Work-type tag (migration 024). Empty → NULL → flat-panel default.
+  // Only "lathe" is user-selectable today; "multi_head_2" / "single_head"
+  // are reserved for forward-compat.
+  const requiresMachineTypeRaw = txt(formData, "requires_machine_type");
+  const requiresMachineType: string | null =
+    requiresMachineTypeRaw === "lathe" ||
+    requiresMachineTypeRaw === "multi_head_2" ||
+    requiresMachineTypeRaw === "single_head"
+      ? requiresMachineTypeRaw
+      : null;
 
   if (!slabId || !vendorId) {
     redirect("/carving?toast=Missing+slab+or+vendor");
   }
 
   // Load vendor so we can snapshot name/type into carving_items.
-  // We only allow CNC vendors in this Phase 3 flow (Manual / Outsource
-  // are paused for now per business decision).
+  // CNC + Manual are both allowed. Manual vendors skip the receive /
+  // load / unload lifecycle — the carving head fires
+  // markCarvingStartedManuallyAction + markCarvingCompleteManuallyAction
+  // on their behalf (see Part E of the carving Phase 4 plan).
   const { data: vendor } = await admin
     .from("vendors")
     .select("id, name, vendor_type, is_active")
@@ -332,12 +419,19 @@ export async function assignCarvingJobAction(formData: FormData) {
     .single();
 
   if (!vendor) redirect("/carving?toast=Vendor+not+found");
-  if ((vendor as { vendor_type: string }).vendor_type !== "CNC") {
-    redirect("/carving?toast=Only+CNC+vendors+supported+for+now");
+  const vendorType = (vendor as { vendor_type: string }).vendor_type;
+  if (vendorType !== "CNC" && vendorType !== "Manual") {
+    redirect("/carving?toast=Only+CNC+or+Manual+vendors+supported");
   }
   if (!(vendor as { is_active: boolean }).is_active) {
     redirect("/carving?toast=Vendor+is+inactive");
   }
+
+  // Work-type tag only applies to CNC vendors. For Manual jobs we
+  // ignore the field and store NULL (manual carvers have no machines
+  // to match).
+  const finalRequiresMachineType =
+    vendorType === "CNC" ? requiresMachineType : null;
 
   // Race guard: slab must currently be cut_done
   const { data: slabRow, error: slabErr } = await admin
@@ -356,13 +450,15 @@ export async function assignCarvingJobAction(formData: FormData) {
       slab_requirement_id: slabId,
       vendor_id: vendorId,
       vendor_name: (vendor as { name: string }).name,
-      vendor_type: (vendor as { vendor_type: string }).vendor_type,
-      // cnc_machine_id intentionally null — vendor picks at load time.
+      vendor_type: vendorType,
+      // cnc_machine_id intentionally null — vendor picks at load time
+      // (CNC). Stays null forever for Manual vendors.
       cnc_machine_id: null,
       note,
       status: "carving_assigned",
       urgency,
       estimated_minutes: estimatedMinutes || null,
+      requires_machine_type: finalRequiresMachineType,
       assigned_by: profile.id,
     })
     .select("id")
@@ -379,8 +475,22 @@ export async function assignCarvingJobAction(formData: FormData) {
 
   const eta = estimatedMinutes ? `${estimatedMinutes}min` : "no eta";
   const urgencyTag = urgency === "urgent" ? " · ⚡ URGENT" : "";
-  await recordEvent(item.id, "assigned", profile.id, `Queued for ${(vendor as { name: string }).name} · ${eta}${urgencyTag}`);
-  await logAudit(profile.id, "carving_assigned", "carving_item", item.id, { slab_id: slabId, vendor_id: vendorId, urgency, estimated_minutes: estimatedMinutes });
+  const typeTag = finalRequiresMachineType === "lathe" ? " · 🌀 lathe" : "";
+  const manualTag = vendorType === "Manual" ? " · 🪚 manual" : "";
+  await recordEvent(
+    item.id,
+    "assigned",
+    profile.id,
+    `Queued for ${(vendor as { name: string }).name} · ${eta}${urgencyTag}${typeTag}${manualTag}`,
+  );
+  await logAudit(profile.id, "carving_assigned", "carving_item", item.id, {
+    slab_id: slabId,
+    vendor_id: vendorId,
+    vendor_type: vendorType,
+    urgency,
+    estimated_minutes: estimatedMinutes,
+    requires_machine_type: finalRequiresMachineType,
+  });
 
   refreshAll();
   redirect("/carving?tab=active&toast=Job+queued");
@@ -412,16 +522,49 @@ export async function loadSlabOnMachineAction(formData: FormData) {
   }
 
   // Load both rows so we can sanity-check vendor ownership (machine
-  // must belong to the same vendor as the carving item).
+  // must belong to the same vendor as the carving item) AND validate
+  // the machine type + dimensions against the job's requirements
+  // (migration 024).
   const [{ data: ci }, { data: mc }] = await Promise.all([
-    admin.from("carving_items").select("id, vendor_id, status, cnc_machine_id, slab_requirement_id, estimated_minutes").eq("id", carvingItemId).maybeSingle(),
-    admin.from("cnc_machines").select("id, vendor_id, status, is_active").eq("id", machineId).maybeSingle(),
+    admin
+      .from("carving_items")
+      .select(
+        "id, vendor_id, status, cnc_machine_id, slab_requirement_id, estimated_minutes, requires_machine_type, received_at_vendor_at",
+      )
+      .eq("id", carvingItemId)
+      .maybeSingle(),
+    admin
+      .from("cnc_machines")
+      .select(
+        "id, vendor_id, status, is_active, machine_type, machine_code, max_length_in, max_width_in, max_thickness_in",
+      )
+      .eq("id", machineId)
+      .maybeSingle(),
   ]);
 
   if (!ci) redirect("/vendor?toast=Carving+job+not+found");
   if (!mc) redirect("/vendor?toast=Machine+not+found");
-  const item = ci as { id: string; vendor_id: string; status: string; cnc_machine_id: string | null; slab_requirement_id: string; estimated_minutes: number | null };
-  const machine = mc as { id: string; vendor_id: string; status: string; is_active: boolean };
+  const item = ci as {
+    id: string;
+    vendor_id: string;
+    status: string;
+    cnc_machine_id: string | null;
+    slab_requirement_id: string;
+    estimated_minutes: number | null;
+    requires_machine_type: string | null;
+    received_at_vendor_at: string | null;
+  };
+  const machine = mc as {
+    id: string;
+    vendor_id: string;
+    status: string;
+    is_active: boolean;
+    machine_type: string | null;
+    machine_code: string | null;
+    max_length_in: number | string | null;
+    max_width_in: number | string | null;
+    max_thickness_in: number | string | null;
+  };
   if (item.vendor_id !== machine.vendor_id) {
     redirect("/vendor?toast=Machine+belongs+to+a+different+vendor");
   }
@@ -431,8 +574,41 @@ export async function loadSlabOnMachineAction(formData: FormData) {
     redirect("/vendor?toast=Job+is+not+in+queue");
   }
 
+  // ── Machine type check (migration 024) ──────────────────────────
+  // Derive the job's required machine type. NULL on the job means
+  // "flat-panel default" which maps to multi_head_2 (the only
+  // non-lathe type in the fleet). Lathes only do cylindrical work,
+  // so a flat-panel job can never go on a lathe.
+  const requiredType =
+    item.requires_machine_type ??
+    (machine.machine_type === "lathe" ? null : "multi_head_2");
+  if (requiredType && machine.machine_type !== requiredType) {
+    redirect(
+      `/vendor?toast=${encodeURIComponent(
+        `This job is tagged for ${requiredType}. Pick a ${requiredType} machine.`,
+      )}`,
+    );
+  }
+
+  // ── Dimension check (migration 024) ─────────────────────────────
+  // Orientation-agnostic on L/W: a slab whose longest face fits the
+  // machine's longest bed dim AND whose shorter face fits the
+  // shorter bed dim is loadable. NULL caps = no limit.
+  const { data: slabDimRow } = await admin
+    .from("slab_requirements")
+    .select("length_ft, width_ft, thickness_ft")
+    .eq("id", item.slab_requirement_id)
+    .maybeSingle();
+  const dimError = checkSlabFits(slabDimRow, machine);
+  if (dimError) redirect(`/vendor?toast=${encodeURIComponent(dimError)}`);
+
   const now = new Date().toISOString();
   const finalVendorEst = vendorEstMinutes || item.estimated_minutes || null;
+  // Auto-receipt: if the vendor never explicitly clicked Mark
+  // received, stamp it now so the assign → load gap has at least an
+  // approximate timestamp (we attribute to the loader, not a
+  // separate receiver).
+  const autoReceiptAt = item.received_at_vendor_at ? null : now;
 
   // Flip carving_items first. Race-guard: only update if status is
   // still carving_assigned (avoids the rare two-phones-at-once case).
@@ -444,6 +620,9 @@ export async function loadSlabOnMachineAction(formData: FormData) {
       loaded_at: now,
       loaded_by: profile.id,
       vendor_estimated_minutes: finalVendorEst,
+      ...(autoReceiptAt
+        ? { received_at_vendor_at: autoReceiptAt, received_at_vendor_by: profile.id }
+        : {}),
     })
     .eq("id", carvingItemId)
     .eq("status", "carving_assigned")
@@ -518,26 +697,60 @@ export async function loadTwoSlabsOnMultiHeadAction(formData: FormData) {
   const [{ data: itemA }, { data: itemB }, { data: mc }] = await Promise.all([
     admin
       .from("carving_items")
-      .select("id, vendor_id, status, cnc_machine_id, slab_requirement_id, estimated_minutes")
+      .select(
+        "id, vendor_id, status, cnc_machine_id, slab_requirement_id, estimated_minutes, requires_machine_type, received_at_vendor_at",
+      )
       .eq("id", carvingItemAId)
       .maybeSingle(),
     admin
       .from("carving_items")
-      .select("id, vendor_id, status, cnc_machine_id, slab_requirement_id, estimated_minutes")
+      .select(
+        "id, vendor_id, status, cnc_machine_id, slab_requirement_id, estimated_minutes, requires_machine_type, received_at_vendor_at",
+      )
       .eq("id", carvingItemBId)
       .maybeSingle(),
     admin
       .from("cnc_machines")
-      .select("id, vendor_id, status, is_active, machine_type")
+      .select(
+        "id, vendor_id, status, is_active, machine_type, machine_code, max_length_in, max_width_in, max_thickness_in",
+      )
       .eq("id", machineId)
       .maybeSingle(),
   ]);
 
   if (!itemA || !itemB) redirect("/vendor?toast=One+of+the+jobs+was+not+found");
   if (!mc) redirect("/vendor?toast=Machine+not+found");
-  const a = itemA as { id: string; vendor_id: string; status: string; cnc_machine_id: string | null; slab_requirement_id: string; estimated_minutes: number | null };
-  const b = itemB as { id: string; vendor_id: string; status: string; cnc_machine_id: string | null; slab_requirement_id: string; estimated_minutes: number | null };
-  const m = mc as { id: string; vendor_id: string; status: string; is_active: boolean; machine_type: string | null };
+  const a = itemA as {
+    id: string;
+    vendor_id: string;
+    status: string;
+    cnc_machine_id: string | null;
+    slab_requirement_id: string;
+    estimated_minutes: number | null;
+    requires_machine_type: string | null;
+    received_at_vendor_at: string | null;
+  };
+  const b = itemB as {
+    id: string;
+    vendor_id: string;
+    status: string;
+    cnc_machine_id: string | null;
+    slab_requirement_id: string;
+    estimated_minutes: number | null;
+    requires_machine_type: string | null;
+    received_at_vendor_at: string | null;
+  };
+  const m = mc as {
+    id: string;
+    vendor_id: string;
+    status: string;
+    is_active: boolean;
+    machine_type: string | null;
+    machine_code: string | null;
+    max_length_in: number | string | null;
+    max_width_in: number | string | null;
+    max_thickness_in: number | string | null;
+  };
 
   if (m.machine_type !== "multi_head_2") {
     redirect("/vendor?toast=This+action+is+only+for+2-head+machines");
@@ -549,6 +762,18 @@ export async function loadTwoSlabsOnMultiHeadAction(formData: FormData) {
   }
   if (a.status !== "carving_assigned" || a.cnc_machine_id || b.status !== "carving_assigned" || b.cnc_machine_id) {
     redirect("/vendor?toast=One+of+the+jobs+is+not+in+queue");
+  }
+
+  // Migration 024: neither slab may be tagged for a non-multi-head
+  // type (e.g. a lathe-tagged job mistakenly paired up here).
+  for (const j of [a, b]) {
+    if (j.requires_machine_type && j.requires_machine_type !== "multi_head_2") {
+      redirect(
+        `/vendor?toast=${encodeURIComponent(
+          `One of the jobs is tagged for ${j.requires_machine_type}. Pick a ${j.requires_machine_type} machine instead.`,
+        )}`,
+      );
+    }
   }
 
   // Validate identical slab geometry. Two cylinders on a 2-head CNC
@@ -583,11 +808,20 @@ export async function loadTwoSlabsOnMultiHeadAction(formData: FormData) {
     );
   }
 
+  // Migration 024: dim check vs the machine's bed envelope.
+  // Both slabs are identical so a single check covers both.
+  const dimErr = checkSlabFits(slabA, m);
+  if (dimErr) redirect(`/vendor?toast=${encodeURIComponent(dimErr)}`);
+
   const now = new Date().toISOString();
   const finalEst = vendorEstMinutes || a.estimated_minutes || b.estimated_minutes || null;
+  // Auto-receipt for both items if they were never explicitly
+  // acknowledged. We attribute to the loader.
+  const autoReceiptA = a.received_at_vendor_at ? null : now;
+  const autoReceiptB = b.received_at_vendor_at ? null : now;
 
   // Flip both items + machine atomically. Race-guard on each item.
-  const updateOne = async (id: string) =>
+  const updateOne = async (id: string, autoReceiptAt: string | null) =>
     admin
       .from("carving_items")
       .update({
@@ -596,13 +830,19 @@ export async function loadTwoSlabsOnMultiHeadAction(formData: FormData) {
         loaded_at: now,
         loaded_by: profile.id,
         vendor_estimated_minutes: finalEst,
+        ...(autoReceiptAt
+          ? { received_at_vendor_at: autoReceiptAt, received_at_vendor_by: profile.id }
+          : {}),
       })
       .eq("id", id)
       .eq("status", "carving_assigned")
       .is("cnc_machine_id", null)
       .select("id");
 
-  const [{ data: updA }, { data: updB }] = await Promise.all([updateOne(a.id), updateOne(b.id)]);
+  const [{ data: updA }, { data: updB }] = await Promise.all([
+    updateOne(a.id, autoReceiptA),
+    updateOne(b.id, autoReceiptB),
+  ]);
   if (!updA?.length || !updB?.length) {
     // Roll back the one that succeeded if the other didn't.
     if (updA?.length) {
@@ -1117,6 +1357,423 @@ export async function cancelCarvingJobAction(formData: FormData) {
 
   refreshAll();
   redirect("/carving?toast=Assignment+cancelled");
+}
+
+// ── Migration 023: receipt acknowledgement ─────────────────────────
+//
+// Either the vendor operator (from /vendor cockpit) or the carving
+// head (from /carving) can mark a slab as physically received at
+// the vendor's shade. This closes the assign → load gap that was
+// previously invisible.
+//
+// No-op if already received. If a vendor role fires this, we
+// validate they own the job (profiles.vendor_id === carving_items.vendor_id).
+// CNC vendors only — Manual vendors don't have a receipt step.
+export async function acknowledgeReceiptAction(formData: FormData) {
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "vendor"]);
+  const admin = createAdminSupabaseClient();
+
+  const carvingItemId = txt(formData, "carving_item_id");
+  const redirectTo = txt(formData, "redirect_to") || "/carving";
+
+  if (!carvingItemId) redirect(`${redirectTo}?toast=Missing+job+id`);
+
+  const { data: ci } = await admin
+    .from("carving_items")
+    .select("id, vendor_id, vendor_type, vendor_name, status, received_at_vendor_at")
+    .eq("id", carvingItemId)
+    .maybeSingle();
+  if (!ci) redirect(`${redirectTo}?toast=Job+not+found`);
+  const item = ci as {
+    id: string;
+    vendor_id: string;
+    vendor_type: string;
+    vendor_name: string;
+    status: string;
+    received_at_vendor_at: string | null;
+  };
+
+  if (item.vendor_type !== "CNC") {
+    redirect(`${redirectTo}?toast=Receipt+step+is+CNC-only`);
+  }
+  if (item.received_at_vendor_at) {
+    redirect(`${redirectTo}?toast=Already+marked+received`);
+  }
+  // Vendor role: must own the job.
+  if (profile.role === "vendor") {
+    if (!profile.vendor_id || profile.vendor_id !== item.vendor_id) {
+      redirect(`${redirectTo}?toast=Not+your+job+to+acknowledge`);
+    }
+  }
+
+  const now = new Date().toISOString();
+  await admin
+    .from("carving_items")
+    .update({ received_at_vendor_at: now, received_at_vendor_by: profile.id })
+    .eq("id", carvingItemId)
+    .is("received_at_vendor_at", null);
+
+  await recordEvent(
+    carvingItemId,
+    "received_at_vendor",
+    profile.id,
+    `Received at ${item.vendor_name}`,
+  );
+  await logAudit(profile.id, "carving_received_at_vendor", "carving_item", carvingItemId, {
+    vendor_id: item.vendor_id,
+  });
+
+  refreshAll();
+  redirect(`${redirectTo}?toast=Marked+received`);
+}
+
+// ── Migration 024: re-tag work-type on an existing job ─────────────
+//
+// Carving head can change a job's requires_machine_type after the
+// initial assignment — e.g. realised mid-flight that the design
+// actually needs a lathe. Only allowed while the job is still in
+// the queue or actively carving.
+export async function updateRequiresMachineTypeAction(formData: FormData) {
+  const { profile } = await requireAuth(["developer", "owner", "carving_head"]);
+  const admin = createAdminSupabaseClient();
+
+  const carvingItemId = txt(formData, "carving_item_id");
+  const rawType = txt(formData, "requires_machine_type");
+  const redirectTo = txt(formData, "redirect_to") || `/carving/${carvingItemId}`;
+
+  if (!carvingItemId) redirect(`${redirectTo}?toast=Missing+job+id`);
+
+  // Empty string → NULL (flat-panel default). Only "lathe" /
+  // "multi_head_2" / "single_head" are legal CHECK values.
+  const newType =
+    rawType === "lathe" || rawType === "multi_head_2" || rawType === "single_head"
+      ? rawType
+      : null;
+
+  const { data: ci } = await admin
+    .from("carving_items")
+    .select("id, vendor_type, status, requires_machine_type, cnc_machine_id")
+    .eq("id", carvingItemId)
+    .maybeSingle();
+  if (!ci) redirect(`${redirectTo}?toast=Job+not+found`);
+  const item = ci as {
+    id: string;
+    vendor_type: string;
+    status: string;
+    requires_machine_type: string | null;
+    cnc_machine_id: string | null;
+  };
+
+  if (item.vendor_type !== "CNC") {
+    redirect(`${redirectTo}?toast=Work-type+tag+is+CNC-only`);
+  }
+  if (item.status !== "carving_assigned" && item.status !== "carving_in_progress") {
+    redirect(`${redirectTo}?toast=Can+only+re-tag+queued+or+active+jobs`);
+  }
+  if (item.cnc_machine_id) {
+    redirect(
+      `${redirectTo}?toast=${encodeURIComponent(
+        "Job is loaded on a machine. Unload first if the new type doesn't match.",
+      )}`,
+    );
+  }
+
+  await admin
+    .from("carving_items")
+    .update({ requires_machine_type: newType })
+    .eq("id", carvingItemId);
+
+  await recordEvent(
+    carvingItemId,
+    "work_type_tagged",
+    profile.id,
+    `Tagged as ${newType ?? "flat panel"}`,
+  );
+  await logAudit(profile.id, "carving_work_type_tagged", "carving_item", carvingItemId, {
+    from: item.requires_machine_type,
+    to: newType,
+  });
+
+  refreshAll();
+  redirect(`${redirectTo}?toast=Work+type+updated`);
+}
+
+// ── Part D: transfer a job to another vendor ──────────────────────
+//
+// Allowed at any point before completion. If the slab is currently
+// loaded on a CNC, we auto-unload the machine and reset machine
+// links on the carving_items row. The vendor flip is preserved on
+// the SAME carving_items row (no DELETE+INSERT) so all
+// carving_job_events stay attached for the full audit trail.
+//
+// 2-head pairs are blocked here — the operator must unload the
+// partner first so the system doesn't have to reason about which
+// half-pair to leave behind.
+export async function transferCarvingJobAction(formData: FormData) {
+  const { profile } = await requireAuth(["developer", "owner", "carving_head"]);
+  const admin = createAdminSupabaseClient();
+
+  const carvingItemId = txt(formData, "carving_item_id");
+  const newVendorId = txt(formData, "new_vendor_id");
+  const reason = txt(formData, "reason");
+  const redirectTo = txt(formData, "redirect_to") || `/carving/${carvingItemId}`;
+
+  if (!carvingItemId || !newVendorId) {
+    redirect(`${redirectTo}?toast=Missing+job+or+vendor`);
+  }
+  if (reason.length < 8) {
+    redirect(`${redirectTo}?toast=Please+enter+a+reason+(min+8+chars)`);
+  }
+
+  const { data: ci } = await admin
+    .from("carving_items")
+    .select("id, vendor_id, vendor_name, status, cnc_machine_id")
+    .eq("id", carvingItemId)
+    .maybeSingle();
+  if (!ci) redirect(`${redirectTo}?toast=Job+not+found`);
+  const item = ci as {
+    id: string;
+    vendor_id: string;
+    vendor_name: string;
+    status: string;
+    cnc_machine_id: string | null;
+  };
+
+  if (item.vendor_id === newVendorId) {
+    redirect(`${redirectTo}?toast=Already+with+that+vendor`);
+  }
+  if (["completed", "dispatched", "rejected"].includes(item.status)) {
+    redirect(`${redirectTo}?toast=Cannot+transfer+completed+or+dispatched+jobs`);
+  }
+
+  // 2-head pair guard: if the slab is loaded on a multi_head_2 and
+  // the partner is also active, refuse and tell the user to unload
+  // both first.
+  if (item.cnc_machine_id) {
+    const { data: machineRow } = await admin
+      .from("cnc_machines")
+      .select("id, machine_type, machine_code")
+      .eq("id", item.cnc_machine_id)
+      .maybeSingle();
+    const mt = (machineRow as { machine_type?: string; machine_code?: string } | null);
+    if (mt?.machine_type === "multi_head_2") {
+      const { data: partners } = await admin
+        .from("carving_items")
+        .select("id")
+        .eq("cnc_machine_id", item.cnc_machine_id)
+        .eq("status", "carving_in_progress");
+      if ((partners ?? []).length > 1) {
+        redirect(
+          `${redirectTo}?toast=${encodeURIComponent(
+            "This is part of a 2-head pair. Unload both first, then transfer.",
+          )}`,
+        );
+      }
+    }
+  }
+
+  const { data: newVendor } = await admin
+    .from("vendors")
+    .select("id, name, vendor_type, is_active")
+    .eq("id", newVendorId)
+    .maybeSingle();
+  if (!newVendor) redirect(`${redirectTo}?toast=Destination+vendor+not+found`);
+  const nv = newVendor as { id: string; name: string; vendor_type: string; is_active: boolean };
+  if (!nv.is_active) redirect(`${redirectTo}?toast=Destination+vendor+is+inactive`);
+  if (nv.vendor_type !== "CNC" && nv.vendor_type !== "Manual") {
+    redirect(`${redirectTo}?toast=Destination+must+be+CNC+or+Manual`);
+  }
+
+  const now = new Date().toISOString();
+  const wasLoaded = !!item.cnc_machine_id;
+  const oldMachineId = item.cnc_machine_id;
+  const oldVendorName = item.vendor_name;
+
+  // Auto-unload from the current machine if loaded.
+  if (oldMachineId) {
+    await admin
+      .from("cnc_machines")
+      .update({ status: "idle", current_carving_item_id: null })
+      .eq("id", oldMachineId)
+      .eq("current_carving_item_id", carvingItemId);
+    await admin.from("cnc_machine_events").insert({
+      cnc_machine_id: oldMachineId,
+      event_type: "unloaded_for_transfer",
+      carving_item_id: carvingItemId,
+      user_id: profile.id,
+      message: `Unloaded for transfer → ${nv.name}`,
+    });
+  }
+
+  await admin
+    .from("carving_items")
+    .update({
+      vendor_id: nv.id,
+      vendor_name: nv.name,
+      vendor_type: nv.vendor_type,
+      status: "carving_assigned",
+      cnc_machine_id: null,
+      loaded_at: null,
+      loaded_by: null,
+      vendor_estimated_minutes: null,
+      received_at_vendor_at: null,
+      received_at_vendor_by: null,
+    })
+    .eq("id", carvingItemId);
+
+  // Slab status mirrors the carving item (back to assigned).
+  const { data: slabIdRow } = await admin
+    .from("carving_items")
+    .select("slab_requirement_id")
+    .eq("id", carvingItemId)
+    .maybeSingle();
+  if ((slabIdRow as { slab_requirement_id?: string } | null)?.slab_requirement_id) {
+    await admin
+      .from("slab_requirements")
+      .update({
+        status: "carving_assigned",
+        updated_by: profile.id,
+        updated_at: now,
+      })
+      .eq("id", (slabIdRow as { slab_requirement_id: string }).slab_requirement_id);
+  }
+
+  await recordEvent(
+    carvingItemId,
+    "transferred",
+    profile.id,
+    `Transferred ${oldVendorName} → ${nv.name}${wasLoaded ? " (was loaded)" : ""} · ${reason}`,
+  );
+  await logAudit(profile.id, "carving_transferred", "carving_item", carvingItemId, {
+    from_vendor: item.vendor_id,
+    to_vendor: nv.id,
+    was_loaded: wasLoaded,
+    reason,
+  });
+
+  refreshAll();
+  redirect(`${redirectTo}?toast=${encodeURIComponent(`Transferred to ${nv.name}`)}`);
+}
+
+// ── Part E: Manual vendor lifecycle ───────────────────────────────
+//
+// Manual carvers have no CNC and no system login. The carving head
+// runs the lifecycle on their behalf via two simple actions:
+//   markCarvingStartedManuallyAction → starts the timer
+//   markCarvingCompleteManuallyAction → marks ready for review
+// Approve / Reject reuse the existing CNC-side actions.
+
+export async function markCarvingStartedManuallyAction(formData: FormData) {
+  const { profile } = await requireAuth(["developer", "owner", "carving_head"]);
+  const admin = createAdminSupabaseClient();
+
+  const carvingItemId = txt(formData, "carving_item_id");
+  const redirectTo = txt(formData, "redirect_to") || `/carving/${carvingItemId}`;
+  if (!carvingItemId) redirect(`${redirectTo}?toast=Missing+job+id`);
+
+  const { data: ci } = await admin
+    .from("carving_items")
+    .select("id, vendor_type, vendor_name, status, slab_requirement_id")
+    .eq("id", carvingItemId)
+    .maybeSingle();
+  if (!ci) redirect(`${redirectTo}?toast=Job+not+found`);
+  const item = ci as {
+    id: string;
+    vendor_type: string;
+    vendor_name: string;
+    status: string;
+    slab_requirement_id: string;
+  };
+
+  if (item.vendor_type !== "Manual") {
+    redirect(`${redirectTo}?toast=Use+the+load+action+for+CNC+vendors`);
+  }
+  if (item.status !== "carving_assigned") {
+    redirect(`${redirectTo}?toast=Job+is+not+in+queue`);
+  }
+
+  const now = new Date().toISOString();
+  await admin
+    .from("carving_items")
+    .update({ status: "carving_in_progress", loaded_at: now, loaded_by: profile.id })
+    .eq("id", carvingItemId)
+    .eq("status", "carving_assigned");
+
+  await admin
+    .from("slab_requirements")
+    .update({ status: "carving_in_progress", updated_by: profile.id, updated_at: now })
+    .eq("id", item.slab_requirement_id);
+
+  await recordEvent(
+    carvingItemId,
+    "started_manually",
+    profile.id,
+    `Manual carving started · ${item.vendor_name}`,
+  );
+  await logAudit(profile.id, "carving_started_manually", "carving_item", carvingItemId, {
+    vendor_name: item.vendor_name,
+  });
+
+  refreshAll();
+  redirect(`${redirectTo}?toast=Marked+started`);
+}
+
+export async function markCarvingCompleteManuallyAction(formData: FormData) {
+  const { profile } = await requireAuth(["developer", "owner", "carving_head"]);
+  const admin = createAdminSupabaseClient();
+
+  const carvingItemId = txt(formData, "carving_item_id");
+  const tempLocation = txt(formData, "temporary_location") || "Manual carver yard";
+  const redirectTo = txt(formData, "redirect_to") || `/carving/${carvingItemId}`;
+  if (!carvingItemId) redirect(`${redirectTo}?toast=Missing+job+id`);
+
+  const { data: ci } = await admin
+    .from("carving_items")
+    .select("id, vendor_type, vendor_name, status, completed_at")
+    .eq("id", carvingItemId)
+    .maybeSingle();
+  if (!ci) redirect(`${redirectTo}?toast=Job+not+found`);
+  const item = ci as {
+    id: string;
+    vendor_type: string;
+    vendor_name: string;
+    status: string;
+    completed_at: string | null;
+  };
+
+  if (item.vendor_type !== "Manual") {
+    redirect(`${redirectTo}?toast=Use+the+unload+action+for+CNC+vendors`);
+  }
+  if (item.status !== "carving_in_progress") {
+    redirect(`${redirectTo}?toast=Job+is+not+in+progress`);
+  }
+  if (item.completed_at) redirect(`${redirectTo}?toast=Already+marked+complete`);
+
+  const now = new Date().toISOString();
+  await admin
+    .from("carving_items")
+    .update({
+      completed_at: now,
+      unloaded_at: now,
+      unloaded_by: profile.id,
+      temporary_location: tempLocation,
+    })
+    .eq("id", carvingItemId)
+    .is("completed_at", null);
+
+  await recordEvent(
+    carvingItemId,
+    "completed_manually",
+    profile.id,
+    `Manual carving complete · ${item.vendor_name} · stored at ${tempLocation}`,
+  );
+  await logAudit(profile.id, "carving_completed_manually", "carving_item", carvingItemId, {
+    vendor_name: item.vendor_name,
+    temporary_location: tempLocation,
+  });
+
+  refreshAll();
+  redirect(`${redirectTo}?toast=Marked+complete`);
 }
 
 // ── Job event timeline — used by JobDetailPeek modal ─────────────

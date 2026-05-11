@@ -9,10 +9,13 @@ import {
   rejectCarvingJobAction,
   updateCarvingLocationAction,
   cancelCarvingJobAction,
+  markCarvingStartedManuallyAction,
+  markCarvingCompleteManuallyAction,
 } from "../actions";
+import { CarvingJobControls } from "./carving-job-controls";
 
 export default async function CarvingJobDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireAuth(["developer", "owner", "carving_head"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head"]);
   const { id } = await params;
   const admin = createAdminSupabaseClient();
 
@@ -47,6 +50,7 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
   const jobRow = job as {
     id: string;
     slab_requirement_id: string;
+    vendor_id: string;
     vendor_name: string;
     vendor_type: string;
     cnc_machine_id: string | null;
@@ -62,11 +66,14 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
     photo_urls?: string[] | null;
     location?: string | null;
     ready_to_dispatch_at?: string | null;
+    requires_machine_type?: string | null;
+    received_at_vendor_at?: string | null;
+    received_at_vendor_by?: string | null;
   };
 
   // .maybeSingle() — slab_requirement might have been deleted/merged.
   // Render gracefully when null instead of crashing the page.
-  const [{ data: slab }, { data: machine }, { data: assignedByProfile }, { data: eventUserProfiles }] = await Promise.all([
+  const [{ data: slab }, { data: machine }, { data: assignedByProfile }, { data: eventUserProfiles }, { data: transferVendors }] = await Promise.all([
     admin
       .from("slab_requirements")
       .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, source_block_id")
@@ -82,6 +89,13 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
       .from("profiles")
       .select("id, full_name")
       .in("id", [...new Set((events ?? []).map((e) => e.user_id).filter(Boolean) as string[])]),
+    // Active CNC + Manual vendors for the transfer modal dropdown.
+    admin
+      .from("vendors")
+      .select("id, name, vendor_type")
+      .in("vendor_type", ["CNC", "Manual"])
+      .eq("is_active", true)
+      .order("name"),
   ]);
 
   const nameById = new Map<string, string>();
@@ -217,6 +231,67 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
                   </a>
                 ))}
               </div>
+            </section>
+          )}
+
+          {/* Phase 4 controls — receipt / tag / transfer.
+              Hidden when the job is already completed / dispatched
+              (the canShowTransfer logic gates this client-side too). */}
+          {!dispatched && !approved && (
+            <section className="page-card">
+              <h3 style={{ margin: "0 0 10px", fontSize: 13, textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--muted)" }}>
+                Workflow
+              </h3>
+              <CarvingJobControls
+                jobId={jobRow.id}
+                currentVendorId={jobRow.vendor_id}
+                currentVendorName={jobRow.vendor_name}
+                vendorType={jobRow.vendor_type}
+                status={jobRow.status}
+                cncMachineId={jobRow.cnc_machine_id}
+                requiresMachineType={jobRow.requires_machine_type ?? null}
+                receivedAtVendorAt={jobRow.received_at_vendor_at ?? null}
+                vendors={(transferVendors ?? []) as Array<{ id: string; name: string; vendor_type: string }>}
+                canManage={["developer", "owner", "carving_head"].includes(profile.role)}
+              />
+              {/* Manual vendor lifecycle buttons — Mark started / complete.
+                  Server-rendered (no client state). */}
+              {jobRow.vendor_type === "Manual" && (
+                <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                  {jobRow.status === "carving_assigned" && (
+                    <form action={markCarvingStartedManuallyAction}>
+                      <input type="hidden" name="carving_item_id" value={jobRow.id} />
+                      <input type="hidden" name="redirect_to" value={`/carving/${jobRow.id}`} />
+                      <button
+                        type="submit"
+                        className="primary-button"
+                        style={{ fontSize: 13, padding: "10px 16px", fontWeight: 700, width: "100%" }}
+                      >
+                        ▶ Mark started manually
+                      </button>
+                    </form>
+                  )}
+                  {jobRow.status === "carving_in_progress" && !jobRow.completed_at && (
+                    <form action={markCarvingCompleteManuallyAction} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <input type="hidden" name="carving_item_id" value={jobRow.id} />
+                      <input type="hidden" name="redirect_to" value={`/carving/${jobRow.id}`} />
+                      <input
+                        type="text"
+                        name="temporary_location"
+                        placeholder="Where will the finished piece sit? (e.g. Yard 3)"
+                        style={{ fontSize: 12, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
+                      />
+                      <button
+                        type="submit"
+                        className="primary-button"
+                        style={{ fontSize: 13, padding: "10px 16px", fontWeight: 700, width: "100%" }}
+                      >
+                        🎯 Mark complete manually
+                      </button>
+                    </form>
+                  )}
+                </div>
+              )}
             </section>
           )}
 

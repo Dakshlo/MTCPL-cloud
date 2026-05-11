@@ -42,6 +42,8 @@ The simpler PDF is shipped (production summary — daily SQFT/CFT per machine). 
 
 - **Operator-side dashboard**: "how many blocks did Ramesh cut this week" — deferred from the cutter operator workflow days.
 - **Bulk operator deactivate / rename** — currently only inline + via SQL.
+- **Per-temple default work-types** — Phase 4 left "this template always = lathe" out of scope. The work-type tag is set per-job at assign time today. A future small `temple_work_type_defaults` table could pre-fill the assign modal.
+- **Bulk-assign view** — Phase 4 deferred the "auto-distribute N slabs across vendors" view. The carving head still picks one slab at a time. The assign modal's per-vendor capacity readout is the first step toward this.
 
 ---
 

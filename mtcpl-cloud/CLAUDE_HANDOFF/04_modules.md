@@ -57,9 +57,9 @@ Phase 3 module. This is where most recent work has been.
 
 Tabs:
 - **Unassigned** — slabs in `cut_done` status. Grouped view shows TEMPLE CARDS; clicking a card opens center-peek with that temple's slab grid. Flat view shows everything as a flat list. Search + priority filter + date filter (Ready in: All / Today / Last 2d / 7d / 30d).
-- **Active** — `carving_assigned` + `carving_in_progress` jobs. Shows the **embedded Floor View** at top (fleet stats + per-vendor cockpit) followed by job cards. Each card has a status ribbon: **▶ CARVING NOW** (with running-for + remaining timer) or **⏳ WAITING** (queued).
+- **Active** — `carving_assigned` + `carving_in_progress` jobs. 6-state status ribbon: **▶ CARVING NOW** (CNC, loaded — with running-for + remaining timer), **🪚 MANUAL CARVING** (Manual vendor, in progress), **🪚 AWAITING MANUAL START** (Manual, queued), **🚚 AWAITING DELIVERY · Xh** (CNC, assigned but not yet received at vendor), **📦 AT VENDOR · Xh** (CNC, received but not yet loaded), fallback ⏳ WAITING. Plus a quick **🌀 LATHE** chip on cylindrical-tagged jobs and **🪚 MANUAL** chip on Manual-vendor jobs.
 - **Awaiting Review** — completed by vendor, not yet approved. Cards show **⏱ waiting Xh** timer. Click → center-peek with full detail + event timeline. Approve / reject inline (no navigation).
-- **Carving Done** — approved jobs. Shows a **CNC Report** quick link at top (just commit `???` — moved from sidebar to this tab).
+- **Carving Done** — approved jobs. Shows a **CNC Report** quick link at top.
 
 Toolbar:
 - Single search bar (matches slab id / label / description / temple / stone / vendor / status / source block)
@@ -70,15 +70,19 @@ Toolbar:
 - Date filter pill row (per tab — "Ready in" / "Assigned in" / "Completed in" / "Approved in")
 
 Server actions live in `src/app/(app)/carving/actions.ts`. Notable:
-- `assignCarvingJobAction` — carving head assigns slab to vendor (CNC only, urgency, estimated_minutes)
-- `loadSlabOnMachineAction` — vendor loads slab on a single-head machine
-- `loadTwoSlabsOnMultiHeadAction` — vendor loads TWO identical slabs on a 2-head machine (validates dims + temple + label match)
-- `completeAndUnloadAction` — vendor unloads (also unloads paired item on 2-head machines)
+- `assignCarvingJobAction` — carving head assigns slab to CNC OR Manual vendor (urgency, estimated_minutes, `requires_machine_type` for CNC).
+- `acknowledgeReceiptAction` (Phase 4) — vendor operator OR carving head marks slab physically received at the vendor's shade. Closes the assign → load gap. Records a `received_at_vendor` event.
+- `loadSlabOnMachineAction` — vendor loads slab. Validates machine type vs job tag + slab dims vs machine bed (migration 024). Auto-fills `received_at_vendor_at` if NULL at load time.
+- `loadTwoSlabsOnMultiHeadAction` — vendor loads TWO identical slabs on a 2-head machine. Adds machine type+dim checks. Both slabs auto-receipted.
+- `completeAndUnloadAction` — vendor unloads (also unloads paired item on 2-head machines).
+- `updateRequiresMachineTypeAction` (Phase 4) — re-tag a CNC job's work type after the initial assign.
+- `transferCarvingJobAction` (Phase 4) — change the vendor on a carving_items row. Auto-unloads the current CNC if loaded (records `unloaded_for_transfer` event). Blocks 2-head pairs. Preserves the row id so all events stay attached.
+- `markCarvingStartedManuallyAction` / `markCarvingCompleteManuallyAction` (Phase 4) — carving head fires these on behalf of Manual carvers. Sets loaded_at + completed_at without involving cnc_machines. Manual carvers don't use the system.
 - `flagMaintenanceAction` / `resolveMaintenanceAction` — machine maintenance with reason dropdown
 - `approveCarvingJobAction` — auto-marks ready-for-dispatch (uses temporary_location). Supports `stay=1` to skip redirect (peek modal).
 - `rejectCarvingJobAction` — sends back to vendor. Also supports `stay=1`.
 - `getMachineHistory` / `getJobEvents` — read-only fetchers used by modals.
-- Vendor CRUD: create / update / deactivate / reactivate / delete (hard delete only when vendor has zero machines + zero items).
+- Vendor CRUD: create / update / deactivate / reactivate / delete (hard delete only when vendor has zero machines + zero items). Migration 024 dim caps (`max_length_in / max_width_in / max_thickness_in`) flow through `machines_json` on the form payload.
 
 ## Carving Floor — `/carving/floor` (developer, owner, carving_head)
 
@@ -125,6 +129,11 @@ Modals:
 - **Flag maintenance** — reason dropdown (tool_change / spindle_issue / electrical / coolant / scheduled_service / other) + detail textarea.
 - **Edit location** — for completed-but-not-yet-shipped slabs.
 - **Machine history** (📊 button) — last 30 days of events from `cnc_machine_events`, with totals (carving time, sessions, downtime, maint episodes).
+
+Phase 4 queue-row additions:
+- Each queue row shows a 🚚 **IN TRANSIT** vs 📦 **AT SHADE** pill so the vendor can tell at a glance whether the slab is still travelling or sitting on their floor.
+- 🌀 **LATHE** chip on cylindrical jobs (work-type tagged at assign time).
+- Green **✅ Mark received** button on rows where `received_at_vendor_at IS NULL`. Wires `acknowledgeReceiptAction`. The Load button is still available regardless — the load action also auto-fills the receipt timestamp if it's NULL.
 
 Mobile-first throughout — vendor uses this on a phone on the floor.
 

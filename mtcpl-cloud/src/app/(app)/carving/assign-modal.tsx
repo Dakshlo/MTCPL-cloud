@@ -1,16 +1,20 @@
 "use client";
 
 /**
- * Assign-to-vendor — Phase 3 (CNC ops), center-peek dialog.
+ * Assign-to-vendor — Phase 4 (CNC ops + Manual + work-type tagging).
  *
  * Carving head:
- *   1. Picks a CNC vendor from the live list (each row shows
- *      "X/Y free · Z queued").
- *   2. After picking, sees a grid of THAT vendor's machines colour-
- *      coded by status — gives them an at-a-glance read on which
- *      machines will pick this slab up vs whether it'll go to a
- *      queue. (They don't pick the machine; the vendor does.)
- *   3. Marks urgency, optionally enters a rough estimated time
+ *   1. Picks a work type — Flat panel (default, goes to multi-head)
+ *      or 🌀 Lathe (cylindrical, goes to lathe). The pick filters and
+ *      sorts the vendor list so the vendor whose machines best match
+ *      bubbles up.
+ *   2. Picks a vendor from the live list. Each row shows the type
+ *      breakdown: "2 multi-head free · 1 lathe free · 4 queued".
+ *      Manual vendors show as "🪚 Manual carver".
+ *   3. After picking a CNC vendor, sees a grid of THAT vendor's
+ *      machines colour-coded by status. Manual vendors show a
+ *      compact "no machines tracked" panel instead.
+ *   4. Marks urgency, optionally enters a rough estimated time
  *      (days + hours since carving runs span hours to multi-day).
  *
  * Renders as a center-peek modal (matches the dashboard ID-lookup +
@@ -25,8 +29,7 @@ type Machine = {
   id: string;
   machine_code: string;
   status: "idle" | "carving" | "maintenance" | "inactive";
-  /** Migration 021: 'single_head' | 'multi_head_2' | 'lathe'. Decides
-   *  the small type pill on each machine tile in the picker. */
+  /** Migration 021: 'single_head' | 'multi_head_2' | 'lathe'. */
   machine_type?: "single_head" | "multi_head_2" | "lathe";
 };
 
@@ -54,12 +57,45 @@ type Slab = {
   thickness_ft: number;
 };
 
+type WorkType = "flat" | "lathe";
+
 const MACHINE_TINT: Record<Machine["status"], { bg: string; border: string; fg: string; label: string }> = {
   idle: { bg: "rgba(22,163,74,0.1)", border: "rgba(22,163,74,0.4)", fg: "#15803d", label: "FREE" },
   carving: { bg: "rgba(37,99,235,0.08)", border: "rgba(37,99,235,0.4)", fg: "#1d4ed8", label: "RUNNING" },
   maintenance: { bg: "rgba(220,38,38,0.08)", border: "rgba(220,38,38,0.4)", fg: "#b91c1c", label: "DOWN" },
   inactive: { bg: "var(--surface-alt)", border: "var(--border)", fg: "var(--muted)", label: "OFF" },
 };
+
+// Compute per-vendor machine type breakdown. We can't trust the
+// `live` summary alone because it doesn't split free machines by
+// type. Walk the machines array to count free / busy / maint by
+// each machine_type — drives the readout AND the lathe-sort.
+function vendorTypeBreakdown(v: Vendor) {
+  const out = {
+    multiFree: 0,
+    multiBusy: 0,
+    multiTotal: 0,
+    latheFree: 0,
+    latheBusy: 0,
+    latheTotal: 0,
+  };
+  for (const m of v.machines) {
+    if (!m) continue;
+    if (m.machine_type === "lathe") {
+      out.latheTotal += 1;
+      if (m.status === "idle") out.latheFree += 1;
+      else if (m.status === "carving") out.latheBusy += 1;
+    } else {
+      // multi_head_2 or legacy single_head — both go in the
+      // "multi-head" bucket since the fleet has no real single-head
+      // machines today.
+      out.multiTotal += 1;
+      if (m.status === "idle") out.multiFree += 1;
+      else if (m.status === "carving") out.multiBusy += 1;
+    }
+  }
+  return out;
+}
 
 export function AssignModal({
   slab,
@@ -71,6 +107,7 @@ export function AssignModal({
   onClose: () => void;
 }) {
   const [vendorId, setVendorId] = useState<string>("");
+  const [workType, setWorkType] = useState<WorkType>("flat");
   const [urgency, setUrgency] = useState<"normal" | "urgent">("normal");
   const [days, setDays] = useState<string>("");
   const [hours, setHours] = useState<string>("");
@@ -90,26 +127,45 @@ export function AssignModal({
   }, [onClose]);
 
   const selectedVendor = vendors.find((v) => v.id === vendorId);
+  const isManual = selectedVendor?.vendor_type === "Manual";
 
-  // Sort vendors so ones with idle capacity bubble to the top —
-  // carving head can scan and grab a free vendor fast.
+  // Sort vendors so the right machine type bubbles up. Manual
+  // vendors always sit at the bottom (capacity-irrelevant). For
+  // CNC vendors, when 🌀 Lathe is selected, prioritise free lathes;
+  // otherwise prioritise free multi-heads. Within each tier, vendors
+  // with shorter queues sort ahead.
   const sortedVendors = useMemo(() => {
     return [...vendors].sort((a, b) => {
-      const aFree = a.live?.free ?? 0;
-      const bFree = b.live?.free ?? 0;
+      // Manual vendors last (they don't have machines to match)
+      if (a.vendor_type !== b.vendor_type) {
+        return a.vendor_type === "Manual" ? 1 : -1;
+      }
+      if (a.vendor_type === "Manual" && b.vendor_type === "Manual") {
+        return a.name.localeCompare(b.name);
+      }
+      const aBreak = vendorTypeBreakdown(a);
+      const bBreak = vendorTypeBreakdown(b);
+      const aFree = workType === "lathe" ? aBreak.latheFree : aBreak.multiFree;
+      const bFree = workType === "lathe" ? bBreak.latheFree : bBreak.multiFree;
       if (aFree !== bFree) return bFree - aFree;
+      // Tier 2: have-the-type-at-all (capacity 0 right now) ahead of
+      // vendors that don't have that type in the fleet at all.
+      const aHasType = workType === "lathe" ? aBreak.latheTotal : aBreak.multiTotal;
+      const bHasType = workType === "lathe" ? bBreak.latheTotal : bBreak.multiTotal;
+      if (aHasType !== bHasType) return bHasType - aHasType;
       const aQ = a.live?.queued ?? 0;
       const bQ = b.live?.queued ?? 0;
       if (aQ !== bQ) return aQ - bQ;
       return a.name.localeCompare(b.name);
     });
-  }, [vendors]);
+  }, [vendors, workType]);
 
   // Compute total minutes from days + hours inputs.
-  // Note: `name="estimated_minutes"` on a hidden input feeds the
-  // server action — that field continues to take minutes so the DB
-  // stores a single normalised unit.
   const totalMinutes = (Number(days) || 0) * 60 * 24 + (Number(hours) || 0) * 60;
+
+  // Map workType → requires_machine_type form value. Flat panel is
+  // the default and stores NULL on the server side (empty string).
+  const requiresMachineType = workType === "lathe" ? "lathe" : "";
 
   return (
     <div
@@ -192,25 +248,153 @@ export function AssignModal({
         <div style={{ flex: 1, overflowY: "auto", padding: "14px 18px 18px" }}>
           <form action={assignCarvingJobAction} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <input type="hidden" name="slab_id" value={slab.id} />
+            <input type="hidden" name="requires_machine_type" value={requiresMachineType} />
+
+            {/* Work type picker — drives vendor sort + load-time
+                validation. Hidden when the selected vendor is Manual
+                (they don't have machine types to match). */}
+            {!isManual && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <Label>Work type</Label>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => setWorkType("flat")}
+                    style={{
+                      flex: 1,
+                      padding: "10px 14px",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      border: `1.5px solid ${workType === "flat" ? "var(--gold-dark)" : "var(--border)"}`,
+                      background: workType === "flat" ? "rgba(180,115,51,0.08)" : "var(--surface)",
+                      color: "var(--text)",
+                      borderRadius: 8,
+                      cursor: "pointer",
+                    }}
+                    title="Flat panel work — must go on a 2-head CNC machine. Default."
+                  >
+                    📐 Flat panel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setWorkType("lathe")}
+                    style={{
+                      flex: 1,
+                      padding: "10px 14px",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      border: `1.5px solid ${workType === "lathe" ? "#7c3aed" : "var(--border)"}`,
+                      background: workType === "lathe" ? "rgba(124,58,237,0.08)" : "var(--surface)",
+                      color: workType === "lathe" ? "#5b21b6" : "var(--text)",
+                      borderRadius: 8,
+                      cursor: "pointer",
+                    }}
+                    title="Cylindrical work — must go on a lathe."
+                  >
+                    🌀 Lathe (cylindrical)
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Vendor list */}
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <Label>CNC vendor</Label>
+              <Label>Vendor</Label>
               {sortedVendors.length === 0 ? (
                 <div className="muted" style={{ padding: 12, fontSize: 13 }}>
-                  No active CNC vendors. Add one in <strong>Manage Vendors</strong>.
+                  No active vendors. Add one in <strong>Manage Vendors</strong>.
                 </div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   {sortedVendors.map((v) => {
-                    const live = v.live;
-                    const free = live?.free ?? 0;
-                    const total = live?.total ?? 0;
-                    const queued = live?.queued ?? 0;
-                    const busy = live?.busy ?? 0;
-                    const maint = live?.maintenance ?? 0;
                     const isSelected = v.id === vendorId;
-                    const hasFree = free > 0;
+                    const isVendorManual = v.vendor_type === "Manual";
+                    const queued = v.live?.queued ?? 0;
+
+                    // Manual vendor row — compact, no machine counts.
+                    if (isVendorManual) {
+                      return (
+                        <label
+                          key={v.id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: 10,
+                            padding: "10px 12px",
+                            background: isSelected ? "rgba(180,115,51,0.08)" : "var(--surface)",
+                            border: `1.5px solid ${isSelected ? "var(--gold-dark)" : "var(--border)"}`,
+                            borderRadius: 8,
+                            cursor: "pointer",
+                            transition: "border-color 0.12s, background 0.12s",
+                          }}
+                        >
+                          <input
+                            type="radio"
+                            name="vendor_id"
+                            value={v.id}
+                            checked={isSelected}
+                            onChange={() => setVendorId(v.id)}
+                            style={{ cursor: "pointer", flexShrink: 0 }}
+                          />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div
+                              style={{
+                                fontWeight: 700,
+                                fontSize: 13,
+                                color: "var(--text)",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {v.name}
+                              <span
+                                style={{
+                                  marginLeft: 8,
+                                  fontSize: 10,
+                                  fontWeight: 700,
+                                  padding: "1px 6px",
+                                  borderRadius: 4,
+                                  background: "rgba(120,53,15,0.12)",
+                                  color: "#78350f",
+                                  letterSpacing: "0.05em",
+                                }}
+                              >
+                                🪚 MANUAL
+                              </span>
+                            </div>
+                            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+                              No machines tracked · head fires Mark started / Mark complete
+                            </div>
+                          </div>
+                          {queued > 0 && (
+                            <div
+                              style={{
+                                padding: "4px 10px",
+                                borderRadius: 999,
+                                background: "rgba(180,115,51,0.12)",
+                                color: "#92400e",
+                                fontWeight: 700,
+                                fontSize: 12,
+                                fontFamily: "ui-monospace, monospace",
+                                whiteSpace: "nowrap",
+                                flexShrink: 0,
+                              }}
+                            >
+                              {queued} in queue
+                            </div>
+                          )}
+                        </label>
+                      );
+                    }
+
+                    // CNC vendor row — type breakdown.
+                    const br = vendorTypeBreakdown(v);
+                    const focusedFree = workType === "lathe" ? br.latheFree : br.multiFree;
+                    const focusedTotal = workType === "lathe" ? br.latheTotal : br.multiTotal;
+                    const hasFreeFocusedType = focusedFree > 0;
+                    const hasTypeInFleet = focusedTotal > 0;
                     return (
                       <label
                         key={v.id}
@@ -224,6 +408,7 @@ export function AssignModal({
                           border: `1.5px solid ${isSelected ? "var(--gold-dark)" : "var(--border)"}`,
                           borderRadius: 8,
                           cursor: "pointer",
+                          opacity: hasTypeInFleet ? 1 : 0.6,
                           transition: "border-color 0.12s, background 0.12s",
                         }}
                       >
@@ -256,20 +441,52 @@ export function AssignModal({
                               marginTop: 2,
                             }}
                           >
-                            {total} machine{total !== 1 ? "s" : ""}
-                            {busy > 0 && ` · ${busy} carving`}
-                            {maint > 0 && ` · ${maint} maint`}
-                            {queued > 0 && ` · ${queued} in queue`}
+                            <span
+                              style={{
+                                fontWeight: workType === "flat" ? 700 : 400,
+                                color: workType === "flat" ? "var(--text)" : "var(--muted)",
+                              }}
+                            >
+                              {br.multiFree}/{br.multiTotal} multi-head
+                            </span>
+                            {" · "}
+                            <span
+                              style={{
+                                fontWeight: workType === "lathe" ? 700 : 400,
+                                color: workType === "lathe" ? "#7c3aed" : "var(--muted)",
+                              }}
+                            >
+                              {br.latheFree}/{br.latheTotal} lathe
+                            </span>
+                            {queued > 0 && ` · ${queued} queued`}
                           </div>
+                          {!hasTypeInFleet && (
+                            <div
+                              style={{
+                                fontSize: 10,
+                                color: "#b45309",
+                                marginTop: 2,
+                                fontStyle: "italic",
+                              }}
+                            >
+                              No {workType === "lathe" ? "lathe" : "multi-head"} in this vendor&apos;s fleet
+                            </div>
+                          )}
                         </div>
                         <div
                           style={{
                             padding: "4px 10px",
                             borderRadius: 999,
-                            background: hasFree
+                            background: hasFreeFocusedType
                               ? "rgba(22,163,74,0.12)"
-                              : "rgba(217,119,6,0.12)",
-                            color: hasFree ? "#15803d" : "#b45309",
+                              : hasTypeInFleet
+                                ? "rgba(217,119,6,0.12)"
+                                : "var(--surface-alt)",
+                            color: hasFreeFocusedType
+                              ? "#15803d"
+                              : hasTypeInFleet
+                                ? "#b45309"
+                                : "var(--muted)",
                             fontWeight: 700,
                             fontSize: 12,
                             fontFamily: "ui-monospace, monospace",
@@ -277,7 +494,7 @@ export function AssignModal({
                             flexShrink: 0,
                           }}
                         >
-                          {free}/{total} free
+                          {focusedFree}/{focusedTotal} free
                         </div>
                       </label>
                     );
@@ -286,8 +503,8 @@ export function AssignModal({
               )}
             </div>
 
-            {/* Per-machine breakdown for the selected vendor */}
-            {selectedVendor && (
+            {/* Per-machine breakdown for the selected vendor (CNC only) */}
+            {selectedVendor && selectedVendor.vendor_type === "CNC" && (
               <div
                 style={{
                   display: "flex",
@@ -330,20 +547,30 @@ export function AssignModal({
                           : m.machine_type === "lathe"
                             ? "LATHE"
                             : null;
+                      const matchesWorkType =
+                        workType === "lathe"
+                          ? m.machine_type === "lathe"
+                          : m.machine_type !== "lathe";
                       return (
                         <div
                           key={m.id}
                           style={{
                             padding: "6px 10px",
                             background: tint.bg,
-                            border: `1.5px solid ${tint.border}`,
+                            border: `1.5px solid ${matchesWorkType ? tint.border : "var(--border)"}`,
                             borderRadius: 6,
                             fontFamily: "ui-monospace, monospace",
                             display: "flex",
                             flexDirection: "column",
                             alignItems: "flex-start",
                             gap: 2,
+                            opacity: matchesWorkType ? 1 : 0.45,
                           }}
+                          title={
+                            !matchesWorkType
+                              ? `Wrong machine type for ${workType === "lathe" ? "lathe" : "flat-panel"} work`
+                              : undefined
+                          }
                         >
                           <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
                             <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>
@@ -383,22 +610,60 @@ export function AssignModal({
                     })}
                   </div>
                 )}
-                {(selectedVendor.live?.free ?? 0) === 0 && (
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: "#b45309",
-                      background: "rgba(217,119,6,0.06)",
-                      padding: "6px 10px",
-                      borderRadius: 6,
-                      border: "1px solid rgba(217,119,6,0.25)",
-                    }}
-                  >
-                    All of {selectedVendor.name}&apos;s machines are busy or in
-                    maintenance. The slab will go to their queue and load when
-                    a machine frees up.
-                  </div>
-                )}
+                {(() => {
+                  const br = vendorTypeBreakdown(selectedVendor);
+                  const focusedFree = workType === "lathe" ? br.latheFree : br.multiFree;
+                  if (focusedFree > 0) return null;
+                  return (
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: "#b45309",
+                        background: "rgba(217,119,6,0.06)",
+                        padding: "6px 10px",
+                        borderRadius: 6,
+                        border: "1px solid rgba(217,119,6,0.25)",
+                      }}
+                    >
+                      No free {workType === "lathe" ? "lathe" : "multi-head"} machines right
+                      now at {selectedVendor.name}. The slab will queue and
+                      load when one frees up.
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
+            {/* Manual-vendor empty-state panel */}
+            {selectedVendor && isManual && (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 6,
+                  padding: 12,
+                  background: "rgba(180,115,51,0.06)",
+                  border: "1px dashed rgba(180,115,51,0.3)",
+                  borderRadius: 8,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: "var(--muted)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.06em",
+                  }}
+                >
+                  Manual vendor — no machines tracked
+                </div>
+                <div style={{ fontSize: 12, color: "var(--text)", lineHeight: 1.45 }}>
+                  Manual carvers don&apos;t use the system. After assigning,
+                  the carving head will fire <strong>▶ Mark started</strong>{" "}
+                  and <strong>🎯 Mark complete</strong> on their behalf from
+                  the job detail page.
+                </div>
               </div>
             )}
 
@@ -471,8 +736,9 @@ export function AssignModal({
                 <span style={{ fontSize: 12, color: "var(--muted)" }}>hours</span>
               </div>
               <span style={{ fontSize: 11, color: "var(--muted-light)" }}>
-                The vendor will set a tighter estimate when they actually load
-                the slab onto a machine. Leave 0 if unsure.
+                {isManual
+                  ? "Manual carvers don't update the system; this is your guess for tracking."
+                  : "The vendor will set a tighter estimate when they load the slab. Leave 0 if unsure."}
               </span>
             </div>
 

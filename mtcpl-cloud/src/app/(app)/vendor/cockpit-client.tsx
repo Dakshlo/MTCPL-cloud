@@ -9,6 +9,7 @@ import {
   flagMaintenanceAction,
   resolveMaintenanceAction,
   updateTemporaryLocationAction,
+  acknowledgeReceiptAction,
   getMachineHistory,
   type MachineHistory,
 } from "../carving/actions";
@@ -37,6 +38,11 @@ export type CarvingJobLite = {
   assigned_at: string;
   note: string | null;
   slab: SlabLite | null;
+  /** Migration 023 — timestamp when the slab physically arrived at
+   *  the vendor's shade. NULL while still in transit. */
+  received_at_vendor_at?: string | null;
+  /** Migration 024 — work-type tag. 'lathe' = cylindrical. */
+  requires_machine_type?: string | null;
 };
 
 export type CncMachineLive = {
@@ -496,6 +502,8 @@ function QueueRow({
   onLoad: () => void;
 }) {
   const isUrgent = job.urgency === "urgent";
+  const received = !!job.received_at_vendor_at;
+  const isLathe = job.requires_machine_type === "lathe";
   return (
     <div
       style={{
@@ -526,6 +534,37 @@ function QueueRow({
               ⚡ URGENT
             </span>
           )}
+          {isLathe && (
+            <span
+              style={{
+                fontSize: 9,
+                fontWeight: 800,
+                padding: "2px 6px",
+                borderRadius: 3,
+                background: "rgba(124,58,237,0.15)",
+                color: "#7c3aed",
+                letterSpacing: "0.05em",
+              }}
+              title="Cylindrical work — must go on a lathe"
+            >
+              🌀 LATHE
+            </span>
+          )}
+          {/* Migration 023 — receipt pill: green when at-shade, amber while in transit. */}
+          <span
+            style={{
+              fontSize: 9,
+              fontWeight: 800,
+              padding: "2px 6px",
+              borderRadius: 3,
+              background: received ? "rgba(22,163,74,0.12)" : "rgba(217,119,6,0.12)",
+              color: received ? "#15803d" : "#b45309",
+              letterSpacing: "0.05em",
+            }}
+            title={received ? "Slab confirmed at vendor shade" : "Slab still in transit from cutting"}
+          >
+            {received ? "📦 AT SHADE" : "🚚 IN TRANSIT"}
+          </span>
           <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 13 }}>
             {job.slab_id}
           </span>
@@ -546,22 +585,46 @@ function QueueRow({
           </div>
         )}
       </div>
-      <button
-        type="button"
-        onClick={onLoad}
-        disabled={!hasIdleMachine}
-        className="primary-button"
-        style={{
-          fontSize: 12,
-          padding: "8px 14px",
-          opacity: hasIdleMachine ? 1 : 0.5,
-          cursor: hasIdleMachine ? "pointer" : "not-allowed",
-          flexShrink: 0,
-        }}
-        title={hasIdleMachine ? "Load to a CNC" : "All machines busy or in maintenance"}
-      >
-        Load to CNC →
-      </button>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
+        {!received && (
+          <form action={acknowledgeReceiptAction}>
+            <input type="hidden" name="carving_item_id" value={job.id} />
+            <input type="hidden" name="redirect_to" value="/vendor" />
+            <button
+              type="submit"
+              style={{
+                fontSize: 11,
+                padding: "6px 12px",
+                background: "#16a34a",
+                color: "#fff",
+                border: "none",
+                borderRadius: 6,
+                fontWeight: 700,
+                cursor: "pointer",
+                width: "100%",
+              }}
+              title="Confirm slab physically arrived at your shade"
+            >
+              ✅ Mark received
+            </button>
+          </form>
+        )}
+        <button
+          type="button"
+          onClick={onLoad}
+          disabled={!hasIdleMachine}
+          className="primary-button"
+          style={{
+            fontSize: 12,
+            padding: "8px 14px",
+            opacity: hasIdleMachine ? 1 : 0.5,
+            cursor: hasIdleMachine ? "pointer" : "not-allowed",
+          }}
+          title={hasIdleMachine ? "Load to a CNC" : "All machines busy or in maintenance"}
+        >
+          Load to CNC →
+        </button>
+      </div>
     </div>
   );
 }

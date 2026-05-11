@@ -69,7 +69,7 @@ export default async function CarvingDashboardPage({
     admin
       .from("carving_items")
       .select(
-        "id, slab_requirement_id, vendor_id, vendor_name, vendor_type, status, urgency, due_at, assigned_at, completed_at, progress_phase, cnc_machine_id, loaded_at, vendor_estimated_minutes, estimated_minutes",
+        "id, slab_requirement_id, vendor_id, vendor_name, vendor_type, status, urgency, due_at, assigned_at, completed_at, progress_phase, cnc_machine_id, loaded_at, vendor_estimated_minutes, estimated_minutes, received_at_vendor_at, requires_machine_type",
       )
       .in("status", ["carving_assigned", "carving_in_progress"])
       .order("assigned_at", { ascending: false }),
@@ -85,18 +85,19 @@ export default async function CarvingDashboardPage({
       .not("review_approved_at", "is", null)
       .order("review_approved_at", { ascending: false })
       .limit(200),
-    // Carving page is now CNC-only. Manual / Outsource vendors are
-    // paused for the Phase 3 CNC ops rollout — they'll come back
-    // later if needed. block_vendor type is for the block side and
-    // must never appear here.
+    // Carving page surfaces CNC + Manual vendors. (Manual carvers
+    // were re-introduced in Phase 4 — they don't have machines and
+    // use a simpler bypass workflow, but the carving head still
+    // needs to assign work to them.) Outsource is paused; block_vendor
+    // type is for the block side and must never appear here.
     //
-    // We pull ALL CNC vendors (including inactive) so the manage
-    // peek modal can show + reactivate them. The Assign modal
-    // filters out inactive ones client-side.
+    // We pull ALL CNC + Manual vendors (including inactive) so the
+    // manage peek modal can show + reactivate them. The Assign modal
+    // filters inactive ones out client-side.
     admin
       .from("vendors")
       .select("id, name, vendor_type, is_active")
-      .eq("vendor_type", "CNC")
+      .in("vendor_type", ["CNC", "Manual"])
       .order("name"),
     // Pull live machine status too so the assign modal can show
     // "Vivek · 3/10 free · 8 queued" per vendor. machine_type also

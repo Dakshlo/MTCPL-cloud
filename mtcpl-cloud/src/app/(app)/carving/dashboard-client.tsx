@@ -82,6 +82,12 @@ type JobRow = {
   loaded_at?: string | null;
   vendor_estimated_minutes?: number | null;
   estimated_minutes?: number | null;
+  /** Migration 023 — timestamp when the slab physically arrived at
+   *  the vendor's shade. NULL while the slab is still in transit. */
+  received_at_vendor_at?: string | null;
+  /** Migration 024 — work-type tag for CNC jobs. 'lathe' = must go
+   *  on a lathe machine. NULL = flat-panel default (multi-head). */
+  requires_machine_type?: string | null;
 };
 
 type Vendor = {
@@ -1380,30 +1386,36 @@ function JobsByTemple({
                     stoneTypes={stoneTypes}
                   />
 
-                  {/* ACTIVE-tab status ribbon. Surfaces "▶ CARVING NOW"
-                      vs "⏳ WAITING" so the carving head + team can
-                      tell at a glance whether each row is loaded on a
-                      machine or sitting in the vendor's queue.
-                      Carving rows show the running-for / remaining
+                  {/* ACTIVE-tab status ribbon. Surfaces six possible
+                      states so the carving head + team can tell at a
+                      glance where each job sits:
+                        ▶ CARVING NOW          (loaded on CNC)
+                        🪚 MANUAL CARVING       (in_progress, no machine, Manual vendor)
+                        🪚 AWAITING MANUAL START (assigned, Manual vendor)
+                        🚚 AWAITING DELIVERY    (assigned, CNC, no receipt yet)
+                        📦 AT VENDOR            (assigned, CNC, received but not loaded)
+                        ⏳ WAITING              (legacy fallback)
+                      Carving rows still show the running-for / remaining
                       duo when a loaded_at + ETA exist. */}
                   {fields.includes("deadline") && (() => {
                     const isCarving = j.status === "carving_in_progress";
                     const isUrgent = j.urgency === "urgent";
+                    const isManual = j.vendor_type === "Manual";
+                    const fmtDur = (m: number) => {
+                      const a = Math.abs(Math.round(m));
+                      if (a < 60) return `${a}m`;
+                      if (a < 60 * 24) return `${Math.floor(a / 60)}h ${a % 60}m`;
+                      return `${Math.floor(a / (60 * 24))}d ${Math.floor((a % (60 * 24)) / 60)}h`;
+                    };
                     if (isCarving && j.loaded_at) {
                       const elapsedMin = (now - new Date(j.loaded_at).getTime()) / 60000;
                       const eta = j.vendor_estimated_minutes ?? j.estimated_minutes ?? null;
                       const remaining = eta != null ? eta - elapsedMin : null;
-                      const fmtDur = (m: number) => {
-                        const a = Math.abs(Math.round(m));
-                        if (a < 60) return `${a}m`;
-                        if (a < 60 * 24) return `${Math.floor(a / 60)}h ${a % 60}m`;
-                        return `${Math.floor(a / (60 * 24))}d ${Math.floor((a % (60 * 24)) / 60)}h`;
-                      };
                       return (
                         <div
                           style={{
-                            background: "rgba(37,99,235,0.08)",
-                            border: "1px solid rgba(37,99,235,0.35)",
+                            background: isManual ? "rgba(120,53,15,0.08)" : "rgba(37,99,235,0.08)",
+                            border: `1px solid ${isManual ? "rgba(120,53,15,0.35)" : "rgba(37,99,235,0.35)"}`,
                             borderRadius: 6,
                             padding: "5px 8px",
                             display: "flex",
@@ -1411,13 +1423,13 @@ function JobsByTemple({
                             gap: 2,
                           }}
                         >
-                          <div style={{ fontSize: 9, fontWeight: 800, color: "#1d4ed8", letterSpacing: "0.07em" }}>
-                            ▶ CARVING NOW
+                          <div style={{ fontSize: 9, fontWeight: 800, color: isManual ? "#92400e" : "#1d4ed8", letterSpacing: "0.07em" }}>
+                            {isManual ? "🪚 MANUAL CARVING" : "▶ CARVING NOW"}
                           </div>
                           <div
                             style={{
                               fontSize: 10,
-                              color: "#1e3a8a",
+                              color: isManual ? "#78350f" : "#1e3a8a",
                               fontFamily: "ui-monospace, monospace",
                               display: "flex",
                               gap: 6,
@@ -1426,7 +1438,7 @@ function JobsByTemple({
                           >
                             <span>▶ {fmtDur(elapsedMin)}</span>
                             {remaining != null && (
-                              <span style={{ color: remaining < 0 ? "#dc2626" : remaining < 15 ? "#b45309" : "#1d4ed8", fontWeight: 700 }}>
+                              <span style={{ color: remaining < 0 ? "#dc2626" : remaining < 15 ? "#b45309" : isManual ? "#92400e" : "#1d4ed8", fontWeight: 700 }}>
                                 ⏱ {remaining < 0 ? `${fmtDur(remaining)} over` : `${fmtDur(remaining)} left`}
                               </span>
                             )}
@@ -1434,12 +1446,54 @@ function JobsByTemple({
                         </div>
                       );
                     }
-                    // Carving_assigned / not loaded yet
+                    // Queued state: branch on Manual vs CNC + receipt
+                    if (isManual) {
+                      return (
+                        <div
+                          style={{
+                            background: isUrgent ? "rgba(220,38,38,0.08)" : "rgba(120,53,15,0.08)",
+                            border: `1px solid ${isUrgent ? "rgba(220,38,38,0.35)" : "rgba(120,53,15,0.3)"}`,
+                            borderRadius: 6,
+                            padding: "5px 8px",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: 6,
+                            fontSize: 10,
+                            fontWeight: 800,
+                            letterSpacing: "0.07em",
+                            color: isUrgent ? "#991b1b" : "#78350f",
+                          }}
+                        >
+                          <span>🪚 AWAITING MANUAL START</span>
+                          {isUrgent && <span style={{ fontSize: 9, fontWeight: 800 }}>⚡ URGENT</span>}
+                        </div>
+                      );
+                    }
+                    // CNC + carving_assigned — branch on receipt
+                    const received = !!j.received_at_vendor_at;
+                    const assignedAt = j.assigned_at ? new Date(j.assigned_at).getTime() : null;
+                    const sinceAssignedMin =
+                      assignedAt != null ? (now - assignedAt) / 60000 : null;
+                    const sinceReceivedMin =
+                      received && j.received_at_vendor_at
+                        ? (now - new Date(j.received_at_vendor_at).getTime()) / 60000
+                        : null;
                     return (
                       <div
                         style={{
-                          background: isUrgent ? "rgba(220,38,38,0.08)" : "rgba(217,119,6,0.08)",
-                          border: `1px solid ${isUrgent ? "rgba(220,38,38,0.35)" : "rgba(217,119,6,0.3)"}`,
+                          background: isUrgent
+                            ? "rgba(220,38,38,0.08)"
+                            : received
+                              ? "rgba(180,115,51,0.08)"
+                              : "rgba(217,119,6,0.08)",
+                          border: `1px solid ${
+                            isUrgent
+                              ? "rgba(220,38,38,0.35)"
+                              : received
+                                ? "rgba(180,115,51,0.3)"
+                                : "rgba(217,119,6,0.3)"
+                          }`,
                           borderRadius: 6,
                           padding: "5px 8px",
                           display: "flex",
@@ -1449,25 +1503,63 @@ function JobsByTemple({
                           fontSize: 10,
                           fontWeight: 800,
                           letterSpacing: "0.07em",
-                          color: isUrgent ? "#991b1b" : "#b45309",
+                          color: isUrgent ? "#991b1b" : received ? "#78350f" : "#b45309",
                         }}
                       >
-                        <span>⏳ WAITING (queued)</span>
+                        <span>
+                          {received
+                            ? `📦 AT VENDOR${sinceReceivedMin != null ? ` · ${fmtDur(sinceReceivedMin)}` : ""}`
+                            : `🚚 AWAITING DELIVERY${sinceAssignedMin != null ? ` · ${fmtDur(sinceAssignedMin)}` : ""}`}
+                        </span>
                         {isUrgent && <span style={{ fontSize: 9, fontWeight: 800 }}>⚡ URGENT</span>}
                       </div>
                     );
                   })()}
 
-                  {/* Header: slab id + stone */}
+                  {/* Header: slab id + stone (+ lathe / manual chips) */}
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
                     <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {j.slab_requirement_id}
                     </span>
-                    {j.stone && (
-                      <span className="role-pill" style={{ fontSize: 9, padding: "1px 6px", flexShrink: 0 }}>
-                        {j.stone}
-                      </span>
-                    )}
+                    <div style={{ display: "flex", gap: 4, alignItems: "center", flexShrink: 0 }}>
+                      {j.requires_machine_type === "lathe" && (
+                        <span
+                          style={{
+                            fontSize: 9,
+                            padding: "1px 6px",
+                            borderRadius: 3,
+                            background: "rgba(124,58,237,0.15)",
+                            color: "#7c3aed",
+                            fontWeight: 800,
+                            letterSpacing: "0.05em",
+                          }}
+                          title="Cylindrical work — must go on a lathe"
+                        >
+                          🌀 LATHE
+                        </span>
+                      )}
+                      {j.vendor_type === "Manual" && (
+                        <span
+                          style={{
+                            fontSize: 9,
+                            padding: "1px 6px",
+                            borderRadius: 3,
+                            background: "rgba(120,53,15,0.15)",
+                            color: "#78350f",
+                            fontWeight: 800,
+                            letterSpacing: "0.05em",
+                          }}
+                          title="Manual carver — head fires Mark started / complete"
+                        >
+                          🪚 MANUAL
+                        </span>
+                      )}
+                      {j.stone && (
+                        <span className="role-pill" style={{ fontSize: 9, padding: "1px 6px" }}>
+                          {j.stone}
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   {/* Temple — primary identifying context for the

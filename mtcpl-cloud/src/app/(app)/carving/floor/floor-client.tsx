@@ -38,6 +38,11 @@ export type FloorQueueItem = {
   urgency: "urgent" | "normal";
   estimated_minutes: number | null;
   slab: FloorSlab | null;
+  /** Migration 023 — true once the slab has been physically received
+   *  at the vendor's shade. Drives the 🚚/📦 pill on the floor view. */
+  received_at_vendor?: boolean;
+  /** Migration 024 — true if this is a lathe (cylindrical) job. */
+  is_lathe?: boolean;
 };
 
 export type FloorRecent = {
@@ -693,6 +698,39 @@ function QueueList({ queue, dark, compact = true, noHeader = false }: { queue: F
               {q.urgency === "urgent" && (
                 <span style={{ color: "#dc2626", fontWeight: 800 }}>⚡</span>
               )}
+              {q.is_lathe && (
+                <span
+                  style={{
+                    fontSize: 8,
+                    fontWeight: 800,
+                    padding: "1px 4px",
+                    borderRadius: 2,
+                    background: "rgba(124,58,237,0.18)",
+                    color: "#7c3aed",
+                    letterSpacing: "0.05em",
+                  }}
+                  title="Cylindrical — lathe required"
+                >
+                  🌀
+                </span>
+              )}
+              {/* Migration 023 — at-shade vs in-transit pill */}
+              <span
+                style={{
+                  fontSize: 8,
+                  fontWeight: 800,
+                  padding: "1px 4px",
+                  borderRadius: 2,
+                  background: q.received_at_vendor
+                    ? "rgba(22,163,74,0.18)"
+                    : "rgba(217,119,6,0.18)",
+                  color: q.received_at_vendor ? "#15803d" : "#b45309",
+                  letterSpacing: "0.05em",
+                }}
+                title={q.received_at_vendor ? "Slab at shade" : "Slab in transit"}
+              >
+                {q.received_at_vendor ? "📦" : "🚚"}
+              </span>
               <span style={{ fontWeight: 700, color: dark ? "#fff" : "var(--text)", flexShrink: 0 }}>
                 {q.slab_id}
               </span>

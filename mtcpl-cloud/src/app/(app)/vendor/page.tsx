@@ -81,7 +81,9 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
     // pulled together so we can split client-side.
     admin
       .from("carving_items")
-      .select("id, slab_requirement_id, status, urgency, estimated_minutes, vendor_estimated_minutes, cnc_machine_id, loaded_at, assigned_at, note")
+      .select(
+        "id, slab_requirement_id, status, urgency, estimated_minutes, vendor_estimated_minutes, cnc_machine_id, loaded_at, assigned_at, note, received_at_vendor_at, requires_machine_type",
+      )
       .eq("vendor_id", vendorId)
       .in("status", ["carving_assigned", "carving_in_progress"])
       .order("assigned_at", { ascending: true }),
@@ -159,6 +161,8 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
     loaded_at: string | null;
     assigned_at: string;
     note: string | null;
+    received_at_vendor_at?: string | null;
+    requires_machine_type?: string | null;
   }>) {
     const slab = slabById.get(row.slab_requirement_id) ?? null;
     const job: CarvingJobLite = {
@@ -173,6 +177,8 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
       assigned_at: row.assigned_at,
       note: row.note,
       slab,
+      received_at_vendor_at: row.received_at_vendor_at ?? null,
+      requires_machine_type: row.requires_machine_type ?? null,
     };
     if (row.status === "carving_assigned") queue.push(job);
     else if (row.cnc_machine_id) activeByMachine.set(row.cnc_machine_id, job);

@@ -8,6 +8,71 @@ Reverse-chronological. Most recent at top. Append to TOP when shipping new work.
 
 ## Recent (this Claude session)
 
+### `(pending)` · Carving Phase 4: receipt, machine constraints, work-type, transfer, Manual workflow
+
+Five intertwined gaps in the carving workflow, addressed as one
+PR. Plan lives at `/Users/home/.claude/plans/iridescent-churning-zebra.md`.
+
+**Migrations 023 + 024** (additive, idempotent, NULL-safe):
+- 023: `carving_items.received_at_vendor_at` + `received_at_vendor_by`
+  to close the assign → load gap.
+- 024: per-CNC `max_length_in / max_width_in / max_thickness_in` +
+  per-job `requires_machine_type` (`NULL`=flat, `'lathe'`=cylindrical).
+
+**New actions in `src/app/(app)/carving/actions.ts`**:
+- `acknowledgeReceiptAction` — vendor operator OR carving head
+  marks a slab physically received at the vendor's shade.
+- `updateRequiresMachineTypeAction` — re-tag a job's work type
+  after the initial assign.
+- `transferCarvingJobAction` — change vendor on a carving_items
+  row. Auto-unloads the current CNC if loaded. Blocks 2-head pairs.
+  Preserves the row id so all events stay attached.
+- `markCarvingStartedManuallyAction` /
+  `markCarvingCompleteManuallyAction` — head fires these on
+  behalf of Manual carvers (who don't use the system).
+
+**Extended actions**:
+- `assignCarvingJobAction` accepts `requires_machine_type` and
+  now allows Manual vendors (was CNC-only).
+- `loadSlabOnMachineAction` + `loadTwoSlabsOnMultiHeadAction`
+  validate machine type vs job tag + slab dim vs bed envelope.
+  Both also auto-fill `received_at_vendor_at` if NULL at load
+  time (single attribution to the loader).
+- `createVendorAction` + `updateVendorAction` persist the new
+  `max_*_in` fields. New machines default to `multi_head_2`
+  instead of `single_head` (the fleet has no single-head CNCs).
+
+**UI**:
+- Assign modal: Work-type pill (Flat panel / 🌀 Lathe). Per-vendor
+  capacity readout splits multi-head vs lathe. Vendors with no
+  free machine of the picked type sort low + render a caption.
+  Manual vendors render a compact "no machines tracked" panel.
+- Vendor form: per-machine `Max L / W / T ″` inputs. Type
+  dropdown limited to 2-head + Lathe (single-head hidden but
+  preserved as legacy display).
+- Carving job detail page: new Workflow card with
+  `✅ Mark received` (CNC, before load), `Re-tag work type`,
+  `↔ Transfer` modal, and Manual `▶ Mark started` /
+  `🎯 Mark complete` buttons.
+- Active-tab cards (dashboard-client): 6-state ribbon —
+  ▶ CARVING NOW, 🪚 MANUAL CARVING, 🪚 AWAITING MANUAL START,
+  🚚 AWAITING DELIVERY (with age), 📦 AT VENDOR (with age),
+  fallback ⏳ WAITING. New chips: 🌀 LATHE + 🪚 MANUAL.
+- Vendor cockpit queue rows: 🚚 IN TRANSIT vs 📦 AT SHADE pill +
+  green `✅ Mark received` button before load. 🌀 LATHE pill
+  surfaces for cylindrical jobs.
+- Floor view + TV mode: queue rows show the same in-transit /
+  at-shade + lathe pill so the wall display reflects reality.
+
+**Plan-time decisions** (from clarification Q&A):
+- Per-CNC dim limits with separate L/W/T (not single "height").
+- Work type tagged at assign time + re-taggable on detail page.
+- Either side (vendor operator OR carving head) can mark received.
+- Transfer allowed anytime before completion (auto-unloads if loaded).
+- Fleet has only `multi_head_2` + `lathe`; no single-head machines.
+- Manual carvers don't use the system; head fires lifecycle on
+  their behalf — no receipt + load + unload, just Started + Complete.
+
 ### `(pending)` · fix: cnc_machines insert NOT-NULL on id + reports/page Print button
 Two fixes in one commit:
 
@@ -149,4 +214,9 @@ New `app_role` value `carving_head`. Lands on `/slabs/ready`. Access: Ready Size
 
 See `03_data_model_and_migrations.md` for the table. Latest run on prod (Daksh confirmed): **021**.
 
-Outstanding migrations awaiting run: **022** (`cnc_machines_id_default.sql`) — must be run before adding new CNC machines, otherwise the insert fails with `null value in column "id" ... violates not-null constraint`. Confirm with Daksh after he runs it.
+Outstanding migrations awaiting run on prod:
+- **022** (`cnc_machines_id_default.sql`) — must be run before adding new CNC machines, otherwise insert fails with `null value in column "id"`.
+- **023** (`received_at_vendor.sql`) — adds the receipt timestamp columns. Without it the Mark Received button and at-shade pills won't work.
+- **024** (`cnc_dim_limits_and_work_type.sql`) — adds per-CNC dim caps + per-job work-type tag. Without it the lathe-tag pill, machine-fit validation, and re-tag UI won't work.
+
+Confirm with Daksh after each. All three are idempotent and additive; the app code is NULL-safe so running them late only disables the new features, not the existing flow.
