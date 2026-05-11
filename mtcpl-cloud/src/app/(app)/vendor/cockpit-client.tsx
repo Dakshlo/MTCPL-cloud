@@ -326,10 +326,14 @@ export function VendorCockpitClient({
         )}
       </Section>
 
-      {/* Ready to load — slabs physically at the shade, ready for a CNC. */}
+      {/* Ready to load — slabs physically at the shade, ready for a
+          CNC. Collapsible at user's request; defaults to OPEN since
+          this is the actionable list (Load button lives here). */}
       <Section
         title="Ready to load"
         subtitle={`${readyToLoad.length} slab${readyToLoad.length !== 1 ? "s" : ""} ready to load on a CNC`}
+        collapsible
+        defaultOpen
       >
         {readyToLoad.length === 0 ? (
           <Empty text={pendingStock.length > 0 ? "Waiting for the transfer runner to deliver. See Pending stock above." : "Queue is clear. Carving head will assign more as slabs become available."} />

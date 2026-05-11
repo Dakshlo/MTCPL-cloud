@@ -154,6 +154,8 @@ export function TransferDispatchList({
         title="Available to claim"
         subtitle={availableRows.length === 0 ? "Nothing pending — yard is clear." : `${availableRows.length} slab${availableRows.length !== 1 ? "s" : ""} ready for pickup`}
         accent="#b45309"
+        collapsible
+        defaultOpen
       >
         {availableRows.length === 0 ? null : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -169,6 +171,8 @@ export function TransferDispatchList({
           title="Claimed by other runners"
           subtitle="Already grabbed — visible for awareness only."
           accent="var(--muted)"
+          collapsible
+          defaultOpen={false}
         >
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {othersRows.map((r) => (
@@ -384,19 +388,56 @@ function Section({
   subtitle,
   accent,
   children,
+  collapsible = false,
+  defaultOpen = true,
 }: {
   title: string;
   subtitle: string;
   accent: string;
   children: React.ReactNode;
+  /** When true, header renders a ▼ / ▶ caret and clicking toggles
+   *  the body. Used on Available + Claimed-by-others so the runner
+   *  can hide them once they've claimed what they need. */
+  collapsible?: boolean;
+  defaultOpen?: boolean;
 }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const isOpen = collapsible ? open : true;
   return (
     <section className="page-card">
-      <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "baseline",
+          gap: 10,
+          marginBottom: isOpen ? 10 : 0,
+          flexWrap: "wrap",
+          cursor: collapsible ? "pointer" : "default",
+          userSelect: collapsible ? "none" : "auto",
+        }}
+        onClick={collapsible ? () => setOpen((v) => !v) : undefined}
+        role={collapsible ? "button" : undefined}
+        tabIndex={collapsible ? 0 : undefined}
+        onKeyDown={
+          collapsible
+            ? (e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setOpen((v) => !v);
+                }
+              }
+            : undefined
+        }
+      >
+        {collapsible && (
+          <span style={{ fontSize: 12, color: "var(--muted)", width: 14, display: "inline-block" }}>
+            {isOpen ? "▼" : "▶"}
+          </span>
+        )}
         <h2 style={{ margin: 0, fontSize: 15, color: accent }}>{title}</h2>
         <span style={{ fontSize: 12, color: "var(--muted)" }}>{subtitle}</span>
       </div>
-      {children}
+      {isOpen && children}
     </section>
   );
 }
