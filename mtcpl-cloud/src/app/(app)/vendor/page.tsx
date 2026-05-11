@@ -124,7 +124,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
   if (uniqueSlabIds.length > 0) {
     const { data: slabs } = await admin
       .from("slab_requirements")
-      .select("id, label, temple, stone, length_ft, width_ft, thickness_ft")
+      .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, stock_location")
       .in("id", uniqueSlabIds);
     for (const s of (slabs ?? []) as Array<{
       id: string;
@@ -134,6 +134,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
       length_ft: number | string;
       width_ft: number | string;
       thickness_ft: number | string;
+      stock_location: string | null;
     }>) {
       slabById.set(s.id, {
         id: s.id,
@@ -143,6 +144,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
         length_in: Number(s.length_ft) || 0,
         width_in: Number(s.width_ft) || 0,
         thickness_in: Number(s.thickness_ft) || 0,
+        stock_location: s.stock_location,
       });
     }
   }

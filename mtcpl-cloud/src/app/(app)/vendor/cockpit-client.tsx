@@ -24,6 +24,10 @@ export type SlabLite = {
   length_in: number;
   width_in: number;
   thickness_in: number;
+  /** Migration 020 — last known physical location set by the cutter
+   *  at finish-block time. Surfaced on in-transit queue rows so the
+   *  vendor knows where to pick the slab up. */
+  stock_location?: string | null;
 };
 
 export type CarvingJobLite = {
@@ -572,6 +576,23 @@ function QueueRow({
         {job.slab && (
           <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
             {job.slab.temple} · {dimStr(job.slab)}
+          </div>
+        )}
+        {/* Where the slab currently is (stock_location set by the cutter
+            at finish-block time, migration 020). Only relevant while the
+            slab is in transit — once received it's at the shade and the
+            line just adds noise. */}
+        {!received && job.slab?.stock_location && (
+          <div
+            style={{
+              fontSize: 11,
+              color: "#7c2d12",
+              marginTop: 2,
+              fontFamily: "ui-monospace, monospace",
+              fontWeight: 700,
+            }}
+          >
+            📍 {job.slab.stock_location}
           </div>
         )}
         {job.estimated_minutes && (

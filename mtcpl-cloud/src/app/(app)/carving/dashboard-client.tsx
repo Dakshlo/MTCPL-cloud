@@ -88,6 +88,10 @@ type JobRow = {
   /** Migration 024 — work-type tag for CNC jobs. 'lathe' = must go
    *  on a lathe machine. NULL = flat-panel default (multi-head). */
   requires_machine_type?: string | null;
+  /** Migration 020 — last known physical location set by the cutter
+   *  operator at finish-block time (e.g. "Yard 2"). Shown next to the
+   *  🚚 IN TRANSIT pill so people know where to fetch the slab. */
+  slab_stock_location?: string | null;
 };
 
 type Vendor = {
@@ -1497,21 +1501,47 @@ function JobsByTemple({
                           borderRadius: 6,
                           padding: "5px 8px",
                           display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          gap: 6,
+                          flexDirection: "column",
+                          gap: 3,
                           fontSize: 10,
                           fontWeight: 800,
                           letterSpacing: "0.07em",
                           color: isUrgent ? "#991b1b" : received ? "#78350f" : "#b45309",
                         }}
                       >
-                        <span>
-                          {received
-                            ? `📦 AT VENDOR${sinceReceivedMin != null ? ` · ${fmtDur(sinceReceivedMin)}` : ""}`
-                            : `🚚 AWAITING DELIVERY${sinceAssignedMin != null ? ` · ${fmtDur(sinceAssignedMin)}` : ""}`}
-                        </span>
-                        {isUrgent && <span style={{ fontSize: 9, fontWeight: 800 }}>⚡ URGENT</span>}
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: 6,
+                          }}
+                        >
+                          <span>
+                            {received
+                              ? `📦 AT VENDOR${sinceReceivedMin != null ? ` · ${fmtDur(sinceReceivedMin)}` : ""}`
+                              : `🚚 AWAITING DELIVERY${sinceAssignedMin != null ? ` · ${fmtDur(sinceAssignedMin)}` : ""}`}
+                          </span>
+                          {isUrgent && <span style={{ fontSize: 9, fontWeight: 800 }}>⚡ URGENT</span>}
+                        </div>
+                        {/* While in transit, show the slab's last known
+                            physical location so whoever is moving it
+                            knows where to pick it up. Once received,
+                            it's at the vendor's shade so the location
+                            field is implicit and we hide it. */}
+                        {!received && j.slab_stock_location && (
+                          <div
+                            style={{
+                              fontSize: 9,
+                              fontWeight: 700,
+                              color: "#7c2d12",
+                              letterSpacing: "0.04em",
+                              fontFamily: "ui-monospace, monospace",
+                            }}
+                          >
+                            📍 {j.slab_stock_location}
+                          </div>
+                        )}
                       </div>
                     );
                   })()}

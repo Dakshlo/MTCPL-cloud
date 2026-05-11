@@ -8,6 +8,27 @@ Reverse-chronological. Most recent at top. Append to TOP when shipping new work.
 
 ## Recent (this Claude session)
 
+### `(pending)` · Phase 4 follow-up: surface 📍 slab location on in-transit pills
+
+Daksh asked: while the slab is in transit (🚚 IN TRANSIT, not yet
+received at vendor), the team needs to see WHERE it currently is so
+they can fetch it. Re-uses `slab_requirements.stock_location` set
+by the cutter at finish-block time (migration 020) — no new schema.
+
+Surfaced on every in-transit surface:
+- /carving Active tab cards — `📍 <location>` line under the
+  🚚 AWAITING DELIVERY ribbon
+- /vendor cockpit queue rows — `📍 <location>` between slab info
+  and ETA
+- /carving/floor + TV mode — small `📍 <location>` chip on each
+  queue row
+- /carving/[id] detail page — "Currently at" row in the assignment
+  card (shown only while CNC + carving_assigned + not yet received)
+
+Hidden once the slab is received at the shade (📦 AT SHADE) — at
+that point the location is implicit (the vendor's shade) and the
+chip just adds noise.
+
 ### `(pending)` · Carving Phase 4: receipt, machine constraints, work-type, transfer, Manual workflow
 
 Five intertwined gaps in the carving workflow, addressed as one

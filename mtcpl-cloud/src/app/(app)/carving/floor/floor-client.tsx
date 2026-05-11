@@ -43,6 +43,8 @@ export type FloorQueueItem = {
   received_at_vendor?: boolean;
   /** Migration 024 — true if this is a lathe (cylindrical) job. */
   is_lathe?: boolean;
+  /** Migration 020 — last known stock location while still in transit. */
+  stock_location?: string | null;
 };
 
 export type FloorRecent = {
@@ -750,6 +752,23 @@ function QueueList({ queue, dark, compact = true, noHeader = false }: { queue: F
                     const cft = (q.slab.length_in * q.slab.width_in * q.slab.thickness_in) / 1728;
                     return cft > 0 ? ` · ${cft.toFixed(2)} CFT` : "";
                   })()}
+                </span>
+              )}
+              {/* Stock location chip while in transit (migration 020). */}
+              {!q.received_at_vendor && q.stock_location && (
+                <span
+                  style={{
+                    fontSize: 9,
+                    fontWeight: 700,
+                    padding: "1px 5px",
+                    borderRadius: 2,
+                    background: dark ? "rgba(124,45,18,0.35)" : "rgba(124,45,18,0.12)",
+                    color: dark ? "#fdba74" : "#7c2d12",
+                    flexShrink: 0,
+                  }}
+                  title="Last known slab location"
+                >
+                  📍 {q.stock_location}
                 </span>
               )}
             </div>

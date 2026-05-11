@@ -72,14 +72,18 @@ export async function buildFloorViewData(): Promise<FloorVendor[]> {
   ];
 
   const slabById = new Map<string, FloorSlab>();
+  // Side-channel for stock_location — we don't put it on FloorSlab
+  // because the floor view's machine/recent cards don't need it.
+  const slabStockLoc = new Map<string, string | null>();
   if (slabIds.length > 0) {
     const { data: slabs } = await admin
       .from("slab_requirements")
-      .select("id, label, temple, stone, length_ft, width_ft, thickness_ft")
+      .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, stock_location")
       .in("id", slabIds);
     for (const s of (slabs ?? []) as Array<{
       id: string; label: string | null; temple: string | null; stone: string | null;
       length_ft: number | string; width_ft: number | string; thickness_ft: number | string;
+      stock_location: string | null;
     }>) {
       slabById.set(s.id, {
         id: s.id,
@@ -90,6 +94,9 @@ export async function buildFloorViewData(): Promise<FloorVendor[]> {
         width_in: Number(s.width_ft) || 0,
         thickness_in: Number(s.thickness_ft) || 0,
       });
+      // Stash stock_location keyed by slab id so we can fill it on
+      // queue items below.
+      slabStockLoc.set(s.id, s.stock_location);
     }
   }
 
@@ -121,6 +128,7 @@ export async function buildFloorViewData(): Promise<FloorVendor[]> {
         slab: slabById.get(j.slab_requirement_id) ?? null,
         received_at_vendor: !!j.received_at_vendor_at,
         is_lathe: j.requires_machine_type === "lathe",
+        stock_location: slabStockLoc.get(j.slab_requirement_id) ?? null,
       }))
       .sort((a, b) => (a.urgency === b.urgency ? 0 : a.urgency === "urgent" ? -1 : 1));
 

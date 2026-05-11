@@ -137,12 +137,13 @@ export default async function CarvingDashboardPage({
       length_ft: number;
       width_ft: number;
       thickness_ft: number;
+      stock_location: string | null;
     }
   >();
   if (uniqueSlabReqIds.length > 0) {
     const { data: slabRows } = await admin
       .from("slab_requirements")
-      .select("id, temple, label, description, stone, length_ft, width_ft, thickness_ft")
+      .select("id, temple, label, description, stone, length_ft, width_ft, thickness_ft, stock_location")
       .in("id", uniqueSlabReqIds);
     for (const s of slabRows ?? []) {
       slabInfoMap.set(s.id, {
@@ -153,6 +154,7 @@ export default async function CarvingDashboardPage({
         length_ft: Number(s.length_ft) || 0,
         width_ft: Number(s.width_ft) || 0,
         thickness_ft: Number(s.thickness_ft) || 0,
+        stock_location: (s as { stock_location?: string | null }).stock_location ?? null,
       });
     }
   }
@@ -168,6 +170,11 @@ export default async function CarvingDashboardPage({
       length_ft: info?.length_ft ?? 0,
       width_ft: info?.width_ft ?? 0,
       thickness_ft: info?.thickness_ft ?? 0,
+      // Last known physical location — set by the cutter operator at
+      // finish-block time (migration 020). Surfaces on in-transit
+      // pills so the carving head / vendor know where to fetch
+      // the slab from before it lands at the shade.
+      slab_stock_location: info?.stock_location ?? null,
       vendor_type: (job as unknown as { vendor_type: string }).vendor_type as "CNC" | "Manual",
     };
   }

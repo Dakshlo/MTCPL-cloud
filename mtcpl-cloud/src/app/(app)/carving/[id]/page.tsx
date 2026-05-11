@@ -76,7 +76,7 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
   const [{ data: slab }, { data: machine }, { data: assignedByProfile }, { data: eventUserProfiles }, { data: transferVendors }] = await Promise.all([
     admin
       .from("slab_requirements")
-      .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, source_block_id")
+      .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, source_block_id, stock_location")
       .eq("id", jobRow.slab_requirement_id)
       .maybeSingle(),
     jobRow.cnc_machine_id
@@ -198,6 +198,22 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
                   <span style={{ fontWeight: 600 }}>📍 {jobRow.location}</span>
                 </div>
               )}
+              {/* While the slab is in transit (CNC, assigned but not
+                  yet received at the vendor's shade), surface the
+                  cutter-set stock_location so the team knows where
+                  to fetch it from. Migration 020 set this; migration
+                  023 added received_at_vendor_at. */}
+              {jobRow.vendor_type === "CNC" &&
+                jobRow.status === "carving_assigned" &&
+                !jobRow.received_at_vendor_at &&
+                (slab as { stock_location?: string | null } | null)?.stock_location && (
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span className="muted">Currently at</span>
+                    <span style={{ fontWeight: 600, color: "#7c2d12" }}>
+                      📍 {(slab as { stock_location: string }).stock_location}
+                    </span>
+                  </div>
+                )}
               {jobRow.note && (
                 <div style={{ marginTop: 6, padding: "8px 10px", background: "var(--surface-alt)", borderRadius: 6 }}>
                   <div className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.06em" }}>Assignment note</div>
