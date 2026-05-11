@@ -305,7 +305,8 @@ export function VendorCockpitClient({
 
       {/* Pending stock — slabs assigned but not yet delivered to
           this vendor's shade. Read-only view; transfer person
-          handles delivery on /carving/transfer. Migration 023/025. */}
+          handles delivery on /carving/transfer. Collapsed by
+          default — vendor doesn't act on these. Migration 023/025. */}
       <Section
         title="Pending stock"
         subtitle={
@@ -313,6 +314,8 @@ export function VendorCockpitClient({
             ? "No slabs awaiting transfer to your shade."
             : `${pendingStock.length} slab${pendingStock.length !== 1 ? "s" : ""} being transferred from the yard`
         }
+        collapsible
+        defaultOpen={false}
       >
         {pendingStock.length === 0 ? null : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -379,7 +382,12 @@ export function VendorCockpitClient({
 
       {/* Recent completed */}
       {recent.length > 0 && (
-        <Section title="Recently completed" subtitle="Last 10 unloaded — awaiting team review unless approved">
+        <Section
+          title="Recently completed"
+          subtitle="Last 10 unloaded — awaiting team review unless approved"
+          collapsible
+          defaultOpen={false}
+        >
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {recent.map((r) => (
               <div
@@ -446,7 +454,10 @@ export function VendorCockpitClient({
         <LoadModal
           machine={loadFor.machine}
           machines={machines}
-          queue={queue}
+          /* Only "ready to load" rows can actually be loaded — pending
+             stock is in transit. Phase 4 follow-up. */
+          queue={readyToLoad}
+          stoneTypes={stoneTypes}
           onClose={() => setLoadFor(null)}
         />
       )}
@@ -481,22 +492,58 @@ function Section({
   title,
   subtitle,
   children,
+  collapsible = false,
+  defaultOpen = true,
 }: {
   title: string;
   subtitle?: string;
   children: React.ReactNode;
+  /** When true, renders a click-to-toggle chevron in the header.
+   *  Used on Pending stock + Recently completed so they don't take
+   *  up screen real estate by default. */
+  collapsible?: boolean;
+  defaultOpen?: boolean;
 }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const isOpen = collapsible ? open : true;
   return (
     <section style={{ marginBottom: 18 }}>
-      <div style={{ marginBottom: 8 }}>
+      <div
+        style={{
+          marginBottom: 8,
+          display: "flex",
+          alignItems: "baseline",
+          gap: 8,
+          cursor: collapsible ? "pointer" : "default",
+          userSelect: collapsible ? "none" : "auto",
+        }}
+        onClick={collapsible ? () => setOpen((v) => !v) : undefined}
+        role={collapsible ? "button" : undefined}
+        tabIndex={collapsible ? 0 : undefined}
+        onKeyDown={
+          collapsible
+            ? (e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setOpen((v) => !v);
+                }
+              }
+            : undefined
+        }
+      >
+        {collapsible && (
+          <span style={{ fontSize: 12, color: "var(--muted)", width: 14, display: "inline-block" }}>
+            {isOpen ? "▼" : "▶"}
+          </span>
+        )}
         <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>{title}</h2>
         {subtitle && (
-          <p className="muted" style={{ margin: "2px 0 0", fontSize: 12 }}>
+          <span className="muted" style={{ fontSize: 12 }}>
             {subtitle}
-          </p>
+          </span>
         )}
       </div>
-      {children}
+      {isOpen && children}
     </section>
   );
 }
@@ -1277,20 +1324,29 @@ function LoadModal({
   machine,
   machines,
   queue,
+  stoneTypes,
   onClose,
 }: {
   machine: CncMachineLive;
   machines: CncMachineLive[];
   queue: CarvingJobLite[];
+  stoneTypes: StoneTypeDef[];
   onClose: () => void;
 }) {
   const [machineId, setMachineId] = useState(machine.id);
   const selectedMachine = machines.find((m) => m.id === machineId) ?? machine;
-  const isTwoHead = selectedMachine.machine_type === "multi_head_2";
+  const machineIsTwoHead = selectedMachine.machine_type === "multi_head_2";
+  // For 2-head machines, the vendor can choose pair mode (default,
+  // both heads running on identical slabs) OR single mode (only one
+  // head loaded, second turned off — rare but real). Single mode
+  // routes through loadSlabOnMachineAction, pair mode through
+  // loadTwoSlabsOnMultiHeadAction.
+  const [loadMode, setLoadMode] = useState<"pair" | "single">("pair");
+  const effectiveIsPair = machineIsTwoHead && loadMode === "pair";
 
   const [carvingItemId, setCarvingItemId] = useState<string>(queue[0]?.id ?? "");
-  // Second slab id for 2-head loads. Filtered to "matches first" so
-  // the vendor can't accidentally pair non-identical slabs.
+  // Second slab id for 2-head pair loads. Filtered to "matches first"
+  // so the vendor can't accidentally pair non-identical slabs.
   const [carvingItemBId, setCarvingItemBId] = useState<string>("");
   const selectedJob = queue.find((q) => q.id === carvingItemId) ?? null;
   const idleMachines = machines.filter((m) => m.status === "idle");
@@ -1302,7 +1358,7 @@ function LoadModal({
 
   // Slabs that match the primary one's L×W×T + temple + label —
   // these are the only valid second-head pairings on a 2-head load.
-  const matchingPair = isTwoHead && selectedJob?.slab
+  const matchingPair = effectiveIsPair && selectedJob?.slab
     ? queue.filter(
         (q) =>
           q.id !== carvingItemId &&
@@ -1315,10 +1371,16 @@ function LoadModal({
       )
     : [];
 
-  // Reset pair selection when primary changes or machine type changes.
+  // Reset pair selection when primary changes, machine type changes,
+  // or the vendor switches between pair and single mode.
   useEffect(() => {
     setCarvingItemBId("");
-  }, [carvingItemId, isTwoHead]);
+  }, [carvingItemId, effectiveIsPair]);
+
+  // Switching to a non-2-head machine forces single mode.
+  useEffect(() => {
+    if (!machineIsTwoHead) setLoadMode("pair"); // benign default; pair logic gated by machineIsTwoHead anyway
+  }, [machineIsTwoHead]);
 
   // When user picks a different slab, prefill estimate from carving
   // head's number (vendor can adjust).
@@ -1337,19 +1399,27 @@ function LoadModal({
 
   return (
     <ModalShell
-      title={isTwoHead ? "Load 2 identical slabs (2-head CNC)" : "Load slab onto CNC"}
+      title={
+        effectiveIsPair
+          ? "Load 2 identical slabs (2-head CNC)"
+          : machineIsTwoHead
+            ? "Load 1 slab onto 2-head CNC (single mode)"
+            : "Load slab onto CNC"
+      }
       subtitle={
-        isTwoHead
+        effectiveIsPair
           ? "Both heads carve the same shape — pick two slabs with identical L×W×T + temple + label."
-          : "Pick the slab and machine, then enter your tighter ETA."
+          : machineIsTwoHead
+            ? "Second head will be turned off. Pick the slab to load on head 1."
+            : "Pick the slab and machine, then enter your tighter ETA."
       }
       onClose={onClose}
     >
       {queue.length === 0 ? (
-        <Empty text="Queue is empty — nothing to load." />
+        <Empty text="No slabs ready to load. Check the Pending stock list — slabs need to be delivered by the transfer runner first." />
       ) : (
         <form
-          action={isTwoHead ? loadTwoSlabsOnMultiHeadAction : loadSlabOnMachineAction}
+          action={effectiveIsPair ? loadTwoSlabsOnMultiHeadAction : loadSlabOnMachineAction}
           style={{ display: "flex", flexDirection: "column", gap: 14 }}
         >
           {/* Machine picker — first so the form layout reflects what
@@ -1410,58 +1480,96 @@ function LoadModal({
             </div>
           </div>
 
-          {/* Primary slab picker */}
+          {/* Pair/Single mode toggle — only on 2-head machines.
+              99.9% of loads are pair mode; single mode is for the
+              rare case where one head is broken or you only have
+              one matching slab. */}
+          {machineIsTwoHead && (
+            <div>
+              <Label>Mode</Label>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  onClick={() => setLoadMode("pair")}
+                  style={{
+                    flex: "1 1 200px",
+                    padding: "10px 14px",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    background: loadMode === "pair" ? "rgba(37,99,235,0.10)" : "var(--surface)",
+                    border: `1.5px solid ${loadMode === "pair" ? "#2563eb" : "var(--border)"}`,
+                    color: loadMode === "pair" ? "#1d4ed8" : "var(--text)",
+                    borderRadius: 6,
+                    cursor: "pointer",
+                    textAlign: "left",
+                  }}
+                >
+                  ▶▶ Pair mode (2 slabs, both heads)
+                  <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2, fontWeight: 400 }}>
+                    Default. Both heads carve identical slabs.
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLoadMode("single")}
+                  style={{
+                    flex: "1 1 200px",
+                    padding: "10px 14px",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    background: loadMode === "single" ? "rgba(180,115,51,0.10)" : "var(--surface)",
+                    border: `1.5px solid ${loadMode === "single" ? "var(--gold-dark)" : "var(--border)"}`,
+                    color: loadMode === "single" ? "var(--gold-dark)" : "var(--text)",
+                    borderRadius: 6,
+                    cursor: "pointer",
+                    textAlign: "left",
+                  }}
+                >
+                  ▶ Single mode (1 slab, second head off)
+                  <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2, fontWeight: 400 }}>
+                    Use when you don&apos;t have a matching pair.
+                  </div>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Primary slab picker — 3D card grid instead of list rows.
+              Vendor sees a thumbnail + slab id + temple + dims and
+              can tap a card to select. */}
           <div>
-            <Label>{isTwoHead ? "Slab A (head 1)" : "Slab to load"}</Label>
+            <Label>{effectiveIsPair ? "Slab A (head 1)" : "Slab to load"}</Label>
             <input
               type="hidden"
-              name={isTwoHead ? "carving_item_a_id" : "carving_item_id"}
+              name={effectiveIsPair ? "carving_item_a_id" : "carving_item_id"}
               value={carvingItemId}
             />
-            <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 220, overflowY: "auto" }}>
-              {queue.map((q) => {
-                const isSelected = q.id === carvingItemId;
-                const isUrgent = q.urgency === "urgent";
-                return (
-                  <button
-                    type="button"
-                    key={q.id}
-                    onClick={() => setCarvingItemId(q.id)}
-                    style={{
-                      textAlign: "left",
-                      padding: "8px 10px",
-                      background: isSelected ? "rgba(180,115,51,0.08)" : "var(--surface)",
-                      border: `1.5px solid ${isSelected ? "var(--gold-dark)" : "var(--border)"}`,
-                      borderRadius: 6,
-                      cursor: "pointer",
-                    }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      {isUrgent && (
-                        <span style={{ fontSize: 9, fontWeight: 800, padding: "1px 6px", borderRadius: 999, background: "#dc2626", color: "#fff" }}>
-                          ⚡
-                        </span>
-                      )}
-                      <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 12 }}>
-                        {q.slab_id}
-                      </span>
-                    </div>
-                    {q.slab && (
-                      <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
-                        {q.slab.temple} · {dimStr(q.slab)}
-                      </div>
-                    )}
-                  </button>
-                );
-              })}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
+                gap: 8,
+                maxHeight: 320,
+                overflowY: "auto",
+              }}
+            >
+              {queue.map((q) => (
+                <SlabPickerCard
+                  key={q.id}
+                  job={q}
+                  selected={q.id === carvingItemId}
+                  onSelect={() => setCarvingItemId(q.id)}
+                  stoneTypes={stoneTypes}
+                />
+              ))}
             </div>
           </div>
 
-          {/* Pair picker — only shows for 2-head machines. We filter
-              the queue down to slabs that have IDENTICAL geometry +
-              temple + label as the primary, since the heads run
-              the same toolpath. */}
-          {isTwoHead && (
+          {/* Pair picker — only shows when in PAIR mode on a 2-head
+              machine. Filtered to slabs that have IDENTICAL geometry
+              + temple + label as the primary, since the heads run
+              the same toolpath. Single mode skips this entirely. */}
+          {effectiveIsPair && (
             <div>
               <Label>Slab B (head 2 — must match A)</Label>
               <input type="hidden" name="carving_item_b_id" value={carvingItemBId} />
@@ -1480,34 +1588,24 @@ function LoadModal({
                   slab with the same dimensions, temple, and label.
                 </div>
               ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 200, overflowY: "auto" }}>
-                  {matchingPair.map((q) => {
-                    const isSelected = q.id === carvingItemBId;
-                    return (
-                      <button
-                        type="button"
-                        key={q.id}
-                        onClick={() => setCarvingItemBId(q.id)}
-                        style={{
-                          textAlign: "left",
-                          padding: "8px 10px",
-                          background: isSelected ? "rgba(180,115,51,0.08)" : "var(--surface)",
-                          border: `1.5px solid ${isSelected ? "var(--gold-dark)" : "var(--border)"}`,
-                          borderRadius: 6,
-                          cursor: "pointer",
-                        }}
-                      >
-                        <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 12 }}>
-                          {q.slab_id}
-                        </span>
-                        {q.slab && (
-                          <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
-                            {q.slab.temple} · {dimStr(q.slab)}
-                          </div>
-                        )}
-                      </button>
-                    );
-                  })}
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
+                    gap: 8,
+                    maxHeight: 280,
+                    overflowY: "auto",
+                  }}
+                >
+                  {matchingPair.map((q) => (
+                    <SlabPickerCard
+                      key={q.id}
+                      job={q}
+                      selected={q.id === carvingItemBId}
+                      onSelect={() => setCarvingItemBId(q.id)}
+                      stoneTypes={stoneTypes}
+                    />
+                  ))}
                 </div>
               )}
             </div>
@@ -1556,19 +1654,90 @@ function LoadModal({
           <button
             type="submit"
             className="primary-button"
-            disabled={isTwoHead && !carvingItemBId}
+            disabled={effectiveIsPair && !carvingItemBId}
             style={{
               fontSize: 14,
               padding: "12px 16px",
               fontWeight: 700,
-              opacity: isTwoHead && !carvingItemBId ? 0.5 : 1,
+              opacity: effectiveIsPair && !carvingItemBId ? 0.5 : 1,
             }}
           >
-            {isTwoHead ? "▶ Load both heads" : "▶ Load now"}
+            {effectiveIsPair ? "▶ Load both heads" : "▶ Load now"}
           </button>
         </form>
       )}
     </ModalShell>
+  );
+}
+
+// 3D card for the load-modal slab picker. Reuses SlabThumb for the
+// proportional preview. Selected state lights the border in gold.
+function SlabPickerCard({
+  job,
+  selected,
+  onSelect,
+  stoneTypes,
+}: {
+  job: CarvingJobLite;
+  selected: boolean;
+  onSelect: () => void;
+  stoneTypes: StoneTypeDef[];
+}) {
+  const isUrgent = job.urgency === "urgent";
+  const isLathe = job.requires_machine_type === "lathe";
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      style={{
+        textAlign: "left",
+        padding: 8,
+        background: selected ? "rgba(180,115,51,0.10)" : "var(--surface)",
+        border: `2px solid ${selected ? "var(--gold-dark)" : "var(--border)"}`,
+        borderRadius: 8,
+        cursor: "pointer",
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+        transition: "border-color 0.12s, background 0.12s",
+      }}
+    >
+      {/* 3D thumb */}
+      {job.slab && (
+        <SlabThumb
+          stone={job.slab.stone}
+          l={job.slab.length_in}
+          w={job.slab.width_in}
+          t={job.slab.thickness_in}
+          stoneTypes={stoneTypes}
+          size={70}
+          height={70}
+        />
+      )}
+      {/* Chips */}
+      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+        {isUrgent && (
+          <span style={{ fontSize: 9, fontWeight: 800, padding: "1px 6px", borderRadius: 3, background: "#dc2626", color: "#fff", letterSpacing: "0.05em" }}>
+            ⚡ URGENT
+          </span>
+        )}
+        {isLathe && (
+          <span style={{ fontSize: 9, fontWeight: 800, padding: "1px 6px", borderRadius: 3, background: "rgba(124,58,237,0.15)", color: "#7c3aed", letterSpacing: "0.05em" }}>
+            🌀 LATHE
+          </span>
+        )}
+      </div>
+      {/* Slab id + temple + dims */}
+      <div style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 12, color: "var(--text)" }}>
+        {job.slab_id}
+      </div>
+      {job.slab && (
+        <div style={{ fontSize: 10, color: "var(--muted)", lineHeight: 1.3 }}>
+          {job.slab.temple}
+          <div style={{ marginTop: 2 }}>{dimStr(job.slab)}</div>
+        </div>
+      )}
+    </button>
   );
 }
 

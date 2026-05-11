@@ -33,6 +33,10 @@ export default async function CarvingDashboardPage({
     priority: boolean | null;
     source_block_id: string | null;
     updated_at: string | null;
+    /** Migration 020 — last known physical location set by the cutter
+     *  at finish-block time. Shows as a 📍 chip on each card so the
+     *  carving head can scan where every cut slab currently sits. */
+    stock_location: string | null;
   };
   async function fetchAllUnassignedSlabs(): Promise<UnassignedRow[]> {
     const PAGE = 1000;
@@ -41,7 +45,7 @@ export default async function CarvingDashboardPage({
       const { data, error } = await admin
         .from("slab_requirements")
         .select(
-          "id, label, temple, stone, length_ft, width_ft, thickness_ft, status, priority, source_block_id, updated_at",
+          "id, label, temple, stone, length_ft, width_ft, thickness_ft, status, priority, source_block_id, updated_at, stock_location",
         )
         .eq("status", "cut_done")
         .order("priority", { ascending: false })

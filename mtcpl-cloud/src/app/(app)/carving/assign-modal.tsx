@@ -22,7 +22,7 @@
  * fits on tablets that the carving head walks around with.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { assignCarvingJobAction } from "./actions";
 
 type Machine = {
@@ -297,7 +297,12 @@ export function AssignModal({
               </div>
             )}
 
-            {/* Vendor list */}
+            {/* Vendor list — partitioned: CNC vendors first (with
+                their capacity breakdown), then a divider, then Manual
+                carvers (no machines to show, simpler row). The
+                section headers make the two paths visually distinct
+                so the carving head can't accidentally pick the wrong
+                workflow. */}
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <Label>Vendor</Label>
               {sortedVendors.length === 0 ? (
@@ -306,24 +311,46 @@ export function AssignModal({
                 </div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {sortedVendors.map((v) => {
+                  {/* CNC section header (only when there's at least one CNC) */}
+                  {sortedVendors.some((v) => v.vendor_type === "CNC") && (
+                    <SectionHeader
+                      label="🏭 CNC Vendors"
+                      hint="Tracked machines · transfer runner delivers slabs"
+                    />
+                  )}
+                  {sortedVendors.map((v, idx) => {
                     const isSelected = v.id === vendorId;
                     const isVendorManual = v.vendor_type === "Manual";
                     const queued = v.live?.queued ?? 0;
+                    // Insert the Manual section header right BEFORE
+                    // the first Manual vendor in the sorted list.
+                    const prev = idx > 0 ? sortedVendors[idx - 1] : null;
+                    const showManualHeader =
+                      isVendorManual && (!prev || prev.vendor_type !== "Manual");
+                    const manualHeaderNode = showManualHeader ? (
+                      <SectionHeader
+                        key={`__manual-header-${v.id}`}
+                        label="🪚 Manual Carvers"
+                        hint="No machines · head fires Mark started / Mark complete"
+                        accent="#92400e"
+                        topMargin={prev ? 10 : 0}
+                      />
+                    ) : null;
 
                     // Manual vendor row — compact, no machine counts.
                     if (isVendorManual) {
                       return (
-                        <label
-                          key={v.id}
+                        <Fragment key={v.id}>
+                          {manualHeaderNode}
+                          <label
                           style={{
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "space-between",
                             gap: 10,
                             padding: "10px 12px",
-                            background: isSelected ? "rgba(180,115,51,0.08)" : "var(--surface)",
-                            border: `1.5px solid ${isSelected ? "var(--gold-dark)" : "var(--border)"}`,
+                            background: isSelected ? "rgba(120,53,15,0.10)" : "rgba(120,53,15,0.04)",
+                            border: `1.5px solid ${isSelected ? "#92400e" : "rgba(120,53,15,0.25)"}`,
                             borderRadius: 8,
                             cursor: "pointer",
                             transition: "border-color 0.12s, background 0.12s",
@@ -385,7 +412,8 @@ export function AssignModal({
                               {queued} in queue
                             </div>
                           )}
-                        </label>
+                          </label>
+                        </Fragment>
                       );
                     }
 
@@ -787,5 +815,48 @@ function Label({ children }: { children: React.ReactNode }) {
     >
       {children}
     </span>
+  );
+}
+
+// Section header that visually partitions CNC and Manual vendors in
+// the picker. The Manual header uses an amber accent + thin top-rule
+// so the divide between the two vendor types is unmistakable.
+function SectionHeader({
+  label,
+  hint,
+  accent,
+  topMargin,
+}: {
+  label: string;
+  hint?: string;
+  accent?: string;
+  topMargin?: number;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "baseline",
+        gap: 8,
+        marginTop: topMargin ?? 0,
+        paddingTop: topMargin && topMargin > 0 ? 10 : 0,
+        borderTop: topMargin && topMargin > 0 ? "1px dashed var(--border)" : "none",
+      }}
+    >
+      <span
+        style={{
+          fontSize: 11,
+          fontWeight: 800,
+          letterSpacing: "0.07em",
+          color: accent ?? "var(--gold-dark)",
+          textTransform: "uppercase",
+        }}
+      >
+        {label}
+      </span>
+      {hint && (
+        <span style={{ fontSize: 10, color: "var(--muted-light)" }}>{hint}</span>
+      )}
+    </div>
   );
 }

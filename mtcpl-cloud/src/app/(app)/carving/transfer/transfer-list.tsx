@@ -209,76 +209,71 @@ function TransferCard({
     <div
       style={{
         display: "flex",
-        gap: 12,
+        flexDirection: "column",
+        gap: 10,
         padding: "12px 14px",
         background: isUrgent ? "rgba(220,38,38,0.04)" : "var(--surface)",
         border: `1px solid ${isUrgent ? "rgba(220,38,38,0.3)" : "var(--border)"}`,
         borderRadius: 10,
-        alignItems: "flex-start",
-        flexWrap: "wrap",
       }}
     >
-      {/* 3D slab thumbnail */}
-      <div style={{ flexShrink: 0 }}>
-        <SlabThumb
-          stone={row.stone}
-          l={row.length_ft}
-          w={row.width_ft}
-          t={row.thickness_ft}
-          stoneTypes={stoneTypes}
-          size={70}
-          height={70}
-        />
+      {/* Top row — slab info + chips */}
+      <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+        <div style={{ flexShrink: 0 }}>
+          <SlabThumb
+            stone={row.stone}
+            l={row.length_ft}
+            w={row.width_ft}
+            t={row.thickness_ft}
+            stoneTypes={stoneTypes}
+            size={64}
+            height={64}
+          />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            {isUrgent && (
+              <span style={{ fontSize: 9, fontWeight: 800, padding: "2px 6px", borderRadius: 3, background: "#dc2626", color: "#fff", letterSpacing: "0.05em" }}>
+                ⚡ URGENT
+              </span>
+            )}
+            {row.is_lathe && (
+              <span style={{ fontSize: 9, fontWeight: 800, padding: "2px 6px", borderRadius: 3, background: "rgba(124,58,237,0.15)", color: "#7c3aed", letterSpacing: "0.05em" }}>
+                🌀 LATHE
+              </span>
+            )}
+            <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 14 }}>
+              {row.slab_id}
+            </code>
+            <span style={{ fontSize: 12, color: "var(--muted)" }}>
+              {row.temple}
+              {row.slab_label && ` · ${row.slab_label}`}
+              {" · "}
+              {dims}
+            </span>
+          </div>
+          {kind === "others" && row.claimed_by_name && (
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+              Claimed by <strong>{row.claimed_by_name}</strong>
+              {row.claimed_at && ` · ${formatRelative(row.claimed_at)} ago`}
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Slab info + locations */}
-      <div style={{ flex: "1 1 280px", minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          {isUrgent && (
-            <span style={{ fontSize: 9, fontWeight: 800, padding: "2px 6px", borderRadius: 3, background: "#dc2626", color: "#fff", letterSpacing: "0.05em" }}>
-              ⚡ URGENT
-            </span>
-          )}
-          {row.is_lathe && (
-            <span style={{ fontSize: 9, fontWeight: 800, padding: "2px 6px", borderRadius: 3, background: "rgba(124,58,237,0.15)", color: "#7c3aed", letterSpacing: "0.05em" }}>
-              🌀 LATHE
-            </span>
-          )}
-          <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 14 }}>
-            {row.slab_id}
-          </code>
-          <span style={{ fontSize: 12, color: "var(--muted)" }}>
-            {row.temple}
-            {row.slab_label && ` · ${row.slab_label}`}
-            {" · "}
-            {dims}
-          </span>
-        </div>
-        <div style={{ display: "flex", gap: 14, fontSize: 12, color: "var(--text)", flexWrap: "wrap" }}>
-          <div>
-            <span className="muted" style={{ fontSize: 11 }}>From: </span>
-            <strong style={{ color: "#7c2d12", fontFamily: "ui-monospace, monospace" }}>
-              📍 {row.stock_location ?? "(no location set)"}
-            </strong>
-          </div>
-          <div>
-            <span className="muted" style={{ fontSize: 11 }}>To: </span>
-            <strong style={{ color: "#15803d", fontFamily: "ui-monospace, monospace" }}>
-              🏭 {row.vendor_name}
-              {row.vendor_dropoff && ` · ${row.vendor_dropoff}`}
-            </strong>
-          </div>
-        </div>
-        {kind === "others" && row.claimed_by_name && (
-          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
-            Claimed by <strong>{row.claimed_by_name}</strong>
-            {row.claimed_at && ` · ${formatRelative(row.claimed_at)} ago`}
-          </div>
-        )}
-      </div>
+      {/* Route visualisation — pickup → drop. Arrow animates when
+          this runner has claimed the row (kind === "mine"). Built
+          as a single horizontal grid so the From/To endpoints stay
+          fixed width and the arrow always centres between them. */}
+      <RouteVisual
+        from={row.stock_location}
+        toVendor={row.vendor_name}
+        toDropoff={row.vendor_dropoff}
+        active={kind === "mine"}
+      />
 
       {/* Action buttons */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "stretch", minWidth: 180 }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "stretch", flexWrap: "wrap" }}>
         {kind === "available" && (
           <form action={claimSlabTransferAction}>
             <input type="hidden" name="carving_item_id" value={row.id} />
@@ -286,7 +281,7 @@ function TransferCard({
             <button
               type="submit"
               className="primary-button"
-              style={{ fontSize: 12, padding: "8px 14px", width: "100%", fontWeight: 700 }}
+              style={{ fontSize: 13, padding: "8px 18px", fontWeight: 700 }}
             >
               📦 Claim
             </button>
@@ -298,9 +293,8 @@ function TransferCard({
               type="button"
               onClick={() => setDeliverOpen(true)}
               style={{
-                fontSize: 12,
-                padding: "8px 14px",
-                width: "100%",
+                fontSize: 13,
+                padding: "8px 18px",
                 fontWeight: 700,
                 background: "#16a34a",
                 color: "#fff",
@@ -317,7 +311,7 @@ function TransferCard({
               <button
                 type="submit"
                 className="ghost-button"
-                style={{ fontSize: 11, padding: "5px 10px", width: "100%" }}
+                style={{ fontSize: 11, padding: "8px 12px" }}
               >
                 Release claim
               </button>
@@ -325,48 +319,44 @@ function TransferCard({
           </>
         )}
         {kind === "mine" && deliverOpen && (
-          <form action={acknowledgeReceiptAction} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <form action={acknowledgeReceiptAction} style={{ display: "flex", gap: 6, alignItems: "center", flex: 1, flexWrap: "wrap" }}>
             <input type="hidden" name="carving_item_id" value={row.id} />
             <input type="hidden" name="redirect_to" value="/carving/transfer" />
             <input
               type="text"
               name="dropoff_note"
-              placeholder="Where did you leave it? (optional)"
+              placeholder={`Where did you leave it? (empty = standard ${row.vendor_dropoff ?? "spot"})`}
               style={{
                 fontSize: 12,
-                padding: "6px 8px",
+                padding: "8px 10px",
                 border: "1px solid var(--border)",
                 borderRadius: 6,
                 background: "var(--bg)",
                 color: "var(--text)",
+                flex: "1 1 200px",
+                minWidth: 160,
               }}
             />
-            <div style={{ display: "flex", gap: 4 }}>
-              <button
-                type="submit"
-                className="primary-button"
-                style={{
-                  fontSize: 12,
-                  padding: "6px 10px",
-                  fontWeight: 700,
-                  background: "#16a34a",
-                  flex: 1,
-                }}
-              >
-                ✅ Done
-              </button>
-              <button
-                type="button"
-                onClick={() => setDeliverOpen(false)}
-                className="ghost-button"
-                style={{ fontSize: 11, padding: "6px 10px" }}
-              >
-                Cancel
-              </button>
-            </div>
-            <span style={{ fontSize: 10, color: "var(--muted-light)" }}>
-              Empty = dropped at standard location ({row.vendor_dropoff ?? row.vendor_name})
-            </span>
+            <button
+              type="submit"
+              className="primary-button"
+              style={{
+                fontSize: 12,
+                padding: "8px 14px",
+                fontWeight: 700,
+                background: "#16a34a",
+              }}
+            >
+              ✅ Done
+            </button>
+            <button
+              type="button"
+              onClick={() => setDeliverOpen(false)}
+              className="ghost-button"
+              style={{ fontSize: 11, padding: "8px 10px" }}
+            >
+              Cancel
+            </button>
           </form>
         )}
         {kind === "others" && canUnclaim && (
@@ -376,7 +366,7 @@ function TransferCard({
             <button
               type="submit"
               className="ghost-button danger-ghost"
-              style={{ fontSize: 11, padding: "6px 10px", width: "100%" }}
+              style={{ fontSize: 11, padding: "6px 12px" }}
             >
               Release their claim
             </button>
@@ -439,4 +429,153 @@ function formatRelative(iso: string): string {
   const hr = Math.floor(min / 60);
   if (hr < 24) return `${hr}h`;
   return `${Math.floor(hr / 24)}d`;
+}
+
+// ── Route visualisation ───────────────────────────────────────────
+//
+// Renders the pickup → drop journey as three columns:
+//   [📍 pickup card]   [→ animated arrow]   [🏭 drop card]
+//
+// When `active` (the runner has claimed the row), the arrow runs a
+// CSS gradient animation left-to-right so it reads as "in motion."
+// When idle, the arrow is static.
+function RouteVisual({
+  from,
+  toVendor,
+  toDropoff,
+  active,
+}: {
+  from: string | null;
+  toVendor: string;
+  toDropoff: string | null;
+  active: boolean;
+}) {
+  return (
+    <>
+      <style>{`
+        @keyframes mtcpl-transfer-flow {
+          0%   { background-position: -40px 0; }
+          100% { background-position: 40px 0; }
+        }
+      `}</style>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 60px 1fr",
+          gap: 8,
+          alignItems: "stretch",
+        }}
+      >
+        {/* From */}
+        <div
+          style={{
+            background: "rgba(180,115,51,0.08)",
+            border: "1px solid rgba(180,115,51,0.3)",
+            borderRadius: 8,
+            padding: "8px 10px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 9,
+              fontWeight: 800,
+              color: "#92400e",
+              letterSpacing: "0.07em",
+              textTransform: "uppercase",
+            }}
+          >
+            📍 From (where it is)
+          </span>
+          <strong
+            style={{
+              fontSize: 13,
+              color: "#7c2d12",
+              fontFamily: "ui-monospace, monospace",
+              wordBreak: "break-word",
+            }}
+          >
+            {from ?? "(no location set)"}
+          </strong>
+        </div>
+
+        {/* Arrow */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            position: "relative",
+          }}
+        >
+          <div
+            style={{
+              width: "100%",
+              height: 6,
+              borderRadius: 3,
+              background: active
+                ? "repeating-linear-gradient(90deg, #16a34a 0 10px, #86efac 10px 20px)"
+                : "var(--border)",
+              backgroundSize: active ? "40px 6px" : undefined,
+              animation: active ? "mtcpl-transfer-flow 0.8s linear infinite" : undefined,
+            }}
+          />
+          <span
+            style={{
+              position: "absolute",
+              fontSize: 18,
+              color: active ? "#15803d" : "var(--muted)",
+              background: "var(--surface)",
+              padding: "0 4px",
+              fontWeight: 800,
+            }}
+          >
+            →
+          </span>
+        </div>
+
+        {/* To */}
+        <div
+          style={{
+            background: "rgba(22,163,74,0.08)",
+            border: "1px solid rgba(22,163,74,0.3)",
+            borderRadius: 8,
+            padding: "8px 10px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 9,
+              fontWeight: 800,
+              color: "#15803d",
+              letterSpacing: "0.07em",
+              textTransform: "uppercase",
+            }}
+          >
+            🏭 To (deliver to)
+          </span>
+          <strong
+            style={{
+              fontSize: 13,
+              color: "#14532d",
+              fontFamily: "ui-monospace, monospace",
+              wordBreak: "break-word",
+            }}
+          >
+            {toVendor}
+          </strong>
+          {toDropoff && (
+            <span style={{ fontSize: 11, color: "#15803d" }}>
+              {toDropoff}
+            </span>
+          )}
+        </div>
+      </div>
+    </>
+  );
 }

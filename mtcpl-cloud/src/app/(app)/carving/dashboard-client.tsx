@@ -23,6 +23,8 @@ import { AssignModal } from "./assign-modal";
 import {
   approveCarvingJobAction,
   rejectCarvingJobAction,
+  markCarvingStartedManuallyAction,
+  markCarvingCompleteManuallyAction,
   getJobEvents,
   type JobEvent,
 } from "./actions";
@@ -44,6 +46,10 @@ type UnassignedSlab = {
    *  is effectively when it became "ready" (status flipped). Drives
    *  the "Ready in last X days" date filter on the carving toolbar. */
   updated_at?: string | null;
+  /** Migration 020 — physical stock location set by the cutter at
+   *  finish-block time. Surfaced as a 📍 chip on each unassigned
+   *  card so the carving head knows where each cut slab sits. */
+  stock_location?: string | null;
 };
 
 type JobRow = {
@@ -832,6 +838,30 @@ function UnassignedByTemple({
         {s.length_ft}×{s.width_ft}×{s.thickness_ft}&Prime;
         {s.source_block_id && ` · ${s.source_block_id}`}
       </div>
+      {/* Stock-location chip — shows where the cutter dropped this
+          slab. Migration 020. Hidden when missing so older slabs
+          (pre-migration) don't render a stray "not set" line. */}
+      {s.stock_location && (
+        <div
+          style={{
+            fontSize: 10,
+            fontWeight: 700,
+            color: "#7c2d12",
+            background: "rgba(180,115,51,0.08)",
+            border: "1px solid rgba(180,115,51,0.25)",
+            padding: "3px 7px",
+            borderRadius: 5,
+            alignSelf: "flex-start",
+            fontFamily: "ui-monospace, monospace",
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+          }}
+          title="Where the cutter team dropped this slab"
+        >
+          📍 {s.stock_location}
+        </div>
+      )}
       {/* Ready-since pill — tells the carving head how long this
           slab has been sitting in cut_done. Older = more pressure. */}
       {s.updated_at && (() => {
@@ -1768,6 +1798,16 @@ function JobsByTemple({
                       )}
                     </div>
                   )}
+
+                  {/* Inline manual-vendor lifecycle buttons. Surfaced
+                      directly on the Active-tab card so the carving
+                      head can fire Mark started / Mark complete
+                      without drilling into the detail page. Buttons
+                      stopPropagation so clicking them doesn't also
+                      open the peek modal. CNC cards skip this. */}
+                  {j.vendor_type === "Manual" && (
+                    <ManualLifecycleButtons job={j} />
+                  )}
                 </div>
               );
             })}
@@ -1776,6 +1816,71 @@ function JobsByTemple({
       ))}
     </>
   );
+}
+
+// Tiny client-side button bar for manual-vendor jobs on Active cards.
+// Imported actions are server actions; calling them from a form runs
+// the server action and refreshes via revalidatePath().
+function ManualLifecycleButtons({ job }: { job: JobRow }) {
+  // carving_assigned → Mark started
+  if (job.status === "carving_assigned") {
+    return (
+      <form
+        action={markCarvingStartedManuallyAction}
+        onClick={(e) => e.stopPropagation()}
+        style={{ marginTop: 4 }}
+      >
+        <input type="hidden" name="carving_item_id" value={job.id} />
+        <input type="hidden" name="redirect_to" value="/carving?tab=active" />
+        <button
+          type="submit"
+          style={{
+            width: "100%",
+            fontSize: 11,
+            padding: "6px 10px",
+            fontWeight: 700,
+            background: "#78350f",
+            color: "#fff",
+            border: "none",
+            borderRadius: 6,
+            cursor: "pointer",
+          }}
+        >
+          ▶ Mark started
+        </button>
+      </form>
+    );
+  }
+  // carving_in_progress + completed_at NULL → Mark complete
+  if (job.status === "carving_in_progress" && !job.completed_at) {
+    return (
+      <form
+        action={markCarvingCompleteManuallyAction}
+        onClick={(e) => e.stopPropagation()}
+        style={{ marginTop: 4 }}
+      >
+        <input type="hidden" name="carving_item_id" value={job.id} />
+        <input type="hidden" name="redirect_to" value="/carving?tab=active" />
+        <button
+          type="submit"
+          style={{
+            width: "100%",
+            fontSize: 11,
+            padding: "6px 10px",
+            fontWeight: 700,
+            background: "#15803d",
+            color: "#fff",
+            border: "none",
+            borderRadius: 6,
+            cursor: "pointer",
+          }}
+        >
+          🎯 Mark complete
+        </button>
+      </form>
+    );
+  }
+  return null;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────

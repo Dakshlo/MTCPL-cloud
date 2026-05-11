@@ -8,6 +8,60 @@ Reverse-chronological. Most recent at top. Append to TOP when shipping new work.
 
 ## Recent (this Claude session)
 
+### `(pending)` · Phase 4 UX polish: route visual, partitioned assign, inline manual, singleton 2-head load
+
+Seven UX improvements stacked into one commit, all from Daksh's
+feedback on the transfer + load flows:
+
+1. **Transfer page route visualisation** — each row now shows a
+   3-column layout: `[📍 From card]` `[→ animated arrow]`
+   `[🏭 To card]`. Arrow runs a CSS gradient animation when this
+   runner has the row claimed (kind="mine"). Stripped action
+   buttons out of the side column and put them under the route
+   so the From/To endpoints get full width.
+
+2. **Assign modal CNC vs Manual partition** — vendor list is now
+   split with section headers: "🏭 CNC Vendors" (with the per-type
+   capacity breakdown) above, dashed divider, then "🪚 Manual
+   Carvers" (compact rows, amber accent) below. Carving head can
+   no longer accidentally treat a Manual carver as if they're CNC.
+
+3. **Inline manual lifecycle buttons on Active cards** — Manual
+   jobs get a `▶ Mark started` / `🎯 Mark complete` button right
+   on the Active-tab card. Click stopsPropagation so it doesn't
+   trigger the peek modal. No drilling into the detail page.
+
+4. **Stock location chip on Unassigned cards** — every unassigned
+   slab card now shows `📍 <stock_location>` so the carving head
+   can scan where each cut slab currently sits before assigning.
+
+5. **Load modal — singleton mode on 2-head CNCs** — new pair/single
+   mode toggle when loading onto a 2-head machine. Single mode
+   uses the existing `loadSlabOnMachineAction` (which already
+   accepted multi_head_2 machines just fine) so we just route to
+   it when mode="single". The "second head off" rare case is now
+   reachable through the UI.
+
+6. **Load modal — 3D card grid** — replaced the cramped vertical
+   list of slab rows with a responsive grid of 3D thumbnail cards
+   (auto-fill, min 140px). Each card shows: SlabThumb · urgency
+   chip · lathe chip · slab id · temple · dims. Much easier to
+   pick the right slab visually.
+
+7. **Collapsible Pending stock + Recently completed** — vendor
+   cockpit's Pending stock and Recently completed sections now
+   collapse by default (▶ caret toggle). Pending stock is
+   read-only and Recently completed is reference; neither needs
+   to take screen space by default. The Ready-to-load section
+   stays open since that's the actionable one.
+
+Also: Load modal queue now filters to readyToLoad only (slabs in
+transit can't be loaded), and the empty state explains why
+("Check Pending stock — slabs need to be delivered first").
+
+No schema change — pure UI work + ReadyToLoad split that came in
+the previous commit's data model.
+
 ### `(pending)` · Slab Transfer role + claim/deliver flow + 3D thumbs on cockpit
 
 A dedicated runner role that physically moves slabs from the cutter's
