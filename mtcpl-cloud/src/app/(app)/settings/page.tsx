@@ -16,6 +16,11 @@ const UI_ROLES_ALL = [
   { value: "slab_entry",       label: "SLAB ENTRY" },
   { value: "block_entry",      label: "BLOCK ENTRY" },
   { value: "cutting_operator", label: "CUTTING OPERATOR" },
+  // Phase 4 — CNC supervisor (Mohit, Manthan, Vivek, etc).
+  // Each vendor row is bound to a profile via vendor_id on profiles.
+  { value: "vendor",           label: "CNC OPERATOR" },
+  // Phase 4 follow-up — slab transfer runner (migration 025).
+  { value: "slab_transfer",    label: "SLAB TRANSFER" },
 ];
 
 // Roles owner/team-head can assign — cannot promote to owner or developer
@@ -26,6 +31,8 @@ const UI_ROLES_PLANNER = [
   { value: "slab_entry",       label: "SLAB ENTRY" },
   { value: "block_entry",      label: "BLOCK ENTRY" },
   { value: "cutting_operator", label: "CUTTING OPERATOR" },
+  { value: "vendor",           label: "CNC OPERATOR" },
+  { value: "slab_transfer",    label: "SLAB TRANSFER" },
 ];
 
 // Legacy — kept for roleLabel lookup
@@ -35,14 +42,15 @@ const ROLE_ACCESS: Record<string, string[]> = {
   developer:        ["Dashboard", "Blocks", "Slabs", "Plan Generator", "Cutting", "Settings"],
   owner:            ["Dashboard", "Blocks", "Slabs", "Plan Generator", "Cutting", "Settings"],
   team_head:        ["Blocks", "Slabs", "Plan Generator", "Cutting", "Settings"],
-  carving_head:     ["Ready Sizes", "Carving Jobs", "Dispatch"],
+  carving_head:     ["Ready Sizes", "Carving Jobs", "Slab Transfer", "Dispatch"],
   block_slab_entry: ["Dashboard", "Blocks", "Slabs"],
   slab_entry:       ["Dashboard", "Slabs"],
   block_entry:      ["Blocks"],
   cutting_operator: ["Cutting"],
   carving_assigner: ["Dashboard"],
   dispatch:         ["Dashboard"],
-  vendor:           ["Dashboard"],
+  vendor:           ["My Jobs"],
+  slab_transfer:    ["Slab Transfer"],
 };
 
 function roleLabel(role: string): string {

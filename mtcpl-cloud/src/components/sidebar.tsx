@@ -81,15 +81,6 @@ const navEntries: NavEntry[] = [
     roles: ["developer", "owner", "carving_head"],
   },
   {
-    // Migration 025 — slab transfer dispatch list. Lives under the
-    // Carving section; slab_transfer role lands here on login.
-    // carving_head + owner + dev see it for oversight.
-    href: "/carving/transfer",
-    label: "Slab Transfer",
-    icon: "🚧",
-    roles: ["developer", "owner", "carving_head", "slab_transfer"],
-  },
-  {
     href: "/dispatch",
     label: "Dispatch",
     icon: "🚚",
@@ -106,6 +97,17 @@ const navEntries: NavEntry[] = [
     label: "My Jobs",
     icon: "👤",
     roles: ["developer", "vendor"],
+  },
+  {
+    // Migration 025 — slab transfer dispatch list. Placed UNDER
+    // My Jobs in the sidebar at user's request — feels like a
+    // sibling of the vendor's own workstation rather than tucked
+    // up with the dispatcher's tools. slab_transfer role lands
+    // here on login. carving_head + owner + dev see it for oversight.
+    href: "/carving/transfer",
+    label: "Slab Transfer",
+    icon: "🚧",
+    roles: ["developer", "owner", "carving_head", "slab_transfer"],
   },
 ];
 

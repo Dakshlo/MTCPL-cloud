@@ -8,6 +8,39 @@ Reverse-chronological. Most recent at top. Append to TOP when shipping new work.
 
 ## Recent (this Claude session)
 
+### `(pending)` · Mirror-pair grouping + roles dropdown + Ready Sizes today-default + sidebar reorder
+
+Four smaller-scoped UX polish items from Daksh:
+
+1. **Mirror-pair grouping in temple peek modal** — when the carving
+   head opens a temple's slab grid, slabs that share (label + L×W×T)
+   now get a shared coloured frame around their card. Singletons
+   stay uncoloured so the eye lands on actual pairs / triples / etc.
+   — exactly the slabs that are 2-head-pair candidates. A banner
+   at the top of the modal explains the convention.
+   Palette is 8 soft pastel tints; if a temple has >8 distinct
+   shapes the palette wraps. Implementation in
+   `TempleSlabsPeek` (dashboard-client.tsx).
+
+2. **Settings → Users role dropdown** — added the two missing roles
+   that were silently absent:
+   - **CNC OPERATOR** (`vendor`) — for Mohit, Manthan, Vivek, etc.
+   - **SLAB TRANSFER** (`slab_transfer`) — for the runner role
+     added in migration 025.
+   Both ROLE_ACCESS rows updated too so the access summary in the
+   users table reads correctly.
+
+3. **Ready Sizes** — page now defaults to today's cut date instead
+   of "all time" (was overwhelming on a yard with 600+ cut slabs).
+   Quick filter row expanded: Today · Yesterday · Last 3 days ·
+   Last 7 · Last 30 · Last 90. Active preset gets a gold-pill
+   highlight so the user can see which range they're on.
+
+4. **Sidebar reorder** — moved Slab Transfer down to sit under
+   My Jobs (was between Carving Jobs and Dispatch). Feels more
+   natural as a vendor-adjacent workstation than tucked up with
+   the dispatcher's tools.
+
 ### `(pending)` · Phase 4 UX polish: route visual, partitioned assign, inline manual, singleton 2-head load
 
 Seven UX improvements stacked into one commit, all from Daksh's

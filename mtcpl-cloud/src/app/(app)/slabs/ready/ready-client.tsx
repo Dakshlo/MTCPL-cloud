@@ -54,8 +54,13 @@ export function ReadySlabsClient({ slabs, stoneNames: _stoneNames, templeNames: 
   const [templeFilter, setTempleFilter] = useState("all");
   const [qualityFilter, setQualityFilter] = useState("all");
   const [search, setSearch] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  // Default to "today only" so the page lands focused on what just
+  // came off the cutting floor. The user can clear or pick a wider
+  // range using the quick buttons (Yesterday / Last 3 days /
+  // Last 7 / 30 / 90). `today` is also declared lower for the quick
+  // buttons; this initialiser uses the same value at mount.
+  const [dateFrom, setDateFrom] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [dateTo, setDateTo] = useState<string>(() => new Date().toISOString().slice(0, 10));
   const [sortBy, setSortBy] = useState<SortCol>("updated_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [exporting, setExporting] = useState(false);
@@ -270,18 +275,50 @@ export function ReadySlabsClient({ slabs, stoneNames: _stoneNames, templeNames: 
           </div>
         </div>
 
-        {/* Quick presets */}
+        {/* Quick presets — page now defaults to Today so these are
+            shortcuts to widen the window. Active button is highlighted
+            so the user can see which range they're currently on. */}
         <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
           <span className="muted" style={{ fontSize: 12, alignSelf: "center" }}>Quick:</span>
-          {[
-            { label: "Last 7 days",  fn: () => { setDateFrom(new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10)); setDateTo(today); } },
-            { label: "Last 30 days", fn: () => { setDateFrom(new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10)); setDateTo(today); } },
-            { label: "Last 90 days", fn: () => { setDateFrom(new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10)); setDateTo(today); } },
-          ].map(p => (
-            <button key={p.label} type="button" className="ghost-button" style={{ fontSize: 11, padding: "2px 9px" }} onClick={p.fn}>
-              {p.label}
-            </button>
-          ))}
+          {(() => {
+            const yesterday = new Date(Date.now() - 1 * 864e5).toISOString().slice(0, 10);
+            const last3 = new Date(Date.now() - 2 * 864e5).toISOString().slice(0, 10);
+            const last7 = new Date(Date.now() - 6 * 864e5).toISOString().slice(0, 10);
+            const last30 = new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10);
+            const last90 = new Date(Date.now() - 89 * 864e5).toISOString().slice(0, 10);
+            const presets: Array<{ label: string; from: string; to: string }> = [
+              { label: "Today",        from: today,     to: today },
+              { label: "Yesterday",    from: yesterday, to: yesterday },
+              { label: "Last 3 days",  from: last3,     to: today },
+              { label: "Last 7 days",  from: last7,     to: today },
+              { label: "Last 30 days", from: last30,    to: today },
+              { label: "Last 90 days", from: last90,    to: today },
+            ];
+            return presets.map((p) => {
+              const isActive = dateFrom === p.from && dateTo === p.to;
+              return (
+                <button
+                  key={p.label}
+                  type="button"
+                  className="ghost-button"
+                  style={{
+                    fontSize: 11,
+                    padding: "2px 9px",
+                    background: isActive ? "rgba(180,115,51,0.12)" : undefined,
+                    borderColor: isActive ? "var(--gold-dark)" : undefined,
+                    color: isActive ? "var(--gold-dark)" : undefined,
+                    fontWeight: isActive ? 700 : undefined,
+                  }}
+                  onClick={() => {
+                    setDateFrom(p.from);
+                    setDateTo(p.to);
+                  }}
+                >
+                  {p.label}
+                </button>
+              );
+            });
+          })()}
         </div>
       </div>
 

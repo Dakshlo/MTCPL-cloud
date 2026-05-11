@@ -1074,9 +1074,38 @@ function TempleCardGrid({
   );
 }
 
+// Soft pastel palette for the mirror-pair group accents. Each
+// unique (label + L×W×T) combination within a temple gets its own
+// colour so the carving head can spot at a glance which slabs are
+// candidates for 2-head pair loads. Limited to 8 colours; if a temple
+// has more than 8 distinct shapes the palette wraps (acceptable —
+// the eye can still see groups).
+const PAIR_GROUP_COLORS: Array<{ bg: string; border: string; label: string }> = [
+  { bg: "rgba(37,99,235,0.08)",  border: "rgba(37,99,235,0.45)",  label: "#1d4ed8" },
+  { bg: "rgba(22,163,74,0.08)",  border: "rgba(22,163,74,0.45)",  label: "#15803d" },
+  { bg: "rgba(217,119,6,0.08)",  border: "rgba(217,119,6,0.45)",  label: "#b45309" },
+  { bg: "rgba(124,58,237,0.08)", border: "rgba(124,58,237,0.45)", label: "#7c3aed" },
+  { bg: "rgba(190,18,60,0.08)",  border: "rgba(190,18,60,0.45)",  label: "#be123c" },
+  { bg: "rgba(14,165,233,0.08)", border: "rgba(14,165,233,0.45)", label: "#0284c7" },
+  { bg: "rgba(139,92,246,0.08)", border: "rgba(139,92,246,0.45)", label: "#7c3aed" },
+  { bg: "rgba(234,88,12,0.08)",  border: "rgba(234,88,12,0.45)",  label: "#c2410c" },
+];
+
+function pairGroupKey(s: UnassignedSlab): string {
+  // Two slabs are pair-eligible when label + dims match exactly.
+  // Don't include stone in the key — same temple = same stone in
+  // practice — and stone mismatch would surface separately.
+  return `${s.label ?? ""}::${Number(s.length_ft)}×${Number(s.width_ft)}×${Number(s.thickness_ft)}`;
+}
+
 // Center-peek modal that shows all slabs in one temple as the same
 // card grid the flat view uses. Clicking a slab card's "Assign to
 // Vendor" still opens the AssignModal stacked over this peek.
+//
+// Mirror-pair grouping: slabs that share (label + L×W×T) get a
+// shared coloured "left bar" accent + faint tinted background. Lone
+// shapes (1 of a kind) get no colour so the eye is drawn to actual
+// pairs/groups — those are the 2-head candidates.
 function TempleSlabsPeek({
   temple,
   slabs,
@@ -1089,6 +1118,26 @@ function TempleSlabsPeek({
   onClose: () => void;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
+
+  // Walk the slabs once: count occurrences per pair key, then assign
+  // each key a colour index. Singletons get no colour (NULL).
+  const groupColorMap = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const s of slabs) {
+      const k = pairGroupKey(s);
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+    const colourByKey = new Map<string, (typeof PAIR_GROUP_COLORS)[number]>();
+    let nextIdx = 0;
+    for (const [k, count] of counts.entries()) {
+      if (count >= 2) {
+        colourByKey.set(k, PAIR_GROUP_COLORS[nextIdx % PAIR_GROUP_COLORS.length]);
+        nextIdx += 1;
+      }
+    }
+    return colourByKey;
+  }, [slabs]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -1179,6 +1228,27 @@ function TempleSlabsPeek({
             ✕
           </button>
         </div>
+        {groupColorMap.size > 0 && (
+          <div
+            style={{
+              padding: "8px 18px",
+              background: "var(--surface-alt)",
+              borderBottom: "1px solid var(--border)",
+              fontSize: 11,
+              color: "var(--muted)",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              flexWrap: "wrap",
+            }}
+          >
+            <strong style={{ color: "var(--text)" }}>🪞 Mirror pairs:</strong>
+            <span>
+              Slabs with matching label + L×W×T share a colour — pick two same-coloured
+              slabs to assign as a 2-head pair.
+            </span>
+          </div>
+        )}
         <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
           <div
             style={{
@@ -1187,7 +1257,25 @@ function TempleSlabsPeek({
               gap: 8,
             }}
           >
-            {slabs.map(renderCard)}
+            {slabs.map((s) => {
+              const tint = groupColorMap.get(pairGroupKey(s));
+              if (!tint) {
+                return renderCard(s);
+              }
+              return (
+                <div
+                  key={s.id}
+                  style={{
+                    background: tint.bg,
+                    border: `2px solid ${tint.border}`,
+                    borderRadius: 10,
+                    padding: 2,
+                  }}
+                >
+                  {renderCard(s)}
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
