@@ -42,6 +42,8 @@ export function VendorForm({
     name?: string;
     vendor_type?: "CNC" | "Manual" | "Outsource";
     is_active?: boolean;
+    /** Migration 025 — standard place to drop slabs for this CNC vendor. */
+    dropoff_location?: string | null;
     machines?: Machine[];
   };
   onCancel?: () => void;
@@ -50,6 +52,7 @@ export function VendorForm({
   const [name, setName] = useState(initial?.name ?? "");
   const [vendorType, setVendorType] = useState<"CNC" | "Manual" | "Outsource">(initial?.vendor_type ?? "Manual");
   const [isActive, setIsActive] = useState(initial?.is_active ?? true);
+  const [dropoffLocation, setDropoffLocation] = useState(initial?.dropoff_location ?? "");
   const [machines, setMachines] = useState<Machine[]>(initial?.machines ?? []);
 
   function addMachine() {
@@ -139,6 +142,27 @@ export function VendorForm({
           </label>
         )}
       </div>
+
+      {/* Slab dropoff location (CNC only) — where the transfer
+          person delivers slabs for this vendor. Migration 025. */}
+      {vendorType === "CNC" && (
+        <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+            Slab dropoff location
+            <span style={{ marginLeft: 6, fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
+              (where the transfer runner drops slabs for this vendor)
+            </span>
+          </span>
+          <input
+            type="text"
+            name="dropoff_location"
+            value={dropoffLocation}
+            onChange={(e) => setDropoffLocation(e.target.value)}
+            placeholder="e.g. Shade A, near gate"
+            style={{ padding: "8px 12px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
+          />
+        </label>
+      )}
 
       {/* CNC machine sub-form */}
       {vendorType === "CNC" && (

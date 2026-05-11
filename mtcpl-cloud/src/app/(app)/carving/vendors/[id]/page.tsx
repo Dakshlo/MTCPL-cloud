@@ -12,7 +12,7 @@ export default async function VendorDetailPage({ params }: { params: Promise<{ i
   const admin = createAdminSupabaseClient();
 
   const [{ data: vendor }, { data: machines }, { data: jobs }] = await Promise.all([
-    admin.from("vendors").select("id, name, vendor_type, is_active").eq("id", id).single(),
+    admin.from("vendors").select("id, name, vendor_type, is_active, dropoff_location").eq("id", id).single(),
     admin.from("cnc_machines").select("id, machine_code, operator_name, is_active, machine_type, max_length_in, max_width_in, max_thickness_in").eq("vendor_id", id).order("machine_code"),
     admin.from("carving_items").select("id, status, assigned_at, due_at, slab_requirement_id").eq("vendor_id", id).order("assigned_at", { ascending: false }).limit(50),
   ]);
@@ -55,6 +55,7 @@ export default async function VendorDetailPage({ params }: { params: Promise<{ i
             name: vendor.name,
             vendor_type: vendor.vendor_type,
             is_active: vendor.is_active,
+            dropoff_location: (vendor as { dropoff_location?: string | null }).dropoff_location ?? null,
             machines: machineList,
           }}
         />

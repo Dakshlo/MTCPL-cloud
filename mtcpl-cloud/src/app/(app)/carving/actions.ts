@@ -111,6 +111,8 @@ export async function createVendorAction(formData: FormData) {
   const name = txt(formData, "name");
   const vendorType = txt(formData, "vendor_type") as "CNC" | "Manual" | "Outsource";
   const machinesJson = txt(formData, "machines_json");
+  // Migration 025 — standard slab dropoff location for CNC vendors.
+  const dropoffLocation = txt(formData, "dropoff_location") || null;
 
   if (!name) redirect("/carving/vendors?toast=Vendor+name+is+required");
   if (!["CNC", "Manual", "Outsource"].includes(vendorType)) {
@@ -119,7 +121,14 @@ export async function createVendorAction(formData: FormData) {
 
   const { data: vendor, error } = await admin
     .from("vendors")
-    .insert({ name, vendor_type: vendorType, is_active: true })
+    .insert({
+      name,
+      vendor_type: vendorType,
+      is_active: true,
+      // Only persist dropoff_location for CNC vendors (Manual has no
+      // shade to deliver to).
+      ...(vendorType === "CNC" ? { dropoff_location: dropoffLocation } : {}),
+    })
     .select("id")
     .single();
 
@@ -195,6 +204,9 @@ export async function updateVendorAction(formData: FormData) {
   const vendorType = txt(formData, "vendor_type") as "CNC" | "Manual" | "Outsource";
   const isActive = txt(formData, "is_active") === "true";
   const machinesJson = txt(formData, "machines_json");
+  // Migration 025 — slab dropoff location (CNC only). Empty string
+  // from the form means "no value" → NULL.
+  const dropoffLocation = txt(formData, "dropoff_location") || null;
   // Caller can pass redirect_to to land back where they came from
   // (carving page peek modal sends "/carving"). Defaults to the
   // vendor's detail page for back-compat with the old form.
@@ -204,7 +216,15 @@ export async function updateVendorAction(formData: FormData) {
 
   const { error } = await admin
     .from("vendors")
-    .update({ name, vendor_type: vendorType, is_active: isActive })
+    .update({
+      name,
+      vendor_type: vendorType,
+      is_active: isActive,
+      // Only update dropoff_location when the vendor is CNC. Switching
+      // CNC→Manual or back-and-forth doesn't wipe a previously-set
+      // value (we just leave it alone).
+      ...(vendorType === "CNC" ? { dropoff_location: dropoffLocation } : {}),
+    })
     .eq("id", vendorId);
 
   if (error) {
@@ -1359,28 +1379,42 @@ export async function cancelCarvingJobAction(formData: FormData) {
   redirect("/carving?toast=Assignment+cancelled");
 }
 
-// ── Migration 023: receipt acknowledgement ─────────────────────────
+// ── Migration 023 + 025: receipt acknowledgement ───────────────────
 //
-// Either the vendor operator (from /vendor cockpit) or the carving
-// head (from /carving) can mark a slab as physically received at
-// the vendor's shade. This closes the assign → load gap that was
-// previously invisible.
+// Anyone in the chain can mark a slab as physically received at the
+// vendor's shade:
+//   - slab_transfer role (PRIMARY — they're the runner doing the
+//     physical move and they capture an optional dropoff_note saying
+//     exactly where they left the slab).
+//   - carving_head (fallback when transfer person isn't around).
+//   - vendor operator (fallback when transfer person isn't around).
+//   - owner / developer (oversight).
 //
-// No-op if already received. If a vendor role fires this, we
-// validate they own the job (profiles.vendor_id === carving_items.vendor_id).
-// CNC vendors only — Manual vendors don't have a receipt step.
+// Clears the claim_by lock if one was set (migration 025) — once
+// delivered, the slab is no longer "in transit, claimed by X".
+//
+// No-op if already received. CNC vendors only.
 export async function acknowledgeReceiptAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner", "carving_head", "vendor"]);
+  const { profile } = await requireAuth([
+    "developer",
+    "owner",
+    "carving_head",
+    "vendor",
+    "slab_transfer",
+  ]);
   const admin = createAdminSupabaseClient();
 
   const carvingItemId = txt(formData, "carving_item_id");
+  const dropoffNote = txt(formData, "dropoff_note") || null;
   const redirectTo = txt(formData, "redirect_to") || "/carving";
 
   if (!carvingItemId) redirect(`${redirectTo}?toast=Missing+job+id`);
 
   const { data: ci } = await admin
     .from("carving_items")
-    .select("id, vendor_id, vendor_type, vendor_name, status, received_at_vendor_at")
+    .select(
+      "id, vendor_id, vendor_type, vendor_name, status, received_at_vendor_at, claimed_by",
+    )
     .eq("id", carvingItemId)
     .maybeSingle();
   if (!ci) redirect(`${redirectTo}?toast=Job+not+found`);
@@ -1391,6 +1425,7 @@ export async function acknowledgeReceiptAction(formData: FormData) {
     vendor_name: string;
     status: string;
     received_at_vendor_at: string | null;
+    claimed_by: string | null;
   };
 
   if (item.vendor_type !== "CNC") {
@@ -1405,26 +1440,150 @@ export async function acknowledgeReceiptAction(formData: FormData) {
       redirect(`${redirectTo}?toast=Not+your+job+to+acknowledge`);
     }
   }
+  // slab_transfer role: if the slab is claimed by someone ELSE,
+  // refuse — they need to coordinate with the claimant.
+  if (profile.role === "slab_transfer" && item.claimed_by && item.claimed_by !== profile.id) {
+    redirect(`${redirectTo}?toast=Claimed+by+another+runner`);
+  }
 
   const now = new Date().toISOString();
   await admin
     .from("carving_items")
-    .update({ received_at_vendor_at: now, received_at_vendor_by: profile.id })
+    .update({
+      received_at_vendor_at: now,
+      received_at_vendor_by: profile.id,
+      // Clear the claim so the row drops out of the "claimed by me" list.
+      claimed_by: null,
+      claimed_at: null,
+      // Only overwrite dropoff_note if the form supplied one — don't
+      // wipe a previously-set note.
+      ...(dropoffNote ? { dropoff_note: dropoffNote } : {}),
+    })
     .eq("id", carvingItemId)
     .is("received_at_vendor_at", null);
 
+  const noteSuffix = dropoffNote ? ` · left at ${dropoffNote}` : "";
   await recordEvent(
     carvingItemId,
     "received_at_vendor",
     profile.id,
-    `Received at ${item.vendor_name}`,
+    `Received at ${item.vendor_name}${noteSuffix}`,
   );
   await logAudit(profile.id, "carving_received_at_vendor", "carving_item", carvingItemId, {
     vendor_id: item.vendor_id,
+    dropoff_note: dropoffNote,
   });
 
   refreshAll();
   redirect(`${redirectTo}?toast=Marked+received`);
+}
+
+// ── Migration 025: claim / unclaim a slab for transfer ─────────────
+//
+// Slab transfer runners "claim" a slab before picking it up so two
+// runners don't both grab the same one. The claim is cleared
+// automatically when the delivery is marked.
+//
+// Anyone with the slab_transfer role can claim. Carving head + owner +
+// developer can also claim (and can unclaim someone else's grab if
+// they need to redirect — useful when a runner goes off shift).
+export async function claimSlabTransferAction(formData: FormData) {
+  const { profile } = await requireAuth([
+    "developer",
+    "owner",
+    "carving_head",
+    "slab_transfer",
+  ]);
+  const admin = createAdminSupabaseClient();
+
+  const carvingItemId = txt(formData, "carving_item_id");
+  const redirectTo = txt(formData, "redirect_to") || "/carving/transfer";
+  if (!carvingItemId) redirect(`${redirectTo}?toast=Missing+job+id`);
+
+  const { data: ci } = await admin
+    .from("carving_items")
+    .select("id, status, received_at_vendor_at, claimed_by")
+    .eq("id", carvingItemId)
+    .maybeSingle();
+  if (!ci) redirect(`${redirectTo}?toast=Job+not+found`);
+  const item = ci as {
+    id: string;
+    status: string;
+    received_at_vendor_at: string | null;
+    claimed_by: string | null;
+  };
+
+  if (item.received_at_vendor_at) {
+    redirect(`${redirectTo}?toast=Already+delivered`);
+  }
+  if (item.status !== "carving_assigned") {
+    redirect(`${redirectTo}?toast=Not+in+transfer+queue`);
+  }
+  if (item.claimed_by && item.claimed_by !== profile.id) {
+    redirect(`${redirectTo}?toast=Already+claimed`);
+  }
+
+  const now = new Date().toISOString();
+  // Race-guard: only claim if still unclaimed. Whoever wins the race
+  // gets the lock; the loser sees "Already claimed" on the next view.
+  const { data: updated } = await admin
+    .from("carving_items")
+    .update({ claimed_by: profile.id, claimed_at: now })
+    .eq("id", carvingItemId)
+    .is("claimed_by", null)
+    .select("id");
+
+  if (!updated?.length && item.claimed_by !== profile.id) {
+    redirect(`${redirectTo}?toast=Already+claimed`);
+  }
+
+  await recordEvent(carvingItemId, "transfer_claimed", profile.id, "Claimed for transfer");
+  await logAudit(profile.id, "transfer_claimed", "carving_item", carvingItemId, {});
+
+  refreshAll();
+  redirect(`${redirectTo}?toast=Claimed`);
+}
+
+export async function unclaimSlabTransferAction(formData: FormData) {
+  const { profile } = await requireAuth([
+    "developer",
+    "owner",
+    "carving_head",
+    "slab_transfer",
+  ]);
+  const admin = createAdminSupabaseClient();
+
+  const carvingItemId = txt(formData, "carving_item_id");
+  const redirectTo = txt(formData, "redirect_to") || "/carving/transfer";
+  if (!carvingItemId) redirect(`${redirectTo}?toast=Missing+job+id`);
+
+  const { data: ci } = await admin
+    .from("carving_items")
+    .select("id, claimed_by, received_at_vendor_at")
+    .eq("id", carvingItemId)
+    .maybeSingle();
+  if (!ci) redirect(`${redirectTo}?toast=Job+not+found`);
+  const item = ci as { id: string; claimed_by: string | null; received_at_vendor_at: string | null };
+
+  if (item.received_at_vendor_at) redirect(`${redirectTo}?toast=Already+delivered`);
+  if (!item.claimed_by) redirect(`${redirectTo}?toast=Not+claimed`);
+
+  // slab_transfer can only unclaim their own. Higher roles can
+  // unclaim anyone's (useful when a runner goes off shift).
+  if (profile.role === "slab_transfer" && item.claimed_by !== profile.id) {
+    redirect(`${redirectTo}?toast=Not+your+claim`);
+  }
+
+  await admin
+    .from("carving_items")
+    .update({ claimed_by: null, claimed_at: null })
+    .eq("id", carvingItemId);
+
+  await recordEvent(carvingItemId, "transfer_unclaimed", profile.id, "Released claim");
+  await logAudit(profile.id, "transfer_unclaimed", "carving_item", carvingItemId, {});
+
+  refreshAll();
+  redirect(`${redirectTo}?toast=Claim+released`);
 }
 
 // ── Migration 024: re-tag work-type on an existing job ─────────────

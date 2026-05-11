@@ -65,6 +65,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
     { data: queueAndActive },
     { data: completedRecent },
     { data: vendorPickerRows },
+    { data: stoneTypes },
   ] = await Promise.all([
     admin
       .from("vendors")
@@ -104,6 +105,13 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
           .eq("is_active", true)
           .order("name")
       : Promise.resolve({ data: null }),
+    // Stone palette definitions for the 3D slab thumbnails on
+    // queue rows + machine cards. Same shape carving page uses.
+    admin
+      .from("stone_types")
+      .select("id, name, color_top, color_front, color_side, sort_order, is_active")
+      .order("sort_order")
+      .order("name"),
   ]);
 
   if (!vendor) {
@@ -249,6 +257,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
       otherVendors={otherVendors}
       isStaffView={profile.role !== "vendor"}
       toast={params.toast ?? null}
+      stoneTypes={stoneTypes ?? []}
     />
   );
 }

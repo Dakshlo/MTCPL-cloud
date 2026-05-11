@@ -30,6 +30,7 @@
 | 022 | `cnc_machines_id_default.sql` | Restore `gen_random_uuid()` default on `cnc_machines.id` (was missing on prod, blocked new-machine inserts with NOT NULL violation) |
 | 023 | `received_at_vendor.sql` | `carving_items.received_at_vendor_at` + `received_at_vendor_by` (closes the assign → load delivery gap; auto-filled at load time if NULL) |
 | 024 | `cnc_dim_limits_and_work_type.sql` | Per-machine bed envelope (`cnc_machines.max_length_in / max_width_in / max_thickness_in`) + per-job work-type tag (`carving_items.requires_machine_type`: NULL=flat-panel, `'lathe'`=cylindrical) |
+| 025 | `slab_transfer_role.sql` | Slab transfer runner role: adds `slab_transfer` to `app_role` enum + `vendors.dropoff_location` + `carving_items.dropoff_note` + `carving_items.claimed_by / claimed_at` (claim lock so two runners don't grab the same slab) |
 
 ## How migrations get to prod
 

@@ -81,6 +81,15 @@ const navEntries: NavEntry[] = [
     roles: ["developer", "owner", "carving_head"],
   },
   {
+    // Migration 025 — slab transfer dispatch list. Lives under the
+    // Carving section; slab_transfer role lands here on login.
+    // carving_head + owner + dev see it for oversight.
+    href: "/carving/transfer",
+    label: "Slab Transfer",
+    icon: "🚧",
+    roles: ["developer", "owner", "carving_head", "slab_transfer"],
+  },
+  {
     href: "/dispatch",
     label: "Dispatch",
     icon: "🚚",
@@ -113,6 +122,7 @@ function roleLabel(role: AppRole): string {
     dispatch: "DISPATCH",
     carving_assigner: "CARVING",
     vendor: "VENDOR",
+    slab_transfer: "SLAB TRANSFER",
   };
   return labels[role] ?? role.replace(/_/g, " ").toUpperCase();
 }
@@ -169,6 +179,7 @@ export function Sidebar({
     if (href === "/carving") return pathname === "/carving";
     if (href === "/carving/floor") return pathname.startsWith("/carving/floor");
     if (href === "/carving/reports") return pathname.startsWith("/carving/reports");
+    if (href === "/carving/transfer") return pathname.startsWith("/carving/transfer");
     return pathname === href || pathname.startsWith(href + "/");
   }
 

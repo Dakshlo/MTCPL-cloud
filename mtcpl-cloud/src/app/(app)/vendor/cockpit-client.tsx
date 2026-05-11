@@ -13,6 +13,8 @@ import {
   getMachineHistory,
   type MachineHistory,
 } from "../carving/actions";
+import { SlabThumb } from "@/components/slab-thumb";
+import type { StoneTypeDef } from "@/lib/stone-utils";
 
 // ── Types — kept here so server page can import them ──────────────
 
@@ -161,6 +163,7 @@ export function VendorCockpitClient({
   otherVendors,
   isStaffView,
   toast,
+  stoneTypes,
 }: {
   vendor: Vendor;
   machines: CncMachineLive[];
@@ -177,6 +180,8 @@ export function VendorCockpitClient({
   otherVendors: Vendor[];
   isStaffView: boolean;
   toast: string | null;
+  /** Stone palette for the 3D slab thumbs on machine cards + queue rows. */
+  stoneTypes: StoneTypeDef[];
 }) {
   const router = useRouter();
   const [now, setNow] = useState<number>(Date.now());
@@ -210,6 +215,21 @@ export function VendorCockpitClient({
     }
     return { idle, carving, maintenance, total: machines.length };
   }, [machines]);
+
+  // Migration 023/025 — split queue into "Pending stock" (assigned
+  // but not yet delivered to this vendor's shade — transfer runner
+  // is responsible) and "Ready to load" (physically here, can be
+  // loaded on a CNC). The vendor's old single Queue list mixed these
+  // together; splitting them surfaces the in-transit gap clearly.
+  const { pendingStock, readyToLoad } = useMemo(() => {
+    const pending: CarvingJobLite[] = [];
+    const ready: CarvingJobLite[] = [];
+    for (const j of queue) {
+      if (j.received_at_vendor_at) ready.push(j);
+      else pending.push(j);
+    }
+    return { pendingStock: pending, readyToLoad: ready };
+  }, [queue]);
 
   return (
     <div style={{ paddingBottom: 80 }}>
@@ -278,17 +298,41 @@ export function VendorCockpitClient({
           <Stat label="Idle" value={totals.idle} fg="#22c55e" />
           <Stat label="Carving" value={totals.carving} fg="#60a5fa" />
           <Stat label="Maintenance" value={totals.maintenance} fg="#f87171" />
-          <Stat label="Queue" value={queue.length} fg="#fbbf24" />
+          <Stat label="Pending stock" value={pendingStock.length} fg="#fbbf24" />
+          <Stat label="Ready to load" value={readyToLoad.length} fg="#fbbf24" />
         </div>
       </div>
 
-      {/* Queue */}
-      <Section title="Queue" subtitle={`${queue.length} slab${queue.length !== 1 ? "s" : ""} waiting to load`}>
-        {queue.length === 0 ? (
-          <Empty text="Queue is clear. Carving head will assign more as slabs become available." />
+      {/* Pending stock — slabs assigned but not yet delivered to
+          this vendor's shade. Read-only view; transfer person
+          handles delivery on /carving/transfer. Migration 023/025. */}
+      <Section
+        title="Pending stock"
+        subtitle={
+          pendingStock.length === 0
+            ? "No slabs awaiting transfer to your shade."
+            : `${pendingStock.length} slab${pendingStock.length !== 1 ? "s" : ""} being transferred from the yard`
+        }
+      >
+        {pendingStock.length === 0 ? null : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {pendingStock.map((job) => (
+              <PendingStockRow key={job.id} job={job} />
+            ))}
+          </div>
+        )}
+      </Section>
+
+      {/* Ready to load — slabs physically at the shade, ready for a CNC. */}
+      <Section
+        title="Ready to load"
+        subtitle={`${readyToLoad.length} slab${readyToLoad.length !== 1 ? "s" : ""} ready to load on a CNC`}
+      >
+        {readyToLoad.length === 0 ? (
+          <Empty text={pendingStock.length > 0 ? "Waiting for the transfer runner to deliver. See Pending stock above." : "Queue is clear. Carving head will assign more as slabs become available."} />
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {queue.map((job) => (
+            {readyToLoad.map((job) => (
               <QueueRow
                 key={job.id}
                 job={job}
@@ -326,6 +370,7 @@ export function VendorCockpitClient({
                 onComplete={() => setCompleteFor(m)}
                 onMaintenance={() => setMaintenanceFor(m)}
                 onHistory={() => setHistoryFor(m)}
+                stoneTypes={stoneTypes}
               />
             ))}
           </div>
@@ -489,6 +534,88 @@ function Stat({ label, value, fg }: { label: string; value: number; fg: string }
       </div>
       <div style={{ fontSize: 22, fontWeight: 700, color: fg, lineHeight: 1.1, marginTop: 2 }}>
         {value}
+      </div>
+    </div>
+  );
+}
+
+// ── Pending stock row — assigned, not yet delivered ─────────────────
+//
+// Read-only. The transfer runner physically moves the slab from the
+// stock location to this vendor's shade and then marks it received
+// (which flips it into the "Ready to load" list). Migration 023/025.
+function PendingStockRow({ job }: { job: CarvingJobLite }) {
+  const isUrgent = job.urgency === "urgent";
+  const isLathe = job.requires_machine_type === "lathe";
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "10px 12px",
+        background: "rgba(217,119,6,0.04)",
+        border: "1px dashed rgba(217,119,6,0.4)",
+        borderRadius: 8,
+        flexWrap: "wrap",
+      }}
+    >
+      <div style={{ flex: "1 1 220px", minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          {isUrgent && (
+            <span
+              style={{
+                fontSize: 10, fontWeight: 800, padding: "2px 8px",
+                borderRadius: 999, background: "#dc2626", color: "#fff",
+                letterSpacing: "0.05em",
+              }}
+            >
+              ⚡ URGENT
+            </span>
+          )}
+          {isLathe && (
+            <span
+              style={{
+                fontSize: 9, fontWeight: 800, padding: "2px 6px",
+                borderRadius: 3, background: "rgba(124,58,237,0.15)",
+                color: "#7c3aed", letterSpacing: "0.05em",
+              }}
+              title="Cylindrical — lathe required"
+            >
+              🌀 LATHE
+            </span>
+          )}
+          <span
+            style={{
+              fontSize: 9, fontWeight: 800, padding: "2px 6px",
+              borderRadius: 3, background: "rgba(217,119,6,0.18)",
+              color: "#b45309", letterSpacing: "0.05em",
+            }}
+          >
+            🚚 IN TRANSIT
+          </span>
+          <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 13 }}>
+            {job.slab_id}
+          </span>
+        </div>
+        {job.slab && (
+          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+            {job.slab.temple} · {dimStr(job.slab)}
+          </div>
+        )}
+        {job.slab?.stock_location && (
+          <div
+            style={{
+              fontSize: 11, color: "#7c2d12", marginTop: 2,
+              fontFamily: "ui-monospace, monospace", fontWeight: 700,
+            }}
+          >
+            📍 Currently at: {job.slab.stock_location}
+          </div>
+        )}
+        <div style={{ fontSize: 10, color: "var(--muted-light)", marginTop: 4 }}>
+          Transfer runner will deliver to your shade. Click ✅ Mark received once it arrives.
+        </div>
       </div>
     </div>
   );
@@ -660,6 +787,7 @@ function MachineCard({
   onComplete,
   onMaintenance,
   onHistory,
+  stoneTypes,
 }: {
   machine: CncMachineLive;
   queueLength: number;
@@ -668,6 +796,9 @@ function MachineCard({
   onComplete: () => void;
   onMaintenance: () => void;
   onHistory: () => void;
+  /** Phase 4 follow-up — used to colour the 3D slab thumb on
+   *  running cards so the operator sees a stone-matched preview. */
+  stoneTypes: StoneTypeDef[];
 }) {
   const tint = STATUS_TINT[machine.status];
   const job = machine.current_job;
@@ -877,8 +1008,27 @@ function MachineCard({
                 background: "rgba(255,255,255,0.85)",
                 border: "1px solid rgba(37,99,235,0.25)",
                 borderRadius: 6,
+                display: "flex",
+                gap: 10,
+                alignItems: "flex-start",
               }}
             >
+              {/* 3D slab thumb so the operator sees a stone-coloured
+                  proportional preview while the slab is on the machine. */}
+              {job.slab && (
+                <div style={{ flexShrink: 0 }}>
+                  <SlabThumb
+                    stone={job.slab.stone}
+                    l={job.slab.length_in}
+                    w={job.slab.width_in}
+                    t={job.slab.thickness_in}
+                    stoneTypes={stoneTypes}
+                    size={56}
+                    height={56}
+                  />
+                </div>
+              )}
+              <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 13 }}>
                 {job.slab_id}
               </div>
@@ -940,6 +1090,7 @@ function MachineCard({
                   />
                 </div>
               )}
+              </div>
             </div>
             <button
               type="button"

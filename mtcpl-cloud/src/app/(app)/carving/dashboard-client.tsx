@@ -26,7 +26,7 @@ import {
   getJobEvents,
   type JobEvent,
 } from "./actions";
-import { IsoBlockStaticSVG } from "@/components/iso-block-static";
+import { SlabThumb } from "@/components/slab-thumb";
 import type { StoneTypeDef } from "@/lib/stone-utils";
 
 type UnassignedSlab = {
@@ -92,6 +92,14 @@ type JobRow = {
    *  operator at finish-block time (e.g. "Yard 2"). Shown next to the
    *  🚚 IN TRANSIT pill so people know where to fetch the slab. */
   slab_stock_location?: string | null;
+  /** Migration 025 — slab transfer claim. claimed_by = NULL while
+   *  unclaimed. claimed_at fires when a transfer runner grabs the
+   *  job. Cleared on delivery (along with receipt being marked). */
+  claimed_by?: string | null;
+  claimed_at?: string | null;
+  /** Migration 025 — where the transfer runner actually left the
+   *  slab (optional — only set when not at standard vendor dropoff). */
+  dropoff_note?: string | null;
 };
 
 type Vendor = {
@@ -738,61 +746,9 @@ export function CarvingDashboardClient({
 // so the thumbnail's footprint is controlled by the OUTER wrapper —
 // fixed-height row with a small inner box that the SVG fits into.
 // Keeps every card the same height regardless of slab proportions.
-function SlabThumb({
-  stone,
-  l,
-  w,
-  t,
-  stoneTypes,
-}: {
-  stone: string | null;
-  l: number;
-  w: number;
-  t: number;
-  stoneTypes: StoneTypeDef[];
-}) {
-  // Guard against zero dims (would crash the SVG math)
-  if (!l || !w || !t) {
-    return (
-      <div
-        style={{
-          height: 70,
-          background: "var(--surface-alt)",
-          borderRadius: 6,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "var(--muted-light)",
-          fontSize: 11,
-        }}
-      >
-        no dimensions
-      </div>
-    );
-  }
-  return (
-    <div
-      style={{
-        height: 80,
-        background: "var(--surface-alt)",
-        borderRadius: 6,
-        padding: 4,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
-      <div style={{ width: 90, maxHeight: 72, display: "flex" }}>
-        <IsoBlockStaticSVG
-          block={{ l, w, h: t, stone: stone ?? "" }}
-          placed={[]}
-          size={90}
-          stoneTypes={stoneTypes}
-        />
-      </div>
-    </div>
-  );
-}
+// SlabThumb moved to @/components/slab-thumb so the vendor cockpit
+// + slab transfer page can reuse it without importing the whole
+// carving dashboard module.
 
 // ─── Unassigned tab — grouped by temple ─────────────────────────────────
 
@@ -1527,8 +1483,9 @@ function JobsByTemple({
                         {/* While in transit, show the slab's last known
                             physical location so whoever is moving it
                             knows where to pick it up. Once received,
-                            it's at the vendor's shade so the location
-                            field is implicit and we hide it. */}
+                            show the dropoff_note (if set) so the team
+                            knows exactly where the runner left it.
+                            Migrations 020 + 023 + 025. */}
                         {!received && j.slab_stock_location && (
                           <div
                             style={{
@@ -1540,6 +1497,24 @@ function JobsByTemple({
                             }}
                           >
                             📍 {j.slab_stock_location}
+                            {j.claimed_by && (
+                              <span style={{ marginLeft: 6, color: "#1d4ed8" }}>
+                                · 🚧 runner has it
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {received && j.dropoff_note && (
+                          <div
+                            style={{
+                              fontSize: 9,
+                              fontWeight: 700,
+                              color: "#15803d",
+                              letterSpacing: "0.04em",
+                              fontFamily: "ui-monospace, monospace",
+                            }}
+                          >
+                            📍 left at {j.dropoff_note}
                           </div>
                         )}
                       </div>

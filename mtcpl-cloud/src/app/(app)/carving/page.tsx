@@ -69,7 +69,7 @@ export default async function CarvingDashboardPage({
     admin
       .from("carving_items")
       .select(
-        "id, slab_requirement_id, vendor_id, vendor_name, vendor_type, status, urgency, due_at, assigned_at, completed_at, progress_phase, cnc_machine_id, loaded_at, vendor_estimated_minutes, estimated_minutes, received_at_vendor_at, requires_machine_type",
+        "id, slab_requirement_id, vendor_id, vendor_name, vendor_type, status, urgency, due_at, assigned_at, completed_at, progress_phase, cnc_machine_id, loaded_at, vendor_estimated_minutes, estimated_minutes, received_at_vendor_at, requires_machine_type, claimed_by, claimed_at, dropoff_note",
       )
       .in("status", ["carving_assigned", "carving_in_progress"])
       .order("assigned_at", { ascending: false }),

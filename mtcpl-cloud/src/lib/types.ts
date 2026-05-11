@@ -10,6 +10,7 @@ export type AppRole =
   | "carving_assigner"
   | "dispatch"
   | "vendor"
+  | "slab_transfer"
   | "worker";
 
 export type StoneType = "PinkStone" | "WhiteStone";

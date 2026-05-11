@@ -25,6 +25,10 @@ export function getDefaultRouteForRole(role?: AppRole | null) {
       return "/dashboard";
     case "vendor":
       return "/cutting";
+    case "slab_transfer":
+      // Migration 025 — slab transfer runner. Lands on the transfer
+      // dispatch list and works through pickups from there.
+      return "/carving/transfer";
     case "worker":
       return "/pending";
     default:

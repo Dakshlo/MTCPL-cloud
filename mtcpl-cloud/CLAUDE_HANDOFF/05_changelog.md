@@ -8,6 +8,72 @@ Reverse-chronological. Most recent at top. Append to TOP when shipping new work.
 
 ## Recent (this Claude session)
 
+### `(pending)` · Slab Transfer role + claim/deliver flow + 3D thumbs on cockpit
+
+A dedicated runner role that physically moves slabs from the cutter's
+stock yard to each CNC vendor's shade. Plan-time decisions (from
+clarification Q&A):
+- Vendor's ✅ Mark received stays as a fallback (transfer person is
+  primary path).
+- Dropoff note is optional (empty = dropped at standard location).
+- Claim-then-deliver model: runner clicks 📦 Claim first to lock the
+  slab so two runners don't grab the same one.
+- Lives at `/carving/transfer` (inside Carving section).
+
+**Migration 025** (`slab_transfer_role.sql`):
+- Adds `slab_transfer` to `app_role` enum (note: ALTER TYPE ADD
+  VALUE can't be inside a transaction — first statement runs alone).
+- `vendors.dropoff_location` — standard place to drop slabs for
+  this CNC vendor (set on vendor edit form).
+- `carving_items.dropoff_note` — where the runner actually left
+  the slab (optional).
+- `carving_items.claimed_by + claimed_at` — claim lock; partial
+  indexes back the unclaimed-pending + claimed-by-me widgets.
+
+**New actions in `actions.ts`**:
+- `claimSlabTransferAction` — race-safe lock (only fires when
+  `claimed_by IS NULL`).
+- `unclaimSlabTransferAction` — runner can release their own
+  claim; carving_head + owner + developer can release anyone's.
+- Extended `acknowledgeReceiptAction` — accepts optional
+  `dropoff_note`, clears the claim, records event with the note.
+
+**New page `/carving/transfer`**:
+- Three buckets: Claimed by me · Available to claim · Claimed by
+  others.
+- Each row: 3D slab thumbnail + slab id + temple + dims + chips
+  (urgent / lathe) + From (stock_location) → To (vendor +
+  dropoff_location) + assigned vendor.
+- Buttons: 📦 Claim (Available) · ✅ Mark delivered + optional
+  note (Claimed by me) · Release their claim (Claimed by others,
+  carving_head+ only).
+
+**Sidebar**: new 🚧 Slab Transfer entry under Carving Jobs.
+Visible to slab_transfer + carving_head + owner + developer.
+`slab_transfer` role lands on /carving/transfer after login.
+
+**Vendor form**: new "Slab dropoff location" input (CNC only).
+`createVendorAction` + `updateVendorAction` persist it.
+
+**Vendor cockpit refactor**:
+- Old single "Queue" section split into two:
+  - **Pending stock** (assigned, not yet delivered) — read-only,
+    shows the slab's current stock location. The transfer runner
+    is responsible for delivering; vendor can't load yet.
+  - **Ready to load** (delivered) — has the Load button as before.
+- Stat tiles updated: Pending stock + Ready to load replace Queue.
+- 3D slab thumbnail on each MachineCard when carving (uses the
+  shared `SlabThumb` component).
+
+**Shared component**: extracted `SlabThumb` from
+`dashboard-client.tsx` into `src/components/slab-thumb.tsx` so the
+transfer page + vendor cockpit can reuse without importing the
+whole carving dashboard module.
+
+**Carving dashboard cards**: surface claim status (🚧 runner has
+it) under the 🚚 IN TRANSIT pill, and `dropoff_note` after delivery
+(📍 left at <note>) so the team knows where to find the slab.
+
 ### `(pending)` · Phase 4 follow-up: surface 📍 slab location on in-transit pills
 
 Daksh asked: while the slab is in transit (🚚 IN TRANSIT, not yet
@@ -239,5 +305,6 @@ Outstanding migrations awaiting run on prod:
 - **022** (`cnc_machines_id_default.sql`) — must be run before adding new CNC machines, otherwise insert fails with `null value in column "id"`.
 - **023** (`received_at_vendor.sql`) — adds the receipt timestamp columns. Without it the Mark Received button and at-shade pills won't work.
 - **024** (`cnc_dim_limits_and_work_type.sql`) — adds per-CNC dim caps + per-job work-type tag. Without it the lathe-tag pill, machine-fit validation, and re-tag UI won't work.
+- **025** (`slab_transfer_role.sql`) — slab_transfer enum value + dropoff + claim columns. Without it `/carving/transfer` will error on the missing columns. **Note**: this migration contains an `ALTER TYPE app_role ADD VALUE` that cannot run inside a transaction — it's the first statement, runs standalone, then BEGIN/COMMIT wraps the rest.
 
-Confirm with Daksh after each. All three are idempotent and additive; the app code is NULL-safe so running them late only disables the new features, not the existing flow.
+Confirm with Daksh after each. All are idempotent and additive; the app code is NULL-safe so running them late only disables the new features, not the existing flow.

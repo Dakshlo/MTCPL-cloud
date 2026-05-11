@@ -84,6 +84,39 @@ Server actions live in `src/app/(app)/carving/actions.ts`. Notable:
 - `getMachineHistory` / `getJobEvents` — read-only fetchers used by modals.
 - Vendor CRUD: create / update / deactivate / reactivate / delete (hard delete only when vendor has zero machines + zero items). Migration 024 dim caps (`max_length_in / max_width_in / max_thickness_in`) flow through `machines_json` on the form payload.
 
+## Slab Transfer — `/carving/transfer` (slab_transfer + developer + owner + carving_head)
+
+Phase 4 follow-up. A dedicated runner role moves slabs from the
+cutter's stock yard to each CNC vendor's shade. The page shows three
+buckets:
+
+- **Claimed by me** — slabs this runner has locked. Each row has
+  a green **✅ Mark delivered** button (with optional dropoff_note
+  field for when the slab is left somewhere different from the
+  vendor's standard dropoff location) and a "Release claim" link.
+- **Available to claim** — unclaimed slabs. Each row has a
+  **📦 Claim** button. Sorted urgent first, then oldest first.
+- **Claimed by other runners** — read-only awareness. carving_head
+  + owner + developer can release someone else's claim (useful when
+  a runner goes off shift).
+
+Each row shows: 3D slab thumbnail · slab id · temple · dims ·
+urgent/lathe chips · **From** (cutter's stock_location) → **To**
+(vendor name + dropoff_location).
+
+Server actions in `src/app/(app)/carving/actions.ts`:
+- `claimSlabTransferAction` — race-safe; refuses if claimed_by is
+  already set by someone else.
+- `unclaimSlabTransferAction` — runner can release their own
+  claim; carving_head + above can release anyone's.
+- `acknowledgeReceiptAction` (extended in this PR) — accepts
+  optional dropoff_note, clears the claim. Vendor + carving_head
+  fallback paths still work.
+
+Vendor cockpit (`/vendor`) splits Queue into **Pending stock**
+(read-only, awaiting transfer) + **Ready to load** (delivered, can
+load on a CNC). Stat tiles updated accordingly.
+
 ## Carving Floor — `/carving/floor` (developer, owner, carving_head)
 
 Two modes:
