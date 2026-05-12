@@ -1523,6 +1523,27 @@ export async function claimSlabTransferAction(formData: FormData) {
     redirect(`${redirectTo}?toast=Already+claimed`);
   }
 
+  // One-active-claim limit (real-world: the runner operates a crane,
+  // grabs one slab, drives it to the shade, comes back for the next).
+  // Reject if this user already has any other slab claimed and not
+  // yet delivered. Carving_head + owner + developer are also subject
+  // to this — they shouldn't be hoarding claims either.
+  const { data: existingClaim } = await admin
+    .from("carving_items")
+    .select("id")
+    .eq("claimed_by", profile.id)
+    .is("received_at_vendor_at", null)
+    .neq("id", carvingItemId)
+    .limit(1)
+    .maybeSingle();
+  if (existingClaim) {
+    redirect(
+      `${redirectTo}?toast=${encodeURIComponent(
+        "You already have a slab claimed. Deliver or release it first.",
+      )}`,
+    );
+  }
+
   const now = new Date().toISOString();
   // Race-guard: only claim if still unclaimed. Whoever wins the race
   // gets the lock; the loser sees "Already claimed" on the next view.

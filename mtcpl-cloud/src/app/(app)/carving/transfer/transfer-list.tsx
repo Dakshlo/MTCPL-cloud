@@ -138,6 +138,14 @@ export function TransferDispatchList({
   const availableRows = cncRows.filter((r) => !r.claimed_by);
   const othersRows = cncRows.filter((r) => r.claimed_by && r.claimed_by !== currentUserId);
 
+  // One-active-claim limit. While the runner has at least one slab
+  // claimed (and not yet delivered), all Claim buttons on Available
+  // rows are disabled with a hint to finish or release the current
+  // one first. Server-side enforcement in claimSlabTransferAction is
+  // the source of truth; this is the UX cue so the runner doesn't
+  // even try to click.
+  const hasActiveClaim = mineRows.length > 0;
+
   const sortByUrgency = (a: TransferRow, b: TransferRow) => {
     if (a.urgency !== b.urgency) return a.urgency === "urgent" ? -1 : 1;
     return new Date(a.assigned_at).getTime() - new Date(b.assigned_at).getTime();
@@ -201,7 +209,9 @@ export function TransferDispatchList({
         )}
       </SectionShell>
 
-      {/* AVAILABLE TO CLAIM — secondary, amber. */}
+      {/* AVAILABLE TO CLAIM — secondary, amber. Claim buttons are
+          disabled while the runner has an active claim (one-at-a-
+          time crane workflow). Banner explains why. */}
       <SectionShell
         kind="available"
         title="📦 Available to claim"
@@ -213,10 +223,40 @@ export function TransferDispatchList({
         collapsible
         defaultOpen
       >
+        {hasActiveClaim && availableRows.length > 0 && (
+          <div
+            style={{
+              padding: "10px 12px",
+              marginBottom: 10,
+              background: "rgba(180,115,51,0.10)",
+              border: "1.5px solid rgba(180,115,51,0.4)",
+              borderRadius: 8,
+              fontSize: 13,
+              color: "#7c2d12",
+              fontWeight: 600,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              flexWrap: "wrap",
+            }}
+          >
+            <span style={{ fontSize: 16 }}>🏗️</span>
+            <span>
+              Finish your current slab first — <strong>Mark delivered</strong> or
+              <strong> Release claim</strong> above before picking the next one.
+            </span>
+          </div>
+        )}
         {availableRows.length > 0 && (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {availableRows.map((r) => (
-              <TransferCard key={r.id} row={r} kind="available" stoneTypes={stoneTypes} />
+              <TransferCard
+                key={r.id}
+                row={r}
+                kind="available"
+                stoneTypes={stoneTypes}
+                disabledReason={hasActiveClaim ? "Deliver or release your current slab first" : null}
+              />
             ))}
           </div>
         )}
@@ -371,11 +411,16 @@ function TransferCard({
   kind,
   canUnclaim,
   stoneTypes,
+  disabledReason,
 }: {
   row: TransferRow;
   kind: "mine" | "available" | "others";
   canUnclaim?: boolean;
   stoneTypes: StoneTypeDef[];
+  /** When set, the Claim button on an Available row is disabled
+   *  and shows this hint as a tooltip + greyed out style. Used to
+   *  enforce the one-active-claim-per-runner rule. */
+  disabledReason?: string | null;
 }) {
   const [deliverOpen, setDeliverOpen] = useState(false);
   const dims = `${row.length_ft}×${row.width_ft}×${row.thickness_ft}″`;
@@ -448,15 +493,19 @@ function TransferCard({
             <button
               type="submit"
               className="primary-button"
+              disabled={!!disabledReason}
+              title={disabledReason ?? undefined}
               style={{
                 width: "100%",
                 fontSize: 14,
                 padding: "12px 20px",
                 fontWeight: 700,
                 minHeight: 44,
+                opacity: disabledReason ? 0.45 : 1,
+                cursor: disabledReason ? "not-allowed" : "pointer",
               }}
             >
-              📦 Claim this slab
+              {disabledReason ? "🏗️ Deliver current first" : "📦 Claim this slab"}
             </button>
           </form>
         )}
