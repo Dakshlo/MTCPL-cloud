@@ -20,6 +20,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AssignModal } from "./assign-modal";
+import { BulkAssignModal } from "./bulk-assign-modal";
 import {
   approveCarvingJobAction,
   rejectCarvingJobAction,
@@ -163,6 +164,30 @@ export function CarvingDashboardClient({
   // Awaiting Review / Carving Done. Center modal with slab info,
   // assignment, and inline approve/reject forms.
   const [peekJob, setPeekJob] = useState<JobRow | null>(null);
+
+  // Bulk-select mode on the Unassigned tab. The carving head taps
+  // "📋 Bulk select" to enter, then taps up to 4 slabs (2-head pair
+  // is the common case). A sticky bar at the bottom shows the count
+  // + "Assign N selected →" which opens BulkAssignModal. The chosen
+  // slabs share a batch_id so the vendor sees them colour-grouped.
+  const [bulkMode, setBulkMode] = useState(false);
+  const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const BULK_MAX = 4;
+
+  // After a successful batch assign the action redirects to
+  // /carving?tab=active&toast=Batch+of+N+queued. Detect that and
+  // clear the bulk state so the sticky bar doesn't keep showing
+  // stale counts for slabs that have already moved out of the
+  // unassigned list.
+  useEffect(() => {
+    const toast = searchParams.get("toast") ?? "";
+    if (toast.startsWith("📦 Batch") || toast.startsWith("Batch")) {
+      setBulkOpen(false);
+      setBulkSelected(new Set());
+      setBulkMode(false);
+    }
+  }, [searchParams]);
 
   // ── Filter / view state ──────────────────────────────────────────
   // Single search box covers slab id, label, description, temple,
@@ -430,6 +455,36 @@ export function CarvingDashboardClient({
           ⚡ Priority
         </button>
 
+        {/* Bulk-select toggle — only on Unassigned tab. Lets the
+            carving head pick up to 4 slabs at once for a batch
+            assign (most common case: 2 mirror slabs for a 2-head
+            CNC pair load). Exiting bulk mode clears selection. */}
+        {tab === "unassigned" && (
+          <button
+            type="button"
+            onClick={() => {
+              setBulkMode((on) => {
+                if (on) setBulkSelected(new Set()); // exiting → clear
+                return !on;
+              });
+            }}
+            title="Select multiple slabs and assign them as a batch (max 4)"
+            style={{
+              padding: "7px 12px",
+              fontSize: 12,
+              fontWeight: 700,
+              border: `1.5px solid ${bulkMode ? "var(--gold-dark)" : "var(--border)"}`,
+              background: bulkMode ? "rgba(180,115,51,0.10)" : "var(--surface)",
+              color: bulkMode ? "var(--gold-dark)" : "var(--muted)",
+              borderRadius: 6,
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {bulkMode ? "✕ Cancel select" : "📋 Bulk select"}
+          </button>
+        )}
+
         {/* View toggle.
             Unassigned tab: Grouped (by temple) vs Flat list.
             Other tabs: Vendor vs Temple grouping (vendor = default
@@ -581,6 +636,20 @@ export function CarvingDashboardClient({
           stoneTypes={stoneTypes}
           viewMode={viewMode}
           onAssign={(s) => setAssigning(s)}
+          bulkMode={bulkMode}
+          bulkSelected={bulkSelected}
+          onBulkToggle={(slabId) => {
+            setBulkSelected((prev) => {
+              const next = new Set(prev);
+              if (next.has(slabId)) {
+                next.delete(slabId);
+              } else if (next.size < BULK_MAX) {
+                next.add(slabId);
+              }
+              return next;
+            });
+          }}
+          bulkMax={BULK_MAX}
         />
       )}
 
@@ -730,6 +799,100 @@ export function CarvingDashboardClient({
         <AssignModal slab={assigning} vendors={vendors} onClose={() => setAssigning(null)} />
       )}
 
+      {/* Bulk-assign modal — fired by the sticky bottom bar. */}
+      {bulkOpen && bulkSelected.size > 0 && (
+        <BulkAssignModal
+          slabs={unassignedSlabs
+            .filter((s) => bulkSelected.has(s.id))
+            .map((s) => ({
+              id: s.id,
+              label: s.label,
+              temple: s.temple,
+              stone: s.stone,
+              length_ft: Number(s.length_ft) || 0,
+              width_ft: Number(s.width_ft) || 0,
+              thickness_ft: Number(s.thickness_ft) || 0,
+            }))}
+          vendors={vendors}
+          stoneTypes={stoneTypes}
+          onClose={() => {
+            setBulkOpen(false);
+            // Clear selection after successful assign so the user
+            // doesn't accidentally re-fire on stale state. (If they
+            // cancel, the selection stays — they can re-open.)
+          }}
+        />
+      )}
+
+      {/* Sticky bulk-select action bar. Only renders on the
+          Unassigned tab when the user has selected >0 slabs.
+          Lives at the bottom of the viewport so it doesn't push
+          content around. */}
+      {tab === "unassigned" && bulkMode && bulkSelected.size > 0 && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: 16,
+            left: "calc(var(--content-left) + 16px)",
+            right: 16,
+            zIndex: 900,
+            padding: "12px 16px",
+            background: "var(--gold-dark)",
+            color: "#fff",
+            borderRadius: 12,
+            boxShadow: "0 12px 36px rgba(0,0,0,0.25)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontWeight: 800, fontSize: 16 }}>
+              📦 {bulkSelected.size} of {BULK_MAX} selected
+            </span>
+            <span style={{ fontSize: 12, opacity: 0.85 }}>
+              Pick a vendor, batch them together.
+            </span>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+            <button
+              type="button"
+              onClick={() => setBulkSelected(new Set())}
+              style={{
+                background: "rgba(255,255,255,0.15)",
+                color: "#fff",
+                border: "1px solid rgba(255,255,255,0.3)",
+                padding: "8px 14px",
+                fontSize: 12,
+                fontWeight: 700,
+                borderRadius: 6,
+                cursor: "pointer",
+              }}
+            >
+              Clear
+            </button>
+            <button
+              type="button"
+              onClick={() => setBulkOpen(true)}
+              style={{
+                background: "#fff",
+                color: "#7c2d12",
+                border: "none",
+                padding: "10px 18px",
+                fontSize: 14,
+                fontWeight: 800,
+                borderRadius: 6,
+                cursor: "pointer",
+              }}
+            >
+              Assign {bulkSelected.size} →
+            </button>
+          </div>
+        </div>
+      )}
+
       {peekJob && (
         <JobDetailPeek
           job={peekJob}
@@ -763,11 +926,22 @@ function UnassignedByTemple({
   stoneTypes,
   viewMode,
   onAssign,
+  bulkMode,
+  bulkSelected,
+  onBulkToggle,
+  bulkMax,
 }: {
   slabs: UnassignedSlab[];
   stoneTypes: StoneTypeDef[];
   viewMode: "grouped" | "flat";
   onAssign: (s: UnassignedSlab) => void;
+  /** Bulk-select mode on the Unassigned tab. When true, clicking a
+   *  card toggles its membership in `bulkSelected` instead of opening
+   *  the single-slab assign modal. Capped at `bulkMax` selections. */
+  bulkMode: boolean;
+  bulkSelected: Set<string>;
+  onBulkToggle: (slabId: string) => void;
+  bulkMax: number;
 }) {
   const groups = useMemo(() => groupByTemple(slabs, (s) => s.temple), [slabs]);
 
@@ -786,19 +960,65 @@ function UnassignedByTemple({
   // Card render reused by both grouped and flat views — keeps the
   // visual identical so the user can switch view modes without
   // re-learning the layout.
-  const renderCard = (s: UnassignedSlab) => (
+  const renderCard = (s: UnassignedSlab) => {
+    const isSelected = bulkSelected.has(s.id);
+    const atLimit = !isSelected && bulkSelected.size >= bulkMax;
+    const cardClickable = bulkMode;
+    return (
     <div
       key={s.id}
+      onClick={cardClickable && !atLimit ? () => onBulkToggle(s.id) : undefined}
       style={{
         padding: "8px 10px",
-        background: s.priority ? "rgba(220,38,38,0.04)" : "var(--surface)",
-        border: `1px solid ${s.priority ? "rgba(220,38,38,0.2)" : "var(--border)"}`,
+        background: bulkMode && isSelected
+          ? "rgba(180,115,51,0.12)"
+          : s.priority
+            ? "rgba(220,38,38,0.04)"
+            : "var(--surface)",
+        border: `2px solid ${
+          bulkMode && isSelected
+            ? "var(--gold-dark)"
+            : s.priority
+              ? "rgba(220,38,38,0.2)"
+              : "var(--border)"
+        }`,
         borderRadius: 8,
         display: "flex",
         flexDirection: "column",
         gap: 6,
+        cursor: cardClickable ? (atLimit ? "not-allowed" : "pointer") : "default",
+        opacity: bulkMode && atLimit ? 0.5 : 1,
+        position: "relative",
+        transition: "border-color 0.12s, background 0.12s",
       }}
+      title={atLimit ? `Max ${bulkMax} slabs per batch` : undefined}
     >
+      {/* Bulk-select checkbox overlay — only shown in bulk mode. */}
+      {bulkMode && (
+        <div
+          style={{
+            position: "absolute",
+            top: 6,
+            right: 6,
+            width: 24,
+            height: 24,
+            borderRadius: 6,
+            background: isSelected ? "var(--gold-dark)" : "var(--surface)",
+            border: `2px solid ${isSelected ? "var(--gold-dark)" : "var(--border)"}`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: isSelected ? "#fff" : "var(--muted-light)",
+            fontWeight: 800,
+            fontSize: 14,
+            zIndex: 1,
+            pointerEvents: "none",
+            boxShadow: isSelected ? "0 2px 6px rgba(180,115,51,0.4)" : "none",
+          }}
+        >
+          {isSelected ? "✓" : ""}
+        </div>
+      )}
       <SlabThumb
         stone={s.stone}
         l={Number(s.length_ft)}
@@ -896,16 +1116,24 @@ function UnassignedByTemple({
           </div>
         );
       })()}
-      <button
-        type="button"
-        onClick={() => onAssign(s)}
-        className="primary-button"
-        style={{ marginTop: 4, fontSize: 13, padding: "9px 12px", fontWeight: 700 }}
-      >
-        Assign to Vendor →
-      </button>
+      {/* Single-slab Assign button — only shown when NOT in bulk
+          mode. In bulk mode the whole card acts as a toggle. */}
+      {!bulkMode && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onAssign(s);
+          }}
+          className="primary-button"
+          style={{ marginTop: 4, fontSize: 13, padding: "9px 12px", fontWeight: 700 }}
+        >
+          Assign to Vendor →
+        </button>
+      )}
     </div>
-  );
+    );
+  };
 
   // ── Flat view — one big grid, no temple grouping. Best when a
   //    search query is active or the carving head wants to scan

@@ -516,6 +516,174 @@ export async function assignCarvingJobAction(formData: FormData) {
   redirect("/carving?tab=active&toast=Job+queued");
 }
 
+// ── Migration 026: bulk-assign up to 4 slabs in one shot ───────────
+//
+// The carving head usually assigns slabs in pairs (for 2-head CNCs)
+// or small batches (3-4 slabs going to the same vendor at once). The
+// single-slab assign flow makes them open the modal N times.
+//
+// This action accepts an array of slab_ids (1-4), one vendor, and a
+// single urgency/note/requires_machine_type. It creates N
+// carving_items rows that all share a fresh `batch_id` UUID so the
+// downstream UI (cockpit + transfer page) can colour-group them
+// visually as "these came together — pair them up if you can."
+//
+// Failure model: best-effort sequential inserts. If a later slab
+// fails (e.g. another head grabbed it first), the earlier successes
+// are KEPT — the vendor gets a partial batch. Toast surfaces the
+// count of successes vs failures so the head can retry the rest.
+export async function assignCarvingJobsBatchAction(formData: FormData) {
+  const { profile } = await requireAuth(["developer", "owner", "carving_head"]);
+  const admin = createAdminSupabaseClient();
+
+  // slab_ids is a JSON-stringified array (form sends "[a,b,c]").
+  const slabIdsJson = txt(formData, "slab_ids");
+  const vendorId = txt(formData, "vendor_id");
+  const note = txt(formData, "note") || null;
+  const urgency = txt(formData, "urgency") === "urgent" ? "urgent" : "normal";
+  const estimatedMinutes = Math.max(0, num(formData, "estimated_minutes", 0));
+  const requiresMachineTypeRaw = txt(formData, "requires_machine_type");
+  const requiresMachineType: string | null =
+    requiresMachineTypeRaw === "lathe" ||
+    requiresMachineTypeRaw === "multi_head_2" ||
+    requiresMachineTypeRaw === "single_head"
+      ? requiresMachineTypeRaw
+      : null;
+
+  let slabIds: string[] = [];
+  try {
+    const parsed = JSON.parse(slabIdsJson);
+    if (Array.isArray(parsed)) {
+      slabIds = parsed.filter((x): x is string => typeof x === "string" && !!x);
+    }
+  } catch {
+    /* fall through — empty list will redirect with error below */
+  }
+
+  if (slabIds.length === 0) {
+    redirect("/carving?toast=No+slabs+selected");
+  }
+  if (slabIds.length > 4) {
+    redirect("/carving?toast=Max+4+slabs+per+batch");
+  }
+  if (!vendorId) {
+    redirect("/carving?toast=Pick+a+vendor");
+  }
+
+  const { data: vendor } = await admin
+    .from("vendors")
+    .select("id, name, vendor_type, is_active")
+    .eq("id", vendorId)
+    .single();
+  if (!vendor) redirect("/carving?toast=Vendor+not+found");
+  const vendorType = (vendor as { vendor_type: string }).vendor_type;
+  if (vendorType !== "CNC" && vendorType !== "Manual") {
+    redirect("/carving?toast=Only+CNC+or+Manual+vendors+supported");
+  }
+  if (!(vendor as { is_active: boolean }).is_active) {
+    redirect("/carving?toast=Vendor+is+inactive");
+  }
+  const finalRequiresMachineType = vendorType === "CNC" ? requiresMachineType : null;
+
+  // One batch_id for every slab in this assignment. Downstream UIs
+  // group slabs sharing a batch_id with the same colour stripe.
+  const batchId = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const successes: string[] = [];
+  const failures: Array<{ slab: string; reason: string }> = [];
+
+  for (const slabId of slabIds) {
+    // Race-guard the slab transition first.
+    const { data: slabRow, error: slabErr } = await admin
+      .from("slab_requirements")
+      .update({ status: "carving_assigned", updated_by: profile.id, updated_at: now })
+      .eq("id", slabId)
+      .eq("status", "cut_done")
+      .select("id");
+    if (slabErr) {
+      failures.push({ slab: slabId, reason: slabErr.message });
+      continue;
+    }
+    if (!slabRow?.length) {
+      failures.push({ slab: slabId, reason: "no longer available" });
+      continue;
+    }
+
+    const { data: item, error: itemErr } = await admin
+      .from("carving_items")
+      .insert({
+        slab_requirement_id: slabId,
+        vendor_id: vendorId,
+        vendor_name: (vendor as { name: string }).name,
+        vendor_type: vendorType,
+        cnc_machine_id: null,
+        note,
+        status: "carving_assigned",
+        urgency,
+        estimated_minutes: estimatedMinutes || null,
+        requires_machine_type: finalRequiresMachineType,
+        batch_id: batchId,
+        assigned_by: profile.id,
+      })
+      .select("id")
+      .single();
+    if (itemErr || !item) {
+      // Roll back the slab status flip for this one.
+      await admin
+        .from("slab_requirements")
+        .update({ status: "cut_done", updated_by: profile.id, updated_at: now })
+        .eq("id", slabId);
+      failures.push({ slab: slabId, reason: itemErr?.message ?? "insert failed" });
+      continue;
+    }
+
+    const eta = estimatedMinutes ? `${estimatedMinutes}min` : "no eta";
+    const urgencyTag = urgency === "urgent" ? " · ⚡ URGENT" : "";
+    const typeTag = finalRequiresMachineType === "lathe" ? " · 🌀 lathe" : "";
+    const batchTag = slabIds.length > 1 ? ` · 📦 batch of ${slabIds.length}` : "";
+    await recordEvent(
+      item.id,
+      "assigned",
+      profile.id,
+      `Queued for ${(vendor as { name: string }).name} · ${eta}${urgencyTag}${typeTag}${batchTag}`,
+    );
+    successes.push(item.id);
+  }
+
+  await logAudit(profile.id, "carving_batch_assigned", "carving_item", batchId, {
+    batch_id: batchId,
+    vendor_id: vendorId,
+    vendor_type: vendorType,
+    urgency,
+    estimated_minutes: estimatedMinutes,
+    requires_machine_type: finalRequiresMachineType,
+    slab_count_requested: slabIds.length,
+    slab_count_succeeded: successes.length,
+    failures,
+  });
+
+  refreshAll();
+  if (successes.length === 0) {
+    redirect(
+      `/carving?toast=${encodeURIComponent(
+        `Batch failed — no slabs could be assigned. ${failures[0]?.reason ?? ""}`,
+      )}`,
+    );
+  }
+  if (failures.length > 0) {
+    redirect(
+      `/carving?tab=active&toast=${encodeURIComponent(
+        `Assigned ${successes.length} of ${slabIds.length} · ${failures.length} failed (${failures[0]?.reason ?? "see log"})`,
+      )}`,
+    );
+  }
+  redirect(
+    `/carving?tab=active&toast=${encodeURIComponent(
+      `📦 Batch of ${successes.length} queued`,
+    )}`,
+  );
+}
+
 // ── CNC ops: load slab on a specific machine ────────────────────────
 //
 // Vendor (CNC supervisor) picks a slab from their queue and loads it

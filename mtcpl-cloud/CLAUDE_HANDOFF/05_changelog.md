@@ -8,6 +8,52 @@ Reverse-chronological. Most recent at top. Append to TOP when shipping new work.
 
 ## Recent (this Claude session)
 
+### `(pending)` · Bulk assign (up to 4 slabs) + batch_id grouping
+
+Migration 026 adds `carving_items.batch_id UUID` to group slabs
+assigned together in a single bulk-assign. New flow on the carving
+Unassigned tab:
+
+1. **Bulk-select toggle** in the toolbar (only on Unassigned tab):
+   `📋 Bulk select` → enters bulk mode.
+2. **Cards become tappable toggles** with a ✓ checkbox overlay.
+   Max 4 selected — 5th tap is no-op with "Max 4 slabs per batch"
+   tooltip + greyed card.
+3. **Sticky bottom bar** appears when ≥1 slab selected:
+   `📦 N of 4 selected · Assign N →` button.
+4. **BulkAssignModal** — pick one vendor, one urgency, one
+   work-type tag, one ETA, one note → fires
+   `assignCarvingJobsBatchAction` which inserts N carving_items
+   rows all sharing a fresh `batch_id` UUID. Modal banner detects
+   when all selected slabs are identical (same label + L×W×T) and
+   shows "✓ All identical — can run as 2-head pairs".
+5. After successful submit the URL toast triggers a useEffect
+   that clears bulk state so the sticky bar doesn't show stale
+   counts.
+
+Failure model: best-effort sequential inserts. If slab #3 races
+and is already taken, slabs #1-2 still get inserted; toast surfaces
+"Assigned 2 of 3 · 1 failed".
+
+New action: `assignCarvingJobsBatchAction(formData)` — accepts
+`slab_ids` (JSON array), `vendor_id`, `urgency`, `note`,
+`estimated_minutes`, `requires_machine_type`. The existing
+single-slab `assignCarvingJobAction` is unchanged and still used
+by the single-click "Assign to Vendor →" button on each card.
+
+### `(pending)` · TV mode polish: default 10s, auto-resume on entry, ⚙ cog settings
+
+Three TV-mode UX fixes:
+- Default rotate is 10s (was 20s) — wall TV cycles through every
+  operator within a minute on a 6-vendor fleet.
+- Removed onMouseEnter/onMouseLeave pause on the TV container —
+  on a wall display the cursor sits somewhere on screen
+  permanently, which caused the rotation to never auto-resume.
+- Collapsed the header chrome (label, Pause/Resume button,
+  duration <select>, Light/Dark toggle) into a single ⚙ cog button
+  that opens a small popover. ⏸ PAUSED chip surfaces near the
+  cog only when paused, so the state stays visible.
+
 ### `(pending)` · Slab transfer UI overhaul: section separation, mobile-first, Delivered confirmation
 
 Big polish pass on `/carving/transfer`. Daksh's feedback: sections
@@ -429,5 +475,6 @@ Outstanding migrations awaiting run on prod:
 - **023** (`received_at_vendor.sql`) — adds the receipt timestamp columns. Without it the Mark Received button and at-shade pills won't work.
 - **024** (`cnc_dim_limits_and_work_type.sql`) — adds per-CNC dim caps + per-job work-type tag. Without it the lathe-tag pill, machine-fit validation, and re-tag UI won't work.
 - **025** (`slab_transfer_role.sql`) — slab_transfer enum value + dropoff + claim columns. Without it `/carving/transfer` will error on the missing columns. **Note**: this migration contains an `ALTER TYPE app_role ADD VALUE` that cannot run inside a transaction — it's the first statement, runs standalone, then BEGIN/COMMIT wraps the rest.
+- **026** (`carving_batch_id.sql`) — `carving_items.batch_id`. Without it the bulk-assign flow will error when inserting; the toolbar Bulk select button and sticky bar still render but submission fails.
 
 Confirm with Daksh after each. All are idempotent and additive; the app code is NULL-safe so running them late only disables the new features, not the existing flow.
