@@ -1097,6 +1097,214 @@ export async function loadTwoSlabsOnMultiHeadAction(formData: FormData) {
   redirect("/vendor?toast=Both+slabs+loaded");
 }
 
+// ── Unload-with-problem — bail out mid-carving ─────────────────────
+//
+// Real-world need: during carving, something breaks. The vendor
+// hits a hardware fault, the slab cracks, the design is wrong, or
+// they realise they can't finish it. They need to take this slab
+// OFF the machine without marking it complete + tell the team why.
+// On a 2-head pair load, this unloads JUST one slab — the partner
+// keeps running on the other head.
+//
+// Reasons (form field `reason`):
+//   broken_slab    — slab cracked / chipped, can't continue
+//   carving_problem — tool wear, run-out, mis-cut
+//   design_problem  — file is wrong, wrong toolpath
+//   needs_transfer  — vendor can't handle, route to another vendor
+//   other          — free-form (notes required)
+//
+// Outcomes:
+//   - carving_item.cnc_machine_id → null, loaded_at → null
+//   - status → 'carving_assigned' (back in vendor's stock)
+//     OR 'rejected' if broken_slab (lets team triage)
+//   - cnc_machine: if no other items still in_progress → 'idle' +
+//     current_carving_item_id null; if partner still running →
+//     keep 'carving' but reset current_carving_item_id to survivor.
+//   - cnc_machine_events row: 'unloaded_with_problem'
+//   - carving_job_events row: 'unload_problem' with reason+notes
+//   - If needs_transfer: also flip vendor_id to new_vendor_id
+//     (same plumbing as transferCarvingJobAction).
+export async function unloadWithProblemAction(formData: FormData) {
+  const { profile } = await requireAuth([
+    "developer",
+    "owner",
+    "carving_head",
+    "vendor",
+  ]);
+  const admin = createAdminSupabaseClient();
+
+  const carvingItemId = txt(formData, "carving_item_id");
+  const reason = txt(formData, "reason");
+  const notes = txt(formData, "notes") || null;
+  const newVendorId = txt(formData, "new_vendor_id") || null;
+  const redirectTo = txt(formData, "redirect_to") || "/vendor";
+
+  const validReasons = ["broken_slab", "carving_problem", "design_problem", "needs_transfer", "other"];
+  if (!carvingItemId) redirect(`${redirectTo}?toast=Missing+job+id`);
+  if (!validReasons.includes(reason)) {
+    redirect(`${redirectTo}?toast=Pick+a+reason`);
+  }
+  if (reason === "other" && (!notes || notes.length < 3)) {
+    redirect(`${redirectTo}?toast=Notes+required+for+'other'`);
+  }
+  if (reason === "needs_transfer" && !newVendorId) {
+    redirect(`${redirectTo}?toast=Pick+a+vendor+to+transfer+to`);
+  }
+
+  // Load the row + its machine.
+  const { data: ci } = await admin
+    .from("carving_items")
+    .select(
+      "id, vendor_id, vendor_name, status, cnc_machine_id, slab_requirement_id",
+    )
+    .eq("id", carvingItemId)
+    .maybeSingle();
+  if (!ci) redirect(`${redirectTo}?toast=Job+not+found`);
+  const item = ci as {
+    id: string;
+    vendor_id: string;
+    vendor_name: string;
+    status: string;
+    cnc_machine_id: string | null;
+    slab_requirement_id: string;
+  };
+
+  // Vendor ownership check.
+  if (profile.role === "vendor") {
+    if (!profile.vendor_id || profile.vendor_id !== item.vendor_id) {
+      redirect(`${redirectTo}?toast=Not+your+slab`);
+    }
+  }
+  if (item.status !== "carving_in_progress") {
+    redirect(`${redirectTo}?toast=Slab+is+not+currently+on+a+machine`);
+  }
+  if (!item.cnc_machine_id) {
+    redirect(`${redirectTo}?toast=Slab+has+no+machine`);
+  }
+
+  const machineId = item.cnc_machine_id;
+  const now = new Date().toISOString();
+
+  // If transferring, validate the destination vendor first so we
+  // don't half-execute on a bad input.
+  let newVendor: { id: string; name: string; vendor_type: string } | null = null;
+  if (reason === "needs_transfer" && newVendorId) {
+    const { data: v } = await admin
+      .from("vendors")
+      .select("id, name, vendor_type, is_active")
+      .eq("id", newVendorId)
+      .maybeSingle();
+    if (!v) redirect(`${redirectTo}?toast=Destination+vendor+not+found`);
+    const vendor = v as { id: string; name: string; vendor_type: string; is_active: boolean };
+    if (!vendor.is_active) redirect(`${redirectTo}?toast=Destination+vendor+is+inactive`);
+    if (vendor.vendor_type !== "CNC" && vendor.vendor_type !== "Manual") {
+      redirect(`${redirectTo}?toast=Destination+must+be+CNC+or+Manual`);
+    }
+    if (vendor.id === item.vendor_id) {
+      redirect(`${redirectTo}?toast=Already+with+that+vendor`);
+    }
+    newVendor = vendor;
+  }
+
+  // ── Flip the carving_item ────────────────────────────────────
+  // broken_slab → status='rejected' so the team triages it. The
+  // other reasons → back to 'carving_assigned' for the vendor (or
+  // new vendor on transfer) to retry/handle.
+  const targetStatus = reason === "broken_slab" ? "rejected" : "carving_assigned";
+  const updatePayload: Record<string, unknown> = {
+    status: targetStatus,
+    cnc_machine_id: null,
+    loaded_at: null,
+    loaded_by: null,
+    vendor_estimated_minutes: null,
+  };
+  if (newVendor) {
+    updatePayload.vendor_id = newVendor.id;
+    updatePayload.vendor_name = newVendor.name;
+    updatePayload.vendor_type = newVendor.vendor_type;
+    // Slab needs to physically travel to new vendor → reset receipt.
+    updatePayload.received_at_vendor_at = null;
+    updatePayload.received_at_vendor_by = null;
+  }
+  await admin.from("carving_items").update(updatePayload).eq("id", carvingItemId);
+
+  // Mirror to slab_requirements so the slab pool view is consistent.
+  await admin
+    .from("slab_requirements")
+    .update({
+      status: reason === "broken_slab" ? "rejected" : "carving_assigned",
+      updated_by: profile.id,
+      updated_at: now,
+    })
+    .eq("id", item.slab_requirement_id);
+
+  // ── Machine state ────────────────────────────────────────────
+  // For 2-head pair loads, the partner may still be running. Check
+  // if any other carving_items are still in_progress on this
+  // machine — if yes, keep machine 'carving' and point
+  // current_carving_item_id at the survivor; if no, machine 'idle'.
+  const { data: partners } = await admin
+    .from("carving_items")
+    .select("id")
+    .eq("cnc_machine_id", machineId)
+    .eq("status", "carving_in_progress")
+    .neq("id", carvingItemId);
+  const survivors = (partners ?? []) as Array<{ id: string }>;
+  if (survivors.length > 0) {
+    // Keep machine carving; if the unloaded item was the one
+    // referenced by current_carving_item_id, swap to a survivor.
+    const { data: mach } = await admin
+      .from("cnc_machines")
+      .select("current_carving_item_id")
+      .eq("id", machineId)
+      .maybeSingle();
+    if ((mach as { current_carving_item_id?: string | null } | null)?.current_carving_item_id === carvingItemId) {
+      await admin
+        .from("cnc_machines")
+        .update({ current_carving_item_id: survivors[0].id })
+        .eq("id", machineId);
+    }
+  } else {
+    // Last item leaving the machine — flip idle.
+    await admin
+      .from("cnc_machines")
+      .update({ status: "idle", current_carving_item_id: null })
+      .eq("id", machineId);
+  }
+
+  // ── Event log on both surfaces ───────────────────────────────
+  const reasonLabel: Record<string, string> = {
+    broken_slab: "🪨 Broken slab",
+    carving_problem: "🛠 Carving problem",
+    design_problem: "📐 Design problem",
+    needs_transfer: `↔ Transfer to ${newVendor?.name ?? "vendor"}`,
+    other: "⚠ Other",
+  };
+  const eventMsg = `${reasonLabel[reason]}${notes ? ` · ${notes}` : ""}`;
+  await admin.from("cnc_machine_events").insert({
+    cnc_machine_id: machineId,
+    event_type: "unloaded_with_problem",
+    carving_item_id: carvingItemId,
+    user_id: profile.id,
+    message: eventMsg,
+  });
+  await recordEvent(carvingItemId, "unload_problem", profile.id, eventMsg);
+  await logAudit(profile.id, "carving_unloaded_with_problem", "carving_item", carvingItemId, {
+    reason,
+    notes,
+    new_vendor_id: newVendor?.id ?? null,
+  });
+
+  refreshAll();
+  const toastMsg =
+    reason === "needs_transfer" && newVendor
+      ? `Transferred to ${newVendor.name}`
+      : reason === "broken_slab"
+        ? "Flagged as broken — team will triage"
+        : "Unloaded with problem note";
+  redirect(`${redirectTo}?toast=${encodeURIComponent(toastMsg)}`);
+}
+
 // ── Complete + unload — vendor marks done after the cut ────────────
 //
 // Atomic:
@@ -1858,7 +2066,11 @@ export async function updateRequiresMachineTypeAction(formData: FormData) {
 // partner first so the system doesn't have to reason about which
 // half-pair to leave behind.
 export async function transferCarvingJobAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner", "carving_head"]);
+  // Vendor role is allowed too — vendors can hand off their own
+  // work when they realise they can't handle it (broken stock,
+  // wrong machine type, overbooked, etc). Ownership check below
+  // ensures vendors can only transfer slabs they currently own.
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "vendor"]);
   const admin = createAdminSupabaseClient();
 
   const carvingItemId = txt(formData, "carving_item_id");
@@ -1886,6 +2098,14 @@ export async function transferCarvingJobAction(formData: FormData) {
     status: string;
     cnc_machine_id: string | null;
   };
+
+  // Vendor role: must currently own the slab. Higher roles can move
+  // anyone's work.
+  if (profile.role === "vendor") {
+    if (!profile.vendor_id || profile.vendor_id !== item.vendor_id) {
+      redirect(`${redirectTo}?toast=Not+your+slab+to+transfer`);
+    }
+  }
 
   if (item.vendor_id === newVendorId) {
     redirect(`${redirectTo}?toast=Already+with+that+vendor`);

@@ -95,16 +95,18 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
       .not("completed_at", "is", null)
       .order("completed_at", { ascending: false })
       .limit(10),
-    // Vendor picker for non-vendor roles (dev/owner/carving_head can
-    // switch which vendor they're viewing).
-    profile.role !== "vendor"
-      ? admin
-          .from("vendors")
-          .select("id, name")
-          .eq("vendor_type", "CNC")
-          .eq("is_active", true)
-          .order("name")
-      : Promise.resolve({ data: null }),
+    // All active CNC + Manual vendors. Used for two purposes:
+    //   1. Vendor picker for non-vendor roles (cockpit-switcher).
+    //   2. Transfer-destination dropdown on the per-slab Problem
+    //      modal — vendors can now transfer their own slabs to
+    //      other vendors, so they need the list even though they're
+    //      logged in as 'vendor' role.
+    admin
+      .from("vendors")
+      .select("id, name, vendor_type")
+      .in("vendor_type", ["CNC", "Manual"])
+      .eq("is_active", true)
+      .order("name"),
     // Stone palette definitions for the 3D slab thumbnails on
     // queue rows + machine cards. Same shape carving page uses.
     admin
@@ -159,7 +161,12 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
 
   // Reshape rows for the client component.
   const queue: CarvingJobLite[] = [];
-  const activeByMachine = new Map<string, CarvingJobLite>();
+  // Map machine_id → ALL active jobs on it. Used to be a single
+  // entry per machine (only the last one in iteration order), which
+  // lost the second slab on a 2-head pair. Now stored as an array
+  // so the cockpit can render both slabs side-by-side and act on
+  // either one independently (e.g. unload one mid-carving).
+  const activeByMachine = new Map<string, CarvingJobLite[]>();
   for (const row of (queueAndActive ?? []) as Array<{
     id: string;
     slab_requirement_id: string;
@@ -193,7 +200,11 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
       batch_id: row.batch_id ?? null,
     };
     if (row.status === "carving_assigned") queue.push(job);
-    else if (row.cnc_machine_id) activeByMachine.set(row.cnc_machine_id, job);
+    else if (row.cnc_machine_id) {
+      const arr = activeByMachine.get(row.cnc_machine_id) ?? [];
+      arr.push(job);
+      activeByMachine.set(row.cnc_machine_id, arr);
+    }
   }
   // Sort the queue: urgent first, then oldest assigned first.
   queue.sort((a, b) => {
@@ -219,7 +230,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
       m.status === "carving" || m.status === "maintenance" || m.status === "inactive"
         ? m.status
         : "idle",
-    current_job: activeByMachine.get(m.id) ?? null,
+    current_jobs: activeByMachine.get(m.id) ?? [],
     maintenance_reason: m.maintenance_reason,
     maintenance_flagged_at: m.maintenance_flagged_at,
     machine_type:
@@ -246,9 +257,12 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
   }));
 
   const vendorRow = vendor as { id: string; name: string };
-  const otherVendors = ((vendorPickerRows as { id: string; name: string }[] | null) ?? []).filter(
-    (v) => v.id !== vendorId,
-  );
+  // Drop the current vendor + ensure shape matches client type.
+  const otherVendors = (
+    (vendorPickerRows as { id: string; name: string; vendor_type: string }[] | null) ?? []
+  )
+    .filter((v) => v.id !== vendorId)
+    .map((v) => ({ id: v.id, name: v.name, vendor_type: v.vendor_type }));
 
   return (
     <VendorCockpitClient

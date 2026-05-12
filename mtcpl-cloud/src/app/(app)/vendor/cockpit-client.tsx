@@ -10,6 +10,7 @@ import {
   resolveMaintenanceAction,
   updateTemporaryLocationAction,
   acknowledgeReceiptAction,
+  unloadWithProblemAction,
   getMachineHistory,
   type MachineHistory,
 } from "../carving/actions";
@@ -61,7 +62,11 @@ export type CncMachineLive = {
   machine_code: string;
   operator_name: string | null;
   status: "idle" | "carving" | "maintenance" | "inactive";
-  current_job: CarvingJobLite | null;
+  /** ALL active jobs on this machine. 1 for single-head + lathe;
+   *  up to 2 for multi_head_2 in pair-load mode. Lets the cockpit
+   *  show both slabs side-by-side and act on either one
+   *  independently (e.g. unload one mid-carving). */
+  current_jobs: CarvingJobLite[];
   maintenance_reason: string | null;
   maintenance_flagged_at: string | null;
   /** Migration 021: 'single_head' (default), 'multi_head_2' (loads
@@ -69,7 +74,7 @@ export type CncMachineLive = {
   machine_type: "single_head" | "multi_head_2" | "lathe";
 };
 
-type Vendor = { id: string; name: string };
+type Vendor = { id: string; name: string; vendor_type?: string };
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -208,6 +213,9 @@ export function VendorCockpitClient({
     slab_id: string;
     temporary_location: string | null;
   } | null>(null);
+  // Per-slab "Problem / transfer" modal — opened from a running
+  // machine card. Tracks the carving_item the operator is acting on.
+  const [problemFor, setProblemFor] = useState<CarvingJobLite | null>(null);
 
   // After a server-action redirects back to /vendor with a
   // success toast (e.g. "Slab loaded", "Both slabs loaded",
@@ -230,6 +238,7 @@ export function VendorCockpitClient({
       setCompleteFor(null);
       setMaintenanceFor(null);
       setEditLocFor(null);
+      setProblemFor(null);
     }
   }, [toast]);
 
@@ -406,6 +415,7 @@ export function VendorCockpitClient({
                 onComplete={() => setCompleteFor(m)}
                 onMaintenance={() => setMaintenanceFor(m)}
                 onHistory={() => setHistoryFor(m)}
+                onProblem={(job) => setProblemFor(job)}
                 stoneTypes={stoneTypes}
               />
             ))}
@@ -494,10 +504,10 @@ export function VendorCockpitClient({
           onClose={() => setLoadFor(null)}
         />
       )}
-      {completeFor && completeFor.current_job && (
+      {completeFor && completeFor.current_jobs[0] && (
         <CompleteModal
           machine={completeFor}
-          job={completeFor.current_job}
+          job={completeFor.current_jobs[0]}
           onClose={() => setCompleteFor(null)}
         />
       )}
@@ -513,6 +523,14 @@ export function VendorCockpitClient({
           slabId={editLocFor.slab_id}
           currentLocation={editLocFor.temporary_location}
           onClose={() => setEditLocFor(null)}
+        />
+      )}
+      {problemFor && (
+        <ProblemModal
+          job={problemFor}
+          otherVendorsForTransfer={otherVendors}
+          currentVendorId={vendor.id}
+          onClose={() => setProblemFor(null)}
         />
       )}
     </div>
@@ -879,6 +897,7 @@ function MachineCard({
   onComplete,
   onMaintenance,
   onHistory,
+  onProblem,
   stoneTypes,
 }: {
   machine: CncMachineLive;
@@ -888,12 +907,22 @@ function MachineCard({
   onComplete: () => void;
   onMaintenance: () => void;
   onHistory: () => void;
+  /** Per-slab "Problem / transfer" button — opens a modal where the
+   *  operator picks a reason (broken slab / carving issue / design
+   *  problem / transfer to another vendor / other) and either
+   *  unloads back to their own queue or transfers to a different
+   *  vendor. Lets them act on ONE slab of a 2-head pair without
+   *  unloading the other. */
+  onProblem: (job: CarvingJobLite) => void;
   /** Phase 4 follow-up — used to colour the 3D slab thumb on
    *  running cards so the operator sees a stone-matched preview. */
   stoneTypes: StoneTypeDef[];
 }) {
   const tint = STATUS_TINT[machine.status];
-  const job = machine.current_job;
+  // Primary job — first one loaded. Used for the timer + the
+  // top-level complete-unload action. Second job (if 2-head pair)
+  // is rendered as an extra slab block below.
+  const job = machine.current_jobs[0] ?? null;
 
   // Countdown + elapsed timers for in-progress jobs. We show BOTH —
   // running-for tells the supervisor "how long has this slab been
@@ -1094,103 +1123,151 @@ function MachineCard({
 
         {machine.status === "carving" && job && (
           <>
-            <div
-              style={{
-                padding: "10px 12px",
-                background: "rgba(255,255,255,0.85)",
-                border: "1px solid rgba(37,99,235,0.25)",
-                borderRadius: 6,
-                display: "flex",
-                gap: 10,
-                alignItems: "flex-start",
-              }}
-            >
-              {/* 3D slab thumb so the operator sees a stone-coloured
-                  proportional preview while the slab is on the machine. */}
-              {job.slab && (
-                <div style={{ flexShrink: 0 }}>
-                  <SlabThumb
-                    stone={job.slab.stone}
-                    l={job.slab.length_in}
-                    w={job.slab.width_in}
-                    t={job.slab.thickness_in}
-                    stoneTypes={stoneTypes}
-                    size={56}
-                    height={56}
-                  />
-                </div>
-              )}
-              <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 13 }}>
-                {job.slab_id}
-              </div>
-              {job.slab && (
-                <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
-                  {job.slab.temple} · {dimStr(job.slab)}
-                </div>
-              )}
-              {/* Two timers: elapsed (always) + remaining (when ETA
-                  was set). Side-by-side so the supervisor sees both
-                  "this slab has been on for Xh" and "Xh left" at a
-                  glance. */}
-              {(runningForLabel || remainingLabel) && (
-                <div
-                  style={{
-                    marginTop: 6,
-                    display: "flex",
-                    flexWrap: "wrap",
-                    alignItems: "baseline",
-                    gap: 8,
-                    fontFamily: "ui-monospace, monospace",
-                  }}
-                >
-                  {runningForLabel && (
-                    <span style={{ fontSize: 12, fontWeight: 700, color: "#2563eb" }}>
-                      ▶ {runningForLabel}
+            {/* Per-slab info blocks — usually 1, but 2 for a 2-head
+                pair load. Each has its own ⚠ Problem button so the
+                operator can flag or unload just that slab while the
+                other keeps running. */}
+            {machine.current_jobs.map((slabJob, idx) => (
+              <div
+                key={slabJob.id}
+                style={{
+                  padding: "10px 12px",
+                  background: "rgba(255,255,255,0.85)",
+                  border: "1px solid rgba(37,99,235,0.25)",
+                  borderRadius: 6,
+                  display: "flex",
+                  gap: 10,
+                  alignItems: "flex-start",
+                }}
+              >
+                {slabJob.slab && (
+                  <div style={{ flexShrink: 0 }}>
+                    <SlabThumb
+                      stone={slabJob.slab.stone}
+                      l={slabJob.slab.length_in}
+                      w={slabJob.slab.width_in}
+                      t={slabJob.slab.thickness_in}
+                      stoneTypes={stoneTypes}
+                      size={56}
+                      height={56}
+                    />
+                  </div>
+                )}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    {/* HEAD pill on 2-head pair loads so the operator
+                        can tell which head a slab is on. Single
+                        loads don't need it. */}
+                    {machine.machine_type === "multi_head_2" && machine.current_jobs.length > 1 && (
+                      <span
+                        style={{
+                          fontSize: 9,
+                          fontWeight: 800,
+                          padding: "1px 5px",
+                          borderRadius: 3,
+                          background: "rgba(37,99,235,0.15)",
+                          color: "#1d4ed8",
+                          letterSpacing: "0.05em",
+                        }}
+                      >
+                        HEAD {idx + 1}
+                      </span>
+                    )}
+                    <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 13 }}>
+                      {slabJob.slab_id}
                     </span>
+                  </div>
+                  {slabJob.slab && (
+                    <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+                      {slabJob.slab.temple} · {dimStr(slabJob.slab)}
+                    </div>
                   )}
-                  {remainingLabel && (
-                    <span
+                  {/* Timer + progress only shown on the first row
+                      since the pair shares a loaded_at + ETA. */}
+                  {idx === 0 && (runningForLabel || remainingLabel) && (
+                    <div
                       style={{
-                        fontSize: 13,
-                        fontWeight: 800,
-                        color: remainingColor!,
+                        marginTop: 6,
+                        display: "flex",
+                        flexWrap: "wrap",
+                        alignItems: "baseline",
+                        gap: 8,
+                        fontFamily: "ui-monospace, monospace",
                       }}
                     >
-                      ⏱ {remainingLabel}
-                    </span>
+                      {runningForLabel && (
+                        <span style={{ fontSize: 12, fontWeight: 700, color: "#2563eb" }}>
+                          ▶ {runningForLabel}
+                        </span>
+                      )}
+                      {remainingLabel && (
+                        <span
+                          style={{
+                            fontSize: 13,
+                            fontWeight: 800,
+                            color: remainingColor!,
+                          }}
+                        >
+                          ⏱ {remainingLabel}
+                        </span>
+                      )}
+                    </div>
                   )}
-                </div>
-              )}
-              {progressPct != null && (
-                <div
-                  style={{
-                    marginTop: 6,
-                    height: 4,
-                    background: "rgba(37,99,235,0.15)",
-                    borderRadius: 2,
-                    overflow: "hidden",
-                  }}
-                >
-                  <div
-                    style={{
-                      height: "100%",
-                      width: `${progressPct}%`,
-                      background: progressPct > 100 ? "#dc2626" : "#2563eb",
-                      transition: "width 0.5s",
+                  {idx === 0 && progressPct != null && (
+                    <div
+                      style={{
+                        marginTop: 6,
+                        height: 4,
+                        background: "rgba(37,99,235,0.15)",
+                        borderRadius: 2,
+                        overflow: "hidden",
+                      }}
+                    >
+                      <div
+                        style={{
+                          height: "100%",
+                          width: `${progressPct}%`,
+                          background: progressPct > 100 ? "#dc2626" : "#2563eb",
+                          transition: "width 0.5s",
+                        }}
+                      />
+                    </div>
+                  )}
+                  {/* Per-slab Problem button — opens a modal where
+                      the operator can flag (broken, design issue) or
+                      request a transfer. Stops propagation so the
+                      card click doesn't fire. */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onProblem(slabJob);
                     }}
-                  />
+                    style={{
+                      marginTop: 8,
+                      fontSize: 11,
+                      padding: "5px 10px",
+                      background: "rgba(220,38,38,0.08)",
+                      color: "#991b1b",
+                      border: "1px solid rgba(220,38,38,0.3)",
+                      borderRadius: 6,
+                      cursor: "pointer",
+                      fontWeight: 700,
+                    }}
+                    title="Flag a problem (broken slab / carving issue) or transfer this slab to another vendor"
+                  >
+                    ⚠ Problem / transfer this slab
+                  </button>
                 </div>
-              )}
               </div>
-            </div>
+            ))}
             <button
               type="button"
               onClick={onComplete}
               className="primary-button"
               style={{ fontSize: 13, padding: "10px 14px", fontWeight: 700 }}
             >
-              ✓ Mark complete + unload
+              ✓ Mark complete + unload {machine.current_jobs.length > 1 ? "both" : ""}
             </button>
           </>
         )}
@@ -2006,6 +2083,196 @@ function MaintenanceModal({
         >
           🔧 Flag maintenance
         </button>
+      </form>
+    </ModalShell>
+  );
+}
+
+// ── Problem / transfer modal ────────────────────────────────────
+//
+// Opens when the operator clicks "⚠ Problem / transfer" on a
+// running machine card. Lets them pick a reason and either bounce
+// the slab back into their own queue (broken / carving issue /
+// design problem / other) OR transfer it to another vendor.
+//
+// On a 2-head pair load this acts on JUST the picked slab — the
+// partner keeps running on the other head. Server action
+// unloadWithProblemAction handles the machine state correctly
+// (machine stays 'carving' as long as one slab is still on it).
+function ProblemModal({
+  job,
+  otherVendorsForTransfer,
+  currentVendorId: _currentVendorId,
+  onClose,
+}: {
+  job: CarvingJobLite;
+  otherVendorsForTransfer: Vendor[];
+  currentVendorId: string;
+  onClose: () => void;
+}) {
+  const [reason, setReason] = useState<string>("");
+  const [notes, setNotes] = useState<string>("");
+  const [transferVendorId, setTransferVendorId] = useState<string>("");
+
+  const requiresNotes = reason === "other" || reason === "broken_slab";
+  const requiresVendorPick = reason === "needs_transfer";
+  const canSubmit =
+    !!reason &&
+    (!requiresNotes || notes.trim().length >= 3) &&
+    (!requiresVendorPick || !!transferVendorId);
+
+  return (
+    <ModalShell
+      title="⚠ Problem with this slab"
+      subtitle={`${job.slab_id}${job.slab ? ` · ${job.slab.temple}` : ""}`}
+      onClose={onClose}
+    >
+      <form action={unloadWithProblemAction} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <input type="hidden" name="carving_item_id" value={job.id} />
+        <input type="hidden" name="redirect_to" value="/vendor" />
+
+        <div>
+          <Label>What&apos;s wrong?</Label>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {[
+              { v: "broken_slab", label: "🪨 Broken slab", help: "Cracked or chipped — can't continue. Team will triage." },
+              { v: "carving_problem", label: "🛠 Carving problem", help: "Tool wear, run-out, mis-cut. Slab returns to your stock." },
+              { v: "design_problem", label: "📐 Design problem", help: "Wrong file / toolpath. Slab returns to your stock." },
+              { v: "needs_transfer", label: "↔ Needs transfer", help: "Hand off to another vendor (overbooked, wrong machine type, etc)." },
+              { v: "other", label: "⚠ Other", help: "Anything else — notes required." },
+            ].map((opt) => {
+              const checked = reason === opt.v;
+              return (
+                <label
+                  key={opt.v}
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 10,
+                    padding: "10px 12px",
+                    background: checked ? "rgba(220,38,38,0.06)" : "var(--surface)",
+                    border: `1.5px solid ${checked ? "rgba(220,38,38,0.5)" : "var(--border)"}`,
+                    borderRadius: 8,
+                    cursor: "pointer",
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="reason"
+                    value={opt.v}
+                    checked={checked}
+                    onChange={() => setReason(opt.v)}
+                    style={{ marginTop: 2, cursor: "pointer", flexShrink: 0 }}
+                  />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: "var(--text)" }}>{opt.label}</div>
+                    <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{opt.help}</div>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Transfer-destination picker — only when reason is needs_transfer */}
+        {requiresVendorPick && (
+          <div>
+            <Label>Transfer to</Label>
+            <select
+              name="new_vendor_id"
+              value={transferVendorId}
+              onChange={(e) => setTransferVendorId(e.target.value)}
+              required
+              style={{
+                fontSize: 13,
+                padding: "10px 12px",
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+                background: "var(--bg)",
+                color: "var(--text)",
+                width: "100%",
+              }}
+            >
+              <option value="">Pick a vendor…</option>
+              {otherVendorsForTransfer.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.name}
+                  {v.vendor_type === "Manual" ? " (Manual)" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        <div>
+          <Label>Notes {requiresNotes && <span style={{ color: "#dc2626" }}>(required)</span>}</Label>
+          <textarea
+            name="notes"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            rows={3}
+            placeholder={
+              reason === "broken_slab"
+                ? "What broke? e.g. cracked along grain near corner"
+                : reason === "carving_problem"
+                  ? "What went wrong? e.g. tool snapped at 40%"
+                  : reason === "design_problem"
+                    ? "What's wrong with the design? e.g. toolpath inverted"
+                    : reason === "needs_transfer"
+                      ? "Why transfer? e.g. need lathe, our shop overbooked"
+                      : "Anything the team should know"
+            }
+            style={{
+              padding: "10px 12px",
+              fontSize: 13,
+              border: "1px solid var(--border)",
+              borderRadius: 8,
+              background: "var(--bg)",
+              color: "var(--text)",
+              resize: "vertical",
+              fontFamily: "inherit",
+              width: "100%",
+            }}
+          />
+        </div>
+
+        <div
+          style={{
+            padding: "8px 12px",
+            fontSize: 11,
+            background: "rgba(180,115,51,0.06)",
+            border: "1px dashed rgba(180,115,51,0.3)",
+            borderRadius: 6,
+            color: "#7c2d12",
+          }}
+        >
+          The machine state will update automatically: if this slab&apos;s
+          partner is still running on the other head, the machine stays
+          carving for the partner. Otherwise the machine flips to idle.
+        </div>
+
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            type="submit"
+            disabled={!canSubmit}
+            style={{
+              flex: 1,
+              fontSize: 14,
+              padding: "12px 18px",
+              fontWeight: 700,
+              background: canSubmit ? "#dc2626" : "var(--surface-alt)",
+              color: canSubmit ? "#fff" : "var(--muted)",
+              border: "none",
+              borderRadius: 8,
+              cursor: canSubmit ? "pointer" : "not-allowed",
+            }}
+          >
+            ⚠ Unload with this reason
+          </button>
+          <button type="button" className="ghost-button" onClick={onClose}>
+            Cancel
+          </button>
+        </div>
       </form>
     </ModalShell>
   );
