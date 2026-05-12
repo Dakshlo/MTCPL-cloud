@@ -112,6 +112,14 @@ export function TransferDispatchList({
 }) {
   const router = useRouter();
   const [toastMsg, setToastMsg] = useState<string | null>(toast);
+  // Live ticker for the "⏱ claimed Xm ago" timer on Mine cards.
+  // 15-second cadence keeps the display feel real without spamming
+  // re-renders — slab transfers are minute-to-hour scale, not seconds.
+  const [now, setNow] = useState<number>(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 15_000);
+    return () => clearInterval(id);
+  }, []);
 
   // Auto-clear toast after 4 seconds.
   useEffect(() => {
@@ -203,7 +211,13 @@ export function TransferDispatchList({
         {mineRows.length > 0 && (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {mineRows.map((r) => (
-              <TransferCard key={r.id} row={r} kind="mine" stoneTypes={stoneTypes} />
+              <TransferCard
+                key={r.id}
+                row={r}
+                kind="mine"
+                stoneTypes={stoneTypes}
+                now={now}
+              />
             ))}
           </div>
         )}
@@ -412,6 +426,7 @@ function TransferCard({
   canUnclaim,
   stoneTypes,
   disabledReason,
+  now,
 }: {
   row: TransferRow;
   kind: "mine" | "available" | "others";
@@ -421,6 +436,9 @@ function TransferCard({
    *  and shows this hint as a tooltip + greyed out style. Used to
    *  enforce the one-active-claim-per-runner rule. */
   disabledReason?: string | null;
+  /** Wall-clock millis. Drives the live "claimed Xm ago" ticker on
+   *  Mine cards. Only required when kind === "mine". */
+  now?: number;
 }) {
   const [deliverOpen, setDeliverOpen] = useState(false);
   const dims = `${row.length_ft}×${row.width_ft}×${row.thickness_ft}″`;
@@ -475,6 +493,14 @@ function TransferCard({
           )}
         </div>
       </div>
+
+      {/* Live "claimed Xm ago" timer — only for Mine rows. Turns
+          amber after 15min and red after 30min as a "did the
+          runner get distracted?" nudge. Uses `now` from the parent
+          ticker so it refreshes every 15s without local state. */}
+      {kind === "mine" && now != null && row.claimed_at && (
+        <ClaimedTimer claimedAt={row.claimed_at} now={now} />
+      )}
 
       {/* Route visualisation */}
       <RouteVisual
@@ -831,6 +857,60 @@ function RouteVisual({
       </div>
     </div>
   );
+}
+
+// ── Live timer for "Claimed by me" rows ───────────────────────────
+//
+// Counts up from claimed_at. Tone changes based on duration so the
+// runner sees a visual nudge if they've been on this slab too long:
+//   < 15 min — green   (normal, all good)
+//   15-30 min — amber  (taking a while, double-check the route)
+//   > 30 min — red     (probably forgot or got pulled into something)
+function ClaimedTimer({ claimedAt, now }: { claimedAt: string; now: number }) {
+  const elapsedMin = Math.max(0, (now - new Date(claimedAt).getTime()) / 60000);
+  const tone =
+    elapsedMin >= 30
+      ? { fg: "#991b1b", bg: "rgba(220,38,38,0.10)", border: "rgba(220,38,38,0.4)", icon: "⚠" }
+      : elapsedMin >= 15
+        ? { fg: "#92400e", bg: "rgba(217,119,6,0.10)", border: "rgba(217,119,6,0.4)", icon: "⏳" }
+        : { fg: "#15803d", bg: "rgba(22,163,74,0.10)", border: "rgba(22,163,74,0.4)", icon: "⏱" };
+  const label = fmtElapsed(elapsedMin);
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 8,
+        padding: "6px 10px",
+        background: tone.bg,
+        border: `1px solid ${tone.border}`,
+        borderRadius: 8,
+        fontSize: 12,
+        fontWeight: 700,
+        color: tone.fg,
+        fontFamily: "ui-monospace, monospace",
+      }}
+    >
+      <span>
+        {tone.icon} Claimed {label} ago
+      </span>
+      {elapsedMin >= 15 && (
+        <span style={{ fontSize: 10, fontWeight: 600, opacity: 0.85 }}>
+          {elapsedMin >= 30 ? "taking long — check?" : "in transit"}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function fmtElapsed(mins: number): string {
+  const m = Math.floor(mins);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  const rem = m % 60;
+  return rem === 0 ? `${h}h` : `${h}h ${rem}m`;
 }
 
 // ── Tiny chips + helpers ──────────────────────────────────────────
