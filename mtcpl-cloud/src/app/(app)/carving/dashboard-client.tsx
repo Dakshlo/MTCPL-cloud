@@ -862,12 +862,13 @@ export function CarvingDashboardClient({
       )}
 
       {/* Sticky bulk-select action bar. Only renders on the
-          Unassigned tab when the user has selected >0 slabs.
-          Lives at the bottom of the viewport so it doesn't push
-          content around. z-index 1100 floats it ABOVE the temple
-          peek modal (z-index 1000), so when the user is selecting
-          inside a temple peek the action bar stays visible. */}
-      {tab === "unassigned" && bulkMode && bulkSelected.size > 0 && (
+          Unassigned tab when the user has selected >0 slabs AND
+          the BulkAssignModal isn't open (otherwise both surfaces
+          show an "Assign N" button which is confusing). Lives at
+          the bottom of the viewport. z-index 1100 floats it ABOVE
+          the temple peek modal (z-index 1000) so it stays visible
+          while selecting inside a temple peek. */}
+      {tab === "unassigned" && bulkMode && bulkSelected.size > 0 && !bulkOpen && (
         <div
           style={{
             position: "fixed",
