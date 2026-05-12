@@ -8,6 +8,37 @@ Reverse-chronological. Most recent at top. Append to TOP when shipping new work.
 
 ## Recent (this Claude session)
 
+### `(pending)` · Batch_id colour stripes everywhere + BulkAssignModal cockpit grid
+
+Two follow-ups to the bulk-assign feature:
+
+1. **Vendor cockpit grid restored on BulkAssignModal.** Daksh
+   noticed the single-slab Assign modal showed the picked
+   vendor's CNCs (free / running / down + machine-type pill +
+   work-type match dim) but the new bulk modal didn't. Copied
+   the same cockpit-preview block so the carving head sees
+   Mohit's CNC fleet status while batching slabs to him —
+   identical UX whether single or bulk.
+
+2. **Batch_id visual grouping wired through every surface.**
+   New `src/lib/batch-colours.ts` exports a deterministic
+   `batchTint(batchId)` that hashes the UUID into one of 8
+   pastel colours. Same batch → same colour everywhere, stable
+   across reloads. NULL → no colour (singleton).
+
+   Surfaces showing the coloured left stripe:
+   - Vendor cockpit Pending stock rows
+   - Vendor cockpit Ready to load rows
+   - Slab transfer Claimed-by-me cards
+   - Slab transfer Available compact rows
+   - Slab transfer Others compact rows
+   - Floor view + TV mode: small colour dot on each queue row
+
+   Active-tab cards on `/carving` not done — would need to thread
+   batch_id through the dashboard-client JobRow type. Deferred
+   since the 4 primary surfaces (where batch matters most) are
+   covered.
+
 ### `(pending)` · Bulk assign (up to 4 slabs) + batch_id grouping
 
 Migration 026 adds `carving_items.batch_id UUID` to group slabs

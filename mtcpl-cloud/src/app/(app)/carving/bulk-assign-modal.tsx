@@ -49,6 +49,19 @@ export type BulkAssignSlab = {
 
 type WorkType = "flat" | "lathe";
 
+// Same colour map the single-slab AssignModal uses for its machine
+// grid — kept in sync visually so a vendor's cockpit-preview looks
+// identical whether the carving head opens single or bulk assign.
+const MACHINE_TINT: Record<
+  Machine["status"],
+  { bg: string; border: string; fg: string; label: string }
+> = {
+  idle: { bg: "rgba(22,163,74,0.1)", border: "rgba(22,163,74,0.4)", fg: "#15803d", label: "FREE" },
+  carving: { bg: "rgba(37,99,235,0.08)", border: "rgba(37,99,235,0.4)", fg: "#1d4ed8", label: "RUNNING" },
+  maintenance: { bg: "rgba(220,38,38,0.08)", border: "rgba(220,38,38,0.4)", fg: "#b91c1c", label: "DOWN" },
+  inactive: { bg: "var(--surface-alt)", border: "var(--border)", fg: "var(--muted)", label: "OFF" },
+};
+
 function typeBreakdown(v: Vendor) {
   const out = { multiFree: 0, multiTotal: 0, latheFree: 0, latheTotal: 0 };
   for (const m of v.machines) {
@@ -384,6 +397,141 @@ export function BulkAssignModal({
                 </div>
               )}
             </div>
+
+            {/* Per-machine breakdown for the selected CNC vendor —
+                same cockpit-preview pattern as the single-slab
+                AssignModal. Lets the carving head see at-a-glance
+                which of Mohit's CNCs are free / running / down /
+                of the wrong type for the chosen work-type. */}
+            {selectedVendor && selectedVendor.vendor_type === "CNC" && (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                  padding: 10,
+                  background: "var(--surface-alt)",
+                  border: "1px dashed var(--border)",
+                  borderRadius: 8,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: "var(--muted)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.06em",
+                  }}
+                >
+                  {selectedVendor.name}&apos;s machines
+                </div>
+                {selectedVendor.machines.length === 0 ? (
+                  <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                    No machines configured for this vendor yet.
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))",
+                      gap: 6,
+                    }}
+                  >
+                    {selectedVendor.machines.map((m) => {
+                      const tint = MACHINE_TINT[m.status];
+                      const typeLabel =
+                        m.machine_type === "multi_head_2"
+                          ? "2× HEAD"
+                          : m.machine_type === "lathe"
+                            ? "LATHE"
+                            : null;
+                      const matchesWorkType =
+                        workType === "lathe"
+                          ? m.machine_type === "lathe"
+                          : m.machine_type !== "lathe";
+                      return (
+                        <div
+                          key={m.id}
+                          style={{
+                            padding: "6px 10px",
+                            background: tint.bg,
+                            border: `1.5px solid ${matchesWorkType ? tint.border : "var(--border)"}`,
+                            borderRadius: 6,
+                            fontFamily: "ui-monospace, monospace",
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "flex-start",
+                            gap: 2,
+                            opacity: matchesWorkType ? 1 : 0.45,
+                          }}
+                          title={
+                            !matchesWorkType
+                              ? `Wrong machine type for ${workType === "lathe" ? "lathe" : "flat-panel"} work`
+                              : undefined
+                          }
+                        >
+                          <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>
+                              {m.machine_code}
+                            </span>
+                            {typeLabel && (
+                              <span
+                                style={{
+                                  fontSize: 8,
+                                  fontWeight: 800,
+                                  padding: "0px 5px",
+                                  borderRadius: 3,
+                                  background:
+                                    m.machine_type === "lathe"
+                                      ? "rgba(124,58,237,0.15)"
+                                      : "rgba(180,115,51,0.18)",
+                                  color: m.machine_type === "lathe" ? "#7c3aed" : "#b45309",
+                                  letterSpacing: "0.06em",
+                                }}
+                              >
+                                {typeLabel}
+                              </span>
+                            )}
+                          </div>
+                          <span
+                            style={{
+                              fontSize: 9,
+                              fontWeight: 700,
+                              color: tint.fg,
+                              letterSpacing: "0.05em",
+                            }}
+                          >
+                            {tint.label}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {(() => {
+                  const br = typeBreakdown(selectedVendor);
+                  const focusedFree = workType === "lathe" ? br.latheFree : br.multiFree;
+                  if (focusedFree > 0) return null;
+                  return (
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: "#b45309",
+                        background: "rgba(217,119,6,0.06)",
+                        padding: "6px 10px",
+                        borderRadius: 6,
+                        border: "1px solid rgba(217,119,6,0.25)",
+                      }}
+                    >
+                      No free {workType === "lathe" ? "lathe" : "multi-head"} machines right
+                      now at {selectedVendor.name}. The batch will queue and
+                      load when one frees up.
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
 
             {/* Urgency */}
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>

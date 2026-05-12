@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { batchTint } from "@/lib/batch-colours";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -45,6 +46,8 @@ export type FloorQueueItem = {
   is_lathe?: boolean;
   /** Migration 020 — last known stock location while still in transit. */
   stock_location?: string | null;
+  /** Migration 026 — batch_id for grouping slabs assigned together. */
+  batch_id?: string | null;
 };
 
 export type FloorRecent = {
@@ -821,6 +824,25 @@ function QueueList({ queue, dark, compact = true, noHeader = false }: { queue: F
                   🌀
                 </span>
               )}
+              {/* Batch chip — small coloured dot for slabs that
+                  were assigned as part of a bulk batch. Migration 026. */}
+              {(() => {
+                const tint = batchTint(q.batch_id);
+                if (!tint) return null;
+                return (
+                  <span
+                    style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: 2,
+                      background: tint.border,
+                      display: "inline-block",
+                      flexShrink: 0,
+                    }}
+                    title="Part of a batch — assigned together"
+                  />
+                );
+              })()}
               {/* Migration 023 — at-shade vs in-transit pill */}
               <span
                 style={{

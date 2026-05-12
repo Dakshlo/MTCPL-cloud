@@ -43,7 +43,7 @@ export async function buildFloorViewData(): Promise<FloorVendor[]> {
     admin
       .from("carving_items")
       .select(
-        "id, slab_requirement_id, vendor_id, status, urgency, estimated_minutes, vendor_estimated_minutes, cnc_machine_id, loaded_at, assigned_at, received_at_vendor_at, requires_machine_type",
+        "id, slab_requirement_id, vendor_id, status, urgency, estimated_minutes, vendor_estimated_minutes, cnc_machine_id, loaded_at, assigned_at, received_at_vendor_at, requires_machine_type, batch_id",
       )
       .in("status", ["carving_assigned", "carving_in_progress"])
       .order("assigned_at", { ascending: true }),
@@ -116,6 +116,7 @@ export async function buildFloorViewData(): Promise<FloorVendor[]> {
       cnc_machine_id: string | null; loaded_at: string | null; assigned_at: string;
       received_at_vendor_at?: string | null;
       requires_machine_type?: string | null;
+      batch_id?: string | null;
     }>).filter((j) => j.vendor_id === v.id);
 
     const queue: FloorQueueItem[] = vJobs
@@ -129,6 +130,7 @@ export async function buildFloorViewData(): Promise<FloorVendor[]> {
         received_at_vendor: !!j.received_at_vendor_at,
         is_lathe: j.requires_machine_type === "lathe",
         stock_location: slabStockLoc.get(j.slab_requirement_id) ?? null,
+        batch_id: j.batch_id ?? null,
       }))
       .sort((a, b) => (a.urgency === b.urgency ? 0 : a.urgency === "urgent" ? -1 : 1));
 

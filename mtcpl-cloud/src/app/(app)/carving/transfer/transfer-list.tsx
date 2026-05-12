@@ -34,6 +34,7 @@ import {
 } from "../actions";
 import { SlabThumb } from "@/components/slab-thumb";
 import type { StoneTypeDef } from "@/lib/stone-utils";
+import { batchTint } from "@/lib/batch-colours";
 
 export type TransferRow = {
   id: string;
@@ -55,6 +56,10 @@ export type TransferRow = {
   claimed_by_name: string | null;
   claimed_at: string | null;
   is_lathe: boolean;
+  /** Migration 026 — shared across slabs assigned together in a
+   *  bulk assignment. Drives the coloured left stripe so the
+   *  runner spots "these came together". */
+  batch_id: string | null;
 };
 
 export type DeliveredRow = {
@@ -447,6 +452,8 @@ function TransferCard({
   const [deliverOpen, setDeliverOpen] = useState(false);
   const dims = `${row.length_ft}×${row.width_ft}×${row.thickness_ft}″`;
   const isUrgent = row.urgency === "urgent";
+  // Migration 026 — slabs assigned together share a colour stripe.
+  const tint = batchTint(row.batch_id);
 
   return (
     <div
@@ -457,9 +464,13 @@ function TransferCard({
         padding: "12px 14px",
         background: "var(--surface)",
         border: `1px solid ${isUrgent ? "rgba(220,38,38,0.4)" : "var(--border)"}`,
+        borderLeft: tint
+          ? `5px solid ${tint.border}`
+          : `1px solid ${isUrgent ? "rgba(220,38,38,0.4)" : "var(--border)"}`,
         borderRadius: 10,
         boxShadow: isUrgent ? "0 0 0 2px rgba(220,38,38,0.08)" : "none",
       }}
+      title={tint ? "Part of a batch — these slabs were assigned together" : undefined}
     >
       {/* Top row — slab info + chips */}
       <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
@@ -664,6 +675,8 @@ function CompactRow({
 }) {
   const dims = `${row.length_ft}×${row.width_ft}×${row.thickness_ft}″`;
   const isUrgent = row.urgency === "urgent";
+  // Migration 026 — slabs assigned together share a colour stripe.
+  const tint = batchTint(row.batch_id);
   return (
     <div
       style={{
@@ -678,9 +691,13 @@ function CompactRow({
         padding: "10px 12px",
         background: "var(--surface)",
         border: `1px solid ${isUrgent ? "rgba(220,38,38,0.4)" : "var(--border)"}`,
+        borderLeft: tint
+          ? `5px solid ${tint.border}`
+          : `1px solid ${isUrgent ? "rgba(220,38,38,0.4)" : "var(--border)"}`,
         borderRadius: 8,
         boxShadow: isUrgent ? "0 0 0 2px rgba(220,38,38,0.06)" : "none",
       }}
+      title={tint ? "Part of a batch — these slabs were assigned together" : undefined}
     >
       {/* Thumb */}
       <div style={{ flexShrink: 0 }}>

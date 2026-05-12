@@ -15,6 +15,7 @@ import {
 } from "../carving/actions";
 import { SlabThumb } from "@/components/slab-thumb";
 import type { StoneTypeDef } from "@/lib/stone-utils";
+import { batchTint } from "@/lib/batch-colours";
 
 // ── Types — kept here so server page can import them ──────────────
 
@@ -49,6 +50,10 @@ export type CarvingJobLite = {
   received_at_vendor_at?: string | null;
   /** Migration 024 — work-type tag. 'lathe' = cylindrical. */
   requires_machine_type?: string | null;
+  /** Migration 026 — batch grouping when slabs were assigned
+   *  together in a single bulk-assign. Shared across all slabs in
+   *  the batch; drives the coloured stripe on cards. */
+  batch_id?: string | null;
 };
 
 export type CncMachineLive = {
@@ -598,6 +603,8 @@ function Stat({ label, value, fg }: { label: string; value: number; fg: string }
 function PendingStockRow({ job }: { job: CarvingJobLite }) {
   const isUrgent = job.urgency === "urgent";
   const isLathe = job.requires_machine_type === "lathe";
+  // Migration 026 — slabs assigned together share a colour stripe.
+  const tint = batchTint(job.batch_id);
   return (
     <div
       style={{
@@ -607,9 +614,13 @@ function PendingStockRow({ job }: { job: CarvingJobLite }) {
         padding: "10px 12px",
         background: "rgba(217,119,6,0.04)",
         border: "1px dashed rgba(217,119,6,0.4)",
+        borderLeft: tint
+          ? `5px solid ${tint.border}`
+          : "1px dashed rgba(217,119,6,0.4)",
         borderRadius: 8,
         flexWrap: "wrap",
       }}
+      title={tint ? "Part of a batch — these slabs were assigned together" : undefined}
     >
       <div style={{ flex: "1 1 220px", minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -686,6 +697,8 @@ function QueueRow({
   const isUrgent = job.urgency === "urgent";
   const received = !!job.received_at_vendor_at;
   const isLathe = job.requires_machine_type === "lathe";
+  // Migration 026 — slabs assigned together share a colour stripe.
+  const tint = batchTint(job.batch_id);
   return (
     <div
       style={{
@@ -695,9 +708,13 @@ function QueueRow({
         padding: "10px 12px",
         background: isUrgent ? "rgba(220,38,38,0.04)" : "var(--surface)",
         border: `1px solid ${isUrgent ? "rgba(220,38,38,0.3)" : "var(--border)"}`,
+        borderLeft: tint
+          ? `5px solid ${tint.border}`
+          : `1px solid ${isUrgent ? "rgba(220,38,38,0.3)" : "var(--border)"}`,
         borderRadius: 8,
         flexWrap: "wrap",
       }}
+      title={tint ? "Part of a batch — these slabs were assigned together" : undefined}
     >
       <div style={{ flex: "1 1 180px", minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>

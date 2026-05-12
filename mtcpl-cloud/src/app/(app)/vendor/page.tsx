@@ -83,7 +83,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
     admin
       .from("carving_items")
       .select(
-        "id, slab_requirement_id, status, urgency, estimated_minutes, vendor_estimated_minutes, cnc_machine_id, loaded_at, assigned_at, note, received_at_vendor_at, requires_machine_type",
+        "id, slab_requirement_id, status, urgency, estimated_minutes, vendor_estimated_minutes, cnc_machine_id, loaded_at, assigned_at, note, received_at_vendor_at, requires_machine_type, batch_id",
       )
       .eq("vendor_id", vendorId)
       .in("status", ["carving_assigned", "carving_in_progress"])
@@ -173,6 +173,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
     note: string | null;
     received_at_vendor_at?: string | null;
     requires_machine_type?: string | null;
+    batch_id?: string | null;
   }>) {
     const slab = slabById.get(row.slab_requirement_id) ?? null;
     const job: CarvingJobLite = {
@@ -189,6 +190,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
       slab,
       received_at_vendor_at: row.received_at_vendor_at ?? null,
       requires_machine_type: row.requires_machine_type ?? null,
+      batch_id: row.batch_id ?? null,
     };
     if (row.status === "carving_assigned") queue.push(job);
     else if (row.cnc_machine_id) activeByMachine.set(row.cnc_machine_id, job);
