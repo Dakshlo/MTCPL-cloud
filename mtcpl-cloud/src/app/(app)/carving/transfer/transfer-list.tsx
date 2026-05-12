@@ -223,9 +223,12 @@ export function TransferDispatchList({
         )}
       </SectionShell>
 
-      {/* AVAILABLE TO CLAIM — secondary, amber. Claim buttons are
-          disabled while the runner has an active claim (one-at-a-
-          time crane workflow). Banner explains why. */}
+      {/* AVAILABLE TO CLAIM — compact single-row layout. Each row
+          shows all info inline (thumb + chips + slab id + temple +
+          dims + from → to + Claim) so the runner can scan a long
+          yard list quickly. Big card lives only on Mine where the
+          runner is actively working. Claim buttons go disabled
+          while the runner already has an active claim. */}
       <SectionShell
         kind="available"
         title="📦 Available to claim"
@@ -262,9 +265,9 @@ export function TransferDispatchList({
           </div>
         )}
         {availableRows.length > 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {availableRows.map((r) => (
-              <TransferCard
+              <CompactRow
                 key={r.id}
                 row={r}
                 kind="available"
@@ -293,7 +296,8 @@ export function TransferDispatchList({
         </SectionShell>
       )}
 
-      {/* CLAIMED BY OTHERS — hidden when empty. */}
+      {/* CLAIMED BY OTHERS — hidden when empty. Same compact row
+          format as Available since this is awareness-only. */}
       {othersRows.length > 0 && (
         <SectionShell
           kind="others"
@@ -302,9 +306,9 @@ export function TransferDispatchList({
           collapsible
           defaultOpen={false}
         >
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {othersRows.map((r) => (
-              <TransferCard
+              <CompactRow
                 key={r.id}
                 row={r}
                 kind="others"
@@ -633,6 +637,167 @@ function TransferCard({
           </form>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Compact row — single-line layout for Available + Others ──────
+//
+// Tight Excel-style row: small thumb · chips · slab id · temple ·
+// dims · 📍 from → 🏭 vendor · action button.
+// Wraps to multi-line on narrow screens (CSS gap + flex-wrap), but
+// stays one line per slab on desktop so the runner can scan a long
+// yard list at a glance. The big card with the animated arrow
+// route is reserved for "Claimed by me" — the active work.
+function CompactRow({
+  row,
+  kind,
+  canUnclaim,
+  stoneTypes,
+  disabledReason,
+}: {
+  row: TransferRow;
+  kind: "available" | "others";
+  canUnclaim?: boolean;
+  stoneTypes: StoneTypeDef[];
+  disabledReason?: string | null;
+}) {
+  const dims = `${row.length_ft}×${row.width_ft}×${row.thickness_ft}″`;
+  const isUrgent = row.urgency === "urgent";
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "8px 10px",
+        background: "var(--surface)",
+        border: `1px solid ${isUrgent ? "rgba(220,38,38,0.4)" : "var(--border)"}`,
+        borderRadius: 8,
+        flexWrap: "wrap",
+      }}
+    >
+      {/* Small thumb */}
+      <div style={{ flexShrink: 0 }}>
+        <SlabThumb
+          stone={row.stone}
+          l={row.length_ft}
+          w={row.width_ft}
+          t={row.thickness_ft}
+          stoneTypes={stoneTypes}
+          size={40}
+          height={40}
+        />
+      </div>
+
+      {/* Chips */}
+      {(isUrgent || row.is_lathe) && (
+        <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+          {isUrgent && <ChipUrgent />}
+          {row.is_lathe && <ChipLathe small />}
+        </div>
+      )}
+
+      {/* Slab id */}
+      <code
+        style={{
+          fontFamily: "ui-monospace, monospace",
+          fontWeight: 700,
+          fontSize: 13,
+          color: "var(--text)",
+          flexShrink: 0,
+        }}
+      >
+        {row.slab_id}
+      </code>
+
+      {/* Temple + dims */}
+      <span
+        style={{
+          fontSize: 11,
+          color: "var(--muted)",
+          flex: "1 1 180px",
+          minWidth: 0,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {row.temple}
+        {row.slab_label && ` · ${row.slab_label}`}
+        {" · "}
+        <span style={{ fontFamily: "ui-monospace, monospace", color: "var(--text)" }}>{dims}</span>
+      </span>
+
+      {/* From → To inline (no big cards). Wraps as a chip pair. */}
+      <div
+        style={{
+          display: "flex",
+          gap: 6,
+          alignItems: "center",
+          fontSize: 11,
+          fontFamily: "ui-monospace, monospace",
+          flexShrink: 0,
+          flexWrap: "wrap",
+        }}
+      >
+        <span style={{ color: "#7c2d12", fontWeight: 700 }}>
+          📍 {row.stock_location ?? "—"}
+        </span>
+        <span style={{ color: "var(--muted)" }}>→</span>
+        <span style={{ color: "#15803d", fontWeight: 700 }}>
+          🏭 {row.vendor_name}
+          {row.vendor_dropoff && (
+            <span style={{ color: "#15803d", fontWeight: 400 }}> · {row.vendor_dropoff}</span>
+          )}
+        </span>
+      </div>
+
+      {/* Claimed-by-X meta for the others kind */}
+      {kind === "others" && row.claimed_by_name && (
+        <span style={{ fontSize: 10, color: "var(--muted)", flexShrink: 0 }}>
+          Claimed by <strong>{row.claimed_by_name}</strong>
+          {row.claimed_at && ` · ${formatRelative(row.claimed_at)} ago`}
+        </span>
+      )}
+
+      {/* Action button */}
+      {kind === "available" && (
+        <form action={claimSlabTransferAction} style={{ flexShrink: 0 }}>
+          <input type="hidden" name="carving_item_id" value={row.id} />
+          <input type="hidden" name="redirect_to" value="/carving/transfer" />
+          <button
+            type="submit"
+            className="primary-button"
+            disabled={!!disabledReason}
+            title={disabledReason ?? undefined}
+            style={{
+              fontSize: 12,
+              padding: "8px 14px",
+              fontWeight: 700,
+              minHeight: 36,
+              opacity: disabledReason ? 0.45 : 1,
+              cursor: disabledReason ? "not-allowed" : "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {disabledReason ? "🏗️ busy" : "📦 Claim"}
+          </button>
+        </form>
+      )}
+      {kind === "others" && canUnclaim && (
+        <form action={unclaimSlabTransferAction} style={{ flexShrink: 0 }}>
+          <input type="hidden" name="carving_item_id" value={row.id} />
+          <input type="hidden" name="redirect_to" value="/carving/transfer" />
+          <button
+            type="submit"
+            className="ghost-button danger-ghost"
+            style={{ fontSize: 11, padding: "6px 10px", whiteSpace: "nowrap" }}
+          >
+            Release
+          </button>
+        </form>
+      )}
     </div>
   );
 }
