@@ -1634,42 +1634,124 @@ function LoadModal({
 
           {/* Vendor's estimated time — defaults from carving head.
               Days + hours range so it works for short pieces and
-              multi-day complex carves alike. */}
-          <div>
-            <Label>Your estimated time</Label>
-            <input type="hidden" name="vendor_estimated_minutes" value={totalMinutes || ""} />
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <input
-                type="number"
-                min="0"
-                max="30"
-                value={days}
-                onChange={(e) => setDays(e.target.value)}
-                placeholder="0"
-                style={{ width: 70, padding: "8px 10px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
-              />
-              <span style={{ fontSize: 12, color: "var(--muted)" }}>days</span>
-              <input
-                type="number"
-                min="0"
-                max="23"
-                value={hours}
-                onChange={(e) => setHours(e.target.value)}
-                placeholder="0"
-                style={{ width: 70, padding: "8px 10px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
-              />
-              <span style={{ fontSize: 12, color: "var(--muted)" }}>hours</span>
+              multi-day complex carves alike. This is the moment
+              the vendor commits to "I'll finish by ~X" — the timer
+              on the cockpit machine card runs against this. Made
+              prominent at Daksh's request: big inputs, clear label,
+              live total readout, carving head's hint as a chip. */}
+          <div
+            style={{
+              padding: "16px 18px",
+              background: "linear-gradient(180deg, rgba(37,99,235,0.06) 0%, var(--surface) 100%)",
+              border: "2px solid rgba(37,99,235,0.30)",
+              borderRadius: 12,
+              boxShadow: "0 2px 12px rgba(37,99,235,0.08)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+              <span
+                style={{
+                  fontSize: 13,
+                  fontWeight: 800,
+                  color: "#1d4ed8",
+                  letterSpacing: "0.04em",
+                  textTransform: "uppercase",
+                }}
+              >
+                ⏱ Your estimated time
+              </span>
+              {selectedJob?.estimated_minutes != null && (
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    padding: "3px 9px",
+                    borderRadius: 999,
+                    background: "rgba(180,115,51,0.12)",
+                    color: "var(--gold-dark)",
+                    whiteSpace: "nowrap",
+                  }}
+                  title="Estimate from the carving head when assigning. Adjust based on what you actually see when loading."
+                >
+                  Head's guess: {fmtDuration(selectedJob.estimated_minutes)}
+                </span>
+              )}
             </div>
-            {totalMinutes > 0 && (
-              <div style={{ fontSize: 10, color: "var(--muted-light)", marginTop: 4, fontFamily: "ui-monospace, monospace" }}>
-                Total: {fmtDuration(totalMinutes)}
+            <input type="hidden" name="vendor_estimated_minutes" value={totalMinutes || ""} />
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <input
+                  type="number"
+                  min="0"
+                  max="30"
+                  value={days}
+                  onChange={(e) => setDays(e.target.value)}
+                  placeholder="0"
+                  aria-label="Days"
+                  style={{
+                    width: 80,
+                    padding: "12px 14px",
+                    fontSize: 20,
+                    fontWeight: 700,
+                    border: "2px solid var(--border)",
+                    borderRadius: 8,
+                    background: "var(--bg)",
+                    color: "var(--text)",
+                    textAlign: "center",
+                    fontVariantNumeric: "tabular-nums",
+                  }}
+                />
+                <span style={{ fontSize: 14, fontWeight: 700, color: "var(--muted)" }}>days</span>
               </div>
-            )}
-            {selectedJob?.estimated_minutes != null && (
-              <div style={{ fontSize: 10, color: "var(--muted-light)", marginTop: 4 }}>
-                Carving head estimated: {fmtDuration(selectedJob.estimated_minutes)}
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <input
+                  type="number"
+                  min="0"
+                  max="23"
+                  value={hours}
+                  onChange={(e) => setHours(e.target.value)}
+                  placeholder="0"
+                  aria-label="Hours"
+                  style={{
+                    width: 80,
+                    padding: "12px 14px",
+                    fontSize: 20,
+                    fontWeight: 700,
+                    border: "2px solid var(--border)",
+                    borderRadius: 8,
+                    background: "var(--bg)",
+                    color: "var(--text)",
+                    textAlign: "center",
+                    fontVariantNumeric: "tabular-nums",
+                  }}
+                />
+                <span style={{ fontSize: 14, fontWeight: 700, color: "var(--muted)" }}>hours</span>
               </div>
-            )}
+              {totalMinutes > 0 && (
+                <span
+                  style={{
+                    marginLeft: "auto",
+                    padding: "6px 12px",
+                    background: "#1d4ed8",
+                    color: "#fff",
+                    fontSize: 13,
+                    fontWeight: 800,
+                    borderRadius: 8,
+                    fontFamily: "ui-monospace, monospace",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  ≈ {fmtDuration(totalMinutes)}
+                </span>
+              )}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.4 }}>
+              The machine timer on the cockpit will count down from this. You can
+              still mark complete early or late.
+            </div>
           </div>
 
           <button
