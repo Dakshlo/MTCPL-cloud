@@ -828,7 +828,13 @@ function VendorRow({
           )}
         </div>
         <div style={{ fontSize: 12, color: "var(--muted)", fontFamily: "ui-monospace, monospace", marginTop: 4, fontWeight: 600 }}>
-          🏭 {br.multiTotal} CNC · {br.latheTotal} Lathe
+          🏭{" "}
+          {[
+            br.multiTotal > 0 ? `${br.multiTotal} CNC` : null,
+            br.latheTotal > 0 ? `${br.latheTotal} Lathe` : null,
+          ]
+            .filter(Boolean)
+            .join(" · ") || "no machines"}
         </div>
       </div>
     </label>

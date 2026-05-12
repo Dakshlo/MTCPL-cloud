@@ -556,8 +556,10 @@ export function AssignModal({
                             )}
                           </div>
                           {/* Fleet inventory — total machines per
-                              type. No free/busy here; that lives in
-                              the cockpit panel below when selected. */}
+                              type. Only types with >0 machines are
+                              shown; e.g. ALKESH (9 CNC, 0 Lathe)
+                              reads "9 CNC". Cleaner glance when the
+                              vendor has only one type of machine. */}
                           <div
                             style={{
                               fontSize: 12,
@@ -567,7 +569,13 @@ export function AssignModal({
                               fontWeight: 600,
                             }}
                           >
-                            🏭 {br.multiTotal} CNC · {br.latheTotal} Lathe
+                            🏭{" "}
+                            {[
+                              br.multiTotal > 0 ? `${br.multiTotal} CNC` : null,
+                              br.latheTotal > 0 ? `${br.latheTotal} Lathe` : null,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ") || "no machines"}
                           </div>
                           {!hasTypeInFleet && (
                             <div
