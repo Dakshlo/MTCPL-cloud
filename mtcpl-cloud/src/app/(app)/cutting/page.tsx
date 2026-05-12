@@ -424,58 +424,74 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
 
       {/* Block cards */}
       <div className="records-stack" style={{ marginTop: 18 }}>
-        {/* In-Approval banner (migration 027) — shows on the In Progress
-            tab whenever there's at least one block in the approval flow.
-            Approvers see total count + link to the approvals queue.
-            Cutting operators see ONLY their own pending submissions.
-            Hidden when count = 0 so it stays out of the way on quiet days. */}
-        {activeTab === "in_progress" && (inApprovalCount ?? 0) > 0 && (
-          <Link
-            href="/cutting/approvals"
-            style={{
-              textDecoration: "none",
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              padding: "10px 14px",
-              marginBottom: 14,
-              background: "rgba(232,197,114,0.14)",
-              border: "1.5px solid var(--gold)",
-              borderLeft: "5px solid var(--gold-dark)",
-              borderRadius: 8,
-              color: "var(--text)",
-              fontSize: 13,
-            }}
-          >
-            <span style={{ fontSize: 16 }}>👀</span>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 700, color: "var(--gold-dark)" }}>
-                In Approval ({inApprovalCount})
-              </div>
-              <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
-                {isApprover
-                  ? "Review the cutter's Cutting Done submissions before they commit."
-                  : wantsOwnApprovalsOnly
-                    ? "Your Cutting Done submissions waiting for approval. Check status or edit if sent back."
-                    : "Cutting Done submissions waiting for approval."}
-              </div>
-            </div>
-            <span
+        {/* Cutting Audit banner (migration 027) — always visible on the
+            In Progress tab so cutters always have a clickable entry
+            into the audit queue. Two visual states:
+              - count > 0: prominent gold styling, count badge, "Review →"
+              - count = 0: dimmed neutral styling, "Queue empty"
+            Audience-aware copy:
+              - Approvers (dev / owner / Rajesh) → full site count.
+              - Cutting submitters (team_head Alkesh / Paresh,
+                cutting_operator) → only their own pending submissions.
+            The top-bar "✓ Cutting Audit" button is approver-only;
+            this banner is the cutter's always-on doorway into the
+            same audit queue. */}
+        {activeTab === "in_progress" && (() => {
+          const count = inApprovalCount ?? 0;
+          const hasAny = count > 0;
+          return (
+            <Link
+              href="/cutting/approvals"
               style={{
-                fontSize: 12,
-                fontWeight: 700,
-                color: "var(--gold-dark)",
-                padding: "4px 10px",
-                background: "var(--bg)",
-                border: "1px solid var(--gold)",
-                borderRadius: 6,
-                whiteSpace: "nowrap",
+                textDecoration: "none",
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                padding: "10px 14px",
+                marginBottom: 14,
+                background: hasAny ? "rgba(232,197,114,0.14)" : "var(--surface)",
+                border: hasAny ? "1.5px solid var(--gold)" : "1px dashed var(--border)",
+                borderLeft: hasAny ? "5px solid var(--gold-dark)" : "5px solid var(--border)",
+                borderRadius: 8,
+                color: "var(--text)",
+                fontSize: 13,
               }}
             >
-              Review →
-            </span>
-          </Link>
-        )}
+              <span style={{ fontSize: 16 }}>{hasAny ? "👀" : "✓"}</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700, color: hasAny ? "var(--gold-dark)" : "var(--muted)" }}>
+                  Cutting Audit
+                  {hasAny ? ` (${count})` : ""}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+                  {hasAny
+                    ? isApprover
+                      ? "Review the cutter's Cutting Done submissions before they commit."
+                      : wantsOwnApprovalsOnly
+                        ? "Your Cutting Done submissions waiting for approval. Check status or edit if sent back."
+                        : "Cutting Done submissions waiting for approval."
+                    : isApprover
+                      ? "Audit queue is empty — no submissions waiting."
+                      : "Your submitted cuts will appear here after you press Done — review status or edit if sent back."}
+                </div>
+              </div>
+              <span
+                style={{
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: hasAny ? "var(--gold-dark)" : "var(--muted)",
+                  padding: "4px 10px",
+                  background: "var(--bg)",
+                  border: `1px solid ${hasAny ? "var(--gold)" : "var(--border)"}`,
+                  borderRadius: 6,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {hasAny ? "Review →" : "Open →"}
+              </span>
+            </Link>
+          );
+        })()}
 
         {rows.length === 0 && rejectedRows.length === 0 && (
           <div className="banner">{emptyMessages[activeTab]}</div>

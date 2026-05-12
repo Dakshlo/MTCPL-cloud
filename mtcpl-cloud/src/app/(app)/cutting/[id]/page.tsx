@@ -317,7 +317,7 @@ export default async function CuttingDetailPage({
           }
           style={{ color: "var(--muted)", textDecoration: "none", fontSize: 13, fontWeight: 500 }}
         >
-          ← Back to {isInApprovalFlow ? "Approvals" : "Cutting"}
+          ← Back to {isInApprovalFlow ? "Cutting Audit" : "Cutting"}
         </Link>
       </div>
 

@@ -134,11 +134,11 @@ export default async function CuttingApprovalsPage() {
     <section className="page-card">
       <div className="record-head">
         <div>
-          <h1>Cutting Approvals</h1>
+          <h1>Cutting Audit</h1>
           <p className="muted">
             {canApprove
-              ? "Review every Cutting Done submission before it commits. Approve as-is, or send back to the cutter with a note."
-              : "Your Cutting Done submissions awaiting approval. You can edit only after the approver sends a block back to you."}
+              ? "Audit every Cutting Done submission before it commits. Approve as-is, edit in place, or send back to the cutter with a note."
+              : "Your Cutting Done submissions awaiting audit. You can edit only after the auditor sends a block back to you."}
           </p>
         </div>
         <Link

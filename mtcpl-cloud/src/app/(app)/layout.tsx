@@ -57,19 +57,21 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             </Link>
           </div>
           <div className="topbar-right">
-            {/* Cut-approval queue button — visible only to approvers
-                (canApproveCuts: developer / owner / team_head with
-                can_approve_cuts=TRUE). Migration 027.
-                Sits BETWEEN the user name (top-bar-left) and the role
-                pill so approvers see their queue size at a glance.
-                Red dot when count > 0, mirroring the notification bell. */}
+            {/* Cutting Audit button — visible only to approvers
+                (canApproveCuts: developer / owner / team_head Rajesh
+                Kumar with can_approve_cuts=TRUE). Migration 027.
+                Named "Cutting Audit" per user — the surface where
+                an approver audits cutter submissions before they
+                commit. Sits BETWEEN the user name (top-bar-left)
+                and the role pill. Red dot when count > 0, mirroring
+                the notification bell. */}
             {approvalsBadge !== null && (
               <Link
                 href="/cutting/approvals"
                 title={
                   approvalsBadge > 0
-                    ? `${approvalsBadge} block${approvalsBadge === 1 ? "" : "s"} waiting for approval`
-                    : "Cutting approvals queue (empty)"
+                    ? `${approvalsBadge} block${approvalsBadge === 1 ? "" : "s"} to audit`
+                    : "Cutting Audit queue (empty)"
                 }
                 style={{
                   position: "relative",
@@ -87,7 +89,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                   whiteSpace: "nowrap",
                 }}
               >
-                ✓ Approvals
+                ✓ Cutting Audit
                 <span
                   style={{
                     fontSize: 11,
