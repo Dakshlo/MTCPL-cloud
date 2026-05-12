@@ -209,6 +209,30 @@ export function VendorCockpitClient({
     temporary_location: string | null;
   } | null>(null);
 
+  // After a server-action redirects back to /vendor with a
+  // success toast (e.g. "Slab loaded", "Both slabs loaded",
+  // "Marked complete"), close any open modal so the user sees the
+  // refreshed cockpit grid. Without this the LoadModal stays open
+  // showing "No slabs ready to load" because the slab it was for
+  // is no longer in the queue — confusing.
+  useEffect(() => {
+    if (!toast) return;
+    const lower = toast.toLowerCase();
+    const successy =
+      lower.includes("loaded") ||
+      lower.includes("marked complete") ||
+      lower.includes("marked received") ||
+      lower.includes("flagged") ||
+      lower.includes("back online") ||
+      lower.includes("location saved");
+    if (successy) {
+      setLoadFor(null);
+      setCompleteFor(null);
+      setMaintenanceFor(null);
+      setEditLocFor(null);
+    }
+  }, [toast]);
+
   const totals = useMemo(() => {
     let idle = 0,
       carving = 0,
