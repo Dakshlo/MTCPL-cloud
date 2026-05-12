@@ -438,34 +438,60 @@ export function BulkAssignModal({
               )}
             </div>
 
-            {/* Per-machine breakdown for the selected CNC vendor —
-                same cockpit-preview pattern as the single-slab
-                AssignModal. Lets the carving head see at-a-glance
-                which of Mohit's CNCs are free / running / down /
-                of the wrong type for the chosen work-type. */}
+            {/* Prominent cockpit panel for the selected CNC vendor —
+                same big-box pattern as the single-slab AssignModal.
+                Shows stock pending + free/busy stat tiles + the
+                full machine grid below. */}
             {selectedVendor && selectedVendor.vendor_type === "CNC" && (
               <div
                 style={{
                   display: "flex",
                   flexDirection: "column",
-                  gap: 8,
-                  padding: 10,
-                  background: "var(--surface-alt)",
-                  border: "1px dashed var(--border)",
-                  borderRadius: 8,
+                  gap: 12,
+                  padding: "14px 16px",
+                  background: "linear-gradient(180deg, rgba(180,115,51,0.06) 0%, var(--surface-alt) 100%)",
+                  border: "2px solid var(--gold-dark)",
+                  borderRadius: 10,
+                  boxShadow: "0 2px 12px rgba(180,115,51,0.10)",
                 }}
               >
-                <div
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    color: "var(--muted)",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.06em",
-                  }}
-                >
-                  {selectedVendor.name}&apos;s machines
+                <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+                  <span
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 800,
+                      color: "var(--gold-dark)",
+                      letterSpacing: "0.02em",
+                    }}
+                  >
+                    🏭 {selectedVendor.name}&apos;s cockpit
+                  </span>
                 </div>
+                {/* Live stat tiles */}
+                {(() => {
+                  const br = typeBreakdown(selectedVendor);
+                  const stockPending = selectedVendor.live?.queued ?? 0;
+                  const busy = selectedVendor.live?.busy ?? 0;
+                  const maint = selectedVendor.live?.maintenance ?? 0;
+                  return (
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
+                        gap: 8,
+                      }}
+                    >
+                      <CockpitStat label="Stock pending" value={stockPending} fg="#b45309" />
+                      <CockpitStat
+                        label={workType === "lathe" ? "Lathes free" : "CNC free"}
+                        value={workType === "lathe" ? br.latheFree : br.multiFree}
+                        fg="#15803d"
+                      />
+                      <CockpitStat label="Carving now" value={busy} fg="#1d4ed8" />
+                      <CockpitStat label="Down" value={maint} fg="#b91c1c" />
+                    </div>
+                  );
+                })()}
                 {selectedVendor.machines.length === 0 ? (
                   <div style={{ fontSize: 12, color: "var(--muted)" }}>
                     No machines configured for this vendor yet.
@@ -784,7 +810,7 @@ function VendorRow({
           <span style={{ fontWeight: 800, fontSize: 15, color: "var(--text)", letterSpacing: "0.02em" }}>
             {v.name}
           </span>
-          {isRecommended && !isSelected && (
+          {isRecommended && (
             <span
               style={{
                 fontSize: 10,
@@ -806,6 +832,43 @@ function VendorRow({
         </div>
       </div>
     </label>
+  );
+}
+
+function CockpitStat({ label, value, fg }: { label: string; value: number; fg: string }) {
+  return (
+    <div
+      style={{
+        padding: "8px 12px",
+        background: "var(--surface)",
+        border: "1px solid var(--border)",
+        borderRadius: 8,
+        textAlign: "center",
+      }}
+    >
+      <div
+        style={{
+          fontSize: 9,
+          color: "var(--muted)",
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+          fontWeight: 700,
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          fontSize: 22,
+          fontWeight: 800,
+          color: fg,
+          fontFamily: "ui-monospace, monospace",
+          marginTop: 2,
+        }}
+      >
+        {value}
+      </div>
+    </div>
   );
 }
 

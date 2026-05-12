@@ -477,8 +477,13 @@ export function AssignModal({
                     const br = vendorTypeBreakdown(v);
                     const hasTypeInFleet =
                       (workType === "lathe" ? br.latheTotal : br.multiTotal) > 0;
-                    const isRecommended =
-                      recommendation.vendorId === v.id && !isSelected;
+                    // ✨ Best Fit chip stays visible even when the
+                    // user selects this vendor — Daksh noticed the
+                    // badge disappearing on click felt confusing
+                    // (looked like they lost the recommendation).
+                    // Now the badge persists so you can see "yes,
+                    // you picked the recommended one".
+                    const isRecommended = recommendation.vendorId === v.id;
                     return (
                       <label
                         key={v.id}
