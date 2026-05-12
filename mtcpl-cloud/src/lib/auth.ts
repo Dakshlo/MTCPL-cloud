@@ -74,31 +74,60 @@ export async function getAuthContext() {
   }
 
   // Use admin client for profile lookup — RLS should never block a user from seeing their own profile,
-  // but using admin eliminates any policy edge-cases (e.g. new users with unusual roles)
+  // but using admin eliminates any policy edge-cases (e.g. new users with unusual roles).
+  //
+  // SELECT *  — listing each column by name turned out to be unsafe.
+  // Migration 027 added `can_approve_cuts` and an explicit select that
+  // referenced it pre-emptively in the deploy meant the query 400'd
+  // for any environment where the migration hadn't run yet, the
+  // existing profile silently disappeared from view, and the
+  // auto-create branch below CLOBBERED real developer/owner rows
+  // with a worker stub. `*` keeps this query forward-compatible
+  // (any new column shows up automatically) and removes the
+  // missing-column footgun entirely.
   const admin = createAdminSupabaseClient();
-  let { data: profile } = await admin
+  type ProfileRow = {
+    id: string;
+    full_name: string | null;
+    phone: string | null;
+    role: AppRole;
+    vendor_id: string | null;
+    is_active: boolean;
+    theme_preference?: "light" | "dark" | null;
+    can_approve_cuts?: boolean;
+  };
+  let { data: profile } = (await admin
     .from("profiles")
-    .select("id, full_name, phone, role, vendor_id, is_active, theme_preference, can_approve_cuts")
+    .select("*")
     .eq("id", user.id)
-    .single();
+    .single()) as { data: ProfileRow | null };
 
-  // Auto-create profile if missing (trigger failed, or profile was deleted while auth user remains)
+  // Auto-create profile if missing (trigger failed, or profile was deleted while auth user remains).
+  // Uses upsert with `ignoreDuplicates: true` — never replaces an
+  // existing row. Double-safety after the migration-027 incident
+  // where a SELECT failure looked like a missing profile and a
+  // plain INSERT here would have over-written real roles.
   if (!profile) {
     const phone = user.phone ?? null;
     const fullName = user.user_metadata?.full_name ?? "";
-    await admin.from("profiles").insert({
-      id: user.id,
-      full_name: fullName,
-      phone,
-      role: "worker",
-      is_active: false,
-    }).single();
-
-    const { data: newProfile } = await admin
+    await admin
       .from("profiles")
-      .select("id, full_name, phone, role, vendor_id, is_active, theme_preference, can_approve_cuts")
+      .upsert(
+        {
+          id: user.id,
+          full_name: fullName,
+          phone,
+          role: "worker",
+          is_active: false,
+        },
+        { onConflict: "id", ignoreDuplicates: true },
+      );
+
+    const { data: newProfile } = (await admin
+      .from("profiles")
+      .select("*")
       .eq("id", user.id)
-      .single();
+      .single()) as { data: ProfileRow | null };
     profile = newProfile;
   }
 

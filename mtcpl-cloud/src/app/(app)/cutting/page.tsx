@@ -135,12 +135,15 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
   const { todayStartIso, tomorrowStartIso } = istTodayBounds();
 
   // Count per individual block status — "done" badge shows TODAY only.
-  // In-Approval count (migration 027) is scoped per role:
-  //   - approvers + team_head + dev + owner → site-wide count
-  //   - cutting_operator → only their own submissions
+  // In-Approval count (migration 027) is scoped by role:
+  //   - approvers (dev / owner / team_head with can_approve_cuts) → site-wide count
+  //   - everyone else (non-approver team_head submitters like Alkesh /
+  //     Paresh, plus any cutting_operator) → only their own submissions
   // Drives the "👀 In Approval (N)" banner shown above In Progress.
+  // The "person who fills Cutting Done" role is team_head in this
+  // shop (per Daksh) — operators submit FROM team_head accounts.
   const isApprover = canApproveCuts(profile);
-  const wantsOwnApprovalsOnly = !isApprover && profile.role === "cutting_operator";
+  const wantsOwnApprovalsOnly = !isApprover;
   const [
     { count: pendingCount },
     { count: waitingCount },

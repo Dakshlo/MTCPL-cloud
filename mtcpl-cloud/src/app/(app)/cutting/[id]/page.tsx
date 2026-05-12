@@ -236,6 +236,10 @@ export default async function CuttingDetailPage({
     (isAwaitingCutterEdit &&
       (isApprover ||
         isOriginalSubmitter ||
+        // Same fallback used by editPendingApprovalAction — team_head
+        // (the actual Cutting Done submitter in this shop) and
+        // cutting_operator can step in for shift handoffs.
+        profile.role === "team_head" ||
         profile.role === "cutting_operator"));
   // Resolve the staged payload safely — JSONB returned as `unknown`.
   type StagedPayload = {

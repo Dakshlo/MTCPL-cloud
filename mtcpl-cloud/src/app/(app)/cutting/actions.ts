@@ -827,9 +827,15 @@ export async function editPendingApprovalAction(
     // Cutter must own the block (or be an approver, who can also
     // step in if the cutter is unavailable).
     if (!isApprover && !isOriginalSubmitter) {
-      // Fallback: allow cutting_operator role broadly. Floor reality
-      // is the same cutter doesn't always re-log in.
-      if (profile.role !== "cutting_operator") {
+      // Fallback: allow team_head OR cutting_operator broadly. The
+      // shop's Cutting Done form is actually filled by team_heads
+      // (Alkesh, Paresh, etc.) — `cutting_operator` is a fallback
+      // for any shift handoff where the original submitter isn't
+      // re-logged in.
+      if (
+        profile.role !== "team_head" &&
+        profile.role !== "cutting_operator"
+      ) {
         return {
           ok: false,
           error: "Only the original cutter or an approver can edit this block.",
