@@ -145,7 +145,9 @@ export function BulkAssignModal({
         bottom: 0,
         background: "rgba(15, 12, 6, 0.55)",
         backdropFilter: "blur(2px)",
-        zIndex: 1000,
+        // 1100 so we float ABOVE the temple peek modal (1000) when
+        // the user bulk-selects from inside the peek then submits.
+        zIndex: 1100,
         display: "flex",
         alignItems: "flex-start",
         justifyContent: "center",

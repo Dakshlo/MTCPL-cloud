@@ -649,6 +649,12 @@ export function CarvingDashboardClient({
               return next;
             });
           }}
+          onToggleBulkMode={() => {
+            setBulkMode((on) => {
+              if (on) setBulkSelected(new Set()); // exiting → clear
+              return !on;
+            });
+          }}
           bulkMax={BULK_MAX}
         />
       )}
@@ -827,7 +833,9 @@ export function CarvingDashboardClient({
       {/* Sticky bulk-select action bar. Only renders on the
           Unassigned tab when the user has selected >0 slabs.
           Lives at the bottom of the viewport so it doesn't push
-          content around. */}
+          content around. z-index 1100 floats it ABOVE the temple
+          peek modal (z-index 1000), so when the user is selecting
+          inside a temple peek the action bar stays visible. */}
       {tab === "unassigned" && bulkMode && bulkSelected.size > 0 && (
         <div
           style={{
@@ -835,7 +843,7 @@ export function CarvingDashboardClient({
             bottom: 16,
             left: "calc(var(--content-left) + 16px)",
             right: 16,
-            zIndex: 900,
+            zIndex: 1100,
             padding: "12px 16px",
             background: "var(--gold-dark)",
             color: "#fff",
@@ -929,6 +937,7 @@ function UnassignedByTemple({
   bulkMode,
   bulkSelected,
   onBulkToggle,
+  onToggleBulkMode,
   bulkMax,
 }: {
   slabs: UnassignedSlab[];
@@ -941,6 +950,10 @@ function UnassignedByTemple({
   bulkMode: boolean;
   bulkSelected: Set<string>;
   onBulkToggle: (slabId: string) => void;
+  /** Toggles bulk mode on/off — leaving bulk mode wipes the selection.
+   *  Same callback fires from both the toolbar button and a copy of
+   *  the toggle inside the temple peek modal. */
+  onToggleBulkMode: () => void;
   bulkMax: number;
 }) {
   const groups = useMemo(() => groupByTemple(slabs, (s) => s.temple), [slabs]);
@@ -1169,6 +1182,10 @@ function UnassignedByTemple({
       slabsTotal={slabs.length}
       onAssign={onAssign}
       renderCard={renderCard}
+      bulkMode={bulkMode}
+      onToggleBulkMode={onToggleBulkMode}
+      bulkSelectedCount={bulkSelected.size}
+      bulkMax={bulkMax}
     />
   );
   void openByDefault; // unused after card refactor
@@ -1180,12 +1197,23 @@ function TempleCardGrid({
   groups,
   slabsTotal,
   renderCard,
+  bulkMode,
+  onToggleBulkMode,
+  bulkSelectedCount,
+  bulkMax,
 }: {
   groups: Array<{ temple: string; items: UnassignedSlab[] }>;
   stoneTypes: StoneTypeDef[];
   slabsTotal: number;
   onAssign: (s: UnassignedSlab) => void;
   renderCard: (s: UnassignedSlab) => React.ReactNode;
+  /** Bulk-select propagated from UnassignedByTemple → here →
+   *  TempleSlabsPeek. Lets the user enter bulk mode without
+   *  leaving the temple peek. */
+  bulkMode: boolean;
+  onToggleBulkMode: () => void;
+  bulkSelectedCount: number;
+  bulkMax: number;
 }) {
   const [openTemple, setOpenTemple] = useState<string | null>(null);
   const openGroup = openTemple ? groups.find((g) => g.temple === openTemple) ?? null : null;
@@ -1296,6 +1324,10 @@ function TempleCardGrid({
           slabs={openGroup.items}
           renderCard={renderCard}
           onClose={() => setOpenTemple(null)}
+          bulkMode={bulkMode}
+          onToggleBulkMode={onToggleBulkMode}
+          bulkSelectedCount={bulkSelectedCount}
+          bulkMax={bulkMax}
         />
       )}
     </>
@@ -1339,11 +1371,22 @@ function TempleSlabsPeek({
   slabs,
   renderCard,
   onClose,
+  bulkMode,
+  onToggleBulkMode,
+  bulkSelectedCount,
+  bulkMax,
 }: {
   temple: string;
   slabs: UnassignedSlab[];
   renderCard: (s: UnassignedSlab) => React.ReactNode;
   onClose: () => void;
+  /** Bulk-select propagated from the parent. Adds a toggle to the
+   *  peek header so the carving head can enter bulk mode without
+   *  closing the peek + clicking the toolbar button. */
+  bulkMode: boolean;
+  onToggleBulkMode: () => void;
+  bulkSelectedCount: number;
+  bulkMax: number;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
 
@@ -1440,22 +1483,71 @@ function TempleSlabsPeek({
               {slabs.length} slab{slabs.length !== 1 ? "s" : ""} ready to assign
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            style={{
-              fontSize: 18,
-              border: "none",
-              background: "transparent",
-              cursor: "pointer",
-              color: "var(--muted)",
-              padding: 4,
-            }}
-            aria-label="Close"
-          >
-            ✕
-          </button>
+          {/* Bulk-select toggle — same fn as the toolbar button so
+              entering bulk mode here just flips the same state.
+              Cards in the peek will then become tappable checkboxes,
+              and the sticky bottom bar appears with "Assign N →". */}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
+            <button
+              type="button"
+              onClick={onToggleBulkMode}
+              title={
+                bulkMode
+                  ? "Exit bulk select"
+                  : `Select up to ${bulkMax} slabs to assign as a batch`
+              }
+              style={{
+                padding: "8px 14px",
+                fontSize: 12,
+                fontWeight: 700,
+                border: `1.5px solid ${bulkMode ? "var(--gold-dark)" : "var(--border)"}`,
+                background: bulkMode ? "rgba(180,115,51,0.10)" : "var(--surface)",
+                color: bulkMode ? "var(--gold-dark)" : "var(--text)",
+                borderRadius: 6,
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {bulkMode
+                ? `✕ Cancel select${bulkSelectedCount > 0 ? ` (${bulkSelectedCount})` : ""}`
+                : "📋 Select multiple"}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              style={{
+                fontSize: 18,
+                border: "none",
+                background: "transparent",
+                cursor: "pointer",
+                color: "var(--muted)",
+                padding: 4,
+              }}
+              aria-label="Close"
+            >
+              ✕
+            </button>
+          </div>
         </div>
+        {/* Hint that explains bulk-select once it's on. */}
+        {bulkMode && (
+          <div
+            style={{
+              padding: "8px 18px",
+              background: "rgba(180,115,51,0.06)",
+              borderBottom: "1px solid var(--border)",
+              fontSize: 12,
+              color: "#7c2d12",
+              fontWeight: 600,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              flexWrap: "wrap",
+            }}
+          >
+            <span>📋 Tap up to {bulkMax} slabs to select. Pair mirror-coloured ones for 2-head pairs.</span>
+          </div>
+        )}
         {groupColorMap.size > 0 && (
           <div
             style={{
