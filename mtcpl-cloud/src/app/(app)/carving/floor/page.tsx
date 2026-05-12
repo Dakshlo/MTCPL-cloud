@@ -23,7 +23,10 @@ export default async function CarvingFloorPage({ searchParams }: { searchParams:
   await requireAuth(["developer", "owner", "carving_head"]);
   const params = await searchParams;
   const initialMode: "grid" | "tv" = params.mode === "tv" ? "tv" : "grid";
-  const initialRotateSec = Math.max(5, Math.min(120, Number(params.rotate) || 20));
+  // Default 10s — the floor TV cycles through vendors fast enough
+  // that someone glancing up always sees the current state of every
+  // operator within a minute. ?rotate= query param still overrides.
+  const initialRotateSec = Math.max(5, Math.min(120, Number(params.rotate) || 10));
 
   const floorVendors = await buildFloorViewData();
 

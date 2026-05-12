@@ -178,10 +178,12 @@ export function FloorViewClient({
   if (mode === "tv") {
     const v = vendors[tvIndex];
     const isDark = tvTheme === "dark";
+    // NOTE: previously onMouseEnter paused the rotation. For a
+    // kiosk display the cursor is always somewhere on screen, so
+    // that caused the rotation to NEVER auto-resume. Removed —
+    // users can pause explicitly via the ⚙ settings cog.
     return (
       <div
-        onMouseEnter={() => setPaused(true)}
-        onMouseLeave={() => setPaused(false)}
         style={{
           position: "fixed",
           top: 0,
@@ -329,8 +331,11 @@ function TvHeader({
   const ctrlBg = isDark ? "rgba(255,255,255,0.08)" : "#fff";
   const ctrlFg = isDark ? "#fff" : "#1a1a1a";
   const ctrlBorder = isDark ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.12)";
-  const muted = isDark ? "rgba(255,255,255,0.55)" : "#8a7a55";
   const dotInactive = isDark ? "rgba(255,255,255,0.25)" : "rgba(0,0,0,0.18)";
+  // All control surface (pause/duration/theme) collapses behind a
+  // single ⚙️ icon. The user wanted the TV to JUST be the data with
+  // no chrome distraction; settings is one click away when needed.
+  const [settingsOpen, setSettingsOpen] = useState(false);
   return (
     <div
       style={{
@@ -341,87 +346,73 @@ function TvHeader({
         justifyContent: "space-between",
         paddingBottom: 10,
         borderBottom: `1px solid ${isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.08)"}`,
+        position: "relative",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <span style={{ fontSize: 11, color: muted, textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>
-          📺 TV mode · {paused ? "paused" : `auto-rotate every ${rotateSec}s`}
-        </span>
+      {/* Left: just the settings cog + vendor dots */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <button
           type="button"
-          onClick={() => setPaused(!paused)}
+          onClick={() => setSettingsOpen((v) => !v)}
           style={{
             background: ctrlBg,
             color: ctrlFg,
             border: `1px solid ${ctrlBorder}`,
-            padding: "5px 12px",
-            fontSize: 11,
-            fontWeight: 700,
+            width: 32,
+            height: 32,
+            fontSize: 14,
             borderRadius: 6,
             cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
           }}
+          title="TV settings (pause, duration, theme)"
+          aria-label="TV settings"
         >
-          {paused ? "▶ Resume" : "⏸ Pause"}
+          ⚙
         </button>
-        <select
-          value={rotateSec}
-          onChange={(e) => setRotateSec(Number(e.target.value))}
-          style={{
-            background: ctrlBg,
-            color: ctrlFg,
-            border: `1px solid ${ctrlBorder}`,
-            padding: "5px 10px",
-            fontSize: 11,
-            borderRadius: 6,
-          }}
-        >
-          {[10, 15, 20, 30, 45, 60].map((s) => (
-            <option key={s} value={s} style={{ color: "#000" }}>
-              {s}s
-            </option>
-          ))}
-        </select>
-        {/* Theme toggle. The label always shows the OPPOSITE state so
-            it reads as "tap to switch to X". Persists to localStorage. */}
-        <button
-          type="button"
-          onClick={() => setTvTheme(isDark ? "light" : "dark")}
-          style={{
-            background: ctrlBg,
-            color: ctrlFg,
-            border: `1px solid ${ctrlBorder}`,
-            padding: "5px 12px",
-            fontSize: 11,
-            fontWeight: 700,
-            borderRadius: 6,
-            cursor: "pointer",
-          }}
-          title={isDark ? "Switch to light theme" : "Switch to dark theme"}
-        >
-          {isDark ? "☀ Light" : "🌙 Dark"}
-        </button>
-      </div>
-      {/* Vendor dots — quick jump */}
-      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        {vendors.map((v, i) => (
-          <button
-            key={v.id}
-            type="button"
-            onClick={() => setTvIndex(i)}
+        {paused && (
+          <span
             style={{
-              width: 10,
-              height: 10,
-              borderRadius: "50%",
-              border: "none",
-              cursor: "pointer",
-              background: i === tvIndex ? "#b87333" : dotInactive,
-              transition: "background 0.2s",
-              padding: 0,
+              fontSize: 10,
+              fontWeight: 800,
+              padding: "3px 8px",
+              borderRadius: 4,
+              background: isDark ? "rgba(217,119,6,0.18)" : "rgba(217,119,6,0.12)",
+              color: isDark ? "#fbbf24" : "#b45309",
+              letterSpacing: "0.05em",
             }}
-            title={v.name}
-          />
-        ))}
+            title="Auto-rotate is paused — tap settings to resume"
+          >
+            ⏸ PAUSED
+          </span>
+        )}
+        {/* Vendor dots — quick jump */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {vendors.map((v, i) => (
+            <button
+              key={v.id}
+              type="button"
+              onClick={() => setTvIndex(i)}
+              style={{
+                width: 10,
+                height: 10,
+                borderRadius: "50%",
+                border: "none",
+                cursor: "pointer",
+                background: i === tvIndex ? "#b87333" : dotInactive,
+                transition: "background 0.2s",
+                padding: 0,
+              }}
+              title={v.name}
+            />
+          ))}
+        </div>
       </div>
+
+      {/* Right: fleet stats + exit TV. Stats stay always-visible since
+          they're the headline numbers the floor wants to see. */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
         <TvStat label="Free" value={fleetTotals.idle} fg={isDark ? "#22c55e" : "#15803d"} dark={isDark} />
         <TvStat label="Carving" value={fleetTotals.carving} fg={isDark ? "#60a5fa" : "#1d4ed8"} dark={isDark} />
@@ -444,6 +435,120 @@ function TvHeader({
           ▦ Exit TV
         </button>
       </div>
+
+      {/* Settings popover — anchored to the cog. Click outside or
+          tap a control to close. Contents: pause/resume, rotate
+          duration, theme toggle. */}
+      {settingsOpen && (
+        <>
+          <div
+            onClick={() => setSettingsOpen(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 998,
+              cursor: "pointer",
+            }}
+          />
+          <div
+            style={{
+              position: "absolute",
+              top: "100%",
+              left: 0,
+              marginTop: 6,
+              zIndex: 999,
+              minWidth: 240,
+              background: ctrlBg,
+              backdropFilter: "blur(8px)",
+              border: `1px solid ${ctrlBorder}`,
+              borderRadius: 10,
+              padding: 12,
+              boxShadow: "0 12px 36px rgba(0,0,0,0.35)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
+              color: ctrlFg,
+            }}
+          >
+            <SettingRow label={paused ? "Resume rotation" : "Pause rotation"}>
+              <button
+                type="button"
+                onClick={() => {
+                  setPaused(!paused);
+                  setSettingsOpen(false);
+                }}
+                style={{
+                  background: ctrlBg,
+                  color: ctrlFg,
+                  border: `1px solid ${ctrlBorder}`,
+                  padding: "6px 12px",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  borderRadius: 6,
+                  cursor: "pointer",
+                  minWidth: 90,
+                }}
+              >
+                {paused ? "▶ Resume" : "⏸ Pause"}
+              </button>
+            </SettingRow>
+
+            <SettingRow label="Rotate every">
+              <select
+                value={rotateSec}
+                onChange={(e) => setRotateSec(Number(e.target.value))}
+                style={{
+                  background: ctrlBg,
+                  color: ctrlFg,
+                  border: `1px solid ${ctrlBorder}`,
+                  padding: "6px 10px",
+                  fontSize: 12,
+                  borderRadius: 6,
+                  minWidth: 90,
+                }}
+              >
+                {[5, 10, 15, 20, 30, 45, 60].map((s) => (
+                  <option key={s} value={s} style={{ color: "#000" }}>
+                    {s} seconds
+                  </option>
+                ))}
+              </select>
+            </SettingRow>
+
+            <SettingRow label="Theme">
+              <button
+                type="button"
+                onClick={() => {
+                  setTvTheme(isDark ? "light" : "dark");
+                }}
+                style={{
+                  background: ctrlBg,
+                  color: ctrlFg,
+                  border: `1px solid ${ctrlBorder}`,
+                  padding: "6px 12px",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  borderRadius: 6,
+                  cursor: "pointer",
+                  minWidth: 90,
+                }}
+                title={isDark ? "Switch to light theme" : "Switch to dark theme"}
+              >
+                {isDark ? "☀ Light" : "🌙 Dark"}
+              </button>
+            </SettingRow>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function SettingRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+      <span style={{ fontSize: 12, fontWeight: 600, opacity: 0.85 }}>{label}</span>
+      {children}
     </div>
   );
 }
