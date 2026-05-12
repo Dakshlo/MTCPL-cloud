@@ -8,6 +8,42 @@ Reverse-chronological. Most recent at top. Append to TOP when shipping new work.
 
 ## Recent (this Claude session)
 
+### `(pending)` · Slab transfer UI overhaul: section separation, mobile-first, Delivered confirmation
+
+Big polish pass on `/carving/transfer`. Daksh's feedback: sections
+looked too similar, no success state after marking delivered, needed
+to work better on mobile. Changes:
+
+1. **Strong visual separation between sections** — each section now
+   has its own background tint + border + accent colour:
+   - 🚧 Claimed by me: BLUE (active work, primary)
+   - 📦 Available to claim: NEUTRAL (secondary)
+   - ✅ Delivered today: GREEN (success)
+   - 👥 Claimed by other runners: MUTED (awareness, hidden when empty)
+
+2. **New "Delivered today" section** — server fetches last 48h of
+   slabs this runner has marked received (filter on
+   `received_at_vendor_by = profile.id`). Each row shows: 3D thumb +
+   slab id + temple + dims + ✓ checkmark + delivered timestamp in
+   IST + dropoff note (if set). Fresh deliveries (<60min) get a
+   greener border + "just now" label. Collapsed by default since
+   it's reference, not action.
+
+3. **Mobile-first card layout** — From → To route now uses a CSS
+   grid that collapses to single-column on screens <600px (arrow
+   rotates 90° to point down). All buttons are 44px+ tap targets.
+   Claim / Mark delivered buttons grow to fill width on narrow.
+
+4. **Better single-runner UX** — when there's only one transfer
+   person, "Claimed by other runners" section is hidden entirely
+   (was rendering an empty/redundant header before).
+
+5. **Stat tiles updated** — "Mine / To claim / Delivered" with
+   colour-coded values matching the section accents.
+
+Server: `transfer/page.tsx` now fetches `deliveredByMe` alongside
+the pending list. Same vendor + stone palette hydration pipeline.
+
 ### `(pending)` · Mirror-pair grouping + roles dropdown + Ready Sizes today-default + sidebar reorder
 
 Four smaller-scoped UX polish items from Daksh:

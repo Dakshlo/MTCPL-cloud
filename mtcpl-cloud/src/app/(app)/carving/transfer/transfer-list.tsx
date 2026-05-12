@@ -3,19 +3,26 @@
 /**
  * Slab Transfer dispatch UI.
  *
- * Three sections rendered top-down:
- *   1. Claimed by me (with Deliver / Unclaim buttons + optional note)
- *   2. Available to claim (📦 Claim button per row)
- *   3. Claimed by others (read-only; carving_head + owner + dev see
- *      an Unclaim button so they can redirect)
+ * Four buckets stacked top-down with strong visual separation so
+ * each section reads as its own surface:
  *
- * Each row carries: 3D slab thumbnail, slab id, temple, dims, lathe
- * chip, urgency chip, pickup location (slab_requirements.stock_location),
- * drop-off location (vendors.dropoff_location), and vendor name.
+ *   1. 🚧 Claimed by me   — BLUE accent. The runner's active work.
+ *      Each row: 3D thumb · slab info · From → To route · Mark
+ *      delivered (with optional note) · Release claim.
  *
- * Marked "use client" because the deliver form per claimed row has
- * a local "dropoff_note" text input + show/hide state. Claim and
- * unclaim are plain server-action forms.
+ *   2. 📦 Available       — AMBER accent. Unclaimed pickups.
+ *      Each row: 3D thumb · slab info · From → To route · Claim.
+ *
+ *   3. ✅ Delivered today  — GREEN accent. Last 48h of deliveries
+ *      by THIS runner. Collapsed by default — it's there as
+ *      success confirmation + history, not an action surface.
+ *
+ *   4. 👥 Claimed by other runners — MUTED. Hidden when empty.
+ *      Awareness only. carving_head + above can release.
+ *
+ * Mobile-first: From → To layout uses a CSS grid that collapses to
+ * a single column on screens under 600px (arrow rotates to point
+ * down). All buttons are 44px tap targets minimum.
  */
 
 import { useEffect, useState } from "react";
@@ -50,14 +57,54 @@ export type TransferRow = {
   is_lathe: boolean;
 };
 
+export type DeliveredRow = {
+  id: string;
+  slab_id: string;
+  temple: string;
+  slab_label: string | null;
+  stone: string | null;
+  length_ft: number;
+  width_ft: number;
+  thickness_ft: number;
+  vendor_name: string;
+  vendor_dropoff: string | null;
+  delivered_at: string;
+  dropoff_note: string | null;
+  urgency: "normal" | "urgent";
+  is_lathe: boolean;
+};
+
+// Single source of truth for the responsive breakpoint. Used by the
+// route-visual grid and the button rows so they all collapse at the
+// same width.
+const MOBILE_CSS = `
+  @keyframes mtcpl-transfer-flow {
+    0%   { background-position: -40px 0; }
+    100% { background-position: 40px 0; }
+  }
+  @media (max-width: 600px) {
+    .mtcpl-route-grid {
+      grid-template-columns: 1fr !important;
+      grid-template-rows: auto auto auto;
+    }
+    .mtcpl-route-arrow {
+      transform: rotate(90deg);
+      width: 60px !important;
+      margin: 0 auto;
+    }
+  }
+`;
+
 export function TransferDispatchList({
   rows,
+  delivered,
   currentUserId,
   canUnclaimOthers,
   stoneTypes,
   toast,
 }: {
   rows: TransferRow[];
+  delivered: DeliveredRow[];
   currentUserId: string;
   canUnclaimOthers: boolean;
   stoneTypes: StoneTypeDef[];
@@ -73,7 +120,7 @@ export function TransferDispatchList({
     return () => clearTimeout(t);
   }, [toastMsg]);
 
-  // Strip ?toast=... once we've shown it so reload doesn't replay.
+  // Strip ?toast=… so reload doesn't replay.
   useEffect(() => {
     if (toast && typeof window !== "undefined" && window.location.search) {
       const url = new URL(window.location.href);
@@ -84,16 +131,13 @@ export function TransferDispatchList({
     }
   }, [toast, router]);
 
-  // Filter into three buckets — CNC only because Manual vendors don't
-  // physically receive slabs the same way (the head fires Mark
-  // started on their behalf elsewhere).
+  // CNC only — Manual vendors don't physically receive slabs.
   const cncRows = rows.filter((r) => r.vendor_type === "CNC");
 
   const mineRows = cncRows.filter((r) => r.claimed_by === currentUserId);
   const availableRows = cncRows.filter((r) => !r.claimed_by);
   const othersRows = cncRows.filter((r) => r.claimed_by && r.claimed_by !== currentUserId);
 
-  // Sort each bucket: urgent first, then oldest assigned first.
   const sortByUrgency = (a: TransferRow, b: TransferRow) => {
     if (a.urgency !== b.urgency) return a.urgency === "urgent" ? -1 : 1;
     return new Date(a.assigned_at).getTime() - new Date(b.assigned_at).getTime();
@@ -103,19 +147,21 @@ export function TransferDispatchList({
   othersRows.sort(sortByUrgency);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 18, paddingBottom: 32 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14, paddingBottom: 32 }}>
+      <style>{MOBILE_CSS}</style>
+
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
         <div>
           <h1 style={{ margin: 0, fontSize: 22 }}>🚧 Slab Transfer</h1>
           <p className="muted" style={{ margin: "4px 0 0", fontSize: 13 }}>
             Move cut slabs from the stock yard to each vendor&apos;s shade.
-            Claim a slab before picking it up so no one else grabs the same one.
+            Claim a slab before picking it up.
           </p>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <StatTile label="To claim" value={availableRows.length} fg="#b45309" />
           <StatTile label="Mine" value={mineRows.length} fg="#1d4ed8" />
-          <StatTile label="Others" value={othersRows.length} fg="var(--muted)" />
+          <StatTile label="To claim" value={availableRows.length} fg="#b45309" />
+          <StatTile label="Delivered" value={delivered.length} fg="#15803d" />
         </div>
       </div>
 
@@ -124,57 +170,85 @@ export function TransferDispatchList({
           role="status"
           style={{
             padding: "10px 14px",
-            background: "rgba(22,163,74,0.08)",
-            border: "1px solid rgba(22,163,74,0.25)",
+            background: "rgba(22,163,74,0.10)",
+            border: "1px solid rgba(22,163,74,0.35)",
             color: "#15803d",
             borderRadius: 8,
             fontSize: 13,
-            fontWeight: 600,
+            fontWeight: 700,
           }}
         >
           ✓ {toastMsg}
         </div>
       )}
 
-      <Section
-        title="Claimed by me"
-        subtitle={mineRows.length === 0 ? "Nothing claimed — pick something below." : `${mineRows.length} slab${mineRows.length !== 1 ? "s" : ""} to deliver`}
-        accent="#1d4ed8"
+      {/* CLAIMED BY ME — primary actionable section. */}
+      <SectionShell
+        kind="mine"
+        title="🚧 Claimed by me"
+        subtitle={
+          mineRows.length === 0
+            ? "Nothing claimed yet — pick something from Available below."
+            : `${mineRows.length} slab${mineRows.length !== 1 ? "s" : ""} to deliver`
+        }
       >
-        {mineRows.length === 0 ? null : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {mineRows.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {mineRows.map((r) => (
               <TransferCard key={r.id} row={r} kind="mine" stoneTypes={stoneTypes} />
             ))}
           </div>
         )}
-      </Section>
+      </SectionShell>
 
-      <Section
-        title="Available to claim"
-        subtitle={availableRows.length === 0 ? "Nothing pending — yard is clear." : `${availableRows.length} slab${availableRows.length !== 1 ? "s" : ""} ready for pickup`}
-        accent="#b45309"
+      {/* AVAILABLE TO CLAIM — secondary, amber. */}
+      <SectionShell
+        kind="available"
+        title="📦 Available to claim"
+        subtitle={
+          availableRows.length === 0
+            ? "Yard is clear — nothing pending."
+            : `${availableRows.length} slab${availableRows.length !== 1 ? "s" : ""} ready for pickup`
+        }
         collapsible
         defaultOpen
       >
-        {availableRows.length === 0 ? null : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {availableRows.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {availableRows.map((r) => (
               <TransferCard key={r.id} row={r} kind="available" stoneTypes={stoneTypes} />
             ))}
           </div>
         )}
-      </Section>
+      </SectionShell>
 
-      {othersRows.length > 0 && (
-        <Section
-          title="Claimed by other runners"
-          subtitle="Already grabbed — visible for awareness only."
-          accent="var(--muted)"
+      {/* DELIVERED TODAY — success confirmation, collapsed by default. */}
+      {delivered.length > 0 && (
+        <SectionShell
+          kind="delivered"
+          title="✅ Delivered today"
+          subtitle={`${delivered.length} slab${delivered.length !== 1 ? "s" : ""} delivered in the last 48 hours`}
           collapsible
           defaultOpen={false}
         >
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {delivered.map((d) => (
+              <DeliveredCard key={d.id} row={d} stoneTypes={stoneTypes} />
+            ))}
+          </div>
+        </SectionShell>
+      )}
+
+      {/* CLAIMED BY OTHERS — hidden when empty. */}
+      {othersRows.length > 0 && (
+        <SectionShell
+          kind="others"
+          title="👥 Claimed by other runners"
+          subtitle="Already grabbed — visible for awareness only."
+          collapsible
+          defaultOpen={false}
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {othersRows.map((r) => (
               <TransferCard
                 key={r.id}
@@ -185,232 +259,80 @@ export function TransferDispatchList({
               />
             ))}
           </div>
-        </Section>
+        </SectionShell>
       )}
     </div>
   );
 }
 
-// ── Card ──────────────────────────────────────────────────────────
+// ── Section shell — strong visual differentiation per kind ────────
 
-function TransferCard({
-  row,
+type SectionKind = "mine" | "available" | "delivered" | "others";
+
+const SECTION_TINTS: Record<
+  SectionKind,
+  { bg: string; border: string; titleFg: string; subtitleFg: string }
+> = {
+  mine: {
+    bg: "linear-gradient(180deg, rgba(37,99,235,0.07) 0%, rgba(37,99,235,0.02) 100%)",
+    border: "rgba(37,99,235,0.40)",
+    titleFg: "#1d4ed8",
+    subtitleFg: "#1e3a8a",
+  },
+  available: {
+    bg: "var(--surface)",
+    border: "var(--border)",
+    titleFg: "#b45309",
+    subtitleFg: "var(--muted)",
+  },
+  delivered: {
+    bg: "rgba(22,163,74,0.06)",
+    border: "rgba(22,163,74,0.35)",
+    titleFg: "#15803d",
+    subtitleFg: "var(--muted)",
+  },
+  others: {
+    bg: "var(--surface-alt)",
+    border: "var(--border)",
+    titleFg: "var(--muted)",
+    subtitleFg: "var(--muted)",
+  },
+};
+
+function SectionShell({
   kind,
-  canUnclaim,
-  stoneTypes,
-}: {
-  row: TransferRow;
-  kind: "mine" | "available" | "others";
-  canUnclaim?: boolean;
-  stoneTypes: StoneTypeDef[];
-}) {
-  const [deliverOpen, setDeliverOpen] = useState(false);
-
-  const dims = `${row.length_ft}×${row.width_ft}×${row.thickness_ft}″`;
-  const isUrgent = row.urgency === "urgent";
-
-  return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: 10,
-        padding: "12px 14px",
-        background: isUrgent ? "rgba(220,38,38,0.04)" : "var(--surface)",
-        border: `1px solid ${isUrgent ? "rgba(220,38,38,0.3)" : "var(--border)"}`,
-        borderRadius: 10,
-      }}
-    >
-      {/* Top row — slab info + chips */}
-      <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
-        <div style={{ flexShrink: 0 }}>
-          <SlabThumb
-            stone={row.stone}
-            l={row.length_ft}
-            w={row.width_ft}
-            t={row.thickness_ft}
-            stoneTypes={stoneTypes}
-            size={64}
-            height={64}
-          />
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            {isUrgent && (
-              <span style={{ fontSize: 9, fontWeight: 800, padding: "2px 6px", borderRadius: 3, background: "#dc2626", color: "#fff", letterSpacing: "0.05em" }}>
-                ⚡ URGENT
-              </span>
-            )}
-            {row.is_lathe && (
-              <span style={{ fontSize: 9, fontWeight: 800, padding: "2px 6px", borderRadius: 3, background: "rgba(124,58,237,0.15)", color: "#7c3aed", letterSpacing: "0.05em" }}>
-                🌀 LATHE
-              </span>
-            )}
-            <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 14 }}>
-              {row.slab_id}
-            </code>
-            <span style={{ fontSize: 12, color: "var(--muted)" }}>
-              {row.temple}
-              {row.slab_label && ` · ${row.slab_label}`}
-              {" · "}
-              {dims}
-            </span>
-          </div>
-          {kind === "others" && row.claimed_by_name && (
-            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
-              Claimed by <strong>{row.claimed_by_name}</strong>
-              {row.claimed_at && ` · ${formatRelative(row.claimed_at)} ago`}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Route visualisation — pickup → drop. Arrow animates when
-          this runner has claimed the row (kind === "mine"). Built
-          as a single horizontal grid so the From/To endpoints stay
-          fixed width and the arrow always centres between them. */}
-      <RouteVisual
-        from={row.stock_location}
-        toVendor={row.vendor_name}
-        toDropoff={row.vendor_dropoff}
-        active={kind === "mine"}
-      />
-
-      {/* Action buttons */}
-      <div style={{ display: "flex", gap: 8, alignItems: "stretch", flexWrap: "wrap" }}>
-        {kind === "available" && (
-          <form action={claimSlabTransferAction}>
-            <input type="hidden" name="carving_item_id" value={row.id} />
-            <input type="hidden" name="redirect_to" value="/carving/transfer" />
-            <button
-              type="submit"
-              className="primary-button"
-              style={{ fontSize: 13, padding: "8px 18px", fontWeight: 700 }}
-            >
-              📦 Claim
-            </button>
-          </form>
-        )}
-        {kind === "mine" && !deliverOpen && (
-          <>
-            <button
-              type="button"
-              onClick={() => setDeliverOpen(true)}
-              style={{
-                fontSize: 13,
-                padding: "8px 18px",
-                fontWeight: 700,
-                background: "#16a34a",
-                color: "#fff",
-                border: "none",
-                borderRadius: 6,
-                cursor: "pointer",
-              }}
-            >
-              ✅ Mark delivered
-            </button>
-            <form action={unclaimSlabTransferAction}>
-              <input type="hidden" name="carving_item_id" value={row.id} />
-              <input type="hidden" name="redirect_to" value="/carving/transfer" />
-              <button
-                type="submit"
-                className="ghost-button"
-                style={{ fontSize: 11, padding: "8px 12px" }}
-              >
-                Release claim
-              </button>
-            </form>
-          </>
-        )}
-        {kind === "mine" && deliverOpen && (
-          <form action={acknowledgeReceiptAction} style={{ display: "flex", gap: 6, alignItems: "center", flex: 1, flexWrap: "wrap" }}>
-            <input type="hidden" name="carving_item_id" value={row.id} />
-            <input type="hidden" name="redirect_to" value="/carving/transfer" />
-            <input
-              type="text"
-              name="dropoff_note"
-              placeholder={`Where did you leave it? (empty = standard ${row.vendor_dropoff ?? "spot"})`}
-              style={{
-                fontSize: 12,
-                padding: "8px 10px",
-                border: "1px solid var(--border)",
-                borderRadius: 6,
-                background: "var(--bg)",
-                color: "var(--text)",
-                flex: "1 1 200px",
-                minWidth: 160,
-              }}
-            />
-            <button
-              type="submit"
-              className="primary-button"
-              style={{
-                fontSize: 12,
-                padding: "8px 14px",
-                fontWeight: 700,
-                background: "#16a34a",
-              }}
-            >
-              ✅ Done
-            </button>
-            <button
-              type="button"
-              onClick={() => setDeliverOpen(false)}
-              className="ghost-button"
-              style={{ fontSize: 11, padding: "8px 10px" }}
-            >
-              Cancel
-            </button>
-          </form>
-        )}
-        {kind === "others" && canUnclaim && (
-          <form action={unclaimSlabTransferAction}>
-            <input type="hidden" name="carving_item_id" value={row.id} />
-            <input type="hidden" name="redirect_to" value="/carving/transfer" />
-            <button
-              type="submit"
-              className="ghost-button danger-ghost"
-              style={{ fontSize: 11, padding: "6px 12px" }}
-            >
-              Release their claim
-            </button>
-          </form>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── Section wrapper ────────────────────────────────────────────────
-
-function Section({
   title,
   subtitle,
-  accent,
   children,
   collapsible = false,
   defaultOpen = true,
 }: {
+  kind: SectionKind;
   title: string;
   subtitle: string;
-  accent: string;
   children: React.ReactNode;
-  /** When true, header renders a ▼ / ▶ caret and clicking toggles
-   *  the body. Used on Available + Claimed-by-others so the runner
-   *  can hide them once they've claimed what they need. */
   collapsible?: boolean;
   defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const isOpen = collapsible ? open : true;
+  const tint = SECTION_TINTS[kind];
   return (
-    <section className="page-card">
+    <section
+      style={{
+        background: tint.bg,
+        border: `1.5px solid ${tint.border}`,
+        borderRadius: 12,
+        padding: "12px 14px",
+        boxShadow: kind === "mine" ? "0 2px 12px rgba(37,99,235,0.08)" : "none",
+      }}
+    >
       <div
         style={{
           display: "flex",
           alignItems: "baseline",
           gap: 10,
-          marginBottom: isOpen ? 10 : 0,
+          marginBottom: isOpen ? 12 : 0,
           flexWrap: "wrap",
           cursor: collapsible ? "pointer" : "default",
           userSelect: collapsible ? "none" : "auto",
@@ -430,15 +352,473 @@ function Section({
         }
       >
         {collapsible && (
-          <span style={{ fontSize: 12, color: "var(--muted)", width: 14, display: "inline-block" }}>
+          <span style={{ fontSize: 12, color: tint.titleFg, width: 14, display: "inline-block" }}>
             {isOpen ? "▼" : "▶"}
           </span>
         )}
-        <h2 style={{ margin: 0, fontSize: 15, color: accent }}>{title}</h2>
-        <span style={{ fontSize: 12, color: "var(--muted)" }}>{subtitle}</span>
+        <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: tint.titleFg }}>{title}</h2>
+        <span style={{ fontSize: 12, color: tint.subtitleFg }}>{subtitle}</span>
       </div>
       {isOpen && children}
     </section>
+  );
+}
+
+// ── Transfer card — actionable row in Mine / Available / Others ───
+
+function TransferCard({
+  row,
+  kind,
+  canUnclaim,
+  stoneTypes,
+}: {
+  row: TransferRow;
+  kind: "mine" | "available" | "others";
+  canUnclaim?: boolean;
+  stoneTypes: StoneTypeDef[];
+}) {
+  const [deliverOpen, setDeliverOpen] = useState(false);
+  const dims = `${row.length_ft}×${row.width_ft}×${row.thickness_ft}″`;
+  const isUrgent = row.urgency === "urgent";
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+        padding: "12px 14px",
+        background: "var(--surface)",
+        border: `1px solid ${isUrgent ? "rgba(220,38,38,0.4)" : "var(--border)"}`,
+        borderRadius: 10,
+        boxShadow: isUrgent ? "0 0 0 2px rgba(220,38,38,0.08)" : "none",
+      }}
+    >
+      {/* Top row — slab info + chips */}
+      <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+        <div style={{ flexShrink: 0 }}>
+          <SlabThumb
+            stone={row.stone}
+            l={row.length_ft}
+            w={row.width_ft}
+            t={row.thickness_ft}
+            stoneTypes={stoneTypes}
+            size={64}
+            height={64}
+          />
+        </div>
+        <div style={{ flex: "1 1 200px", minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 4 }}>
+            {isUrgent && <ChipUrgent />}
+            {row.is_lathe && <ChipLathe />}
+            <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 14, color: "var(--text)" }}>
+              {row.slab_id}
+            </code>
+          </div>
+          <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.4 }}>
+            {row.temple}
+            {row.slab_label && ` · ${row.slab_label}`}
+            <div style={{ marginTop: 2, fontFamily: "ui-monospace, monospace", color: "var(--text)" }}>
+              {dims}
+            </div>
+          </div>
+          {kind === "others" && row.claimed_by_name && (
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+              Claimed by <strong>{row.claimed_by_name}</strong>
+              {row.claimed_at && ` · ${formatRelative(row.claimed_at)} ago`}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Route visualisation */}
+      <RouteVisual
+        from={row.stock_location}
+        toVendor={row.vendor_name}
+        toDropoff={row.vendor_dropoff}
+        active={kind === "mine"}
+      />
+
+      {/* Action buttons */}
+      <div style={{ display: "flex", gap: 8, alignItems: "stretch", flexWrap: "wrap" }}>
+        {kind === "available" && (
+          <form action={claimSlabTransferAction} style={{ flex: 1, minWidth: 120 }}>
+            <input type="hidden" name="carving_item_id" value={row.id} />
+            <input type="hidden" name="redirect_to" value="/carving/transfer" />
+            <button
+              type="submit"
+              className="primary-button"
+              style={{
+                width: "100%",
+                fontSize: 14,
+                padding: "12px 20px",
+                fontWeight: 700,
+                minHeight: 44,
+              }}
+            >
+              📦 Claim this slab
+            </button>
+          </form>
+        )}
+        {kind === "mine" && !deliverOpen && (
+          <>
+            <button
+              type="button"
+              onClick={() => setDeliverOpen(true)}
+              style={{
+                flex: 1,
+                minWidth: 160,
+                fontSize: 14,
+                padding: "12px 20px",
+                fontWeight: 700,
+                background: "#16a34a",
+                color: "#fff",
+                border: "none",
+                borderRadius: 8,
+                cursor: "pointer",
+                minHeight: 44,
+                boxShadow: "0 2px 8px rgba(22,163,74,0.25)",
+              }}
+            >
+              ✅ Mark delivered
+            </button>
+            <form action={unclaimSlabTransferAction}>
+              <input type="hidden" name="carving_item_id" value={row.id} />
+              <input type="hidden" name="redirect_to" value="/carving/transfer" />
+              <button
+                type="submit"
+                className="ghost-button"
+                style={{ fontSize: 12, padding: "10px 14px", minHeight: 44 }}
+              >
+                Release claim
+              </button>
+            </form>
+          </>
+        )}
+        {kind === "mine" && deliverOpen && (
+          <form
+            action={acknowledgeReceiptAction}
+            style={{ display: "flex", gap: 6, alignItems: "stretch", flex: 1, flexWrap: "wrap" }}
+          >
+            <input type="hidden" name="carving_item_id" value={row.id} />
+            <input type="hidden" name="redirect_to" value="/carving/transfer" />
+            <input
+              type="text"
+              name="dropoff_note"
+              placeholder={`Where? (empty = ${row.vendor_dropoff ?? "standard spot"})`}
+              style={{
+                fontSize: 13,
+                padding: "10px 12px",
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+                background: "var(--bg)",
+                color: "var(--text)",
+                flex: "1 1 180px",
+                minWidth: 140,
+                minHeight: 44,
+              }}
+            />
+            <button
+              type="submit"
+              style={{
+                fontSize: 13,
+                padding: "10px 18px",
+                fontWeight: 700,
+                background: "#16a34a",
+                color: "#fff",
+                border: "none",
+                borderRadius: 8,
+                cursor: "pointer",
+                minHeight: 44,
+              }}
+            >
+              ✅ Done
+            </button>
+            <button
+              type="button"
+              onClick={() => setDeliverOpen(false)}
+              className="ghost-button"
+              style={{ fontSize: 12, padding: "10px 14px", minHeight: 44 }}
+            >
+              Cancel
+            </button>
+          </form>
+        )}
+        {kind === "others" && canUnclaim && (
+          <form action={unclaimSlabTransferAction}>
+            <input type="hidden" name="carving_item_id" value={row.id} />
+            <input type="hidden" name="redirect_to" value="/carving/transfer" />
+            <button
+              type="submit"
+              className="ghost-button danger-ghost"
+              style={{ fontSize: 12, padding: "8px 14px" }}
+            >
+              Release their claim
+            </button>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Delivered card — success confirmation row ─────────────────────
+
+function DeliveredCard({ row, stoneTypes }: { row: DeliveredRow; stoneTypes: StoneTypeDef[] }) {
+  const dims = `${row.length_ft}×${row.width_ft}×${row.thickness_ft}″`;
+  const deliveredAt = new Date(row.delivered_at);
+  const ist = deliveredAt.toLocaleString("en-IN", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Kolkata",
+  });
+  const ageMin = (Date.now() - deliveredAt.getTime()) / 60000;
+  const isFresh = ageMin < 60;
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: 12,
+        padding: "10px 12px",
+        background: "var(--surface)",
+        border: `1px solid ${isFresh ? "rgba(22,163,74,0.45)" : "var(--border)"}`,
+        borderRadius: 8,
+        alignItems: "center",
+      }}
+    >
+      <div style={{ flexShrink: 0 }}>
+        <SlabThumb
+          stone={row.stone}
+          l={row.length_ft}
+          w={row.width_ft}
+          t={row.thickness_ft}
+          stoneTypes={stoneTypes}
+          size={44}
+          height={44}
+        />
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          <span
+            style={{
+              fontSize: 16,
+              color: "#15803d",
+              fontWeight: 800,
+              flexShrink: 0,
+            }}
+          >
+            ✓
+          </span>
+          <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 13 }}>
+            {row.slab_id}
+          </code>
+          <span style={{ fontSize: 11, color: "var(--muted)" }}>
+            {row.temple}
+            {row.slab_label && ` · ${row.slab_label}`}
+            {" · "}
+            {dims}
+          </span>
+          {row.is_lathe && <ChipLathe small />}
+        </div>
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            flexWrap: "wrap",
+            marginTop: 4,
+            fontSize: 11,
+            color: "var(--muted)",
+          }}
+        >
+          <span>
+            🏭 <strong style={{ color: "var(--text)" }}>{row.vendor_name}</strong>
+            {row.dropoff_note ? (
+              <span style={{ color: "#15803d" }}> · 📍 {row.dropoff_note}</span>
+            ) : row.vendor_dropoff ? (
+              <span> · {row.vendor_dropoff}</span>
+            ) : null}
+          </span>
+          <span style={{ color: "#15803d", fontWeight: 700, fontFamily: "ui-monospace, monospace" }}>
+            ✅ {ist}
+            {isFresh && ageMin < 60 && <span style={{ marginLeft: 4 }}>· just now</span>}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Route visualisation — From → To, animated when claimed ────────
+
+function RouteVisual({
+  from,
+  toVendor,
+  toDropoff,
+  active,
+}: {
+  from: string | null;
+  toVendor: string;
+  toDropoff: string | null;
+  active: boolean;
+}) {
+  return (
+    <div
+      className="mtcpl-route-grid"
+      style={{
+        display: "grid",
+        gridTemplateColumns: "1fr 60px 1fr",
+        gap: 8,
+        alignItems: "stretch",
+      }}
+    >
+      <div
+        style={{
+          background: "rgba(180,115,51,0.10)",
+          border: "1px solid rgba(180,115,51,0.35)",
+          borderRadius: 8,
+          padding: "8px 10px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 2,
+        }}
+      >
+        <span
+          style={{
+            fontSize: 9,
+            fontWeight: 800,
+            color: "#92400e",
+            letterSpacing: "0.07em",
+            textTransform: "uppercase",
+          }}
+        >
+          📍 From (where it is)
+        </span>
+        <strong
+          style={{
+            fontSize: 13,
+            color: "#7c2d12",
+            fontFamily: "ui-monospace, monospace",
+            wordBreak: "break-word",
+          }}
+        >
+          {from ?? "(no location set)"}
+        </strong>
+      </div>
+
+      <div
+        className="mtcpl-route-arrow"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          position: "relative",
+          height: 44,
+        }}
+      >
+        <div
+          style={{
+            width: "100%",
+            height: 6,
+            borderRadius: 3,
+            background: active
+              ? "repeating-linear-gradient(90deg, #16a34a 0 10px, #86efac 10px 20px)"
+              : "var(--border)",
+            backgroundSize: active ? "40px 6px" : undefined,
+            animation: active ? "mtcpl-transfer-flow 0.8s linear infinite" : undefined,
+          }}
+        />
+        <span
+          style={{
+            position: "absolute",
+            fontSize: 20,
+            color: active ? "#15803d" : "var(--muted)",
+            background: "var(--surface)",
+            padding: "0 6px",
+            fontWeight: 800,
+          }}
+        >
+          →
+        </span>
+      </div>
+
+      <div
+        style={{
+          background: "rgba(22,163,74,0.10)",
+          border: "1px solid rgba(22,163,74,0.35)",
+          borderRadius: 8,
+          padding: "8px 10px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 2,
+        }}
+      >
+        <span
+          style={{
+            fontSize: 9,
+            fontWeight: 800,
+            color: "#15803d",
+            letterSpacing: "0.07em",
+            textTransform: "uppercase",
+          }}
+        >
+          🏭 To (deliver to)
+        </span>
+        <strong
+          style={{
+            fontSize: 13,
+            color: "#14532d",
+            fontFamily: "ui-monospace, monospace",
+            wordBreak: "break-word",
+          }}
+        >
+          {toVendor}
+        </strong>
+        {toDropoff && (
+          <span style={{ fontSize: 11, color: "#15803d" }}>{toDropoff}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Tiny chips + helpers ──────────────────────────────────────────
+
+function ChipUrgent() {
+  return (
+    <span
+      style={{
+        fontSize: 9,
+        fontWeight: 800,
+        padding: "2px 7px",
+        borderRadius: 999,
+        background: "#dc2626",
+        color: "#fff",
+        letterSpacing: "0.05em",
+      }}
+    >
+      ⚡ URGENT
+    </span>
+  );
+}
+
+function ChipLathe({ small = false }: { small?: boolean }) {
+  return (
+    <span
+      style={{
+        fontSize: small ? 8 : 9,
+        fontWeight: 800,
+        padding: small ? "1px 5px" : "2px 6px",
+        borderRadius: 3,
+        background: "rgba(124,58,237,0.15)",
+        color: "#7c3aed",
+        letterSpacing: "0.05em",
+      }}
+    >
+      🌀 LATHE
+    </span>
   );
 }
 
@@ -453,10 +833,25 @@ function StatTile({ label, value, fg }: { label: string; value: number; fg: stri
         minWidth: 70,
       }}
     >
-      <div style={{ fontSize: 10, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700 }}>
+      <div
+        style={{
+          fontSize: 10,
+          color: "var(--muted)",
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+          fontWeight: 700,
+        }}
+      >
         {label}
       </div>
-      <div style={{ fontSize: 22, fontWeight: 800, color: fg, fontFamily: "ui-monospace, monospace" }}>
+      <div
+        style={{
+          fontSize: 22,
+          fontWeight: 800,
+          color: fg,
+          fontFamily: "ui-monospace, monospace",
+        }}
+      >
         {value}
       </div>
     </div>
@@ -470,153 +865,4 @@ function formatRelative(iso: string): string {
   const hr = Math.floor(min / 60);
   if (hr < 24) return `${hr}h`;
   return `${Math.floor(hr / 24)}d`;
-}
-
-// ── Route visualisation ───────────────────────────────────────────
-//
-// Renders the pickup → drop journey as three columns:
-//   [📍 pickup card]   [→ animated arrow]   [🏭 drop card]
-//
-// When `active` (the runner has claimed the row), the arrow runs a
-// CSS gradient animation left-to-right so it reads as "in motion."
-// When idle, the arrow is static.
-function RouteVisual({
-  from,
-  toVendor,
-  toDropoff,
-  active,
-}: {
-  from: string | null;
-  toVendor: string;
-  toDropoff: string | null;
-  active: boolean;
-}) {
-  return (
-    <>
-      <style>{`
-        @keyframes mtcpl-transfer-flow {
-          0%   { background-position: -40px 0; }
-          100% { background-position: 40px 0; }
-        }
-      `}</style>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 60px 1fr",
-          gap: 8,
-          alignItems: "stretch",
-        }}
-      >
-        {/* From */}
-        <div
-          style={{
-            background: "rgba(180,115,51,0.08)",
-            border: "1px solid rgba(180,115,51,0.3)",
-            borderRadius: 8,
-            padding: "8px 10px",
-            display: "flex",
-            flexDirection: "column",
-            gap: 2,
-          }}
-        >
-          <span
-            style={{
-              fontSize: 9,
-              fontWeight: 800,
-              color: "#92400e",
-              letterSpacing: "0.07em",
-              textTransform: "uppercase",
-            }}
-          >
-            📍 From (where it is)
-          </span>
-          <strong
-            style={{
-              fontSize: 13,
-              color: "#7c2d12",
-              fontFamily: "ui-monospace, monospace",
-              wordBreak: "break-word",
-            }}
-          >
-            {from ?? "(no location set)"}
-          </strong>
-        </div>
-
-        {/* Arrow */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            position: "relative",
-          }}
-        >
-          <div
-            style={{
-              width: "100%",
-              height: 6,
-              borderRadius: 3,
-              background: active
-                ? "repeating-linear-gradient(90deg, #16a34a 0 10px, #86efac 10px 20px)"
-                : "var(--border)",
-              backgroundSize: active ? "40px 6px" : undefined,
-              animation: active ? "mtcpl-transfer-flow 0.8s linear infinite" : undefined,
-            }}
-          />
-          <span
-            style={{
-              position: "absolute",
-              fontSize: 18,
-              color: active ? "#15803d" : "var(--muted)",
-              background: "var(--surface)",
-              padding: "0 4px",
-              fontWeight: 800,
-            }}
-          >
-            →
-          </span>
-        </div>
-
-        {/* To */}
-        <div
-          style={{
-            background: "rgba(22,163,74,0.08)",
-            border: "1px solid rgba(22,163,74,0.3)",
-            borderRadius: 8,
-            padding: "8px 10px",
-            display: "flex",
-            flexDirection: "column",
-            gap: 2,
-          }}
-        >
-          <span
-            style={{
-              fontSize: 9,
-              fontWeight: 800,
-              color: "#15803d",
-              letterSpacing: "0.07em",
-              textTransform: "uppercase",
-            }}
-          >
-            🏭 To (deliver to)
-          </span>
-          <strong
-            style={{
-              fontSize: 13,
-              color: "#14532d",
-              fontFamily: "ui-monospace, monospace",
-              wordBreak: "break-word",
-            }}
-          >
-            {toVendor}
-          </strong>
-          {toDropoff && (
-            <span style={{ fontSize: 11, color: "#15803d" }}>
-              {toDropoff}
-            </span>
-          )}
-        </div>
-      </div>
-    </>
-  );
 }

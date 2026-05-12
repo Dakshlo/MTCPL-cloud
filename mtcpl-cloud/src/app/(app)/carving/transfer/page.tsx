@@ -41,10 +41,18 @@ export default async function SlabTransferPage({
   const admin = createAdminSupabaseClient();
   const params = await searchParams;
 
-  // Every carving_assigned + not-yet-received job is a candidate
-  // for transfer. We hydrate vendor.name + vendor.dropoff_location
-  // + slab dims + stock_location + claimer name client-side.
-  const [{ data: jobs }, { data: vendors }, { data: stoneTypes }] = await Promise.all([
+  // Pending + recently-delivered-by-me + vendors + stones.
+  //   - Pending: carving_assigned, not yet received → the actionable
+  //     list (Claimed/Available/Others buckets).
+  //   - Delivered by me: last 48h of slabs THIS user marked
+  //     received. Powers the success-confirmation "Delivered" section.
+  const since48h = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+  const [
+    { data: jobs },
+    { data: deliveredByMe },
+    { data: vendors },
+    { data: stoneTypes },
+  ] = await Promise.all([
     admin
       .from("carving_items")
       .select(
@@ -52,8 +60,17 @@ export default async function SlabTransferPage({
       )
       .eq("status", "carving_assigned")
       .is("received_at_vendor_at", null)
-      .order("urgency", { ascending: true }) // 'normal' > 'urgent'? actually normal < urgent lexicographically...
+      .order("urgency", { ascending: true })
       .order("assigned_at", { ascending: true }),
+    admin
+      .from("carving_items")
+      .select(
+        "id, slab_requirement_id, vendor_id, vendor_name, vendor_type, received_at_vendor_at, dropoff_note, urgency, requires_machine_type",
+      )
+      .eq("received_at_vendor_by", profile.id)
+      .gte("received_at_vendor_at", since48h)
+      .order("received_at_vendor_at", { ascending: false })
+      .limit(30),
     admin
       .from("vendors")
       .select("id, name, vendor_type, dropoff_location")
@@ -66,8 +83,12 @@ export default async function SlabTransferPage({
   ]);
 
   // Hydrate slab dims + stock_location. carving_items doesn't carry
-  // dims directly — they're on slab_requirements.
-  const slabIds = (jobs ?? []).map((j) => j.slab_requirement_id);
+  // dims directly — they're on slab_requirements. Pull both pending
+  // and delivered slab ids in the same query.
+  const slabIds = [
+    ...(jobs ?? []).map((j) => j.slab_requirement_id),
+    ...(deliveredByMe ?? []).map((j) => j.slab_requirement_id),
+  ];
   const slabInfo = new Map<
     string,
     {
@@ -149,9 +170,32 @@ export default async function SlabTransferPage({
     };
   });
 
+  // Reshape "delivered by me" for the success-confirmation section.
+  const deliveredRows = (deliveredByMe ?? []).map((j) => {
+    const info = slabInfo.get(j.slab_requirement_id);
+    const vendor = vendorById.get(j.vendor_id) ?? null;
+    return {
+      id: j.id,
+      slab_id: j.slab_requirement_id,
+      temple: info?.temple ?? "—",
+      slab_label: info?.label ?? null,
+      stone: info?.stone ?? null,
+      length_ft: info?.length_ft ?? 0,
+      width_ft: info?.width_ft ?? 0,
+      thickness_ft: info?.thickness_ft ?? 0,
+      vendor_name: vendor?.name ?? j.vendor_name,
+      vendor_dropoff: vendor?.dropoff_location ?? null,
+      delivered_at: (j as { received_at_vendor_at: string }).received_at_vendor_at,
+      dropoff_note: (j as { dropoff_note?: string | null }).dropoff_note ?? null,
+      urgency: ((j as { urgency?: string }).urgency === "urgent" ? "urgent" : "normal") as "urgent" | "normal",
+      is_lathe: (j as { requires_machine_type?: string | null }).requires_machine_type === "lathe",
+    };
+  });
+
   return (
     <TransferDispatchList
       rows={rows}
+      delivered={deliveredRows}
       currentUserId={profile.id}
       canUnclaimOthers={["developer", "owner", "carving_head"].includes(profile.role)}
       stoneTypes={stoneTypes ?? []}
