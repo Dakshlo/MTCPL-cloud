@@ -6,6 +6,18 @@ Live document. Update as things resolve.
 
 ## ⏰ Reminders for Daksh
 
+### 0. Flip Rajesh Kumar's approver bit after migration 027
+
+Migration 027 (Cutting approval workflow) ships the `profiles.can_approve_cuts` column with default `FALSE`. After running the migration, run this UPDATE in the SQL editor:
+
+```sql
+UPDATE public.profiles
+   SET can_approve_cuts = TRUE
+ WHERE full_name ILIKE 'RAJESH KUMAR%';
+```
+
+Without this, the top-bar **✓ Approvals** button never shows for Rajesh and the approval queue is invisible to him. Developer + Owner roles always qualify in code regardless — Rajesh is the only `team_head` that needs the bit flipped today. Add new approvers the same way.
+
 ### 1. Bind Vivek's profile when he logs in
 He hasn't logged into the system yet. When he creates an auth user (phone OTP or email), run the bind SQL:
 

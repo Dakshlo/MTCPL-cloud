@@ -19,7 +19,7 @@ import { SelectionProvider } from "./selection-context";
 import { BlockSelector } from "./block-selector";
 import { CuttingHistorySearchBar, type HistoryRow } from "./cutting-history-search-bar";
 import { PendingApprovalActions } from "./pending-approval-actions";
-import { canManageOperators } from "@/lib/cutting-permissions";
+import { canApproveCuts, canManageOperators } from "@/lib/cutting-permissions";
 
 type Tab = "pending" | "waiting" | "in_progress" | "done";
 type SearchParams = Promise<{ tab?: string }>;
@@ -134,12 +134,19 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
 
   const { todayStartIso, tomorrowStartIso } = istTodayBounds();
 
-  // Count per individual block status — "done" badge shows TODAY only
+  // Count per individual block status — "done" badge shows TODAY only.
+  // In-Approval count (migration 027) is scoped per role:
+  //   - approvers + team_head + dev + owner → site-wide count
+  //   - cutting_operator → only their own submissions
+  // Drives the "👀 In Approval (N)" banner shown above In Progress.
+  const isApprover = canApproveCuts(profile);
+  const wantsOwnApprovalsOnly = !isApprover && profile.role === "cutting_operator";
   const [
     { count: pendingCount },
     { count: waitingCount },
     { count: inProgressCount },
     { count: doneTodayCount },
+    { count: inApprovalCount },
   ] = await Promise.all([
     supabase
       .from("cut_session_blocks")
@@ -159,6 +166,16 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
       .eq("status", "done")
       .gte("updated_at", todayStartIso)
       .lt("updated_at", tomorrowStartIso),
+    wantsOwnApprovalsOnly
+      ? supabase
+          .from("cut_session_blocks")
+          .select("*", { count: "exact", head: true })
+          .in("status", ["awaiting_approval", "awaiting_cutter_edit"])
+          .eq("submitted_for_approval_by", profile.id)
+      : supabase
+          .from("cut_session_blocks")
+          .select("*", { count: "exact", head: true })
+          .in("status", ["awaiting_approval", "awaiting_cutter_edit"]),
   ]);
 
   let statusFilter: string[];
@@ -404,6 +421,59 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
 
       {/* Block cards */}
       <div className="records-stack" style={{ marginTop: 18 }}>
+        {/* In-Approval banner (migration 027) — shows on the In Progress
+            tab whenever there's at least one block in the approval flow.
+            Approvers see total count + link to the approvals queue.
+            Cutting operators see ONLY their own pending submissions.
+            Hidden when count = 0 so it stays out of the way on quiet days. */}
+        {activeTab === "in_progress" && (inApprovalCount ?? 0) > 0 && (
+          <Link
+            href="/cutting/approvals"
+            style={{
+              textDecoration: "none",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              padding: "10px 14px",
+              marginBottom: 14,
+              background: "rgba(232,197,114,0.14)",
+              border: "1.5px solid var(--gold)",
+              borderLeft: "5px solid var(--gold-dark)",
+              borderRadius: 8,
+              color: "var(--text)",
+              fontSize: 13,
+            }}
+          >
+            <span style={{ fontSize: 16 }}>👀</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700, color: "var(--gold-dark)" }}>
+                In Approval ({inApprovalCount})
+              </div>
+              <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+                {isApprover
+                  ? "Review the cutter's Cutting Done submissions before they commit."
+                  : wantsOwnApprovalsOnly
+                    ? "Your Cutting Done submissions waiting for approval. Check status or edit if sent back."
+                    : "Cutting Done submissions waiting for approval."}
+              </div>
+            </div>
+            <span
+              style={{
+                fontSize: 12,
+                fontWeight: 700,
+                color: "var(--gold-dark)",
+                padding: "4px 10px",
+                background: "var(--bg)",
+                border: "1px solid var(--gold)",
+                borderRadius: 6,
+                whiteSpace: "nowrap",
+              }}
+            >
+              Review →
+            </span>
+          </Link>
+        )}
+
         {rows.length === 0 && rejectedRows.length === 0 && (
           <div className="banner">{emptyMessages[activeTab]}</div>
         )}

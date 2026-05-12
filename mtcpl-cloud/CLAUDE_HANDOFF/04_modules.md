@@ -34,9 +34,9 @@ Sub-routes:
 
 ## Cutting — `/cutting` (cutting_operator, team_head, owner, dev, ...)
 
-Sessions / blocks in various states. Pending Approval, Pending Cut, In Progress, Done Today, Cutting History.
+Sessions / blocks in various states. Pending Approval (pre-cut operator pick), Pending Cut, In Progress, Done Today, Cutting History.
 
-Per-block detail page `/cutting/[id]` shows the 3D layout, slab list, finish-cutting form. Uses the `finish_block_cut` RPC (migration 018) for atomic completion.
+Per-block detail page `/cutting/[id]` shows the 3D layout, slab list, finish-cutting form. The cutter fills Cutting Done; submission **stages the payload** in `cut_session_blocks.pending_approval_payload` (JSONB) and flips the block to `awaiting_approval` (migration 027). The atomic `finish_block_cut` RPC (migration 018) only runs at **approve time** — the cutter's mistakes never touch donor blocks or slab statuses until an approver signs off.
 
 **Cutting Done flow** captures:
 - Which slabs were actually cut (vs returned to open)
@@ -50,6 +50,32 @@ Per-block detail page `/cutting/[id]` shows the 3D layout, slab list, finish-cut
 - `/cutting/[id]/labels` — post-cut sheet (every slab attributed to the block, with codes + dims + stock location). Cutter writes the IDs onto physical slabs.
 
 The print page also has `MANUAL ENTRY` section + a `📍 Stock location` write-line (added in commit 898c46b).
+
+### Cutting Approvals — `/cutting/approvals` (migration 027)
+
+Supervisor checkpoint between Cutting Done and Done Today. Only a small set of approvers see the action surface:
+- `developer` + `owner` always.
+- `team_head` only when `profiles.can_approve_cuts = TRUE` (post-migration UPDATE sets Rajesh Kumar's row).
+
+`canApproveCuts(profile)` in `src/lib/cutting-permissions.ts` is the single gate. The top bar layout (`src/app/(app)/layout.tsx`) shows a **✓ Approvals (N)** button between the user-name slot and the role pill — red dot when count > 0, count = total `awaiting_approval` + `awaiting_cutter_edit`.
+
+Two new statuses on `cut_block_status`:
+- `awaiting_approval` — cutter submitted, payload staged, approver reviewing. Cutters **cannot edit** unilaterally.
+- `awaiting_cutter_edit` — approver pressed "Send back for edit" with optional note. Only now does the cutter (the original `submitted_for_approval_by` user, or any `cutting_operator` as fallback) get an editable form. Save flips status back to `awaiting_approval`.
+
+Server actions (`src/app/(app)/cutting/actions.ts`):
+- `finishBlockAction` (re-shaped) — stages payload + flips block to `awaiting_approval`. Returns `{ ok: true, awaitingApproval: true }`. No DB-side mutations to slabs / donor blocks.
+- `approveCutAction` — approver-only. Pre-flight donor check on `transferred_slab_ids` (rejects if any donor is `done` / `rejected` — surfaces the blocking block ids). Then fires `finish_block_cut` RPC with the staged payload and clears `pending_approval_payload`.
+- `approveCutFormAction` — thin void-returning wrapper for `<form action>` usage in the detail page. Redirects to `/cutting/approvals` on success or `?error=...` on failure.
+- `requestCutterEditAction` — approver-only. Flips to `awaiting_cutter_edit` with `sent_back_note`. Notifies cutting operators.
+- `editPendingApprovalAction` — approver path (status = awaiting_approval, stays the same) OR cutter path (status = awaiting_cutter_edit, flips back to awaiting_approval on save). Re-parses the same `FormData` shape as `finishBlockAction`.
+
+The In Progress tab on `/cutting` shows a **👀 In Approval (N)** banner above the cards when there's anything in the approval flow. Approvers see total count; `cutting_operator` users see only their own submissions; the banner links to `/cutting/approvals` either way. The approvals route itself filters cutters down to their own rows.
+
+The detail page `/cutting/[id]` adapts when status is `awaiting_approval` or `awaiting_cutter_edit`:
+- Banner with submitted-at / submitted-by + optional sent-back note.
+- Approve / Edit / "Send back (in queue)" buttons by role.
+- `?edit=approval` query-flag re-renders the `FinishBlockForm` pre-filled from the staged payload (uses the new `initialPayload` + `editMode` props). Submit posts to `editPendingApprovalAction` and redirects back to `/cutting/approvals`.
 
 ## Carving — `/carving` (developer, owner, carving_head)
 

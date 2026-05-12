@@ -8,6 +8,147 @@ Reverse-chronological. Most recent at top. Append to TOP when shipping new work.
 
 ## Recent (this Claude session)
 
+### `(pending)` · Cutting approval workflow (migration 027)
+
+Supervisor checkpoint between Cutting Done and Done Today. Cutter
+operators sometimes mistype the form (wrong slab marked cut, wrong
+extra from open inventory, accidental transfer claim from another
+block) and the mistake propagates immediately — donor block flips
+`needs_reprint=TRUE`, `slab_requirements.status` locks, audit log
+records the wrong entry, carving head + dispatch see garbage. The
+new flow inserts a human review step that catches all of that
+before any data mutation.
+
+**Schema (migration 027):**
+- `ALTER TYPE cut_block_status ADD VALUE 'awaiting_approval'`,
+  `'awaiting_cutter_edit'` (outside the BEGIN/COMMIT block because
+  ALTER TYPE can't run inside a transaction).
+- `profiles.can_approve_cuts BOOLEAN DEFAULT FALSE` — per-profile
+  flag. Post-migration: `UPDATE profiles SET can_approve_cuts=TRUE
+  WHERE full_name ILIKE 'RAJESH KUMAR%'`. Developer + Owner always
+  qualify regardless of the bit (enforced in code).
+- `cut_session_blocks` bookkeeping: `pending_approval_payload JSONB`,
+  `submitted_for_approval_at/by`, `approved_at/by`,
+  `approval_edited_at/by`, `sent_back_at/by/note`. Partial index
+  on `(submitted_for_approval_at DESC) WHERE status IN
+  ('awaiting_approval', 'awaiting_cutter_edit')` speeds up the
+  top-bar badge count + the approvals list.
+- **No data migration** — the 14 in-progress blocks and 7 done-today
+  blocks at deploy time keep their existing statuses. New flow
+  kicks in for future `finishBlockAction` calls only.
+
+**State machine:**
+```
+cutting / done_prompt
+   │ cutter presses Done
+   ▼
+awaiting_approval ←──────────────┐
+   │                              │
+   │ approver "Send back for edit"│ cutter saves edit
+   │                              │ (editPendingApprovalAction
+   │                              │  while awaiting_cutter_edit)
+   ▼                              │
+awaiting_cutter_edit ─────────────┘
+
+awaiting_approval
+   │ approver "Approve"
+   │ → finish_block_cut RPC fires from staged payload
+   ▼
+ done
+```
+
+**Server actions** (`src/app/(app)/cutting/actions.ts`):
+- `finishBlockAction` (re-shaped) — stages the cutter's payload in
+  `pending_approval_payload` + flips block to `awaiting_approval`.
+  Returns `{ ok: true, awaitingApproval: true }`. NO slab/donor
+  mutations until approval.
+- `approveCutAction` — approver-only (`canApproveCuts(profile)`).
+  Pre-flight donor check: if any `transferred_slab_ids` points to
+  a donor that's now `done` / `rejected`, surfaces a clear error
+  listing the blocking block ids. Then fires `finish_block_cut`
+  RPC with the staged payload and clears
+  `pending_approval_payload`. Donor `needs_reprint` notifications
+  + audit fire fire-and-forget from this side now.
+- `approveCutFormAction` — thin void-returning wrapper used by the
+  detail page's `<form action>`. Redirects to `/cutting/approvals`
+  on success or `?error=...` on failure.
+- `requestCutterEditAction` — approver-only. Flips to
+  `awaiting_cutter_edit` with optional `sent_back_note`. Notifies
+  cutting operators.
+- `editPendingApprovalAction` — branched auth: approver path
+  (status = awaiting_approval, stays the same) OR cutter path
+  (status = awaiting_cutter_edit, flips back to awaiting_approval
+  on save + clears `sent_back_note`). Re-parses the same
+  `FormData` shape as `finishBlockAction`. Cutters CANNOT edit
+  while in `awaiting_approval` — they only get an Edit button after
+  the approver presses "Send back for edit".
+
+**Permission helper** (`src/lib/cutting-permissions.ts`):
+```ts
+export function canApproveCuts(
+  profile: Pick<Profile, "role" | "can_approve_cuts">,
+): boolean {
+  if (profile.role === "developer") return true;
+  if (profile.role === "owner") return true;
+  if (profile.role === "team_head" && profile.can_approve_cuts) return true;
+  return false;
+}
+```
+
+**UI surfaces:**
+- **Top bar `[✓ Approvals (N)]` button** (`src/app/(app)/layout.tsx`)
+  — sits between user-name slot and role pill, visible only to
+  approvers. Red dot when count > 0; count = total
+  `awaiting_approval` + `awaiting_cutter_edit`. Click → opens the
+  approvals queue.
+- **`/cutting/approvals`** — two-section list:
+  - "👀 Awaiting approval" — approver sees Approve / Edit /
+    Send-back-for-edit (with inline note textarea). Cutters see
+    their own rows read-only ("Waiting for approver review").
+  - "↩ Sent back for edit" — approver sees Edit / Approve-as-is.
+    Cutters see their own rows with the approver's note
+    prominently displayed + an Edit button.
+  - Each card shows submitted-at + submitted-by + operator name +
+    payload summary chips (X cut · Y manual · Z transferred · N
+    remainder · stock location · ♻ Restock).
+- **`/cutting` In Progress tab** shows a **👀 In Approval (N)**
+  banner above the cards when at least one block is in the
+  approval flow. Approvers see total; `cutting_operator` users
+  see only their own submissions; both link to
+  `/cutting/approvals` which then re-filters.
+- **`/cutting/[id]`** detail page adapts when status is
+  `awaiting_approval` / `awaiting_cutter_edit` — banner with
+  submitted/sent-back metadata, inline Approve / Edit /
+  "Send back (in queue)" buttons by role. `?edit=approval` query
+  flag re-renders the `FinishBlockForm` pre-filled from the
+  staged payload (new `initialPayload` + `editMode` +
+  `redirectTo` + `submitLabelOverride` props on the form).
+
+**Donor safety:** while a block sits in approval, no slab statuses
+change, no donor `needs_reprint` flips, no `layout.placed[]`
+modifications. The 14-block-in-progress backlog can continue
+cutting unaffected. If donor Block 2 finishes its own cut while
+Block 1 awaits approval with a transfer from Block 2, the
+pre-flight donor check on `approveCutAction` blocks the approval
+with a clear error so the approver can send back and remove the
+transfer (or a dev can SQL-clean).
+
+Files touched:
+- `supabase/migrations/027_cut_approval.sql` (new)
+- `src/lib/types.ts` (Profile.can_approve_cuts?)
+- `src/lib/cutting-permissions.ts` (canApproveCuts helper)
+- `src/lib/auth.ts` (profile SELECT widened)
+- `src/app/(app)/layout.tsx` (Approvals top-bar button)
+- `src/app/(app)/cutting/actions.ts` (finishBlockAction refactor +
+  approveCutAction + approveCutFormAction +
+  requestCutterEditAction + editPendingApprovalAction)
+- `src/app/(app)/cutting/page.tsx` (In Approval banner)
+- `src/app/(app)/cutting/[id]/page.tsx` (approval surface)
+- `src/app/(app)/cutting/finish-block-form.tsx` (initialPayload +
+  editMode + redirectTo + submitLabelOverride props)
+- `src/app/(app)/cutting/approvals/page.tsx` (new)
+- `src/app/(app)/cutting/approvals/approvals-client.tsx` (new)
+
 ### `(pending)` · Batch_id colour stripes everywhere + BulkAssignModal cockpit grid
 
 Two follow-ups to the bulk-assign feature:

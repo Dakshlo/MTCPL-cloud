@@ -32,6 +32,24 @@ type TransferableSlab = OpenSlab & {
 
 type RemainderEntry = { l: string; w: string; h: string; quality: "" | "A" | "B"; yard: number };
 
+/** Shape of the staged Cutting-Done payload (migration 027). When the
+ *  approver / sent-back cutter is editing a pending submission, this
+ *  pre-fills the form so they don't re-type the entire entry. */
+export type InitialPayload = {
+  cut_slab_ids?: string[];
+  extra_slab_ids?: string[];
+  transferred_slab_ids?: string[];
+  remainders?: Array<{
+    l: number;
+    w: number;
+    h: number;
+    quality?: "" | "A" | "B";
+    yard?: number;
+  }>;
+  stock_location?: string | null;
+  restock?: boolean;
+};
+
 export function FinishBlockForm({
   sessionBlockId,
   sessionId,
@@ -44,6 +62,10 @@ export function FinishBlockForm({
   allowTransfer = false,
   parentQuality = "",
   finishAction,
+  initialPayload,
+  editMode = false,
+  redirectTo,
+  submitLabelOverride,
 }: {
   sessionBlockId: string;
   sessionId: string;
@@ -69,29 +91,63 @@ export function FinishBlockForm({
   finishAction: (
     formData: FormData,
   ) => Promise<
-    | { ok: true; alreadyDone?: boolean }
+    | { ok: true; alreadyDone?: boolean; awaitingApproval?: boolean }
     | { ok: false; error: string }
     | void
   >;
+  /** Pre-fill form state when editing an already-submitted payload
+   *  (migration 027 approval flow). When provided, all selection
+   *  state initialises from the payload instead of "everything cut". */
+  initialPayload?: InitialPayload | null;
+  /** True when the form is being shown for the approval-edit path
+   *  (approver editing, or cutter resubmitting after send-back).
+   *  Drives the submit button copy + post-submit redirect target. */
+  editMode?: boolean;
+  /** Override the post-success redirect destination. Defaults to
+   *  /cutting?tab=done (original cutting-done flow). The approval
+   *  edit path overrides to /cutting/approvals. */
+  redirectTo?: string;
+  /** Custom button label for the primary submit. The approval edit
+   *  path uses "Save changes" instead of "Done". */
+  submitLabelOverride?: string;
 }) {
-  const [checkedIds, setCheckedIds] = useState<Set<string>>(
-    new Set(allSlabs.map((s) => s.id))
+  // Initial cut-checked set — when editing, use the staged
+  // cut_slab_ids; otherwise fall back to "everything cut" which is
+  // the friendly default for a first submission.
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(() => {
+    if (initialPayload?.cut_slab_ids) {
+      return new Set(initialPayload.cut_slab_ids);
+    }
+    return new Set(allSlabs.map((s) => s.id));
+  });
+  const [remainders, setRemainders] = useState<RemainderEntry[]>(() => {
+    const seeds = initialPayload?.remainders ?? [];
+    return seeds.map((r) => ({
+      l: r.l.toString(),
+      w: r.w.toString(),
+      h: r.h.toString(),
+      quality: r.quality ?? "",
+      yard: r.yard ?? yard,
+    }));
+  });
+  const [extraIds, setExtraIds] = useState<Set<string>>(
+    () => new Set(initialPayload?.extra_slab_ids ?? []),
   );
-  const [remainders, setRemainders] = useState<RemainderEntry[]>([]);
-  const [extraIds, setExtraIds] = useState<Set<string>>(new Set());
   // Stock location for the cut slabs — where the operator is putting
   // them physically. Required so the carving/dispatch teams can find
   // the slabs after cutting. Defaults to the parent block's yard
   // label as a sensible starting point.
   const [stockLocation, setStockLocation] = useState<string>(
-    `Yard ${yard}`,
+    initialPayload?.stock_location ?? `Yard ${yard}`,
   );
   // Selected transfer slabs — kept separate from extraIds because the
   // server action splits open vs planned via two different formData
   // fields. The combined ExtraSizePicker shows them merged but
   // toggle handlers still route to the right set so submission is
   // unchanged downstream.
-  const [transferIds, setTransferIds] = useState<Set<string>>(new Set());
+  const [transferIds, setTransferIds] = useState<Set<string>>(
+    () => new Set(initialPayload?.transferred_slab_ids ?? []),
+  );
   // Submit / error state. Server action now RETURNS a result
   // (`{ ok: true }` or `{ ok: false, error }`) instead of redirecting,
   // so the client handles navigation. This sidesteps a class of
@@ -235,7 +291,7 @@ export function FinishBlockForm({
     startSubmit(async () => {
       try {
         const result = (await finishAction(formData)) as
-          | { ok: true; alreadyDone?: boolean }
+          | { ok: true; alreadyDone?: boolean; awaitingApproval?: boolean }
           | { ok: false; error: string }
           | undefined;
         // Old-shape (void/redirect) fallback: if the action returns
@@ -244,11 +300,19 @@ export function FinishBlockForm({
         if (!result || result.ok) {
           // Refresh server data + navigate. router.refresh
           // re-runs the route's RSC tree against the now-updated
-          // DB; router.replace navigates to the Done tab. Doing
-          // both is the safest sequence — refresh first so the
-          // /cutting?tab=done page sees fresh data.
+          // DB; router.replace handles the navigation target.
+          //   - Approval-edit path → /cutting/approvals
+          //   - Cutting-Done path (migration 027) → in_progress tab
+          //     (because the block is now in approval, not Done Today)
+          //   - Legacy / undefined awaitingApproval → original
+          //     /cutting?tab=done (pre-027 deploy fallback)
           router.refresh();
-          router.replace("/cutting?tab=done");
+          const fallback =
+            redirectTo ??
+            (result && "awaitingApproval" in result && result.awaitingApproval
+              ? "/cutting?tab=in_progress"
+              : "/cutting?tab=done");
+          router.replace(fallback);
           return;
         }
         setSubmitError(result.error);
@@ -551,20 +615,32 @@ export function FinishBlockForm({
         </div>
       )}
 
-      {/* Action buttons */}
+      {/* Action buttons. When editing a staged approval payload
+          (editMode=true) the buttons say "Save" — the cut is already
+          pending and the cutter/approver is updating the staged form,
+          not committing fresh. Otherwise it's the normal Cutting-Done
+          flow ("Done"). */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {validRemainders.length > 0 ? (
           <>
             <form onSubmit={(e) => handleSubmit(e, "yes")}>
               {hiddenInputs("yes")}
               <button className="primary-button" type="submit" disabled={submitting}>
-                {submitting ? "Submitting…" : `Done & Restock (${validRemainders.length} piece${validRemainders.length > 1 ? "s" : ""})`}
+                {submitting
+                  ? "Submitting…"
+                  : editMode
+                    ? `${submitLabelOverride ?? "Save"} & Restock (${validRemainders.length} piece${validRemainders.length > 1 ? "s" : ""})`
+                    : `Done & Restock (${validRemainders.length} piece${validRemainders.length > 1 ? "s" : ""})`}
               </button>
             </form>
             <form onSubmit={(e) => handleSubmit(e, "no")}>
               {hiddenInputs("no")}
               <button className="secondary-button" type="submit" disabled={submitting}>
-                {submitting ? "Submitting…" : "Done & Discard"}
+                {submitting
+                  ? "Submitting…"
+                  : editMode
+                    ? `${submitLabelOverride ?? "Save"} & Discard`
+                    : "Done & Discard"}
               </button>
             </form>
           </>
@@ -572,7 +648,11 @@ export function FinishBlockForm({
           <form onSubmit={(e) => handleSubmit(e, "no")}>
             {hiddenInputs("no")}
             <button className="primary-button" type="submit" disabled={submitting}>
-              {submitting ? "Submitting…" : "Done"}
+              {submitting
+                ? "Submitting…"
+                : editMode
+                  ? submitLabelOverride ?? "Save changes"
+                  : "Done"}
             </button>
           </form>
         )}

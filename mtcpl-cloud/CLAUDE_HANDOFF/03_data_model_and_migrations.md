@@ -32,6 +32,7 @@
 | 024 | `cnc_dim_limits_and_work_type.sql` | Per-machine bed envelope (`cnc_machines.max_length_in / max_width_in / max_thickness_in`) + per-job work-type tag (`carving_items.requires_machine_type`: NULL=flat-panel, `'lathe'`=cylindrical) |
 | 025 | `slab_transfer_role.sql` | Slab transfer runner role: adds `slab_transfer` to `app_role` enum + `vendors.dropoff_location` + `carving_items.dropoff_note` + `carving_items.claimed_by / claimed_at` (claim lock so two runners don't grab the same slab) |
 | 026 | `carving_batch_id.sql` | `carving_items.batch_id UUID` — groups slabs assigned together in one bulk-assign. NULL = singleton. Used by the cockpit + transfer page to colour-group "came together" slabs visually. |
+| 027 | `cut_approval.sql` | Cutting-Done supervisor checkpoint. Adds `awaiting_approval` + `awaiting_cutter_edit` to `cut_block_status`, `profiles.can_approve_cuts` flag, and approval bookkeeping columns on `cut_session_blocks` (`pending_approval_payload JSONB`, `submitted_for_approval_at/by`, `approved_at/by`, `approval_edited_at/by`, `sent_back_at/by/note`). Cutter's Cutting Done form now stages in the JSONB; only approval fires `finish_block_cut`. Post-migration: `UPDATE profiles SET can_approve_cuts=TRUE WHERE full_name ILIKE 'RAJESH KUMAR%'`. |
 
 ## How migrations get to prod
 
@@ -157,7 +158,7 @@ public.stone_types
 - `block_status`: `available | reserved | consumed | discarded`
 - `block_category`: `Fresh | Reused`
 - `cut_session_status`: `draft | approved | in_progress | closed | cancelled`
-- `cut_block_status`: `pending_worker | cutting | done_prompt | done | rejected` (also `pending_cut` added 013)
+- `cut_block_status`: `pending_worker | cutting | done_prompt | done | rejected` (also `pending_cut` added 013; `awaiting_approval` + `awaiting_cutter_edit` added 027)
 - `vendor_type`: `CNC | Manual` (the original enum). Soft string `'Outsource' | 'block_vendor'` also seen on rows.
 - `app_role`: see above
 

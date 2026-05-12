@@ -46,3 +46,27 @@ export function canManageOperators(profile: Pick<Profile, "role" | "full_name">)
   if (profile.role === "cutting_operator") return true;
   return false;
 }
+
+/**
+ * Cutting-Done supervisor approval (migration 027). Only this small
+ * set of people sees the top-bar Approvals button + can press
+ * Approve / Edit / Send back for edit:
+ *
+ *   - developer (always)
+ *   - owner (always)
+ *   - team_head, but ONLY if their profile has can_approve_cuts=TRUE
+ *
+ * The flag is set on Rajesh Kumar's profile post-migration. Other
+ * team_heads (Alkesh, Paresh Kumar, etc.) keep all their existing
+ * capabilities but don't see the approval surface — by design,
+ * cut approval is an owner-level checkpoint that one trusted
+ * team_head handles in practice.
+ */
+export function canApproveCuts(
+  profile: Pick<Profile, "role" | "can_approve_cuts">,
+): boolean {
+  if (profile.role === "developer") return true;
+  if (profile.role === "owner") return true;
+  if (profile.role === "team_head" && profile.can_approve_cuts === true) return true;
+  return false;
+}

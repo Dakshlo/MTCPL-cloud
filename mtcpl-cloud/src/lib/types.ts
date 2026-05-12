@@ -25,6 +25,12 @@ export type Profile = {
   is_active: boolean;
   /** User's saved theme preference. NULL = never toggled (treat as 'light'). */
   theme_preference?: "light" | "dark" | null;
+  /** Migration 027 — per-profile approver flag for the cutting
+   *  Cutting-Done → Done-Today supervisor checkpoint. Set to TRUE
+   *  on the Rajesh Kumar row post-migration. Developer + Owner
+   *  roles qualify regardless of this bit (the canApproveCuts
+   *  helper enforces that). */
+  can_approve_cuts?: boolean;
 };
 
 export type Vendor = {

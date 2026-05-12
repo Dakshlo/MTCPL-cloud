@@ -26,11 +26,14 @@ import {
   finishBlockAction,
   undoDoneAction,
   acknowledgeReprintAction,
+  approveCutFormAction,
+  editPendingApprovalAction,
 } from "../actions";
-import { canTransferPlannedSlabs } from "@/lib/cutting-permissions";
+import { canApproveCuts, canTransferPlannedSlabs } from "@/lib/cutting-permissions";
 import { NeedsReprintBanner } from "@/components/needs-reprint-banner";
 
 type Params = Promise<{ id: string }>;
+type SearchParams = Promise<{ edit?: string }>;
 
 type PlacedSlab = {
   id: string;
@@ -55,15 +58,23 @@ function slabColor(id: string) {
   return SLAB_COLORS[(num - 1) % SLAB_COLORS.length];
 }
 
-export default async function CuttingDetailPage({ params }: { params: Params }) {
+export default async function CuttingDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Params;
+  searchParams: SearchParams;
+}) {
   const { profile } = await requireAuth(["owner", "team_head", "cutting_operator"]);
   const { id } = await params;
+  const sp = await searchParams;
+  const wantsApprovalEdit = sp.edit === "approval";
   const supabase = createAdminSupabaseClient();
 
   const { data: block, error } = await supabase
     .from("cut_session_blocks")
     .select(
-      "id, status, block_id, largest_remainder, restocked_block_id, layout, updated_at, cut_session_id, cutting_seq, needs_reprint, reprint_reason, cut_sessions(id, session_code, kerf_mm, created_at, planned_by), cut_session_slabs(id, slab_requirement_id, is_filler)"
+      "id, status, block_id, largest_remainder, restocked_block_id, layout, updated_at, cut_session_id, cutting_seq, needs_reprint, reprint_reason, pending_approval_payload, submitted_for_approval_at, submitted_for_approval_by, sent_back_at, sent_back_by, sent_back_note, approval_edited_at, approval_edited_by, cut_sessions(id, session_code, kerf_mm, created_at, planned_by), cut_session_slabs(id, slab_requirement_id, is_filler)"
     )
     .eq("id", id)
     .single();
@@ -207,7 +218,46 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
   const isCutting = block.status === "cutting" || block.status === "done_prompt";
   const isDone = block.status === "done";
   const isRejected = block.status === "rejected";
+  // Migration 027 — approval-flow states.
+  const isAwaitingApproval = block.status === "awaiting_approval";
+  const isAwaitingCutterEdit = block.status === "awaiting_cutter_edit";
+  const isInApprovalFlow = isAwaitingApproval || isAwaitingCutterEdit;
   const allowTransfer = canTransferPlannedSlabs(profile);
+  const isApprover = canApproveCuts(profile);
+  // Cutter ownership — submitted_for_approval_by is set when the
+  // block enters the approval flow. Either the submitter or a
+  // generic cutting_operator (fallback for shift handoffs) can edit
+  // a sent-back block.
+  const isOriginalSubmitter =
+    (block as { submitted_for_approval_by?: string | null })
+      .submitted_for_approval_by === profile.id;
+  const canEditApprovalNow =
+    (isAwaitingApproval && isApprover) ||
+    (isAwaitingCutterEdit &&
+      (isApprover ||
+        isOriginalSubmitter ||
+        profile.role === "cutting_operator"));
+  // Resolve the staged payload safely — JSONB returned as `unknown`.
+  type StagedPayload = {
+    cut_slab_ids?: string[];
+    not_cut_slab_ids?: string[];
+    extra_slab_ids?: string[];
+    transferred_slab_ids?: string[];
+    remainders?: Array<{
+      id?: string;
+      l: number;
+      w: number;
+      h: number;
+      quality?: "" | "A" | "B";
+      yard?: number;
+    }>;
+    restock?: boolean;
+    stock_location?: string | null;
+    stone?: string;
+    yard?: number;
+  };
+  const stagedPayload = (block as { pending_approval_payload?: StagedPayload | null })
+    .pending_approval_payload ?? null;
 
   // When the cut is already done, fetch the REAL post-cut data so the
   // utilisation bar reflects what actually happened instead of the
@@ -251,13 +301,19 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
 
   return (
     <section className="page-card">
-      {/* Breadcrumb */}
+      {/* Breadcrumb. Approval-flow blocks send the back link to the
+          approvals queue so the reviewer can keep moving through the
+          list. Everything else returns to the appropriate cutting tab. */}
       <div style={{ marginBottom: 18 }}>
         <Link
-          href={`/cutting?tab=${isCutting ? "in_progress" : isWaiting ? "waiting" : isDone ? "done" : isRejected ? "done" : "pending"}`}
+          href={
+            isInApprovalFlow
+              ? "/cutting/approvals"
+              : `/cutting?tab=${isCutting ? "in_progress" : isWaiting ? "waiting" : isDone ? "done" : isRejected ? "done" : "pending"}`
+          }
           style={{ color: "var(--muted)", textDecoration: "none", fontSize: 13, fontWeight: 500 }}
         >
-          ← Back to Cutting
+          ← Back to {isInApprovalFlow ? "Approvals" : "Cutting"}
         </Link>
       </div>
 
@@ -319,6 +375,30 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
               }}
             >
               ● Live Cutting
+            </span>
+          )}
+          {isAwaitingApproval && (
+            <span
+              className="role-pill"
+              style={{
+                background: "var(--gold)",
+                color: "#fff",
+                fontWeight: 700,
+              }}
+            >
+              👀 Awaiting Approval
+            </span>
+          )}
+          {isAwaitingCutterEdit && (
+            <span
+              className="role-pill"
+              style={{
+                background: "#b45309",
+                color: "#fff",
+                fontWeight: 700,
+              }}
+            >
+              ↩ Sent Back for Edit
             </span>
           )}
           {isDone && (
@@ -722,6 +802,284 @@ export default async function CuttingDetailPage({ params }: { params: Params }) 
           />
         </>
       )}
+
+      {/* ── AWAITING APPROVAL / AWAITING CUTTER EDIT (migration 027) ──
+          The cutter's submission is staged in pending_approval_payload.
+          Until approval (or send-back-and-resubmit cycle), no slab or
+          donor mutations have happened — the cutter's mistakes here
+          are fully reversible.
+          The surface adapts to:
+            - URL flag `?edit=approval` → show FinishBlockForm pre-filled
+              for editing the staged payload.
+            - Otherwise → show banner + inline buttons (Approve / Edit /
+              Send back) gated by role. */}
+      {isInApprovalFlow && (() => {
+        const stagedSubmittedAt = (block as { submitted_for_approval_at?: string | null })
+          .submitted_for_approval_at ?? null;
+        const stagedSubmittedBy = (block as { submitted_for_approval_by?: string | null })
+          .submitted_for_approval_by ?? null;
+        const stagedSentBackAt = (block as { sent_back_at?: string | null })
+          .sent_back_at ?? null;
+        const stagedSentBackBy = (block as { sent_back_by?: string | null })
+          .sent_back_by ?? null;
+        const stagedSentBackNote = (block as { sent_back_note?: string | null })
+          .sent_back_note ?? null;
+
+        // When the user navigates here with ?edit=approval AND they're
+        // authorised to edit, render the FinishBlockForm pre-filled
+        // from the staged payload. The form posts to
+        // editPendingApprovalAction which updates the JSONB (+ flips
+        // status if the cutter resubmits).
+        if (wantsApprovalEdit && canEditApprovalNow && stagedPayload) {
+          return (
+            <>
+              <div
+                style={{
+                  margin: "0 0 18px",
+                  padding: "12px 16px",
+                  background: "rgba(232,197,114,0.18)",
+                  border: "1.5px solid var(--gold)",
+                  borderRadius: 8,
+                }}
+              >
+                <p style={{ margin: 0, fontSize: 13, color: "var(--gold-dark)", fontWeight: 700 }}>
+                  ✏ Editing pending approval
+                </p>
+                <p className="muted" style={{ margin: "4px 0 0", fontSize: 12 }}>
+                  {isApprover && isAwaitingApproval
+                    ? "Fix any details and press Save. The block stays in your approval queue — press Approve there once you're happy."
+                    : isAwaitingCutterEdit
+                      ? "Apply the requested changes and save. The block goes back to the approver for re-review."
+                      : "Editing staged Cutting-Done payload."}
+                </p>
+              </div>
+              <FinishBlockForm
+                sessionBlockId={block.id}
+                sessionId={block.cut_session_id}
+                blockId={block.block_id}
+                stone={blk?.stone ?? "PinkStone"}
+                yard={blk?.yard ?? 1}
+                allSlabs={placed.map((s) => ({
+                  id: s.id,
+                  label: s.label,
+                  temple: s.temple,
+                  sw: s.sw,
+                  sh: s.sh,
+                }))}
+                openSlabs={(openSlabs ?? []).filter((s) => !placed.some((p) => p.id === s.id))}
+                transferableSlabs={transferableSlabs}
+                allowTransfer={allowTransfer}
+                parentQuality={parentQuality}
+                finishAction={editPendingApprovalAction}
+                initialPayload={{
+                  cut_slab_ids: stagedPayload.cut_slab_ids ?? [],
+                  extra_slab_ids: stagedPayload.extra_slab_ids ?? [],
+                  transferred_slab_ids: stagedPayload.transferred_slab_ids ?? [],
+                  remainders: (stagedPayload.remainders ?? []).map((r) => ({
+                    l: Number(r.l),
+                    w: Number(r.w),
+                    h: Number(r.h),
+                    quality: r.quality,
+                    yard: r.yard,
+                  })),
+                  stock_location: stagedPayload.stock_location ?? null,
+                  restock: stagedPayload.restock ?? false,
+                }}
+                editMode
+                redirectTo="/cutting/approvals"
+                submitLabelOverride="Save changes"
+              />
+            </>
+          );
+        }
+
+        // Non-edit mode → banner + buttons.
+        return (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div
+              style={{
+                padding: "14px 16px",
+                background: isAwaitingApproval
+                  ? "rgba(232,197,114,0.14)"
+                  : "rgba(180,83,9,0.10)",
+                border: `1.5px solid ${isAwaitingApproval ? "var(--gold)" : "rgba(180,83,9,0.45)"}`,
+                borderLeft: `5px solid ${isAwaitingApproval ? "var(--gold-dark)" : "#b45309"}`,
+                borderRadius: 8,
+              }}
+            >
+              <p style={{ margin: 0, fontWeight: 700, color: isAwaitingApproval ? "var(--gold-dark)" : "#b45309", fontSize: 14 }}>
+                {isAwaitingApproval ? "👀 Awaiting approval" : "↩ Sent back for edit"}
+              </p>
+              <p style={{ margin: "5px 0 0", fontSize: 12, color: "var(--muted)" }}>
+                {isAwaitingApproval
+                  ? "Cutter has submitted the Cutting Done form. No slab or donor mutations have happened yet — they fire on approve."
+                  : "Approver asked the cutter to fix the submission. Once the cutter saves, the block goes back to Awaiting approval."}
+              </p>
+              {stagedSubmittedAt && (
+                <p style={{ margin: "8px 0 0", fontSize: 11, color: "var(--muted)" }}>
+                  Submitted{" "}
+                  {new Date(stagedSubmittedAt).toLocaleString("en-IN", {
+                    day: "numeric",
+                    month: "short",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                  {stagedSubmittedBy && profilesMap[stagedSubmittedBy] && (
+                    <>
+                      {" "}by{" "}
+                      <span style={{ color: "var(--gold-dark)", fontWeight: 600 }}>
+                        {profilesMap[stagedSubmittedBy]}
+                      </span>
+                    </>
+                  )}
+                </p>
+              )}
+              {isAwaitingCutterEdit && stagedSentBackNote && (
+                <div
+                  style={{
+                    marginTop: 10,
+                    padding: "10px 12px",
+                    background: "rgba(255,255,255,0.5)",
+                    border: "1px solid rgba(180,83,9,0.35)",
+                    borderRadius: 6,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: "#b45309",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.06em",
+                      marginBottom: 4,
+                    }}
+                  >
+                    Approver note
+                    {stagedSentBackBy && profilesMap[stagedSentBackBy]
+                      ? ` · from ${profilesMap[stagedSentBackBy]}`
+                      : ""}
+                    {stagedSentBackAt && (
+                      <span style={{ color: "var(--muted)", marginLeft: 6 }}>
+                        ·{" "}
+                        {new Date(stagedSentBackAt).toLocaleString("en-IN", {
+                          day: "numeric",
+                          month: "short",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                    )}
+                  </div>
+                  <p style={{ margin: 0, fontSize: 13, color: "var(--text)", lineHeight: 1.5 }}>
+                    {stagedSentBackNote}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Per-role actions. Send-back uses the inline form on the
+                approvals list page (which has a textarea for the note).
+                On this detail page we keep it simple — Edit link to
+                ?edit=approval, Approve via inline POST. The full
+                approve/send-back conversation lives on the queue. */}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+              {isApprover && isAwaitingApproval && (
+                <>
+                  <form action={approveCutFormAction}>
+                    <input type="hidden" name="session_block_id" value={block.id} />
+                    <button className="primary-button" type="submit">
+                      ✓ Approve
+                    </button>
+                  </form>
+                  <Link
+                    href={`/cutting/${block.id}?edit=approval`}
+                    style={{
+                      textDecoration: "none",
+                      fontSize: 13,
+                      padding: "8px 16px",
+                      background: "var(--bg)",
+                      border: "1px solid var(--border)",
+                      borderRadius: 6,
+                      color: "var(--text)",
+                      fontWeight: 600,
+                    }}
+                  >
+                    ✏ Edit
+                  </Link>
+                  <Link
+                    href="/cutting/approvals"
+                    style={{
+                      textDecoration: "none",
+                      fontSize: 13,
+                      padding: "8px 16px",
+                      background: "var(--bg)",
+                      border: "1px solid var(--border)",
+                      borderRadius: 6,
+                      color: "#b45309",
+                      fontWeight: 600,
+                    }}
+                    title="Open approvals queue to leave a note and send back to the cutter"
+                  >
+                    ↩ Send back (in queue)
+                  </Link>
+                </>
+              )}
+              {isApprover && isAwaitingCutterEdit && (
+                <>
+                  <Link
+                    href={`/cutting/${block.id}?edit=approval`}
+                    style={{
+                      textDecoration: "none",
+                      fontSize: 13,
+                      padding: "8px 16px",
+                      background: "var(--bg)",
+                      border: "1px solid var(--border)",
+                      borderRadius: 6,
+                      color: "var(--text)",
+                      fontWeight: 600,
+                    }}
+                  >
+                    ✏ Edit
+                  </Link>
+                  <form action={approveCutFormAction}>
+                    <input type="hidden" name="session_block_id" value={block.id} />
+                    <button
+                      className="primary-button"
+                      type="submit"
+                      title="Approve as-is, skipping the cutter edit"
+                    >
+                      ✓ Approve as-is
+                    </button>
+                  </form>
+                </>
+              )}
+              {!isApprover && isAwaitingApproval && (
+                <span
+                  className="muted"
+                  style={{
+                    fontSize: 12,
+                    padding: "8px 14px",
+                    border: "1px dashed var(--border)",
+                    borderRadius: 6,
+                  }}
+                >
+                  Waiting for approver review. You'll see an Edit button if
+                  they send it back.
+                </span>
+              )}
+              {!isApprover && isAwaitingCutterEdit && canEditApprovalNow && (
+                <Link
+                  href={`/cutting/${block.id}?edit=approval`}
+                  className="primary-button"
+                  style={{ textDecoration: "none", padding: "8px 16px", fontWeight: 700 }}
+                >
+                  ✏ Edit submission
+                </Link>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── DONE: Summary + optional undo ── */}
       {isDone && (

@@ -78,7 +78,7 @@ export async function getAuthContext() {
   const admin = createAdminSupabaseClient();
   let { data: profile } = await admin
     .from("profiles")
-    .select("id, full_name, phone, role, vendor_id, is_active, theme_preference")
+    .select("id, full_name, phone, role, vendor_id, is_active, theme_preference, can_approve_cuts")
     .eq("id", user.id)
     .single();
 
@@ -96,7 +96,7 @@ export async function getAuthContext() {
 
     const { data: newProfile } = await admin
       .from("profiles")
-      .select("id, full_name, phone, role, vendor_id, is_active, theme_preference")
+      .select("id, full_name, phone, role, vendor_id, is_active, theme_preference, can_approve_cuts")
       .eq("id", user.id)
       .single();
     profile = newProfile;

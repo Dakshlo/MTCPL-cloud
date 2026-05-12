@@ -222,7 +222,7 @@ export async function rejectBlockAction(formData: FormData) {
 // error now lands on /cutting as a normal page error rather than
 // as a misleading "Cutting Done failed" form error.
 export type FinishBlockResult =
-  | { ok: true; alreadyDone?: boolean }
+  | { ok: true; alreadyDone?: boolean; awaitingApproval?: boolean }
   | { ok: false; error: string };
 
 export async function finishBlockAction(formData: FormData): Promise<FinishBlockResult> {
@@ -271,8 +271,10 @@ export async function finishBlockAction(formData: FormData): Promise<FinishBlock
   });
 
   try {
-    // Permission gate for transfers — the PG function trusts callers
-    // (it's SECURITY DEFINER), so the auth check has to live here.
+    // Permission gate for transfers — even at submission time. The
+    // approver re-validates donor state before commit, but we still
+    // refuse the submission outright if this cutter has no transfer
+    // privilege.
     if (transferredSlabIds.length > 0) {
       const { canTransferPlannedSlabs } = await import("@/lib/cutting-permissions");
       if (!canTransferPlannedSlabs(profile)) {
@@ -282,114 +284,61 @@ export async function finishBlockAction(formData: FormData): Promise<FinishBlock
       }
     }
 
-    // ── ATOMIC RPC ───────────────────────────────────────────────
-    // Everything below — remainder inserts, parent block update,
-    // slab status flips, donor layout edits, transfer link
-    // teardown, cut_session_block done flip — runs as ONE Postgres
-    // function call inside ONE transaction. Single round-trip,
-    // single timeout window, single rollback boundary. Replaces
-    // ~18 sequential round-trips that were causing recurring
-    // partial-commit timeouts on the cutting floor.
+    // ── Stage the cutter's payload (migration 027) ────────────────
+    // Cutting Done no longer commits immediately. The cutter's
+    // entire form snapshot is stored on cut_session_blocks
+    // .pending_approval_payload and the block flips to
+    // 'awaiting_approval'. An approver (developer / owner / Rajesh
+    // Kumar) reviews + either approves (fires finish_block_cut RPC)
+    // or sends back for the cutter to edit. NO downstream slab /
+    // donor mutations happen until approval.
     //
-    // Migration 018_finish_block_cut_rpc.sql installs the function.
-    // Run the migration in Supabase SQL Editor before this code
-    // hits production.
-    const tStart = Date.now();
-    const { data: rpcData, error: rpcErr } = await supabase.rpc("finish_block_cut", {
-      p_session_block_id: sessionBlockId,
-      p_session_id: sessionId,
-      p_block_id: blockId,
-      p_stone: stone,
-      p_yard: yard,
-      p_actor: profile.id,
-      p_cut_slab_ids: cutSlabIds,
-      p_not_cut_slab_ids: notCutSlabIds,
-      p_extra_slab_ids: extraSlabIds,
-      p_transferred_slab_ids: transferredSlabIds,
-      // Pass remainders as-is — the PG function reads l/w/h/quality/yard/id off each.
-      p_remainders: remainders,
-      p_restock: restock,
-      // Optional — applied to every slab the RPC touches.
-      // Migration 020 adds slab_requirements.stock_location +
-      // teaches the RPC to consume this parameter.
-      p_stock_location: stockLocation,
-    });
-    console.log(`[finishBlockAction] RPC finish_block_cut returned in ${Date.now() - tStart}ms`);
-
-    if (rpcErr) {
-      console.error("[finishBlockAction] RPC error", rpcErr);
-      // Surface the PG function's RAISE EXCEPTION message verbatim
-      // so the operator sees what actually failed.
-      throw new Error(rpcErr.message ?? "Cutting Done RPC failed without a message.");
-    }
-
-    const result = (rpcData ?? {}) as {
-      success?: boolean;
-      already_done?: boolean;
-      restocked_block_id?: string | null;
-      restocked_count?: number;
-      extras_committed?: number;
-      transfers_committed?: number;
-      transfer_donor_blocks?: string[];
-      transfer_donor_session_block_ids?: string[];
-      already_done_slab_ids?: string[];
+    // The block must currently be in 'cutting' or 'done_prompt'
+    // (the cutter just hit Done from In Progress) OR
+    // 'awaiting_cutter_edit' (resubmitting after edit). Race-guard
+    // on the WHERE clause so two cutters can't double-submit.
+    const payload = {
+      cut_slab_ids: cutSlabIds,
+      not_cut_slab_ids: notCutSlabIds,
+      extra_slab_ids: extraSlabIds,
+      transferred_slab_ids: transferredSlabIds,
+      remainders,
+      restock,
+      stock_location: stockLocation,
+      stone,
+      yard,
     };
+    const now = new Date().toISOString();
+    const { data: updated, error: updErr } = await supabase
+      .from("cut_session_blocks")
+      .update({
+        status: "awaiting_approval",
+        pending_approval_payload: payload,
+        submitted_for_approval_at: now,
+        submitted_for_approval_by: profile.id,
+        // Clear send-back trail if this is a cutter resubmission.
+        sent_back_at: null,
+        sent_back_by: null,
+        sent_back_note: null,
+        updated_at: now,
+      })
+      .eq("id", sessionBlockId)
+      .in("status", ["cutting", "done_prompt", "awaiting_cutter_edit"])
+      .select("id");
 
-    if (result.already_done) {
-      console.log("[finishBlockAction] block was already done — skipping cleanup");
-      await refreshPaths();
-      return { ok: true, alreadyDone: true };
-    }
-
-    // Reconstruct the values the cleanup phase needs.
-    const restockedBlockId = result.restocked_block_id ?? null;
-    const restockedIds: string[] = restockedBlockId ? restockedBlockId.split(",").filter(Boolean) : [];
-    const transferDonorBlocks = result.transfer_donor_blocks ?? [];
-    const transferDonorCsbIds = result.transfer_donor_session_block_ids ?? [];
-
-    // Fire-and-forget donor notifications outside the critical path.
-    // The PG function already flipped donor needs_reprint=true so the
-    // banner shows even if these notify calls fail.
-    if (transferDonorCsbIds.length > 0) {
-      void Promise.all(
-        transferDonorCsbIds.map((donorId, i) => {
-          const donorBlockId = transferDonorBlocks[i] ?? donorId;
-          return notify(
-            "slab_transferred_from",
-            `Slab(s) moved away from ${donorBlockId}`,
-            {
-              message: `Claimed by ${blockId}. Reprint plan before cutting.`,
-              entityType: "cut_session_block",
-              entityId: donorId,
-              actorId: profile.id,
-              targetRoles: ["cutting_operator", "team_head", "developer"],
-            },
-          ).catch((e) =>
-            console.warn(`[finishBlockAction] donor ${donorBlockId} notify failed (non-fatal)`, e),
-          );
-        }),
+    if (updErr) throw new Error(updErr.message);
+    if (!updated || updated.length === 0) {
+      throw new Error(
+        "Block is no longer in a submittable state — it may have already been submitted or moved on. Refresh and retry.",
       );
-
-      // Audit the transfer-in event (fire-and-forget).
-      logAudit(profile.id, "slab_transferred_in", "cut_session_block", sessionBlockId, {
-        transferred_slabs: transferredSlabIds,
-        donor_blocks: transferDonorBlocks,
-        donor_session_block_ids: transferDonorCsbIds,
-      }).catch((e) => console.warn("[finishBlockAction] audit slab_transferred_in failed (non-fatal)", e));
     }
 
-    // ── Critical path complete — the block is now officially done. ──
-    // Everything below is bookkeeping (audit log, notification feed,
-    // session-status sync, path revalidation). Run them in parallel
-    // and treat individual failures as warnings, not errors — none of
-    // them affect the integrity of the cut record itself, but we still
-    // want to await before redirect so the next page render sees fresh
-    // data.
-    const hasDeviation = extraSlabIds.length > 0 || transferredSlabIds.length > 0;
-    const cleanupResults = await Promise.allSettled([
+    // Audit + notify approvers. Fire-and-forget — these failing
+    // doesn't mean the submission failed.
+    void Promise.all([
       logAudit(
         profile.id,
-        hasDeviation ? "cutting_done_with_deviation" : "cutting_done",
+        "cutting_done_pending_approval",
         "cut_session_block",
         sessionBlockId,
         {
@@ -397,28 +346,29 @@ export async function finishBlockAction(formData: FormData): Promise<FinishBlock
           block_id: blockId,
           cut_slabs: cutSlabIds,
           not_cut_slabs: notCutSlabIds,
-          restocked_blocks: restockedIds,
-          restock,
-          ...(extraSlabIds.length > 0 ? { extra_slabs: extraSlabIds } : {}),
-          ...(transferredSlabIds.length > 0 ? { transferred_slabs: transferredSlabIds } : {}),
+          extra_slabs: extraSlabIds,
+          transferred_slabs: transferredSlabIds,
+          remainder_count: remainders.length,
         },
       ),
-      notify("cut_done", `Block ${blockId} cutting completed`, {
-        message: `${cutSlabIds.length} slab(s) cut${restockedIds.length > 0 ? ` · ${restockedIds.length} restocked` : ""}${extraSlabIds.length > 0 ? ` · ${extraSlabIds.length} unplanned` : ""}${transferredSlabIds.length > 0 ? ` · ${transferredSlabIds.length} transferred from other plans` : ""}`,
-        entityType: "cut_session_block",
-        entityId: sessionBlockId,
-        actorId: profile.id,
-      }),
-      syncSessionStatus(sessionId),
-    ]);
-    for (const r of cleanupResults) {
-      if (r.status === "rejected") {
-        console.warn("[finishBlockAction] post-done cleanup task failed (non-fatal)", r.reason);
-      }
-    }
+      notify(
+        "cut_pending_approval",
+        `Block ${blockId} submitted for approval`,
+        {
+          message: `${cutSlabIds.length} slab(s) cut${extraSlabIds.length > 0 ? ` · ${extraSlabIds.length} unplanned` : ""}${transferredSlabIds.length > 0 ? ` · ${transferredSlabIds.length} transferred` : ""}. Review and approve.`,
+          entityType: "cut_session_block",
+          entityId: sessionBlockId,
+          actorId: profile.id,
+          targetRoles: ["developer", "owner"],
+        },
+      ),
+    ]).catch((e) =>
+      console.warn("[finishBlockAction] pending-approval cleanup failed (non-fatal)", e),
+    );
+
     await refreshPaths();
-    console.log("[finishBlockAction] SUCCESS", { sessionBlockId, blockId });
-    return { ok: true };
+    console.log("[finishBlockAction] SUBMITTED FOR APPROVAL", { sessionBlockId, blockId });
+    return { ok: true, awaitingApproval: true };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[finishBlockAction] FAILED", {
@@ -428,11 +378,531 @@ export async function finishBlockAction(formData: FormData): Promise<FinishBlock
       error: msg,
       stack: err instanceof Error ? err.stack : null,
     });
-    // No NEXT_REDIRECT re-throw branch — the happy path now returns
-    // `{ ok: true }` and the client does router.push, so any thrown
-    // error here is a genuine failure to surface.
     return { ok: false, error: msg };
   }
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Cut-approval actions (migration 027)
+// ──────────────────────────────────────────────────────────────────
+
+// Shape of the payload stored on cut_session_blocks
+// .pending_approval_payload. Matches what finishBlockAction stages.
+type PendingApprovalPayload = {
+  cut_slab_ids: string[];
+  not_cut_slab_ids: string[];
+  extra_slab_ids: string[];
+  transferred_slab_ids: string[];
+  remainders: Array<{
+    id: string;
+    l: number;
+    w: number;
+    h: number;
+    quality?: "" | "A" | "B";
+    yard?: number;
+  }>;
+  restock: boolean;
+  stock_location: string | null;
+  stone: string;
+  yard: number;
+};
+
+/**
+ * Approve a pending cut — the only path to status='done' now.
+ *
+ * Fires the existing finish_block_cut RPC (migration 018) with the
+ * staged payload. Atomic — single round-trip, single rollback
+ * boundary. Approver attribution recorded on the block.
+ *
+ * Pre-flight donor check: if any transferred slab points to a
+ * donor block that's no longer in pending/cutting/awaiting_*,
+ * surface a clear error rather than letting the RPC raise an
+ * opaque one. The approver can then send the block back for edit
+ * to remove the bad transfer, or contact a dev.
+ *
+ * Auth: canApproveCuts(profile) — developer / owner / team_head
+ * with can_approve_cuts=TRUE.
+ */
+export async function approveCutAction(
+  formData: FormData,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { profile } = await requireAuth(["developer", "owner", "team_head"]);
+  const { canApproveCuts } = await import("@/lib/cutting-permissions");
+  if (!canApproveCuts(profile)) {
+    return { ok: false, error: "You do not have permission to approve cuts." };
+  }
+  const supabase = createAdminSupabaseClient();
+
+  const sessionBlockId = String(formData.get("session_block_id") || "");
+  if (!sessionBlockId) return { ok: false, error: "Missing session_block_id" };
+
+  // Load the block + payload + session.
+  const { data: blockRow, error: blockErr } = await supabase
+    .from("cut_session_blocks")
+    .select("id, status, block_id, cut_session_id, pending_approval_payload")
+    .eq("id", sessionBlockId)
+    .maybeSingle();
+  if (blockErr) return { ok: false, error: blockErr.message };
+  if (!blockRow) return { ok: false, error: "Block not found." };
+  const block = blockRow as {
+    id: string;
+    status: string;
+    block_id: string;
+    cut_session_id: string;
+    pending_approval_payload: PendingApprovalPayload | null;
+  };
+  if (block.status !== "awaiting_approval") {
+    return { ok: false, error: `Block is not awaiting approval (status: ${block.status}).` };
+  }
+  const payload = block.pending_approval_payload;
+  if (!payload) {
+    return { ok: false, error: "No staged payload — refresh and retry." };
+  }
+
+  try {
+    // Pre-flight donor check for any transfers in the payload.
+    if (payload.transferred_slab_ids.length > 0) {
+      const { data: donorRows } = await supabase
+        .from("cut_session_slabs")
+        .select("slab_requirement_id, cut_session_block_id, cut_session_blocks(block_id, status)")
+        .in("slab_requirement_id", payload.transferred_slab_ids);
+      // PostgREST returns the nested cut_session_blocks join as
+      // either a single object or an array depending on the relationship;
+      // we normalise via `unknown` to dodge the generated `any[]` cast.
+      type DonorRow = {
+        slab_requirement_id: string;
+        cut_session_block_id: string;
+        cut_session_blocks:
+          | { block_id: string; status: string }
+          | { block_id: string; status: string }[]
+          | null;
+      };
+      const ACCEPTABLE_DONOR_STATUSES = [
+        "pending_worker",
+        "pending_cut",
+        "cutting",
+        "done_prompt",
+        // While in awaiting_approval / awaiting_cutter_edit the donor
+        // is still mutable, so those are fine.
+        "awaiting_approval",
+        "awaiting_cutter_edit",
+      ];
+      const rawDonorRows = (donorRows ?? []) as unknown as DonorRow[];
+      const stuck = rawDonorRows.filter((r) => {
+        const joined = Array.isArray(r.cut_session_blocks)
+          ? r.cut_session_blocks[0] ?? null
+          : r.cut_session_blocks;
+        const s = joined?.status;
+        if (!s) return true;
+        return !ACCEPTABLE_DONOR_STATUSES.includes(s);
+      });
+      if (stuck.length > 0) {
+        const blockIds = [
+          ...new Set(
+            stuck.map((r) => {
+              const joined = Array.isArray(r.cut_session_blocks)
+                ? r.cut_session_blocks[0] ?? null
+                : r.cut_session_blocks;
+              return joined?.block_id ?? "?";
+            }),
+          ),
+        ].join(", ");
+        return {
+          ok: false,
+          error: `Donor block(s) [${blockIds}] are no longer pending — the transfer cannot be committed. Send the block back for edit to remove this transfer, or contact a developer.`,
+        };
+      }
+    }
+
+    // Fire the same RPC the old finishBlockAction used.
+    const tStart = Date.now();
+    const { data: rpcData, error: rpcErr } = await supabase.rpc("finish_block_cut", {
+      p_session_block_id: sessionBlockId,
+      p_session_id: block.cut_session_id,
+      p_block_id: block.block_id,
+      p_stone: payload.stone,
+      p_yard: payload.yard,
+      p_actor: profile.id,
+      p_cut_slab_ids: payload.cut_slab_ids,
+      p_not_cut_slab_ids: payload.not_cut_slab_ids,
+      p_extra_slab_ids: payload.extra_slab_ids,
+      p_transferred_slab_ids: payload.transferred_slab_ids,
+      p_remainders: payload.remainders,
+      p_restock: payload.restock,
+      p_stock_location: payload.stock_location,
+    });
+    console.log(`[approveCutAction] RPC finish_block_cut returned in ${Date.now() - tStart}ms`);
+    if (rpcErr) throw new Error(rpcErr.message ?? "Approve RPC failed without a message.");
+
+    const result = (rpcData ?? {}) as {
+      success?: boolean;
+      already_done?: boolean;
+      restocked_block_id?: string | null;
+      transfer_donor_blocks?: string[];
+      transfer_donor_session_block_ids?: string[];
+    };
+
+    // Mark approval attribution + clear staged payload. We do this
+    // even on already_done so the approver fields are populated.
+    await supabase
+      .from("cut_session_blocks")
+      .update({
+        approved_at: new Date().toISOString(),
+        approved_by: profile.id,
+        pending_approval_payload: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", sessionBlockId);
+
+    // Donor notifications + audit (fire-and-forget — copy of the
+    // old logic, just on this side of the timeline).
+    const restockedBlockId = result.restocked_block_id ?? null;
+    const restockedIds: string[] = restockedBlockId
+      ? restockedBlockId.split(",").filter(Boolean)
+      : [];
+    const transferDonorBlocks = result.transfer_donor_blocks ?? [];
+    const transferDonorCsbIds = result.transfer_donor_session_block_ids ?? [];
+    if (transferDonorCsbIds.length > 0) {
+      void Promise.all(
+        transferDonorCsbIds.map((donorId, i) => {
+          const donorBlockId = transferDonorBlocks[i] ?? donorId;
+          return notify(
+            "slab_transferred_from",
+            `Slab(s) moved away from ${donorBlockId}`,
+            {
+              message: `Claimed by ${block.block_id}. Reprint plan before cutting.`,
+              entityType: "cut_session_block",
+              entityId: donorId,
+              actorId: profile.id,
+              targetRoles: ["cutting_operator", "team_head", "developer"],
+            },
+          ).catch((e) =>
+            console.warn(`[approveCutAction] donor ${donorBlockId} notify failed`, e),
+          );
+        }),
+      );
+      logAudit(profile.id, "slab_transferred_in", "cut_session_block", sessionBlockId, {
+        transferred_slabs: payload.transferred_slab_ids,
+        donor_blocks: transferDonorBlocks,
+        donor_session_block_ids: transferDonorCsbIds,
+      }).catch((e) => console.warn("[approveCutAction] audit failed", e));
+    }
+
+    const hasDeviation =
+      payload.extra_slab_ids.length > 0 || payload.transferred_slab_ids.length > 0;
+    await Promise.allSettled([
+      logAudit(
+        profile.id,
+        hasDeviation ? "cut_approved_with_deviation" : "cut_approved",
+        "cut_session_block",
+        sessionBlockId,
+        {
+          session_id: block.cut_session_id,
+          block_id: block.block_id,
+          cut_slabs: payload.cut_slab_ids,
+          not_cut_slabs: payload.not_cut_slab_ids,
+          restocked_blocks: restockedIds,
+          restock: payload.restock,
+          ...(payload.extra_slab_ids.length > 0
+            ? { extra_slabs: payload.extra_slab_ids }
+            : {}),
+          ...(payload.transferred_slab_ids.length > 0
+            ? { transferred_slabs: payload.transferred_slab_ids }
+            : {}),
+        },
+      ),
+      notify(
+        "cut_done",
+        `Block ${block.block_id} cutting approved`,
+        {
+          message: `${payload.cut_slab_ids.length} slab(s) cut${restockedIds.length > 0 ? ` · ${restockedIds.length} restocked` : ""}${payload.extra_slab_ids.length > 0 ? ` · ${payload.extra_slab_ids.length} unplanned` : ""}${payload.transferred_slab_ids.length > 0 ? ` · ${payload.transferred_slab_ids.length} transferred` : ""}`,
+          entityType: "cut_session_block",
+          entityId: sessionBlockId,
+          actorId: profile.id,
+        },
+      ),
+      syncSessionStatus(block.cut_session_id),
+    ]);
+
+    await refreshPaths();
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[approveCutAction] FAILED", { sessionBlockId, error: msg });
+    return { ok: false, error: msg };
+  }
+}
+
+/**
+ * Form-wrapper around approveCutAction. The HTML form action prop
+ * wants `void | Promise<void>`, but approveCutAction returns a
+ * result object (used by the approvals-client and the detail page's
+ * client-side button paths). This wrapper bridges the two — runs
+ * the approve, then redirects on success or appends an error query
+ * param on failure so the toast banner can surface it.
+ */
+export async function approveCutFormAction(formData: FormData) {
+  const result = await approveCutAction(formData);
+  const sessionBlockId = String(formData.get("session_block_id") || "");
+  if (!result.ok) {
+    redirect(
+      `/cutting/${encodeURIComponent(sessionBlockId)}?error=${encodeURIComponent(result.error)}`,
+    );
+  }
+  redirect("/cutting/approvals");
+}
+
+/**
+ * Send a pending-approval block back to the cutter for edits.
+ * Approver-only. Flips status to 'awaiting_cutter_edit' and
+ * stores an optional note ("check slab X — looks like it wasn't
+ * cut"). The cutter sees the Edit button on their next visit and
+ * the note prominently. Resubmission flips back to
+ * 'awaiting_approval'.
+ */
+export async function requestCutterEditAction(
+  formData: FormData,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { profile } = await requireAuth(["developer", "owner", "team_head"]);
+  const { canApproveCuts } = await import("@/lib/cutting-permissions");
+  if (!canApproveCuts(profile)) {
+    return { ok: false, error: "You do not have permission to send cuts back." };
+  }
+  const supabase = createAdminSupabaseClient();
+
+  const sessionBlockId = String(formData.get("session_block_id") || "");
+  const note = (String(formData.get("note") || "")).trim() || null;
+  if (!sessionBlockId) return { ok: false, error: "Missing session_block_id" };
+
+  const { data: blockRow } = await supabase
+    .from("cut_session_blocks")
+    .select("id, status, block_id, submitted_for_approval_by")
+    .eq("id", sessionBlockId)
+    .maybeSingle();
+  if (!blockRow) return { ok: false, error: "Block not found." };
+  const block = blockRow as {
+    id: string;
+    status: string;
+    block_id: string;
+    submitted_for_approval_by: string | null;
+  };
+  if (block.status !== "awaiting_approval") {
+    return {
+      ok: false,
+      error: `Block is not awaiting approval (status: ${block.status}).`,
+    };
+  }
+
+  const now = new Date().toISOString();
+  const { error: updErr } = await supabase
+    .from("cut_session_blocks")
+    .update({
+      status: "awaiting_cutter_edit",
+      sent_back_at: now,
+      sent_back_by: profile.id,
+      sent_back_note: note,
+      updated_at: now,
+    })
+    .eq("id", sessionBlockId)
+    .eq("status", "awaiting_approval");
+  if (updErr) return { ok: false, error: updErr.message };
+
+  void Promise.all([
+    logAudit(profile.id, "cut_sent_back_for_edit", "cut_session_block", sessionBlockId, {
+      block_id: block.block_id,
+      note,
+    }),
+    notify(
+      "cut_sent_back",
+      `Block ${block.block_id} sent back for edit`,
+      {
+        message: note ?? "Approver requested changes.",
+        entityType: "cut_session_block",
+        entityId: sessionBlockId,
+        actorId: profile.id,
+        // Notify cutting operators broadly. The notification bell
+        // filters by recipient role; the cutter's submitter id is
+        // captured in the audit log + payload for direct lookup.
+        targetRoles: ["cutting_operator", "team_head", "developer"],
+      },
+    ),
+  ]).catch((e) =>
+    console.warn("[requestCutterEditAction] cleanup failed (non-fatal)", e),
+  );
+
+  await refreshPaths();
+  return { ok: true };
+}
+
+/**
+ * Edit a pending-approval block's staged payload.
+ *
+ * Two valid paths:
+ *   1. Approver editing while status = awaiting_approval. They can
+ *      edit-then-approve in one sitting. Status stays the same.
+ *   2. Cutter editing while status = awaiting_cutter_edit (i.e. the
+ *      approver sent it back). Save flips status BACK to
+ *      awaiting_approval so the approver re-reviews. Sent_back_note
+ *      is cleared.
+ *
+ * Everything else is rejected.
+ *
+ * Accepts the same form payload as finishBlockAction.
+ */
+export async function editPendingApprovalAction(
+  formData: FormData,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { profile } = await requireAuth([
+    "developer",
+    "owner",
+    "team_head",
+    "cutting_operator",
+  ]);
+  const supabase = createAdminSupabaseClient();
+
+  const sessionBlockId = String(formData.get("session_block_id") || "");
+  if (!sessionBlockId) return { ok: false, error: "Missing session_block_id" };
+
+  // Re-parse the same fields finishBlockAction parses.
+  const cutSlabIds = JSON.parse(String(formData.get("cut_slab_ids") || "[]")) as string[];
+  const allSlabIds = JSON.parse(String(formData.get("all_slab_ids") || "[]")) as string[];
+  const notCutSlabIds = allSlabIds.filter((id) => !cutSlabIds.includes(id));
+  const restock = String(formData.get("restock") || "") === "yes";
+  const remainders = JSON.parse(
+    String(formData.get("remainders_json") || "[]"),
+  ) as Array<{ id: string; l: number; w: number; h: number; quality?: "" | "A" | "B"; yard?: number }>;
+  const extraSlabIds = JSON.parse(String(formData.get("extra_slab_ids") || "[]")) as string[];
+  const transferredSlabIds = JSON.parse(
+    String(formData.get("transferred_slab_ids") || "[]"),
+  ) as string[];
+  const stockLocation = String(formData.get("stock_location") || "").trim() || null;
+  const stone = String(formData.get("stone") || "PinkStone");
+  const yard = Number(formData.get("yard") || 1);
+
+  // Permission gate for transfers (same as finishBlockAction).
+  if (transferredSlabIds.length > 0) {
+    const { canTransferPlannedSlabs } = await import("@/lib/cutting-permissions");
+    if (!canTransferPlannedSlabs(profile)) {
+      return {
+        ok: false,
+        error:
+          "You do not have permission to transfer slabs from another block's plan.",
+      };
+    }
+  }
+
+  // Authorise this specific edit attempt.
+  const { data: blockRow } = await supabase
+    .from("cut_session_blocks")
+    .select("id, status, block_id, submitted_for_approval_by, cut_session_id")
+    .eq("id", sessionBlockId)
+    .maybeSingle();
+  if (!blockRow) return { ok: false, error: "Block not found." };
+  const block = blockRow as {
+    id: string;
+    status: string;
+    block_id: string;
+    submitted_for_approval_by: string | null;
+    cut_session_id: string;
+  };
+
+  const { canApproveCuts } = await import("@/lib/cutting-permissions");
+  const isApprover = canApproveCuts(profile);
+  const isOriginalSubmitter = block.submitted_for_approval_by === profile.id;
+
+  let nextStatus: "awaiting_approval" | "awaiting_cutter_edit";
+  if (block.status === "awaiting_approval") {
+    // Only approvers can edit while in approval queue (cutters are
+    // locked out per Daksh's request — they can only edit when sent
+    // back).
+    if (!isApprover) {
+      return {
+        ok: false,
+        error:
+          "You can only edit when the approver sends the block back for edit. Wait for review.",
+      };
+    }
+    nextStatus = "awaiting_approval";
+  } else if (block.status === "awaiting_cutter_edit") {
+    // Cutter must own the block (or be an approver, who can also
+    // step in if the cutter is unavailable).
+    if (!isApprover && !isOriginalSubmitter) {
+      // Fallback: allow cutting_operator role broadly. Floor reality
+      // is the same cutter doesn't always re-log in.
+      if (profile.role !== "cutting_operator") {
+        return {
+          ok: false,
+          error: "Only the original cutter or an approver can edit this block.",
+        };
+      }
+    }
+    nextStatus = "awaiting_approval"; // cutter resubmits → back to queue
+  } else {
+    return {
+      ok: false,
+      error: `Block is not in an editable approval state (status: ${block.status}).`,
+    };
+  }
+
+  const payload: PendingApprovalPayload = {
+    cut_slab_ids: cutSlabIds,
+    not_cut_slab_ids: notCutSlabIds,
+    extra_slab_ids: extraSlabIds,
+    transferred_slab_ids: transferredSlabIds,
+    remainders,
+    restock,
+    stock_location: stockLocation,
+    stone,
+    yard,
+  };
+  const now = new Date().toISOString();
+
+  const updatePayload: Record<string, unknown> = {
+    pending_approval_payload: payload,
+    approval_edited_at: now,
+    approval_edited_by: profile.id,
+    status: nextStatus,
+    updated_at: now,
+  };
+  // When the cutter resubmits, clear the send-back trail.
+  if (block.status === "awaiting_cutter_edit") {
+    updatePayload.sent_back_note = null;
+  }
+
+  const { error: updErr } = await supabase
+    .from("cut_session_blocks")
+    .update(updatePayload)
+    .eq("id", sessionBlockId)
+    .eq("status", block.status);
+  if (updErr) return { ok: false, error: updErr.message };
+
+  void Promise.all([
+    logAudit(profile.id, "cut_approval_edited", "cut_session_block", sessionBlockId, {
+      block_id: block.block_id,
+      edited_by_role: profile.role,
+      from_status: block.status,
+      to_status: nextStatus,
+    }),
+    // If cutter resubmitted, ping approvers.
+    block.status === "awaiting_cutter_edit"
+      ? notify(
+          "cut_resubmitted",
+          `Block ${block.block_id} resubmitted for approval`,
+          {
+            message: "Cutter has applied edits. Re-review pending approval queue.",
+            entityType: "cut_session_block",
+            entityId: sessionBlockId,
+            actorId: profile.id,
+            targetRoles: ["developer", "owner"],
+          },
+        )
+      : Promise.resolve(),
+  ]).catch((e) =>
+    console.warn("[editPendingApprovalAction] cleanup failed (non-fatal)", e),
+  );
+
+  await refreshPaths();
+  return { ok: true };
 }
 
 /**
