@@ -630,34 +630,65 @@ export function CarvingDashboardClient({
     <>
       {filterBar}
 
-      {tab === "unassigned" && (
-        <UnassignedByTemple
-          slabs={filteredUnassigned}
-          stoneTypes={stoneTypes}
-          viewMode={viewMode}
-          onAssign={(s) => setAssigning(s)}
-          bulkMode={bulkMode}
-          bulkSelected={bulkSelected}
-          onBulkToggle={(slabId) => {
-            setBulkSelected((prev) => {
-              const next = new Set(prev);
-              if (next.has(slabId)) {
-                next.delete(slabId);
-              } else if (next.size < BULK_MAX) {
+      {tab === "unassigned" && (() => {
+        // Derive the "anchor" — dims of the FIRST selected slab. Once
+        // anchored, any further additions must match L×W×T (a hard
+        // constraint per Daksh: bulk-assign is for mirror-pair work
+        // which only makes sense for identical slabs). Different-dim
+        // cards go dim + cursor:not-allowed in the renderCard.
+        const anchorId = bulkSelected.size > 0 ? [...bulkSelected][0] : null;
+        const anchor = anchorId ? unassignedSlabs.find((s) => s.id === anchorId) ?? null : null;
+        return (
+          <UnassignedByTemple
+            slabs={filteredUnassigned}
+            stoneTypes={stoneTypes}
+            viewMode={viewMode}
+            onAssign={(s) => setAssigning(s)}
+            bulkMode={bulkMode}
+            bulkSelected={bulkSelected}
+            onBulkToggle={(slabId) => {
+              setBulkSelected((prev) => {
+                const next = new Set(prev);
+                if (next.has(slabId)) {
+                  next.delete(slabId);
+                  return next;
+                }
+                if (next.size >= BULK_MAX) return prev;
+                // Enforce same-dim constraint when there's an anchor.
+                if (anchor) {
+                  const cand = unassignedSlabs.find((s) => s.id === slabId);
+                  if (
+                    cand &&
+                    (Number(cand.length_ft) !== Number(anchor.length_ft) ||
+                      Number(cand.width_ft) !== Number(anchor.width_ft) ||
+                      Number(cand.thickness_ft) !== Number(anchor.thickness_ft))
+                  ) {
+                    return prev; // mismatched dims — silently refuse
+                  }
+                }
                 next.add(slabId);
-              }
-              return next;
-            });
-          }}
-          onToggleBulkMode={() => {
-            setBulkMode((on) => {
-              if (on) setBulkSelected(new Set()); // exiting → clear
-              return !on;
-            });
-          }}
-          bulkMax={BULK_MAX}
-        />
-      )}
+                return next;
+              });
+            }}
+            onToggleBulkMode={() => {
+              setBulkMode((on) => {
+                if (on) setBulkSelected(new Set());
+                return !on;
+              });
+            }}
+            bulkMax={BULK_MAX}
+            anchorDims={
+              anchor
+                ? {
+                    length_ft: Number(anchor.length_ft),
+                    width_ft: Number(anchor.width_ft),
+                    thickness_ft: Number(anchor.thickness_ft),
+                  }
+                : null
+            }
+          />
+        );
+      })()}
 
       {tab === "active" && (
         <>
@@ -939,6 +970,7 @@ function UnassignedByTemple({
   onBulkToggle,
   onToggleBulkMode,
   bulkMax,
+  anchorDims,
 }: {
   slabs: UnassignedSlab[];
   stoneTypes: StoneTypeDef[];
@@ -955,6 +987,11 @@ function UnassignedByTemple({
    *  the toggle inside the temple peek modal. */
   onToggleBulkMode: () => void;
   bulkMax: number;
+  /** Dims of the first slab selected in this bulk batch. Once set,
+   *  any further additions must match L×W×T or they're silently
+   *  refused by the toggle handler. We surface that visually here
+   *  by dimming non-matching cards. NULL = no anchor yet. */
+  anchorDims: { length_ft: number; width_ft: number; thickness_ft: number } | null;
 }) {
   const groups = useMemo(() => groupByTemple(slabs, (s) => s.temple), [slabs]);
 
@@ -976,11 +1013,22 @@ function UnassignedByTemple({
   const renderCard = (s: UnassignedSlab) => {
     const isSelected = bulkSelected.has(s.id);
     const atLimit = !isSelected && bulkSelected.size >= bulkMax;
-    const cardClickable = bulkMode;
+    // Same-dim constraint: if a bulk batch has been started, only
+    // cards matching the anchor's L×W×T can join. Non-matching cards
+    // get the dim/disabled treatment so the user understands why.
+    const dimMismatch =
+      bulkMode &&
+      anchorDims &&
+      !isSelected &&
+      (Number(s.length_ft) !== anchorDims.length_ft ||
+        Number(s.width_ft) !== anchorDims.width_ft ||
+        Number(s.thickness_ft) !== anchorDims.thickness_ft);
+    const cardClickable = bulkMode && !dimMismatch;
+    const isDisabled = bulkMode && (atLimit || !!dimMismatch);
     return (
     <div
       key={s.id}
-      onClick={cardClickable && !atLimit ? () => onBulkToggle(s.id) : undefined}
+      onClick={cardClickable ? () => onBulkToggle(s.id) : undefined}
       style={{
         padding: "8px 10px",
         background: bulkMode && isSelected
@@ -999,12 +1047,22 @@ function UnassignedByTemple({
         display: "flex",
         flexDirection: "column",
         gap: 6,
-        cursor: cardClickable ? (atLimit ? "not-allowed" : "pointer") : "default",
-        opacity: bulkMode && atLimit ? 0.5 : 1,
+        cursor: bulkMode
+          ? isDisabled
+            ? "not-allowed"
+            : "pointer"
+          : "default",
+        opacity: isDisabled ? 0.35 : 1,
         position: "relative",
         transition: "border-color 0.12s, background 0.12s",
       }}
-      title={atLimit ? `Max ${bulkMax} slabs per batch` : undefined}
+      title={
+        dimMismatch
+          ? `Different dimensions — bulk select requires matching L×W×T (anchor: ${anchorDims?.length_ft}×${anchorDims?.width_ft}×${anchorDims?.thickness_ft}″)`
+          : atLimit
+            ? `Max ${bulkMax} slabs per batch`
+            : undefined
+      }
     >
       {/* Bulk-select checkbox overlay — only shown in bulk mode. */}
       {bulkMode && (
@@ -1186,6 +1244,7 @@ function UnassignedByTemple({
       onToggleBulkMode={onToggleBulkMode}
       bulkSelectedCount={bulkSelected.size}
       bulkMax={bulkMax}
+      anchorDims={anchorDims}
     />
   );
   void openByDefault; // unused after card refactor
@@ -1201,6 +1260,7 @@ function TempleCardGrid({
   onToggleBulkMode,
   bulkSelectedCount,
   bulkMax,
+  anchorDims,
 }: {
   groups: Array<{ temple: string; items: UnassignedSlab[] }>;
   stoneTypes: StoneTypeDef[];
@@ -1214,6 +1274,7 @@ function TempleCardGrid({
   onToggleBulkMode: () => void;
   bulkSelectedCount: number;
   bulkMax: number;
+  anchorDims: { length_ft: number; width_ft: number; thickness_ft: number } | null;
 }) {
   const [openTemple, setOpenTemple] = useState<string | null>(null);
   const openGroup = openTemple ? groups.find((g) => g.temple === openTemple) ?? null : null;
@@ -1328,6 +1389,7 @@ function TempleCardGrid({
           onToggleBulkMode={onToggleBulkMode}
           bulkSelectedCount={bulkSelectedCount}
           bulkMax={bulkMax}
+          anchorDims={anchorDims}
         />
       )}
     </>
@@ -1375,6 +1437,7 @@ function TempleSlabsPeek({
   onToggleBulkMode,
   bulkSelectedCount,
   bulkMax,
+  anchorDims,
 }: {
   temple: string;
   slabs: UnassignedSlab[];
@@ -1387,6 +1450,7 @@ function TempleSlabsPeek({
   onToggleBulkMode: () => void;
   bulkSelectedCount: number;
   bulkMax: number;
+  anchorDims: { length_ft: number; width_ft: number; thickness_ft: number } | null;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
 
@@ -1529,7 +1593,9 @@ function TempleSlabsPeek({
             </button>
           </div>
         </div>
-        {/* Hint that explains bulk-select once it's on. */}
+        {/* Hint that explains bulk-select once it's on. When an
+            anchor has been set (first slab selected), the message
+            shifts to call out the L×W×T requirement explicitly. */}
         {bulkMode && (
           <div
             style={{
@@ -1545,7 +1611,16 @@ function TempleSlabsPeek({
               flexWrap: "wrap",
             }}
           >
-            <span>📋 Tap up to {bulkMax} slabs to select. Pair mirror-coloured ones for 2-head pairs.</span>
+            {anchorDims ? (
+              <span>
+                📋 Batch locked to <strong>{anchorDims.length_ft}×{anchorDims.width_ft}×{anchorDims.thickness_ft}″</strong>.
+                Only matching slabs can be added (max {bulkMax}).
+              </span>
+            ) : (
+              <span>
+                📋 Tap up to {bulkMax} slabs to select. They must share the same L×W×T.
+              </span>
+            )}
           </div>
         )}
         {groupColorMap.size > 0 && (

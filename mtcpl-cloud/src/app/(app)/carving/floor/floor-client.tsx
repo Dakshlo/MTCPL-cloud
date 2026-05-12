@@ -279,7 +279,7 @@ function GridHeader({
         <Stat label="Free" value={fleetTotals.idle} fg="#22c55e" />
         <Stat label="Carving" value={fleetTotals.carving} fg="#60a5fa" />
         <Stat label="Maint" value={fleetTotals.maintenance} fg="#f87171" />
-        <Stat label="Queue" value={fleetTotals.queue} fg="#fbbf24" />
+        <Stat label="Stock pending" value={fleetTotals.queue} fg="#fbbf24" />
         <Stat label="Today" value={fleetTotals.today} fg="#E8C572" />
       </div>
       <button
@@ -420,7 +420,7 @@ function TvHeader({
         <TvStat label="Free" value={fleetTotals.idle} fg={isDark ? "#22c55e" : "#15803d"} dark={isDark} />
         <TvStat label="Carving" value={fleetTotals.carving} fg={isDark ? "#60a5fa" : "#1d4ed8"} dark={isDark} />
         <TvStat label="Maint" value={fleetTotals.maintenance} fg={isDark ? "#f87171" : "#b91c1c"} dark={isDark} />
-        <TvStat label="Queue" value={fleetTotals.queue} fg={isDark ? "#fbbf24" : "#b45309"} dark={isDark} />
+        <TvStat label="Stock pending" value={fleetTotals.queue} fg={isDark ? "#fbbf24" : "#b45309"} dark={isDark} />
         <button
           type="button"
           onClick={() => setMode("grid")}
@@ -1059,7 +1059,7 @@ function VendorTvSlide({ vendor, now, slideKey, dark }: { vendor: FloorVendor; n
           <TvBigStat label="Free" value={vendor.totals.idle} fg={dark ? "#22c55e" : "#15803d"} dark={dark} />
           <TvBigStat label="Carving" value={vendor.totals.carving} fg={dark ? "#60a5fa" : "#1d4ed8"} dark={dark} />
           <TvBigStat label="Maint" value={vendor.totals.maintenance} fg={dark ? "#f87171" : "#b91c1c"} dark={dark} />
-          <TvBigStat label="Queue" value={vendor.totals.queue} fg={dark ? "#fbbf24" : "#b45309"} dark={dark} />
+          <TvBigStat label="Stock pending" value={vendor.totals.queue} fg={dark ? "#fbbf24" : "#b45309"} dark={dark} />
           <TvBigStat label="Today" value={vendor.totals.today} fg={dark ? "#E8C572" : "#b87333"} dark={dark} />
         </div>
       </div>
@@ -1472,7 +1472,7 @@ function VendorStatRow({ totals }: { totals: FloorVendor["totals"] }) {
       <Tile label="Free" value={totals.idle} fg="#16a34a" />
       <Tile label="Carving" value={totals.carving} fg="#2563eb" />
       <Tile label="Maint" value={totals.maintenance} fg="#dc2626" />
-      <Tile label="Queue" value={totals.queue} fg="#b45309" />
+      <Tile label="Stock pending" value={totals.queue} fg="#b45309" />
       <Tile label="Today" value={totals.today} fg="#b87333" />
     </div>
   );

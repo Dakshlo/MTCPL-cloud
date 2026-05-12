@@ -62,6 +62,33 @@ const MACHINE_TINT: Record<
   inactive: { bg: "var(--surface-alt)", border: "var(--border)", fg: "var(--muted)", label: "OFF" },
 };
 
+// Same rule-based recommender as the single-slab AssignModal. Kept
+// in sync visually (✨ BEST FIT chip + auto-select) so the workflow
+// reads identical whether assigning one slab or a batch.
+function recommendVendor(
+  vendors: Vendor[],
+  workType: WorkType,
+): { vendorId: string | null; reason: string } {
+  let best: { id: string; name: string; score: number; reason: string } | null = null;
+  for (const v of vendors) {
+    if (v.vendor_type !== "CNC") continue;
+    const br = typeBreakdown(v);
+    const free = workType === "lathe" ? br.latheFree : br.multiFree;
+    const total = workType === "lathe" ? br.latheTotal : br.multiTotal;
+    if (total === 0) continue;
+    const queued = v.live?.queued ?? 0;
+    const score = (free > 0 ? 100 : 50) + free * 5 - queued * 5;
+    const reason =
+      free > 0
+        ? `${free} free ${workType === "lathe" ? "lathe" : "CNC"}${queued > 0 ? ` · ${queued} pending` : ""}`
+        : `will go to stock pending · ${queued} ahead`;
+    if (!best || score > best.score || (score === best.score && v.name < best.name)) {
+      best = { id: v.id, name: v.name, score, reason };
+    }
+  }
+  return best ? { vendorId: best.id, reason: best.reason } : { vendorId: null, reason: "" };
+}
+
 function typeBreakdown(v: Vendor) {
   const out = { multiFree: 0, multiTotal: 0, latheFree: 0, latheTotal: 0 };
   for (const m of v.machines) {
@@ -108,6 +135,17 @@ export function BulkAssignModal({
 
   const selectedVendor = vendors.find((v) => v.id === vendorId);
   const isManual = selectedVendor?.vendor_type === "Manual";
+
+  // Rule-based recommendation. Auto-selects the winner on mount +
+  // whenever work-type flips. User can override by clicking another
+  // vendor row.
+  const recommendation = useMemo(
+    () => recommendVendor(vendors, workType),
+    [vendors, workType],
+  );
+  useEffect(() => {
+    if (recommendation.vendorId) setVendorId(recommendation.vendorId);
+  }, [recommendation.vendorId]);
 
   const sortedVendors = useMemo(() => {
     return [...vendors].sort((a, b) => {
@@ -391,6 +429,8 @@ export function BulkAssignModal({
                         isSelected={isSelected}
                         onSelect={() => setVendorId(v.id)}
                         workType={workType}
+                        isRecommended={recommendation.vendorId === v.id}
+                        recommendationReason={recommendation.reason}
                       />
                     );
                   })}
@@ -525,7 +565,7 @@ export function BulkAssignModal({
                       }}
                     >
                       No free {workType === "lathe" ? "lathe" : "multi-head"} machines right
-                      now at {selectedVendor.name}. The batch will queue and
+                      now at {selectedVendor.name}. The batch will go into stock pending and
                       load when one frees up.
                     </div>
                   );
@@ -645,12 +685,16 @@ function VendorRow({
   isManual,
   onSelect,
   workType,
+  isRecommended,
+  recommendationReason,
 }: {
   v: Vendor;
   isSelected: boolean;
   isManual?: boolean;
   onSelect: () => void;
   workType: WorkType;
+  isRecommended?: boolean;
+  recommendationReason?: string;
 }) {
   const queued = v.live?.queued ?? 0;
   if (isManual) {
@@ -692,22 +736,39 @@ function VendorRow({
               🪚 MANUAL
             </span>
           </div>
+          {queued > 0 && (
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+              {queued} stock pending
+            </div>
+          )}
         </div>
       </label>
     );
   }
   const br = typeBreakdown(v);
+  const hasTypeInFleet = (workType === "lathe" ? br.latheTotal : br.multiTotal) > 0;
   return (
     <label
       style={{
         display: "flex",
         alignItems: "center",
         gap: 10,
-        padding: "10px 12px",
-        background: isSelected ? "rgba(180,115,51,0.08)" : "var(--surface)",
-        border: `1.5px solid ${isSelected ? "var(--gold-dark)" : "var(--border)"}`,
+        padding: "12px 14px",
+        background: isSelected
+          ? "rgba(180,115,51,0.10)"
+          : isRecommended
+            ? "rgba(22,163,74,0.05)"
+            : "var(--surface)",
+        border: `2px solid ${
+          isSelected
+            ? "var(--gold-dark)"
+            : isRecommended
+              ? "rgba(22,163,74,0.4)"
+              : "var(--border)"
+        }`,
         borderRadius: 8,
         cursor: "pointer",
+        opacity: hasTypeInFleet ? 1 : 0.5,
       }}
     >
       <input
@@ -719,26 +780,29 @@ function VendorRow({
         style={{ cursor: "pointer", flexShrink: 0 }}
       />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 700, fontSize: 13, color: "var(--text)" }}>{v.name}</div>
-        <div style={{ fontSize: 11, color: "var(--muted)", fontFamily: "ui-monospace, monospace", marginTop: 2 }}>
-          <span
-            style={{
-              fontWeight: workType === "flat" ? 700 : 400,
-              color: workType === "flat" ? "var(--text)" : "var(--muted)",
-            }}
-          >
-            {br.multiFree}/{br.multiTotal} multi-head
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ fontWeight: 800, fontSize: 15, color: "var(--text)", letterSpacing: "0.02em" }}>
+            {v.name}
           </span>
-          {" · "}
-          <span
-            style={{
-              fontWeight: workType === "lathe" ? 700 : 400,
-              color: workType === "lathe" ? "#7c3aed" : "var(--muted)",
-            }}
-          >
-            {br.latheFree}/{br.latheTotal} lathe
-          </span>
-          {queued > 0 && ` · ${queued} queued`}
+          {isRecommended && !isSelected && (
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 800,
+                padding: "2px 8px",
+                borderRadius: 999,
+                background: "#16a34a",
+                color: "#fff",
+                letterSpacing: "0.06em",
+              }}
+              title={`Best fit: ${recommendationReason}`}
+            >
+              ✨ BEST FIT
+            </span>
+          )}
+        </div>
+        <div style={{ fontSize: 12, color: "var(--muted)", fontFamily: "ui-monospace, monospace", marginTop: 4, fontWeight: 600 }}>
+          🏭 {br.multiTotal} CNC · {br.latheTotal} Lathe
         </div>
       </div>
     </label>

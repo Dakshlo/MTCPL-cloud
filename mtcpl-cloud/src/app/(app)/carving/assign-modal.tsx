@@ -66,10 +66,9 @@ const MACHINE_TINT: Record<Machine["status"], { bg: string; border: string; fg: 
   inactive: { bg: "var(--surface-alt)", border: "var(--border)", fg: "var(--muted)", label: "OFF" },
 };
 
-// Compute per-vendor machine type breakdown. We can't trust the
-// `live` summary alone because it doesn't split free machines by
-// type. Walk the machines array to count free / busy / maint by
-// each machine_type — drives the readout AND the lathe-sort.
+// Compute per-vendor machine type breakdown. Multi-head + legacy
+// single-head are merged into the "CNC" bucket (Daksh: include both
+// in CNC only). Lathe is its own bucket.
 function vendorTypeBreakdown(v: Vendor) {
   const out = {
     multiFree: 0,
@@ -86,15 +85,53 @@ function vendorTypeBreakdown(v: Vendor) {
       if (m.status === "idle") out.latheFree += 1;
       else if (m.status === "carving") out.latheBusy += 1;
     } else {
-      // multi_head_2 or legacy single_head — both go in the
-      // "multi-head" bucket since the fleet has no real single-head
-      // machines today.
+      // multi_head_2 + legacy single_head → "CNC" bucket. The fleet
+      // has no real single-head machines today, but the type stays
+      // in the schema as legacy.
       out.multiTotal += 1;
       if (m.status === "idle") out.multiFree += 1;
       else if (m.status === "carving") out.multiBusy += 1;
     }
   }
   return out;
+}
+
+// Rule-based recommender: score each vendor against the work type
+// + current free/queue state and pick the winner. Stays simple +
+// deterministic + explainable. Replaces "AI for this" — for a
+// math-heavy capacity check, rules beat LLMs every time.
+//
+// Scoring:
+//   +100 if vendor has ≥1 free machine of the matching type RIGHT NOW
+//   +50  if vendor has the matching type at all (will queue but can do it)
+//    -∞  if vendor doesn't have the matching type (eliminated)
+//   +5  per extra free matching machine (more headroom)
+//   -5  per slab currently queued (= ~30min wait estimate)
+//
+// Tie-breaker: alphabetical, so the same input always picks the
+// same vendor.
+function recommendVendor(
+  vendors: Vendor[],
+  workType: WorkType,
+): { vendorId: string | null; reason: string } {
+  let best: { id: string; score: number; reason: string } | null = null;
+  for (const v of vendors) {
+    if (v.vendor_type !== "CNC") continue; // recommender is CNC-only
+    const br = vendorTypeBreakdown(v);
+    const free = workType === "lathe" ? br.latheFree : br.multiFree;
+    const total = workType === "lathe" ? br.latheTotal : br.multiTotal;
+    if (total === 0) continue; // no matching machine in fleet
+    const queued = v.live?.queued ?? 0;
+    let score = (free > 0 ? 100 : 50) + free * 5 - queued * 5;
+    const reason =
+      free > 0
+        ? `${free} free ${workType === "lathe" ? "lathe" : "CNC"}${queued > 0 ? ` · ${queued} pending` : ""}`
+        : `will queue · ${queued} ahead`;
+    if (!best || score > best.score || (score === best.score && v.name < (vendors.find((x) => x.id === best!.id)?.name ?? ""))) {
+      best = { id: v.id, score, reason };
+    }
+  }
+  return best ? { vendorId: best.id, reason: best.reason } : { vendorId: null, reason: "" };
 }
 
 export function AssignModal({
@@ -128,6 +165,22 @@ export function AssignModal({
 
   const selectedVendor = vendors.find((v) => v.id === vendorId);
   const isManual = selectedVendor?.vendor_type === "Manual";
+
+  // Rule-based recommendation. Re-runs whenever work-type or the
+  // vendor fleet changes. Powers the ✨ Best fit badge on one
+  // vendor row + auto-selects that vendor when the modal opens.
+  const recommendation = useMemo(
+    () => recommendVendor(vendors, workType),
+    [vendors, workType],
+  );
+
+  // Auto-select the recommended vendor on mount + whenever the
+  // work-type flips. The user can override by clicking another row.
+  useEffect(() => {
+    if (recommendation.vendorId) {
+      setVendorId(recommendation.vendorId);
+    }
+  }, [recommendation.vendorId]);
 
   // Sort vendors so the right machine type bubbles up. Manual
   // vendors always sit at the bottom (capacity-irrelevant). For
@@ -409,7 +462,7 @@ export function AssignModal({
                                 flexShrink: 0,
                               }}
                             >
-                              {queued} in queue
+                              {queued} stock pending
                             </div>
                           )}
                           </label>
@@ -417,12 +470,15 @@ export function AssignModal({
                       );
                     }
 
-                    // CNC vendor row — type breakdown.
+                    // CNC vendor row — simplified per Daksh:
+                    // just name + fleet inventory totals (no
+                    // free/busy details — that's in the cockpit
+                    // panel below when this row is selected).
                     const br = vendorTypeBreakdown(v);
-                    const focusedFree = workType === "lathe" ? br.latheFree : br.multiFree;
-                    const focusedTotal = workType === "lathe" ? br.latheTotal : br.multiTotal;
-                    const hasFreeFocusedType = focusedFree > 0;
-                    const hasTypeInFleet = focusedTotal > 0;
+                    const hasTypeInFleet =
+                      (workType === "lathe" ? br.latheTotal : br.multiTotal) > 0;
+                    const isRecommended =
+                      recommendation.vendorId === v.id && !isSelected;
                     return (
                       <label
                         key={v.id}
@@ -431,12 +487,22 @@ export function AssignModal({
                           alignItems: "center",
                           justifyContent: "space-between",
                           gap: 10,
-                          padding: "10px 12px",
-                          background: isSelected ? "rgba(180,115,51,0.08)" : "var(--surface)",
-                          border: `1.5px solid ${isSelected ? "var(--gold-dark)" : "var(--border)"}`,
+                          padding: "12px 14px",
+                          background: isSelected
+                            ? "rgba(180,115,51,0.10)"
+                            : isRecommended
+                              ? "rgba(22,163,74,0.05)"
+                              : "var(--surface)",
+                          border: `2px solid ${
+                            isSelected
+                              ? "var(--gold-dark)"
+                              : isRecommended
+                                ? "rgba(22,163,74,0.4)"
+                                : "var(--border)"
+                          }`,
                           borderRadius: 8,
                           cursor: "pointer",
-                          opacity: hasTypeInFleet ? 1 : 0.6,
+                          opacity: hasTypeInFleet ? 1 : 0.5,
                           transition: "border-color 0.12s, background 0.12s",
                         }}
                       >
@@ -451,78 +517,77 @@ export function AssignModal({
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div
                             style={{
-                              fontWeight: 700,
-                              fontSize: 13,
-                              color: "var(--text)",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 8,
+                              flexWrap: "wrap",
                             }}
                           >
-                            {v.name}
+                            <span
+                              style={{
+                                fontWeight: 800,
+                                fontSize: 15,
+                                color: "var(--text)",
+                                letterSpacing: "0.02em",
+                              }}
+                            >
+                              {v.name}
+                            </span>
+                            {isRecommended && (
+                              <span
+                                style={{
+                                  fontSize: 10,
+                                  fontWeight: 800,
+                                  padding: "2px 8px",
+                                  borderRadius: 999,
+                                  background: "#16a34a",
+                                  color: "#fff",
+                                  letterSpacing: "0.06em",
+                                }}
+                                title={`Best fit: ${recommendation.reason}`}
+                              >
+                                ✨ BEST FIT
+                              </span>
+                            )}
                           </div>
+                          {/* Fleet inventory — total machines per
+                              type. No free/busy here; that lives in
+                              the cockpit panel below when selected. */}
                           <div
                             style={{
-                              fontSize: 11,
+                              fontSize: 12,
                               color: "var(--muted)",
                               fontFamily: "ui-monospace, monospace",
-                              marginTop: 2,
+                              marginTop: 4,
+                              fontWeight: 600,
                             }}
                           >
-                            <span
-                              style={{
-                                fontWeight: workType === "flat" ? 700 : 400,
-                                color: workType === "flat" ? "var(--text)" : "var(--muted)",
-                              }}
-                            >
-                              {br.multiFree}/{br.multiTotal} multi-head
-                            </span>
-                            {" · "}
-                            <span
-                              style={{
-                                fontWeight: workType === "lathe" ? 700 : 400,
-                                color: workType === "lathe" ? "#7c3aed" : "var(--muted)",
-                              }}
-                            >
-                              {br.latheFree}/{br.latheTotal} lathe
-                            </span>
-                            {queued > 0 && ` · ${queued} queued`}
+                            🏭 {br.multiTotal} CNC · {br.latheTotal} Lathe
                           </div>
                           {!hasTypeInFleet && (
                             <div
                               style={{
                                 fontSize: 10,
                                 color: "#b45309",
-                                marginTop: 2,
+                                marginTop: 4,
                                 fontStyle: "italic",
                               }}
                             >
-                              No {workType === "lathe" ? "lathe" : "multi-head"} in this vendor&apos;s fleet
+                              No {workType === "lathe" ? "lathe" : "CNC"} in this vendor&apos;s fleet
                             </div>
                           )}
-                        </div>
-                        <div
-                          style={{
-                            padding: "4px 10px",
-                            borderRadius: 999,
-                            background: hasFreeFocusedType
-                              ? "rgba(22,163,74,0.12)"
-                              : hasTypeInFleet
-                                ? "rgba(217,119,6,0.12)"
-                                : "var(--surface-alt)",
-                            color: hasFreeFocusedType
-                              ? "#15803d"
-                              : hasTypeInFleet
-                                ? "#b45309"
-                                : "var(--muted)",
-                            fontWeight: 700,
-                            fontSize: 12,
-                            fontFamily: "ui-monospace, monospace",
-                            whiteSpace: "nowrap",
-                            flexShrink: 0,
-                          }}
-                        >
-                          {focusedFree}/{focusedTotal} free
+                          {isRecommended && (
+                            <div
+                              style={{
+                                fontSize: 10,
+                                color: "#15803d",
+                                marginTop: 4,
+                                fontWeight: 600,
+                              }}
+                            >
+                              {recommendation.reason}
+                            </div>
+                          )}
                         </div>
                       </label>
                     );
@@ -531,30 +596,63 @@ export function AssignModal({
               )}
             </div>
 
-            {/* Per-machine breakdown for the selected vendor (CNC only) */}
+            {/* Cockpit panel — only renders for the picked CNC
+                vendor. Made bigger + more prominent per Daksh: this
+                is where the carving head reads the live state
+                before committing. Headline shows stock pending +
+                free/busy counts; grid shows every machine. */}
             {selectedVendor && selectedVendor.vendor_type === "CNC" && (
               <div
                 style={{
                   display: "flex",
                   flexDirection: "column",
-                  gap: 8,
-                  padding: 10,
-                  background: "var(--surface-alt)",
-                  border: "1px dashed var(--border)",
-                  borderRadius: 8,
+                  gap: 12,
+                  padding: "14px 16px",
+                  background: "linear-gradient(180deg, rgba(180,115,51,0.06) 0%, var(--surface-alt) 100%)",
+                  border: "2px solid var(--gold-dark)",
+                  borderRadius: 10,
+                  boxShadow: "0 2px 12px rgba(180,115,51,0.10)",
                 }}
               >
-                <div
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    color: "var(--muted)",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.06em",
-                  }}
-                >
-                  {selectedVendor.name}&apos;s machines
+                <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+                  <span
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 800,
+                      color: "var(--gold-dark)",
+                      letterSpacing: "0.02em",
+                    }}
+                  >
+                    🏭 {selectedVendor.name}&apos;s cockpit
+                  </span>
                 </div>
+                {/* Live stats — stock pending + free/busy/maintenance.
+                    Same numbers the actual /vendor cockpit shows, in
+                    a tighter row. */}
+                {(() => {
+                  const br = vendorTypeBreakdown(selectedVendor);
+                  const stockPending = selectedVendor.live?.queued ?? 0;
+                  const busy = selectedVendor.live?.busy ?? 0;
+                  const maint = selectedVendor.live?.maintenance ?? 0;
+                  return (
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
+                        gap: 8,
+                      }}
+                    >
+                      <CockpitStat label="Stock pending" value={stockPending} fg="#b45309" />
+                      <CockpitStat
+                        label={workType === "lathe" ? "Lathes free" : "CNC free"}
+                        value={workType === "lathe" ? br.latheFree : br.multiFree}
+                        fg="#15803d"
+                      />
+                      <CockpitStat label="Carving now" value={busy} fg="#1d4ed8" />
+                      <CockpitStat label="Down" value={maint} fg="#b91c1c" />
+                    </div>
+                  );
+                })()}
                 {selectedVendor.machines.length === 0 ? (
                   <div style={{ fontSize: 12, color: "var(--muted)" }}>
                     No machines configured for this vendor yet.
@@ -653,9 +751,9 @@ export function AssignModal({
                         border: "1px solid rgba(217,119,6,0.25)",
                       }}
                     >
-                      No free {workType === "lathe" ? "lathe" : "multi-head"} machines right
-                      now at {selectedVendor.name}. The slab will queue and
-                      load when one frees up.
+                      No free {workType === "lathe" ? "lathe" : "CNC"} machines right
+                      now at {selectedVendor.name}. The slab will go into stock
+                      pending and load when one frees up.
                     </div>
                   );
                 })()}
@@ -815,6 +913,45 @@ function Label({ children }: { children: React.ReactNode }) {
     >
       {children}
     </span>
+  );
+}
+
+// Compact stat tile for the cockpit panel — used to show stock
+// pending count + free / carving / down counts inline.
+function CockpitStat({ label, value, fg }: { label: string; value: number; fg: string }) {
+  return (
+    <div
+      style={{
+        padding: "8px 12px",
+        background: "var(--surface)",
+        border: "1px solid var(--border)",
+        borderRadius: 8,
+        textAlign: "center",
+      }}
+    >
+      <div
+        style={{
+          fontSize: 9,
+          color: "var(--muted)",
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+          fontWeight: 700,
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          fontSize: 22,
+          fontWeight: 800,
+          color: fg,
+          fontFamily: "ui-monospace, monospace",
+          marginTop: 2,
+        }}
+      >
+        {value}
+      </div>
+    </div>
   );
 }
 
