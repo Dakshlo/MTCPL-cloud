@@ -206,7 +206,26 @@ export async function rejectBlockAction(formData: FormData) {
   await refreshPaths();
 }
 
-export async function finishBlockAction(formData: FormData) {
+// Return-success contract: the action no longer redirects on the
+// happy path. Instead it returns `{ ok: true }` (or `{ ok: true,
+// alreadyDone: true }` for the idempotent re-click case) and the
+// client (finish-block-form.tsx handleSubmit) does router.push +
+// router.refresh.
+//
+// Why: when finishBlockAction transferred slabs from another block,
+// the post-action redirect was throwing during the Server Component
+// render of /cutting?tab=done — Next.js bundled the render error
+// back into the action response, which the form caught and showed
+// as "An error occurred in the Server Components render…" even
+// though the DB write had succeeded. Switching to client-side
+// navigation sidesteps the redirect+RSC race; any genuine page
+// error now lands on /cutting as a normal page error rather than
+// as a misleading "Cutting Done failed" form error.
+export type FinishBlockResult =
+  | { ok: true; alreadyDone?: boolean }
+  | { ok: false; error: string };
+
+export async function finishBlockAction(formData: FormData): Promise<FinishBlockResult> {
   const { profile } = await requireAuth(["owner", "team_head", "cutting_operator"]);
   const supabase = createAdminSupabaseClient();
 
@@ -319,7 +338,7 @@ export async function finishBlockAction(formData: FormData) {
     if (result.already_done) {
       console.log("[finishBlockAction] block was already done — skipping cleanup");
       await refreshPaths();
-      redirect("/cutting?tab=done");
+      return { ok: true, alreadyDone: true };
     }
 
     // Reconstruct the values the cleanup phase needs.
@@ -399,12 +418,8 @@ export async function finishBlockAction(formData: FormData) {
     }
     await refreshPaths();
     console.log("[finishBlockAction] SUCCESS", { sessionBlockId, blockId });
+    return { ok: true };
   } catch (err) {
-    // Don't swallow Next's redirect signal — let it propagate so the
-    // browser actually navigates.
-    if (err && typeof err === "object" && "digest" in err && typeof (err as { digest?: unknown }).digest === "string" && (err as { digest: string }).digest.startsWith("NEXT_REDIRECT")) {
-      throw err;
-    }
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[finishBlockAction] FAILED", {
       sessionBlockId, sessionId, blockId,
@@ -413,12 +428,11 @@ export async function finishBlockAction(formData: FormData) {
       error: msg,
       stack: err instanceof Error ? err.stack : null,
     });
-    throw err;
+    // No NEXT_REDIRECT re-throw branch — the happy path now returns
+    // `{ ok: true }` and the client does router.push, so any thrown
+    // error here is a genuine failure to surface.
+    return { ok: false, error: msg };
   }
-
-  // redirect() throws NEXT_REDIRECT internally — must live outside the
-  // try/catch above so our catch doesn't swallow it.
-  redirect("/cutting?tab=done");
 }
 
 /**

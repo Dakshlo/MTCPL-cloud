@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { ALLOWED_YARDS, yardLabel } from "@/lib/yards";
 import { ExtraSizePicker } from "./extra-size-picker";
 
@@ -61,7 +62,17 @@ export function FinishBlockForm({
    *  doesn't have to re-pick the same grade four times. They can still
    *  override per-row if the interior is a different grade. */
   parentQuality?: "" | "A" | "B";
-  finishAction: (formData: FormData) => Promise<void>;
+  /** Server action. New return shape: { ok: true } | { ok: false, error }.
+   *  Old shape (void) is still accepted for the case where an older
+   *  deploy is serving this client — handleSubmit treats undefined
+   *  as success-with-redirect-already-thrown. */
+  finishAction: (
+    formData: FormData,
+  ) => Promise<
+    | { ok: true; alreadyDone?: boolean }
+    | { ok: false; error: string }
+    | void
+  >;
 }) {
   const [checkedIds, setCheckedIds] = useState<Set<string>>(
     new Set(allSlabs.map((s) => s.id))
@@ -81,13 +92,14 @@ export function FinishBlockForm({
   // toggle handlers still route to the right set so submission is
   // unchanged downstream.
   const [transferIds, setTransferIds] = useState<Set<string>>(new Set());
-  // Submit / error state. Server action throws on failure; we catch
-  // here so the operator sees the actual message ("transfer slabs
-  // cut_done failed: …") instead of Next's generic "server error"
-  // page. Transition keeps the click responsive while the action
-  // runs (which can be a few seconds).
+  // Submit / error state. Server action now RETURNS a result
+  // (`{ ok: true }` or `{ ok: false, error }`) instead of redirecting,
+  // so the client handles navigation. This sidesteps a class of
+  // RSC-render-during-redirect failures that were spurious-erroring
+  // out the cross-block-transfer flow. See finishBlockAction comment.
   const [submitting, startSubmit] = useTransition();
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const router = useRouter();
 
   function toggle(id: string) {
     setCheckedIds((prev) => {
@@ -222,13 +234,29 @@ export function FinishBlockForm({
     formData.set("restock", restock);
     startSubmit(async () => {
       try {
-        await finishAction(formData);
-        // Action ends with redirect() which throws NEXT_REDIRECT;
-        // Next.js intercepts the throw and navigates the browser.
-        // If the await returns normally, we never reached the
-        // redirect — that's an unexpected success path; just reload.
+        const result = (await finishAction(formData)) as
+          | { ok: true; alreadyDone?: boolean }
+          | { ok: false; error: string }
+          | undefined;
+        // Old-shape (void/redirect) fallback: if the action returns
+        // undefined (e.g. an older deploy + new client), just
+        // refresh — it likely succeeded and threw NEXT_REDIRECT.
+        if (!result || result.ok) {
+          // Refresh server data + navigate. router.refresh
+          // re-runs the route's RSC tree against the now-updated
+          // DB; router.replace navigates to the Done tab. Doing
+          // both is the safest sequence — refresh first so the
+          // /cutting?tab=done page sees fresh data.
+          router.refresh();
+          router.replace("/cutting?tab=done");
+          return;
+        }
+        setSubmitError(result.error);
+        console.error("[FinishBlockForm] action returned error", result.error);
       } catch (err) {
-        // Next.js redirect signal: rethrow so the framework navigates.
+        // Should be rare now — the action returns instead of
+        // throwing on the happy path. NEXT_REDIRECT can still come
+        // from the requireAuth call up top (e.g. session expired).
         if (
           err &&
           typeof err === "object" &&
