@@ -667,17 +667,22 @@ function CompactRow({
   return (
     <div
       style={{
+        // Locked 3-column layout: [thumb] [info, grows] [button].
+        // The middle column has min-width: 0 so long temple names
+        // truncate with ellipsis instead of pushing the button to a
+        // new line. This keeps every Claim button vertically aligned
+        // down the right edge of the list.
         display: "flex",
         alignItems: "center",
-        gap: 10,
-        padding: "8px 10px",
+        gap: 12,
+        padding: "10px 12px",
         background: "var(--surface)",
         border: `1px solid ${isUrgent ? "rgba(220,38,38,0.4)" : "var(--border)"}`,
         borderRadius: 8,
-        flexWrap: "wrap",
+        boxShadow: isUrgent ? "0 0 0 2px rgba(220,38,38,0.06)" : "none",
       }}
     >
-      {/* Small thumb */}
+      {/* Thumb */}
       <div style={{ flexShrink: 0 }}>
         <SlabThumb
           stone={row.stone}
@@ -685,83 +690,91 @@ function CompactRow({
           w={row.width_ft}
           t={row.thickness_ft}
           stoneTypes={stoneTypes}
-          size={40}
-          height={40}
+          size={56}
+          height={56}
         />
       </div>
 
-      {/* Chips */}
-      {(isUrgent || row.is_lathe) && (
-        <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+      {/* Middle column: three info lines, all left-aligned. Truncates
+          on overflow so the button never gets pushed off the row. */}
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
+        {/* Line 1 — chips + slab id + dims (the prominent line) */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           {isUrgent && <ChipUrgent />}
           {row.is_lathe && <ChipLathe small />}
+          <code
+            style={{
+              fontFamily: "ui-monospace, monospace",
+              fontWeight: 800,
+              fontSize: 15,
+              color: "var(--text)",
+            }}
+          >
+            {row.slab_id}
+          </code>
+          <span
+            style={{
+              fontFamily: "ui-monospace, monospace",
+              fontWeight: 700,
+              fontSize: 13,
+              color: "var(--text)",
+              background: "var(--surface-alt)",
+              padding: "2px 7px",
+              borderRadius: 4,
+            }}
+          >
+            {dims}
+          </span>
         </div>
-      )}
 
-      {/* Slab id */}
-      <code
-        style={{
-          fontFamily: "ui-monospace, monospace",
-          fontWeight: 700,
-          fontSize: 13,
-          color: "var(--text)",
-          flexShrink: 0,
-        }}
-      >
-        {row.slab_id}
-      </code>
+        {/* Line 2 — temple + label, secondary */}
+        <div
+          style={{
+            fontSize: 12,
+            color: "var(--muted)",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            fontWeight: 600,
+          }}
+          title={`${row.temple}${row.slab_label ? " · " + row.slab_label : ""}`}
+        >
+          🏛 {row.temple}
+          {row.slab_label && ` · ${row.slab_label}`}
+        </div>
 
-      {/* Temple + dims */}
-      <span
-        style={{
-          fontSize: 11,
-          color: "var(--muted)",
-          flex: "1 1 180px",
-          minWidth: 0,
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {row.temple}
-        {row.slab_label && ` · ${row.slab_label}`}
-        {" · "}
-        <span style={{ fontFamily: "ui-monospace, monospace", color: "var(--text)" }}>{dims}</span>
-      </span>
-
-      {/* From → To inline (no big cards). Wraps as a chip pair. */}
-      <div
-        style={{
-          display: "flex",
-          gap: 6,
-          alignItems: "center",
-          fontSize: 11,
-          fontFamily: "ui-monospace, monospace",
-          flexShrink: 0,
-          flexWrap: "wrap",
-        }}
-      >
-        <span style={{ color: "#7c2d12", fontWeight: 700 }}>
-          📍 {row.stock_location ?? "—"}
-        </span>
-        <span style={{ color: "var(--muted)" }}>→</span>
-        <span style={{ color: "#15803d", fontWeight: 700 }}>
-          🏭 {row.vendor_name}
-          {row.vendor_dropoff && (
-            <span style={{ color: "#15803d", fontWeight: 400 }}> · {row.vendor_dropoff}</span>
+        {/* Line 3 — from → to route, monospace */}
+        <div
+          style={{
+            display: "flex",
+            gap: 6,
+            alignItems: "center",
+            fontSize: 11,
+            fontFamily: "ui-monospace, monospace",
+            flexWrap: "wrap",
+            color: "var(--muted)",
+          }}
+        >
+          <span style={{ color: "#7c2d12", fontWeight: 700 }}>
+            📍 {row.stock_location ?? "—"}
+          </span>
+          <span style={{ color: "var(--muted-light)", fontWeight: 700 }}>→</span>
+          <span style={{ color: "#15803d", fontWeight: 700 }}>
+            🏭 {row.vendor_name}
+            {row.vendor_dropoff && (
+              <span style={{ color: "#15803d", fontWeight: 400 }}> · {row.vendor_dropoff}</span>
+            )}
+          </span>
+          {kind === "others" && row.claimed_by_name && (
+            <span style={{ color: "var(--muted)", fontWeight: 400, fontSize: 10 }}>
+              · Claimed by <strong>{row.claimed_by_name}</strong>
+              {row.claimed_at && ` · ${formatRelative(row.claimed_at)} ago`}
+            </span>
           )}
-        </span>
+        </div>
       </div>
 
-      {/* Claimed-by-X meta for the others kind */}
-      {kind === "others" && row.claimed_by_name && (
-        <span style={{ fontSize: 10, color: "var(--muted)", flexShrink: 0 }}>
-          Claimed by <strong>{row.claimed_by_name}</strong>
-          {row.claimed_at && ` · ${formatRelative(row.claimed_at)} ago`}
-        </span>
-      )}
-
-      {/* Action button */}
+      {/* Right column: action button, locked to the right edge */}
       {kind === "available" && (
         <form action={claimSlabTransferAction} style={{ flexShrink: 0 }}>
           <input type="hidden" name="carving_item_id" value={row.id} />
@@ -772,10 +785,11 @@ function CompactRow({
             disabled={!!disabledReason}
             title={disabledReason ?? undefined}
             style={{
-              fontSize: 12,
-              padding: "8px 14px",
+              fontSize: 13,
+              padding: "10px 18px",
               fontWeight: 700,
-              minHeight: 36,
+              minHeight: 44,
+              minWidth: 110,
               opacity: disabledReason ? 0.45 : 1,
               cursor: disabledReason ? "not-allowed" : "pointer",
               whiteSpace: "nowrap",
@@ -792,7 +806,7 @@ function CompactRow({
           <button
             type="submit"
             className="ghost-button danger-ghost"
-            style={{ fontSize: 11, padding: "6px 10px", whiteSpace: "nowrap" }}
+            style={{ fontSize: 12, padding: "8px 12px", whiteSpace: "nowrap" }}
           >
             Release
           </button>
