@@ -76,11 +76,22 @@ export function canMarkPaid(p: Pick<Profile, "role">): boolean {
   return false;
 }
 
-/** bill_vendors CRUD. Accountant-managed, but owner + developer can
- *  edit too (small team — easier than gatekeeping vendor adds). */
+/** Full bill_vendors CRUD — list, create, edit, archive. Powers the
+ *  /accounts/vendors page in its entirety. */
 export function canManageBillVendors(p: Pick<Profile, "role">): boolean {
   if (p.role === "developer") return true;
   if (p.role === "owner") return true;
   if (p.role === "accountant") return true;
+  return false;
+}
+
+/** Add a NEW bill vendor. Broader than canManageBillVendors — also
+ *  allows biller, because the "+ Add new vendor" button on the
+ *  bill-entry page (new-bill flow) needs to work when a biller
+ *  enters a bill from a never-before-seen supplier. Edit and archive
+ *  on existing vendors still require canManageBillVendors. */
+export function canAddBillVendors(p: Pick<Profile, "role">): boolean {
+  if (canManageBillVendors(p)) return true;
+  if (p.role === "biller") return true;
   return false;
 }

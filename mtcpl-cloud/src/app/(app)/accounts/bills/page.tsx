@@ -18,7 +18,7 @@ import {
   VendorIdentity,
 } from "../_ui/components";
 
-type SearchParams = Promise<{ status?: string; vendor?: string }>;
+type SearchParams = Promise<{ status?: string; vendor?: string; q?: string }>;
 
 const ALL_STATUSES = ["pending_approval", "approved", "rejected", "fully_paid", "cancelled"];
 const STATUS_LABELS: Record<string, string> = {
@@ -63,6 +63,7 @@ export default async function BillsListPage({
   const sp = await searchParams;
   const statusFilter = sp.status ?? "";
   const vendorFilter = sp.vendor ?? "";
+  const searchQuery = (sp.q ?? "").trim();
 
   const restrictToOwn =
     profile.role === "biller" &&
@@ -88,6 +89,12 @@ export default async function BillsListPage({
   if (restrictToOwn) query = query.eq("submitted_by", profile.id);
   if (statusFilter && ALL_STATUSES.includes(statusFilter)) query = query.eq("status", statusFilter);
   if (vendorFilter) query = query.eq("bill_vendor_id", vendorFilter);
+  // Token + vendor's-bill-no search. PostgREST `or` filter does an
+  // OR across both columns with case-insensitive prefix match.
+  if (searchQuery) {
+    const safe = searchQuery.replace(/[%,]/g, " ");
+    query = query.or(`token.ilike.%${safe}%,vendor_bill_no.ilike.%${safe}%`);
+  }
 
   const { data: billsRaw, error } = await query;
   if (error) throw new Error(error.message);
@@ -137,20 +144,40 @@ export default async function BillsListPage({
         }}
       >
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-          <StatusChip current={statusFilter} value="" vendorFilter={vendorFilter} label={`All (${allCount})`} />
+          <StatusChip current={statusFilter} value="" vendorFilter={vendorFilter} searchQuery={searchQuery} label={`All (${allCount})`} />
           {ALL_STATUSES.map((s) => (
             <StatusChip
               key={s}
               current={statusFilter}
               value={s}
               vendorFilter={vendorFilter}
+              searchQuery={searchQuery}
               label={`${STATUS_LABELS[s]} · ${counts[s] ?? 0}`}
             />
           ))}
         </div>
         <div style={{ flex: 1, display: "flex", justifyContent: "flex-end", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <form method="GET" style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+          <form method="GET" style={{ display: "inline-flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             {statusFilter && <input type="hidden" name="status" value={statusFilter} />}
+            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              🔍 Search
+            </span>
+            <input
+              type="search"
+              name="q"
+              defaultValue={searchQuery}
+              placeholder="Token (T-2026-1) or bill no…"
+              style={{
+                padding: "6px 12px",
+                fontSize: 13,
+                background: "#fff",
+                border: `1px solid ${ACCOUNTS_TOKENS.borderStrong}`,
+                borderRadius: 8,
+                color: "var(--text)",
+                width: 220,
+                fontFamily: "ui-monospace, monospace",
+              }}
+            />
             <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
               Vendor
             </span>
@@ -176,7 +203,7 @@ export default async function BillsListPage({
             <button type="submit" style={BUTTON_STYLES.secondary}>
               Apply
             </button>
-            {(statusFilter || vendorFilter) && (
+            {(statusFilter || vendorFilter || searchQuery) && (
               <Link href="/accounts/bills" style={{ fontSize: 12, color: "var(--muted)", textDecoration: "underline" }}>
                 Clear all
               </Link>
@@ -303,17 +330,20 @@ function StatusChip({
   current,
   value,
   vendorFilter,
+  searchQuery,
   label,
 }: {
   current: string;
   value: string;
   vendorFilter: string;
+  searchQuery: string;
   label: string;
 }) {
   const isActive = current === value;
   const params = new URLSearchParams();
   if (value) params.set("status", value);
   if (vendorFilter) params.set("vendor", vendorFilter);
+  if (searchQuery) params.set("q", searchQuery);
   const href = `/accounts/bills${params.toString() ? `?${params.toString()}` : ""}`;
   return (
     <Link

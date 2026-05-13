@@ -18,6 +18,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
 import { notify } from "@/lib/notifications";
 import {
+  canAddBillVendors,
   canApproveBills,
   canConfirmPayments,
   canManageAccounts,
@@ -840,12 +841,22 @@ export async function upsertBillVendorAction(formData: FormData): Promise<
   | { ok: false; error: string }
 > {
   const { profile } = await requireAuth();
-  if (!canManageBillVendors(profile)) {
+  const id = String(formData.get("id") || "").trim() || null;
+
+  // Create vs update have different permission gates:
+  //   • CREATE — biller can add a new vendor mid-bill-entry, so the
+  //     gate is the broader canAddBillVendors.
+  //   • UPDATE — editing an existing vendor still requires the full
+  //     canManageBillVendors (dev / owner / accountant). Billers
+  //     don't have UI access to edit vendors anyway.
+  const isCreate = !id;
+  const allowed = isCreate
+    ? canAddBillVendors(profile)
+    : canManageBillVendors(profile);
+  if (!allowed) {
     return { ok: false, error: "You do not have permission to manage bill vendors." };
   }
   const supabase = createAdminSupabaseClient();
-
-  const id = String(formData.get("id") || "").trim() || null;
   const name = String(formData.get("name") || "").trim();
   if (!name) return { ok: false, error: "Vendor name is required." };
 

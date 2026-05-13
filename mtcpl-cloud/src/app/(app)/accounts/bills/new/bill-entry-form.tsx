@@ -263,6 +263,27 @@ export function BillEntryForm({
                 required
               />
             </div>
+            {/* INR-formatted preview. Type "150000" → see "= ₹1,50,000".
+                Number inputs can't show comma separators directly, so
+                we render the formatted value next to the field as a
+                live mirror. Hidden when the field is empty. */}
+            {subtotalNum > 0 && (
+              <span
+                style={{
+                  fontSize: 12,
+                  color: ACCOUNTS_TOKENS.accent,
+                  fontFamily: "ui-monospace, monospace",
+                  fontWeight: 600,
+                }}
+              >
+                = ₹{subtotalNum.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                {subtotalNum >= 100000 && (
+                  <span style={{ color: "var(--muted)", fontWeight: 400, marginLeft: 6 }}>
+                    ({inrWords(subtotalNum)})
+                  </span>
+                )}
+              </span>
+            )}
           </FormField>
 
           <FormField label="GST %">
@@ -501,4 +522,17 @@ function PreviewRow({
       {value}
     </div>
   );
+}
+
+/** Spoken-form Indian numeric annotation — "1 lakh", "12.5 lakh",
+ *  "1.5 crore", etc. Only kicks in for ≥ 1 lakh (where it's actually
+ *  useful — below that, the digits are short enough to read). */
+function inrWords(n: number): string {
+  if (n < 100_000) return "";
+  if (n < 10_000_000) {
+    const lakh = n / 100_000;
+    return `${lakh % 1 === 0 ? lakh.toFixed(0) : lakh.toFixed(2)} lakh`;
+  }
+  const cr = n / 10_000_000;
+  return `${cr % 1 === 0 ? cr.toFixed(0) : cr.toFixed(2)} crore`;
 }
