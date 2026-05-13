@@ -56,7 +56,7 @@ export default async function BillVendorsPage() {
   return (
     <section className="page-card">
       <AccountsHero
-        title="Bill vendors"
+        title="Vendors Profile (Bill)"
         description="The beneficiary master. Distinct from carving vendors. Bank details + GST info live here so the entry form stays light."
         badge={
           <span

@@ -117,8 +117,9 @@ const navEntries: NavEntry[] = [
   //                  by default (getDefaultRouteForRole), and the page
   //                  headers cross-link to /accounts/bills with the
   //                  "← All bills" + "+ New bill" buttons.
-  //   • developer/owner — full visibility except Pay Today + Bills Audit,
-  //                  which live in the top bar as count-badge buttons.
+  //   • developer/owner — sidebar entries except:
+  //                       - Enter Bill (reached via "+ New bill" CTA on All Bills)
+  //                       - Pay Today + Bills Audit (top-bar count badges)
   //   • accountant — full visibility incl. Pay Today (their queue surface).
   //                  No top-bar badge for accountant by design — the
   //                  sidebar entry is their entry point.
@@ -126,12 +127,6 @@ const navEntries: NavEntry[] = [
     type: "divider",
     label: "ACCOUNTS",
     roles: ["developer", "owner", "accountant"],
-  },
-  {
-    href: "/accounts/bills/new",
-    label: "Enter Bill",
-    icon: "🧾",
-    roles: ["developer", "owner"],
   },
   {
     href: "/accounts/bills",
@@ -161,7 +156,7 @@ const navEntries: NavEntry[] = [
   },
   {
     href: "/accounts/vendors",
-    label: "Bill Vendors",
+    label: "Vendors Profile (Bill)",
     icon: "🏢",
     roles: ["developer", "owner", "accountant"],
   },
@@ -240,6 +235,12 @@ export function Sidebar({
     if (href === "/carving/floor") return pathname.startsWith("/carving/floor");
     if (href === "/carving/reports") return pathname.startsWith("/carving/reports");
     if (href === "/carving/transfer") return pathname.startsWith("/carving/transfer");
+    // /accounts is the Due Bills landing — exact match only so it
+    // doesn't light up while the user is on any /accounts/* sub-route
+    // (e.g. /accounts/bills, /accounts/payments, etc.). Otherwise the
+    // sidebar shows three menu items highlighted at once for any
+    // accounts page, which is what Daksh flagged.
+    if (href === "/accounts") return pathname === "/accounts";
     return pathname === href || pathname.startsWith(href + "/");
   }
 

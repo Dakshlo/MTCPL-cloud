@@ -75,7 +75,7 @@ export default async function BillVendorDetailPage({
             fontWeight: 600,
           }}
         >
-          ← All bill vendors
+          ← All vendors profile (bill)
         </Link>
       </div>
 
