@@ -956,13 +956,20 @@ function MachineCard({
     downtimeLabel = `Down for ${fmtDuration(downMin)}`;
   }
 
+  // Lathe machines get a heavily-rounded pill shape so they're
+  // unmistakable next to the rectangular CNC cards on the cockpit
+  // grid. We can't make the whole card a true circle (way too much
+  // content — header, slab thumb, action buttons), but a 28px
+  // border-radius is round enough to read as "the rounder one =
+  // lathe" at a glance.
+  const isLathe = machine.machine_type === "lathe";
   return (
     <div
       style={{
         padding: 0,
         background: tint.bg,
         border: `2px solid ${tint.border}`,
-        borderRadius: 10,
+        borderRadius: isLathe ? 28 : 10,
         display: "flex",
         flexDirection: "column",
         position: "relative",
@@ -977,14 +984,18 @@ function MachineCard({
       }}
     >
       {/* Top accent bar — colour the entire card edge so cards are
-          distinguishable at a glance even when scanning fast */}
-      <div
-        style={{
-          height: 4,
-          background: tint.accent,
-          opacity: machine.status === "idle" ? 0.4 : 1,
-        }}
-      />
+          distinguishable at a glance even when scanning fast.
+          Skipped for lathes since the pill-shape would clip the
+          straight 4px bar. */}
+      {!isLathe && (
+        <div
+          style={{
+            height: 4,
+            background: tint.accent,
+            opacity: machine.status === "idle" ? 0.4 : 1,
+          }}
+        />
+      )}
 
       <div style={{ padding: "10px 12px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
         {/* Header: BIG machine code + prominent status pill */}

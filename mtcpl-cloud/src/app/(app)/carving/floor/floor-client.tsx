@@ -1116,28 +1116,34 @@ function VendorTvSlide({ vendor, now, slideKey, dark }: { vendor: FloorVendor; n
 
 function CompactMachineTile({ machine, now }: { machine: FloorMachine; now: number }) {
   const tint = STATUS_TINT[machine.status];
+  // Lathe machines render with a heavily rounded pill shape on the
+  // floor view too, matching the rest of the cockpit surfaces. Easy
+  // to pick out the turning machines from the panel CNCs at a glance.
+  const isLathe = machine.machine_type === "lathe";
   return (
     <div
       style={{
         padding: "8px 10px",
         background: tint.bg,
         border: `1.5px solid ${tint.border}`,
-        borderRadius: 8,
+        borderRadius: isLathe ? 24 : 8,
         display: "flex",
         flexDirection: "column",
         gap: 4,
         position: "relative",
       }}
     >
-      <div
-        style={{
-          height: 3,
-          background: tint.accent,
-          borderRadius: 2,
-          marginBottom: 4,
-          opacity: machine.status === "idle" ? 0.4 : 1,
-        }}
-      />
+      {!isLathe && (
+        <div
+          style={{
+            height: 3,
+            background: tint.accent,
+            borderRadius: 2,
+            marginBottom: 4,
+            opacity: machine.status === "idle" ? 0.4 : 1,
+          }}
+        />
+      )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 4 }}>
         <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13 }}>
           {machine.machine_code}
@@ -1255,13 +1261,16 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
   const subColor = dark ? "rgba(255,255,255,0.7)" : "#666";
   const sub2Color = dark ? "rgba(255,255,255,0.5)" : "#666";
   const dividerColor = dark ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.08)";
+  // Lathe machines are heavily rounded — same visual cue used on
+  // every other cockpit surface so the TV slide reads consistently.
+  const isLathe = machine.machine_type === "lathe";
   return (
     <div
       style={{
         padding: 18,
         background: cardBg,
         border: `2px solid ${cardBorder}`,
-        borderRadius: 14,
+        borderRadius: isLathe ? 40 : 14,
         display: "flex",
         flexDirection: "column",
         gap: 10,

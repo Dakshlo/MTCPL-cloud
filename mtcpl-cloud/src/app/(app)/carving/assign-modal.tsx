@@ -690,43 +690,59 @@ export function AssignModal({
                         workType === "lathe"
                           ? m.machine_type === "lathe"
                           : m.machine_type !== "lathe";
+                      // Lathe machines render as circles — visually
+                      // distinct from rectangular CNC tiles so the
+                      // floor + carving head can pick them out at a
+                      // glance. CNC tiles keep their existing layout.
+                      const isLathe = m.machine_type === "lathe";
                       return (
                         <div
                           key={m.id}
                           style={{
-                            padding: "6px 10px",
+                            padding: isLathe ? 0 : "6px 10px",
+                            width: isLathe ? 78 : undefined,
+                            height: isLathe ? 78 : undefined,
                             background: tint.bg,
                             border: `1.5px solid ${matchesWorkType ? tint.border : "var(--border)"}`,
-                            borderRadius: 6,
+                            borderRadius: isLathe ? "50%" : 6,
                             fontFamily: "ui-monospace, monospace",
                             display: "flex",
                             flexDirection: "column",
-                            alignItems: "flex-start",
+                            alignItems: isLathe ? "center" : "flex-start",
+                            justifyContent: isLathe ? "center" : "flex-start",
                             gap: 2,
                             opacity: matchesWorkType ? 1 : 0.45,
+                            textAlign: isLathe ? ("center" as const) : undefined,
                           }}
                           title={
                             !matchesWorkType
                               ? `Wrong machine type for ${workType === "lathe" ? "lathe" : "flat-panel"} work`
-                              : undefined
+                              : isLathe
+                                ? `Lathe — ${m.machine_code} · ${tint.label}`
+                                : undefined
                           }
                         >
-                          <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 4,
+                              flexWrap: "wrap",
+                              justifyContent: isLathe ? "center" : "flex-start",
+                            }}
+                          >
                             <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>
                               {m.machine_code}
                             </span>
-                            {typeLabel && (
+                            {typeLabel && !isLathe && (
                               <span
                                 style={{
                                   fontSize: 8,
                                   fontWeight: 800,
                                   padding: "0px 5px",
                                   borderRadius: 3,
-                                  background:
-                                    m.machine_type === "lathe"
-                                      ? "rgba(124,58,237,0.15)"
-                                      : "rgba(180,115,51,0.18)",
-                                  color: m.machine_type === "lathe" ? "#7c3aed" : "#b45309",
+                                  background: "rgba(180,115,51,0.18)",
+                                  color: "#b45309",
                                   letterSpacing: "0.06em",
                                 }}
                               >
@@ -734,6 +750,18 @@ export function AssignModal({
                               </span>
                             )}
                           </div>
+                          {isLathe && (
+                            <span
+                              style={{
+                                fontSize: 8,
+                                fontWeight: 800,
+                                color: "#7c3aed",
+                                letterSpacing: "0.08em",
+                              }}
+                            >
+                              🌀 LATHE
+                            </span>
+                          )}
                           <span
                             style={{
                               fontSize: 9,
