@@ -290,9 +290,36 @@ export function DueBillsClient({
                             max={r.amountOutstanding}
                             value={display}
                             disabled={r.hasOpenPayment}
-                            onChange={(e) =>
-                              setAmountOverrides((p) => ({ ...p, [r.id]: e.target.value }))
-                            }
+                            onChange={(e) => {
+                              // Cap at outstanding — can't propose more than
+                              // what's owed. Empty string is allowed during
+                              // typing so the user can clear and retype.
+                              const raw = e.target.value;
+                              if (raw === "") {
+                                setAmountOverrides((p) => ({ ...p, [r.id]: "" }));
+                                return;
+                              }
+                              const n = Number(raw);
+                              if (!Number.isFinite(n) || n < 0) return;
+                              const clamped =
+                                n > r.amountOutstanding
+                                  ? String(r.amountOutstanding)
+                                  : raw;
+                              setAmountOverrides((p) => ({ ...p, [r.id]: clamped }));
+                            }}
+                            onBlur={(e) => {
+                              // On blur, normalise: empty/0 → outstanding,
+                              // otherwise leave the user's number alone.
+                              const n = Number(e.target.value);
+                              if (!Number.isFinite(n) || n <= 0) {
+                                setAmountOverrides((p) => {
+                                  const next = { ...p };
+                                  delete next[r.id];
+                                  return next;
+                                });
+                              }
+                            }}
+                            title={`Max ₹${r.amountOutstanding.toLocaleString("en-IN")} — capped at outstanding`}
                             style={{
                               width: 120,
                               padding: "6px 8px",

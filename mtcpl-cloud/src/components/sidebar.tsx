@@ -112,6 +112,9 @@ const navEntries: NavEntry[] = [
   // ── ACCOUNTS section (migration 028) ────────────────────────────
   // The new accounting / finance vertical. Roles: biller (data entry),
   // accountant (dashboard + payments), owner + developer everywhere.
+  // Bills Audit + Pay Today live in the TOP BAR (layout.tsx) since
+  // those are queue-style surfaces that need an always-visible count
+  // badge — they're omitted from the sidebar to avoid duplication.
   {
     type: "divider",
     label: "ACCOUNTS",
@@ -130,21 +133,9 @@ const navEntries: NavEntry[] = [
     roles: ["developer", "owner", "biller", "accountant"],
   },
   {
-    href: "/accounts/approvals",
-    label: "Bills Audit",
-    icon: "✅",
-    roles: ["developer", "owner"],
-  },
-  {
     href: "/accounts",
     label: "Due Bills",
     icon: "💰",
-    roles: ["developer", "owner", "accountant"],
-  },
-  {
-    href: "/accounts/pay-today",
-    label: "Pay Today",
-    icon: "💸",
     roles: ["developer", "owner", "accountant"],
   },
   {
