@@ -24,6 +24,7 @@ import {
   canManageAccounts,
   canManageBillVendors,
   canMarkPaid,
+  canRenameBillVendor,
   canSubmitBills,
 } from "@/lib/accounts-permissions";
 
@@ -879,9 +880,18 @@ export async function upsertBillVendorAction(formData: FormData): Promise<
 
   try {
     if (id) {
+      // Strip `name` from the UPDATE payload when the actor can't
+      // rename. Server is the source of truth — even if a client
+      // sent the old name in the form, we don't trust it here.
+      // Owner + developer can rename; accountant cannot. (Biller
+      // can't even reach this branch — they can only CREATE.)
+      const updatePayload: Record<string, unknown> = { ...payload };
+      if (!canRenameBillVendor(profile)) {
+        delete updatePayload.name;
+      }
       const { error } = await supabase
         .from("bill_vendors")
-        .update(payload)
+        .update(updatePayload)
         .eq("id", id);
       if (error) {
         if (error.code === PG_UNIQUE_VIOLATION) {
@@ -889,7 +899,10 @@ export async function upsertBillVendorAction(formData: FormData): Promise<
         }
         return { ok: false, error: error.message };
       }
-      void logAudit(profile.id, "bill_vendor_updated", "bill_vendor", id, { name });
+      void logAudit(profile.id, "bill_vendor_updated", "bill_vendor", id, {
+        name,
+        renamed: canRenameBillVendor(profile),
+      });
       await refreshAccountsPaths();
       return { ok: true, vendorId: id };
     }

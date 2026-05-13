@@ -2,7 +2,10 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { canManageBillVendors } from "@/lib/accounts-permissions";
+import {
+  canManageBillVendors,
+  canRenameBillVendor,
+} from "@/lib/accounts-permissions";
 import { upsertBillVendorAction } from "../../actions";
 import { VendorForm } from "../vendor-form";
 import {
@@ -166,6 +169,7 @@ export default async function BillVendorDetailPage({
           action={upsertBillVendorAction}
           mode="edit"
           vendorId={id}
+          nameLocked={!canRenameBillVendor(profile)}
           initialValues={{
             name: vendor.name,
             category: vendor.category,

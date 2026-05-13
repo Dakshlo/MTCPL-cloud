@@ -95,3 +95,15 @@ export function canAddBillVendors(p: Pick<Profile, "role">): boolean {
   if (p.role === "biller") return true;
   return false;
 }
+
+/** Change the vendor NAME on an existing profile. Locked to
+ *  developer + owner only. The accountant can edit every other field
+ *  (phone, GSTIN, bank details, address, notes) but the name is the
+ *  vendor's canonical identifier — renaming mid-stream creates
+ *  confusion in audit logs and the bill list (where the vendor
+ *  shows up next to its existing bills). */
+export function canRenameBillVendor(p: Pick<Profile, "role">): boolean {
+  if (p.role === "developer") return true;
+  if (p.role === "owner") return true;
+  return false;
+}

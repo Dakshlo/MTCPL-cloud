@@ -24,6 +24,7 @@ export function VendorForm({
   initialValues,
   vendorId,
   trigger,
+  nameLocked = false,
 }: {
   action: (formData: FormData) => Promise<UpsertResult>;
   mode: "create" | "edit";
@@ -43,6 +44,11 @@ export function VendorForm({
   };
   vendorId?: string;
   trigger?: React.ReactNode;
+  /** When true, the Name field renders as read-only with a lock
+   *  indicator + hint. Only owner / developer can rename a vendor
+   *  (canRenameBillVendor). The server also enforces this — even
+   *  if the form's submitted name differs, the action drops it. */
+  nameLocked?: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -93,14 +99,40 @@ export function VendorForm({
       onSubmit={handleSubmit}
       style={{ display: "flex", flexDirection: "column", gap: 14 }}
     >
-      <Field label="Vendor name" required>
+      <Field label={nameLocked ? "Vendor name 🔒" : "Vendor name"} required={!nameLocked}>
         <input
           value={form.name}
-          onChange={(e) => setForm({ ...form, name: e.target.value })}
-          required
-          style={INPUT_STYLE}
+          onChange={(e) => {
+            if (nameLocked) return;
+            setForm({ ...form, name: e.target.value });
+          }}
+          required={!nameLocked}
+          readOnly={nameLocked}
+          disabled={nameLocked}
+          style={{
+            ...INPUT_STYLE,
+            background: nameLocked ? ACCOUNTS_TOKENS.surfaceMuted : "#fff",
+            color: nameLocked ? "var(--muted)" : "var(--text)",
+            cursor: nameLocked ? "not-allowed" : "text",
+          }}
           autoFocus={mode === "create"}
+          title={nameLocked ? "Only owner or developer can rename a vendor" : undefined}
         />
+        {nameLocked && (
+          <span
+            style={{
+              fontSize: 11,
+              color: "var(--muted)",
+              marginTop: 4,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+            }}
+          >
+            🔒 Name is locked. Only the owner or developer can rename a vendor.
+            Edit phone, GSTIN, bank, address, etc. freely below.
+          </span>
+        )}
       </Field>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         <Field label="Category">
