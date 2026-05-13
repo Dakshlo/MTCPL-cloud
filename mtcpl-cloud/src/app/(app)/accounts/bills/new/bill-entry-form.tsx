@@ -19,9 +19,9 @@ import {
   BUTTON_STYLES,
   INPUT_STYLE,
   Money,
-  VendorAvatar,
   VendorIdentity,
 } from "../../_ui/components";
+import { VendorPicker } from "./vendor-picker";
 
 export type BillVendorOption = {
   id: string;
@@ -161,52 +161,22 @@ export function BillEntryForm({
               }}
             >
               <strong>No bill vendors yet.</strong> Click <strong>+ Add new vendor</strong>{" "}
-              up at the top of the page to add your first one. The dropdown will populate
+              up at the top of the page to add your first one. The picker will populate
               after you save.
             </div>
           ) : (
             <>
               <FormField label="Vendor" required>
-                <select
-                  value={vendorId}
-                  onChange={(e) => setVendorId(e.target.value)}
-                  required
-                  style={{ ...INPUT_STYLE, cursor: "pointer" }}
-                >
-                  <option value="">— Select a vendor —</option>
-                  {vendors.map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {v.name}
-                      {v.category ? ` · ${v.category}` : ""}
-                      {v.gstin ? ` · GSTIN ${v.gstin}` : ""}
-                    </option>
-                  ))}
-                </select>
+                <VendorPicker
+                  vendors={vendors}
+                  selectedId={vendorId}
+                  onChange={setVendorId}
+                />
               </FormField>
-              {selectedVendor && (
-                <div
-                  style={{
-                    marginTop: 4,
-                    padding: "10px 12px",
-                    background: ACCOUNTS_TOKENS.accentLight,
-                    border: `1px solid ${ACCOUNTS_TOKENS.accentBorder}`,
-                    borderRadius: 10,
-                  }}
-                >
-                  <VendorIdentity
-                    name={selectedVendor.name}
-                    subLabel={
-                      [selectedVendor.category, selectedVendor.gstin && `GSTIN ${selectedVendor.gstin}`]
-                        .filter(Boolean)
-                        .join(" · ") || undefined
-                    }
-                    size={36}
-                  />
-                </div>
-              )}
               <p style={{ margin: 0, fontSize: 11, color: "var(--muted)" }}>
-                Need a new vendor? Use the <strong>+ Add new vendor</strong> button at the
-                top of the page — once you save, this dropdown picks it up.
+                Click the field above to search and pick a vendor. Need a new one? Use the{" "}
+                <strong>+ Add new vendor</strong> button at the top of the page — once
+                you save, the picker auto-selects it.
               </p>
             </>
           )}
