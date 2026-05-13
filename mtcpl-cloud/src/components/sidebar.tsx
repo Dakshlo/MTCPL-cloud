@@ -86,12 +86,9 @@ const navEntries: NavEntry[] = [
     icon: "🚚",
     roles: ["developer", "owner", "carving_head"],
   },
-  {
-    href: "/challan",
-    label: "Challan",
-    icon: "📋",
-    roles: ["developer", "owner"],
-  },
+  // Challan removed from sidebar at Daksh's request — it's reachable
+  // from a button on the Dispatch page header, which is the natural
+  // path (you finalise a dispatch, then look at the challan).
   {
     href: "/vendor",
     label: "My Jobs",
@@ -99,15 +96,16 @@ const navEntries: NavEntry[] = [
     roles: ["developer", "vendor"],
   },
   {
-    // Migration 025 — slab transfer dispatch list. Placed UNDER
-    // My Jobs in the sidebar at user's request — feels like a
-    // sibling of the vendor's own workstation rather than tucked
-    // up with the dispatcher's tools. slab_transfer role lands
-    // here on login. carving_head + owner + dev see it for oversight.
+    // Migration 025 — slab transfer dispatch list. Visibility is
+    // intentionally narrow: only the runner role (slab_transfer)
+    // who actually moves slabs from cutting yard to vendor shades,
+    // plus developer for oversight. Owner + carving_head used to
+    // see it but Daksh asked to drop them — this is a runner-only
+    // workstation, not a managerial surface.
     href: "/carving/transfer",
     label: "Slab Transfer",
     icon: "🚧",
-    roles: ["developer", "owner", "carving_head", "slab_transfer"],
+    roles: ["developer", "slab_transfer"],
   },
   // ── ACCOUNTS section (migration 028) ────────────────────────────
   // The new accounting / finance vertical.

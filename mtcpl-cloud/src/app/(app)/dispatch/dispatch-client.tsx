@@ -145,6 +145,30 @@ export function DispatchClient({
             delivery challan, and mark delivered once the site engineer confirms receipt.
           </p>
         </div>
+        {/* Challan archive — moved here from the sidebar at Daksh's
+            request. The natural flow is dispatch → challan, so the
+            link sits in the dispatch header. */}
+        <Link
+          href="/challan"
+          style={{
+            textDecoration: "none",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "8px 14px",
+            background: "var(--bg)",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            color: "var(--text)",
+            fontSize: 13,
+            fontWeight: 600,
+            whiteSpace: "nowrap",
+            alignSelf: "flex-start",
+          }}
+          title="Open the challan archive — every dispatch that's been finalised"
+        >
+          📋 Challan archive →
+        </Link>
       </div>
 
       {/* Toast / error banners */}
