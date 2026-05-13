@@ -33,6 +33,7 @@
 | 025 | `slab_transfer_role.sql` | Slab transfer runner role: adds `slab_transfer` to `app_role` enum + `vendors.dropoff_location` + `carving_items.dropoff_note` + `carving_items.claimed_by / claimed_at` (claim lock so two runners don't grab the same slab) |
 | 026 | `carving_batch_id.sql` | `carving_items.batch_id UUID` — groups slabs assigned together in one bulk-assign. NULL = singleton. Used by the cockpit + transfer page to colour-group "came together" slabs visually. |
 | 027 | `cut_approval.sql` | Cutting-Done supervisor checkpoint. Adds `awaiting_approval` + `awaiting_cutter_edit` to `cut_block_status`, `profiles.can_approve_cuts` flag, and approval bookkeeping columns on `cut_session_blocks` (`pending_approval_payload JSONB`, `submitted_for_approval_at/by`, `approved_at/by`, `approval_edited_at/by`, `sent_back_at/by/note`). Cutter's Cutting Done form now stages in the JSONB; only approval fires `finish_block_cut`. Post-migration: `UPDATE profiles SET can_approve_cuts=TRUE WHERE full_name ILIKE 'RAJESH KUMAR%'`. |
+| 028 | `accounts_module.sql` | Accounting / Finance vertical. Adds `biller` + `accountant` to `app_role`; new enums `bill_status` / `bill_payment_status` / `payment_method`; three new tables `bill_vendors`, `bills`, `bill_payments`; `profiles.can_approve_bills` flag; sequence `bill_token_seq`; token trigger `assign_bill_token`; `bills.amount_outstanding` STORED GENERATED column; recalc trigger `recalc_bill_amount_paid` keeping `amount_paid` + bill status in sync as payment rows enter/leave `paid`. Read-only RLS on the three new tables; all writes via admin client server actions. Post-migration: `UPDATE profiles SET can_approve_bills=TRUE WHERE full_name ILIKE 'NARESH%'`. |
 
 ## How migrations get to prod
 
@@ -159,6 +160,9 @@ public.stone_types
 - `block_category`: `Fresh | Reused`
 - `cut_session_status`: `draft | approved | in_progress | closed | cancelled`
 - `cut_block_status`: `pending_worker | cutting | done_prompt | done | rejected` (also `pending_cut` added 013; `awaiting_approval` + `awaiting_cutter_edit` added 027)
+- `bill_status` (028): `pending_approval | approved | rejected | fully_paid | cancelled`
+- `bill_payment_status` (028): `proposed | confirmed | paid | cancelled`
+- `payment_method` (028): `cash | cheque | neft | rtgs | upi | imps | card | other`
 - `vendor_type`: `CNC | Manual` (the original enum). Soft string `'Outsource' | 'block_vendor'` also seen on rows.
 - `app_role`: see above
 

@@ -29,6 +29,16 @@ export function getDefaultRouteForRole(role?: AppRole | null) {
       // Migration 025 — slab transfer runner. Lands on the transfer
       // dispatch list and works through pickups from there.
       return "/carving/transfer";
+    case "biller":
+      // Migration 028 — accounting bill entry. The biller's primary
+      // action is "enter a new bill", so they land directly on the
+      // entry form. /accounts/bills (their own submissions list) is
+      // one click away via the sidebar.
+      return "/accounts/bills/new";
+    case "accountant":
+      // Migration 028 — accountant lands on the due-bills dashboard
+      // (aging buckets + multi-select propose-pay-today).
+      return "/accounts";
     case "worker":
       return "/pending";
     default:

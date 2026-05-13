@@ -10,6 +10,10 @@ import { Toast } from "@/components/toast";
 import { Heartbeat } from "@/components/heartbeat";
 import { requireAuth } from "@/lib/auth";
 import { canApproveCuts } from "@/lib/cutting-permissions";
+import {
+  canApproveBills,
+  canManageAccounts,
+} from "@/lib/accounts-permissions";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 
 const SETTINGS_ROLES = ["developer", "owner", "team_head"];
@@ -21,16 +25,34 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
 
   // Cut-approval queue size — only loaded for approvers (migration 027).
   // Cheap single-COUNT query, indexed by the partial index added in 027.
-  // The badge updates on next page load; RealtimeRefresh keeps it
-  // fresh on navigation across the shell.
   let approvalsBadge: number | null = null;
+  let billsAuditBadge: number | null = null;
+  let payTodayBadge: number | null = null;
+  const supabase = createAdminSupabaseClient();
   if (canApproveCuts(profile)) {
-    const supabase = createAdminSupabaseClient();
     const { count } = await supabase
       .from("cut_session_blocks")
       .select("*", { count: "exact", head: true })
       .in("status", ["awaiting_approval", "awaiting_cutter_edit"]);
     approvalsBadge = count ?? 0;
+  }
+  // Bills Audit badge — approvers see the count of bills waiting for
+  // approval (migration 028). Mirrors Cutting Audit badge styling.
+  if (canApproveBills(profile)) {
+    const { count } = await supabase
+      .from("bills")
+      .select("*", { count: "exact", head: true })
+      .eq("status", "pending_approval");
+    billsAuditBadge = count ?? 0;
+  }
+  // Pay Today badge — accountant + owner + dev see in-flight payments
+  // (proposed + confirmed). Drives both audiences back to the screen.
+  if (canManageAccounts(profile) || canApproveBills(profile)) {
+    const { count } = await supabase
+      .from("bill_payments")
+      .select("*", { count: "exact", head: true })
+      .in("status", ["proposed", "confirmed"]);
+    payTodayBadge = count ?? 0;
   }
 
   return (
@@ -124,6 +146,33 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                 )}
               </Link>
             )}
+
+            {/* Bills Audit badge — migration 028. Approvers (dev / owner /
+                profile.can_approve_bills) see pending bill submissions to
+                review. */}
+            {billsAuditBadge !== null && (
+              <TopbarBadge
+                href="/accounts/approvals"
+                label="₹ Bills Audit"
+                count={billsAuditBadge}
+                emptyTitle="Bills Audit queue (empty)"
+                activeTitle={`${billsAuditBadge} bill${billsAuditBadge === 1 ? "" : "s"} to audit`}
+              />
+            )}
+
+            {/* Pay Today badge — migration 028. Accountant + owner + dev
+                see in-flight payment proposals + confirmed-ready-to-pay
+                rows. Click → /accounts/pay-today. */}
+            {payTodayBadge !== null && (
+              <TopbarBadge
+                href="/accounts/pay-today"
+                label="💸 Pay Today"
+                count={payTodayBadge}
+                emptyTitle="Pay Today queue (empty)"
+                activeTitle={`${payTodayBadge} payment${payTodayBadge === 1 ? "" : "s"} in flight`}
+              />
+            )}
+
             <span className="role-pill" style={
               profile.role === "developer" ? { background: "var(--gold)", color: "#fff", fontWeight: 700 } :
               profile.role === "owner"     ? { background: "#1a1a1a", color: "#fff", fontWeight: 700 } :
@@ -138,6 +187,8 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                 slab_entry: "SLAB ENTRY",
                 block_entry: "BLOCK ENTRY",
                 cutting_operator: "CUTTING OPERATOR",
+                biller: "BILLER",
+                accountant: "ACCOUNTANT",
               } as Record<string, string>)[profile.role] ?? profile.role.replace(/_/g, " ").toUpperCase()}
             </span>
             {NOTIFICATION_ROLES.includes(profile.role) && (
@@ -159,5 +210,76 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       <MobileNav role={profile.role} displayName={displayName} />
       <Toast />
     </div>
+  );
+}
+
+/** Topbar action badge — same visual treatment as the Cutting Audit
+ *  button above. Extracted because Bills Audit + Pay Today share it
+ *  one-for-one. */
+function TopbarBadge({
+  href,
+  label,
+  count,
+  emptyTitle,
+  activeTitle,
+}: {
+  href: string;
+  label: string;
+  count: number;
+  emptyTitle: string;
+  activeTitle: string;
+}) {
+  const active = count > 0;
+  return (
+    <Link
+      href={href}
+      title={active ? activeTitle : emptyTitle}
+      style={{
+        position: "relative",
+        textDecoration: "none",
+        fontSize: 12,
+        fontWeight: 700,
+        padding: "5px 12px",
+        background: active ? "var(--gold)" : "var(--bg)",
+        color: active ? "#fff" : "var(--text)",
+        border: `1px solid ${active ? "var(--gold-dark)" : "var(--border)"}`,
+        borderRadius: 6,
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {label}
+      <span
+        style={{
+          fontSize: 11,
+          fontFamily: "ui-monospace, monospace",
+          fontWeight: 700,
+          padding: "0 6px",
+          borderRadius: 10,
+          background: active ? "rgba(255,255,255,0.25)" : "var(--border)",
+          color: active ? "#fff" : "var(--muted)",
+          minWidth: 18,
+          textAlign: "center",
+        }}
+      >
+        {count}
+      </span>
+      {active && (
+        <span
+          style={{
+            position: "absolute",
+            top: -3,
+            right: -3,
+            width: 8,
+            height: 8,
+            borderRadius: "50%",
+            background: "#dc2626",
+            border: "1.5px solid var(--surface, #fff)",
+          }}
+        />
+      )}
+    </Link>
   );
 }

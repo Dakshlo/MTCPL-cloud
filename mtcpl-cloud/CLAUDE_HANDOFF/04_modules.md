@@ -229,3 +229,75 @@ Chat surface backed by Anthropic API. Tool calls into our DB to answer "how many
 ## My Jobs — `/vendor` aliased to "My Jobs" in vendor sidebar
 
 Same page as the cockpit. Vendors see it labelled "My Jobs" in their sidebar.
+
+## Accounts — `/accounts/*` (migration 028)
+
+Brand-new finance vertical, orthogonal to cutting/carving. Two new roles plus owner sign-off:
+- `biller` — fills the bill-entry form. Lands on `/accounts/bills/new`.
+- `accountant` — runs the due-bills dashboard + payment workflow. Lands on `/accounts`.
+- `owner` (and dev) — approves bills + ticks the pay-today batch.
+
+Three new tables: `bill_vendors` (beneficiary master, separate from carving `vendors`), `bills` (master record with `amount_subtotal` + `gst_percent` + STORED GENERATED `amount_total` / `amount_outstanding`, token TOK-YYYY-NNNNN via trigger), `bill_payments` (per-payment lifecycle row — proposed → confirmed → paid; partial payments produce multiple rows).
+
+### Bill lifecycle
+
+```
+pending_approval ──[owner approve]──► approved ──[full pay via trigger]──► fully_paid (terminal)
+       │ ▲                                │
+       │ │                                └──[admin cancel, only if no payments]──► cancelled
+   [reject]│
+       ▼ │
+   rejected ──[biller edits + resubmits]── back to pending_approval
+```
+
+`amount_outstanding = amount_total − amount_paid` (generated). `amount_paid` is recomputed by the `recalc_bill_amount_paid` trigger every time a `bill_payments` row enters or leaves `paid`. Reversal supported (a voided cheque flips `fully_paid` back to `approved`).
+
+### Payment lifecycle
+
+```
+proposed ──[owner ticks]──► confirmed ──[accountant marks paid]──► paid (terminal)
+   │                            │
+   └──[owner unticks]──┐         └──[accountant aborts]──► cancelled
+                      ▼
+                  cancelled
+```
+
+A single bill has many `bill_payments` rows over time. Each one carries the `proposal_batch_id` so the owner can confirm/un-tick a whole batch in one go. Un-ticked rows get auto-cancelled with `cancel_reason='owner_unticked'`.
+
+### Routes
+- `/accounts/bills/new` — bill-entry form (biller). Combobox over active `bill_vendors` with inline "+ Add new" quick-add. GST% quick-pick chips (0/5/12/18/28/custom). Live total preview.
+- `/accounts/bills` — list view with status + vendor filters. Biller sees own; everyone else sees all.
+- `/accounts/bills/[id]` — detail: amount summary, audit trail, payment history table. Approve/Reject/Edit/Cancel by role + status.
+- `/accounts/bills/[id]/edit` — reuses `BillEntryForm` with `mode='edit'`. Locked once any non-cancelled `bill_payments` row exists.
+- `/accounts/approvals` — owner's audit queue. Direct copy of `/cutting/approvals` shape; two sections (Awaiting / Rejected), Approve / Edit / Send-back-with-note per row.
+- `/accounts` — accountant dashboard. KPI cards (Total outstanding, Due bills, Avg days outstanding, Top vendor), aging buckets (0–30 / 31–60 / 61–90 / 90+), multi-select table to propose pay-today with per-row amount override.
+- `/accounts/pay-today` — three sections: **Proposed** (owner ticks per batch), **Confirmed** (accountant marks paid with method + reference + actual amount — partial-friendly), **Paid today** (running total).
+- `/accounts/payments` — historical ledger. Filters: date range, vendor, method. Defaults to last 30 days.
+- `/accounts/vendors` + `/accounts/vendors/[id]` — `bill_vendors` CRUD with per-vendor outstanding totals + bill history.
+
+### Permissions helper
+
+`src/lib/accounts-permissions.ts`:
+- `canSubmitBills(p)` — biller / owner / dev
+- `canApproveBills(p)` — owner / dev / `p.can_approve_bills === true`
+- `canConfirmPayments(p)` — same set as canApproveBills
+- `canManageAccounts(p)` — accountant / owner / dev
+- `canMarkPaid(p)` — accountant / dev (strict: owner confirms, accountant executes)
+- `canManageBillVendors(p)` — accountant / owner / dev
+
+### Top-bar badges
+
+`src/app/(app)/layout.tsx` shows two new badges, identical styling to the existing **✓ Cutting Audit** button:
+- **₹ Bills Audit (N)** — visible to `canApproveBills`. Count = `bills WHERE status='pending_approval'`. → `/accounts/approvals`.
+- **💸 Pay Today (N)** — visible to `canManageAccounts` OR `canApproveBills`. Count = `bill_payments WHERE status IN ('proposed','confirmed')`. → `/accounts/pay-today`.
+
+Both queries hit partial indexes from migration 028 (`bills_pending_approval_idx`, `bill_payments_open_idx`).
+
+### Out of scope (v1)
+- **Inventory cross-link.** `bills.inventory_ref_token` column exists as a stub for v2 (when a bill clears, the inventory module will create a stock row with the same token). Never written in v1.
+- **Bill scan / photo upload.** No Supabase Storage infra yet — owner reviews the physical paper bill while checking the entry. The description field carries item details.
+- **TDS withholding.** Common in Indian B2B; not modelled.
+- **Multi-currency.** All amounts ₹, stored as `NUMERIC(14,2)`.
+- **Vendor statement / aging report PDF.** Defer.
+- **CSV / Excel export** of payment history. Defer.
+- **Vendor email / SMS** post-payment. Defer (no transactional email infra).

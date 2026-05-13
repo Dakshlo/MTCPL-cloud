@@ -11,7 +11,12 @@ export type AppRole =
   | "dispatch"
   | "vendor"
   | "slab_transfer"
-  | "worker";
+  | "worker"
+  // Migration 028 — accounting module roles.
+  // biller     fills the bill-entry form (lands on /accounts/bills/new).
+  // accountant manages the due-bills dashboard + payments (lands on /accounts).
+  | "biller"
+  | "accountant";
 
 export type StoneType = "PinkStone" | "WhiteStone";
 
@@ -31,6 +36,12 @@ export type Profile = {
    *  roles qualify regardless of this bit (the canApproveCuts
    *  helper enforces that). */
   can_approve_cuts?: boolean;
+  /** Migration 028 — per-profile approver flag for the bill audit
+   *  flow (biller submits → owner approves → accountant pays). Set
+   *  to TRUE on Naresh's row post-migration. Developer + Owner
+   *  always qualify in code regardless of the bit (the
+   *  canApproveBills helper enforces that). */
+  can_approve_bills?: boolean;
 };
 
 export type Vendor = {

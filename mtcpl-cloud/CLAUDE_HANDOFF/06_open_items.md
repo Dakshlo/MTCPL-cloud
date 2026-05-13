@@ -18,6 +18,22 @@ UPDATE public.profiles
 
 Without this, the top-bar **✓ Approvals** button never shows for Rajesh and the approval queue is invisible to him. Developer + Owner roles always qualify in code regardless — Rajesh is the only `team_head` that needs the bit flipped today. Add new approvers the same way.
 
+### 0b. Flip Naresh's bill-approver bit after migration 028
+
+Migration 028 (Accounts / Finance module) ships the `profiles.can_approve_bills` column with default `FALSE`. After running the migration, run this UPDATE:
+
+```sql
+UPDATE public.profiles
+   SET can_approve_bills = TRUE
+ WHERE full_name ILIKE 'NARESH%';
+```
+
+Developer + Owner roles always qualify regardless, so today this is primarily future-proofing for a non-owner approver. Naresh's row is the natural first to flip if his profile sits under any role other than `owner`.
+
+Also remember to seed the new roles when assigning users:
+- `biller` (data entry only, lands on `/accounts/bills/new`)
+- `accountant` (dashboard + payments, lands on `/accounts`)
+
 ### 1. Bind Vivek's profile when he logs in
 He hasn't logged into the system yet. When he creates an auth user (phone OTP or email), run the bind SQL:
 
@@ -56,6 +72,10 @@ The simpler PDF is shipped (production summary — daily SQFT/CFT per machine). 
 - **Bulk operator deactivate / rename** — currently only inline + via SQL.
 - **Per-temple default work-types** — Phase 4 left "this template always = lathe" out of scope. The work-type tag is set per-job at assign time today. A future small `temple_work_type_defaults` table could pre-fill the assign modal.
 - **Bulk-assign view** — Phase 4 deferred the "auto-distribute N slabs across vendors" view. The carving head still picks one slab at a time. The assign modal's per-vendor capacity readout is the first step toward this.
+- **Accounts v2: inventory cross-link** — migration 028 added `bills.inventory_ref_token` as a stub column for the future inventory module. When that ships, every bill that lands `paid` should also create an inventory row tagged with the same token so a single physical purchase ties the financial and material records together. The biller-side form will gain "items table" entries (qty + unit) so the inventory side gets structured rows instead of a free-text description.
+- **Accounts v2: bill scan upload** — Daksh confirmed deferred for v1. Once Supabase Storage is configured, add a single-file upload on `/accounts/bills/new` + a thumbnail viewer on the audit page so the approver sees the actual paper bill while ticking the entry.
+- **Accounts v2: TDS withholding** — Indian B2B convention. Add `bills.tds_percent` + `bills.amount_tds` columns; deduct from `amount_total` for the outstanding calc; reflect on payment proposals.
+- **Accounts reporting** — PDF vendor statements, payment-history CSV/Excel export, optional WhatsApp/email to vendor on payment.
 
 ---
 

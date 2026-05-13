@@ -109,6 +109,56 @@ const navEntries: NavEntry[] = [
     icon: "🚧",
     roles: ["developer", "owner", "carving_head", "slab_transfer"],
   },
+  // ── ACCOUNTS section (migration 028) ────────────────────────────
+  // The new accounting / finance vertical. Roles: biller (data entry),
+  // accountant (dashboard + payments), owner + developer everywhere.
+  {
+    type: "divider",
+    label: "ACCOUNTS",
+    roles: ["developer", "owner", "biller", "accountant"],
+  },
+  {
+    href: "/accounts/bills/new",
+    label: "Enter Bill",
+    icon: "🧾",
+    roles: ["developer", "owner", "biller"],
+  },
+  {
+    href: "/accounts/bills",
+    label: "All Bills",
+    icon: "📑",
+    roles: ["developer", "owner", "biller", "accountant"],
+  },
+  {
+    href: "/accounts/approvals",
+    label: "Bills Audit",
+    icon: "✅",
+    roles: ["developer", "owner"],
+  },
+  {
+    href: "/accounts",
+    label: "Due Bills",
+    icon: "💰",
+    roles: ["developer", "owner", "accountant"],
+  },
+  {
+    href: "/accounts/pay-today",
+    label: "Pay Today",
+    icon: "💸",
+    roles: ["developer", "owner", "accountant"],
+  },
+  {
+    href: "/accounts/payments",
+    label: "Payment History",
+    icon: "🗂️",
+    roles: ["developer", "owner", "accountant"],
+  },
+  {
+    href: "/accounts/vendors",
+    label: "Bill Vendors",
+    icon: "🏢",
+    roles: ["developer", "owner", "accountant"],
+  },
 ];
 
 function roleLabel(role: AppRole): string {
@@ -125,6 +175,8 @@ function roleLabel(role: AppRole): string {
     carving_assigner: "CARVING",
     vendor: "VENDOR",
     slab_transfer: "SLAB TRANSFER",
+    biller: "BILLER",
+    accountant: "ACCOUNTANT",
   };
   return labels[role] ?? role.replace(/_/g, " ").toUpperCase();
 }
