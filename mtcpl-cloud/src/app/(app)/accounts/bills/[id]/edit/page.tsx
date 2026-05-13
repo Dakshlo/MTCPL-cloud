@@ -14,6 +14,7 @@ import {
   BillEntryForm,
   type BillVendorOption,
 } from "../../new/bill-entry-form";
+import { AddVendorButton } from "../../new/add-vendor-button";
 import { AccountsHero, BUTTON_STYLES } from "../../../_ui/components";
 
 type Params = Promise<{ id: string }>;
@@ -76,16 +77,18 @@ export default async function EditBillPage({ params }: { params: Params }) {
             : "You're editing a bill while it's still in audit. The status stays the same after save."
         }
         actions={
-          <Link href={`/accounts/bills/${id}`} style={BUTTON_STYLES.secondary}>
-            ← Bill detail
-          </Link>
+          <>
+            <AddVendorButton action={upsertBillVendorAction} />
+            <Link href={`/accounts/bills/${id}`} style={BUTTON_STYLES.secondary}>
+              ← Bill detail
+            </Link>
+          </>
         }
       />
 
       <BillEntryForm
         vendors={vendors}
         submitAction={editAndReturn}
-        addVendorAction={upsertBillVendorAction}
         mode="edit"
         billId={id}
         initialValues={{

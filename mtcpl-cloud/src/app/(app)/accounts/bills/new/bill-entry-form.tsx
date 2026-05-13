@@ -5,8 +5,11 @@
  *   • LEFT: grouped sections (Beneficiary → Bill details → Amount + GST).
  *   • RIGHT: sticky preview card with live total, vendor info, save button.
  *
- * Quick-add vendor modal is a centred dialog (kept the same pattern as
- * before — slide-over felt heavy for a small form).
+ * Beneficiary is now a plain native <select> dropdown. Adding a new
+ * vendor is a separate flow — the "+ Add new vendor" button lives on
+ * the page header (next to "← All bills") and opens a portal-rendered
+ * modal that's NOT nested inside this form. After saving, the page
+ * reloads with the new vendor pre-selected via `?picked=<id>`.
  */
 
 import { useMemo, useState, useTransition } from "react";
@@ -31,19 +34,15 @@ type SubmitResult =
   | { ok: true; billId: string; token: string }
   | { ok: false; error: string };
 
-type AddVendorResult =
-  | { ok: true; vendorId: string }
-  | { ok: false; error: string };
-
 const GST_QUICK_PICKS = [0, 5, 12, 18, 28] as const;
 
 export function BillEntryForm({
   vendors,
   initialValues,
   submitAction,
-  addVendorAction,
   mode = "new",
   billId,
+  preSelectedVendorId,
 }: {
   vendors: BillVendorOption[];
   initialValues?: {
@@ -56,9 +55,12 @@ export function BillEntryForm({
     gst_percent?: number;
   };
   submitAction: (formData: FormData) => Promise<SubmitResult>;
-  addVendorAction: (formData: FormData) => Promise<AddVendorResult>;
   mode?: "new" | "edit";
   billId?: string;
+  /** When the user adds a vendor from the page-header button, the
+   *  add-vendor flow redirects to `?picked=<id>` and we auto-select
+   *  that vendor here. */
+  preSelectedVendorId?: string | null;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -72,9 +74,9 @@ export function BillEntryForm({
     return `${yyyy}-${mm}-${dd}`;
   }, []);
 
-  const [vendorId, setVendorId] = useState<string>(initialValues?.bill_vendor_id ?? "");
-  const [vendorSearch, setVendorSearch] = useState("");
-  const [showVendorList, setShowVendorList] = useState(false);
+  const [vendorId, setVendorId] = useState<string>(
+    initialValues?.bill_vendor_id ?? preSelectedVendorId ?? "",
+  );
   const [billDate, setBillDate] = useState(initialValues?.bill_date ?? today);
   const [vendorBillNo, setVendorBillNo] = useState(initialValues?.vendor_bill_no ?? "");
   const [description, setDescription] = useState(initialValues?.description ?? "");
@@ -86,33 +88,12 @@ export function BillEntryForm({
     initialValues?.gst_percent != null ? String(initialValues.gst_percent) : "18",
   );
 
-  const [vendorModalOpen, setVendorModalOpen] = useState(false);
-  const [newVendorName, setNewVendorName] = useState("");
-  const [newVendorCategory, setNewVendorCategory] = useState("");
-  const [newVendorGstin, setNewVendorGstin] = useState("");
-  const [newVendorPhone, setNewVendorPhone] = useState("");
-  const [vendorModalError, setVendorModalError] = useState<string | null>(null);
-  const [vendorAdding, startVendorAdd] = useTransition();
-
   const subtotalNum = Number(subtotal) || 0;
   const gstNum = Number(gstPercent) || 0;
   const gstAmount = Math.round(subtotalNum * gstNum) / 100;
   const totalAmount = Math.round((subtotalNum + gstAmount) * 100) / 100;
 
   const selectedVendor = vendors.find((v) => v.id === vendorId) ?? null;
-
-  const filteredVendors = useMemo(() => {
-    const q = vendorSearch.trim().toLowerCase();
-    if (!q) return vendors.slice(0, 30);
-    return vendors
-      .filter(
-        (v) =>
-          v.name.toLowerCase().includes(q) ||
-          (v.category ?? "").toLowerCase().includes(q) ||
-          (v.gstin ?? "").toLowerCase().includes(q),
-      )
-      .slice(0, 30);
-  }, [vendorSearch, vendors]);
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -151,40 +132,6 @@ export function BillEntryForm({
     });
   }
 
-  function handleAddVendor(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setVendorModalError(null);
-    const name = newVendorName.trim();
-    if (!name) return setVendorModalError("Vendor name is required.");
-    const fd = new FormData();
-    fd.set("name", name);
-    fd.set("category", newVendorCategory.trim());
-    fd.set("gstin", newVendorGstin.trim());
-    fd.set("phone", newVendorPhone.trim());
-    startVendorAdd(async () => {
-      const result = await addVendorAction(fd);
-      if (!result.ok) {
-        setVendorModalError(result.error);
-        return;
-      }
-      vendors.push({
-        id: result.vendorId,
-        name,
-        category: newVendorCategory.trim() || null,
-        gstin: newVendorGstin.trim() || null,
-      });
-      setVendorId(result.vendorId);
-      setVendorSearch("");
-      setShowVendorList(false);
-      setVendorModalOpen(false);
-      setNewVendorName("");
-      setNewVendorCategory("");
-      setNewVendorGstin("");
-      setNewVendorPhone("");
-      router.refresh();
-    });
-  }
-
   return (
     <form
       onSubmit={handleSubmit}
@@ -198,106 +145,70 @@ export function BillEntryForm({
       {/* LEFT — grouped sections */}
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         {/* Beneficiary */}
-        <FormSection title="Beneficiary" description="Who issued this bill? Search the vendor master or add a new one.">
-          <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
-            <div style={{ position: "relative", flex: 1 }}>
-              <input
-                type="text"
-                placeholder={selectedVendor ? "Change vendor…" : "Search vendor by name, category, GSTIN…"}
-                value={selectedVendor && !showVendorList ? selectedVendor.name : vendorSearch}
-                onChange={(e) => {
-                  setVendorSearch(e.target.value);
-                  setShowVendorList(true);
-                  if (selectedVendor) setVendorId("");
-                }}
-                onFocus={() => setShowVendorList(true)}
-                style={INPUT_STYLE}
-              />
-              {showVendorList && filteredVendors.length > 0 && (
-                <div
-                  style={{
-                    position: "absolute",
-                    top: "100%",
-                    left: 0,
-                    right: 0,
-                    marginTop: 4,
-                    background: "#fff",
-                    border: `1px solid ${ACCOUNTS_TOKENS.border}`,
-                    borderRadius: 10,
-                    maxHeight: 280,
-                    overflowY: "auto",
-                    zIndex: 10,
-                    boxShadow: ACCOUNTS_TOKENS.shadowLarge,
-                  }}
-                >
-                  {filteredVendors.map((v) => (
-                    <button
-                      key={v.id}
-                      type="button"
-                      onClick={() => {
-                        setVendorId(v.id);
-                        setVendorSearch("");
-                        setShowVendorList(false);
-                      }}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 10,
-                        width: "100%",
-                        padding: "8px 12px",
-                        background: v.id === vendorId ? ACCOUNTS_TOKENS.accentLight : "transparent",
-                        border: "none",
-                        borderBottom: `1px solid ${ACCOUNTS_TOKENS.border}`,
-                        cursor: "pointer",
-                        textAlign: "left",
-                      }}
-                    >
-                      <VendorAvatar name={v.name} size={28} />
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
-                          {v.name}
-                        </div>
-                        {(v.category || v.gstin) && (
-                          <div style={{ fontSize: 11, color: "var(--muted)" }}>
-                            {v.category && <span>{v.category}</span>}
-                            {v.category && v.gstin && " · "}
-                            {v.gstin && <span style={{ fontFamily: "ui-monospace, monospace" }}>{v.gstin}</span>}
-                          </div>
-                        )}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            <button
-              type="button"
-              onClick={() => setVendorModalOpen(true)}
-              style={BUTTON_STYLES.secondary}
-            >
-              + Add new
-            </button>
-          </div>
-          {selectedVendor && (
+        <FormSection
+          title="Beneficiary"
+          description="Who issued this bill? Pick from the vendor master."
+        >
+          {vendors.length === 0 ? (
             <div
               style={{
-                marginTop: 10,
-                padding: "10px 12px",
-                background: ACCOUNTS_TOKENS.accentLight,
-                border: `1px solid ${ACCOUNTS_TOKENS.accentBorder}`,
+                padding: "14px 16px",
+                background: ACCOUNTS_TOKENS.warningLight,
+                border: `1px solid ${ACCOUNTS_TOKENS.warning}`,
                 borderRadius: 10,
+                fontSize: 13,
+                color: ACCOUNTS_TOKENS.warning,
               }}
             >
-              <VendorIdentity
-                name={selectedVendor.name}
-                subLabel={
-                  [selectedVendor.category, selectedVendor.gstin && `GSTIN ${selectedVendor.gstin}`]
-                    .filter(Boolean)
-                    .join(" · ") || undefined
-                }
-                size={36}
-              />
+              <strong>No bill vendors yet.</strong> Click <strong>+ Add new vendor</strong>{" "}
+              up at the top of the page to add your first one. The dropdown will populate
+              after you save.
             </div>
+          ) : (
+            <>
+              <FormField label="Vendor" required>
+                <select
+                  value={vendorId}
+                  onChange={(e) => setVendorId(e.target.value)}
+                  required
+                  style={{ ...INPUT_STYLE, cursor: "pointer" }}
+                >
+                  <option value="">— Select a vendor —</option>
+                  {vendors.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.name}
+                      {v.category ? ` · ${v.category}` : ""}
+                      {v.gstin ? ` · GSTIN ${v.gstin}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </FormField>
+              {selectedVendor && (
+                <div
+                  style={{
+                    marginTop: 4,
+                    padding: "10px 12px",
+                    background: ACCOUNTS_TOKENS.accentLight,
+                    border: `1px solid ${ACCOUNTS_TOKENS.accentBorder}`,
+                    borderRadius: 10,
+                  }}
+                >
+                  <VendorIdentity
+                    name={selectedVendor.name}
+                    subLabel={
+                      [selectedVendor.category, selectedVendor.gstin && `GSTIN ${selectedVendor.gstin}`]
+                        .filter(Boolean)
+                        .join(" · ") || undefined
+                    }
+                    size={36}
+                  />
+                </div>
+              )}
+              <p style={{ margin: 0, fontSize: 11, color: "var(--muted)" }}>
+                Need a new vendor? Use the <strong>+ Add new vendor</strong> button at the
+                top of the page — once you save, this dropdown picks it up.
+              </p>
+            </>
           )}
         </FormSection>
 
@@ -474,19 +385,25 @@ export function BillEntryForm({
 
         {(billDate || vendorBillNo) && (
           <div style={{ fontSize: 12, color: "var(--muted)" }}>
-            {billDate && new Date(billDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+            {billDate &&
+              new Date(billDate).toLocaleDateString("en-IN", {
+                day: "numeric",
+                month: "short",
+                year: "numeric",
+              })}
             {billDate && vendorBillNo && " · "}
-            {vendorBillNo && <span style={{ fontFamily: "ui-monospace, monospace", color: "var(--text)" }}>{vendorBillNo}</span>}
+            {vendorBillNo && (
+              <span style={{ fontFamily: "ui-monospace, monospace", color: "var(--text)" }}>
+                {vendorBillNo}
+              </span>
+            )}
           </div>
         )}
 
         <div style={{ height: 1, background: ACCOUNTS_TOKENS.border, margin: "4px 0" }} />
 
         <PreviewRow label="Subtotal" value={<Money value={subtotalNum} tone="muted" />} />
-        <PreviewRow
-          label={`GST (${gstNum}%)`}
-          value={<Money value={gstAmount} tone="muted" />}
-        />
+        <PreviewRow label={`GST (${gstNum}%)`} value={<Money value={gstAmount} tone="muted" />} />
 
         <div style={{ height: 1, background: ACCOUNTS_TOKENS.border, margin: "4px 0" }} />
 
@@ -515,13 +432,15 @@ export function BillEntryForm({
         <button
           type="submit"
           disabled={pending}
-          style={{ ...BUTTON_STYLES.primary, width: "100%", justifyContent: "center", padding: "11px 18px", fontSize: 14 }}
+          style={{
+            ...BUTTON_STYLES.primary,
+            width: "100%",
+            justifyContent: "center",
+            padding: "11px 18px",
+            fontSize: 14,
+          }}
         >
-          {pending
-            ? "Saving…"
-            : mode === "edit"
-              ? "Save & resubmit"
-              : "Submit for audit"}
+          {pending ? "Saving…" : mode === "edit" ? "Save & resubmit" : "Submit for audit"}
         </button>
 
         <p style={{ margin: 0, fontSize: 11, color: "var(--muted)", lineHeight: 1.5 }}>
@@ -529,118 +448,6 @@ export function BillEntryForm({
           lands in the accountant's due list.
         </p>
       </aside>
-
-      {/* Quick-add vendor modal */}
-      {vendorModalOpen && (
-        <div
-          onClick={() => setVendorModalOpen(false)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(15, 23, 42, 0.45)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 50,
-          }}
-        >
-          <form
-            onClick={(e) => e.stopPropagation()}
-            onSubmit={handleAddVendor}
-            style={{
-              background: "#fff",
-              border: `1px solid ${ACCOUNTS_TOKENS.border}`,
-              borderRadius: 14,
-              padding: 24,
-              minWidth: 420,
-              maxWidth: 500,
-              width: "92%",
-              display: "flex",
-              flexDirection: "column",
-              gap: 14,
-              boxShadow: ACCOUNTS_TOKENS.shadowLarge,
-            }}
-          >
-            <div>
-              <h2 style={{ margin: 0, fontSize: 17, fontWeight: 800, letterSpacing: "-0.01em" }}>
-                Add a bill vendor
-              </h2>
-              <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--muted)" }}>
-                Quick add. Bank details + address can be filled later from /accounts/vendors.
-              </p>
-            </div>
-            <FormField label="Vendor name" required>
-              <input
-                type="text"
-                value={newVendorName}
-                onChange={(e) => setNewVendorName(e.target.value)}
-                placeholder="e.g. Shree Cement Ltd"
-                style={INPUT_STYLE}
-                required
-                autoFocus
-              />
-            </FormField>
-            <FormField label="Category">
-              <input
-                type="text"
-                value={newVendorCategory}
-                onChange={(e) => setNewVendorCategory(e.target.value)}
-                placeholder="cement / steel / tools / etc"
-                style={INPUT_STYLE}
-              />
-            </FormField>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <FormField label="GSTIN">
-                <input
-                  type="text"
-                  value={newVendorGstin}
-                  onChange={(e) => setNewVendorGstin(e.target.value)}
-                  style={INPUT_STYLE}
-                />
-              </FormField>
-              <FormField label="Phone">
-                <input
-                  type="text"
-                  value={newVendorPhone}
-                  onChange={(e) => setNewVendorPhone(e.target.value)}
-                  style={INPUT_STYLE}
-                />
-              </FormField>
-            </div>
-            {vendorModalError && (
-              <div
-                role="alert"
-                style={{
-                  padding: "8px 10px",
-                  background: ACCOUNTS_TOKENS.dangerLight,
-                  border: `1px solid ${ACCOUNTS_TOKENS.danger}`,
-                  borderRadius: 8,
-                  color: ACCOUNTS_TOKENS.danger,
-                  fontSize: 12,
-                }}
-              >
-                {vendorModalError}
-              </div>
-            )}
-            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-              <button
-                type="button"
-                onClick={() => setVendorModalOpen(false)}
-                style={BUTTON_STYLES.secondary}
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={vendorAdding}
-                style={BUTTON_STYLES.primary}
-              >
-                {vendorAdding ? "Adding…" : "Add vendor"}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
     </form>
   );
 }
@@ -706,11 +513,7 @@ function FormField({
         {required && <span style={{ color: ACCOUNTS_TOKENS.danger, marginLeft: 4 }}>*</span>}
       </span>
       {children}
-      {hint && (
-        <span style={{ fontSize: 11, color: "var(--muted)" }}>
-          {hint}
-        </span>
-      )}
+      {hint && <span style={{ fontSize: 11, color: "var(--muted)" }}>{hint}</span>}
     </label>
   );
 }

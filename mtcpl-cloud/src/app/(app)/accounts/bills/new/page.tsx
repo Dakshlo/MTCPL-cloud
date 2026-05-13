@@ -5,13 +5,23 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canSubmitBills } from "@/lib/accounts-permissions";
 import { submitBillAction, upsertBillVendorAction } from "../../actions";
 import { BillEntryForm, type BillVendorOption } from "./bill-entry-form";
+import { AddVendorButton } from "./add-vendor-button";
 import { AccountsHero, BUTTON_STYLES } from "../../_ui/components";
 
-export default async function NewBillPage() {
+type SearchParams = Promise<{ picked?: string }>;
+
+export default async function NewBillPage({
+  searchParams,
+}: {
+  searchParams: SearchParams;
+}) {
   const { profile } = await requireAuth();
   if (!canSubmitBills(profile)) {
     redirect("/accounts");
   }
+
+  const sp = await searchParams;
+  const picked = sp.picked ?? null;
 
   const supabase = createAdminSupabaseClient();
   const { data: vendorRows } = await supabase
@@ -28,16 +38,19 @@ export default async function NewBillPage() {
         title="New bill"
         description="Fill in the supplier's bill details. We'll auto-tag with a unique token and send it to the owner for audit."
         actions={
-          <Link href="/accounts/bills" style={BUTTON_STYLES.secondary}>
-            ← All bills
-          </Link>
+          <>
+            <AddVendorButton action={upsertBillVendorAction} />
+            <Link href="/accounts/bills" style={BUTTON_STYLES.secondary}>
+              ← All bills
+            </Link>
+          </>
         }
       />
 
       <BillEntryForm
         vendors={vendors}
         submitAction={submitBillAction}
-        addVendorAction={upsertBillVendorAction}
+        preSelectedVendorId={picked}
       />
     </section>
   );
