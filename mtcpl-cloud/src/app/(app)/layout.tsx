@@ -12,6 +12,9 @@ import { requireAuth } from "@/lib/auth";
 import { canApproveCuts } from "@/lib/cutting-permissions";
 import { canApproveBills } from "@/lib/accounts-permissions";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { getSystemStatus } from "@/lib/system-status";
+import { getProfilesMap } from "@/lib/profiles";
+import { SystemDownScreen } from "@/components/system-down-screen";
 
 const SETTINGS_ROLES = ["developer", "owner", "team_head"];
 const NOTIFICATION_ROLES = ["developer"]; // flip to include "team_head" at rollout
@@ -19,6 +22,34 @@ const NOTIFICATION_ROLES = ["developer"]; // flip to include "team_head" at roll
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const { profile } = await requireAuth();
   const displayName = profile.vendor_name || profile.full_name || profile.phone || "MTCPL User";
+
+  // ── System maintenance gate (migration 031) ────────────────────
+  // Developer can take the whole app offline via Settings → System
+  // Status. While down, every authenticated user (including the
+  // developer who flipped it) sees the maintenance screen instead
+  // of the normal shell. getSystemStatus() falls back to
+  // `down: false` if the table or row is missing — so deploying
+  // this code before running migration 031 keeps the app live.
+  const systemStatus = await getSystemStatus();
+  if (systemStatus.down) {
+    let updatedByName: string | null = null;
+    if (systemStatus.updatedBy) {
+      try {
+        const map = await getProfilesMap();
+        updatedByName = map[systemStatus.updatedBy] ?? null;
+      } catch {
+        updatedByName = null;
+      }
+    }
+    return (
+      <SystemDownScreen
+        isDeveloper={profile.role === "developer"}
+        message={systemStatus.message}
+        updatedAt={systemStatus.updatedAt}
+        updatedByName={updatedByName}
+      />
+    );
+  }
 
   // Cut-approval queue size — only loaded for approvers (migration 027).
   // Cheap single-COUNT query, indexed by the partial index added in 027.

@@ -1,10 +1,17 @@
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { addTempleAction, updateTempleAction, deleteTempleAction, updateUserAction, deleteUserAction, updateOwnNameAction, addStoneTypeAction, deleteStoneTypeAction, setStoneCategoryAction } from "./actions";
+import {
+  takeSystemDownAction,
+  bringSystemUpAction,
+} from "./system-status-actions";
 import { stoneDisplayName } from "@/lib/stone-utils";
 import type { AppRole } from "@/lib/types";
 import { AutoBackup } from "@/components/auto-backup";
 import { PeekSection } from "@/components/peek-section";
+import { getSystemStatus } from "@/lib/system-status";
+import { getProfilesMap } from "@/lib/profiles";
+import { SystemStatusSection } from "./system-status-section";
 
 // All assignable roles — only shown to developer
 const UI_ROLES_ALL = [
@@ -78,6 +85,20 @@ function fmtAuditDate(iso: string) {
 export default async function SettingsPage() {
   const { profile: currentUser } = await requireAuth(["owner", "team_head", "developer"]);
   const admin = createAdminSupabaseClient();
+
+  // System Status — read once, render developer-only section below.
+  // getSystemStatus() falls back to `down: false` if migration 031
+  // hasn't run, so the page renders normally either way.
+  const systemStatus = await getSystemStatus();
+  let systemUpdatedByName: string | null = null;
+  if (systemStatus.updatedBy) {
+    try {
+      const map = await getProfilesMap();
+      systemUpdatedByName = map[systemStatus.updatedBy] ?? null;
+    } catch {
+      systemUpdatedByName = null;
+    }
+  }
 
   // Screen time — developer only
   const istNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
@@ -221,6 +242,22 @@ export default async function SettingsPage() {
           <p className="muted">Manage temples and system users.</p>
         </div>
       </div>
+
+      {/* System Status — DEVELOPER ONLY. Kill-switch that locks the
+          whole app behind a maintenance screen. Goes at the TOP of
+          the settings page because (a) it's the highest-impact action
+          here and (b) when it's "Down" the developer needs to find
+          the recovery button fast. */}
+      {currentUser.role === "developer" && (
+        <SystemStatusSection
+          isDown={systemStatus.down}
+          message={systemStatus.message}
+          updatedAt={systemStatus.updatedAt}
+          updatedByName={systemUpdatedByName}
+          takeDownAction={takeSystemDownAction}
+          bringUpAction={bringSystemUpAction}
+        />
+      )}
 
       {/* User Management — owner, team_head, developer */}
       {(currentUser.role === "owner" || currentUser.role === "developer" || currentUser.role === "team_head") && (
