@@ -14,6 +14,7 @@ import {
   BillEntryForm,
   type BillVendorOption,
 } from "../../new/bill-entry-form";
+import { AccountsHero, BUTTON_STYLES } from "../../../_ui/components";
 
 type Params = Promise<{ id: string }>;
 
@@ -32,7 +33,6 @@ export default async function EditBillPage({ params }: { params: Params }) {
 
   if (!bill) notFound();
 
-  // Visibility / permission check before rendering.
   const isApprover = canApproveBills(profile);
   const isSubmitter = bill.submitted_by === profile.id;
   const isBillerLike = canSubmitBills(profile);
@@ -43,7 +43,6 @@ export default async function EditBillPage({ params }: { params: Params }) {
     redirect(`/accounts/bills/${id}`);
   }
 
-  // Block edit if any non-cancelled payment row exists.
   const { count: lockedPayments } = await supabase
     .from("bill_payments")
     .select("*", { count: "exact", head: true })
@@ -60,7 +59,6 @@ export default async function EditBillPage({ params }: { params: Params }) {
     .order("name");
   const vendors: BillVendorOption[] = (vendorRows ?? []) as BillVendorOption[];
 
-  // Wrap editBillAction so the form sees the same return shape as submitBillAction.
   async function editAndReturn(formData: FormData) {
     "use server";
     const result = await editBillAction(formData);
@@ -70,52 +68,36 @@ export default async function EditBillPage({ params }: { params: Params }) {
 
   return (
     <section className="page-card">
-      <div className="record-head">
-        <div>
-          <h1>Edit bill</h1>
-          <p className="muted">
-            {bill.status === "rejected"
-              ? "This bill was sent back for edit. Fix the entry and resave — the bill goes back to the audit queue."
-              : "You're editing a bill that's still in audit. Save in-place; the status stays the same."}
-          </p>
-        </div>
-        <Link
-          href={`/accounts/bills/${id}`}
-          style={{
-            textDecoration: "none",
-            fontSize: 13,
-            padding: "6px 14px",
-            background: "var(--bg)",
-            border: "1px solid var(--border)",
-            borderRadius: 6,
-            color: "var(--muted)",
-            fontWeight: 500,
-            whiteSpace: "nowrap",
-            alignSelf: "flex-start",
-          }}
-        >
-          ← Bill detail
-        </Link>
-      </div>
+      <AccountsHero
+        title="Edit bill"
+        description={
+          bill.status === "rejected"
+            ? "This bill was sent back for edit. Fix the entry and resave — it goes back to the audit queue."
+            : "You're editing a bill while it's still in audit. The status stays the same after save."
+        }
+        actions={
+          <Link href={`/accounts/bills/${id}`} style={BUTTON_STYLES.secondary}>
+            ← Bill detail
+          </Link>
+        }
+      />
 
-      <div style={{ marginTop: 20 }}>
-        <BillEntryForm
-          vendors={vendors}
-          submitAction={editAndReturn}
-          addVendorAction={upsertBillVendorAction}
-          mode="edit"
-          billId={id}
-          initialValues={{
-            bill_vendor_id: bill.bill_vendor_id,
-            vendor_bill_no: bill.vendor_bill_no,
-            bill_date: bill.bill_date,
-            description: bill.description,
-            cost_head: bill.cost_head,
-            amount_subtotal: Number(bill.amount_subtotal),
-            gst_percent: Number(bill.gst_percent),
-          }}
-        />
-      </div>
+      <BillEntryForm
+        vendors={vendors}
+        submitAction={editAndReturn}
+        addVendorAction={upsertBillVendorAction}
+        mode="edit"
+        billId={id}
+        initialValues={{
+          bill_vendor_id: bill.bill_vendor_id,
+          vendor_bill_no: bill.vendor_bill_no,
+          bill_date: bill.bill_date,
+          description: bill.description,
+          cost_head: bill.cost_head,
+          amount_subtotal: Number(bill.amount_subtotal),
+          gst_percent: Number(bill.gst_percent),
+        }}
+      />
     </section>
   );
 }

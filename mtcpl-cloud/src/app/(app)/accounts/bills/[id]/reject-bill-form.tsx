@@ -3,10 +3,8 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { rejectBillAction } from "../../actions";
+import { ACCOUNTS_TOKENS, BUTTON_STYLES } from "../../_ui/components";
 
-/** Reject-bill mini-form. Shows a "↩ Reject (with note)" button that
- *  opens an inline note textarea. Mirrors the cutting-approval
- *  send-back flow. */
 export function RejectBillForm({ billId }: { billId: string }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -37,16 +35,7 @@ export function RejectBillForm({ billId }: { billId: string }) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        style={{
-          fontSize: 13,
-          padding: "8px 16px",
-          background: "var(--bg)",
-          border: "1px solid var(--border)",
-          borderRadius: 6,
-          color: "#b91c1c",
-          fontWeight: 600,
-          cursor: "pointer",
-        }}
+        style={BUTTON_STYLES.danger}
       >
         ↩ Reject (send back for edit)
       </button>
@@ -61,16 +50,16 @@ export function RejectBillForm({ billId }: { billId: string }) {
         minWidth: 280,
         display: "flex",
         flexDirection: "column",
-        gap: 8,
-        padding: 12,
-        background: "var(--bg)",
-        border: "1px solid var(--border)",
-        borderRadius: 6,
+        gap: 10,
+        padding: 14,
+        background: "#fff",
+        border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+        borderRadius: 10,
       }}
     >
       <label
         style={{
-          fontSize: 10,
+          fontSize: 11,
           fontWeight: 700,
           color: "var(--muted)",
           textTransform: "uppercase",
@@ -86,10 +75,10 @@ export function RejectBillForm({ billId }: { billId: string }) {
         placeholder="e.g. Check the amount — total seems off. Re-confirm GST%."
         style={{
           fontSize: 13,
-          padding: "8px 10px",
-          border: "1px solid var(--border)",
-          borderRadius: 4,
-          background: "var(--surface)",
+          padding: "9px 12px",
+          border: `1px solid ${ACCOUNTS_TOKENS.borderStrong}`,
+          borderRadius: 8,
+          background: "#fff",
           color: "var(--text)",
           resize: "vertical",
           fontFamily: "inherit",
@@ -100,10 +89,10 @@ export function RejectBillForm({ billId }: { billId: string }) {
           role="alert"
           style={{
             fontSize: 12,
-            color: "#7f1d1d",
-            background: "rgba(220,38,38,0.08)",
+            color: ACCOUNTS_TOKENS.danger,
+            background: ACCOUNTS_TOKENS.dangerLight,
             padding: "6px 10px",
-            borderRadius: 4,
+            borderRadius: 6,
           }}
         >
           {error}
@@ -113,8 +102,7 @@ export function RejectBillForm({ billId }: { billId: string }) {
         <button
           type="submit"
           disabled={pending}
-          className="primary-button"
-          style={{ fontSize: 13, background: "#b45309" }}
+          style={{ ...BUTTON_STYLES.primary, background: ACCOUNTS_TOKENS.danger, boxShadow: "0 1px 2px rgba(220,38,38,0.18)" }}
         >
           {pending ? "Sending back…" : "↩ Confirm reject"}
         </button>
@@ -126,15 +114,7 @@ export function RejectBillForm({ billId }: { billId: string }) {
             setError(null);
           }}
           disabled={pending}
-          style={{
-            fontSize: 13,
-            padding: "8px 14px",
-            background: "transparent",
-            border: "1px solid var(--border)",
-            borderRadius: 6,
-            color: "var(--muted)",
-            cursor: pending ? "wait" : "pointer",
-          }}
+          style={BUTTON_STYLES.secondary}
         >
           Cancel
         </button>

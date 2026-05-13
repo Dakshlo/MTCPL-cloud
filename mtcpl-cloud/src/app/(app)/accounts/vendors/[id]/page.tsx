@@ -1,5 +1,3 @@
-// Bill-vendor detail — bank details, bill history, total outstanding.
-
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
@@ -7,6 +5,16 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canManageBillVendors } from "@/lib/accounts-permissions";
 import { upsertBillVendorAction } from "../../actions";
 import { VendorForm } from "../vendor-form";
+import {
+  AccountsHero,
+  ACCOUNTS_TOKENS,
+  BillStatusPill,
+  BUTTON_STYLES,
+  EmptyState,
+  Money,
+  TABLE_STYLES,
+  VendorAvatar,
+} from "../../_ui/components";
 
 type Params = Promise<{ id: string }>;
 
@@ -53,56 +61,107 @@ export default async function BillVendorDetailPage({
     .filter((b) => b.status === "approved")
     .reduce((s, b) => s + Number(b.amount_outstanding), 0);
   const totalPaid = bills.reduce((s, b) => s + Number(b.amount_paid), 0);
+  const billsCount = bills.length;
 
   return (
     <section className="page-card">
-      <div style={{ marginBottom: 18 }}>
+      <div style={{ marginBottom: 14 }}>
         <Link
           href="/accounts/vendors"
           style={{
             color: "var(--muted)",
             textDecoration: "none",
             fontSize: 13,
-            fontWeight: 500,
+            fontWeight: 600,
           }}
         >
           ← All bill vendors
         </Link>
       </div>
-      <div className="record-head" style={{ marginBottom: 16 }}>
-        <div>
-          <h1>{vendor.name}</h1>
-          <p className="muted">
-            {vendor.category ?? "—"}
-            {vendor.gstin ? ` · GSTIN ${vendor.gstin}` : ""}
-            {vendor.phone ? ` · ${vendor.phone}` : ""}
-          </p>
+
+      {/* Hero */}
+      <div
+        style={{
+          background: "linear-gradient(135deg, #f8fafc 0%, #ffffff 100%)",
+          border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+          borderRadius: 14,
+          padding: "20px 22px",
+          marginBottom: 18,
+          boxShadow: ACCOUNTS_TOKENS.shadow,
+          display: "flex",
+          gap: 18,
+          flexWrap: "wrap",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+        }}
+      >
+        <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+          <VendorAvatar name={vendor.name} size={56} />
+          <div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 4 }}>
+              <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: "var(--text)", letterSpacing: "-0.02em" }}>
+                {vendor.name}
+              </h1>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  padding: "3px 10px",
+                  borderRadius: 999,
+                  background: vendor.is_active ? ACCOUNTS_TOKENS.successLight : ACCOUNTS_TOKENS.surfaceMuted,
+                  color: vendor.is_active ? ACCOUNTS_TOKENS.success : "var(--muted)",
+                }}
+              >
+                {vendor.is_active ? "● Active" : "○ Archived"}
+              </span>
+            </div>
+            <p style={{ margin: 0, fontSize: 13, color: "var(--muted)" }}>
+              {vendor.category ?? "—"}
+              {vendor.gstin && <> · GSTIN <code style={{ fontFamily: "ui-monospace, monospace", color: "var(--text)" }}>{vendor.gstin}</code></>}
+              {vendor.phone && <> · {vendor.phone}</>}
+            </p>
+          </div>
         </div>
-        <div
-          style={{
-            fontFamily: "ui-monospace, monospace",
-            textAlign: "right",
-          }}
-        >
-          <div style={{ fontSize: 10, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase" }}>
-            Outstanding
+
+        <div style={{ display: "flex", gap: 24, flexWrap: "wrap", textAlign: "right" }}>
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              Outstanding
+            </div>
+            {totalOutstanding > 0 ? (
+              <Money value={totalOutstanding} size="hero" tone="warning" />
+            ) : (
+              <span style={{ fontSize: 22, color: ACCOUNTS_TOKENS.success, fontWeight: 700 }}>
+                Cleared
+              </span>
+            )}
           </div>
-          <div
-            style={{
-              fontSize: 24,
-              fontWeight: 800,
-              color: totalOutstanding > 0 ? "#b45309" : "var(--muted)",
-            }}
-          >
-            ₹{totalOutstanding.toLocaleString("en-IN")}
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              Lifetime paid
+            </div>
+            <Money value={totalPaid} size="large" tone="success" />
           </div>
-          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
-            Lifetime paid ₹{totalPaid.toLocaleString("en-IN")}
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              Total bills
+            </div>
+            <span style={{ fontSize: 22, fontWeight: 800, color: "var(--text)", letterSpacing: "-0.02em", fontFamily: "ui-monospace, monospace" }}>
+              {billsCount}
+            </span>
           </div>
         </div>
       </div>
 
-      <div style={{ marginTop: 14 }}>
+      {/* Edit + Bill history side by side */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "minmax(280px, 360px) minmax(0, 1fr)",
+          gap: 18,
+          alignItems: "flex-start",
+        }}
+      >
         <VendorForm
           action={upsertBillVendorAction}
           mode="edit"
@@ -122,103 +181,96 @@ export default async function BillVendorDetailPage({
             notes: vendor.notes,
           }}
         />
-      </div>
 
-      <h2 style={{ fontSize: 14, marginTop: 26, marginBottom: 10, color: "var(--muted)" }}>
-        Bill history ({bills.length})
-      </h2>
-      {bills.length === 0 ? (
-        <p className="muted" style={{ fontSize: 12 }}>
-          No bills yet for this vendor.
-        </p>
-      ) : (
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-            <thead>
-              <tr style={{ borderBottom: "2px solid var(--border)" }}>
-                <th style={thStyle}>Token</th>
-                <th style={thStyle}>Date</th>
-                <th style={thStyle}>Bill no</th>
-                <th style={thStyle}>Description</th>
-                <th style={{ ...thStyle, textAlign: "right" }}>Total</th>
-                <th style={{ ...thStyle, textAlign: "right" }}>Paid</th>
-                <th style={{ ...thStyle, textAlign: "right" }}>Outstanding</th>
-                <th style={thStyle}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {bills.map((b) => (
-                <tr key={b.id} style={{ borderBottom: "1px solid var(--border)" }}>
-                  <td style={tdStyle}>
-                    <Link
-                      href={`/accounts/bills/${b.id}`}
-                      style={{
-                        textDecoration: "none",
-                        fontFamily: "ui-monospace, monospace",
-                        fontWeight: 700,
-                        color: "var(--text)",
-                      }}
-                    >
-                      {b.token}
-                    </Link>
-                  </td>
-                  <td style={tdStyle}>
-                    {new Date(b.bill_date).toLocaleDateString("en-IN", {
-                      day: "numeric",
-                      month: "short",
-                      year: "numeric",
-                    })}
-                  </td>
-                  <td style={tdStyle}>
-                    <code style={{ fontSize: 12 }}>{b.vendor_bill_no}</code>
-                  </td>
-                  <td style={{ ...tdStyle, maxWidth: 260 }}>
-                    <span style={{ fontSize: 12 }}>
-                      {b.description.length > 60 ? `${b.description.slice(0, 60)}…` : b.description}
-                    </span>
-                  </td>
-                  <td style={{ ...tdStyle, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>
-                    ₹{Number(b.amount_total).toLocaleString("en-IN")}
-                  </td>
-                  <td style={{ ...tdStyle, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>
-                    {Number(b.amount_paid) > 0
-                      ? `₹${Number(b.amount_paid).toLocaleString("en-IN")}`
-                      : "—"}
-                  </td>
-                  <td style={{ ...tdStyle, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>
-                    {Number(b.amount_outstanding) > 0 ? (
-                      <strong style={{ color: "#b45309" }}>
-                        ₹{Number(b.amount_outstanding).toLocaleString("en-IN")}
-                      </strong>
-                    ) : (
-                      <span className="muted">—</span>
-                    )}
-                  </td>
-                  <td style={tdStyle}>
-                    <span style={{ fontSize: 11, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                      {b.status.replace(/_/g, " ")}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "baseline",
+              gap: 10,
+              marginBottom: 12,
+              paddingBottom: 8,
+              borderBottom: `1px solid ${ACCOUNTS_TOKENS.border}`,
+            }}
+          >
+            <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>Bill history</h3>
+            <span style={{ fontSize: 12, color: "var(--muted)" }}>
+              {billsCount} bill{billsCount === 1 ? "" : "s"}
+            </span>
+          </div>
+          {bills.length === 0 ? (
+            <EmptyState
+              icon="📑"
+              title="No bills yet for this vendor"
+              description="When a biller submits a bill against this vendor, it'll show up here."
+            />
+          ) : (
+            <div style={TABLE_STYLES.tableWrap}>
+              <div style={{ overflowX: "auto" }}>
+                <table style={TABLE_STYLES.table}>
+                  <thead style={TABLE_STYLES.thead}>
+                    <tr>
+                      <th style={TABLE_STYLES.th}>Token</th>
+                      <th style={TABLE_STYLES.th}>Date</th>
+                      <th style={TABLE_STYLES.th}>Bill no</th>
+                      <th style={TABLE_STYLES.thRight}>Total</th>
+                      <th style={TABLE_STYLES.thRight}>Outstanding</th>
+                      <th style={TABLE_STYLES.th}>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {bills.map((b, idx) => (
+                      <tr
+                        key={b.id}
+                        style={{ background: idx % 2 === 0 ? "#fff" : ACCOUNTS_TOKENS.surfaceMuted }}
+                      >
+                        <td style={TABLE_STYLES.td}>
+                          <Link
+                            href={`/accounts/bills/${b.id}`}
+                            style={{
+                              textDecoration: "none",
+                              fontFamily: "ui-monospace, monospace",
+                              fontWeight: 700,
+                              color: ACCOUNTS_TOKENS.accent,
+                            }}
+                          >
+                            {b.token}
+                          </Link>
+                        </td>
+                        <td style={{ ...TABLE_STYLES.td, fontSize: 12, color: "var(--muted)" }}>
+                          {new Date(b.bill_date).toLocaleDateString("en-IN", {
+                            day: "numeric",
+                            month: "short",
+                            year: "numeric",
+                          })}
+                        </td>
+                        <td style={TABLE_STYLES.td}>
+                          <code style={{ fontSize: 12, fontFamily: "ui-monospace, monospace" }}>
+                            {b.vendor_bill_no}
+                          </code>
+                        </td>
+                        <td style={TABLE_STYLES.tdRight}>
+                          <Money value={Number(b.amount_total)} tone="muted" />
+                        </td>
+                        <td style={TABLE_STYLES.tdRight}>
+                          {Number(b.amount_outstanding) > 0 ? (
+                            <Money value={Number(b.amount_outstanding)} tone="warning" />
+                          ) : (
+                            <span style={{ fontSize: 11, color: "var(--muted)" }}>—</span>
+                          )}
+                        </td>
+                        <td style={TABLE_STYLES.td}>
+                          <BillStatusPill status={b.status} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </section>
   );
 }
-
-const thStyle: React.CSSProperties = {
-  textAlign: "left",
-  padding: "8px 10px",
-  fontSize: 10,
-  fontWeight: 700,
-  color: "var(--muted)",
-  textTransform: "uppercase",
-  letterSpacing: "0.06em",
-};
-const tdStyle: React.CSSProperties = {
-  padding: "10px 10px",
-  verticalAlign: "middle",
-};

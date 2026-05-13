@@ -5,6 +5,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canSubmitBills } from "@/lib/accounts-permissions";
 import { submitBillAction, upsertBillVendorAction } from "../../actions";
 import { BillEntryForm, type BillVendorOption } from "./bill-entry-form";
+import { AccountsHero, BUTTON_STYLES } from "../../_ui/components";
 
 export default async function NewBillPage() {
   const { profile } = await requireAuth();
@@ -23,40 +24,21 @@ export default async function NewBillPage() {
 
   return (
     <section className="page-card">
-      <div className="record-head">
-        <div>
-          <h1>Enter a bill</h1>
-          <p className="muted">
-            Fill in the vendor's bill details. Once submitted, the bill is
-            tagged with a unique token and sent to the owner for audit.
-          </p>
-        </div>
-        <Link
-          href="/accounts/bills"
-          style={{
-            textDecoration: "none",
-            fontSize: 13,
-            padding: "6px 14px",
-            background: "var(--bg)",
-            border: "1px solid var(--border)",
-            borderRadius: 6,
-            color: "var(--muted)",
-            fontWeight: 500,
-            whiteSpace: "nowrap",
-            alignSelf: "flex-start",
-          }}
-        >
-          ← All bills
-        </Link>
-      </div>
+      <AccountsHero
+        title="New bill"
+        description="Fill in the supplier's bill details. We'll auto-tag with a unique token and send it to the owner for audit."
+        actions={
+          <Link href="/accounts/bills" style={BUTTON_STYLES.secondary}>
+            ← All bills
+          </Link>
+        }
+      />
 
-      <div style={{ marginTop: 20 }}>
-        <BillEntryForm
-          vendors={vendors}
-          submitAction={submitBillAction}
-          addVendorAction={upsertBillVendorAction}
-        />
-      </div>
+      <BillEntryForm
+        vendors={vendors}
+        submitAction={submitBillAction}
+        addVendorAction={upsertBillVendorAction}
+      />
     </section>
   );
 }

@@ -1,12 +1,3 @@
-// Bills Audit queue (migration 028).
-//
-// Owner / developer / anyone with can_approve_bills sees this page.
-// Two sections:
-//   - Awaiting approval — Approve / Reject / Edit per row.
-//   - Rejected (awaiting biller edit) — read-only summary with note.
-//
-// Mirrors /cutting/approvals patterns one-for-one.
-
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
@@ -15,6 +6,7 @@ import { getProfilesMap } from "@/lib/profiles";
 import { canApproveBills } from "@/lib/accounts-permissions";
 import { ApprovalsClient, type ApprovalBillRow } from "./approvals-client";
 import { approveBillAction, rejectBillAction } from "../actions";
+import { AccountsHero, BUTTON_STYLES } from "../_ui/components";
 
 export default async function BillsAuditPage() {
   const { profile } = await requireAuth();
@@ -88,33 +80,15 @@ export default async function BillsAuditPage() {
 
   return (
     <section className="page-card">
-      <div className="record-head">
-        <div>
-          <h1>Bills Audit</h1>
-          <p className="muted">
-            Review every Cutting Done bill submission before it commits to
-            the accountant's due list. Approve as-is or send back to the
-            biller with a note.
-          </p>
-        </div>
-        <Link
-          href="/accounts"
-          style={{
-            textDecoration: "none",
-            fontSize: 13,
-            padding: "6px 14px",
-            background: "var(--bg)",
-            border: "1px solid var(--border)",
-            borderRadius: 6,
-            color: "var(--muted)",
-            fontWeight: 500,
-            whiteSpace: "nowrap",
-            alignSelf: "flex-start",
-          }}
-        >
-          ← Accounts home
-        </Link>
-      </div>
+      <AccountsHero
+        title="Bills Audit"
+        description="Review every bill submission before it lands in the accountant's due list. Approve as-is or send back to the biller with a note."
+        actions={
+          <Link href="/accounts" style={BUTTON_STYLES.secondary}>
+            ← Accounts
+          </Link>
+        }
+      />
 
       <ApprovalsClient
         awaiting={awaiting}

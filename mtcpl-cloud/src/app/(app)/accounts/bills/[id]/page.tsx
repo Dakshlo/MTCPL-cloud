@@ -14,30 +14,19 @@ import {
   cancelBillFormAction,
 } from "../../actions";
 import { RejectBillForm } from "./reject-bill-form";
+import {
+  ACCOUNTS_TOKENS,
+  BillStatusPill,
+  BUTTON_STYLES,
+  Money,
+  PaymentStatusPill,
+  TABLE_STYLES,
+  VendorAvatar,
+  VendorIdentity,
+} from "../../_ui/components";
 
 type Params = Promise<{ id: string }>;
 type SearchParams = Promise<{ error?: string; saved?: string }>;
-
-const STATUS_TINT: Record<
-  string,
-  { label: string; bg: string; color: string; border: string }
-> = {
-  pending_approval: {
-    label: "Pending approval",
-    bg: "rgba(232,197,114,0.18)",
-    color: "var(--gold-dark)",
-    border: "var(--gold)",
-  },
-  approved: { label: "Approved", bg: "rgba(22,101,52,0.10)", color: "#15803d", border: "#86efac" },
-  rejected: { label: "Rejected", bg: "rgba(220,38,38,0.10)", color: "#b91c1c", border: "#fca5a5" },
-  fully_paid: {
-    label: "Fully paid",
-    bg: "rgba(15,118,110,0.10)",
-    color: "#0f766e",
-    border: "rgba(15,118,110,0.4)",
-  },
-  cancelled: { label: "Cancelled", bg: "rgba(0,0,0,0.06)", color: "var(--muted)", border: "var(--border)" },
-};
 
 export default async function BillDetailPage({
   params,
@@ -54,20 +43,25 @@ export default async function BillDetailPage({
   const { data: bill } = await supabase
     .from("bills")
     .select(
-      "id, token, vendor_bill_no, bill_date, description, cost_head, amount_subtotal, gst_percent, amount_gst, amount_total, amount_paid, amount_outstanding, status, rejection_note, submitted_by, submitted_at, approved_by, approved_at, rejected_by, rejected_at, cancelled_by, cancelled_at, bill_vendor_id, bill_vendors(id, name, category, gstin, phone)",
+      "id, token, vendor_bill_no, bill_date, description, cost_head, amount_subtotal, gst_percent, amount_gst, amount_total, amount_paid, amount_outstanding, status, rejection_note, submitted_by, submitted_at, approved_by, approved_at, rejected_by, rejected_at, cancelled_by, cancelled_at, bill_vendor_id, bill_vendors(id, name, category, gstin, phone, email, address, bank_name, bank_account, ifsc, upi_id)",
     )
     .eq("id", id)
     .maybeSingle();
 
   if (!bill) notFound();
 
-  // Cast joined vendor object (PostgREST may return as array depending on relationship)
   type VendorInfo = {
     id: string;
     name: string;
     category: string | null;
     gstin: string | null;
     phone: string | null;
+    email: string | null;
+    address: string | null;
+    bank_name: string | null;
+    bank_account: string | null;
+    ifsc: string | null;
+    upi_id: string | null;
   };
   const vendor: VendorInfo | null = Array.isArray(bill.bill_vendors)
     ? (bill.bill_vendors[0] as VendorInfo) ?? null
@@ -75,7 +69,6 @@ export default async function BillDetailPage({
 
   const profilesMap = await getProfilesMap();
 
-  // Payment history (newest first)
   const { data: paymentsRaw } = await supabase
     .from("bill_payments")
     .select(
@@ -102,7 +95,6 @@ export default async function BillDetailPage({
     cancel_reason: string | null;
   }>;
 
-  const tint = STATUS_TINT[bill.status] ?? STATUS_TINT.cancelled;
   const hasOpenPayment = payments.some((p) => p.status === "proposed" || p.status === "confirmed");
   const isLocked = payments.some((p) => p.status !== "cancelled");
   const isOwnBill = bill.submitted_by === profile.id;
@@ -112,16 +104,84 @@ export default async function BillDetailPage({
       (canApproveBills(profile) || isOwnBill || canSubmitBills(profile))) ||
       (bill.status === "pending_approval" && canApproveBills(profile)));
 
+  // Timeline events for the right rail
+  const timeline: Array<{ at: string; label: string; by: string | null; tone: string }> = [];
+  if (bill.submitted_at) {
+    timeline.push({
+      at: bill.submitted_at,
+      label: "Submitted",
+      by: bill.submitted_by ? profilesMap[bill.submitted_by] ?? null : null,
+      tone: ACCOUNTS_TOKENS.neutral,
+    });
+  }
+  if (bill.approved_at) {
+    timeline.push({
+      at: bill.approved_at,
+      label: "Approved",
+      by: bill.approved_by ? profilesMap[bill.approved_by] ?? null : null,
+      tone: ACCOUNTS_TOKENS.success,
+    });
+  }
+  if (bill.rejected_at) {
+    timeline.push({
+      at: bill.rejected_at,
+      label: "Rejected",
+      by: bill.rejected_by ? profilesMap[bill.rejected_by] ?? null : null,
+      tone: ACCOUNTS_TOKENS.danger,
+    });
+  }
+  if (bill.cancelled_at) {
+    timeline.push({
+      at: bill.cancelled_at,
+      label: "Cancelled",
+      by: bill.cancelled_by ? profilesMap[bill.cancelled_by] ?? null : null,
+      tone: ACCOUNTS_TOKENS.neutral,
+    });
+  }
+  for (const p of payments) {
+    if (p.paid_at) {
+      timeline.push({
+        at: p.paid_at,
+        label: `Paid ₹${Number(p.paid_amount ?? 0).toLocaleString("en-IN")} · ${p.payment_method?.toUpperCase() ?? "—"}`,
+        by: p.paid_by ? profilesMap[p.paid_by] ?? null : null,
+        tone: ACCOUNTS_TOKENS.success,
+      });
+    } else if (p.confirmed_at) {
+      timeline.push({
+        at: p.confirmed_at,
+        label: `Payment confirmed · ₹${Number(p.proposed_amount).toLocaleString("en-IN")}`,
+        by: p.confirmed_by ? profilesMap[p.confirmed_by] ?? null : null,
+        tone: ACCOUNTS_TOKENS.warning,
+      });
+    } else if (p.proposed_at) {
+      timeline.push({
+        at: p.proposed_at,
+        label: `Payment proposed · ₹${Number(p.proposed_amount).toLocaleString("en-IN")}`,
+        by: p.proposed_by ? profilesMap[p.proposed_by] ?? null : null,
+        tone: ACCOUNTS_TOKENS.accent,
+      });
+    }
+    if (p.cancelled_at) {
+      timeline.push({
+        at: p.cancelled_at,
+        label: `Payment cancelled${p.cancel_reason ? ` · ${p.cancel_reason}` : ""}`,
+        by: p.cancelled_by ? profilesMap[p.cancelled_by] ?? null : null,
+        tone: ACCOUNTS_TOKENS.neutral,
+      });
+    }
+  }
+  timeline.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+
   return (
     <section className="page-card">
-      <div style={{ marginBottom: 18 }}>
+      <div style={{ marginBottom: 14 }}>
         <Link
           href="/accounts/bills"
           style={{
             color: "var(--muted)",
             textDecoration: "none",
             fontSize: 13,
-            fontWeight: 500,
+            fontWeight: 600,
           }}
         >
           ← All bills
@@ -129,558 +189,566 @@ export default async function BillDetailPage({
       </div>
 
       {sp.saved && (
-        <div
-          style={{
-            marginBottom: 14,
-            padding: "10px 14px",
-            background: "rgba(22,101,52,0.10)",
-            border: "1px solid #86efac",
-            borderRadius: 6,
-            color: "#15803d",
-            fontSize: 13,
-            fontWeight: 600,
-          }}
-        >
-          ✓ Bill saved successfully.
-        </div>
+        <FlashBanner tone="success">✓ Saved successfully.</FlashBanner>
       )}
       {sp.error && (
-        <div
-          style={{
-            marginBottom: 14,
-            padding: "10px 14px",
-            background: "rgba(220,38,38,0.08)",
-            border: "1.5px solid #dc2626",
-            borderRadius: 6,
-            color: "#7f1d1d",
-            fontSize: 13,
-          }}
-        >
-          <strong>Action failed:</strong> {sp.error}
-        </div>
+        <FlashBanner tone="danger"><strong>Action failed:</strong> {sp.error}</FlashBanner>
       )}
 
-      {/* Header */}
-      <div className="record-head" style={{ marginBottom: 16, alignItems: "flex-start" }}>
-        <div>
-          <h1
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-              margin: 0,
-              fontFamily: "ui-monospace, monospace",
-            }}
-          >
-            <code>{bill.token}</code>
-            <span
-              style={{
-                fontSize: 11,
-                fontWeight: 700,
-                padding: "4px 12px",
-                borderRadius: 14,
-                background: tint.bg,
-                color: tint.color,
-                border: `1px solid ${tint.border}`,
-                letterSpacing: "0.05em",
-                textTransform: "uppercase",
-              }}
-            >
-              {tint.label}
-            </span>
-          </h1>
-          <p className="muted" style={{ marginTop: 6 }}>
-            {vendor?.name ?? "—"}
-            {vendor?.gstin ? ` · GSTIN ${vendor.gstin}` : ""}
-            {" · Vendor bill no "}
-            <strong style={{ color: "var(--text)" }}>{bill.vendor_bill_no}</strong>
-          </p>
-        </div>
-        {canEdit && (
-          <Link
-            href={`/accounts/bills/${bill.id}/edit`}
-            style={{
-              textDecoration: "none",
-              fontSize: 13,
-              padding: "8px 16px",
-              background: "var(--bg)",
-              border: "1px solid var(--border)",
-              borderRadius: 6,
-              fontWeight: 600,
-              color: "var(--text)",
-            }}
-          >
-            ✏ Edit
-          </Link>
-        )}
-      </div>
-
-      {/* Amount summary block */}
+      {/* Hero block — token, vendor, total, status */}
       <div
         style={{
-          padding: "14px 18px",
-          background: "var(--surface)",
-          border: "1.5px solid var(--gold)",
-          borderRadius: 8,
-          marginBottom: 16,
+          background: "linear-gradient(135deg, #f8fafc 0%, #ffffff 100%)",
+          border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+          borderRadius: 14,
+          padding: "20px 22px",
+          marginBottom: 18,
+          boxShadow: ACCOUNTS_TOKENS.shadow,
+          display: "flex",
+          gap: 20,
+          flexWrap: "wrap",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
         }}
       >
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-            gap: 16,
-            fontFamily: "ui-monospace, monospace",
-          }}
-        >
-          <Stat label="Subtotal" value={`₹${Number(bill.amount_subtotal).toLocaleString("en-IN")}`} />
-          <Stat
-            label={`GST (${Number(bill.gst_percent)}%)`}
-            value={`₹${Number(bill.amount_gst).toLocaleString("en-IN")}`}
-          />
-          <Stat
-            label="Total"
-            value={`₹${Number(bill.amount_total).toLocaleString("en-IN")}`}
-            highlight
-          />
-          <Stat
-            label="Paid"
-            value={`₹${Number(bill.amount_paid).toLocaleString("en-IN")}`}
-            tone={Number(bill.amount_paid) > 0 ? "#15803d" : undefined}
-          />
-          <Stat
-            label="Outstanding"
-            value={`₹${Number(bill.amount_outstanding).toLocaleString("en-IN")}`}
-            tone={Number(bill.amount_outstanding) > 0 ? "#b45309" : "#15803d"}
-            highlight
-          />
+        <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
+          <VendorAvatar name={vendor?.name ?? "?"} size={56} />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
+              <code
+                style={{
+                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  padding: "3px 10px",
+                  background: ACCOUNTS_TOKENS.accentLight,
+                  color: ACCOUNTS_TOKENS.accent,
+                  borderRadius: 6,
+                  letterSpacing: "0.02em",
+                }}
+              >
+                {bill.token}
+              </code>
+              <BillStatusPill status={bill.status} />
+            </div>
+            <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: "var(--text)", letterSpacing: "-0.02em" }}>
+              {vendor?.name ?? "Unknown vendor"}
+            </h1>
+            <p style={{ margin: "4px 0 0", fontSize: 13, color: "var(--muted)" }}>
+              Vendor bill <code style={{ fontFamily: "ui-monospace, monospace", color: "var(--text)" }}>{bill.vendor_bill_no}</code>
+              {" · "}
+              {new Date(bill.bill_date).toLocaleDateString("en-IN", {
+                day: "numeric",
+                month: "long",
+                year: "numeric",
+              })}
+              {bill.cost_head ? <> · <span style={{ color: ACCOUNTS_TOKENS.warning, fontWeight: 600 }}>{bill.cost_head}</span></> : null}
+            </p>
+          </div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
+            Total
+          </div>
+          <Money value={Number(bill.amount_total)} size="hero" tone="accent" />
+          <div style={{ marginTop: 4, display: "flex", gap: 14, justifyContent: "flex-end", flexWrap: "wrap", fontFamily: "ui-monospace, monospace", fontSize: 11, color: "var(--muted)" }}>
+            <span>Net <Money value={Number(bill.amount_subtotal)} size="small" tone="muted" /></span>
+            <span>GST {Number(bill.gst_percent)}% <Money value={Number(bill.amount_gst)} size="small" tone="muted" /></span>
+          </div>
         </div>
       </div>
 
-      {/* Bill details */}
+      {/* Two-column body: details + side rail */}
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 16,
-          marginBottom: 16,
+          gridTemplateColumns: "minmax(0, 1fr) minmax(280px, 340px)",
+          gap: 18,
         }}
       >
-        <InfoBlock label="Bill date">
-          {new Date(bill.bill_date).toLocaleDateString("en-IN", {
-            day: "numeric",
-            month: "long",
-            year: "numeric",
-          })}
-        </InfoBlock>
-        <InfoBlock label="Cost head">
-          {bill.cost_head ? (
-            <span
+        {/* LEFT column — payment summary + description + payment history */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* Payment summary cards */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(3, 1fr)",
+              gap: 12,
+            }}
+          >
+            <SummaryCard
+              label="Total"
+              value={<Money value={Number(bill.amount_total)} size="large" />}
+              tone={ACCOUNTS_TOKENS.neutral}
+            />
+            <SummaryCard
+              label="Paid"
+              value={
+                Number(bill.amount_paid) > 0 ? (
+                  <Money value={Number(bill.amount_paid)} size="large" tone="success" />
+                ) : (
+                  <span style={{ fontSize: 16, color: "var(--muted)", fontWeight: 600 }}>—</span>
+                )
+              }
+              tone={ACCOUNTS_TOKENS.success}
+            />
+            <SummaryCard
+              label="Outstanding"
+              value={
+                Number(bill.amount_outstanding) > 0 ? (
+                  <Money value={Number(bill.amount_outstanding)} size="large" tone="warning" />
+                ) : (
+                  <span style={{ fontSize: 16, color: ACCOUNTS_TOKENS.success, fontWeight: 700 }}>Cleared</span>
+                )
+              }
+              tone={Number(bill.amount_outstanding) > 0 ? ACCOUNTS_TOKENS.warning : ACCOUNTS_TOKENS.success}
+            />
+          </div>
+
+          {/* Description */}
+          <Section title="Description">
+            <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, whiteSpace: "pre-wrap", color: "var(--text)" }}>
+              {bill.description}
+            </p>
+          </Section>
+
+          {/* Rejection note */}
+          {bill.status === "rejected" && bill.rejection_note && (
+            <div
               style={{
-                fontSize: 12,
-                padding: "3px 10px",
-                borderRadius: 4,
-                background: "rgba(184,115,51,0.10)",
-                color: "#b45309",
+                padding: "14px 16px",
+                background: ACCOUNTS_TOKENS.dangerLight,
+                border: `1px solid ${ACCOUNTS_TOKENS.danger}`,
+                borderLeft: `4px solid ${ACCOUNTS_TOKENS.danger}`,
+                borderRadius: 10,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  color: ACCOUNTS_TOKENS.danger,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                  marginBottom: 4,
+                }}
+              >
+                Rejected
+                {bill.rejected_by && profilesMap[bill.rejected_by]
+                  ? ` · by ${profilesMap[bill.rejected_by]}`
+                  : ""}
+              </div>
+              <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5 }}>{bill.rejection_note}</p>
+            </div>
+          )}
+
+          {/* Owner audit actions */}
+          {bill.status === "pending_approval" && canApproveBills(profile) && (
+            <div
+              style={{
+                padding: 16,
+                background: ACCOUNTS_TOKENS.accentLight,
+                border: `1.5px solid ${ACCOUNTS_TOKENS.accentBorder}`,
+                borderRadius: 12,
+                display: "flex",
+                gap: 10,
+                flexWrap: "wrap",
+                alignItems: "center",
+              }}
+            >
+              <span style={{ fontSize: 13, color: ACCOUNTS_TOKENS.accent, fontWeight: 600, flex: 1, minWidth: 200 }}>
+                ⏱ This bill is waiting for your audit. Review the entry against the physical bill.
+              </span>
+              <form action={approveBillFormAction} style={{ display: "inline" }}>
+                <input type="hidden" name="bill_id" value={bill.id} />
+                <button type="submit" style={BUTTON_STYLES.primary}>
+                  ✓ Approve bill
+                </button>
+              </form>
+              <RejectBillForm billId={bill.id} />
+            </div>
+          )}
+
+          {/* Payment history */}
+          <Section
+            title={`Payment history`}
+            subtitle={`${payments.length} record${payments.length === 1 ? "" : "s"}`}
+          >
+            {payments.length === 0 ? (
+              <p style={{ margin: 0, fontSize: 13, color: "var(--muted)", padding: "10px 4px" }}>
+                No payment activity yet.
+              </p>
+            ) : (
+              <div style={{ overflowX: "auto", marginTop: 6 }}>
+                <table style={TABLE_STYLES.table}>
+                  <thead style={TABLE_STYLES.thead}>
+                    <tr>
+                      <th style={TABLE_STYLES.th}>Status</th>
+                      <th style={TABLE_STYLES.th}>Activity</th>
+                      <th style={TABLE_STYLES.thRight}>Proposed</th>
+                      <th style={TABLE_STYLES.thRight}>Paid</th>
+                      <th style={TABLE_STYLES.th}>Method · Ref</th>
+                      <th style={TABLE_STYLES.th}>Who</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {payments.map((p) => (
+                      <tr key={p.id}>
+                        <td style={TABLE_STYLES.td}>
+                          <PaymentStatusPill status={p.status} />
+                        </td>
+                        <td style={{ ...TABLE_STYLES.td, fontSize: 12, color: "var(--muted)" }}>
+                          {p.paid_at
+                            ? new Date(p.paid_at).toLocaleString("en-IN", {
+                                day: "numeric",
+                                month: "short",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })
+                            : p.proposed_at
+                              ? new Date(p.proposed_at).toLocaleString("en-IN", {
+                                  day: "numeric",
+                                  month: "short",
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })
+                              : "—"}
+                        </td>
+                        <td style={TABLE_STYLES.tdRight}>
+                          <Money value={Number(p.proposed_amount)} size="small" tone="muted" />
+                        </td>
+                        <td style={TABLE_STYLES.tdRight}>
+                          {p.paid_amount != null ? (
+                            <Money value={Number(p.paid_amount)} size="small" tone="success" />
+                          ) : (
+                            <span style={{ color: "var(--muted)" }}>—</span>
+                          )}
+                        </td>
+                        <td style={{ ...TABLE_STYLES.td, fontSize: 12 }}>
+                          {p.payment_method ? (
+                            <>
+                              <strong style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                                {p.payment_method}
+                              </strong>
+                              {p.payment_reference ? <span style={{ color: "var(--muted)" }}> · {p.payment_reference}</span> : null}
+                            </>
+                          ) : (
+                            <span style={{ color: "var(--muted)" }}>—</span>
+                          )}
+                        </td>
+                        <td style={{ ...TABLE_STYLES.td, fontSize: 12, color: "var(--muted)" }}>
+                          {p.status === "paid" && p.paid_by
+                            ? profilesMap[p.paid_by]
+                            : p.status === "cancelled" && p.cancelled_by
+                              ? `Cancelled · ${profilesMap[p.cancelled_by] ?? ""}`
+                              : p.status === "confirmed" && p.confirmed_by
+                                ? `Confirmed · ${profilesMap[p.confirmed_by] ?? ""}`
+                                : p.proposed_by
+                                  ? profilesMap[p.proposed_by]
+                                  : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Section>
+
+          {isLocked && (
+            <p style={{ fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}>
+              Bill is locked — payment activity exists. Contact a developer for corrections.
+            </p>
+          )}
+        </div>
+
+        {/* RIGHT rail — vendor info + timeline + secondary actions */}
+        <aside style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {/* Vendor card */}
+          {vendor && (
+            <div
+              style={{
+                background: "#fff",
+                border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+                borderRadius: 12,
+                padding: 16,
+                boxShadow: ACCOUNTS_TOKENS.shadow,
+              }}
+            >
+              <div style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>
+                Vendor
+              </div>
+              <VendorIdentity
+                name={vendor.name}
+                subLabel={vendor.category ?? undefined}
+                size={36}
+                href={`/accounts/vendors/${vendor.id}`}
+              />
+              <dl style={{ margin: "14px 0 0", display: "flex", flexDirection: "column", gap: 6, fontSize: 12 }}>
+                {vendor.gstin && <KV k="GSTIN" v={vendor.gstin} mono />}
+                {vendor.phone && <KV k="Phone" v={vendor.phone} />}
+                {vendor.email && <KV k="Email" v={vendor.email} />}
+                {vendor.upi_id && <KV k="UPI" v={vendor.upi_id} mono />}
+                {vendor.bank_name && <KV k="Bank" v={vendor.bank_name} />}
+                {vendor.ifsc && <KV k="IFSC" v={vendor.ifsc} mono />}
+              </dl>
+            </div>
+          )}
+
+          {/* Actions */}
+          {canEdit && (
+            <div
+              style={{
+                background: "#fff",
+                border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+                borderRadius: 12,
+                padding: 16,
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
+              }}
+            >
+              <div style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                Actions
+              </div>
+              <Link href={`/accounts/bills/${bill.id}/edit`} style={BUTTON_STYLES.secondary}>
+                ✏ Edit bill
+              </Link>
+              {!isLocked &&
+                (bill.status === "pending_approval" || bill.status === "rejected") &&
+                (profile.role === "developer" || profile.role === "owner") && (
+                  <form action={cancelBillFormAction}>
+                    <input type="hidden" name="bill_id" value={bill.id} />
+                    <button type="submit" style={{ ...BUTTON_STYLES.ghost, width: "100%" }}>
+                      Cancel this bill
+                    </button>
+                  </form>
+                )}
+            </div>
+          )}
+
+          {/* Approved + has outstanding → reminder */}
+          {bill.status === "approved" &&
+            Number(bill.amount_outstanding) > 0 &&
+            !hasOpenPayment &&
+            canManageAccounts(profile) && (
+              <div
+                style={{
+                  background: ACCOUNTS_TOKENS.successLight,
+                  border: `1px solid ${ACCOUNTS_TOKENS.success}`,
+                  borderRadius: 12,
+                  padding: 14,
+                  fontSize: 13,
+                  color: ACCOUNTS_TOKENS.success,
+                  fontWeight: 600,
+                }}
+              >
+                Ready for payment proposal —{" "}
+                <Link href="/accounts" style={{ color: ACCOUNTS_TOKENS.success, fontWeight: 700, textDecoration: "underline" }}>
+                  open Due Bills
+                </Link>
+              </div>
+            )}
+          {hasOpenPayment && canManageAccounts(profile) && (
+            <div
+              style={{
+                background: ACCOUNTS_TOKENS.warningLight,
+                border: `1px solid ${ACCOUNTS_TOKENS.warning}`,
+                borderRadius: 12,
+                padding: 14,
+                fontSize: 13,
+                color: ACCOUNTS_TOKENS.warning,
                 fontWeight: 600,
               }}
             >
-              {bill.cost_head}
-            </span>
-          ) : (
-            <span className="muted" style={{ fontSize: 12 }}>—</span>
+              Payment in flight —{" "}
+              <Link href="/accounts/pay-today" style={{ color: ACCOUNTS_TOKENS.warning, fontWeight: 700, textDecoration: "underline" }}>
+                continue on Pay Today
+              </Link>
+            </div>
           )}
-        </InfoBlock>
-      </div>
-      <InfoBlock label="Description">
-        <p style={{ margin: 0, fontSize: 14, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{bill.description}</p>
-      </InfoBlock>
 
-      {/* Rejection note (if any) */}
-      {bill.status === "rejected" && bill.rejection_note && (
-        <div
-          style={{
-            marginTop: 14,
-            padding: "12px 14px",
-            background: "rgba(220,38,38,0.06)",
-            border: "1px solid rgba(220,38,38,0.30)",
-            borderLeft: "5px solid #dc2626",
-            borderRadius: 6,
-          }}
-        >
+          {/* Audit timeline */}
           <div
             style={{
-              fontSize: 10,
-              fontWeight: 700,
-              color: "#b91c1c",
-              textTransform: "uppercase",
-              letterSpacing: "0.06em",
-              marginBottom: 4,
+              background: "#fff",
+              border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+              borderRadius: 12,
+              padding: 16,
+              boxShadow: ACCOUNTS_TOKENS.shadow,
             }}
           >
-            Rejection note
-            {bill.rejected_by && profilesMap[bill.rejected_by]
-              ? ` · ${profilesMap[bill.rejected_by]}`
-              : ""}
-          </div>
-          <p style={{ margin: 0, fontSize: 13 }}>{bill.rejection_note}</p>
-        </div>
-      )}
-
-      {/* Owner action buttons (pending_approval only) */}
-      {bill.status === "pending_approval" && canApproveBills(profile) && (
-        <div
-          style={{
-            marginTop: 18,
-            display: "flex",
-            gap: 10,
-            flexWrap: "wrap",
-            padding: "14px",
-            background: "rgba(232,197,114,0.08)",
-            border: "1.5px solid var(--gold)",
-            borderRadius: 8,
-          }}
-        >
-          <form action={approveBillFormAction}>
-            <input type="hidden" name="bill_id" value={bill.id} />
-            <button className="primary-button" type="submit">
-              ✓ Approve bill
-            </button>
-          </form>
-          <RejectBillForm billId={bill.id} />
-        </div>
-      )}
-
-      {/* Cancel action (developer/owner, only if no payments) */}
-      {!isLocked &&
-        (bill.status === "pending_approval" || bill.status === "rejected") &&
-        (profile.role === "developer" || profile.role === "owner") && (
-          <form action={cancelBillFormAction} style={{ marginTop: 12 }}>
-            <input type="hidden" name="bill_id" value={bill.id} />
-            <button
-              type="submit"
-              style={{
-                fontSize: 12,
-                padding: "6px 14px",
-                background: "transparent",
-                border: "1px dashed var(--border)",
-                color: "var(--muted)",
-                borderRadius: 6,
-                cursor: "pointer",
-              }}
-            >
-              Cancel this bill (no payments exist yet)
-            </button>
-          </form>
-        )}
-
-      {/* Approved + has outstanding → link to propose payment */}
-      {bill.status === "approved" &&
-        Number(bill.amount_outstanding) > 0 &&
-        !hasOpenPayment &&
-        canManageAccounts(profile) && (
-          <div
-            style={{
-              marginTop: 18,
-              padding: "12px 14px",
-              background: "rgba(22,101,52,0.08)",
-              border: "1.5px solid #86efac",
-              borderRadius: 8,
-            }}
-          >
-            <p style={{ margin: 0, fontSize: 13 }}>
-              Approved. Pick this bill from{" "}
-              <Link href="/accounts" style={{ color: "var(--gold-dark)", fontWeight: 700 }}>
-                Due Bills
-              </Link>{" "}
-              to propose a payment.
-            </p>
-          </div>
-        )}
-
-      {hasOpenPayment && canManageAccounts(profile) && (
-        <div
-          style={{
-            marginTop: 18,
-            padding: "12px 14px",
-            background: "rgba(184,115,51,0.10)",
-            border: "1.5px solid #b45309",
-            borderRadius: 8,
-          }}
-        >
-          <p style={{ margin: 0, fontSize: 13 }}>
-            A payment is open for this bill. Continue on{" "}
-            <Link
-              href="/accounts/pay-today"
-              style={{ color: "var(--gold-dark)", fontWeight: 700 }}
-            >
-              Pay Today
-            </Link>
-            .
-          </p>
-        </div>
-      )}
-
-      {/* Audit trail */}
-      <h2 style={{ fontSize: 14, marginTop: 28, marginBottom: 10, color: "var(--muted)" }}>
-        Audit trail
-      </h2>
-      <ul
-        style={{
-          listStyle: "none",
-          padding: 0,
-          margin: 0,
-          fontSize: 12,
-          display: "flex",
-          flexDirection: "column",
-          gap: 6,
-        }}
-      >
-        <AuditRow
-          label="Submitted"
-          at={bill.submitted_at}
-          by={bill.submitted_by ? profilesMap[bill.submitted_by] : null}
-        />
-        {bill.approved_at && (
-          <AuditRow
-            label="Approved"
-            at={bill.approved_at}
-            by={bill.approved_by ? profilesMap[bill.approved_by] : null}
-          />
-        )}
-        {bill.rejected_at && (
-          <AuditRow
-            label="Rejected"
-            at={bill.rejected_at}
-            by={bill.rejected_by ? profilesMap[bill.rejected_by] : null}
-          />
-        )}
-        {bill.cancelled_at && (
-          <AuditRow
-            label="Cancelled"
-            at={bill.cancelled_at}
-            by={bill.cancelled_by ? profilesMap[bill.cancelled_by] : null}
-          />
-        )}
-      </ul>
-
-      {/* Payment history */}
-      <h2 style={{ fontSize: 14, marginTop: 28, marginBottom: 10, color: "var(--muted)" }}>
-        Payment history ({payments.length})
-      </h2>
-      {payments.length === 0 ? (
-        <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-          No payment rows yet.
-        </p>
-      ) : (
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-          <thead>
-            <tr style={{ borderBottom: "1px solid var(--border)" }}>
-              <th style={thStyle}>Proposed</th>
-              <th style={thStyle}>Status</th>
-              <th style={{ ...thStyle, textAlign: "right" }}>Proposed ₹</th>
-              <th style={{ ...thStyle, textAlign: "right" }}>Paid ₹</th>
-              <th style={thStyle}>Method · Ref</th>
-              <th style={thStyle}>Who</th>
-            </tr>
-          </thead>
-          <tbody>
-            {payments.map((p) => (
-              <tr key={p.id} style={{ borderBottom: "1px solid var(--border)" }}>
-                <td style={tdStyle}>
-                  {p.proposed_at
-                    ? new Date(p.proposed_at).toLocaleString("en-IN", {
+            <div style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 12 }}>
+              Audit trail
+            </div>
+            {timeline.length === 0 ? (
+              <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>No events yet.</p>
+            ) : (
+              <ol style={{ listStyle: "none", padding: 0, margin: 0, position: "relative" }}>
+                {/* vertical line */}
+                <span
+                  style={{
+                    position: "absolute",
+                    left: 6,
+                    top: 6,
+                    bottom: 6,
+                    width: 1.5,
+                    background: ACCOUNTS_TOKENS.border,
+                  }}
+                />
+                {timeline.map((e, i) => (
+                  <li key={i} style={{ position: "relative", paddingLeft: 22, paddingBottom: i === timeline.length - 1 ? 0 : 14 }}>
+                    <span
+                      style={{
+                        position: "absolute",
+                        left: 0,
+                        top: 3,
+                        width: 13,
+                        height: 13,
+                        borderRadius: "50%",
+                        background: e.tone,
+                        border: `2px solid var(--surface, #fff)`,
+                      }}
+                    />
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>
+                      {e.label}
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 1 }}>
+                      {new Date(e.at).toLocaleString("en-IN", {
                         day: "numeric",
                         month: "short",
                         hour: "2-digit",
                         minute: "2-digit",
-                      })
-                    : "—"}
-                </td>
-                <td style={tdStyle}>
-                  <span
-                    style={{
-                      fontSize: 10,
-                      fontWeight: 700,
-                      padding: "2px 8px",
-                      borderRadius: 4,
-                      background:
-                        p.status === "paid"
-                          ? "rgba(22,101,52,0.12)"
-                          : p.status === "confirmed"
-                            ? "rgba(232,197,114,0.18)"
-                            : p.status === "proposed"
-                              ? "rgba(15,118,110,0.10)"
-                              : "rgba(0,0,0,0.06)",
-                      color:
-                        p.status === "paid"
-                          ? "#15803d"
-                          : p.status === "confirmed"
-                            ? "var(--gold-dark)"
-                            : p.status === "proposed"
-                              ? "#0f766e"
-                              : "var(--muted)",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.04em",
-                    }}
-                  >
-                    {p.status}
-                  </span>
-                </td>
-                <td style={{ ...tdStyle, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>
-                  ₹{Number(p.proposed_amount).toLocaleString("en-IN")}
-                </td>
-                <td style={{ ...tdStyle, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>
-                  {p.paid_amount != null
-                    ? `₹${Number(p.paid_amount).toLocaleString("en-IN")}`
-                    : "—"}
-                </td>
-                <td style={tdStyle}>
-                  {p.payment_method ? (
-                    <>
-                      <strong>{p.payment_method.toUpperCase()}</strong>
-                      {p.payment_reference ? ` · ${p.payment_reference}` : ""}
-                    </>
-                  ) : (
-                    <span className="muted">—</span>
-                  )}
-                </td>
-                <td style={tdStyle}>
-                  {p.status === "paid" && p.paid_by
-                    ? profilesMap[p.paid_by]
-                    : p.status === "cancelled" && p.cancelled_by
-                      ? `Cancelled · ${profilesMap[p.cancelled_by] ?? ""}`
-                      : p.status === "confirmed" && p.confirmed_by
-                        ? `Confirmed · ${profilesMap[p.confirmed_by] ?? ""}`
-                        : p.proposed_by
-                          ? profilesMap[p.proposed_by]
-                          : "—"}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      {/* Locked-out hint */}
-      {isLocked && (
-        <p className="muted" style={{ fontSize: 11, marginTop: 14, fontStyle: "italic" }}>
-          Bill is locked — payment activity exists. Contact a developer for corrections.
-        </p>
-      )}
+                      })}
+                      {e.by ? ` · ${e.by}` : ""}
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+        </aside>
+      </div>
     </section>
   );
 }
 
-const thStyle: React.CSSProperties = {
-  textAlign: "left",
-  padding: "8px 10px",
-  fontSize: 10,
-  fontWeight: 700,
-  color: "var(--muted)",
-  textTransform: "uppercase",
-  letterSpacing: "0.06em",
-};
-const tdStyle: React.CSSProperties = { padding: "8px 10px", verticalAlign: "middle" };
+function FlashBanner({
+  tone,
+  children,
+}: {
+  tone: "success" | "danger";
+  children: React.ReactNode;
+}) {
+  const tones = {
+    success: { bg: ACCOUNTS_TOKENS.successLight, border: ACCOUNTS_TOKENS.success, fg: ACCOUNTS_TOKENS.success },
+    danger: { bg: ACCOUNTS_TOKENS.dangerLight, border: ACCOUNTS_TOKENS.danger, fg: ACCOUNTS_TOKENS.danger },
+  };
+  const t = tones[tone];
+  return (
+    <div
+      style={{
+        marginBottom: 12,
+        padding: "10px 14px",
+        background: t.bg,
+        border: `1px solid ${t.border}`,
+        borderRadius: 8,
+        color: t.fg,
+        fontSize: 13,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
 
-function Stat({
+function Section({
+  title,
+  subtitle,
+  children,
+}: {
+  title: React.ReactNode;
+  subtitle?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        background: "#fff",
+        border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+        borderRadius: 12,
+        padding: 16,
+        boxShadow: ACCOUNTS_TOKENS.shadow,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 10 }}>
+        <h3 style={{ margin: 0, fontSize: 13, fontWeight: 700, color: "var(--text)", letterSpacing: "-0.005em" }}>
+          {title}
+        </h3>
+        {subtitle && (
+          <span style={{ fontSize: 11, color: "var(--muted)" }}>{subtitle}</span>
+        )}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function SummaryCard({
   label,
   value,
   tone,
-  highlight,
 }: {
   label: string;
-  value: string;
-  tone?: string;
-  highlight?: boolean;
+  value: React.ReactNode;
+  tone: string;
 }) {
   return (
-    <div>
+    <div
+      style={{
+        padding: 14,
+        background: "#fff",
+        border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+        borderLeft: `3px solid ${tone}`,
+        borderRadius: 10,
+        boxShadow: ACCOUNTS_TOKENS.shadow,
+      }}
+    >
       <div
         style={{
           fontSize: 10,
-          color: "var(--muted)",
           fontWeight: 700,
+          color: "var(--muted)",
           textTransform: "uppercase",
           letterSpacing: "0.06em",
+          marginBottom: 6,
         }}
       >
         {label}
       </div>
-      <div
-        style={{
-          fontSize: highlight ? 18 : 14,
-          fontWeight: highlight ? 800 : 700,
-          color: tone ?? (highlight ? "var(--gold-dark)" : "var(--text)"),
-          marginTop: 3,
-        }}
-      >
-        {value}
-      </div>
+      <div>{value}</div>
     </div>
   );
 }
 
-function InfoBlock({ label, children }: { label: string; children: React.ReactNode }) {
+function KV({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
   return (
-    <div>
-      <div
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+      <dt style={{ color: "var(--muted)", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+        {k}
+      </dt>
+      <dd
         style={{
-          fontSize: 10,
-          color: "var(--muted)",
-          fontWeight: 700,
-          textTransform: "uppercase",
-          letterSpacing: "0.06em",
-          marginBottom: 4,
+          margin: 0,
+          fontFamily: mono ? "ui-monospace, monospace" : undefined,
+          color: "var(--text)",
+          fontSize: 12,
+          textAlign: "right",
+          wordBreak: "break-all",
         }}
       >
-        {label}
-      </div>
-      <div>{children}</div>
+        {v}
+      </dd>
     </div>
-  );
-}
-
-function AuditRow({
-  label,
-  at,
-  by,
-}: {
-  label: string;
-  at: string | null;
-  by: string | null | undefined;
-}) {
-  return (
-    <li style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
-      <span
-        style={{
-          fontSize: 10,
-          fontWeight: 700,
-          color: "var(--muted)",
-          textTransform: "uppercase",
-          letterSpacing: "0.05em",
-          minWidth: 90,
-        }}
-      >
-        {label}
-      </span>
-      <span style={{ fontSize: 12 }}>
-        {at
-          ? new Date(at).toLocaleString("en-IN", {
-              day: "numeric",
-              month: "short",
-              year: "numeric",
-              hour: "2-digit",
-              minute: "2-digit",
-            })
-          : "—"}
-        {by && (
-          <>
-            {" · "}
-            <span style={{ color: "var(--gold-dark)", fontWeight: 600 }}>{by}</span>
-          </>
-        )}
-      </span>
-    </li>
   );
 }

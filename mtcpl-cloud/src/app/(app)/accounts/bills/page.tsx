@@ -7,21 +7,27 @@ import {
   canManageAccounts,
   canSubmitBills,
 } from "@/lib/accounts-permissions";
+import {
+  AccountsHero,
+  ACCOUNTS_TOKENS,
+  BillStatusPill,
+  BUTTON_STYLES,
+  EmptyState,
+  Money,
+  TABLE_STYLES,
+  VendorIdentity,
+} from "../_ui/components";
 
 type SearchParams = Promise<{ status?: string; vendor?: string }>;
 
-const STATUS_TINT: Record<
-  string,
-  { label: string; bg: string; color: string }
-> = {
-  pending_approval: { label: "Pending approval", bg: "rgba(232,197,114,0.18)", color: "var(--gold-dark)" },
-  approved: { label: "Approved", bg: "rgba(22,101,52,0.12)", color: "#15803d" },
-  rejected: { label: "Rejected", bg: "rgba(220,38,38,0.10)", color: "#b91c1c" },
-  fully_paid: { label: "Fully paid", bg: "rgba(15,118,110,0.12)", color: "#0f766e" },
-  cancelled: { label: "Cancelled", bg: "rgba(0,0,0,0.06)", color: "var(--muted)" },
-};
-
 const ALL_STATUSES = ["pending_approval", "approved", "rejected", "fully_paid", "cancelled"];
+const STATUS_LABELS: Record<string, string> = {
+  pending_approval: "Pending audit",
+  approved: "Approved",
+  rejected: "Rejected",
+  fully_paid: "Paid in full",
+  cancelled: "Cancelled",
+};
 
 type BillRow = {
   id: string;
@@ -46,7 +52,6 @@ export default async function BillsListPage({
   searchParams: SearchParams;
 }) {
   const { profile } = await requireAuth();
-  // Hidden away from anyone not in the accounts world
   if (
     !canSubmitBills(profile) &&
     !canManageAccounts(profile) &&
@@ -59,7 +64,6 @@ export default async function BillsListPage({
   const statusFilter = sp.status ?? "";
   const vendorFilter = sp.vendor ?? "";
 
-  // Visibility: biller sees only their own; everyone else sees all.
   const restrictToOwn =
     profile.role === "biller" &&
     !canManageAccounts(profile) &&
@@ -89,7 +93,6 @@ export default async function BillsListPage({
   if (error) throw new Error(error.message);
   const bills = ((billsRaw ?? []) as unknown) as BillRow[];
 
-  // Quick counts per status (always over the visible scope)
   let countQuery = supabase.from("bills").select("status", { count: "exact", head: false });
   if (restrictToOwn) countQuery = countQuery.eq("submitted_by", profile.id);
   const { data: statusBuckets } = await countQuery;
@@ -98,264 +101,201 @@ export default async function BillsListPage({
     const s = r.status as string;
     counts[s] = (counts[s] ?? 0) + 1;
   }
+  const allCount = Object.values(counts).reduce((s, n) => s + n, 0);
 
   return (
     <section className="page-card">
-      <div className="record-head">
-        <div>
-          <h1>All bills</h1>
-          <p className="muted">
-            {restrictToOwn
-              ? "Your bill submissions. Click into any row for status + edit options."
-              : "Every bill in the system. Filter by status or vendor."}
-          </p>
-        </div>
-        {canSubmitBills(profile) && (
-          <Link
-            href="/accounts/bills/new"
-            className="primary-button"
-            style={{ textDecoration: "none", padding: "8px 18px", fontSize: 13, fontWeight: 700 }}
-          >
-            + New bill
-          </Link>
-        )}
-      </div>
+      <AccountsHero
+        title="All bills"
+        description={
+          restrictToOwn
+            ? "Your bill submissions. Click any row to see status + edit options."
+            : "Every bill in the system, ordered by most-recent submission."
+        }
+        actions={
+          canSubmitBills(profile) ? (
+            <Link href="/accounts/bills/new" style={BUTTON_STYLES.primary}>
+              + New bill
+            </Link>
+          ) : null
+        }
+      />
 
-      {/* Filter chips */}
+      {/* Filter strip */}
       <div
         style={{
+          background: "var(--surface, #fff)",
+          border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+          borderRadius: 12,
+          padding: "12px 14px",
+          marginBottom: 16,
           display: "flex",
           gap: 14,
-          marginTop: 16,
-          padding: "12px 14px",
-          background: "var(--surface)",
-          border: "1px solid var(--border)",
-          borderRadius: 8,
           flexWrap: "wrap",
           alignItems: "center",
+          boxShadow: ACCOUNTS_TOKENS.shadow,
         }}
       >
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase" }}>
-            Status
-          </span>
-          <StatusChip current={statusFilter} value="" vendorFilter={vendorFilter} label={`All (${bills.length})`} />
+          <StatusChip current={statusFilter} value="" vendorFilter={vendorFilter} label={`All (${allCount})`} />
           {ALL_STATUSES.map((s) => (
             <StatusChip
               key={s}
               current={statusFilter}
               value={s}
               vendorFilter={vendorFilter}
-              label={`${STATUS_TINT[s].label} (${counts[s] ?? 0})`}
-              tint={STATUS_TINT[s]}
+              label={`${STATUS_LABELS[s]} · ${counts[s] ?? 0}`}
             />
           ))}
         </div>
-        <div style={{ flex: 1, display: "flex", justifyContent: "flex-end", gap: 8, alignItems: "center" }}>
-          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase" }}>
-            Vendor
-          </span>
-          <form method="GET" style={{ display: "inline" }}>
+        <div style={{ flex: 1, display: "flex", justifyContent: "flex-end", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <form method="GET" style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
             {statusFilter && <input type="hidden" name="status" value={statusFilter} />}
+            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              Vendor
+            </span>
             <select
               name="vendor"
               defaultValue={vendorFilter}
               style={{
-                padding: "5px 10px",
-                fontSize: 12,
-                background: "var(--bg)",
-                border: "1px solid var(--border)",
-                borderRadius: 6,
+                padding: "6px 10px",
+                fontSize: 13,
+                background: "#fff",
+                border: `1px solid ${ACCOUNTS_TOKENS.borderStrong}`,
+                borderRadius: 8,
                 color: "var(--text)",
               }}
             >
-              <option value="">All vendors</option>
+              <option value="">All</option>
               {vendors.map((v) => (
                 <option key={v.id} value={v.id}>
                   {v.name}
                 </option>
               ))}
             </select>
-            <button
-              type="submit"
-              style={{
-                marginLeft: 4,
-                padding: "5px 10px",
-                fontSize: 12,
-                background: "var(--bg)",
-                border: "1px solid var(--border)",
-                borderRadius: 6,
-                cursor: "pointer",
-                color: "var(--text)",
-              }}
-            >
-              Filter
+            <button type="submit" style={BUTTON_STYLES.secondary}>
+              Apply
             </button>
+            {(statusFilter || vendorFilter) && (
+              <Link href="/accounts/bills" style={{ fontSize: 12, color: "var(--muted)", textDecoration: "underline" }}>
+                Clear all
+              </Link>
+            )}
           </form>
         </div>
       </div>
 
       {/* Bills table */}
-      <div style={{ marginTop: 18, overflowX: "auto" }}>
-        {bills.length === 0 ? (
-          <div className="banner">No bills match the current filters.</div>
-        ) : (
-          <table
-            style={{
-              width: "100%",
-              borderCollapse: "collapse",
-              fontSize: 13,
-            }}
-          >
-            <thead>
-              <tr style={{ borderBottom: "2px solid var(--border)" }}>
-                <Th>Token</Th>
-                <Th>Vendor</Th>
-                <Th>Bill date</Th>
-                <Th>Vendor bill no</Th>
-                <Th>Cost head</Th>
-                <Th align="right">Total</Th>
-                <Th align="right">Outstanding</Th>
-                <Th>Status</Th>
-                <Th>Submitted by</Th>
-                <Th>&nbsp;</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {bills.map((b) => {
-                const tint = STATUS_TINT[b.status] ?? STATUS_TINT.cancelled;
-                return (
-                  <tr key={b.id} style={{ borderBottom: "1px solid var(--border)" }}>
-                    <Td>
-                      <code style={{ fontWeight: 700 }}>{b.token}</code>
-                    </Td>
-                    <Td>{b.bill_vendors?.name ?? "—"}</Td>
-                    <Td>
+      {bills.length === 0 ? (
+        <EmptyState
+          icon="📑"
+          title="No bills match the current filters"
+          description={canSubmitBills(profile) ? "Start by adding a bill, or adjust the status / vendor filters above." : "Try clearing the filters or check back later."}
+          action={
+            canSubmitBills(profile) ? (
+              <Link href="/accounts/bills/new" style={BUTTON_STYLES.primary}>
+                + New bill
+              </Link>
+            ) : undefined
+          }
+        />
+      ) : (
+        <div style={TABLE_STYLES.tableWrap}>
+          <div style={{ overflowX: "auto" }}>
+            <table style={TABLE_STYLES.table}>
+              <thead style={TABLE_STYLES.thead}>
+                <tr>
+                  <th style={TABLE_STYLES.th}>Vendor / token</th>
+                  <th style={TABLE_STYLES.th}>Bill no</th>
+                  <th style={TABLE_STYLES.th}>Date</th>
+                  <th style={TABLE_STYLES.th}>Cost head</th>
+                  <th style={TABLE_STYLES.thRight}>Total</th>
+                  <th style={TABLE_STYLES.thRight}>Outstanding</th>
+                  <th style={TABLE_STYLES.th}>Status</th>
+                  <th style={TABLE_STYLES.th}>Submitted by</th>
+                  <th style={TABLE_STYLES.th}>&nbsp;</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bills.map((b, idx) => (
+                  <tr
+                    key={b.id}
+                    style={{
+                      background: idx % 2 === 0 ? "#fff" : ACCOUNTS_TOKENS.surfaceMuted,
+                      transition: "background 0.1s",
+                    }}
+                  >
+                    <td style={TABLE_STYLES.td}>
+                      <Link href={`/accounts/bills/${b.id}`} style={{ textDecoration: "none", color: "inherit" }}>
+                        <VendorIdentity
+                          name={b.bill_vendors?.name ?? "—"}
+                          subLabel={b.token}
+                        />
+                      </Link>
+                    </td>
+                    <td style={TABLE_STYLES.td}>
+                      <code style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}>
+                        {b.vendor_bill_no}
+                      </code>
+                    </td>
+                    <td style={{ ...TABLE_STYLES.td, fontSize: 12, color: "var(--muted)" }}>
                       {new Date(b.bill_date).toLocaleDateString("en-IN", {
                         day: "numeric",
                         month: "short",
                         year: "numeric",
                       })}
-                    </Td>
-                    <Td>
-                      <code style={{ fontSize: 12 }}>{b.vendor_bill_no}</code>
-                    </Td>
-                    <Td>
+                    </td>
+                    <td style={TABLE_STYLES.td}>
                       {b.cost_head ? (
                         <span
                           style={{
                             fontSize: 11,
-                            padding: "2px 8px",
-                            borderRadius: 4,
-                            background: "rgba(184,115,51,0.10)",
-                            color: "#b45309",
+                            padding: "2px 10px",
+                            borderRadius: 999,
+                            background: ACCOUNTS_TOKENS.surfaceMuted,
+                            color: ACCOUNTS_TOKENS.neutral,
                             fontWeight: 600,
+                            border: `1px solid ${ACCOUNTS_TOKENS.border}`,
                           }}
                         >
                           {b.cost_head}
                         </span>
                       ) : (
-                        <span className="muted" style={{ fontSize: 11 }}>—</span>
+                        <span style={{ fontSize: 11, color: "var(--muted)" }}>—</span>
                       )}
-                    </Td>
-                    <Td align="right">
-                      <strong style={{ fontFamily: "ui-monospace, monospace" }}>
-                        ₹{Number(b.amount_total).toLocaleString("en-IN")}
-                      </strong>
-                    </Td>
-                    <Td align="right">
-                      <span
-                        style={{
-                          fontFamily: "ui-monospace, monospace",
-                          color: Number(b.amount_outstanding) > 0 ? "#b45309" : "var(--muted)",
-                          fontWeight: 600,
-                        }}
-                      >
-                        ₹{Number(b.amount_outstanding).toLocaleString("en-IN")}
-                      </span>
-                    </Td>
-                    <Td>
-                      <span
-                        style={{
-                          fontSize: 11,
-                          fontWeight: 700,
-                          padding: "3px 9px",
-                          borderRadius: 4,
-                          background: tint.bg,
-                          color: tint.color,
-                          letterSpacing: "0.04em",
-                          textTransform: "uppercase",
-                        }}
-                      >
-                        {tint.label}
-                      </span>
-                    </Td>
-                    <Td>
-                      <span className="muted" style={{ fontSize: 12 }}>
-                        {b.submitted_by ? profilesMap[b.submitted_by] ?? "—" : "—"}
-                      </span>
-                    </Td>
-                    <Td>
+                    </td>
+                    <td style={TABLE_STYLES.tdRight}>
+                      <Money value={Number(b.amount_total)} />
+                    </td>
+                    <td style={TABLE_STYLES.tdRight}>
+                      {Number(b.amount_outstanding) > 0 ? (
+                        <Money value={Number(b.amount_outstanding)} tone="warning" />
+                      ) : (
+                        <span style={{ fontSize: 11, color: "var(--muted)" }}>—</span>
+                      )}
+                    </td>
+                    <td style={TABLE_STYLES.td}>
+                      <BillStatusPill status={b.status} />
+                    </td>
+                    <td style={{ ...TABLE_STYLES.td, fontSize: 12, color: "var(--muted)" }}>
+                      {b.submitted_by ? profilesMap[b.submitted_by] ?? "—" : "—"}
+                    </td>
+                    <td style={TABLE_STYLES.td}>
                       <Link
                         href={`/accounts/bills/${b.id}`}
-                        style={{
-                          textDecoration: "none",
-                          fontSize: 12,
-                          padding: "4px 10px",
-                          background: "var(--bg)",
-                          border: "1px solid var(--border)",
-                          borderRadius: 6,
-                          color: "var(--text)",
-                          fontWeight: 600,
-                          whiteSpace: "nowrap",
-                        }}
+                        style={{ ...BUTTON_STYLES.secondary, padding: "5px 12px", fontSize: 11 }}
                       >
                         View →
                       </Link>
-                    </Td>
+                    </td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </section>
-  );
-}
-
-function Th({
-  children,
-  align,
-}: {
-  children: React.ReactNode;
-  align?: "left" | "right";
-}) {
-  return (
-    <th
-      style={{
-        textAlign: align ?? "left",
-        padding: "8px 10px",
-        fontSize: 10,
-        fontWeight: 700,
-        color: "var(--muted)",
-        textTransform: "uppercase",
-        letterSpacing: "0.06em",
-      }}
-    >
-      {children}
-    </th>
-  );
-}
-function Td({
-  children,
-  align,
-}: {
-  children: React.ReactNode;
-  align?: "left" | "right";
-}) {
-  return (
-    <td style={{ padding: "10px 10px", textAlign: align ?? "left", verticalAlign: "middle" }}>{children}</td>
   );
 }
 
@@ -364,13 +304,11 @@ function StatusChip({
   value,
   vendorFilter,
   label,
-  tint,
 }: {
   current: string;
   value: string;
   vendorFilter: string;
   label: string;
-  tint?: { bg: string; color: string };
 }) {
   const isActive = current === value;
   const params = new URLSearchParams();
@@ -382,18 +320,18 @@ function StatusChip({
       href={href}
       style={{
         textDecoration: "none",
-        fontSize: 11,
+        fontSize: 12,
         fontWeight: 700,
-        padding: "4px 10px",
-        borderRadius: 14,
-        background: isActive ? tint?.bg ?? "var(--gold)" : "var(--bg)",
-        color: isActive ? tint?.color ?? "#fff" : "var(--muted)",
-        border: `1px solid ${isActive ? "currentColor" : "var(--border)"}`,
+        padding: "5px 12px",
+        borderRadius: 999,
+        background: isActive ? ACCOUNTS_TOKENS.accent : "#fff",
+        color: isActive ? "#fff" : "var(--muted)",
+        border: `1px solid ${isActive ? ACCOUNTS_TOKENS.accent : ACCOUNTS_TOKENS.borderStrong}`,
         whiteSpace: "nowrap",
+        transition: "all 0.12s",
       }}
     >
       {label}
     </Link>
   );
 }
-

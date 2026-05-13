@@ -1,13 +1,3 @@
-// Pay Today screen (migration 028).
-//
-// Three sections:
-//   1. Proposed — accountant has staged the payment. Owner sees
-//      checkboxes + Confirm button at the bottom (per batch).
-//      Accountant sees rows read-only with a "withdraw" link.
-//   2. Confirmed — owner has ticked. Accountant marks each paid
-//      (amount + method + reference + note). Owner sees read-only.
-//   3. Paid today — today's `paid` rows. Running total at the bottom.
-
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
@@ -24,13 +14,19 @@ import {
   markPaymentPaidAction,
 } from "../actions";
 import { PayTodayClient, type PayTodayRow } from "./pay-today-client";
+import {
+  AccountsHero,
+  ACCOUNTS_TOKENS,
+  BUTTON_STYLES,
+  EmptyState,
+  Money,
+  TABLE_STYLES,
+  VendorIdentity,
+} from "../_ui/components";
 
 export default async function PayTodayPage() {
   const { profile } = await requireAuth();
-  if (
-    !canManageAccounts(profile) &&
-    !canConfirmPayments(profile)
-  ) {
+  if (!canManageAccounts(profile) && !canConfirmPayments(profile)) {
     redirect("/accounts");
   }
 
@@ -45,7 +41,7 @@ export default async function PayTodayPage() {
     .in("status", ["proposed", "confirmed"])
     .order("proposed_at", { ascending: false });
 
-  // Today's IST window for the "Paid today" section.
+  // IST today window
   const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
   const DAY_MS = 86_400_000;
   const nowMs = Date.now();
@@ -158,35 +154,53 @@ export default async function PayTodayPage() {
   });
 
   const paidTodayTotal = paidToday.reduce((s, p) => s + p.paidAmount, 0);
+  const proposedTotal = proposedRows.reduce((s, r) => s + r.proposedAmount, 0);
+  const confirmedTotal = confirmedRows.reduce((s, r) => s + r.proposedAmount, 0);
 
   return (
     <section className="page-card">
-      <div className="record-head">
-        <div>
-          <h1>Pay Today</h1>
-          <p className="muted">
-            Proposed payments go through owner confirmation before the
-            accountant marks them paid. Partial payments are supported —
-            adjust the actual amount paid per row.
-          </p>
-        </div>
-        <Link
-          href="/accounts"
-          style={{
-            textDecoration: "none",
-            fontSize: 13,
-            padding: "6px 14px",
-            background: "var(--bg)",
-            border: "1px solid var(--border)",
-            borderRadius: 6,
-            color: "var(--muted)",
-            fontWeight: 500,
-            whiteSpace: "nowrap",
-            alignSelf: "flex-start",
-          }}
-        >
-          ← Due Bills
-        </Link>
+      <AccountsHero
+        title="Pay Today"
+        description="Proposed payments → owner confirmation → accountant marks paid. Partial payments are supported — adjust the actual amount per row."
+        actions={
+          <Link href="/accounts" style={BUTTON_STYLES.secondary}>
+            ← Due Bills
+          </Link>
+        }
+      />
+
+      {/* Flow summary strip */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+          gap: 10,
+          marginBottom: 20,
+        }}
+      >
+        <FlowStat
+          label="Proposed by accountant"
+          count={proposedRows.length}
+          value={proposedTotal}
+          tone={ACCOUNTS_TOKENS.accent}
+          icon="📥"
+        />
+        <FlowArrow />
+        <FlowStat
+          label="Confirmed by owner"
+          count={confirmedRows.length}
+          value={confirmedTotal}
+          tone={ACCOUNTS_TOKENS.warning}
+          icon="✅"
+        />
+        <FlowArrow />
+        <FlowStat
+          label="Paid today"
+          count={paidToday.length}
+          value={paidTodayTotal}
+          tone={ACCOUNTS_TOKENS.success}
+          icon="💸"
+        />
       </div>
 
       <PayTodayClient
@@ -200,111 +214,94 @@ export default async function PayTodayPage() {
         cancelAction={cancelPaymentAction}
       />
 
-      {/* Paid today */}
+      {/* Paid today section */}
       <div style={{ marginTop: 26 }}>
         <div
           style={{
             display: "flex",
             alignItems: "baseline",
-            gap: 8,
-            marginBottom: 10,
-            paddingBottom: 6,
-            borderBottom: "1px solid var(--border)",
+            gap: 10,
+            marginBottom: 12,
+            paddingBottom: 8,
+            borderBottom: `1px solid ${ACCOUNTS_TOKENS.border}`,
           }}
         >
-          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>
+          <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "var(--text)", letterSpacing: "-0.005em" }}>
             💰 Paid today
           </h2>
-          <span className="muted" style={{ fontSize: 12 }}>
-            {paidToday.length} payment{paidToday.length === 1 ? "" : "s"} ·{" "}
-            <strong style={{ color: "#15803d", fontFamily: "ui-monospace, monospace" }}>
-              ₹{paidTodayTotal.toLocaleString("en-IN")}
-            </strong>
+          <span style={{ fontSize: 12, color: "var(--muted)" }}>
+            <strong style={{ color: "var(--text)" }}>{paidToday.length}</strong> payment{paidToday.length === 1 ? "" : "s"} ·{" "}
+            <Money value={paidTodayTotal} size="small" tone="success" />
           </span>
         </div>
         {paidToday.length === 0 ? (
-          <div
-            className="muted"
-            style={{
-              fontSize: 12,
-              padding: "10px 14px",
-              background: "var(--surface)",
-              border: "1px dashed var(--border)",
-              borderRadius: 6,
-            }}
-          >
-            No payments marked paid today yet.
-          </div>
+          <EmptyState
+            icon="💸"
+            title="No payments recorded today yet"
+            description="Mark payments paid from the Confirmed section once you've actually moved the money. They show here for the rest of the day."
+          />
         ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-              <thead>
-                <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                  <th style={thStyle}>Token</th>
-                  <th style={thStyle}>Vendor</th>
-                  <th style={{ ...thStyle, textAlign: "right" }}>Paid ₹</th>
-                  <th style={thStyle}>Method · Ref</th>
-                  <th style={thStyle}>Note</th>
-                  <th style={thStyle}>By</th>
-                  <th style={thStyle}>Time</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paidToday.map((p) => (
-                  <tr key={p.id} style={{ borderBottom: "1px solid var(--border)" }}>
-                    <td style={tdStyle}>
-                      <Link
-                        href={`/accounts/bills/${p.billId}`}
-                        style={{
-                          textDecoration: "none",
-                          fontWeight: 700,
-                          fontFamily: "ui-monospace, monospace",
-                          color: "var(--text)",
-                        }}
-                      >
-                        {p.billToken}
-                      </Link>
-                    </td>
-                    <td style={tdStyle}>{p.vendorName}</td>
-                    <td style={{ ...tdStyle, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>
-                      <strong style={{ color: "#15803d" }}>
-                        ₹{p.paidAmount.toLocaleString("en-IN")}
-                      </strong>
-                    </td>
-                    <td style={tdStyle}>
-                      {p.paymentMethod ? (
-                        <>
-                          <strong>{p.paymentMethod.toUpperCase()}</strong>
-                          {p.paymentReference ? ` · ${p.paymentReference}` : ""}
-                        </>
-                      ) : (
-                        <span className="muted">—</span>
-                      )}
-                    </td>
-                    <td style={{ ...tdStyle, maxWidth: 220 }}>
-                      <span style={{ fontSize: 12, color: "var(--muted)" }}>
+          <div style={TABLE_STYLES.tableWrap}>
+            <div style={{ overflowX: "auto" }}>
+              <table style={TABLE_STYLES.table}>
+                <thead style={TABLE_STYLES.thead}>
+                  <tr>
+                    <th style={TABLE_STYLES.th}>Vendor / token</th>
+                    <th style={TABLE_STYLES.thRight}>Paid</th>
+                    <th style={TABLE_STYLES.th}>Method · Ref</th>
+                    <th style={TABLE_STYLES.th}>Note</th>
+                    <th style={TABLE_STYLES.th}>By</th>
+                    <th style={TABLE_STYLES.th}>Time</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paidToday.map((p, idx) => (
+                    <tr
+                      key={p.id}
+                      style={{ background: idx % 2 === 0 ? "#fff" : ACCOUNTS_TOKENS.surfaceMuted }}
+                    >
+                      <td style={TABLE_STYLES.td}>
+                        <Link
+                          href={`/accounts/bills/${p.billId}`}
+                          style={{ textDecoration: "none", color: "inherit" }}
+                        >
+                          <VendorIdentity name={p.vendorName} subLabel={p.billToken} />
+                        </Link>
+                      </td>
+                      <td style={TABLE_STYLES.tdRight}>
+                        <Money value={p.paidAmount} tone="success" />
+                      </td>
+                      <td style={{ ...TABLE_STYLES.td, fontSize: 12 }}>
+                        {p.paymentMethod ? (
+                          <>
+                            <strong style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                              {p.paymentMethod}
+                            </strong>
+                            {p.paymentReference && <span style={{ color: "var(--muted)" }}> · {p.paymentReference}</span>}
+                          </>
+                        ) : (
+                          <span style={{ color: "var(--muted)" }}>—</span>
+                        )}
+                      </td>
+                      <td style={{ ...TABLE_STYLES.td, maxWidth: 240, fontSize: 12, color: "var(--muted)" }}>
                         {p.paymentNote ?? "—"}
-                      </span>
-                    </td>
-                    <td style={tdStyle}>
-                      <span className="muted" style={{ fontSize: 12 }}>
+                      </td>
+                      <td style={{ ...TABLE_STYLES.td, fontSize: 12, color: "var(--muted)" }}>
                         {p.paidByName ?? "—"}
-                      </span>
-                    </td>
-                    <td style={tdStyle}>
-                      <span className="muted" style={{ fontSize: 12 }}>
+                      </td>
+                      <td style={{ ...TABLE_STYLES.td, fontSize: 12, color: "var(--muted)" }}>
                         {p.paidAt
                           ? new Date(p.paidAt).toLocaleTimeString("en-IN", {
                               hour: "2-digit",
                               minute: "2-digit",
                             })
                           : "—"}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </div>
@@ -312,16 +309,72 @@ export default async function PayTodayPage() {
   );
 }
 
-const thStyle: React.CSSProperties = {
-  textAlign: "left",
-  padding: "8px 10px",
-  fontSize: 10,
-  fontWeight: 700,
-  color: "var(--muted)",
-  textTransform: "uppercase",
-  letterSpacing: "0.06em",
-};
-const tdStyle: React.CSSProperties = {
-  padding: "10px 10px",
-  verticalAlign: "middle",
-};
+function FlowStat({
+  label,
+  count,
+  value,
+  tone,
+  icon,
+}: {
+  label: string;
+  count: number;
+  value: number;
+  tone: string;
+  icon: string;
+}) {
+  const isEmpty = count === 0;
+  return (
+    <div
+      style={{
+        padding: "14px 16px",
+        background: "var(--surface, #fff)",
+        border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+        borderLeft: `4px solid ${tone}`,
+        borderRadius: 12,
+        boxShadow: ACCOUNTS_TOKENS.shadow,
+        opacity: isEmpty ? 0.7 : 1,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <span style={{ fontSize: 16 }}>{icon}</span>
+        <span
+          style={{
+            fontSize: 10,
+            fontWeight: 700,
+            color: "var(--muted)",
+            textTransform: "uppercase",
+            letterSpacing: "0.06em",
+          }}
+        >
+          {label}
+        </span>
+      </div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 24, fontWeight: 800, color: "var(--text)", letterSpacing: "-0.02em", fontFamily: "ui-monospace, monospace" }}>
+          {count}
+        </span>
+        <span style={{ fontSize: 11, color: "var(--muted)" }}>
+          payment{count === 1 ? "" : "s"}
+        </span>
+      </div>
+      <Money value={value} size="small" tone={isEmpty ? "muted" : "muted"} />
+    </div>
+  );
+}
+
+function FlowArrow() {
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: 18,
+        color: ACCOUNTS_TOKENS.borderStrong,
+      }}
+    >
+      →
+    </div>
+  );
+}

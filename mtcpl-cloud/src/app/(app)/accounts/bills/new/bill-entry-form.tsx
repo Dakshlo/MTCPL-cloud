@@ -1,24 +1,24 @@
 "use client";
 
 /**
- * Bill entry form — biller + owner + dev.
+ * Bill entry form — two-column layout (Zoho Books style):
+ *   • LEFT: grouped sections (Beneficiary → Bill details → Amount + GST).
+ *   • RIGHT: sticky preview card with live total, vendor info, save button.
  *
- * Fields:
- *   - Beneficiary (combobox over active bill_vendors + inline "+ Add")
- *   - Bill date
- *   - Vendor's bill number
- *   - Description (textarea)
- *   - Cost head (free-text — accountant uses this for reports later)
- *   - Subtotal amount (₹) + GST% (quick-pick chips)
- *   - Live total preview (subtotal + GST = total)
- *
- * Submit fires submitBillAction. Returns `{ ok: true, billId, token }`
- * on success — we toast + redirect to the bill detail page. Mirrors
- * the FinishBlockForm submit + redirect pattern.
+ * Quick-add vendor modal is a centred dialog (kept the same pattern as
+ * before — slide-over felt heavy for a small form).
  */
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import {
+  ACCOUNTS_TOKENS,
+  BUTTON_STYLES,
+  INPUT_STYLE,
+  Money,
+  VendorAvatar,
+  VendorIdentity,
+} from "../../_ui/components";
 
 export type BillVendorOption = {
   id: string;
@@ -42,9 +42,6 @@ export function BillEntryForm({
   initialValues,
   submitAction,
   addVendorAction,
-  // When editing an existing bill, `mode='edit'` switches the button
-  // copy + redirect target so the form doubles as both "new bill" and
-  // "rejected-bill resubmit".
   mode = "new",
   billId,
 }: {
@@ -67,7 +64,6 @@ export function BillEntryForm({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  // Pre-fill from initialValues (edit mode) or sensible defaults.
   const today = useMemo(() => {
     const d = new Date();
     const yyyy = d.getFullYear();
@@ -107,7 +103,7 @@ export function BillEntryForm({
 
   const filteredVendors = useMemo(() => {
     const q = vendorSearch.trim().toLowerCase();
-    if (!q) return vendors.slice(0, 20);
+    if (!q) return vendors.slice(0, 30);
     return vendors
       .filter(
         (v) =>
@@ -115,7 +111,7 @@ export function BillEntryForm({
           (v.category ?? "").toLowerCase().includes(q) ||
           (v.gstin ?? "").toLowerCase().includes(q),
       )
-      .slice(0, 20);
+      .slice(0, 30);
   }, [vendorSearch, vendors]);
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -125,12 +121,10 @@ export function BillEntryForm({
     if (!vendorBillNo.trim()) return setError("Vendor's bill number is required.");
     if (!billDate) return setError("Bill date is required.");
     if (!description.trim()) return setError("Description is required.");
-    if (!Number.isFinite(subtotalNum) || subtotalNum <= 0) {
+    if (!Number.isFinite(subtotalNum) || subtotalNum <= 0)
       return setError("Subtotal must be greater than zero.");
-    }
-    if (!Number.isFinite(gstNum) || gstNum < 0 || gstNum > 100) {
+    if (!Number.isFinite(gstNum) || gstNum < 0 || gstNum > 100)
       return setError("GST% must be between 0 and 100.");
-    }
 
     const formData = new FormData();
     if (mode === "edit" && billId) formData.set("bill_id", billId);
@@ -148,13 +142,12 @@ export function BillEntryForm({
         setError(result.error);
         return;
       }
-      // Toast surfaced via the route + page refresh.
       router.refresh();
-      if (mode === "edit") {
-        router.replace(`/accounts/bills/${billId}?saved=1`);
-      } else {
-        router.replace(`/accounts/bills/${result.billId}?saved=1`);
-      }
+      router.replace(
+        mode === "edit"
+          ? `/accounts/bills/${billId}?saved=1`
+          : `/accounts/bills/${result.billId}?saved=1`,
+      );
     });
   }
 
@@ -174,14 +167,12 @@ export function BillEntryForm({
         setVendorModalError(result.error);
         return;
       }
-      // Optimistically add to the list and select it.
-      const newVendor: BillVendorOption = {
+      vendors.push({
         id: result.vendorId,
         name,
         category: newVendorCategory.trim() || null,
         gstin: newVendorGstin.trim() || null,
-      };
-      vendors.push(newVendor);
+      });
       setVendorId(result.vendorId);
       setVendorSearch("");
       setShowVendorList(false);
@@ -195,247 +186,349 @@ export function BillEntryForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-      {/* Beneficiary */}
-      <Field label="Beneficiary (bill vendor)" required>
-        <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
-          <div style={{ position: "relative", flex: 1 }}>
-            <input
-              type="text"
-              placeholder={selectedVendor ? "Change vendor…" : "Search vendor by name, category, GSTIN…"}
-              value={selectedVendor && !showVendorList ? selectedVendor.name : vendorSearch}
-              onChange={(e) => {
-                setVendorSearch(e.target.value);
-                setShowVendorList(true);
-                if (selectedVendor) setVendorId("");
-              }}
-              onFocus={() => setShowVendorList(true)}
-              style={inputStyle}
-            />
-            {showVendorList && filteredVendors.length > 0 && (
-              <div
-                style={{
-                  position: "absolute",
-                  top: "100%",
-                  left: 0,
-                  right: 0,
-                  marginTop: 4,
-                  background: "var(--bg)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 6,
-                  maxHeight: 260,
-                  overflowY: "auto",
-                  zIndex: 10,
-                  boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+    <form
+      onSubmit={handleSubmit}
+      style={{
+        display: "grid",
+        gridTemplateColumns: "minmax(0, 1fr) 320px",
+        gap: 22,
+        alignItems: "flex-start",
+      }}
+    >
+      {/* LEFT — grouped sections */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        {/* Beneficiary */}
+        <FormSection title="Beneficiary" description="Who issued this bill? Search the vendor master or add a new one.">
+          <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+            <div style={{ position: "relative", flex: 1 }}>
+              <input
+                type="text"
+                placeholder={selectedVendor ? "Change vendor…" : "Search vendor by name, category, GSTIN…"}
+                value={selectedVendor && !showVendorList ? selectedVendor.name : vendorSearch}
+                onChange={(e) => {
+                  setVendorSearch(e.target.value);
+                  setShowVendorList(true);
+                  if (selectedVendor) setVendorId("");
                 }}
-              >
-                {filteredVendors.map((v) => (
-                  <button
-                    key={v.id}
-                    type="button"
-                    onClick={() => {
-                      setVendorId(v.id);
-                      setVendorSearch("");
-                      setShowVendorList(false);
-                    }}
-                    style={{
-                      display: "block",
-                      width: "100%",
-                      textAlign: "left",
-                      padding: "8px 12px",
-                      background: v.id === vendorId ? "rgba(232,197,114,0.12)" : "transparent",
-                      border: "none",
-                      borderBottom: "1px solid var(--border-light, var(--border))",
-                      cursor: "pointer",
-                      fontSize: 13,
-                      color: "var(--text)",
-                    }}
-                  >
-                    <strong>{v.name}</strong>
-                    {(v.category || v.gstin) && (
-                      <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>
-                        {v.category ? v.category : ""}
-                        {v.category && v.gstin ? " · " : ""}
-                        {v.gstin ? `GSTIN ${v.gstin}` : ""}
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <button
-            type="button"
-            onClick={() => setVendorModalOpen(true)}
-            style={{
-              padding: "8px 14px",
-              fontSize: 13,
-              background: "var(--bg)",
-              border: "1px solid var(--border)",
-              borderRadius: 6,
-              fontWeight: 600,
-              cursor: "pointer",
-              color: "var(--text)",
-              whiteSpace: "nowrap",
-            }}
-          >
-            + Add new
-          </button>
-        </div>
-        {selectedVendor && (
-          <p className="muted" style={{ fontSize: 11, marginTop: 4 }}>
-            Selected: <strong style={{ color: "var(--text)" }}>{selectedVendor.name}</strong>
-            {selectedVendor.gstin ? ` · GSTIN ${selectedVendor.gstin}` : ""}
-          </p>
-        )}
-      </Field>
-
-      {/* Bill date + vendor's bill no */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-        <Field label="Bill date" required>
-          <input
-            type="date"
-            value={billDate}
-            onChange={(e) => setBillDate(e.target.value)}
-            style={inputStyle}
-            required
-          />
-        </Field>
-        <Field label="Vendor's bill number" required>
-          <input
-            type="text"
-            value={vendorBillNo}
-            onChange={(e) => setVendorBillNo(e.target.value)}
-            placeholder="e.g. INV/2026/0042"
-            style={inputStyle}
-            required
-          />
-        </Field>
-      </div>
-
-      {/* Description + cost head */}
-      <Field label="Description (items on the bill)" required>
-        <textarea
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="e.g. 3× CNC tools (5mm cutter + 8mm cutter + 10mm router)"
-          rows={3}
-          style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }}
-          required
-        />
-      </Field>
-      <Field label="Cost head (optional)" hint="Free-text category for accountant reports later — e.g. Tools, Cement, Site overhead, Utilities">
-        <input
-          type="text"
-          value={costHead}
-          onChange={(e) => setCostHead(e.target.value)}
-          placeholder="e.g. Tools"
-          style={inputStyle}
-        />
-      </Field>
-
-      {/* Amount + GST */}
-      <Field label="Subtotal (₹, before GST)" required>
-        <input
-          type="number"
-          step="0.01"
-          min="0"
-          value={subtotal}
-          onChange={(e) => setSubtotal(e.target.value)}
-          placeholder="50000"
-          style={{ ...inputStyle, fontFamily: "ui-monospace, monospace" }}
-          required
-        />
-      </Field>
-
-      <Field label="GST %">
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
-          {GST_QUICK_PICKS.map((p) => (
+                onFocus={() => setShowVendorList(true)}
+                style={INPUT_STYLE}
+              />
+              {showVendorList && filteredVendors.length > 0 && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "100%",
+                    left: 0,
+                    right: 0,
+                    marginTop: 4,
+                    background: "#fff",
+                    border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+                    borderRadius: 10,
+                    maxHeight: 280,
+                    overflowY: "auto",
+                    zIndex: 10,
+                    boxShadow: ACCOUNTS_TOKENS.shadowLarge,
+                  }}
+                >
+                  {filteredVendors.map((v) => (
+                    <button
+                      key={v.id}
+                      type="button"
+                      onClick={() => {
+                        setVendorId(v.id);
+                        setVendorSearch("");
+                        setShowVendorList(false);
+                      }}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 10,
+                        width: "100%",
+                        padding: "8px 12px",
+                        background: v.id === vendorId ? ACCOUNTS_TOKENS.accentLight : "transparent",
+                        border: "none",
+                        borderBottom: `1px solid ${ACCOUNTS_TOKENS.border}`,
+                        cursor: "pointer",
+                        textAlign: "left",
+                      }}
+                    >
+                      <VendorAvatar name={v.name} size={28} />
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
+                          {v.name}
+                        </div>
+                        {(v.category || v.gstin) && (
+                          <div style={{ fontSize: 11, color: "var(--muted)" }}>
+                            {v.category && <span>{v.category}</span>}
+                            {v.category && v.gstin && " · "}
+                            {v.gstin && <span style={{ fontFamily: "ui-monospace, monospace" }}>{v.gstin}</span>}
+                          </div>
+                        )}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <button
-              key={p}
               type="button"
-              onClick={() => setGstPercent(String(p))}
+              onClick={() => setVendorModalOpen(true)}
+              style={BUTTON_STYLES.secondary}
+            >
+              + Add new
+            </button>
+          </div>
+          {selectedVendor && (
+            <div
               style={{
-                padding: "5px 12px",
-                fontSize: 12,
-                background: gstNum === p ? "var(--gold)" : "var(--bg)",
-                color: gstNum === p ? "#fff" : "var(--text)",
-                border: `1px solid ${gstNum === p ? "var(--gold-dark)" : "var(--border)"}`,
-                borderRadius: 6,
-                fontWeight: 700,
-                cursor: "pointer",
-                fontFamily: "ui-monospace, monospace",
+                marginTop: 10,
+                padding: "10px 12px",
+                background: ACCOUNTS_TOKENS.accentLight,
+                border: `1px solid ${ACCOUNTS_TOKENS.accentBorder}`,
+                borderRadius: 10,
               }}
             >
-              {p}%
-            </button>
-          ))}
-          <input
-            type="number"
-            step="0.01"
-            min="0"
-            max="100"
-            value={gstPercent}
-            onChange={(e) => setGstPercent(e.target.value)}
-            style={{ ...inputStyle, width: 90, fontFamily: "ui-monospace, monospace" }}
-          />
-          <span className="muted" style={{ fontSize: 11 }}>custom</span>
-        </div>
-      </Field>
+              <VendorIdentity
+                name={selectedVendor.name}
+                subLabel={
+                  [selectedVendor.category, selectedVendor.gstin && `GSTIN ${selectedVendor.gstin}`]
+                    .filter(Boolean)
+                    .join(" · ") || undefined
+                }
+                size={36}
+              />
+            </div>
+          )}
+        </FormSection>
 
-      {/* Live total preview */}
-      <div
-        style={{
-          padding: "12px 14px",
-          background: "var(--surface)",
-          border: "1.5px solid var(--gold)",
-          borderRadius: 8,
-          display: "flex",
-          flexDirection: "column",
-          gap: 4,
-          fontFamily: "ui-monospace, monospace",
-        }}
-      >
-        <Row label="Subtotal" value={`₹${subtotalNum.toLocaleString("en-IN")}`} />
-        <Row label={`GST (${gstNum}%)`} value={`₹${gstAmount.toLocaleString("en-IN")}`} />
-        <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
-        <Row
-          label="Total"
-          value={`₹${totalAmount.toLocaleString("en-IN")}`}
-          highlight
-        />
+        {/* Bill details */}
+        <FormSection title="Bill details" description="From the supplier's paper bill.">
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <FormField label="Bill date" required>
+              <input
+                type="date"
+                value={billDate}
+                onChange={(e) => setBillDate(e.target.value)}
+                style={INPUT_STYLE}
+                required
+              />
+            </FormField>
+            <FormField label="Vendor's bill number" required>
+              <input
+                type="text"
+                value={vendorBillNo}
+                onChange={(e) => setVendorBillNo(e.target.value)}
+                placeholder="e.g. INV/2026/0042"
+                style={INPUT_STYLE}
+                required
+              />
+            </FormField>
+          </div>
+          <FormField label="Description (items on the bill)" required>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="e.g. 3× CNC tools (5mm cutter + 8mm cutter + 10mm router)"
+              rows={3}
+              style={{ ...INPUT_STYLE, resize: "vertical", fontFamily: "inherit" }}
+              required
+            />
+          </FormField>
+          <FormField
+            label="Cost head"
+            hint="Optional — free-text category for accountant reports later (Tools / Cement / Site overhead / Utilities …)"
+          >
+            <input
+              type="text"
+              value={costHead}
+              onChange={(e) => setCostHead(e.target.value)}
+              placeholder="e.g. Tools"
+              style={INPUT_STYLE}
+            />
+          </FormField>
+        </FormSection>
+
+        {/* Amount + GST */}
+        <FormSection title="Amount & GST" description="Subtotal before GST; we'll compute the total.">
+          <FormField label="Subtotal (₹, before GST)" required>
+            <div style={{ position: "relative" }}>
+              <span
+                style={{
+                  position: "absolute",
+                  left: 12,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  color: "var(--muted)",
+                  fontFamily: "ui-monospace, monospace",
+                  fontSize: 13,
+                  pointerEvents: "none",
+                }}
+              >
+                ₹
+              </span>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={subtotal}
+                onChange={(e) => setSubtotal(e.target.value)}
+                placeholder="50000"
+                style={{
+                  ...INPUT_STYLE,
+                  paddingLeft: 26,
+                  fontFamily: "ui-monospace, monospace",
+                  fontSize: 14,
+                }}
+                required
+              />
+            </div>
+          </FormField>
+
+          <FormField label="GST %">
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+              {GST_QUICK_PICKS.map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setGstPercent(String(p))}
+                  style={{
+                    padding: "6px 14px",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    background: gstNum === p ? ACCOUNTS_TOKENS.accent : "#fff",
+                    color: gstNum === p ? "#fff" : "var(--text)",
+                    border: `1px solid ${gstNum === p ? ACCOUNTS_TOKENS.accent : ACCOUNTS_TOKENS.borderStrong}`,
+                    borderRadius: 8,
+                    cursor: "pointer",
+                    fontFamily: "ui-monospace, monospace",
+                  }}
+                >
+                  {p}%
+                </button>
+              ))}
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                max="100"
+                value={gstPercent}
+                onChange={(e) => setGstPercent(e.target.value)}
+                style={{ ...INPUT_STYLE, width: 90, fontFamily: "ui-monospace, monospace" }}
+              />
+              <span style={{ fontSize: 11, color: "var(--muted)" }}>custom</span>
+            </div>
+          </FormField>
+        </FormSection>
+
+        {error && (
+          <div
+            role="alert"
+            style={{
+              padding: "12px 14px",
+              background: ACCOUNTS_TOKENS.dangerLight,
+              border: `1px solid ${ACCOUNTS_TOKENS.danger}`,
+              borderRadius: 10,
+              color: ACCOUNTS_TOKENS.danger,
+              fontSize: 13,
+            }}
+          >
+            <strong>Couldn't save:</strong> {error}
+          </div>
+        )}
       </div>
 
-      {error && (
+      {/* RIGHT — sticky preview rail */}
+      <aside
+        style={{
+          position: "sticky",
+          top: 16,
+          background: "#fff",
+          border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+          borderRadius: 12,
+          padding: 18,
+          boxShadow: ACCOUNTS_TOKENS.shadow,
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+        }}
+      >
         <div
-          role="alert"
           style={{
-            padding: "10px 12px",
-            background: "rgba(220,38,38,0.08)",
-            border: "1.5px solid #dc2626",
-            borderRadius: 6,
-            color: "#7f1d1d",
-            fontSize: 13,
+            fontSize: 10,
+            fontWeight: 700,
+            color: "var(--muted)",
+            textTransform: "uppercase",
+            letterSpacing: "0.06em",
           }}
         >
-          <strong>Couldn't save:</strong> {error}
+          Bill preview
         </div>
-      )}
 
-      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+        {selectedVendor ? (
+          <VendorIdentity name={selectedVendor.name} subLabel={selectedVendor.category ?? undefined} size={36} />
+        ) : (
+          <div style={{ fontSize: 12, color: "var(--muted)", fontStyle: "italic" }}>
+            No vendor selected yet
+          </div>
+        )}
+
+        {(billDate || vendorBillNo) && (
+          <div style={{ fontSize: 12, color: "var(--muted)" }}>
+            {billDate && new Date(billDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+            {billDate && vendorBillNo && " · "}
+            {vendorBillNo && <span style={{ fontFamily: "ui-monospace, monospace", color: "var(--text)" }}>{vendorBillNo}</span>}
+          </div>
+        )}
+
+        <div style={{ height: 1, background: ACCOUNTS_TOKENS.border, margin: "4px 0" }} />
+
+        <PreviewRow label="Subtotal" value={<Money value={subtotalNum} tone="muted" />} />
+        <PreviewRow
+          label={`GST (${gstNum}%)`}
+          value={<Money value={gstAmount} tone="muted" />}
+        />
+
+        <div style={{ height: 1, background: ACCOUNTS_TOKENS.border, margin: "4px 0" }} />
+
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "baseline",
+            padding: "8px 0",
+          }}
+        >
+          <span
+            style={{
+              fontSize: 12,
+              fontWeight: 700,
+              color: "var(--text)",
+              textTransform: "uppercase",
+              letterSpacing: "0.05em",
+            }}
+          >
+            Total payable
+          </span>
+          <Money value={totalAmount} size="large" tone="accent" />
+        </div>
+
         <button
           type="submit"
-          className="primary-button"
           disabled={pending}
-          style={{ padding: "10px 22px", fontSize: 14, fontWeight: 700 }}
+          style={{ ...BUTTON_STYLES.primary, width: "100%", justifyContent: "center", padding: "11px 18px", fontSize: 14 }}
         >
           {pending
             ? "Saving…"
             : mode === "edit"
-              ? "Save changes & resubmit"
-              : "Submit for approval"}
+              ? "Save & resubmit"
+              : "Submit for audit"}
         </button>
-      </div>
+
+        <p style={{ margin: 0, fontSize: 11, color: "var(--muted)", lineHeight: 1.5 }}>
+          The bill goes to the owner's audit queue. Once approved, it
+          lands in the accountant's due list.
+        </p>
+      </aside>
 
       {/* Quick-add vendor modal */}
       {vendorModalOpen && (
@@ -444,7 +537,7 @@ export function BillEntryForm({
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(0,0,0,0.4)",
+            background: "rgba(15, 23, 42, 0.45)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -455,69 +548,74 @@ export function BillEntryForm({
             onClick={(e) => e.stopPropagation()}
             onSubmit={handleAddVendor}
             style={{
-              background: "var(--bg)",
-              border: "1px solid var(--border)",
-              borderRadius: 10,
-              padding: 22,
-              minWidth: 380,
-              maxWidth: 480,
+              background: "#fff",
+              border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+              borderRadius: 14,
+              padding: 24,
+              minWidth: 420,
+              maxWidth: 500,
               width: "92%",
               display: "flex",
               flexDirection: "column",
               gap: 14,
+              boxShadow: ACCOUNTS_TOKENS.shadowLarge,
             }}
           >
-            <h2 style={{ margin: 0, fontSize: 17 }}>Add a bill vendor</h2>
-            <p className="muted" style={{ margin: 0, fontSize: 12 }}>
-              Quick add. You can fill the rest (bank details, address) later from /accounts/vendors.
-            </p>
-            <Field label="Vendor name" required>
+            <div>
+              <h2 style={{ margin: 0, fontSize: 17, fontWeight: 800, letterSpacing: "-0.01em" }}>
+                Add a bill vendor
+              </h2>
+              <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--muted)" }}>
+                Quick add. Bank details + address can be filled later from /accounts/vendors.
+              </p>
+            </div>
+            <FormField label="Vendor name" required>
               <input
                 type="text"
                 value={newVendorName}
                 onChange={(e) => setNewVendorName(e.target.value)}
                 placeholder="e.g. Shree Cement Ltd"
-                style={inputStyle}
+                style={INPUT_STYLE}
                 required
                 autoFocus
               />
-            </Field>
-            <Field label="Category">
+            </FormField>
+            <FormField label="Category">
               <input
                 type="text"
                 value={newVendorCategory}
                 onChange={(e) => setNewVendorCategory(e.target.value)}
                 placeholder="cement / steel / tools / etc"
-                style={inputStyle}
+                style={INPUT_STYLE}
               />
-            </Field>
+            </FormField>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Field label="GSTIN">
+              <FormField label="GSTIN">
                 <input
                   type="text"
                   value={newVendorGstin}
                   onChange={(e) => setNewVendorGstin(e.target.value)}
-                  style={inputStyle}
+                  style={INPUT_STYLE}
                 />
-              </Field>
-              <Field label="Phone">
+              </FormField>
+              <FormField label="Phone">
                 <input
                   type="text"
                   value={newVendorPhone}
                   onChange={(e) => setNewVendorPhone(e.target.value)}
-                  style={inputStyle}
+                  style={INPUT_STYLE}
                 />
-              </Field>
+              </FormField>
             </div>
             {vendorModalError && (
               <div
                 role="alert"
                 style={{
                   padding: "8px 10px",
-                  background: "rgba(220,38,38,0.08)",
-                  border: "1px solid #dc2626",
-                  borderRadius: 6,
-                  color: "#7f1d1d",
+                  background: ACCOUNTS_TOKENS.dangerLight,
+                  border: `1px solid ${ACCOUNTS_TOKENS.danger}`,
+                  borderRadius: 8,
+                  color: ACCOUNTS_TOKENS.danger,
                   fontSize: 12,
                 }}
               >
@@ -528,23 +626,14 @@ export function BillEntryForm({
               <button
                 type="button"
                 onClick={() => setVendorModalOpen(false)}
-                style={{
-                  padding: "8px 16px",
-                  fontSize: 13,
-                  background: "transparent",
-                  border: "1px solid var(--border)",
-                  borderRadius: 6,
-                  cursor: "pointer",
-                  color: "var(--muted)",
-                }}
+                style={BUTTON_STYLES.secondary}
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="primary-button"
                 disabled={vendorAdding}
-                style={{ padding: "8px 18px", fontSize: 13 }}
+                style={BUTTON_STYLES.primary}
               >
                 {vendorAdding ? "Adding…" : "Add vendor"}
               </button>
@@ -556,19 +645,42 @@ export function BillEntryForm({
   );
 }
 
-// ── Small visual helpers ────────────────────────────────────────────
+function FormSection({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        background: "#fff",
+        border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+        borderRadius: 12,
+        padding: 18,
+        display: "flex",
+        flexDirection: "column",
+        gap: 12,
+        boxShadow: ACCOUNTS_TOKENS.shadow,
+      }}
+    >
+      <div>
+        <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: "var(--text)", letterSpacing: "-0.005em" }}>
+          {title}
+        </h3>
+        {description && (
+          <p style={{ margin: "3px 0 0", fontSize: 12, color: "var(--muted)" }}>{description}</p>
+        )}
+      </div>
+      {children}
+    </div>
+  );
+}
 
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "9px 12px",
-  fontSize: 13,
-  border: "1px solid var(--border)",
-  borderRadius: 6,
-  background: "var(--bg)",
-  color: "var(--text)",
-};
-
-function Field({
+function FormField({
   label,
   required,
   hint,
@@ -591,11 +703,11 @@ function Field({
         }}
       >
         {label}
-        {required && <span style={{ color: "#dc2626", marginLeft: 4 }}>*</span>}
+        {required && <span style={{ color: ACCOUNTS_TOKENS.danger, marginLeft: 4 }}>*</span>}
       </span>
       {children}
       {hint && (
-        <span className="muted" style={{ fontSize: 11 }}>
+        <span style={{ fontSize: 11, color: "var(--muted)" }}>
           {hint}
         </span>
       )}
@@ -603,35 +715,17 @@ function Field({
   );
 }
 
-function Row({
+function PreviewRow({
   label,
   value,
-  highlight,
 }: {
   label: string;
-  value: string;
-  highlight?: boolean;
+  value: React.ReactNode;
 }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-      <span
-        style={{
-          fontSize: highlight ? 13 : 12,
-          fontWeight: highlight ? 700 : 500,
-          color: highlight ? "var(--text)" : "var(--muted)",
-        }}
-      >
-        {label}
-      </span>
-      <strong
-        style={{
-          fontSize: highlight ? 18 : 13,
-          fontWeight: 700,
-          color: highlight ? "var(--gold-dark)" : "var(--text)",
-        }}
-      >
-        {value}
-      </strong>
+      <span style={{ fontSize: 12, color: "var(--muted)" }}>{label}</span>
+      {value}
     </div>
   );
 }

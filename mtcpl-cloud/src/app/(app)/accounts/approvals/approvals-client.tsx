@@ -1,26 +1,22 @@
 "use client";
 
 /**
- * Bills audit queue — list view + per-row controls.
- * Mirrors /cutting/approvals/approvals-client.tsx one-for-one.
+ * Bills audit queue — Zoho-style card list.
  *
- * Sections
- *   A. Awaiting approval — biller has submitted, approver hasn't acted.
- *   B. Rejected (awaiting biller edit) — read-only summary with the note.
- *
- * Approver buttons (awaiting_approval):
- *   - ✓ Approve         → approveBillAction
- *   - ✏ Edit            → /accounts/bills/[id]/edit
- *   - ↩ Send back       → inline note textarea → rejectBillAction
- *
- * For rejected rows, no inline actions; the biller (or approver) edits
- * via the dedicated /accounts/bills/[id]/edit route which is linked
- * from each card.
+ * Two sections:
+ *   • Awaiting audit — per-row Approve / Edit / Send back.
+ *   • Sent back for biller edit — read-only with the note + Edit link.
  */
 
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import {
+  ACCOUNTS_TOKENS,
+  BUTTON_STYLES,
+  Money,
+  VendorAvatar,
+} from "../_ui/components";
 
 export type ApprovalBillRow = {
   id: string;
@@ -56,20 +52,20 @@ export function ApprovalsClient({
   rejectAction: (formData: FormData) => Promise<ServerResult>;
 }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 24, marginTop: 18 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 26 }}>
       <Section
-        title="Awaiting approval"
+        title="Awaiting audit"
         emoji="👀"
-        emptyMessage="Nothing waiting for approval right now."
+        emptyMessage="Nothing waiting for audit right now."
         rows={awaiting}
         approveAction={approveAction}
         rejectAction={rejectAction}
         approverActions
       />
       <Section
-        title="Rejected (waiting for biller edit)"
+        title="Sent back for biller edit"
         emoji="↩"
-        emptyMessage="No rejected bills currently. They'll show up here when an audit fails."
+        emptyMessage="No bills currently sitting with billers for edits."
         rows={rejected}
         approveAction={approveAction}
         rejectAction={rejectAction}
@@ -96,41 +92,50 @@ function Section({
   rejectAction: (formData: FormData) => Promise<ServerResult>;
   approverActions: boolean;
 }) {
+  const total = rows.reduce((s, r) => s + r.amountTotal, 0);
   return (
     <div>
       <div
         style={{
           display: "flex",
           alignItems: "baseline",
-          gap: 8,
-          marginBottom: 10,
-          paddingBottom: 6,
-          borderBottom: "1px solid var(--border)",
+          gap: 10,
+          marginBottom: 12,
+          paddingBottom: 8,
+          borderBottom: `1px solid ${ACCOUNTS_TOKENS.border}`,
+          flexWrap: "wrap",
         }}
       >
-        <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "var(--text)" }}>
+        <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "var(--text)", letterSpacing: "-0.005em" }}>
           {emoji} {title}
         </h2>
-        <span className="muted" style={{ fontSize: 12 }}>
-          {rows.length} bill{rows.length === 1 ? "" : "s"}
+        <span style={{ fontSize: 12, color: "var(--muted)" }}>
+          <strong style={{ color: "var(--text)" }}>{rows.length}</strong>{" "}
+          bill{rows.length === 1 ? "" : "s"}
+          {rows.length > 0 && (
+            <>
+              {" · "}
+              <Money value={total} size="small" tone="muted" />
+            </>
+          )}
         </span>
       </div>
 
       {rows.length === 0 ? (
         <div
-          className="muted"
           style={{
-            fontSize: 12,
-            padding: "10px 14px",
-            background: "var(--surface)",
-            border: "1px dashed var(--border)",
-            borderRadius: 6,
+            fontSize: 13,
+            padding: "16px 18px",
+            background: ACCOUNTS_TOKENS.surfaceMuted,
+            border: `1px dashed ${ACCOUNTS_TOKENS.borderStrong}`,
+            borderRadius: 12,
+            color: "var(--muted)",
           }}
         >
           {emptyMessage}
         </div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {rows.map((row) => (
             <BillAuditCard
               key={row.id}
@@ -200,90 +205,96 @@ function BillAuditCard({
 
   return (
     <div
-      className="plan-card"
-      style={
-        isRejected
-          ? { borderLeft: "5px solid #b45309", background: "rgba(180,83,9,0.05)" }
-          : { borderLeft: "5px solid var(--gold-dark)" }
-      }
+      style={{
+        background: "#fff",
+        border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+        borderLeft: `4px solid ${isRejected ? ACCOUNTS_TOKENS.danger : ACCOUNTS_TOKENS.accent}`,
+        borderRadius: 12,
+        boxShadow: ACCOUNTS_TOKENS.shadow,
+        overflow: "hidden",
+      }}
     >
-      <div className="record-head" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-start" }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
-            <code style={{ fontFamily: "ui-monospace, monospace", fontSize: 14, fontWeight: 700 }}>
-              {row.token}
-            </code>
-            <strong style={{ fontSize: 14 }}>{row.vendorName}</strong>
-            {row.vendorGstin && (
-              <span className="muted" style={{ fontSize: 11 }}>
-                GSTIN {row.vendorGstin}
-              </span>
-            )}
-          </div>
-          <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--muted)" }}>
-            Vendor bill no <strong style={{ color: "var(--text)" }}>{row.vendorBillNo}</strong>
-            {" · "}
-            {new Date(row.billDate).toLocaleDateString("en-IN", {
-              day: "numeric",
-              month: "short",
-              year: "numeric",
-            })}
-            {row.costHead && (
-              <>
-                {" · "}
-                <span style={{ color: "#b45309", fontWeight: 600 }}>{row.costHead}</span>
-              </>
-            )}
-          </p>
-          <p style={{ margin: "6px 0 0", fontSize: 13, lineHeight: 1.4 }}>{row.description}</p>
-          <p style={{ margin: "6px 0 0", fontSize: 11, color: "var(--muted)" }}>
-            Submitted{" "}
-            {row.submittedAt
-              ? new Date(row.submittedAt).toLocaleString("en-IN", {
-                  day: "numeric",
-                  month: "short",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })
-              : "—"}
-            {row.submittedByName && (
-              <>
-                {" "}by{" "}
-                <span style={{ color: "var(--gold-dark)", fontWeight: 600 }}>
-                  {row.submittedByName}
+      <div style={{ padding: "16px 18px", display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
+        {/* Vendor + bill identity */}
+        <div style={{ display: "flex", gap: 12, alignItems: "flex-start", minWidth: 0, flex: 1 }}>
+          <VendorAvatar name={row.vendorName} size={44} />
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 4 }}>
+              <strong style={{ fontSize: 15, color: "var(--text)", letterSpacing: "-0.005em" }}>
+                {row.vendorName}
+              </strong>
+              <code
+                style={{
+                  fontSize: 11,
+                  fontFamily: "ui-monospace, monospace",
+                  padding: "2px 8px",
+                  background: ACCOUNTS_TOKENS.accentLight,
+                  color: ACCOUNTS_TOKENS.accent,
+                  borderRadius: 4,
+                  fontWeight: 700,
+                }}
+              >
+                {row.token}
+              </code>
+              {row.vendorGstin && (
+                <span style={{ fontSize: 11, color: "var(--muted)", fontFamily: "ui-monospace, monospace" }}>
+                  GSTIN {row.vendorGstin}
                 </span>
-              </>
-            )}
-          </p>
+              )}
+            </div>
+            <p style={{ margin: "0 0 6px", fontSize: 12, color: "var(--muted)" }}>
+              Vendor bill{" "}
+              <code style={{ fontFamily: "ui-monospace, monospace", color: "var(--text)" }}>{row.vendorBillNo}</code>
+              {" · "}
+              {new Date(row.billDate).toLocaleDateString("en-IN", {
+                day: "numeric",
+                month: "short",
+                year: "numeric",
+              })}
+              {row.costHead && (
+                <>
+                  {" · "}
+                  <span style={{ color: ACCOUNTS_TOKENS.warning, fontWeight: 600 }}>{row.costHead}</span>
+                </>
+              )}
+            </p>
+            <p style={{ margin: 0, fontSize: 13, color: "var(--text)", lineHeight: 1.5 }}>
+              {row.description}
+            </p>
+            <p style={{ margin: "8px 0 0", fontSize: 11, color: "var(--muted)" }}>
+              Submitted{" "}
+              {row.submittedAt
+                ? new Date(row.submittedAt).toLocaleString("en-IN", {
+                    day: "numeric",
+                    month: "short",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })
+                : "—"}
+              {row.submittedByName && (
+                <>
+                  {" "}by{" "}
+                  <span style={{ color: ACCOUNTS_TOKENS.accent, fontWeight: 600 }}>{row.submittedByName}</span>
+                </>
+              )}
+            </p>
+          </div>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
-          <div style={{ fontFamily: "ui-monospace, monospace", textAlign: "right" }}>
-            <div style={{ fontSize: 10, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase" }}>
-              Total
-            </div>
-            <div style={{ fontSize: 20, fontWeight: 800, color: "var(--gold-dark)" }}>
-              ₹{row.amountTotal.toLocaleString("en-IN")}
-            </div>
-            <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
-              ₹{row.amountSubtotal.toLocaleString("en-IN")} + ₹{gst.toLocaleString("en-IN")} GST ({row.gstPercent}%)
-            </div>
+        {/* Amount block */}
+        <div style={{ textAlign: "right", minWidth: 180 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+            Total
+          </div>
+          <Money value={row.amountTotal} size="large" tone="accent" />
+          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4, fontFamily: "ui-monospace, monospace" }}>
+            ₹{row.amountSubtotal.toLocaleString("en-IN")} + ₹{gst.toLocaleString("en-IN")} GST ({row.gstPercent}%)
           </div>
           <Link
             href={`/accounts/bills/${row.id}`}
-            style={{
-              textDecoration: "none",
-              fontSize: 12,
-              padding: "4px 12px",
-              background: "var(--bg)",
-              border: "1px solid var(--border)",
-              borderRadius: 6,
-              color: "var(--text)",
-              fontWeight: 500,
-              whiteSpace: "nowrap",
-            }}
+            style={{ ...BUTTON_STYLES.secondary, marginTop: 10, fontSize: 11, padding: "5px 12px" }}
           >
-            View →
+            View detail →
           </Link>
         </div>
       </div>
@@ -291,27 +302,26 @@ function BillAuditCard({
       {isRejected && row.rejectionNote && (
         <div
           style={{
-            marginTop: 10,
+            margin: "0 18px 16px",
             padding: "10px 12px",
-            background: "rgba(180,83,9,0.10)",
-            border: "1px solid rgba(180,83,9,0.35)",
-            borderRadius: 6,
+            background: ACCOUNTS_TOKENS.dangerLight,
+            border: `1px solid ${ACCOUNTS_TOKENS.danger}`,
+            borderRadius: 8,
           }}
         >
           <div
             style={{
               fontSize: 10,
               fontWeight: 700,
-              color: "#b45309",
+              color: ACCOUNTS_TOKENS.danger,
               textTransform: "uppercase",
               letterSpacing: "0.06em",
               marginBottom: 4,
             }}
           >
-            Approver note
-            {row.rejectedByName ? ` · from ${row.rejectedByName}` : ""}
+            Auditor note{row.rejectedByName ? ` · from ${row.rejectedByName}` : ""}
           </div>
-          <p style={{ margin: 0, fontSize: 13 }}>{row.rejectionNote}</p>
+          <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5 }}>{row.rejectionNote}</p>
         </div>
       )}
 
@@ -319,12 +329,12 @@ function BillAuditCard({
         <div
           role="alert"
           style={{
-            marginTop: 10,
+            margin: "0 18px 16px",
             padding: "10px 12px",
-            background: "rgba(220,38,38,0.08)",
-            border: "1.5px solid #dc2626",
-            borderRadius: 6,
-            color: "#7f1d1d",
+            background: ACCOUNTS_TOKENS.dangerLight,
+            border: `1px solid ${ACCOUNTS_TOKENS.danger}`,
+            borderRadius: 8,
+            color: ACCOUNTS_TOKENS.danger,
             fontSize: 12,
           }}
         >
@@ -332,94 +342,61 @@ function BillAuditCard({
         </div>
       )}
 
-      {approverActions && (
-        <div
-          className="record-actions"
-          style={{ marginTop: 12, gap: 8, display: "flex", flexWrap: "wrap" }}
-        >
-          <button
-            type="button"
-            className="primary-button"
-            onClick={runApprove}
-            disabled={pending}
-            style={{ fontSize: 13 }}
-          >
-            {pending ? "Approving…" : "✓ Approve"}
-          </button>
-          <Link
-            href={`/accounts/bills/${row.id}/edit`}
-            style={{
-              textDecoration: "none",
-              fontSize: 13,
-              padding: "8px 16px",
-              background: "var(--bg)",
-              border: "1px solid var(--border)",
-              borderRadius: 6,
-              color: "var(--text)",
-              fontWeight: 600,
-            }}
-          >
-            ✏ Edit
-          </Link>
-          <button
-            type="button"
-            onClick={() => setShowReject((v) => !v)}
-            disabled={pending}
-            style={{
-              fontSize: 13,
-              padding: "8px 16px",
-              background: showReject ? "rgba(180,83,9,0.18)" : "var(--bg)",
-              border: "1px solid var(--border)",
-              borderRadius: 6,
-              color: "#b45309",
-              fontWeight: 600,
-              cursor: pending ? "wait" : "pointer",
-            }}
-          >
-            ↩ Send back for edit
-          </button>
-        </div>
-      )}
-
-      {!approverActions && (
-        <div className="record-actions" style={{ marginTop: 12, gap: 8 }}>
-          <Link
-            href={`/accounts/bills/${row.id}/edit`}
-            style={{
-              textDecoration: "none",
-              fontSize: 13,
-              padding: "8px 16px",
-              background: "var(--bg)",
-              border: "1px solid var(--border)",
-              borderRadius: 6,
-              color: "var(--text)",
-              fontWeight: 600,
-            }}
-          >
+      {/* Action footer */}
+      <div
+        style={{
+          padding: "12px 18px",
+          background: ACCOUNTS_TOKENS.surfaceMuted,
+          borderTop: `1px solid ${ACCOUNTS_TOKENS.border}`,
+          display: "flex",
+          gap: 8,
+          flexWrap: "wrap",
+        }}
+      >
+        {approverActions ? (
+          <>
+            <button
+              type="button"
+              onClick={runApprove}
+              disabled={pending}
+              style={BUTTON_STYLES.primary}
+            >
+              {pending ? "Approving…" : "✓ Approve"}
+            </button>
+            <Link href={`/accounts/bills/${row.id}/edit`} style={BUTTON_STYLES.secondary}>
+              ✏ Edit
+            </Link>
+            <button
+              type="button"
+              onClick={() => setShowReject((v) => !v)}
+              disabled={pending}
+              style={{
+                ...BUTTON_STYLES.danger,
+                background: showReject ? ACCOUNTS_TOKENS.dangerLight : "#fff",
+              }}
+            >
+              ↩ Send back for edit
+            </button>
+          </>
+        ) : (
+          <Link href={`/accounts/bills/${row.id}/edit`} style={BUTTON_STYLES.secondary}>
             ✏ Open edit form
           </Link>
-        </div>
-      )}
+        )}
+      </div>
 
       {showReject && approverActions && (
         <div
           style={{
-            marginTop: 12,
-            padding: 12,
-            background: "var(--bg)",
-            border: "1px solid var(--border)",
-            borderRadius: 6,
+            padding: "14px 18px",
+            background: "#fff",
+            borderTop: `1px solid ${ACCOUNTS_TOKENS.border}`,
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
           }}
         >
-          <label
-            style={{
-              fontSize: 11,
-              fontWeight: 700,
-              color: "var(--muted)",
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-            }}
-          >
+          <label style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
             Note for the biller (optional)
           </label>
           <textarea
@@ -429,25 +406,24 @@ function BillAuditCard({
             rows={3}
             style={{
               width: "100%",
-              marginTop: 6,
-              padding: "8px 10px",
+              padding: "9px 12px",
               fontSize: 13,
-              border: "1px solid var(--border)",
-              borderRadius: 4,
-              background: "var(--surface)",
+              border: `1px solid ${ACCOUNTS_TOKENS.borderStrong}`,
+              borderRadius: 8,
+              background: "#fff",
               color: "var(--text)",
               resize: "vertical",
+              fontFamily: "inherit",
             }}
           />
-          <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 8 }}>
             <button
               type="button"
               onClick={runReject}
               disabled={pending}
-              className="primary-button"
-              style={{ fontSize: 13, background: "#b45309" }}
+              style={{ ...BUTTON_STYLES.primary, background: ACCOUNTS_TOKENS.danger, boxShadow: "0 1px 2px rgba(220,38,38,0.18)" }}
             >
-              {pending ? "Sending back…" : "↩ Confirm reject"}
+              {pending ? "Sending back…" : "↩ Confirm send back"}
             </button>
             <button
               type="button"
@@ -456,16 +432,7 @@ function BillAuditCard({
                 setNote("");
               }}
               disabled={pending}
-              style={{
-                fontSize: 13,
-                padding: "8px 16px",
-                background: "transparent",
-                border: "1px solid var(--border)",
-                borderRadius: 6,
-                color: "var(--muted)",
-                fontWeight: 500,
-                cursor: pending ? "wait" : "pointer",
-              }}
+              style={BUTTON_STYLES.secondary}
             >
               Cancel
             </button>

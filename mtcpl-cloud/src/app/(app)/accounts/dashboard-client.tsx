@@ -1,17 +1,24 @@
 "use client";
 
 /**
- * Due-bills multi-select + propose-pay-today.
+ * Due-bills table + multi-select propose-pay-today.
  *
- * Accountant picks rows → adjusts per-row "propose amount" (defaults
- * to outstanding) → submits as a batch. The server creates one
- * proposal_batch_id and one bill_payments row per bill at status
- * 'proposed'. Owner takes over from the /accounts/pay-today screen.
+ * Modern Zoho-style layout: sticky action bar at the bottom shows
+ * selected count + grand total + propose button. Per-row "propose ₹"
+ * input is collapsed by default — appears only after the row is
+ * ticked. Sticky table header, hover rows, vendor avatars.
  */
 
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import {
+  ACCOUNTS_TOKENS,
+  BUTTON_STYLES,
+  Money,
+  TABLE_STYLES,
+  VendorIdentity,
+} from "./_ui/components";
 
 export type DueBillRow = {
   id: string;
@@ -69,9 +76,7 @@ export function DueBillsClient({
 
   function selectAllVisible() {
     const next = new Set(selected);
-    for (const r of rows) {
-      if (!r.hasOpenPayment) next.add(r.id);
-    }
+    for (const r of rows) if (!r.hasOpenPayment) next.add(r.id);
     setSelected(next);
   }
 
@@ -83,145 +88,49 @@ export function DueBillsClient({
   function handlePropose() {
     setError(null);
     setSuccess(null);
-    if (selectedRows.length === 0) {
-      setError("Pick at least one bill.");
-      return;
-    }
+    if (selectedRows.length === 0) return setError("Pick at least one bill.");
     const proposedAmounts: Record<string, number> = {};
     for (const r of selectedRows) {
       const override = Number(amountOverrides[r.id]);
-      const amount = Number.isFinite(override) && override > 0
-        ? Math.min(override, r.amountOutstanding)
-        : r.amountOutstanding;
-      proposedAmounts[r.id] = amount;
+      proposedAmounts[r.id] =
+        Number.isFinite(override) && override > 0
+          ? Math.min(override, r.amountOutstanding)
+          : r.amountOutstanding;
     }
     const fd = new FormData();
     fd.set("bill_ids", JSON.stringify(selectedRows.map((r) => r.id)));
     fd.set("proposed_amounts", JSON.stringify(proposedAmounts));
     startTransition(async () => {
-      const result = await proposeAction(fd);
-      if (!result.ok) {
-        setError(result.error);
-        return;
-      }
+      const r = await proposeAction(fd);
+      if (!r.ok) return setError(r.error);
       setSelected(new Set());
       setAmountOverrides({});
       setSuccess(
-        `Proposed ${result.rowsCreated} bill${result.rowsCreated === 1 ? "" : "s"}${
-          result.skipped.length > 0 ? ` · skipped ${result.skipped.length}` : ""
-        }. Owner will review on Pay Today.`,
+        `${r.rowsCreated} bill${r.rowsCreated === 1 ? "" : "s"} proposed${
+          r.skipped.length > 0 ? ` · ${r.skipped.length} skipped` : ""
+        }. Owner can confirm on Pay Today.`,
       );
       router.refresh();
     });
   }
 
   if (rows.length === 0) {
-    return (
-      <div className="banner" style={{ marginTop: 8 }}>
-        No bills due right now. New ones land here as soon as the owner
-        approves them.
-      </div>
-    );
+    return null; // EmptyState rendered by the parent server component
   }
 
   return (
-    <div>
-      {/* Action bar */}
-      {canPropose && (
-        <div
-          style={{
-            display: "flex",
-            gap: 12,
-            flexWrap: "wrap",
-            alignItems: "center",
-            marginBottom: 10,
-            padding: "10px 14px",
-            background: "var(--surface)",
-            border: "1px solid var(--border)",
-            borderRadius: 8,
-          }}
-        >
-          <button
-            type="button"
-            onClick={selectAllVisible}
-            style={{
-              fontSize: 12,
-              padding: "5px 12px",
-              background: "var(--bg)",
-              border: "1px solid var(--border)",
-              borderRadius: 6,
-              cursor: "pointer",
-              color: "var(--text)",
-              fontWeight: 600,
-            }}
-          >
-            Select all visible
-          </button>
-          <button
-            type="button"
-            onClick={clearAll}
-            disabled={selected.size === 0}
-            style={{
-              fontSize: 12,
-              padding: "5px 12px",
-              background: "var(--bg)",
-              border: "1px solid var(--border)",
-              borderRadius: 6,
-              cursor: selected.size === 0 ? "not-allowed" : "pointer",
-              color: "var(--muted)",
-              opacity: selected.size === 0 ? 0.5 : 1,
-            }}
-          >
-            Clear
-          </button>
-          <div
-            style={{
-              flex: 1,
-              fontSize: 13,
-              color: "var(--muted)",
-              fontFamily: "ui-monospace, monospace",
-            }}
-          >
-            {selected.size > 0 ? (
-              <>
-                <strong style={{ color: "var(--text)" }}>{selected.size}</strong> selected ·{" "}
-                <strong style={{ color: "var(--gold-dark)" }}>
-                  ₹{selectedTotal.toLocaleString("en-IN")}
-                </strong>{" "}
-                will be proposed
-              </>
-            ) : (
-              "Tick the bills you want to propose for today's payment run."
-            )}
-          </div>
-          <button
-            type="button"
-            onClick={handlePropose}
-            disabled={pending || selected.size === 0}
-            className="primary-button"
-            style={{
-              fontSize: 13,
-              padding: "8px 18px",
-              fontWeight: 700,
-              opacity: selected.size === 0 ? 0.6 : 1,
-            }}
-          >
-            {pending ? "Proposing…" : `💸 Propose ${selected.size} for pay-today`}
-          </button>
-        </div>
-      )}
-
+    <div style={{ position: "relative" }}>
       {error && (
         <div
           role="alert"
           style={{
             marginBottom: 10,
-            padding: "10px 12px",
-            background: "rgba(220,38,38,0.08)",
-            border: "1.5px solid #dc2626",
-            borderRadius: 6,
-            color: "#7f1d1d",
-            fontSize: 12,
+            padding: "10px 14px",
+            background: ACCOUNTS_TOKENS.dangerLight,
+            border: `1px solid ${ACCOUNTS_TOKENS.danger}`,
+            borderRadius: 8,
+            color: ACCOUNTS_TOKENS.danger,
+            fontSize: 13,
           }}
         >
           {error}
@@ -231,205 +140,259 @@ export function DueBillsClient({
         <div
           style={{
             marginBottom: 10,
-            padding: "10px 12px",
-            background: "rgba(22,101,52,0.10)",
-            border: "1px solid #86efac",
-            borderRadius: 6,
-            color: "#15803d",
-            fontSize: 12,
+            padding: "10px 14px",
+            background: ACCOUNTS_TOKENS.successLight,
+            border: `1px solid ${ACCOUNTS_TOKENS.success}`,
+            borderRadius: 8,
+            color: ACCOUNTS_TOKENS.success,
+            fontSize: 13,
             fontWeight: 600,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 12,
+            flexWrap: "wrap",
           }}
         >
-          {success}{" "}
-          <Link href="/accounts/pay-today" style={{ textDecoration: "underline" }}>
+          <span>{success}</span>
+          <Link
+            href="/accounts/pay-today"
+            style={{ ...BUTTON_STYLES.secondary, padding: "6px 12px", fontSize: 12 }}
+          >
             Open Pay Today →
           </Link>
         </div>
       )}
 
-      <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-          <thead>
-            <tr style={{ borderBottom: "2px solid var(--border)" }}>
-              {canPropose && <th style={thStyle}>&nbsp;</th>}
-              <th style={thStyle}>Token</th>
-              <th style={thStyle}>Vendor</th>
-              <th style={thStyle}>Bill date</th>
-              <th style={thStyle}>Bill no</th>
-              <th style={thStyle}>Cost head</th>
-              <th style={{ ...thStyle, textAlign: "right" }}>Total</th>
-              <th style={{ ...thStyle, textAlign: "right" }}>Outstanding</th>
-              <th style={thStyle}>Age</th>
-              {canPropose && <th style={thStyle}>Propose ₹</th>}
-              <th style={thStyle}>&nbsp;</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => {
-              const isSelected = selected.has(r.id);
-              const displayAmount =
-                amountOverrides[r.id] != null
-                  ? amountOverrides[r.id]
-                  : String(r.amountOutstanding);
-              return (
-                <tr
-                  key={r.id}
-                  style={{
-                    borderBottom: "1px solid var(--border)",
-                    background: isSelected ? "rgba(232,197,114,0.10)" : undefined,
-                    opacity: r.hasOpenPayment ? 0.55 : 1,
-                  }}
-                >
-                  {canPropose && (
-                    <td style={tdStyle}>
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        disabled={r.hasOpenPayment}
-                        onChange={() => toggle(r.id)}
-                        title={
-                          r.hasOpenPayment
-                            ? "A payment is already in flight for this bill."
-                            : undefined
-                        }
-                      />
-                    </td>
-                  )}
-                  <td style={tdStyle}>
-                    <code style={{ fontWeight: 700 }}>{r.token}</code>
-                  </td>
-                  <td style={tdStyle}>{r.vendorName}</td>
-                  <td style={tdStyle}>
-                    {new Date(r.billDate).toLocaleDateString("en-IN", {
-                      day: "numeric",
-                      month: "short",
-                      year: "numeric",
-                    })}
-                  </td>
-                  <td style={tdStyle}>
-                    <code style={{ fontSize: 12 }}>{r.vendorBillNo}</code>
-                  </td>
-                  <td style={tdStyle}>
-                    {r.costHead ? (
-                      <span
-                        style={{
-                          fontSize: 11,
-                          padding: "2px 8px",
-                          borderRadius: 4,
-                          background: "rgba(184,115,51,0.10)",
-                          color: "#b45309",
-                          fontWeight: 600,
-                        }}
-                      >
-                        {r.costHead}
-                      </span>
-                    ) : (
-                      <span className="muted" style={{ fontSize: 11 }}>
-                        —
-                      </span>
+      <div style={TABLE_STYLES.tableWrap}>
+        <div style={{ overflowX: "auto" }}>
+          <table style={TABLE_STYLES.table}>
+            <thead style={TABLE_STYLES.thead}>
+              <tr>
+                {canPropose && (
+                  <th style={{ ...TABLE_STYLES.th, width: 40 }}>
+                    <input
+                      type="checkbox"
+                      checked={
+                        rows.length > 0 &&
+                        rows.every((r) => r.hasOpenPayment || selected.has(r.id))
+                      }
+                      onChange={(e) =>
+                        e.currentTarget.checked ? selectAllVisible() : clearAll()
+                      }
+                    />
+                  </th>
+                )}
+                <th style={TABLE_STYLES.th}>Vendor / token</th>
+                <th style={TABLE_STYLES.th}>Bill #</th>
+                <th style={TABLE_STYLES.th}>Bill date</th>
+                <th style={TABLE_STYLES.th}>Cost head</th>
+                <th style={TABLE_STYLES.thRight}>Total</th>
+                <th style={TABLE_STYLES.thRight}>Outstanding</th>
+                <th style={TABLE_STYLES.th}>Age</th>
+                {canPropose && <th style={TABLE_STYLES.thRight}>Propose</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, idx) => {
+                const isSelected = selected.has(r.id);
+                const display =
+                  amountOverrides[r.id] != null
+                    ? amountOverrides[r.id]
+                    : String(r.amountOutstanding);
+                return (
+                  <tr
+                    key={r.id}
+                    style={{
+                      background: isSelected
+                        ? ACCOUNTS_TOKENS.accentLight
+                        : idx % 2 === 0
+                          ? "#fff"
+                          : ACCOUNTS_TOKENS.surfaceMuted,
+                      opacity: r.hasOpenPayment ? 0.55 : 1,
+                      transition: "background 0.1s",
+                    }}
+                  >
+                    {canPropose && (
+                      <td style={TABLE_STYLES.td}>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          disabled={r.hasOpenPayment}
+                          onChange={() => toggle(r.id)}
+                          title={
+                            r.hasOpenPayment
+                              ? "A payment is already in flight for this bill"
+                              : undefined
+                          }
+                        />
+                      </td>
                     )}
-                  </td>
-                  <td style={{ ...tdStyle, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>
-                    ₹{r.amountTotal.toLocaleString("en-IN")}
-                  </td>
-                  <td style={{ ...tdStyle, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>
-                    <strong style={{ color: "#b45309" }}>
-                      ₹{r.amountOutstanding.toLocaleString("en-IN")}
-                    </strong>
-                  </td>
-                  <td style={tdStyle}>
-                    <AgeBadge bucket={r.ageBucket} />
-                  </td>
-                  {canPropose && (
-                    <td style={tdStyle}>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        max={r.amountOutstanding}
-                        value={displayAmount}
-                        disabled={!isSelected || r.hasOpenPayment}
-                        onChange={(e) =>
-                          setAmountOverrides((prev) => ({ ...prev, [r.id]: e.target.value }))
-                        }
-                        style={{
-                          width: 110,
-                          padding: "5px 8px",
-                          fontSize: 12,
-                          fontFamily: "ui-monospace, monospace",
-                          background: "var(--bg)",
-                          border: "1px solid var(--border)",
-                          borderRadius: 4,
-                          color: "var(--text)",
-                          opacity: isSelected ? 1 : 0.45,
-                        }}
-                      />
+                    <td style={TABLE_STYLES.td}>
+                      <Link
+                        href={`/accounts/bills/${r.id}`}
+                        style={{ textDecoration: "none", color: "inherit" }}
+                      >
+                        <VendorIdentity
+                          name={r.vendorName}
+                          subLabel={r.token}
+                          size={32}
+                        />
+                      </Link>
                     </td>
-                  )}
-                  <td style={tdStyle}>
-                    <Link
-                      href={`/accounts/bills/${r.id}`}
-                      style={{
-                        textDecoration: "none",
-                        fontSize: 12,
-                        padding: "4px 10px",
-                        background: "var(--bg)",
-                        border: "1px solid var(--border)",
-                        borderRadius: 6,
-                        color: "var(--text)",
-                        fontWeight: 600,
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      View →
-                    </Link>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                    <td style={TABLE_STYLES.td}>
+                      <code style={{ fontSize: 12, fontFamily: "ui-monospace, monospace" }}>
+                        {r.vendorBillNo}
+                      </code>
+                    </td>
+                    <td style={{ ...TABLE_STYLES.td, fontSize: 12, color: "var(--muted)" }}>
+                      {new Date(r.billDate).toLocaleDateString("en-IN", {
+                        day: "numeric",
+                        month: "short",
+                        year: "numeric",
+                      })}
+                    </td>
+                    <td style={TABLE_STYLES.td}>
+                      {r.costHead ? (
+                        <span
+                          style={{
+                            fontSize: 11,
+                            padding: "2px 10px",
+                            borderRadius: 999,
+                            background: ACCOUNTS_TOKENS.surfaceMuted,
+                            color: ACCOUNTS_TOKENS.neutral,
+                            fontWeight: 600,
+                            border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+                          }}
+                        >
+                          {r.costHead}
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: 11, color: "var(--muted)" }}>—</span>
+                      )}
+                    </td>
+                    <td style={TABLE_STYLES.tdRight}>
+                      <Money value={r.amountTotal} tone="muted" />
+                    </td>
+                    <td style={TABLE_STYLES.tdRight}>
+                      <Money value={r.amountOutstanding} tone="warning" />
+                    </td>
+                    <td style={TABLE_STYLES.td}>
+                      <AgeBadge bucket={r.ageBucket} days={Math.floor((Date.now() - new Date(r.billDate).getTime()) / 86_400_000)} />
+                    </td>
+                    {canPropose && (
+                      <td style={TABLE_STYLES.tdRight}>
+                        {isSelected ? (
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            max={r.amountOutstanding}
+                            value={display}
+                            disabled={r.hasOpenPayment}
+                            onChange={(e) =>
+                              setAmountOverrides((p) => ({ ...p, [r.id]: e.target.value }))
+                            }
+                            style={{
+                              width: 120,
+                              padding: "6px 8px",
+                              fontSize: 12,
+                              fontFamily: "ui-monospace, monospace",
+                              border: `1px solid ${ACCOUNTS_TOKENS.accent}`,
+                              borderRadius: 6,
+                              background: "#fff",
+                              color: "var(--text)",
+                              textAlign: "right",
+                            }}
+                          />
+                        ) : (
+                          <span style={{ fontSize: 11, color: "var(--muted)" }}>—</span>
+                        )}
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
+
+      {/* Sticky action bar (sticky when selection is non-empty) */}
+      {canPropose && selected.size > 0 && (
+        <div
+          style={{
+            position: "sticky",
+            bottom: 16,
+            marginTop: 14,
+            padding: "14px 18px",
+            background: "#fff",
+            border: `1.5px solid ${ACCOUNTS_TOKENS.accent}`,
+            borderRadius: 12,
+            boxShadow: "0 8px 24px rgba(79,70,229,0.18)",
+            display: "flex",
+            alignItems: "center",
+            gap: 14,
+            flexWrap: "wrap",
+            zIndex: 5,
+          }}
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              {selected.size} bill{selected.size === 1 ? "" : "s"} selected
+            </span>
+            <Money value={selectedTotal} size="large" tone="accent" />
+          </div>
+          <div style={{ flex: 1 }} />
+          <button type="button" onClick={clearAll} style={BUTTON_STYLES.ghost} disabled={pending}>
+            Clear
+          </button>
+          <button
+            type="button"
+            onClick={handlePropose}
+            disabled={pending}
+            style={BUTTON_STYLES.primary}
+          >
+            {pending ? "Proposing…" : `💸 Propose ${selected.size} for Pay Today`}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
 
-function AgeBadge({ bucket }: { bucket: DueBillRow["ageBucket"] }) {
-  const map: Record<DueBillRow["ageBucket"], { label: string; color: string; bg: string }> = {
-    "0_30": { label: "0–30d", color: "#15803d", bg: "rgba(22,101,52,0.12)" },
-    "31_60": { label: "31–60", color: "#b45309", bg: "rgba(180,83,9,0.12)" },
-    "61_90": { label: "61–90", color: "#dc2626", bg: "rgba(220,38,38,0.10)" },
-    "90_plus": { label: "90+", color: "#7f1d1d", bg: "rgba(127,29,29,0.14)" },
+function AgeBadge({
+  bucket,
+  days,
+}: {
+  bucket: DueBillRow["ageBucket"];
+  days: number;
+}) {
+  const tints: Record<DueBillRow["ageBucket"], { bg: string; fg: string; dot: string }> = {
+    "0_30":    { bg: "#dcfce7", fg: "#166534", dot: "#22c55e" },
+    "31_60":   { bg: "#fef3c7", fg: "#92400e", dot: "#f59e0b" },
+    "61_90":   { bg: "#ffedd5", fg: "#9a3412", dot: "#ea580c" },
+    "90_plus": { bg: "#fee2e2", fg: "#991b1b", dot: "#ef4444" },
   };
-  const t = map[bucket];
+  const t = tints[bucket];
   return (
     <span
       style={{
-        fontSize: 10,
-        fontWeight: 800,
-        padding: "2px 8px",
-        borderRadius: 4,
-        color: t.color,
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "2px 10px 2px 8px",
+        borderRadius: 999,
         background: t.bg,
-        letterSpacing: "0.04em",
+        color: t.fg,
+        fontSize: 11,
+        fontWeight: 700,
         fontFamily: "ui-monospace, monospace",
       }}
+      title={`${days} day${days === 1 ? "" : "s"} since bill date`}
     >
-      {t.label}
+      <span style={{ width: 5, height: 5, borderRadius: "50%", background: t.dot }} />
+      {days}d
     </span>
   );
 }
-
-const thStyle: React.CSSProperties = {
-  textAlign: "left",
-  padding: "8px 10px",
-  fontSize: 10,
-  fontWeight: 700,
-  color: "var(--muted)",
-  textTransform: "uppercase",
-  letterSpacing: "0.06em",
-};
-const tdStyle: React.CSSProperties = {
-  padding: "10px 10px",
-  verticalAlign: "middle",
-};

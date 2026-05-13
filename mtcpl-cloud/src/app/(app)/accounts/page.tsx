@@ -1,11 +1,8 @@
-// Accounts landing — role-aware.
+// Accounts landing — role-aware. Zoho Books / FreshBooks-style.
 //
-//   accountant  → due-bills dashboard (KPI cards + aging buckets + multi-select propose).
-//   owner / dev → summary cards for both halves: audit queue + accountant dashboard.
+//   accountant  → due-bills dashboard (hero KPIs + aging strip + table).
+//   owner / dev → same dashboard (they see everything).
 //   biller      → redirected to /accounts/bills/new (their primary action).
-//
-// The dashboard query is bounded — we only pull `approved` bills with
-// outstanding > 0 (the partial index `bills_due_idx` covers this).
 
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -17,6 +14,14 @@ import {
 } from "@/lib/accounts-permissions";
 import { DueBillsClient, type DueBillRow } from "./dashboard-client";
 import { proposePaymentsAction } from "./actions";
+import {
+  AccountsHero,
+  ACCOUNTS_TOKENS,
+  BUTTON_STYLES,
+  EmptyState,
+  KpiCard,
+  Money,
+} from "./_ui/components";
 
 type SearchParams = Promise<{ vendor?: string; age?: string }>;
 
@@ -26,13 +31,9 @@ export default async function AccountsHomePage({
   searchParams: SearchParams;
 }) {
   const { profile } = await requireAuth();
-  // Biller routes here from getDefaultRouteForRole would be /accounts/bills/new
-  // already. If a biller ever hits /accounts directly, bounce them.
   if (profile.role === "biller") {
     redirect("/accounts/bills/new");
   }
-
-  // Only roles that should see the dashboard:
   if (
     profile.role !== "developer" &&
     profile.role !== "owner" &&
@@ -43,11 +44,10 @@ export default async function AccountsHomePage({
 
   const sp = await searchParams;
   const vendorFilter = sp.vendor ?? "";
-  const ageFilter = sp.age ?? ""; // '0_30' | '31_60' | '61_90' | '90_plus'
+  const ageFilter = sp.age ?? "";
 
   const supabase = createAdminSupabaseClient();
 
-  // Active vendors for the filter dropdown
   const { data: vendorRows } = await supabase
     .from("bill_vendors")
     .select("id, name")
@@ -55,7 +55,6 @@ export default async function AccountsHomePage({
     .order("name");
   const vendors = (vendorRows ?? []) as Array<{ id: string; name: string }>;
 
-  // Due bills — all `approved` with outstanding > 0.
   let dueQuery = supabase
     .from("bills")
     .select(
@@ -70,8 +69,6 @@ export default async function AccountsHomePage({
   const { data: dueRaw, error } = await dueQuery;
   if (error) throw new Error(error.message);
 
-  // Bills already in an open payment (proposed / confirmed) — hidden
-  // from the propose-multi-select so the accountant can't double-stage.
   const billIds = (dueRaw ?? []).map((b) => b.id as string);
   const openPaymentBillIds = new Set<string>();
   if (billIds.length > 0) {
@@ -130,14 +127,10 @@ export default async function AccountsHomePage({
     };
   });
 
-  // Filter by age bucket if requested
   const filteredDue = ageFilter
     ? allDue.filter((b) => b.ageBucket === ageFilter)
     : allDue;
 
-  // KPI rollups (over the visible-scope `allDue`, ignoring vendor + age filters
-  // would lie about "Total outstanding" — instead let the filters narrow the
-  // KPI cards too so they always agree with the table below.)
   const totalOutstanding = filteredDue.reduce((s, b) => s + b.amountOutstanding, 0);
   const billsCount = filteredDue.length;
   const avgDaysOutstanding =
@@ -163,8 +156,6 @@ export default async function AccountsHomePage({
     return top;
   })();
 
-  // Aging bucket counts (always over allDue regardless of age filter so the
-  // tabs themselves stay accurate).
   const bucketCounts = {
     "0_30": allDue.filter((b) => b.ageBucket === "0_30").length,
     "31_60": allDue.filter((b) => b.ageBucket === "31_60").length,
@@ -177,136 +168,241 @@ export default async function AccountsHomePage({
     "61_90": allDue.filter((b) => b.ageBucket === "61_90").reduce((s, b) => s + b.amountOutstanding, 0),
     "90_plus": allDue.filter((b) => b.ageBucket === "90_plus").reduce((s, b) => s + b.amountOutstanding, 0),
   };
+  const grandTotal = allDue.reduce((s, b) => s + b.amountOutstanding, 0) || 1;
 
   const isApprover = canApproveBills(profile);
   const isAccountManager = canManageAccounts(profile);
 
   return (
     <section className="page-card">
-      <div className="record-head">
-        <div>
-          <h1>{profile.role === "accountant" ? "Due bills" : "Accounts"}</h1>
-          <p className="muted">
-            {profile.role === "accountant"
-              ? "Approved bills awaiting payment. Pick rows to propose for today's run."
-              : "Finance overview. Use the cards to jump into the audit queue or the payment workflow."}
-          </p>
-        </div>
-        {isApprover && (
-          <Link
-            href="/accounts/approvals"
-            style={{
-              textDecoration: "none",
-              fontSize: 13,
-              padding: "8px 16px",
-              background: "var(--bg)",
-              border: "1px solid var(--border)",
-              borderRadius: 6,
-              color: "var(--text)",
-              fontWeight: 600,
-              whiteSpace: "nowrap",
-              alignSelf: "flex-start",
-            }}
-          >
-            ✓ Bills Audit →
-          </Link>
-        )}
-      </div>
+      <AccountsHero
+        title={profile.role === "accountant" ? "Due Bills" : "Accounts"}
+        description={
+          profile.role === "accountant"
+            ? "Approved bills awaiting payment. Pick rows to propose for today's run."
+            : "Finance overview. Audit fresh bills and queue today's payment batch."
+        }
+        actions={
+          <>
+            {isApprover && (
+              <Link href="/accounts/approvals" style={BUTTON_STYLES.secondary}>
+                ✓ Bills Audit
+              </Link>
+            )}
+            <Link href="/accounts/pay-today" style={BUTTON_STYLES.secondary}>
+              💸 Pay Today
+            </Link>
+            <Link href="/accounts/payments" style={BUTTON_STYLES.secondary}>
+              🗂️ Payment History
+            </Link>
+          </>
+        }
+      />
 
-      {/* KPI cards */}
+      {/* Hero KPI strip */}
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
           gap: 12,
-          marginTop: 18,
+          marginBottom: 20,
         }}
       >
         <KpiCard
           label="Total outstanding"
-          value={`₹${totalOutstanding.toLocaleString("en-IN")}`}
-          tone="#b45309"
+          value={<Money value={totalOutstanding} size="hero" tone={totalOutstanding > 0 ? "danger" : "muted"} />}
+          sublabel={`across ${billsCount} bill${billsCount === 1 ? "" : "s"}`}
+          tone="danger"
+          icon="💰"
         />
-        <KpiCard label="Due bills" value={String(billsCount)} tone="var(--gold-dark)" />
-        <KpiCard label="Avg days outstanding" value={`${avgDaysOutstanding}d`} tone="#0f766e" />
+        <KpiCard
+          label="Bills in queue"
+          value={
+            <span style={{ fontSize: 30, fontWeight: 800, letterSpacing: "-0.02em" }}>
+              {billsCount}
+            </span>
+          }
+          sublabel={ageFilter ? "in selected age bucket" : "approved + outstanding"}
+          tone="accent"
+          icon="📋"
+        />
+        <KpiCard
+          label="Avg days outstanding"
+          value={
+            <span style={{ fontSize: 30, fontWeight: 800, letterSpacing: "-0.02em", color: avgDaysOutstanding > 60 ? ACCOUNTS_TOKENS.danger : "var(--text)" }}>
+              {avgDaysOutstanding}
+              <span style={{ fontSize: 16, color: "var(--muted)", fontWeight: 600, marginLeft: 4 }}>days</span>
+            </span>
+          }
+          sublabel={
+            avgDaysOutstanding === 0
+              ? "—"
+              : avgDaysOutstanding <= 30
+                ? "Healthy turnaround"
+                : avgDaysOutstanding <= 60
+                  ? "Watch list"
+                  : "Action needed"
+          }
+          tone={avgDaysOutstanding > 60 ? "danger" : avgDaysOutstanding > 30 ? "warning" : "success"}
+          icon="⏱"
+        />
         <KpiCard
           label="Top vendor by outstanding"
           value={
-            topVendor
-              ? `${topVendor.name} · ₹${topVendor.total.toLocaleString("en-IN")}`
-              : "—"
+            topVendor ? (
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text)", marginBottom: 4, lineHeight: 1.2, wordBreak: "break-word" }}>
+                  {topVendor.name}
+                </div>
+                <Money value={topVendor.total} size="large" tone="warning" />
+              </div>
+            ) : (
+              <span style={{ fontSize: 18, color: "var(--muted)", fontWeight: 600 }}>—</span>
+            )
           }
-          tone="#7c3aed"
+          tone="warning"
+          icon="🏢"
         />
       </div>
 
-      {/* Aging buckets */}
+      {/* Aging analysis — proportional bar + bucket tiles */}
+      {allDue.length > 0 && (
+        <div
+          style={{
+            background: "var(--surface, #fff)",
+            border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+            borderRadius: 12,
+            padding: "16px 18px",
+            marginBottom: 16,
+            boxShadow: ACCOUNTS_TOKENS.shadow,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+            <h2 style={{ margin: 0, fontSize: 13, fontWeight: 700, color: "var(--text)", letterSpacing: "-0.005em" }}>
+              Aging analysis
+            </h2>
+            <span style={{ fontSize: 11, color: "var(--muted)" }}>
+              by days since bill date
+            </span>
+          </div>
+
+          {/* Proportional aging bar */}
+          <div
+            style={{
+              display: "flex",
+              height: 8,
+              borderRadius: 4,
+              overflow: "hidden",
+              background: ACCOUNTS_TOKENS.surfaceMuted,
+              marginBottom: 14,
+            }}
+          >
+            {(["0_30", "31_60", "61_90", "90_plus"] as const).map((b) => {
+              const colors = {
+                "0_30": ACCOUNTS_TOKENS.success,
+                "31_60": "#f59e0b",
+                "61_90": "#ea580c",
+                "90_plus": ACCOUNTS_TOKENS.danger,
+              };
+              const pct = (bucketTotals[b] / grandTotal) * 100;
+              if (pct === 0) return null;
+              return (
+                <div
+                  key={b}
+                  style={{
+                    width: `${pct}%`,
+                    background: colors[b],
+                    transition: "width 0.2s",
+                  }}
+                  title={`${b.replace("_", "–").replace("plus", "+")} days · ₹${bucketTotals[b].toLocaleString("en-IN")}`}
+                />
+              );
+            })}
+          </div>
+
+          {/* Bucket tiles */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+              gap: 8,
+            }}
+          >
+            <AgeBucket
+              label="All bills"
+              value=""
+              current={ageFilter}
+              count={allDue.length}
+              total={allDue.reduce((s, b) => s + b.amountOutstanding, 0)}
+              accent={ACCOUNTS_TOKENS.accent}
+              vendor={vendorFilter}
+            />
+            <AgeBucket
+              label="0–30 days"
+              value="0_30"
+              current={ageFilter}
+              count={bucketCounts["0_30"]}
+              total={bucketTotals["0_30"]}
+              accent={ACCOUNTS_TOKENS.success}
+              vendor={vendorFilter}
+            />
+            <AgeBucket
+              label="31–60 days"
+              value="31_60"
+              current={ageFilter}
+              count={bucketCounts["31_60"]}
+              total={bucketTotals["31_60"]}
+              accent="#f59e0b"
+              vendor={vendorFilter}
+            />
+            <AgeBucket
+              label="61–90 days"
+              value="61_90"
+              current={ageFilter}
+              count={bucketCounts["61_90"]}
+              total={bucketTotals["61_90"]}
+              accent="#ea580c"
+              vendor={vendorFilter}
+            />
+            <AgeBucket
+              label="90+ days"
+              value="90_plus"
+              current={ageFilter}
+              count={bucketCounts["90_plus"]}
+              total={bucketTotals["90_plus"]}
+              accent={ACCOUNTS_TOKENS.danger}
+              vendor={vendorFilter}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Vendor filter */}
       <div
         style={{
-          marginTop: 16,
           display: "flex",
           gap: 10,
+          marginBottom: 14,
+          alignItems: "center",
           flexWrap: "wrap",
         }}
       >
-        <AgeChip
-          label="All"
-          value=""
-          current={ageFilter}
-          count={allDue.length}
-          total={allDue.reduce((s, b) => s + b.amountOutstanding, 0)}
-          tint="var(--gold-dark)"
-          vendor={vendorFilter}
-        />
-        <AgeChip
-          label="0–30 days"
-          value="0_30"
-          current={ageFilter}
-          count={bucketCounts["0_30"]}
-          total={bucketTotals["0_30"]}
-          tint="#15803d"
-          vendor={vendorFilter}
-        />
-        <AgeChip
-          label="31–60"
-          value="31_60"
-          current={ageFilter}
-          count={bucketCounts["31_60"]}
-          total={bucketTotals["31_60"]}
-          tint="#b45309"
-          vendor={vendorFilter}
-        />
-        <AgeChip
-          label="61–90"
-          value="61_90"
-          current={ageFilter}
-          count={bucketCounts["61_90"]}
-          total={bucketTotals["61_90"]}
-          tint="#dc2626"
-          vendor={vendorFilter}
-        />
-        <AgeChip
-          label="90+ days"
-          value="90_plus"
-          current={ageFilter}
-          count={bucketCounts["90_plus"]}
-          total={bucketTotals["90_plus"]}
-          tint="#7f1d1d"
-          vendor={vendorFilter}
-        />
-
-        <form method="GET" style={{ marginLeft: "auto", display: "inline-flex", gap: 6 }}>
+        <form method="GET" style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
           {ageFilter && <input type="hidden" name="age" value={ageFilter} />}
+          <label style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            Vendor
+          </label>
           <select
             name="vendor"
             defaultValue={vendorFilter}
             style={{
-              padding: "5px 10px",
-              fontSize: 12,
-              background: "var(--bg)",
-              border: "1px solid var(--border)",
-              borderRadius: 6,
+              padding: "6px 12px",
+              fontSize: 13,
+              background: "#fff",
+              border: `1px solid ${ACCOUNTS_TOKENS.borderStrong}`,
+              borderRadius: 8,
               color: "var(--text)",
+              minWidth: 200,
             }}
           >
             <option value="">All vendors</option>
@@ -316,88 +412,49 @@ export default async function AccountsHomePage({
               </option>
             ))}
           </select>
-          <button
-            type="submit"
-            style={{
-              padding: "5px 10px",
-              fontSize: 12,
-              background: "var(--bg)",
-              border: "1px solid var(--border)",
-              borderRadius: 6,
-              cursor: "pointer",
-              color: "var(--text)",
-            }}
-          >
-            Filter
+          <button type="submit" style={BUTTON_STYLES.secondary}>
+            Apply filter
           </button>
+          {(vendorFilter || ageFilter) && (
+            <Link href="/accounts" style={{ fontSize: 12, color: "var(--muted)", textDecoration: "underline" }}>
+              Clear all
+            </Link>
+          )}
         </form>
       </div>
 
       {/* Multi-select propose table */}
-      <div style={{ marginTop: 18 }}>
+      {filteredDue.length === 0 && allDue.length === 0 ? (
+        <EmptyState
+          icon="💸"
+          title="No bills due right now"
+          description="When the owner approves a bill, it lands here for payment proposal. Try the Bills Audit queue if you're expecting something."
+          action={
+            isApprover ? (
+              <Link href="/accounts/approvals" style={BUTTON_STYLES.primary}>
+                Open Bills Audit
+              </Link>
+            ) : undefined
+          }
+        />
+      ) : (
         <DueBillsClient
           rows={filteredDue}
           canPropose={isAccountManager}
           proposeAction={proposePaymentsAction}
         />
-      </div>
+      )}
     </section>
   );
 }
 
-function KpiCard({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone: string;
-}) {
-  return (
-    <div
-      style={{
-        padding: "12px 14px",
-        background: "var(--surface)",
-        border: "1px solid var(--border)",
-        borderLeft: `4px solid ${tone}`,
-        borderRadius: 8,
-      }}
-    >
-      <div
-        style={{
-          fontSize: 10,
-          fontWeight: 700,
-          color: "var(--muted)",
-          textTransform: "uppercase",
-          letterSpacing: "0.06em",
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          fontSize: 18,
-          fontWeight: 800,
-          color: tone,
-          marginTop: 4,
-          fontFamily: "ui-monospace, monospace",
-          wordBreak: "break-word",
-        }}
-      >
-        {value}
-      </div>
-    </div>
-  );
-}
-
-function AgeChip({
+function AgeBucket({
   label,
   value,
   current,
   count,
   total,
-  tint,
+  accent,
   vendor,
 }: {
   label: string;
@@ -405,7 +462,7 @@ function AgeChip({
   current: string;
   count: number;
   total: number;
-  tint: string;
+  accent: string;
   vendor: string;
 }) {
   const isActive = current === value;
@@ -418,24 +475,38 @@ function AgeChip({
       href={href}
       style={{
         textDecoration: "none",
-        padding: "8px 14px",
-        background: isActive ? tint : "var(--bg)",
+        padding: "10px 12px",
+        background: isActive ? accent : "#fff",
         color: isActive ? "#fff" : "var(--text)",
-        border: `1.5px solid ${isActive ? tint : "var(--border)"}`,
-        borderRadius: 8,
+        border: `1.5px solid ${isActive ? accent : ACCOUNTS_TOKENS.border}`,
+        borderRadius: 10,
         display: "flex",
         flexDirection: "column",
-        gap: 2,
-        minWidth: 120,
+        gap: 4,
+        transition: "all 0.12s",
       }}
     >
-      <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+      <span
+        style={{
+          fontSize: 10,
+          fontWeight: 700,
+          opacity: isActive ? 0.9 : 0.7,
+          textTransform: "uppercase",
+          letterSpacing: "0.05em",
+        }}
+      >
         {label}
       </span>
-      <span style={{ fontSize: 15, fontWeight: 800, fontFamily: "ui-monospace, monospace" }}>
+      <span style={{ fontSize: 18, fontWeight: 800, fontFamily: "ui-monospace, monospace", letterSpacing: "-0.01em" }}>
         {count}
       </span>
-      <span style={{ fontSize: 10, opacity: 0.85, fontFamily: "ui-monospace, monospace" }}>
+      <span
+        style={{
+          fontSize: 11,
+          opacity: isActive ? 0.85 : 0.7,
+          fontFamily: "ui-monospace, monospace",
+        }}
+      >
         ₹{total.toLocaleString("en-IN")}
       </span>
     </Link>

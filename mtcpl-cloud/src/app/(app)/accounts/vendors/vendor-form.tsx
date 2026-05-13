@@ -2,14 +2,21 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import {
+  ACCOUNTS_TOKENS,
+  BUTTON_STYLES,
+  INPUT_STYLE,
+  SidePanel,
+} from "../_ui/components";
 
 type UpsertResult =
   | { ok: true; vendorId: string }
   | { ok: false; error: string };
 
 /**
- * Bill-vendor add / edit form. Opens as a modal on the list page;
- * also reused inline on the detail page for editing.
+ * Bill-vendor add / edit form. Uses the SidePanel slide-over for
+ * "create" mode (kept compact and finance-app-feeling). For "edit"
+ * mode on the vendor detail page, the form renders inline.
  */
 export function VendorForm({
   action,
@@ -38,11 +45,11 @@ export function VendorForm({
   trigger?: React.ReactNode;
 }) {
   const router = useRouter();
-  const [open, setOpen] = useState(mode === "edit");
+  const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  const [form, setForm] = useState({
+  const initial = {
     name: initialValues?.name ?? "",
     category: initialValues?.category ?? "",
     gstin: initialValues?.gstin ?? "",
@@ -55,7 +62,9 @@ export function VendorForm({
     ifsc: initialValues?.ifsc ?? "",
     upi_id: initialValues?.upi_id ?? "",
     notes: initialValues?.notes ?? "",
-  });
+  };
+
+  const [form, setForm] = useState(initial);
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -73,62 +82,24 @@ export function VendorForm({
       router.refresh();
       if (mode === "create") {
         setOpen(false);
-        setForm({
-          name: "",
-          category: "",
-          gstin: "",
-          pan: "",
-          address: "",
-          phone: "",
-          email: "",
-          bank_name: "",
-          bank_account: "",
-          ifsc: "",
-          upi_id: "",
-          notes: "",
-        });
+        setForm(initial);
       }
     });
   }
 
-  if (mode === "create" && !open) {
-    return (
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="primary-button"
-        style={{ fontSize: 13, fontWeight: 700, padding: "8px 18px" }}
-      >
-        {trigger ?? "+ Add bill vendor"}
-      </button>
-    );
-  }
-
+  // Form body — used both inline (edit) and inside slide-over (create).
   const formBody = (
     <form
       onSubmit={handleSubmit}
-      onClick={(e) => e.stopPropagation()}
-      style={{
-        background: "var(--bg)",
-        border: "1px solid var(--border)",
-        borderRadius: 10,
-        padding: 22,
-        display: "flex",
-        flexDirection: "column",
-        gap: 12,
-      }}
+      style={{ display: "flex", flexDirection: "column", gap: 14 }}
     >
-      <h2 style={{ margin: 0, fontSize: 16 }}>
-        {mode === "edit" ? "Edit vendor" : "Add a bill vendor"}
-      </h2>
-
-      <Field label="Name" required>
+      <Field label="Vendor name" required>
         <input
           value={form.name}
           onChange={(e) => setForm({ ...form, name: e.target.value })}
           required
-          style={inputStyle}
-          autoFocus
+          style={INPUT_STYLE}
+          autoFocus={mode === "create"}
         />
       </Field>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -137,14 +108,14 @@ export function VendorForm({
             value={form.category}
             onChange={(e) => setForm({ ...form, category: e.target.value })}
             placeholder="cement / steel / tools / etc"
-            style={inputStyle}
+            style={INPUT_STYLE}
           />
         </Field>
         <Field label="GSTIN">
           <input
             value={form.gstin}
             onChange={(e) => setForm({ ...form, gstin: e.target.value })}
-            style={inputStyle}
+            style={{ ...INPUT_STYLE, fontFamily: "ui-monospace, monospace" }}
           />
         </Field>
       </div>
@@ -153,14 +124,14 @@ export function VendorForm({
           <input
             value={form.pan}
             onChange={(e) => setForm({ ...form, pan: e.target.value })}
-            style={inputStyle}
+            style={{ ...INPUT_STYLE, fontFamily: "ui-monospace, monospace" }}
           />
         </Field>
         <Field label="Phone">
           <input
             value={form.phone}
             onChange={(e) => setForm({ ...form, phone: e.target.value })}
-            style={inputStyle}
+            style={INPUT_STYLE}
           />
         </Field>
       </div>
@@ -169,7 +140,7 @@ export function VendorForm({
           type="email"
           value={form.email}
           onChange={(e) => setForm({ ...form, email: e.target.value })}
-          style={inputStyle}
+          style={INPUT_STYLE}
         />
       </Field>
       <Field label="Address">
@@ -177,29 +148,30 @@ export function VendorForm({
           value={form.address}
           onChange={(e) => setForm({ ...form, address: e.target.value })}
           rows={2}
-          style={{ ...inputStyle, fontFamily: "inherit", resize: "vertical" }}
+          style={{ ...INPUT_STYLE, fontFamily: "inherit", resize: "vertical" }}
         />
       </Field>
+
       <details style={{ marginTop: 4 }}>
         <summary
           style={{
             cursor: "pointer",
-            fontSize: 12,
+            fontSize: 11,
             fontWeight: 700,
-            color: "var(--muted)",
+            color: ACCOUNTS_TOKENS.accent,
             textTransform: "uppercase",
             letterSpacing: "0.05em",
-            padding: "4px 0",
+            padding: "6px 0",
           }}
         >
-          Bank details (optional)
+          + Bank details (optional)
         </summary>
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
           <Field label="Bank name">
             <input
               value={form.bank_name}
               onChange={(e) => setForm({ ...form, bank_name: e.target.value })}
-              style={inputStyle}
+              style={INPUT_STYLE}
             />
           </Field>
           <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
@@ -207,14 +179,14 @@ export function VendorForm({
               <input
                 value={form.bank_account}
                 onChange={(e) => setForm({ ...form, bank_account: e.target.value })}
-                style={inputStyle}
+                style={{ ...INPUT_STYLE, fontFamily: "ui-monospace, monospace" }}
               />
             </Field>
             <Field label="IFSC">
               <input
                 value={form.ifsc}
                 onChange={(e) => setForm({ ...form, ifsc: e.target.value })}
-                style={inputStyle}
+                style={{ ...INPUT_STYLE, fontFamily: "ui-monospace, monospace" }}
               />
             </Field>
           </div>
@@ -222,17 +194,18 @@ export function VendorForm({
             <input
               value={form.upi_id}
               onChange={(e) => setForm({ ...form, upi_id: e.target.value })}
-              style={inputStyle}
+              style={{ ...INPUT_STYLE, fontFamily: "ui-monospace, monospace" }}
             />
           </Field>
         </div>
       </details>
+
       <Field label="Notes">
         <textarea
           value={form.notes}
           onChange={(e) => setForm({ ...form, notes: e.target.value })}
           rows={2}
-          style={{ ...inputStyle, fontFamily: "inherit", resize: "vertical" }}
+          style={{ ...INPUT_STYLE, fontFamily: "inherit", resize: "vertical" }}
         />
       </Field>
 
@@ -241,10 +214,10 @@ export function VendorForm({
           role="alert"
           style={{
             padding: "8px 10px",
-            background: "rgba(220,38,38,0.08)",
-            border: "1px solid #dc2626",
-            borderRadius: 6,
-            color: "#7f1d1d",
+            background: ACCOUNTS_TOKENS.dangerLight,
+            border: `1px solid ${ACCOUNTS_TOKENS.danger}`,
+            borderRadius: 8,
+            color: ACCOUNTS_TOKENS.danger,
             fontSize: 12,
           }}
         >
@@ -258,25 +231,12 @@ export function VendorForm({
             type="button"
             onClick={() => setOpen(false)}
             disabled={pending}
-            style={{
-              fontSize: 13,
-              padding: "8px 16px",
-              background: "transparent",
-              border: "1px solid var(--border)",
-              borderRadius: 6,
-              cursor: pending ? "wait" : "pointer",
-              color: "var(--muted)",
-            }}
+            style={BUTTON_STYLES.secondary}
           >
             Cancel
           </button>
         )}
-        <button
-          type="submit"
-          disabled={pending}
-          className="primary-button"
-          style={{ fontSize: 13, padding: "8px 18px", fontWeight: 700 }}
-        >
+        <button type="submit" disabled={pending} style={BUTTON_STYLES.primary}>
           {pending ? "Saving…" : mode === "edit" ? "Save changes" : "Add vendor"}
         </button>
       </div>
@@ -285,24 +245,40 @@ export function VendorForm({
 
   if (mode === "create") {
     return (
-      <div
-        onClick={() => setOpen(false)}
-        style={{
-          position: "fixed",
-          inset: 0,
-          background: "rgba(0,0,0,0.4)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          zIndex: 50,
-        }}
-      >
-        <div style={{ minWidth: 480, maxWidth: 560, width: "92%" }}>{formBody}</div>
-      </div>
+      <>
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          style={BUTTON_STYLES.primary}
+        >
+          {trigger ?? "+ Add bill vendor"}
+        </button>
+        <SidePanel
+          open={open}
+          onClose={() => setOpen(false)}
+          title="Add a bill vendor"
+          description="Bank details + address can be filled later. Only name is required to get started."
+        >
+          {formBody}
+        </SidePanel>
+      </>
     );
   }
 
-  return formBody;
+  return (
+    <div
+      style={{
+        background: "#fff",
+        border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+        borderRadius: 12,
+        padding: 18,
+        boxShadow: ACCOUNTS_TOKENS.shadow,
+      }}
+    >
+      <h3 style={{ margin: "0 0 14px", fontSize: 14, fontWeight: 700 }}>Vendor details</h3>
+      {formBody}
+    </div>
+  );
 }
 
 function Field({
@@ -318,7 +294,7 @@ function Field({
     <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       <span
         style={{
-          fontSize: 10,
+          fontSize: 11,
           fontWeight: 700,
           color: "var(--muted)",
           textTransform: "uppercase",
@@ -326,19 +302,9 @@ function Field({
         }}
       >
         {label}
-        {required && <span style={{ color: "#dc2626", marginLeft: 4 }}>*</span>}
+        {required && <span style={{ color: ACCOUNTS_TOKENS.danger, marginLeft: 4 }}>*</span>}
       </span>
       {children}
     </label>
   );
 }
-
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "8px 10px",
-  fontSize: 13,
-  border: "1px solid var(--border)",
-  borderRadius: 6,
-  background: "var(--bg)",
-  color: "var(--text)",
-};
