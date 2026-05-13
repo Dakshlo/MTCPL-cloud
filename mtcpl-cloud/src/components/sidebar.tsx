@@ -110,33 +110,48 @@ const navEntries: NavEntry[] = [
     roles: ["developer", "owner", "carving_head", "slab_transfer"],
   },
   // ── ACCOUNTS section (migration 028) ────────────────────────────
-  // The new accounting / finance vertical. Roles: biller (data entry),
-  // accountant (dashboard + payments), owner + developer everywhere.
-  // Bills Audit + Pay Today live in the TOP BAR (layout.tsx) since
-  // those are queue-style surfaces that need an always-visible count
-  // badge — they're omitted from the sidebar to avoid duplication.
+  // The new accounting / finance vertical.
+  //
+  // Per-role visibility:
+  //   • biller    — NO sidebar entries. They land on /accounts/bills/new
+  //                  by default (getDefaultRouteForRole), and the page
+  //                  headers cross-link to /accounts/bills with the
+  //                  "← All bills" + "+ New bill" buttons.
+  //   • developer/owner — full visibility except Pay Today + Bills Audit,
+  //                  which live in the top bar as count-badge buttons.
+  //   • accountant — full visibility incl. Pay Today (their queue surface).
+  //                  No top-bar badge for accountant by design — the
+  //                  sidebar entry is their entry point.
   {
     type: "divider",
     label: "ACCOUNTS",
-    roles: ["developer", "owner", "biller", "accountant"],
+    roles: ["developer", "owner", "accountant"],
   },
   {
     href: "/accounts/bills/new",
     label: "Enter Bill",
     icon: "🧾",
-    roles: ["developer", "owner", "biller"],
+    roles: ["developer", "owner"],
   },
   {
     href: "/accounts/bills",
     label: "All Bills",
     icon: "📑",
-    roles: ["developer", "owner", "biller", "accountant"],
+    roles: ["developer", "owner", "accountant"],
   },
   {
     href: "/accounts",
     label: "Due Bills",
     icon: "💰",
     roles: ["developer", "owner", "accountant"],
+  },
+  {
+    // Accountant-only sidebar entry. dev + owner have the top-bar
+    // badge with live count — they don't need a sidebar duplicate.
+    href: "/accounts/pay-today",
+    label: "Pay Today",
+    icon: "💸",
+    roles: ["accountant"],
   },
   {
     href: "/accounts/payments",

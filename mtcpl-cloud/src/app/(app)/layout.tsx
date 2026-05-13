@@ -10,10 +10,7 @@ import { Toast } from "@/components/toast";
 import { Heartbeat } from "@/components/heartbeat";
 import { requireAuth } from "@/lib/auth";
 import { canApproveCuts } from "@/lib/cutting-permissions";
-import {
-  canApproveBills,
-  canManageAccounts,
-} from "@/lib/accounts-permissions";
+import { canApproveBills } from "@/lib/accounts-permissions";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 
 const SETTINGS_ROLES = ["developer", "owner", "team_head"];
@@ -45,9 +42,12 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       .eq("status", "pending_approval");
     billsAuditBadge = count ?? 0;
   }
-  // Pay Today badge — accountant + owner + dev see in-flight payments
-  // (proposed + confirmed). Drives both audiences back to the screen.
-  if (canManageAccounts(profile) || canApproveBills(profile)) {
+  // Pay Today badge — owner + developer only. Accountant gets a
+  // sidebar entry instead (the queue is their day-to-day surface;
+  // they don't need a count badge competing with their workflow).
+  // The top-bar badge is for approvers who need to know when a
+  // proposed batch is waiting on their tick.
+  if (canApproveBills(profile)) {
     const { count } = await supabase
       .from("bill_payments")
       .select("*", { count: "exact", head: true })
