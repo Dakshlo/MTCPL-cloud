@@ -40,16 +40,11 @@ export function NavigationProgress() {
     let safetyTimer: ReturnType<typeof setTimeout> | null = null;
 
     function startSoon() {
-      // Tiny delay so navigations that finish in < 100ms never
-      // flicker the bar. SPA route changes commonly complete in
-      // 60–80ms, so the bar only shows when there's a real wait.
+      // Tiny delay so navigations that finish in < 60ms never
+      // flicker the bar. Cut from 100ms → 60ms after Daksh
+      // flagged the cursor change felt late.
       if (showTimer) clearTimeout(showTimer);
-      showTimer = setTimeout(() => {
-        setActive(true);
-        if (typeof document !== "undefined") {
-          document.body.style.cursor = "wait";
-        }
-      }, 100);
+      showTimer = setTimeout(() => setActive(true), 60);
       // Safety net: never leave the indicator hung past 12s.
       if (safetyTimer) clearTimeout(safetyTimer);
       safetyTimer = setTimeout(stop, 12_000);
@@ -65,9 +60,6 @@ export function NavigationProgress() {
         safetyTimer = null;
       }
       setActive(false);
-      if (typeof document !== "undefined") {
-        document.body.style.cursor = "";
-      }
     }
 
     function onClick(e: MouseEvent) {
@@ -128,22 +120,42 @@ export function NavigationProgress() {
   // Pathname OR query string changed → navigation completed → clear.
   useEffect(() => {
     setActive(false);
-    if (typeof document !== "undefined") {
-      document.body.style.cursor = "";
-    }
   }, [pathname, searchParams]);
 
   if (!active) return null;
 
   return (
     <>
+      {/* Daksh refinement: the cursor:wait set on <body> wasn't
+          visible until the mouse moved off the clicked button —
+          buttons have their own `cursor: pointer` which wins in the
+          cascade. Forcing `cursor: wait !important` on EVERY
+          element with a universal selector flips the cursor right
+          at the click moment, with no mouse-move required. The
+          rule only exists while the indicator is active so there's
+          no idle-state cost. */}
       <style>{`
+        html.mtcpl-nav-loading,
+        html.mtcpl-nav-loading *,
+        html.mtcpl-nav-loading *::before,
+        html.mtcpl-nav-loading *::after {
+          cursor: wait !important;
+        }
         @keyframes mtcpl-nav-progress {
           0%   { transform: translateX(-100%); }
-          50%  { transform: translateX(20%); }
-          100% { transform: translateX(200%); }
+          55%  { transform: translateX(40%); }
+          100% { transform: translateX(220%); }
+        }
+        @keyframes mtcpl-nav-glow {
+          0%, 100% { opacity: 0.85; }
+          50%      { opacity: 1; }
         }
       `}</style>
+      <ClassOnHtml className="mtcpl-nav-loading" />
+      {/* Daksh: top bar more prominent. Bumped from 3px to 5px,
+          dropped the soft gradient ends for a solid bright bar with
+          a visible glow that pulses, so it reads as "active" even
+          when the slide is between its left/right extremes. */}
       <div
         role="progressbar"
         aria-label="Loading"
@@ -152,24 +164,42 @@ export function NavigationProgress() {
           top: 0,
           left: 0,
           right: 0,
-          height: 3,
-          background: "transparent",
+          height: 5,
+          background: "rgba(201, 161, 74, 0.18)",
           zIndex: 9999,
           overflow: "hidden",
           pointerEvents: "none",
+          animation: "mtcpl-nav-glow 1.8s ease-in-out infinite",
+          boxShadow: "0 0 14px rgba(201, 161, 74, 0.55)",
         }}
       >
         <div
           style={{
             height: "100%",
-            width: "50%",
+            width: "45%",
             background:
-              "linear-gradient(90deg, transparent 0%, var(--gold, #c9a14a) 30%, var(--gold-dark, #a4823a) 70%, transparent 100%)",
+              "linear-gradient(90deg, rgba(201,161,74,0) 0%, #d4ad58 25%, #c9a14a 50%, #a4823a 75%, rgba(164,130,58,0) 100%)",
             animation: "mtcpl-nav-progress 1.1s ease-in-out infinite",
-            boxShadow: "0 1px 8px rgba(201, 161, 74, 0.5)",
+            boxShadow:
+              "0 0 18px rgba(201, 161, 74, 0.95), 0 1px 4px rgba(164,130,58,0.6)",
           }}
         />
       </div>
     </>
   );
+}
+
+/** Tiny helper that adds a class to <html> while mounted and
+ *  removes it on unmount. Decoupled from the cursor logic above so
+ *  the className stays scoped to the React lifecycle even if a
+ *  parent fast-refreshes. */
+function ClassOnHtml({ className }: { className: string }) {
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.documentElement.classList.add(className);
+    return () => {
+      document.documentElement.classList.remove(className);
+    };
+  }, [className]);
+  return null;
 }
