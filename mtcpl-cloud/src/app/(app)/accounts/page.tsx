@@ -71,13 +71,39 @@ export default async function AccountsHomePage({
 
   const billIds = (dueRaw ?? []).map((b) => b.id as string);
   const openPaymentBillIds = new Set<string>();
+  // Paid-in-parts breakdown — every bill_payments row at status='paid'
+  // for the bills on this page, grouped per bill. Used to render the
+  // chips Daksh asked for ("₹10k · ₹20k · ₹20k") under each bill's
+  // paid total.
+  const paidPartsByBill = new Map<
+    string,
+    Array<{ amount: number; paidAt: string | null; method: string | null }>
+  >();
   if (billIds.length > 0) {
-    const { data: openPayments } = await supabase
-      .from("bill_payments")
-      .select("bill_id")
-      .in("bill_id", billIds)
-      .in("status", ["proposed", "confirmed"]);
+    const [{ data: openPayments }, { data: paidPayments }] = await Promise.all([
+      supabase
+        .from("bill_payments")
+        .select("bill_id")
+        .in("bill_id", billIds)
+        .in("status", ["proposed", "confirmed"]),
+      supabase
+        .from("bill_payments")
+        .select("bill_id, paid_amount, paid_at, payment_method")
+        .in("bill_id", billIds)
+        .eq("status", "paid")
+        .order("paid_at", { ascending: true }),
+    ]);
     for (const p of openPayments ?? []) openPaymentBillIds.add(p.bill_id as string);
+    for (const p of paidPayments ?? []) {
+      const billId = p.bill_id as string;
+      const list = paidPartsByBill.get(billId) ?? [];
+      list.push({
+        amount: Number(p.paid_amount) || 0,
+        paidAt: (p.paid_at as string | null) ?? null,
+        method: (p.payment_method as string | null) ?? null,
+      });
+      paidPartsByBill.set(billId, list);
+    }
   }
 
   type DbRow = {
@@ -107,9 +133,13 @@ export default async function AccountsHomePage({
     if (days <= 90) return "61_90";
     return "90_plus";
   }
+  function daysSince(dateStr: string): number {
+    return Math.floor((todayMs - new Date(dateStr).getTime()) / 86_400_000);
+  }
 
   const allDue: DueBillRow[] = dueRows.map((r) => {
     const v = Array.isArray(r.bill_vendors) ? r.bill_vendors[0] ?? null : r.bill_vendors;
+    const days = daysSince(r.bill_date);
     return {
       id: r.id,
       token: r.token,
@@ -124,6 +154,12 @@ export default async function AccountsHomePage({
       amountOutstanding: Number(r.amount_outstanding),
       ageBucket: bucketFor(r.bill_date),
       hasOpenPayment: openPaymentBillIds.has(r.id),
+      daysSinceBill: days,
+      // 45-day rule — Daksh: "in our company we pay our due after
+      // around 45 days after bill generated of vendor". Soft guard:
+      // show a warning chip + propose-time banner, no hard block.
+      prematureForPayment: days < 45,
+      paymentParts: paidPartsByBill.get(r.id) ?? [],
     };
   });
 

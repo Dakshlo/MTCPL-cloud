@@ -46,7 +46,15 @@ export type PayTodayRow = {
   billDate: string | null;
   billOutstanding: number;
   billTotal: number;
+  /** Daksh's 45-day rule (Mig 038 follow-up). Set in the page server
+   *  component from bill_date — same threshold as Due Bills uses. */
+  daysSinceBill: number | null;
+  prematureForPayment: boolean;
 };
+
+/** 45-day window before a bill should be paid — kept in sync with the
+ *  same constant exported from dashboard-client. */
+export const PREMATURE_PAYMENT_DAYS = 45;
 
 type ServerResult = { ok: true } | { ok: false; error: string };
 
@@ -82,8 +90,53 @@ export function PayTodayClient({
 
   const [activeMarkRow, setActiveMarkRow] = useState<PayTodayRow | null>(null);
 
+  // Daksh's 45-day rule — count premature rows across both sections so
+  // the warning banner is visible regardless of which step the payment
+  // is at (proposed or confirmed).
+  const prematureRows = [...proposedRows, ...confirmedRows].filter(
+    (r) => r.prematureForPayment,
+  );
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 26 }}>
+      {prematureRows.length > 0 && (
+        <div
+          role="alert"
+          style={{
+            padding: "12px 16px",
+            background: "rgba(251, 191, 36, 0.10)",
+            border: "1.5px solid #f59e0b",
+            borderLeft: "5px solid #b45309",
+            borderRadius: 10,
+            fontSize: 13,
+            color: "#78350f",
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 12,
+          }}
+        >
+          <span style={{ fontSize: 20, lineHeight: 1 }} aria-hidden="true">⚠️</span>
+          <div style={{ flex: 1 }}>
+            <strong>
+              {prematureRows.length} payment{prematureRows.length === 1 ? "" : "s"} younger than {PREMATURE_PAYMENT_DAYS} days
+            </strong>
+            <div style={{ marginTop: 4, fontSize: 12, lineHeight: 1.5 }}>
+              Company policy: pay {PREMATURE_PAYMENT_DAYS} days after bill date.
+              You can still mark these paid, but please double-check before
+              releasing the money. Bills affected:{" "}
+              {prematureRows
+                .slice(0, 6)
+                .map(
+                  (r) =>
+                    `${r.vendorName} (${r.daysSinceBill}d)`,
+                )
+                .join(", ")}
+              {prematureRows.length > 6 ? `, and ${prematureRows.length - 6} more` : ""}.
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Proposed section */}
       <SectionBlock
         title="Proposed"

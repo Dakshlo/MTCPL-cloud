@@ -34,7 +34,23 @@ export type DueBillRow = {
   amountOutstanding: number;
   ageBucket: "0_30" | "31_60" | "61_90" | "90_plus";
   hasOpenPayment: boolean;
+  /** Days since bill_date. Used for the premature-payment guard. */
+  daysSinceBill: number;
+  /** Daksh's 45-day rule: bills less than 45 days old shouldn't be
+   *  paid yet. Soft warning, not a hard block. */
+  prematureForPayment: boolean;
+  /** Breakdown of paid payments for this bill. Empty if nothing paid
+   *  yet. Used to render chips under the Paid column. */
+  paymentParts: Array<{
+    amount: number;
+    paidAt: string | null;
+    method: string | null;
+  }>;
 };
+
+/** 45-day window before a bill should be paid — Daksh's company
+ *  policy. Exposed so PayToday can use the same threshold. */
+export const PREMATURE_PAYMENT_DAYS = 45;
 
 type ProposeResult =
   | { ok: true; batchId: string; rowsCreated: number; skipped: string[] }
@@ -64,6 +80,10 @@ export function DueBillsClient({
     (s, r) => s + (Number(amountOverrides[r.id]) || r.amountOutstanding),
     0,
   );
+  // Daksh's 45-day rule — flag any selected rows that are too young
+  // to be paid by company policy. Soft warning rendered above the
+  // sticky propose bar.
+  const prematureSelected = selectedRows.filter((r) => r.prematureForPayment);
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -188,6 +208,7 @@ export function DueBillsClient({
                 <th style={TABLE_STYLES.th}>Bill date</th>
                 <th style={TABLE_STYLES.th}>Cost head</th>
                 <th style={TABLE_STYLES.thRight}>Total</th>
+                <th style={TABLE_STYLES.thRight}>Paid</th>
                 <th style={TABLE_STYLES.thRight}>Outstanding</th>
                 <th style={TABLE_STYLES.th}>Age</th>
                 {canPropose && <th style={TABLE_STYLES.thRight}>Propose</th>}
@@ -275,10 +296,17 @@ export function DueBillsClient({
                       <Money value={r.amountTotal} tone="muted" />
                     </td>
                     <td style={TABLE_STYLES.tdRight}>
+                      <PaidCell paid={r.amountPaid} parts={r.paymentParts} />
+                    </td>
+                    <td style={TABLE_STYLES.tdRight}>
                       <Money value={r.amountOutstanding} tone="warning" />
                     </td>
                     <td style={TABLE_STYLES.td}>
-                      <AgeBadge bucket={r.ageBucket} days={Math.floor((Date.now() - new Date(r.billDate).getTime()) / 86_400_000)} />
+                      <AgeBadge
+                        bucket={r.ageBucket}
+                        days={r.daysSinceBill}
+                        premature={r.prematureForPayment}
+                      />
                     </td>
                     {canPropose && (
                       <td style={TABLE_STYLES.tdRight}>
@@ -345,6 +373,48 @@ export function DueBillsClient({
         </div>
       </div>
 
+      {/* Premature-payment warning (Daksh's 45-day rule). Renders
+          above the sticky bar when the current selection includes
+          any bill younger than PREMATURE_PAYMENT_DAYS. Soft block —
+          user can still proceed if they have a reason. */}
+      {canPropose && prematureSelected.length > 0 && (
+        <div
+          style={{
+            marginTop: 14,
+            padding: "12px 16px",
+            background: "rgba(251, 191, 36, 0.10)",
+            border: "1.5px solid #f59e0b",
+            borderLeft: "5px solid #b45309",
+            borderRadius: 10,
+            fontSize: 13,
+            color: "#78350f",
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 12,
+          }}
+          role="alert"
+        >
+          <span style={{ fontSize: 20, lineHeight: 1 }} aria-hidden="true">
+            ⚠️
+          </span>
+          <div style={{ flex: 1 }}>
+            <strong>
+              {prematureSelected.length} bill
+              {prematureSelected.length === 1 ? "" : "s"} younger than {PREMATURE_PAYMENT_DAYS} days
+            </strong>
+            <div style={{ marginTop: 4, fontSize: 12, lineHeight: 1.5 }}>
+              Company policy: pay {PREMATURE_PAYMENT_DAYS} days after bill date.
+              You can still propose now, but please double-check before sending.
+              Bills affected:{" "}
+              {prematureSelected
+                .map((r) => `${r.vendorName} (${r.daysSinceBill}d)`)
+                .join(", ")}
+              .
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Sticky action bar (sticky when selection is non-empty) */}
       {canPropose && selected.size > 0 && (
         <div
@@ -391,9 +461,11 @@ export function DueBillsClient({
 function AgeBadge({
   bucket,
   days,
+  premature,
 }: {
   bucket: DueBillRow["ageBucket"];
   days: number;
+  premature?: boolean;
 }) {
   const tints: Record<DueBillRow["ageBucket"], { bg: string; fg: string; dot: string }> = {
     "0_30":    { bg: "#dcfce7", fg: "#166534", dot: "#22c55e" },
@@ -403,23 +475,115 @@ function AgeBadge({
   };
   const t = tints[bucket];
   return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        padding: "2px 10px 2px 8px",
-        borderRadius: 999,
-        background: t.bg,
-        color: t.fg,
-        fontSize: 11,
-        fontWeight: 700,
-        fontFamily: "ui-monospace, monospace",
-      }}
-      title={`${days} day${days === 1 ? "" : "s"} since bill date`}
-    >
-      <span style={{ width: 5, height: 5, borderRadius: "50%", background: t.dot }} />
-      {days}d
-    </span>
+    <div style={{ display: "inline-flex", flexDirection: "column", gap: 4 }}>
+      <span
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "2px 10px 2px 8px",
+          borderRadius: 999,
+          background: t.bg,
+          color: t.fg,
+          fontSize: 11,
+          fontWeight: 700,
+          fontFamily: "ui-monospace, monospace",
+        }}
+        title={`${days} day${days === 1 ? "" : "s"} since bill date`}
+      >
+        <span style={{ width: 5, height: 5, borderRadius: "50%", background: t.dot }} />
+        {days}d
+      </span>
+      {premature && (
+        <span
+          title={`Pay after ${PREMATURE_PAYMENT_DAYS} days since bill date — Daksh's company policy`}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 4,
+            padding: "1px 6px",
+            borderRadius: 4,
+            background: "rgba(251, 191, 36, 0.15)",
+            color: "#92400e",
+            border: "1px solid #fbbf24",
+            fontSize: 9,
+            fontWeight: 700,
+            letterSpacing: "0.04em",
+            textTransform: "uppercase",
+            whiteSpace: "nowrap",
+          }}
+        >
+          ⚠ Pay after {PREMATURE_PAYMENT_DAYS - days}d
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Paid column cell — total paid figure with a breakdown of the
+ *  individual payment chunks underneath (Daksh: "show paid amount in
+ *  parts. like 10000 under that 20000 and under that 20000"). If the
+ *  bill has no payments yet the cell collapses to a muted dash. */
+function PaidCell({
+  paid,
+  parts,
+}: {
+  paid: number;
+  parts: DueBillRow["paymentParts"];
+}) {
+  if (paid <= 0 || parts.length === 0) {
+    return <span style={{ fontSize: 12, color: "var(--muted)" }}>—</span>;
+  }
+  return (
+    <div style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+      <Money value={paid} tone="success" />
+      {parts.length > 0 && (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "flex-end",
+            gap: 2,
+            fontFamily: "ui-monospace, monospace",
+          }}
+        >
+          {parts.map((p, i) => {
+            const datePart = p.paidAt
+              ? new Date(p.paidAt).toLocaleDateString("en-IN", {
+                  day: "numeric",
+                  month: "short",
+                })
+              : null;
+            return (
+              <span
+                key={i}
+                title={[
+                  `Part #${i + 1}`,
+                  datePart ? `Paid on ${datePart}` : null,
+                  p.method ? `via ${p.method}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  color: "#15803d",
+                  background: "rgba(34, 197, 94, 0.10)",
+                  border: "1px solid rgba(34, 197, 94, 0.25)",
+                  borderRadius: 4,
+                  padding: "1px 6px",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                ₹{p.amount.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+                {datePart ? (
+                  <span style={{ opacity: 0.7, fontWeight: 500 }}> · {datePart}</span>
+                ) : null}
+              </span>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }

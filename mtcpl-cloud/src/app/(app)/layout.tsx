@@ -11,7 +11,7 @@ import { Toast } from "@/components/toast";
 import { Heartbeat } from "@/components/heartbeat";
 import { requireAuth } from "@/lib/auth";
 import { canApproveCuts } from "@/lib/cutting-permissions";
-import { canApproveBills } from "@/lib/accounts-permissions";
+import { canApproveBills, canConfirmPayments } from "@/lib/accounts-permissions";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getEffectiveStatus, getDepartmentStatus } from "@/lib/system-status";
 import {
@@ -167,11 +167,11 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     billsAuditBadge = count ?? 0;
   }
   // Pay Today badge — owner + developer only. Accountant gets a
-  // sidebar entry instead (the queue is their day-to-day surface;
-  // they don't need a count badge competing with their workflow).
-  // The top-bar badge is for approvers who need to know when a
-  // proposed batch is waiting on their tick.
-  if (canApproveBills(profile)) {
+  // sidebar entry instead. Crosscheck (mig 037) intentionally
+  // EXCLUDED — they only verify bills, never participate in the
+  // payment-confirm step. Gate on canConfirmPayments (which omits
+  // crosscheck) rather than canApproveBills (which includes them).
+  if (canConfirmPayments(profile)) {
     const { count } = await supabase
       .from("bill_payments")
       .select("*", { count: "exact", head: true })

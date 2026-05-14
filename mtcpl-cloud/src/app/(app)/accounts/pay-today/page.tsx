@@ -87,9 +87,17 @@ export default async function PayTodayPage() {
   };
   const open = ((openRowsRaw ?? []) as unknown) as OpenRow[];
 
+  // Daksh's 45-day rule. Same threshold as the dashboard-client constant.
+  const PREMATURE_PAYMENT_DAYS = 45;
+  function daysSince(dateStr: string | null): number | null {
+    if (!dateStr) return null;
+    return Math.floor((nowMs - new Date(dateStr).getTime()) / DAY_MS);
+  }
+
   function rowFromOpen(r: OpenRow): PayTodayRow {
     const b = r.bills;
     const v = b ? (Array.isArray(b.bill_vendors) ? b.bill_vendors[0] ?? null : b.bill_vendors) : null;
+    const d = daysSince(b?.bill_date ?? null);
     return {
       id: r.id,
       billId: r.bill_id,
@@ -106,6 +114,8 @@ export default async function PayTodayPage() {
       billDate: b?.bill_date ?? null,
       billOutstanding: b ? Number(b.amount_outstanding ?? 0) : 0,
       billTotal: b ? Number(b.amount_total ?? 0) : 0,
+      daysSinceBill: d,
+      prematureForPayment: d !== null && d < PREMATURE_PAYMENT_DAYS,
     };
   }
 
