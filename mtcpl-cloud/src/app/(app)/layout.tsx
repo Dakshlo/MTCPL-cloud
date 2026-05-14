@@ -379,6 +379,7 @@ function buildTopbarTaskItems(counts: {
       description: "Cutter submissions awaiting your sign-off",
       count: counts.approvalsBadge,
       icon: "✓",
+      department: "production",
     });
   }
   if (counts.billsAuditBadge !== null) {
@@ -389,6 +390,7 @@ function buildTopbarTaskItems(counts: {
       description: "Bills waiting for verification",
       count: counts.billsAuditBadge,
       icon: "✅",
+      department: "finance",
     });
   }
   if (counts.payTodayBadge !== null) {
@@ -399,6 +401,7 @@ function buildTopbarTaskItems(counts: {
       description: "Proposed + confirmed payments in flight",
       count: counts.payTodayBadge,
       icon: "💸",
+      department: "finance",
     });
   }
   if (counts.inventoryAuditBadge !== null) {
@@ -409,6 +412,7 @@ function buildTopbarTaskItems(counts: {
       description: "Stock movement batches awaiting audit",
       count: counts.inventoryAuditBadge,
       icon: "📦",
+      department: "inventory",
     });
   }
   return items;

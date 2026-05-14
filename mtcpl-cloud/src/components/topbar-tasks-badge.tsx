@@ -40,6 +40,8 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
+export type TopbarTaskDepartment = "production" | "finance" | "inventory";
+
 export type TopbarTask = {
   id: string;
   /** Where the link lands when the user clicks the row. */
@@ -52,6 +54,21 @@ export type TopbarTask = {
   count: number;
   /** Small leading emoji / glyph. */
   icon: string;
+  /** Which department this queue belongs to. Used by the dropdown
+   *  to group rows by department + colour-tag each section. */
+  department: TopbarTaskDepartment;
+};
+
+// Department accent colours used by the dropdown headers + the
+// item-icon backgrounds. Same palette as the sidebar's department
+// switcher so the visual language is consistent across the app.
+const DEPT_META: Record<
+  TopbarTaskDepartment,
+  { label: string; color: string }
+> = {
+  production: { label: "Production", color: "#c9a14a" },
+  finance:    { label: "Finance",    color: "#5e8c4e" },
+  inventory:  { label: "Inventory",  color: "#c87850" },
 };
 
 export function TopbarTasksBadge({ items }: { items: TopbarTask[] }) {
@@ -92,6 +109,19 @@ export function TopbarTasksBadge({ items }: { items: TopbarTask[] }) {
 
   const total = items.reduce((s, it) => s + it.count, 0);
   const hasPending = total > 0;
+
+  // Group items by department in render order: Production → Finance
+  // → Inventory. Sections that have no items for this user (e.g.
+  // an accountant doesn't get a Production row) are skipped.
+  const grouped: Array<{
+    dept: TopbarTaskDepartment;
+    items: TopbarTask[];
+  }> = [];
+  const order: TopbarTaskDepartment[] = ["production", "finance", "inventory"];
+  for (const dept of order) {
+    const deptItems = items.filter((it) => it.department === dept);
+    if (deptItems.length > 0) grouped.push({ dept, items: deptItems });
+  }
 
   function openNow() {
     if (closeTimer.current) {
@@ -176,13 +206,34 @@ export function TopbarTasksBadge({ items }: { items: TopbarTask[] }) {
         )}
       </button>
 
-      {/* Glassmorphism dropdown */}
+      {/* Glassmorphism dropdown — Daksh follow-on: opens with a
+          clip-path circle that "blooms" out from the trigger
+          button's anchor point (top-right of the panel), rather
+          than the flat fade-down. Reads as a half-circle ripple
+          spreading from where the click happened. Subtle but very
+          recognisably "ours." */}
       {open && (
         <>
           <style>{`
-            @keyframes mtcpl-tasks-pop {
-              from { opacity: 0; transform: translateY(-6px) scale(0.98); }
-              to   { opacity: 1; transform: translateY(0)     scale(1); }
+            @keyframes mtcpl-tasks-bloom {
+              0% {
+                opacity: 0;
+                /* Origin: top-right of the panel, roughly the
+                   trigger button's vertical centre projected onto
+                   the panel's top edge. */
+                clip-path: circle(0% at calc(100% - 28px) 0%);
+              }
+              30% {
+                opacity: 1;
+              }
+              100% {
+                opacity: 1;
+                clip-path: circle(160% at calc(100% - 28px) 0%);
+              }
+            }
+            @keyframes mtcpl-tasks-row-in {
+              from { opacity: 0; transform: translateY(2px); }
+              to   { opacity: 1; transform: translateY(0); }
             }
           `}</style>
           <div
@@ -204,7 +255,8 @@ export function TopbarTasksBadge({ items }: { items: TopbarTask[] }) {
               boxShadow:
                 "0 12px 40px rgba(15, 23, 42, 0.18), 0 0 0 1px rgba(15, 23, 42, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.55)",
               zIndex: 200,
-              animation: "mtcpl-tasks-pop 0.12s ease-out",
+              animation:
+                "mtcpl-tasks-bloom 0.34s cubic-bezier(0.2, 0.8, 0.2, 1.05) both",
               display: "flex",
               flexDirection: "column",
               gap: 2,
@@ -234,113 +286,172 @@ export function TopbarTasksBadge({ items }: { items: TopbarTask[] }) {
                 {total}
               </span>
             </div>
-            {items.map((it) => {
-              const itemHasCount = it.count > 0;
+
+            {/* Department-grouped sections */}
+            {grouped.map((group, groupIdx) => {
+              const meta = DEPT_META[group.dept];
+              const groupTotal = group.items.reduce((s, it) => s + it.count, 0);
               return (
-                <Link
-                  key={it.id}
-                  href={it.href}
-                  onClick={() => setOpen(false)}
-                  role="menuitem"
+                <div
+                  key={group.dept}
                   style={{
                     display: "flex",
-                    alignItems: "center",
-                    gap: 12,
-                    padding: "10px 12px",
-                    borderRadius: 10,
-                    textDecoration: "none",
-                    color: "var(--text)",
-                    background: "transparent",
-                    transition: "background 0.12s ease",
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background =
-                      "rgba(15, 23, 42, 0.06)";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = "transparent";
+                    flexDirection: "column",
+                    gap: 2,
+                    marginTop: groupIdx === 0 ? 0 : 6,
                   }}
                 >
-                  <span
+                  {/* Department header */}
+                  <div
                     style={{
-                      width: 32,
-                      height: 32,
-                      flexShrink: 0,
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      borderRadius: 8,
-                      background: itemHasCount
-                        ? "rgba(201, 161, 74, 0.18)"
-                        : "rgba(15, 23, 42, 0.06)",
-                      fontSize: 16,
-                      lineHeight: 1,
-                    }}
-                  >
-                    {it.icon}
-                  </span>
-                  <span
-                    style={{
-                      flex: 1,
                       display: "flex",
-                      flexDirection: "column",
-                      gap: 1,
-                      minWidth: 0,
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: 13,
-                        fontWeight: 700,
-                        color: "var(--text)",
-                        letterSpacing: "-0.005em",
-                      }}
-                    >
-                      {it.label}
-                    </span>
-                    <span
-                      style={{
-                        fontSize: 11,
-                        color: "rgba(15, 23, 42, 0.55)",
-                        lineHeight: 1.35,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {it.description}
-                    </span>
-                  </span>
-                  <span
-                    style={{
-                      fontSize: 11,
-                      fontFamily: "ui-monospace, monospace",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "4px 12px 2px",
+                      fontSize: 9.5,
                       fontWeight: 800,
-                      padding: "2px 9px",
-                      borderRadius: 999,
-                      background: itemHasCount
-                        ? "var(--gold)"
-                        : "rgba(15, 23, 42, 0.08)",
-                      color: itemHasCount ? "#fff" : "rgba(15, 23, 42, 0.45)",
-                      minWidth: 22,
-                      textAlign: "center",
-                      flexShrink: 0,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.12em",
+                      color: meta.color,
                     }}
                   >
-                    {it.count}
-                  </span>
-                  <span
-                    aria-hidden="true"
-                    style={{
-                      fontSize: 13,
-                      color: "rgba(15, 23, 42, 0.35)",
-                      fontWeight: 600,
-                      flexShrink: 0,
-                    }}
-                  >
-                    →
-                  </span>
-                </Link>
+                    <span
+                      aria-hidden
+                      style={{
+                        width: 6,
+                        height: 6,
+                        borderRadius: "50%",
+                        background: meta.color,
+                        boxShadow: `0 0 0 3px ${meta.color}22`,
+                      }}
+                    />
+                    {meta.label}
+                    {groupTotal > 0 && (
+                      <span
+                        style={{
+                          marginLeft: "auto",
+                          fontFamily: "ui-monospace, monospace",
+                          fontWeight: 800,
+                          color: meta.color,
+                          opacity: 0.85,
+                        }}
+                      >
+                        {groupTotal}
+                      </span>
+                    )}
+                  </div>
+
+                  {group.items.map((it) => {
+                    const itemHasCount = it.count > 0;
+                    return (
+                      <Link
+                        key={it.id}
+                        href={it.href}
+                        onClick={() => setOpen(false)}
+                        role="menuitem"
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 12,
+                          padding: "10px 12px",
+                          borderRadius: 10,
+                          textDecoration: "none",
+                          color: "var(--text)",
+                          background: "transparent",
+                          transition: "background 0.12s ease",
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = `${meta.color}14`;
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = "transparent";
+                        }}
+                      >
+                        <span
+                          style={{
+                            width: 32,
+                            height: 32,
+                            flexShrink: 0,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            borderRadius: 8,
+                            background: itemHasCount
+                              ? `${meta.color}22`
+                              : "rgba(15, 23, 42, 0.06)",
+                            fontSize: 16,
+                            lineHeight: 1,
+                          }}
+                        >
+                          {it.icon}
+                        </span>
+                        <span
+                          style={{
+                            flex: 1,
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 1,
+                            minWidth: 0,
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: 13,
+                              fontWeight: 700,
+                              color: "var(--text)",
+                              letterSpacing: "-0.005em",
+                            }}
+                          >
+                            {it.label}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: 11,
+                              color: "rgba(15, 23, 42, 0.55)",
+                              lineHeight: 1.35,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {it.description}
+                          </span>
+                        </span>
+                        <span
+                          style={{
+                            fontSize: 11,
+                            fontFamily: "ui-monospace, monospace",
+                            fontWeight: 800,
+                            padding: "2px 9px",
+                            borderRadius: 999,
+                            background: itemHasCount
+                              ? meta.color
+                              : "rgba(15, 23, 42, 0.08)",
+                            color: itemHasCount
+                              ? "#fff"
+                              : "rgba(15, 23, 42, 0.45)",
+                            minWidth: 22,
+                            textAlign: "center",
+                            flexShrink: 0,
+                          }}
+                        >
+                          {it.count}
+                        </span>
+                        <span
+                          aria-hidden="true"
+                          style={{
+                            fontSize: 13,
+                            color: "rgba(15, 23, 42, 0.35)",
+                            fontWeight: 600,
+                            flexShrink: 0,
+                          }}
+                        >
+                          →
+                        </span>
+                      </Link>
+                    );
+                  })}
+                </div>
               );
             })}
           </div>
