@@ -133,18 +133,31 @@ const navEntries: NavEntry[] = [
     roles: ["developer", "slab_transfer"],
     department: "production",
   },
-  // ── ACCOUNTS section (Finance department, migration 028) ─────────
+  // ── ACCOUNTS section (Finance department, mig 028 + 037 crosscheck) ──
   {
     type: "divider",
     label: "ACCOUNTS",
-    roles: ["developer", "owner", "accountant"],
+    roles: ["developer", "owner", "accountant", "crosscheck"],
     department: "finance",
   },
   {
+    // Mig 037: crosscheck role sees the All Bills list as their
+    // primary entry point — they review pending bills from here and
+    // also from the top-bar Bills Audit badge.
     href: "/accounts/bills",
     label: "All Bills",
     icon: "📑",
-    roles: ["developer", "owner", "accountant"],
+    roles: ["developer", "owner", "accountant", "crosscheck"],
+    department: "finance",
+  },
+  {
+    // Crosscheck queue — the dedicated audit page that lists every
+    // bill at status='pending_approval' waiting for verification.
+    // Reusing the existing /accounts/approvals route from mig 028.
+    href: "/accounts/approvals",
+    label: "Crosscheck Queue",
+    icon: "✅",
+    roles: ["crosscheck"],
     department: "finance",
   },
   {
@@ -209,6 +222,7 @@ function roleLabel(role: AppRole): string {
     slab_transfer: "SLAB TRANSFER",
     biller: "BILLER",
     accountant: "ACCOUNTANT",
+    crosscheck: "CROSSCHECK",
   };
   return labels[role] ?? role.replace(/_/g, " ").toUpperCase();
 }

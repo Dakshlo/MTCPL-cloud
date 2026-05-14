@@ -12,11 +12,25 @@ export type AppRole =
   | "vendor"
   | "slab_transfer"
   | "worker"
-  // Migration 028 — accounting module roles.
-  // biller     fills the bill-entry form (lands on /accounts/bills/new).
-  // accountant manages the due-bills dashboard + payments (lands on /accounts).
+  // Migration 028 — original accounting roles.
+  //
+  // biller — deprecated as of migration 037. Kept in the enum so any
+  //   pre-existing biller-role profiles continue to function, but
+  //   removed from the Settings role picker so admins can't mint
+  //   new ones. The accountant role now does bill entry + payments.
+  //
+  // accountant — does it all in Finance: adds bills, proposes
+  //   payments, marks them paid. Lands on /accounts.
+  //
+  // Migration 037 — new role.
+  //
+  // crosscheck — verification gate between accountant submit and
+  //   "outstanding". Only permission is to flip a bill from
+  //   pending_approval → approved. Owner can still approve as a
+  //   fallback.
   | "biller"
-  | "accountant";
+  | "accountant"
+  | "crosscheck";
 
 export type StoneType = "PinkStone" | "WhiteStone";
 

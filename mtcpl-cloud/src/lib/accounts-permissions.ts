@@ -1,17 +1,16 @@
 import type { Profile } from "@/lib/types";
 
 /**
- * Migration 028 — accounting module gates.
+ * Finance permission gates.
  *
- * Mirror of cutting-permissions.ts. Two new roles (`biller`,
- * `accountant`) handle most of the day-to-day; owner stays the
- * approver-of-record; developer is the superuser bypass everywhere.
+ * Migration 028 set up the original flow: biller submits, owner
+ * approves, accountant pays. Migration 037 collapses biller into
+ * accountant and inserts a new "crosscheck" role as the verification
+ * gate before bills go to "outstanding":
  *
- * The flow:
- *
- *   biller → submitBillAction → pending_approval
+ *   accountant → submitBillAction → pending_approval
  *      │
- *      └─► owner → approveBillAction → approved
+ *      └─► crosscheck (or owner) → approveBillAction → approved
  *               │
  *               └─► accountant → proposePaymentsAction
  *                        │
@@ -19,41 +18,53 @@ import type { Profile } from "@/lib/types";
  *                                 │
  *                                 └─► accountant → markPaymentPaidAction → paid
  *
- * `can_approve_bills` on `profiles` is the future-proof bit (mirrors
- * `can_approve_cuts` from migration 027). Today only Naresh has it
- * flipped on; tomorrow a senior team_head might handle bill review
- * on the owner's behalf without needing a code change.
+ * The biller role stays in the enum so any historical biller-role
+ * profile keeps working, but new role assignments should pick
+ * accountant. Owner can still approve bills as a fallback to the
+ * crosscheck step.
  */
 
-/** Bill-entry form + own submissions list. Open to dev, owner, biller.
- *  Owner is included because a small shop will sometimes have the
- *  owner himself fill the form when no biller is on duty. */
+/** Bill-entry form + own submissions list.
+ *  Mig 037: accountant now does bill entry alongside payments.
+ *  biller stays valid for historical profiles. */
 export function canSubmitBills(p: Pick<Profile, "role">): boolean {
   if (p.role === "developer") return true;
   if (p.role === "owner") return true;
-  if (p.role === "biller") return true;
+  if (p.role === "accountant") return true;
+  if (p.role === "biller") return true; // legacy compatibility
   return false;
 }
 
-/** Approve / reject a submitted bill + the topbar "Bills Audit"
- *  badge. Developer + Owner always; per-profile override via
- *  `can_approve_bills` (Naresh's row gets this flipped to TRUE
- *  post-migration). */
+/** Approve / reject a submitted bill (moves it from pending_approval
+ *  → approved, i.e. into "outstanding").
+ *
+ *  Mig 037: crosscheck role added as the default verifier. Owner +
+ *  developer still approve as a fallback (Daksh: "but still owner can
+ *  also approve"). Per-profile `can_approve_bills` override is kept
+ *  for the legacy Naresh path. */
 export function canApproveBills(
+  p: Pick<Profile, "role" | "can_approve_bills">,
+): boolean {
+  if (p.role === "developer") return true;
+  if (p.role === "owner") return true;
+  if (p.role === "crosscheck") return true;
+  if (p.can_approve_bills === true) return true;
+  return false;
+}
+
+/** Owner's tick on the pay-today screen.
+ *
+ *  Deliberately decoupled from canApproveBills as of Mig 037 — the
+ *  crosscheck role verifies BILLS but does NOT participate in the
+ *  payment-confirm step. That stays owner-only (plus developer and
+ *  the per-profile can_approve_bills override for Naresh). */
+export function canConfirmPayments(
   p: Pick<Profile, "role" | "can_approve_bills">,
 ): boolean {
   if (p.role === "developer") return true;
   if (p.role === "owner") return true;
   if (p.can_approve_bills === true) return true;
   return false;
-}
-
-/** Owner's tick on the pay-today screen. Same set as approvers — the
- *  finance audit chain stays in the same hands across both gates. */
-export function canConfirmPayments(
-  p: Pick<Profile, "role" | "can_approve_bills">,
-): boolean {
-  return canApproveBills(p);
 }
 
 /** Accountant duties: propose pay-today, view due-bills dashboard,
@@ -85,14 +96,14 @@ export function canManageBillVendors(p: Pick<Profile, "role">): boolean {
   return false;
 }
 
-/** Add a NEW bill vendor. Broader than canManageBillVendors — also
- *  allows biller, because the "+ Add new vendor" button on the
- *  bill-entry page (new-bill flow) needs to work when a biller
- *  enters a bill from a never-before-seen supplier. Edit and archive
- *  on existing vendors still require canManageBillVendors. */
+/** Add a NEW bill vendor. Broader than canManageBillVendors — anyone
+ *  who can submit a bill can also create a vendor mid-flow, because
+ *  the "+ Add new vendor" button on the bill-entry page needs to work
+ *  when entering a bill from a never-before-seen supplier. Edit and
+ *  archive on existing vendors still require canManageBillVendors. */
 export function canAddBillVendors(p: Pick<Profile, "role">): boolean {
   if (canManageBillVendors(p)) return true;
-  if (p.role === "biller") return true;
+  if (canSubmitBills(p)) return true;
   return false;
 }
 

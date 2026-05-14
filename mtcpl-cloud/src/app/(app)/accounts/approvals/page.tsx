@@ -81,8 +81,8 @@ export default async function BillsAuditPage() {
   return (
     <section className="page-card">
       <AccountsHero
-        title="Bills Audit"
-        description="Review every bill submission before it lands in the accountant's due list. Approve as-is or send back to the biller with a note."
+        title="Crosscheck Queue"
+        description="Verify every bill submission before it lands in the accountant's outstanding list. Approve as-is or send back to the submitter with a note. Owner can also approve here as a fallback (Mig 037)."
         actions={
           <Link href="/accounts" style={BUTTON_STYLES.secondary}>
             ← Accounts

@@ -16,9 +16,9 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getEffectiveStatus, getDepartmentStatus } from "@/lib/system-status";
 import {
   DEPARTMENTS,
-  canSwitchDepartment,
   departmentForRoute,
   effectiveDepartment,
+  rolePermittedDepartments,
   type Department,
 } from "@/lib/departments";
 import { getProfilesMap } from "@/lib/profiles";
@@ -81,37 +81,41 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       ? `${scopeLabel} · ${effectiveStatus.message}`
       : `${scopeLabel} is currently offline.`;
 
-    // Quick-jump to other departments still live. Only relevant for
-    // per-department locks (a global lock means every alternative is
-    // also locked) AND for users who can switch departments
-    // (developer + owner). Cheap 3-row lookup — only happens on the
-    // locked-page-load path. We re-query each dept's flag instead of
-    // reusing effectiveStatus so the user always sees fresh state.
+    // Quick-jump to other departments still live. Two filters:
+    //   1. Only per-department locks qualify — a global lock means
+    //      every alternative is also locked, so there's nowhere to
+    //      jump to.
+    //   2. Filter to departments the user's role permits — dev/owner
+    //      get all three; accountant gets Finance; cutting roles get
+    //      Production; etc. Even locked roles see this panel — an
+    //      accountant who somehow lands on /dashboard during a
+    //      Production lock should still see "Go to Finance" so they
+    //      can get back to their actual workspace.
     let availableDepartments: Array<{
       id: string;
       label: string;
       icon: string;
       href: string;
     }> = [];
-    if (
-      effectiveStatus.source === "department" &&
-      canSwitchDepartment(profile.role)
-    ) {
-      const otherDepts: Department[] = (["production", "finance", "inventory"] as const).filter(
-        (d) => d !== requestDept,
-      );
-      const statuses = await Promise.all(otherDepts.map((d) => getDepartmentStatus(d)));
-      for (let i = 0; i < otherDepts.length; i++) {
-        const dId = otherDepts[i];
-        if (statuses[i].down) continue;
-        const meta = DEPARTMENTS.find((d) => d.id === dId);
-        if (!meta) continue;
-        availableDepartments.push({
-          id: dId,
-          label: meta.label,
-          icon: meta.icon,
-          href: meta.landingHref,
-        });
+    if (effectiveStatus.source === "department") {
+      const permittedDepts = rolePermittedDepartments(profile.role);
+      const otherPermitted = permittedDepts.filter((d) => d !== requestDept);
+      if (otherPermitted.length > 0) {
+        const statuses = await Promise.all(
+          otherPermitted.map((d) => getDepartmentStatus(d)),
+        );
+        for (let i = 0; i < otherPermitted.length; i++) {
+          const dId = otherPermitted[i];
+          if (statuses[i].down) continue;
+          const meta = DEPARTMENTS.find((d) => d.id === dId);
+          if (!meta) continue;
+          availableDepartments.push({
+            id: dId,
+            label: meta.label,
+            icon: meta.icon,
+            href: meta.landingHref,
+          });
+        }
       }
     }
 
@@ -318,16 +322,16 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               </Link>
             )}
 
-            {/* Bills Audit badge — migration 028. Approvers (dev / owner /
-                profile.can_approve_bills) see pending bill submissions to
-                review. */}
+            {/* Crosscheck badge — mig 028 + 037. Verifiers (dev / owner /
+                crosscheck / profile.can_approve_bills) see pending bill
+                submissions to verify before they land in outstanding. */}
             {billsAuditBadge !== null && (
               <TopbarBadge
                 href="/accounts/approvals"
-                label="₹ Bills Audit"
+                label="✅ Crosscheck"
                 count={billsAuditBadge}
-                emptyTitle="Bills Audit queue (empty)"
-                activeTitle={`${billsAuditBadge} bill${billsAuditBadge === 1 ? "" : "s"} to audit`}
+                emptyTitle="Crosscheck queue (empty)"
+                activeTitle={`${billsAuditBadge} bill${billsAuditBadge === 1 ? "" : "s"} to verify`}
               />
             )}
 

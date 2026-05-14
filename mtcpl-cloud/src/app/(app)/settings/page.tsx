@@ -13,7 +13,15 @@ import { getSystemStatus, getDepartmentStatus } from "@/lib/system-status";
 import { getProfilesMap } from "@/lib/profiles";
 import { SystemStatusSection } from "./system-status-section";
 
-// All assignable roles — only shown to developer
+// All assignable roles — only shown to developer.
+//
+// Mig 037 housekeeping:
+//   • biller — dropped from this picker (accountant now does bill entry).
+//     The role stays valid in the AppRole enum so any existing
+//     biller-role profile keeps working; we just stop minting new ones.
+//   • crosscheck — added as the new bill-verification role.
+//   • accountant — present below for completeness; was already valid
+//     since Mig 028. Mig 037 broadens what accountant can do.
 const UI_ROLES_ALL = [
   { value: "developer",        label: "DEVELOPER" },
   { value: "owner",            label: "OWNER" },
@@ -23,11 +31,10 @@ const UI_ROLES_ALL = [
   { value: "slab_entry",       label: "SLAB ENTRY" },
   { value: "block_entry",      label: "BLOCK ENTRY" },
   { value: "cutting_operator", label: "CUTTING OPERATOR" },
-  // Phase 4 — CNC supervisor (Mohit, Manthan, Vivek, etc).
-  // Each vendor row is bound to a profile via vendor_id on profiles.
   { value: "vendor",           label: "CNC OPERATOR" },
-  // Phase 4 follow-up — slab transfer runner (migration 025).
   { value: "slab_transfer",    label: "SLAB TRANSFER" },
+  { value: "accountant",       label: "ACCOUNTANT" },
+  { value: "crosscheck",       label: "CROSSCHECK" },
 ];
 
 // Roles owner/team-head can assign — cannot promote to owner or developer

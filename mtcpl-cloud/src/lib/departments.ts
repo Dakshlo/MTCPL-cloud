@@ -131,3 +131,19 @@ export function effectiveDepartment(
 export function canSwitchDepartment(role: AppRole): boolean {
   return lockedDepartmentForRole(role) === null;
 }
+
+/**
+ * Every department this role is permitted to use. For developer +
+ * owner that's all three. For a role that's locked to one department,
+ * just that one. Used by the lock screen's quick-jump panel — even a
+ * locked role (accountant, biller, cutting_operator) deserves a way
+ * back to their own department if they somehow land on a route
+ * outside it during a maintenance window.
+ */
+export function rolePermittedDepartments(role: AppRole): Department[] {
+  if (canSwitchDepartment(role)) {
+    return ["production", "finance", "inventory"];
+  }
+  const locked = lockedDepartmentForRole(role);
+  return locked ? [locked] : [];
+}

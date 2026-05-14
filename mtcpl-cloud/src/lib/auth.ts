@@ -38,7 +38,12 @@ export function getDefaultRouteForRole(role?: AppRole | null) {
     case "accountant":
       // Migration 028 — accountant lands on the due-bills dashboard
       // (aging buckets + multi-select propose-pay-today).
+      // Mig 037 expands accountant duties to include bill entry too.
       return "/accounts";
+    case "crosscheck":
+      // Mig 037 — crosscheck role's only job is the bill verification
+      // gate. Their natural landing is the audit queue.
+      return "/accounts/approvals";
     case "worker":
       return "/pending";
     default:
