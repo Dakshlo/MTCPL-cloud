@@ -286,8 +286,15 @@ export default async function SettingsPage() {
           Stone Types, Temple Codes, etc.). See <MaintenanceCollapsible>
           rendered below the AutoBackup PeekSection. */}
 
-      {/* User Management — owner, team_head, developer */}
-      {(currentUser.role === "owner" || currentUser.role === "developer" || currentUser.role === "team_head") && (
+      {/* User Management — owner + developer only.
+          Daksh (this pass): "remove user section on setting page
+          from all roles other than owner and developer. Currently
+          team heads can see — remove it." Future intent he flagged:
+          a department head should eventually see just their own
+          department's users (e.g. carving_head sees vendor + carving
+          roles). Skipped here — we'll wire that filter when there's
+          a clearer department→roles mapping in the schema. */}
+      {(currentUser.role === "owner" || currentUser.role === "developer") && (
         <PeekSection
           icon="👥"
           title="Users"
@@ -727,23 +734,52 @@ export default async function SettingsPage() {
                   <form action={updateTempleAction} className="settings-form-row">
                     <input type="hidden" name="id" value={temple.id} />
                     <input type="hidden" name="temple_name" value={temple.name} />
+                    {/* Daksh: temple name / code prefix / stone type are
+                        LOCKED after creation. Changing them mid-flow
+                        caused problems with existing slab IDs and
+                        references. The fields render as read-only with
+                        a 🔒 hint; only Status (and Delete) stay
+                        actionable. The server action also ignores any
+                        attempt to send new values for these three. */}
                     <label className="stack" style={{ flex: 2 }}>
-                      <span>Temple Name</span>
-                      <input name="name" defaultValue={temple.name} required />
+                      <span>Temple Name 🔒</span>
+                      <input
+                        name="name"
+                        defaultValue={temple.name}
+                        readOnly
+                        disabled
+                        title="Locked after creation"
+                        style={{ background: "#f5f1e6", color: "#4a4a4a", cursor: "not-allowed" }}
+                      />
                     </label>
                     <label className="stack" style={{ flex: 1 }}>
-                      <span>Code Prefix</span>
+                      <span>Code Prefix 🔒</span>
                       <input
                         name="code_prefix"
                         defaultValue={temple.code_prefix}
                         maxLength={6}
-                        required
-                        style={{ textTransform: "uppercase", fontFamily: "ui-monospace, monospace", fontWeight: 700 }}
+                        readOnly
+                        disabled
+                        title="Locked after creation"
+                        style={{
+                          textTransform: "uppercase",
+                          fontFamily: "ui-monospace, monospace",
+                          fontWeight: 700,
+                          background: "#f5f1e6",
+                          color: "#4a4a4a",
+                          cursor: "not-allowed",
+                        }}
                       />
                     </label>
                     <label className="stack" style={{ flex: "0 0 auto" }}>
-                      <span>Stone Type</span>
-                      <select name="default_stone" defaultValue={(temple as any).default_stone ?? "PinkStone"}>
+                      <span>Stone Type 🔒</span>
+                      <select
+                        name="default_stone"
+                        defaultValue={(temple as any).default_stone ?? "PinkStone"}
+                        disabled
+                        title="Locked after creation"
+                        style={{ background: "#f5f1e6", color: "#4a4a4a", cursor: "not-allowed" }}
+                      >
                         {stoneList.length > 0
                           ? stoneList.map(st => <option key={st.name} value={st.name}>{st.name}</option>)
                           : <>
@@ -767,6 +803,13 @@ export default async function SettingsPage() {
                       </button>
                     </div>
                   </form>
+                  <p style={{ fontSize: 11, color: "var(--muted)", margin: "8px 2px 0", lineHeight: 1.5 }}>
+                    🔒 Temple name, code prefix and stone type are locked
+                    after the temple is first created. Changing them
+                    mid-flow corrupts slab IDs that already reference
+                    this temple. If you genuinely need to rename, mark
+                    this temple Inactive and add a new one.
+                  </p>
                 </div>
               </details>
             ))}

@@ -156,19 +156,26 @@ export async function updateTempleAction(formData: FormData) {
   const supabase = await createServerSupabaseClient();
 
   const id = text(formData, "id");
-  const name = text(formData, "name");
-  const code_prefix = text(formData, "code_prefix").toUpperCase();
-  const default_stone = text(formData, "default_stone") || "PinkStone";
+  // Daksh follow-on: temple name, code_prefix and default_stone
+  // are now LOCKED after creation. Changing them mid-flow caused
+  // problems (slab IDs, existing references). The edit form
+  // surfaces them read-only; the server ignores any value the
+  // client tries to send and only updates is_active. Form still
+  // submits the original values via hidden inputs, but we don't
+  // trust them — we only PATCH the status column.
   const is_active = formData.get("is_active") === "true";
 
   if (!id) redirect("/settings?toast=Missing+ID");
 
-  const { error } = await supabase.from("temples").update({ name, code_prefix, default_stone, is_active }).eq("id", id);
+  const { error } = await supabase
+    .from("temples")
+    .update({ is_active })
+    .eq("id", id);
   if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
 
   revalidatePath("/settings");
   revalidatePath("/slabs");
-  redirect("/settings?toast=Temple+updated");
+  redirect("/settings?toast=Temple+status+updated");
 }
 
 export async function deleteTempleAction(formData: FormData) {
