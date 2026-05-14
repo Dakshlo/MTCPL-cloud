@@ -42,6 +42,16 @@ export function AddVendorButton({
   // Empty string = use app-level default (45). 0 = current. Otherwise
   // an integer number of days after bill_date.
   const [paymentTermsDays, setPaymentTermsDays] = useState<string>("");
+  // Mig 042 follow-on — bank account no. + TDS/TCS flag in the
+  // quick-add (Daksh: "add account no. and tds/tcs field in this
+  // add new vendor on new bill page too"). Bank name + IFSC come
+  // along for the ride since the three move together and the
+  // accountant usually has all three in hand when adding a vendor.
+  const [bankName, setBankName] = useState("");
+  const [bankAccount, setBankAccount] = useState("");
+  const [ifsc, setIfsc] = useState("");
+  // Single-pick tri-state. Matches the vendor-edit form picker.
+  const [taxFlag, setTaxFlag] = useState<"none" | "tds" | "tcs">("none");
 
   useEffect(() => setMounted(true), []);
 
@@ -62,6 +72,10 @@ export function AddVendorButton({
     setPhone("");
     setEmail("");
     setPaymentTermsDays("");
+    setBankName("");
+    setBankAccount("");
+    setIfsc("");
+    setTaxFlag("none");
     setError(null);
   }
 
@@ -77,6 +91,14 @@ export function AddVendorButton({
     fd.set("phone", phone.trim());
     fd.set("email", email.trim());
     fd.set("payment_terms_days", paymentTermsDays.trim());
+    // Mig 042 follow-on — bank info + tax flag.
+    fd.set("bank_name", bankName.trim());
+    fd.set("bank_account", bankAccount.trim());
+    fd.set("ifsc", ifsc.trim().toUpperCase());
+    fd.set("tds_applicable", taxFlag === "tds" ? "1" : "");
+    fd.set("tcs_applicable", taxFlag === "tcs" ? "1" : "");
+    fd.set("default_tds_percent", "");
+    fd.set("default_tcs_percent", "");
     startTransition(async () => {
       const r = await action(fd);
       if (!r.ok) {
@@ -131,8 +153,10 @@ export function AddVendorButton({
               Add a bill vendor
             </h2>
             <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--muted)" }}>
-              Quick add. Bank details, address, and the rest can be filled
-              later from <strong>Bill Vendors</strong> in the sidebar.
+              Quick add — bank info + TDS/TCS flag in here too so the new
+              bill can be paid out without a second trip to{" "}
+              <strong>Bill Vendors</strong>. PAN, address, UPI etc. can
+              still be filled later from the sidebar.
             </p>
           </div>
 
@@ -177,6 +201,75 @@ export function AddVendorButton({
               onChange={(e) => setEmail(e.target.value)}
               style={INPUT_STYLE}
             />
+          </Field>
+
+          {/* Mig 042 follow-on — bank info. Account number + IFSC are
+              what the accountant actually needs to pay out, so they
+              live in the primary modal flow now. Bank name comes
+              along since the three move together. */}
+          <Field label="Bank name">
+            <input
+              value={bankName}
+              onChange={(e) => setBankName(e.target.value)}
+              placeholder="e.g. PUNJAB NATIONAL BANK"
+              style={INPUT_STYLE}
+            />
+          </Field>
+          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
+            <Field label="Account number">
+              <input
+                value={bankAccount}
+                onChange={(e) => setBankAccount(e.target.value)}
+                placeholder="e.g. 1230008700004797"
+                style={{ ...INPUT_STYLE, fontFamily: "ui-monospace, monospace" }}
+              />
+            </Field>
+            <Field label="IFSC">
+              <input
+                value={ifsc}
+                onChange={(e) => setIfsc(e.target.value)}
+                placeholder="e.g. PUNB0123000"
+                style={{ ...INPUT_STYLE, fontFamily: "ui-monospace, monospace" }}
+              />
+            </Field>
+          </div>
+
+          {/* Mig 042 follow-on — TDS/TCS picker. Mutually exclusive;
+              no rate stored on the vendor (entered on each bill). */}
+          <Field label="Tax deductions / collections">
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr 1fr",
+                gap: 6,
+                background: ACCOUNTS_TOKENS.surfaceMuted,
+                border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+                borderRadius: 8,
+                padding: 6,
+              }}
+            >
+              <TaxFlagTile
+                active={taxFlag === "none"}
+                label="None"
+                hint="No tax adjustment"
+                onClick={() => setTaxFlag("none")}
+              />
+              <TaxFlagTile
+                active={taxFlag === "tds"}
+                label="TDS"
+                hint="We deduct → remit to govt"
+                onClick={() => setTaxFlag("tds")}
+              />
+              <TaxFlagTile
+                active={taxFlag === "tcs"}
+                label="TCS"
+                hint="Vendor adds on top"
+                onClick={() => setTaxFlag("tcs")}
+              />
+            </div>
+            <span style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.45 }}>
+              Pick one. The bill form will prompt for the % at entry time.
+            </span>
           </Field>
 
           <Field label="Payment terms">
@@ -333,6 +426,61 @@ function PaymentTermsQuickPicker({
         </div>
       )}
     </div>
+  );
+}
+
+/** Mig 042 follow-on — single-pick tile for the TDS/TCS picker in
+ *  the quick-add modal. Mirrors the TaxFlagOption helper in
+ *  vendor-form.tsx so the two pickers look identical. */
+function TaxFlagTile({
+  active,
+  label,
+  hint,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  hint: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        padding: "8px 10px",
+        background: active ? ACCOUNTS_TOKENS.accent : "#fff",
+        color: active ? "#fff" : "var(--text)",
+        border: `1px solid ${active ? ACCOUNTS_TOKENS.accent : ACCOUNTS_TOKENS.border}`,
+        borderRadius: 6,
+        cursor: "pointer",
+        display: "flex",
+        flexDirection: "column",
+        gap: 2,
+        alignItems: "flex-start",
+        textAlign: "left",
+      }}
+    >
+      <span
+        style={{
+          fontSize: 12,
+          fontWeight: 800,
+          letterSpacing: "0.04em",
+          textTransform: "uppercase",
+        }}
+      >
+        {label}
+      </span>
+      <span
+        style={{
+          fontSize: 10,
+          color: active ? "rgba(255,255,255,0.85)" : "var(--muted)",
+          lineHeight: 1.4,
+        }}
+      >
+        {hint}
+      </span>
+    </button>
   );
 }
 
