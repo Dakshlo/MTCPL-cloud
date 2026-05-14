@@ -17,6 +17,7 @@ import { PayTodayClient, type PayTodayRow } from "./pay-today-client";
 import {
   AccountsHero,
   ACCOUNTS_TOKENS,
+  SECTION_COLORS,
   BUTTON_STYLES,
   EmptyState,
   Money,
@@ -184,37 +185,45 @@ export default async function PayTodayPage() {
         }
       />
 
-      {/* Flow summary strip */}
+      {/* Mig 042 follow-on (Daksh): "that pay today section cards
+          taking too much space, make them small." Replaced the 3-card
+          grid + arrows with a single compact pill strip. Each pill
+          is also a clickable anchor that jumps to its section so a
+          long page doesn't require manual scrolling. Colour-coded
+          dots match the section banners further down. */}
       <div
         style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-          gap: 10,
-          marginBottom: 20,
+          display: "flex",
+          gap: 8,
+          marginBottom: 16,
+          flexWrap: "wrap",
+          background: "#fff",
+          border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+          borderRadius: 10,
+          padding: 6,
+          boxShadow: ACCOUNTS_TOKENS.shadow,
         }}
       >
-        <FlowStat
-          label="Proposed by accountant"
+        <FlowPill
+          href="#section-proposed"
+          label="Proposed"
           count={proposedRows.length}
           value={proposedTotal}
-          tone={ACCOUNTS_TOKENS.accent}
-          icon="📥"
+          dotColor={SECTION_COLORS.proposed}
         />
-        <FlowArrow />
-        <FlowStat
+        <FlowPill
+          href="#section-confirmed"
           label="Confirmed by owner"
           count={confirmedRows.length}
           value={confirmedTotal}
-          tone={ACCOUNTS_TOKENS.warning}
-          icon="✅"
+          dotColor={SECTION_COLORS.confirmed}
         />
-        <FlowArrow />
-        <FlowStat
+        <FlowPill
+          href="#section-paid-today"
           label="Paid today"
           count={paidToday.length}
           value={paidTodayTotal}
-          tone={ACCOUNTS_TOKENS.success}
-          icon="💸"
+          dotColor={SECTION_COLORS.paidToday}
         />
       </div>
 
@@ -234,26 +243,18 @@ export default async function PayTodayPage() {
         cancelAction={cancelPaymentAction}
       />
 
-      {/* Paid today section */}
-      <div style={{ marginTop: 26 }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "baseline",
-            gap: 10,
-            marginBottom: 12,
-            paddingBottom: 8,
-            borderBottom: `1px solid ${ACCOUNTS_TOKENS.border}`,
-          }}
-        >
-          <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "var(--text)", letterSpacing: "-0.005em" }}>
-            💰 Paid today
-          </h2>
-          <span style={{ fontSize: 12, color: "var(--muted)" }}>
-            <strong style={{ color: "var(--text)" }}>{paidToday.length}</strong> payment{paidToday.length === 1 ? "" : "s"} ·{" "}
-            <Money value={paidTodayTotal} size="small" tone="success" />
-          </span>
-        </div>
+      {/* Paid today section — Mig 042 follow-on: sticky color-banded
+          banner so a fast scroll never leaves you guessing which
+          section you're in. */}
+      <div id="section-paid-today" style={{ marginTop: 26 }}>
+        <SectionBanner
+          label="Paid today"
+          emoji="💰"
+          count={paidToday.length}
+          countSuffix="payment"
+          subline={paidToday.length > 0 ? `Total ₹${paidTodayTotal.toLocaleString("en-IN")}` : "Nothing recorded yet"}
+          tint={SECTION_COLORS.paidToday}
+        />
         {paidToday.length === 0 ? (
           <EmptyState
             icon="💸"
@@ -329,72 +330,165 @@ export default async function PayTodayPage() {
   );
 }
 
-function FlowStat({
+/** Mig 042 follow-on — compact pill in the top KPI strip. Click
+ *  scrolls to that section. */
+function FlowPill({
+  href,
   label,
   count,
   value,
-  tone,
-  icon,
+  dotColor,
 }: {
+  href: string;
   label: string;
   count: number;
   value: number;
-  tone: string;
-  icon: string;
+  dotColor: string;
 }) {
   const isEmpty = count === 0;
   return (
-    <div
+    <Link
+      href={href}
       style={{
-        padding: "14px 16px",
-        background: "var(--surface, #fff)",
-        border: `1px solid ${ACCOUNTS_TOKENS.border}`,
-        borderLeft: `4px solid ${tone}`,
-        borderRadius: 12,
-        boxShadow: ACCOUNTS_TOKENS.shadow,
+        flex: "1 1 200px",
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "8px 12px",
+        background: isEmpty ? "transparent" : `${dotColor}11`,
+        border: `1px solid ${isEmpty ? ACCOUNTS_TOKENS.border : `${dotColor}55`}`,
+        borderRadius: 8,
+        textDecoration: "none",
+        color: "var(--text)",
         opacity: isEmpty ? 0.7 : 1,
+        transition: "transform 0.1s ease, box-shadow 0.1s ease",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-        <span style={{ fontSize: 16 }}>{icon}</span>
+      <span
+        aria-hidden
+        style={{
+          width: 10,
+          height: 10,
+          borderRadius: "50%",
+          background: dotColor,
+          flexShrink: 0,
+          boxShadow: isEmpty ? "none" : `0 0 0 3px ${dotColor}22`,
+        }}
+      />
+      <div style={{ display: "flex", flexDirection: "column", gap: 0, minWidth: 0 }}>
         <span
           style={{
             fontSize: 10,
-            fontWeight: 700,
+            fontWeight: 800,
             color: "var(--muted)",
             textTransform: "uppercase",
-            letterSpacing: "0.06em",
+            letterSpacing: "0.07em",
           }}
         >
           {label}
         </span>
-      </div>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 24, fontWeight: 800, color: "var(--text)", letterSpacing: "-0.02em", fontFamily: "ui-monospace, monospace" }}>
+        <span
+          style={{
+            fontSize: 14,
+            fontWeight: 800,
+            color: "var(--text)",
+            fontFamily: "ui-monospace, monospace",
+            letterSpacing: "-0.01em",
+          }}
+        >
           {count}
-        </span>
-        <span style={{ fontSize: 11, color: "var(--muted)" }}>
-          payment{count === 1 ? "" : "s"}
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              color: "var(--muted)",
+              marginLeft: 4,
+              letterSpacing: "0.04em",
+            }}
+          >
+            · ₹{value.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+          </span>
         </span>
       </div>
-      <Money value={value} size="small" tone={isEmpty ? "muted" : "muted"} />
+    </Link>
+  );
+}
+
+/** Mig 042 follow-on — section banner that sticks to the top as
+ *  the user scrolls through that section. Strong colour-coding so
+ *  even a fast scroll telegraphs which section is active. */
+function SectionBanner({
+  label,
+  emoji,
+  count,
+  countSuffix,
+  subline,
+  tint,
+}: {
+  label: string;
+  emoji: string;
+  count: number;
+  countSuffix: string;
+  subline: string;
+  tint: string;
+}) {
+  return (
+    <div
+      style={{
+        position: "sticky",
+        top: 0,
+        zIndex: 10,
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        padding: "10px 16px",
+        marginBottom: 12,
+        background: `linear-gradient(135deg, ${tint}EE 0%, ${tint}DD 100%)`,
+        color: "#fff",
+        borderRadius: 10,
+        boxShadow: `0 2px 8px ${tint}44`,
+      }}
+    >
+      <span style={{ fontSize: 18, lineHeight: 1 }} aria-hidden>
+        {emoji}
+      </span>
+      <h2
+        style={{
+          margin: 0,
+          fontSize: 14,
+          fontWeight: 800,
+          letterSpacing: "0.02em",
+          textTransform: "uppercase",
+        }}
+      >
+        {label}
+      </h2>
+      <span
+        style={{
+          padding: "2px 10px",
+          fontSize: 11,
+          fontWeight: 800,
+          fontFamily: "ui-monospace, monospace",
+          background: "rgba(255,255,255,0.22)",
+          borderRadius: 999,
+        }}
+      >
+        {count} {countSuffix}
+        {count === 1 ? "" : "s"}
+      </span>
+      <span
+        style={{
+          marginLeft: "auto",
+          fontSize: 11,
+          fontWeight: 700,
+          opacity: 0.92,
+          fontFamily: "ui-monospace, monospace",
+          letterSpacing: "0.02em",
+        }}
+      >
+        {subline}
+      </span>
     </div>
   );
 }
 
-function FlowArrow() {
-  return (
-    <div
-      aria-hidden="true"
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontSize: 18,
-        color: ACCOUNTS_TOKENS.borderStrong,
-      }}
-    >
-      →
-    </div>
-  );
-}

@@ -33,6 +33,22 @@ export const ACCOUNTS_TOKENS = {
   shadowLarge: "0 4px 12px rgba(15, 23, 42, 0.08), 0 2px 4px rgba(15, 23, 42, 0.04)",
 };
 
+// ── Pay-Today section colours (Mig 042 follow-on) ──────────────────
+//
+// Daksh: "make something different so even on fast scroll user can
+// know he change the page section from proposed to confirmed."
+//
+// Three strongly-differentiated accents — amber/green/blue — used
+// on the top KPI pill strip, the sticky section banner per section,
+// and the per-row card left border. Shared from this file so the
+// page (server component) and the client island agree on the
+// colours without prop drilling.
+export const SECTION_COLORS = {
+  proposed: "#d4923a",  // amber — accountant just proposed, waiting on owner
+  confirmed: "#5e8c4e", // green — owner has confirmed, accountant pays next
+  paidToday: "#3a6ea8", // blue — done for the day
+} as const;
+
 // ── Money display ──────────────────────────────────────────────────
 
 /** Indian-locale currency display. Default size 14px, mono font.

@@ -77,12 +77,23 @@ export function canManageAccounts(p: Pick<Profile, "role">): boolean {
   return false;
 }
 
-/** Strict: only the accountant (or developer) actually marks a
- *  payment paid. Keeps the segregation explicit — owner confirms,
- *  accountant executes. The bank reference + method live on this
- *  row, written by whoever has hands on the actual payment. */
+/** Records a payment as paid — writes paid_amount, payment_method,
+ *  payment_reference, paid_at, paid_by onto the bill_payments row.
+ *
+ *  Mig 042 follow-on: Daksh wants the owner to be able to mark paid
+ *  too (small business; sometimes the owner does the final bank
+ *  step themselves). Originally locked to accountant + dev to
+ *  enforce segregation of duties; that segregation is now a soft
+ *  preference, not a hard rule.
+ *
+ *  The amount itself is still LOCKED to whatever the owner
+ *  confirmed at proposal-time — markPaymentPaidAction re-reads
+ *  proposed_amount from the DB row, so even an owner clicking
+ *  Mark Paid can't change the number without going through the
+ *  send-back flow. */
 export function canMarkPaid(p: Pick<Profile, "role">): boolean {
   if (p.role === "developer") return true;
+  if (p.role === "owner") return true;
   if (p.role === "accountant") return true;
   return false;
 }

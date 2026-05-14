@@ -20,6 +20,7 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   ACCOUNTS_TOKENS,
+  SECTION_COLORS,
   BUTTON_STYLES,
   INPUT_STYLE,
   Money,
@@ -141,6 +142,7 @@ export function PayTodayClient({
 
       {/* Proposed section */}
       <SectionBlock
+        sectionId="section-proposed"
         title="Proposed"
         emoji="📥"
         emptyMessage={
@@ -150,6 +152,7 @@ export function PayTodayClient({
         }
         count={proposedRows.length}
         total={proposedRows.reduce((s, r) => s + r.proposedAmount, 0)}
+        tint={SECTION_COLORS.proposed}
       >
         {proposedBatches.map((batch) => (
           <ProposedBatch
@@ -166,11 +169,13 @@ export function PayTodayClient({
 
       {/* Confirmed section */}
       <SectionBlock
+        sectionId="section-confirmed"
         title="Confirmed — ready to pay"
         emoji="✅"
         emptyMessage="Nothing confirmed yet. Confirmed proposals from the owner land here."
         count={confirmedRows.length}
         total={confirmedRows.reduce((s, r) => s + r.proposedAmount, 0)}
+        tint={SECTION_COLORS.confirmed}
       >
         {confirmedRows.length > 0 && (
           <>
@@ -258,47 +263,90 @@ export function PayTodayClient({
   );
 }
 
+/** Mig 042 follow-on — Pay Today sections now wear a strongly
+ *  colour-banded sticky banner. As the user scrolls through a long
+ *  list of proposed or confirmed payments, the banner stays pinned
+ *  to the top of the viewport so the section identity is always
+ *  visible. Each section gets its own tint (amber / green / blue)
+ *  for unmistakable fast-scroll orientation. */
 function SectionBlock({
+  sectionId,
   title,
   emoji,
   emptyMessage,
   count,
   total,
+  tint,
   children,
 }: {
+  sectionId: string;
   title: string;
   emoji: string;
   emptyMessage: string;
   count: number;
   total: number;
+  tint: string;
   children: React.ReactNode;
 }) {
   return (
-    <div>
+    <div id={sectionId} style={{ marginBottom: 18 }}>
       <div
         style={{
+          position: "sticky",
+          top: 0,
+          zIndex: 10,
           display: "flex",
-          alignItems: "baseline",
-          gap: 10,
+          alignItems: "center",
+          gap: 12,
+          padding: "10px 16px",
           marginBottom: 12,
-          paddingBottom: 8,
-          borderBottom: `1px solid ${ACCOUNTS_TOKENS.border}`,
+          background: `linear-gradient(135deg, ${tint}EE 0%, ${tint}DD 100%)`,
+          color: "#fff",
+          borderRadius: 10,
+          boxShadow: `0 2px 8px ${tint}44`,
           flexWrap: "wrap",
         }}
       >
-        <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "var(--text)", letterSpacing: "-0.005em" }}>
-          {emoji} {title}
-        </h2>
-        <span style={{ fontSize: 12, color: "var(--muted)" }}>
-          <strong style={{ color: "var(--text)" }}>{count}</strong>{" "}
-          payment{count === 1 ? "" : "s"}
-          {count > 0 && (
-            <>
-              {" · "}
-              <Money value={total} size="small" tone="accent" />
-            </>
-          )}
+        <span style={{ fontSize: 18, lineHeight: 1 }} aria-hidden>
+          {emoji}
         </span>
+        <h2
+          style={{
+            margin: 0,
+            fontSize: 14,
+            fontWeight: 800,
+            letterSpacing: "0.02em",
+            textTransform: "uppercase",
+          }}
+        >
+          {title}
+        </h2>
+        <span
+          style={{
+            padding: "2px 10px",
+            fontSize: 11,
+            fontWeight: 800,
+            fontFamily: "ui-monospace, monospace",
+            background: "rgba(255,255,255,0.22)",
+            borderRadius: 999,
+          }}
+        >
+          {count} payment{count === 1 ? "" : "s"}
+        </span>
+        {count > 0 && (
+          <span
+            style={{
+              marginLeft: "auto",
+              fontSize: 11,
+              fontWeight: 800,
+              opacity: 0.92,
+              fontFamily: "ui-monospace, monospace",
+              letterSpacing: "0.02em",
+            }}
+          >
+            ₹{total.toLocaleString("en-IN")}
+          </span>
+        )}
       </div>
       {count === 0 ? (
         <div
@@ -314,7 +362,14 @@ function SectionBlock({
           {emptyMessage}
         </div>
       ) : (
-        children
+        // The section tint cascades down so child cards can pick it
+        // up via CSS variable. ProposedBatch + ConfirmedRow read it
+        // off and render a matching left-border accent.
+        <div
+          style={{ ["--section-tint" as string]: tint } as React.CSSProperties}
+        >
+          {children}
+        </div>
       )}
     </div>
   );
@@ -392,7 +447,11 @@ function ProposedBatch({
       style={{
         marginBottom: 14,
         background: "#fff",
-        border: `1.5px solid ${ACCOUNTS_TOKENS.accent}`,
+        // Mig 042 follow-on — section tint flows down via CSS var
+        // set on the SectionBlock wrapper. Fast-scroll glance sees a
+        // matching coloured left edge on every card in this section.
+        border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+        borderLeft: `5px solid var(--section-tint, ${ACCOUNTS_TOKENS.accent})`,
         borderRadius: 12,
         boxShadow: ACCOUNTS_TOKENS.shadow,
         overflow: "hidden",
@@ -581,7 +640,8 @@ function ConfirmedRow({
     <div
       style={{
         background: "#fff",
-        border: `1.5px solid ${ACCOUNTS_TOKENS.success}`,
+        border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+        borderLeft: `5px solid var(--section-tint, ${ACCOUNTS_TOKENS.success})`,
         borderRadius: 12,
         padding: "14px 16px",
         boxShadow: ACCOUNTS_TOKENS.shadow,
