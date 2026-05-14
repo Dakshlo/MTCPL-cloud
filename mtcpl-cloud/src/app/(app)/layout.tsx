@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { headers } from "next/headers";
+import { headers, cookies } from "next/headers";
 
 import { LogoutButton } from "@/components/logout-button";
 import { MobileNav } from "@/components/mobile-nav";
@@ -17,6 +17,10 @@ import { getEffectiveStatus } from "@/lib/system-status";
 import { departmentForRoute, effectiveDepartment } from "@/lib/departments";
 import { getProfilesMap } from "@/lib/profiles";
 import { SystemDownScreen } from "@/components/system-down-screen";
+import {
+  DEV_BYPASS_COOKIE,
+  disableDevMaintenanceBypassAction,
+} from "@/app/(app)/settings/system-status-actions";
 
 const SETTINGS_ROLES = ["developer", "owner", "team_head"];
 const NOTIFICATION_ROLES = ["developer"]; // flip to include "team_head" at rollout
@@ -37,10 +41,21 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   // Two layers: a global flag (legacy from migration 031) AND three
   // per-department flags (Migration 036). getEffectiveStatus returns
   // the first DOWN it finds across (global, then this route's
-  // department). Developer override stays — devs see the down screen
-  // with a "Bring back live" button on it.
+  // department).
+  //
+  // Developer override: a developer can click "Access system anyway"
+  // on the lock screen to set DEV_BYPASS_COOKIE on their browser.
+  // While that cookie is present we skip the down screen and let
+  // the dev continue into the app — but render a yellow override
+  // banner across the top of every page so they never forget the
+  // rest of the team is locked out.
+  const cookieJar = await cookies();
+  const hasDevBypass =
+    profile.role === "developer" &&
+    cookieJar.get(DEV_BYPASS_COOKIE)?.value === "1";
+
   const effectiveStatus = await getEffectiveStatus(requestDept);
-  if (effectiveStatus.down) {
+  if (effectiveStatus.down && !hasDevBypass) {
     let updatedByName: string | null = null;
     if (effectiveStatus.updatedBy) {
       try {
@@ -50,9 +65,6 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         updatedByName = null;
       }
     }
-    // Decorate the message with the affected scope so the lock
-    // screen is unambiguous about what's down (vs. the legacy
-    // "everything is down" reading).
     const scopeLabel =
       effectiveStatus.source === "global"
         ? "All systems"
@@ -73,6 +85,20 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       />
     );
   }
+
+  // If we got here AND the system is actually down, the dev is in
+  // bypass mode. Capture that so we can render the override banner
+  // below.
+  const inDevBypass = effectiveStatus.down && hasDevBypass;
+  const bypassScopeLabel = inDevBypass
+    ? effectiveStatus.source === "global"
+      ? "all systems"
+      : requestDept === "production"
+        ? "Production"
+        : requestDept === "finance"
+          ? "Finance"
+          : "Inventory"
+    : null;
 
   // Cut-approval queue size — only loaded for approvers (migration 027).
   // Cheap single-COUNT query, indexed by the partial index added in 027.
@@ -121,6 +147,56 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       />
 
       <main className="main-shell">
+        {/* Developer maintenance-bypass banner. Only renders when the
+            current dev has the bypass cookie AND the system is still
+            in a down state. Visible across every authenticated page
+            so the dev never forgets the rest of the team is locked
+            out. Click "Exit override" to drop the cookie + go back
+            to the lock screen. */}
+        {inDevBypass && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              padding: "8px 16px",
+              background: "rgba(251, 191, 36, 0.15)",
+              borderBottom: "1.5px solid #f59e0b",
+              color: "#78350f",
+              fontSize: 12,
+              fontWeight: 600,
+              flexWrap: "wrap",
+            }}
+          >
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+              <span aria-hidden="true">🔓</span>
+              <span>
+                <strong>Admin override active.</strong> Maintenance is on for{" "}
+                {bypassScopeLabel ?? "everyone"} — you can still work, but the
+                rest of the team is locked out.
+              </span>
+            </span>
+            <form action={disableDevMaintenanceBypassAction}>
+              <button
+                type="submit"
+                style={{
+                  padding: "4px 12px",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  background: "transparent",
+                  color: "#78350f",
+                  border: "1px solid #b45309",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Exit override
+              </button>
+            </form>
+          </div>
+        )}
         <div className="topbar">
           <div className="topbar-left">
             <span className="topbar-label">Signed in as</span>

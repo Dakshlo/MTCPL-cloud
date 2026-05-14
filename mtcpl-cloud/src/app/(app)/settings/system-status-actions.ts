@@ -11,11 +11,21 @@
 // requireAuth + developer-role check gates every write.
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
 import { deptStatusKey } from "@/lib/system-status";
 import type { Department } from "@/lib/departments";
+
+/** Cookie name for the developer maintenance-bypass override (Mig 036
+ *  follow-up). When present and the user is a developer, the root
+ *  layout skips the system-down screen and lets them continue into
+ *  the app while everyone else is still locked. Short-lived so it
+ *  doesn't survive an inadvertent browser switch. */
+export const DEV_BYPASS_COOKIE = "dev_maint_bypass";
+const DEV_BYPASS_MAX_AGE_SECONDS = 60 * 60 * 4; // 4 hours
 
 type Result = { ok: true } | { ok: false; error: string };
 
@@ -103,4 +113,60 @@ export async function bringSystemUpFormAction(formData: FormData) {
   if (!result.ok) {
     console.error("[bringSystemUpFormAction] failed:", result.error);
   }
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Developer maintenance-bypass — admin override cookie
+// ──────────────────────────────────────────────────────────────────
+// Pattern: dev flips the global (or a per-department) maintenance
+// flag. They land on the lock screen along with everyone else. From
+// the lock screen the dev can either (a) bring the system back live
+// for everyone, or (b) click "Access system anyway" — which sets the
+// DEV_BYPASS_COOKIE on their browser session. The root layout, when
+// it sees `down=true` on the maintenance check, looks up this cookie
+// and only short-circuits to the lock screen if the cookie ISN'T set
+// (or the user isn't a developer).
+//
+// Side effect: while in bypass mode the layout renders a yellow
+// banner across the top of every page so the dev never forgets they
+// have admin override on. Clearing it sends them back to the lock
+// screen on the next request.
+
+/** Form action — sets the bypass cookie on this dev's browser, then
+ *  redirects to /dashboard. Strictly developer-only. Accepts a
+ *  FormData param (unused) so it can wire straight into a
+ *  `<form action={...}>` on the SystemDownScreen / banner. */
+export async function enableDevMaintenanceBypassAction(_formData: FormData) {
+  void _formData;
+  const { profile } = await requireAuth();
+  if (profile.role !== "developer") {
+    // Quietly bounce — non-developers should never see this button.
+    redirect("/");
+  }
+  const jar = await cookies();
+  jar.set(DEV_BYPASS_COOKIE, "1", {
+    httpOnly: true,
+    secure: true,
+    sameSite: "lax",
+    path: "/",
+    maxAge: DEV_BYPASS_MAX_AGE_SECONDS,
+  });
+  void logAudit(profile.id, "dev_maintenance_bypass_enabled", "profile", profile.id, {})
+    .catch(() => {});
+  redirect("/dashboard");
+}
+
+/** Form action — clears the bypass cookie. After this the dev sees
+ *  the lock screen again on the next request (until they bring the
+ *  system back live, or re-enable bypass). FormData param unused. */
+export async function disableDevMaintenanceBypassAction(_formData: FormData) {
+  void _formData;
+  const { profile } = await requireAuth();
+  const jar = await cookies();
+  jar.delete(DEV_BYPASS_COOKIE);
+  if (profile.role === "developer") {
+    void logAudit(profile.id, "dev_maintenance_bypass_disabled", "profile", profile.id, {})
+      .catch(() => {});
+  }
+  redirect("/");
 }

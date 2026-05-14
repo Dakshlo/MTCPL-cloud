@@ -5,13 +5,21 @@
 // timestamp, plus an explicit Sign out option so they can leave the locked
 // session if they need to. No other clickable links anywhere.
 //
-// For developer: same screen + a "Bring system back up" form. This is the
-// only way to recover without SQL Editor access. Developer is intentionally
-// NOT given full app access during a maintenance window — keeps the
-// experience identical to what every other user sees, which makes it
-// safer to verify the lock is working before logging off.
+// For developer: same screen + TWO options:
+//   1. ↑ Bring system back live  — clears the maintenance flag for
+//      everyone. Existing behaviour from migration 031.
+//   2. 🔓 Access system anyway   — sets the developer-bypass cookie
+//      on THIS browser only. Everyone else stays locked, but the
+//      dev can continue working. They see a yellow override banner
+//      at the top of every page reminding them maintenance is active.
+//      Added per Daksh's request — useful during a deploy where the
+//      dev still needs to poke around while the rest of the team is
+//      locked out.
 
-import { bringSystemUpFormAction } from "@/app/(app)/settings/system-status-actions";
+import {
+  bringSystemUpFormAction,
+  enableDevMaintenanceBypassAction,
+} from "@/app/(app)/settings/system-status-actions";
 
 export function SystemDownScreen({
   isDeveloper,
@@ -137,32 +145,62 @@ export function SystemDownScreen({
                 marginBottom: 6,
               }}
             >
-              Developer override
+              Developer options
             </div>
-            <p style={{ margin: "0 0 12px", fontSize: 13, lineHeight: 1.5, color: "rgba(248, 250, 252, 0.85)" }}>
-              You're seeing the same lock everyone else sees. Bring the
-              system back up below to restore normal access.
+            <p
+              style={{
+                margin: "0 0 14px",
+                fontSize: 13,
+                lineHeight: 1.5,
+                color: "rgba(248, 250, 252, 0.85)",
+              }}
+            >
+              You're seeing the same lock everyone else sees. Bring the system
+              back up to restore normal access, or use the override below to
+              keep working alone while everyone else stays locked.
             </p>
-            <form action={bringSystemUpFormAction}>
-              <button
-                type="submit"
-                style={{
-                  width: "100%",
-                  padding: "10px 18px",
-                  fontSize: 14,
-                  fontWeight: 700,
-                  background: "#4f46e5",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: 8,
-                  cursor: "pointer",
-                  letterSpacing: "-0.005em",
-                  boxShadow: "0 4px 12px rgba(79, 70, 229, 0.35)",
-                }}
-              >
-                ↑ Bring system back live
-              </button>
-            </form>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <form action={bringSystemUpFormAction}>
+                <button
+                  type="submit"
+                  style={{
+                    width: "100%",
+                    padding: "10px 18px",
+                    fontSize: 14,
+                    fontWeight: 700,
+                    background: "#4f46e5",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: 8,
+                    cursor: "pointer",
+                    letterSpacing: "-0.005em",
+                    boxShadow: "0 4px 12px rgba(79, 70, 229, 0.35)",
+                  }}
+                >
+                  ↑ Bring system back live (for everyone)
+                </button>
+              </form>
+              <form action={enableDevMaintenanceBypassAction}>
+                <button
+                  type="submit"
+                  style={{
+                    width: "100%",
+                    padding: "10px 18px",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    background: "transparent",
+                    color: "#fde68a",
+                    border: "1px solid #fbbf24",
+                    borderRadius: 8,
+                    cursor: "pointer",
+                    letterSpacing: "-0.005em",
+                  }}
+                  title="Bypass the lock for this browser session only. Everyone else stays locked. A banner will appear at the top of every page as a reminder."
+                >
+                  🔓 Access system anyway (only me, 4 hrs)
+                </button>
+              </form>
+            </div>
           </div>
         )}
 
