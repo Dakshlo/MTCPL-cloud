@@ -120,12 +120,41 @@ async function applyTransferEarmarks(
       | null;
   };
   const rows = (donorRows ?? []) as unknown as DonorRow[];
-  const rowFor = (slabId: string) =>
-    rows.find((r) => r.slab_requirement_id === slabId);
   const donorOf = (r: DonorRow) =>
     Array.isArray(r.cut_session_blocks)
       ? r.cut_session_blocks[0] ?? null
       : r.cut_session_blocks;
+
+  // A slab can have MULTIPLE cut_session_slabs rows in the DB — one
+  // live (donor still in pending/cutting) and one or more stale (donor
+  // already 'done'/'rejected' from a previous cut that didn't clean
+  // up its link rows). Migration 034 plugged this leak going forward,
+  // but historical stale rows still exist and we can't assume they're
+  // gone. So instead of "find the first row" (which would randomly
+  // pick the stale one), we pick the BEST candidate per slab:
+  //
+  //   1. A row already earmarked for THIS csb (pending_transfer_to_csb_id
+  //      matches our id) — that's our own prior reservation, take it.
+  //   2. A row whose donor is in a mutable status — that's the live one.
+  //   3. As a last resort, the first row — will hit the "stuck" path
+  //      below with a meaningful donor block id in the error.
+  function pickRowForSlab(slabId: string): DonorRow | null {
+    const candidates = rows.filter((r) => r.slab_requirement_id === slabId);
+    if (candidates.length === 0) return null;
+    const earmarkedForUs = candidates.find(
+      (r) => r.pending_transfer_to_csb_id === myCsbId,
+    );
+    if (earmarkedForUs) return earmarkedForUs;
+    const liveRow = candidates.find((r) => {
+      const donor = donorOf(r);
+      return (
+        donor &&
+        MUTABLE_DONOR_STATUSES.includes(donor.status as DonorMutability)
+      );
+    });
+    if (liveRow) return liveRow;
+    return candidates[0];
+  }
 
   const missing: string[] = [];
   const selfClaim: string[] = [];
@@ -133,7 +162,7 @@ async function applyTransferEarmarks(
   const alreadyClaimed: { donor: string }[] = [];
 
   for (const slabId of slabIds) {
-    const row = rowFor(slabId);
+    const row = pickRowForSlab(slabId);
     if (!row) {
       missing.push(slabId);
       continue;
@@ -186,19 +215,35 @@ async function applyTransferEarmarks(
     };
   }
 
-  // 2. Stamp donor cut_session_slabs rows.
-  const { error: stampErr } = await supabase
-    .from("cut_session_slabs")
-    .update({ pending_transfer_to_csb_id: myCsbId })
-    .in("slab_requirement_id", slabIds)
-    .neq("cut_session_block_id", myCsbId)
-    .is("pending_transfer_to_csb_id", null);
-  if (stampErr) return { ok: false, error: stampErr.message };
+  // 2. Stamp donor cut_session_slabs rows — ONLY on the live csbs we
+  // picked above. Important: if a slab has both a live row (donor
+  // pending/cutting) AND a stale row (donor done from a prior cut
+  // that didn't clean up), we must NOT stamp the stale row — that
+  // row should be left alone or cleaned up separately. Filtering by
+  // the live donor csb ids isolates the UPDATE to the legitimate row.
+  const liveDonorCsbIds = [
+    ...new Set(
+      slabIds
+        .map((sid) => pickRowForSlab(sid))
+        .filter((r): r is DonorRow => r !== null)
+        .map((r) => r.cut_session_block_id),
+    ),
+  ].filter((id) => id !== myCsbId);
+
+  if (liveDonorCsbIds.length > 0) {
+    const { error: stampErr } = await supabase
+      .from("cut_session_slabs")
+      .update({ pending_transfer_to_csb_id: myCsbId })
+      .in("slab_requirement_id", slabIds)
+      .in("cut_session_block_id", liveDonorCsbIds)
+      .is("pending_transfer_to_csb_id", null);
+    if (stampErr) return { ok: false, error: stampErr.message };
+  }
 
   // 3. Flip donor needs_reprint with a "claimed pending audit" reason.
-  const donorCsbIds = [
-    ...new Set(rows.map((r) => r.cut_session_block_id)),
-  ].filter((id) => id !== myCsbId);
+  //    Same restriction — only the live donor csbs get the banner,
+  //    not the stale ones.
+  const donorCsbIds = liveDonorCsbIds;
   if (donorCsbIds.length > 0) {
     const reason = `${slabIds.length} slab(s) claimed by ${myBlockId} pending audit on ${new Date().toLocaleDateString("en-IN")}`;
     const now = new Date().toISOString();
@@ -760,25 +805,41 @@ export async function approveCutAction(
         "awaiting_cutter_edit",
       ];
       const rawDonorRows = (donorRows ?? []) as unknown as DonorRow[];
-      const stuck = rawDonorRows.filter((r) => {
+      const donorStatusOf = (r: DonorRow) => {
         const joined = Array.isArray(r.cut_session_blocks)
           ? r.cut_session_blocks[0] ?? null
           : r.cut_session_blocks;
-        const s = joined?.status;
-        if (!s) return true;
-        return !ACCEPTABLE_DONOR_STATUSES.includes(s);
-      });
-      if (stuck.length > 0) {
-        const blockIds = [
-          ...new Set(
-            stuck.map((r) => {
-              const joined = Array.isArray(r.cut_session_blocks)
-                ? r.cut_session_blocks[0] ?? null
-                : r.cut_session_blocks;
-              return joined?.block_id ?? "?";
-            }),
-          ),
-        ].join(", ");
+        return joined?.status ?? null;
+      };
+
+      // A slab can have MULTIPLE cut_session_slabs rows when a stale
+      // link from a prior finished/rejected block was never cleaned
+      // up (pre-mig-034 history). Group rows by slab_requirement_id
+      // and ONLY flag a slab as stuck if NONE of its rows point to a
+      // still-mutable donor. As long as at least one mutable row
+      // exists, the transfer can commit.
+      const slabsWithAnyLiveRow = new Set<string>();
+      for (const r of rawDonorRows) {
+        const s = donorStatusOf(r);
+        if (s && ACCEPTABLE_DONOR_STATUSES.includes(s)) {
+          slabsWithAnyLiveRow.add(r.slab_requirement_id);
+        }
+      }
+      const stuckSlabs = payload.transferred_slab_ids.filter(
+        (sid) => !slabsWithAnyLiveRow.has(sid),
+      );
+      if (stuckSlabs.length > 0) {
+        // Pick a representative stuck row per slab so the error names
+        // the actual offending donor block.
+        const stuckBlockIds = new Set<string>();
+        for (const r of rawDonorRows) {
+          if (!stuckSlabs.includes(r.slab_requirement_id)) continue;
+          const joined = Array.isArray(r.cut_session_blocks)
+            ? r.cut_session_blocks[0] ?? null
+            : r.cut_session_blocks;
+          if (joined?.block_id) stuckBlockIds.add(joined.block_id);
+        }
+        const blockIds = [...stuckBlockIds].join(", ");
         return {
           ok: false,
           error: `Donor block(s) [${blockIds}] are no longer pending — the transfer cannot be committed. Send the block back for edit to remove this transfer, or contact a developer.`,
