@@ -17,7 +17,10 @@ import { canViewInventory } from "@/lib/inventory-permissions";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
 import { InventoryShell } from "../../_components/inventory-shell";
+import { InventorySetupBanner } from "../../_components/setup-banner";
 import { INV_THEME, secondaryButton } from "../../_components/theme";
+
+const PG_UNDEFINED_TABLE = "42P01";
 import {
   ComponentIcon,
   type ScaffoldingComponentType,
@@ -79,6 +82,20 @@ export default async function HistoryPage({
     supabase.from("sites").select("id, code, name, is_plant").order("name"),
     supabase.from("scaffolding_components").select("*"),
   ]);
+
+  for (const [name, res] of [
+    ["inventory_movements", movementsRes],
+    ["sites", sitesRes],
+    ["scaffolding_components", componentsRes],
+  ] as const) {
+    if (res.error?.code === PG_UNDEFINED_TABLE) {
+      return (
+        <InventoryShell title="History" pathname={pathname}>
+          <InventorySetupBanner missing={name} />
+        </InventoryShell>
+      );
+    }
+  }
 
   const movements = ((movementsRes.data ?? []) as unknown) as MovementRow[];
   const sites = ((sitesRes.data ?? []) as unknown) as Pick<

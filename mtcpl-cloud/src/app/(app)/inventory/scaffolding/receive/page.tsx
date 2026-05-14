@@ -7,7 +7,8 @@ import { requireAuth } from "@/lib/auth";
 import { canManageInventory } from "@/lib/inventory-permissions";
 import { InventoryShell } from "../../_components/inventory-shell";
 import { MovementForm } from "../../_components/movement-form-client";
-import { loadInventorySnapshot } from "../../_components/stock";
+import { loadInventorySnapshotOrSetup } from "../../_components/stock";
+import { InventorySetupBanner } from "../../_components/setup-banner";
 import { INV_THEME } from "../../_components/theme";
 
 export default async function ReceiveScaffoldingPage() {
@@ -19,14 +20,26 @@ export default async function ReceiveScaffoldingPage() {
   const h = await headers();
   const pathname = h.get("x-pathname") ?? "/inventory/scaffolding/receive";
 
-  const { sites, components, stock, plant } = await loadInventorySnapshot();
+  const snapshotResult = await loadInventorySnapshotOrSetup();
+  if (snapshotResult.kind !== "ok") {
+    return (
+      <InventoryShell title="Receive scaffolding" pathname={pathname}>
+        {snapshotResult.kind === "needs_migration" ? (
+          <InventorySetupBanner missing={snapshotResult.missing} />
+        ) : (
+          <div style={{ padding: 24, color: INV_THEME.stockOut }}>
+            {snapshotResult.message}
+          </div>
+        )}
+      </InventoryShell>
+    );
+  }
+  const { sites, components, stock, plant } = snapshotResult.snapshot;
 
   if (!plant) {
     return (
       <InventoryShell title="Receive scaffolding" pathname={pathname}>
-        <div style={{ padding: 24, color: INV_THEME.steelLight }}>
-          Plant site row missing — run migration 041.
-        </div>
+        <InventorySetupBanner missing="sites (PLANT row not seeded)" />
       </InventoryShell>
     );
   }

@@ -186,14 +186,20 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   // The badge counts BATCHES (distinct batch_id), not rows — a 6-item
   // issue is one decision, not six.
   if (canApproveInventoryMovements(profile)) {
-    const { data: pendingBatches } = await supabase
+    const { data: pendingBatches, error: pendingBatchesError } = await supabase
       .from("inventory_movements")
       .select("batch_id")
       .eq("status", "pending_approval");
-    const uniqueBatches = new Set(
-      (pendingBatches ?? []).map((r) => r.batch_id as string),
-    );
-    inventoryAuditBadge = uniqueBatches.size;
+    if (pendingBatchesError) {
+      // Migration 041 not yet run on this environment → hide the
+      // badge entirely. Otherwise it would flash a misleading "0".
+      inventoryAuditBadge = null;
+    } else {
+      const uniqueBatches = new Set(
+        (pendingBatches ?? []).map((r) => r.batch_id as string),
+      );
+      inventoryAuditBadge = uniqueBatches.size;
+    }
   }
 
   return (

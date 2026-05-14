@@ -14,8 +14,11 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
 import { InventoryShell } from "../_components/inventory-shell";
 import { ApprovalsClient } from "./approvals-client";
+import { InventorySetupBanner } from "../_components/setup-banner";
 import { INV_THEME } from "../_components/theme";
 import type { MovementRow, Site, ScaffoldingComponent } from "../_components/stock";
+
+const PG_UNDEFINED_TABLE = "42P01";
 
 export default async function InventoryApprovalsPage() {
   const { profile } = await requireAuth();
@@ -36,6 +39,22 @@ export default async function InventoryApprovalsPage() {
     supabase.from("sites").select("id, code, name, is_plant"),
     supabase.from("scaffolding_components").select("*"),
   ]);
+
+  // Migration 041 hasn't run yet on this environment — render the
+  // setup banner instead of crashing into the generic error page.
+  for (const [name, res] of [
+    ["inventory_movements", pendingRes],
+    ["sites", sitesRes],
+    ["scaffolding_components", componentsRes],
+  ] as const) {
+    if (res.error?.code === PG_UNDEFINED_TABLE) {
+      return (
+        <InventoryShell title="Inventory audit" pathname={pathname}>
+          <InventorySetupBanner missing={name} />
+        </InventoryShell>
+      );
+    }
+  }
 
   const movements = ((pendingRes.data ?? []) as unknown) as MovementRow[];
   const sites = ((sitesRes.data ?? []) as unknown) as Pick<Site, "id" | "code" | "name" | "is_plant">[];

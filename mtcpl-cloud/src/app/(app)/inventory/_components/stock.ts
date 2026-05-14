@@ -108,16 +108,30 @@ export function buildStockMap(movements: MovementRow[]): StockMap {
   return map;
 }
 
-/** One-shot fetch of every site, every active component, and every
- *  status='approved' OR 'pending_approval' movement. Used by the
- *  inventory board and per-site detail pages. */
-export async function loadInventorySnapshot(): Promise<{
+/** Postgres "relation does not exist" — fired when the migration
+ *  hasn't been run yet on this environment. Surfaced as a tagged
+ *  result by `loadInventorySnapshotOrSetup` so callers can render a
+ *  helpful "run migration 041" panel instead of dumping the user
+ *  into the generic error boundary. */
+const PG_UNDEFINED_TABLE = "42P01";
+
+export type InventorySnapshot = {
   sites: Site[];
   components: ScaffoldingComponent[];
   movements: MovementRow[];
   stock: StockMap;
   plant: Site | null;
-}> {
+};
+
+export type InventorySnapshotResult =
+  | { kind: "ok"; snapshot: InventorySnapshot }
+  | { kind: "needs_migration"; missing: string }
+  | { kind: "error"; message: string };
+
+/** Soft-failing version of the snapshot loader. Used by every
+ *  inventory page so a missing migration shows a setup banner
+ *  rather than crashing into error.tsx. */
+export async function loadInventorySnapshotOrSetup(): Promise<InventorySnapshotResult> {
   const supabase = createAdminSupabaseClient();
   const [sitesRes, componentsRes, movementsRes] = await Promise.all([
     supabase
@@ -137,11 +151,22 @@ export async function loadInventorySnapshot(): Promise<{
       .in("status", ["approved", "pending_approval"]),
   ]);
 
-  if (sitesRes.error) throw new Error(`sites query failed: ${sitesRes.error.message}`);
-  if (componentsRes.error)
-    throw new Error(`components query failed: ${componentsRes.error.message}`);
-  if (movementsRes.error)
-    throw new Error(`movements query failed: ${movementsRes.error.message}`);
+  // Check each query individually so we can name the missing table.
+  for (const [name, res] of [
+    ["sites", sitesRes],
+    ["scaffolding_components", componentsRes],
+    ["inventory_movements", movementsRes],
+  ] as const) {
+    if (res.error) {
+      if (res.error.code === PG_UNDEFINED_TABLE) {
+        return { kind: "needs_migration", missing: name };
+      }
+      return {
+        kind: "error",
+        message: `${name} query failed: ${res.error.message}`,
+      };
+    }
+  }
 
   const sites = ((sitesRes.data ?? []) as unknown) as Site[];
   const components = ((componentsRes.data ?? []) as unknown) as ScaffoldingComponent[];
@@ -149,7 +174,24 @@ export async function loadInventorySnapshot(): Promise<{
   const stock = buildStockMap(movements);
   const plant = sites.find((s) => s.is_plant) ?? null;
 
-  return { sites, components, movements, stock, plant };
+  return {
+    kind: "ok",
+    snapshot: { sites, components, movements, stock, plant },
+  };
+}
+
+/** Legacy throwing variant — kept for places that prefer a try/catch
+ *  shape (none today; preserved in case a future caller wants it).
+ *  Prefer `loadInventorySnapshotOrSetup`. */
+export async function loadInventorySnapshot(): Promise<InventorySnapshot> {
+  const r = await loadInventorySnapshotOrSetup();
+  if (r.kind === "ok") return r.snapshot;
+  if (r.kind === "needs_migration") {
+    throw new Error(
+      `Inventory tables missing (${r.missing}) — run migration 041_inventory_scaffolding.sql.`,
+    );
+  }
+  throw new Error(r.message);
 }
 
 /** Stock-level dot summary: ●●● healthy / ●●○ low / ●○○ out.

@@ -13,7 +13,10 @@ import { canManageSites } from "@/lib/inventory-permissions";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { InventoryShell } from "../../_components/inventory-shell";
 import { SitesClient } from "./sites-client";
+import { InventorySetupBanner } from "../../_components/setup-banner";
 import { INV_THEME } from "../../_components/theme";
+
+const PG_UNDEFINED_TABLE = "42P01";
 
 export default async function SitesPage() {
   const { profile } = await requireAuth();
@@ -25,12 +28,20 @@ export default async function SitesPage() {
   const pathname = h.get("x-pathname") ?? "/inventory/scaffolding/sites";
 
   const supabase = createAdminSupabaseClient();
-  const { data: sitesRaw } = await supabase
+  const { data: sitesRaw, error: sitesError } = await supabase
     .from("sites")
     .select("*")
     .order("is_plant", { ascending: false })
     .order("is_active", { ascending: false })
     .order("name", { ascending: true });
+
+  if (sitesError?.code === PG_UNDEFINED_TABLE) {
+    return (
+      <InventoryShell title="Sites" pathname={pathname}>
+        <InventorySetupBanner missing="sites" />
+      </InventoryShell>
+    );
+  }
 
   type SiteRow = {
     id: string;

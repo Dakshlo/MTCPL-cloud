@@ -23,10 +23,11 @@ import {
   ComponentCardGrid,
 } from "../_components/component-card";
 import {
-  loadInventorySnapshot,
+  loadInventorySnapshotOrSetup,
   stockKey,
   totalOutAtSites,
 } from "../_components/stock";
+import { InventorySetupBanner } from "../_components/setup-banner";
 import {
   labelForComponentType,
   type ScaffoldingComponentType,
@@ -47,10 +48,15 @@ export default async function ScaffoldingBoardPage({
   const pathname = h.get("x-pathname") ?? "/inventory/scaffolding";
   const { site: siteParam } = await searchParams;
 
-  const snapshot = await loadInventorySnapshot();
-  const { sites, components, stock, plant } = snapshot;
-
-  if (!plant) {
+  const snapshotResult = await loadInventorySnapshotOrSetup();
+  if (snapshotResult.kind === "needs_migration") {
+    return (
+      <InventoryShell title="Scaffolding" pathname={pathname}>
+        <InventorySetupBanner missing={snapshotResult.missing} />
+      </InventoryShell>
+    );
+  }
+  if (snapshotResult.kind === "error") {
     return (
       <InventoryShell title="Scaffolding" pathname={pathname}>
         <div
@@ -60,11 +66,20 @@ export default async function ScaffoldingBoardPage({
             borderRadius: 12,
             padding: 32,
             textAlign: "center",
-            color: INV_THEME.steelLight,
+            color: INV_THEME.stockOut,
           }}
         >
-          Plant site row missing — run migration 041.
+          {snapshotResult.message}
         </div>
+      </InventoryShell>
+    );
+  }
+  const { sites, components, stock, plant } = snapshotResult.snapshot;
+
+  if (!plant) {
+    return (
+      <InventoryShell title="Scaffolding" pathname={pathname}>
+        <InventorySetupBanner missing="sites (PLANT row not seeded)" />
       </InventoryShell>
     );
   }

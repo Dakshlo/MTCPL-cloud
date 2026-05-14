@@ -7,8 +7,11 @@ import { canManageScaffoldingComponents } from "@/lib/inventory-permissions";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { InventoryShell } from "../../_components/inventory-shell";
 import { ComponentsClient } from "./components-client";
+import { InventorySetupBanner } from "../../_components/setup-banner";
 import type { ScaffoldingComponent } from "../../_components/stock";
 import { INV_THEME } from "../../_components/theme";
+
+const PG_UNDEFINED_TABLE = "42P01";
 
 export default async function ComponentsPage() {
   const { profile } = await requireAuth();
@@ -20,11 +23,19 @@ export default async function ComponentsPage() {
   const pathname = h.get("x-pathname") ?? "/inventory/scaffolding/components";
 
   const supabase = createAdminSupabaseClient();
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("scaffolding_components")
     .select("*")
     .order("component_type", { ascending: true })
     .order("display_order", { ascending: true });
+
+  if (error?.code === PG_UNDEFINED_TABLE) {
+    return (
+      <InventoryShell title="Component catalog" pathname={pathname}>
+        <InventorySetupBanner missing="scaffolding_components" />
+      </InventoryShell>
+    );
+  }
 
   const components = ((data ?? []) as unknown) as ScaffoldingComponent[];
 
