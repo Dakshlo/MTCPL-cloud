@@ -88,16 +88,17 @@ export function VendorForm({
       initialValues?.payment_terms_days != null
         ? String(initialValues.payment_terms_days)
         : "",
-    tds_applicable: initialValues?.tds_applicable === true,
-    default_tds_percent:
-      initialValues?.default_tds_percent != null
-        ? String(initialValues.default_tds_percent)
-        : "",
-    tcs_applicable: initialValues?.tcs_applicable === true,
-    default_tcs_percent:
-      initialValues?.default_tcs_percent != null
-        ? String(initialValues.default_tcs_percent)
-        : "",
+    // Mig 042 follow-on — TDS / TCS are mutually exclusive per
+    // vendor (Daksh: "only one can be selected per vendor"). We
+    // collapse the two booleans into a single tri-state radio in
+    // the form, and split it back to the two booleans on submit so
+    // the wire format / DB columns don't change.
+    tax_flag:
+      initialValues?.tds_applicable === true
+        ? ("tds" as const)
+        : initialValues?.tcs_applicable === true
+          ? ("tcs" as const)
+          : ("none" as const),
   };
 
   const [form, setForm] = useState(initial);
@@ -109,14 +110,22 @@ export function VendorForm({
     const fd = new FormData();
     if (vendorId) fd.set("id", vendorId);
     for (const [k, v] of Object.entries(form)) {
-      // Booleans need to serialise to "1" / "" so the server can read
-      // them off FormData (which only carries strings).
+      // Skip the synthetic tax_flag — we split it into the two
+      // server-side booleans separately below.
+      if (k === "tax_flag") continue;
       if (typeof v === "boolean") {
         fd.set(k, v ? "1" : "");
       } else {
         fd.set(k, v ?? "");
       }
     }
+    // Mig 042 follow-on — single-pick TDS/TCS. Percent defaults are
+    // intentionally cleared; the accountant enters the rate on the
+    // bill form each time.
+    fd.set("tds_applicable", form.tax_flag === "tds" ? "1" : "");
+    fd.set("tcs_applicable", form.tax_flag === "tcs" ? "1" : "");
+    fd.set("default_tds_percent", "");
+    fd.set("default_tcs_percent", "");
     startTransition(async () => {
       const r = await action(fd);
       if (!r.ok) {
@@ -189,38 +198,36 @@ export function VendorForm({
           />
         </Field>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        <Field label="PAN">
-          <input
-            value={form.pan}
-            onChange={(e) => setForm({ ...form, pan: e.target.value })}
-            style={{ ...INPUT_STYLE, fontFamily: "ui-monospace, monospace" }}
-          />
-        </Field>
-        <Field label="Phone">
-          <input
-            value={form.phone}
-            onChange={(e) => setForm({ ...form, phone: e.target.value })}
-            style={INPUT_STYLE}
-          />
-        </Field>
-      </div>
-      <Field label="Email">
+
+      {/* Mig 042 follow-on (Daksh) — bank info promoted under
+          Category / GSTIN. PAN / phone / email / address / UPI live
+          inside the collapsible "Additional details" section below. */}
+      <Field label="Bank name">
         <input
-          type="email"
-          value={form.email}
-          onChange={(e) => setForm({ ...form, email: e.target.value })}
+          value={form.bank_name}
+          onChange={(e) => setForm({ ...form, bank_name: e.target.value })}
+          placeholder="e.g. PUNJAB NATIONAL BANK"
           style={INPUT_STYLE}
         />
       </Field>
-      <Field label="Address">
-        <textarea
-          value={form.address}
-          onChange={(e) => setForm({ ...form, address: e.target.value })}
-          rows={2}
-          style={{ ...INPUT_STYLE, fontFamily: "inherit", resize: "vertical" }}
-        />
-      </Field>
+      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
+        <Field label="Account number">
+          <input
+            value={form.bank_account}
+            onChange={(e) => setForm({ ...form, bank_account: e.target.value })}
+            placeholder="e.g. 1230008700004797"
+            style={{ ...INPUT_STYLE, fontFamily: "ui-monospace, monospace" }}
+          />
+        </Field>
+        <Field label="IFSC">
+          <input
+            value={form.ifsc}
+            onChange={(e) => setForm({ ...form, ifsc: e.target.value })}
+            placeholder="e.g. PUNB0123000"
+            style={{ ...INPUT_STYLE, fontFamily: "ui-monospace, monospace" }}
+          />
+        </Field>
+      </div>
 
       <Field
         label="Payment terms (days after bill date)"
@@ -232,140 +239,48 @@ export function VendorForm({
         />
       </Field>
 
-      {/* Mig 042 — TDS / TCS applicability. Two independent toggles.
-          When a flag is on, the bill-entry form for this vendor will
-          surface the matching tax input (pre-filled with the default
-          rate). The accountant can still override per bill. */}
+      {/* Mig 042 follow-on — TDS / TCS are MUTUALLY EXCLUSIVE per
+          vendor. Single tri-state picker; no default rate stored on
+          the vendor. The accountant enters the actual rate on each
+          bill at entry time. */}
       <Field
         label="Tax deductions / collections"
-        hint="If this vendor needs TDS deducted from your payment, or charges TCS on top of GST, flag it here. The bill form will then prompt for the rate."
+        hint="Pick one. The bill form for this vendor will prompt for the % at entry time — no default rate is stored here."
       >
         <div
           style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 10,
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr 1fr",
+            gap: 6,
             background: ACCOUNTS_TOKENS.surfaceMuted,
             border: `1px solid ${ACCOUNTS_TOKENS.border}`,
             borderRadius: 8,
-            padding: "10px 12px",
+            padding: 6,
           }}
         >
-          {/* TDS row */}
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "auto 1fr auto",
-              gap: 10,
-              alignItems: "center",
-            }}
-          >
-            <label
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                cursor: "pointer",
-                fontSize: 12,
-                fontWeight: 700,
-                color: "var(--text)",
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={form.tds_applicable}
-                onChange={(e) =>
-                  setForm({ ...form, tds_applicable: e.target.checked })
-                }
-              />
-              TDS applicable
-            </label>
-            <span style={{ fontSize: 11, color: "var(--muted)" }}>
-              We deduct from payment → remit to govt
-            </span>
-            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <input
-                type="number"
-                step="0.01"
-                min={0}
-                max={100}
-                value={form.default_tds_percent}
-                onChange={(e) =>
-                  setForm({ ...form, default_tds_percent: e.target.value })
-                }
-                disabled={!form.tds_applicable}
-                placeholder="0"
-                style={{
-                  ...INPUT_STYLE,
-                  width: 70,
-                  fontFamily: "ui-monospace, monospace",
-                  textAlign: "right",
-                  opacity: form.tds_applicable ? 1 : 0.4,
-                }}
-                aria-label="Default TDS percent"
-              />
-              <span style={{ fontSize: 11, color: "var(--muted)" }}>%</span>
-            </div>
-          </div>
-          {/* TCS row */}
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "auto 1fr auto",
-              gap: 10,
-              alignItems: "center",
-            }}
-          >
-            <label
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                cursor: "pointer",
-                fontSize: 12,
-                fontWeight: 700,
-                color: "var(--text)",
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={form.tcs_applicable}
-                onChange={(e) =>
-                  setForm({ ...form, tcs_applicable: e.target.checked })
-                }
-              />
-              TCS applicable
-            </label>
-            <span style={{ fontSize: 11, color: "var(--muted)" }}>
-              Vendor adds on top → we pay vendor inclusive
-            </span>
-            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <input
-                type="number"
-                step="0.01"
-                min={0}
-                max={100}
-                value={form.default_tcs_percent}
-                onChange={(e) =>
-                  setForm({ ...form, default_tcs_percent: e.target.value })
-                }
-                disabled={!form.tcs_applicable}
-                placeholder="0"
-                style={{
-                  ...INPUT_STYLE,
-                  width: 70,
-                  fontFamily: "ui-monospace, monospace",
-                  textAlign: "right",
-                  opacity: form.tcs_applicable ? 1 : 0.4,
-                }}
-                aria-label="Default TCS percent"
-              />
-              <span style={{ fontSize: 11, color: "var(--muted)" }}>%</span>
-            </div>
-          </div>
+          <TaxFlagOption
+            active={form.tax_flag === "none"}
+            label="None"
+            hint="No tax adjustment"
+            onClick={() => setForm({ ...form, tax_flag: "none" })}
+          />
+          <TaxFlagOption
+            active={form.tax_flag === "tds"}
+            label="TDS"
+            hint="We deduct → remit to govt"
+            onClick={() => setForm({ ...form, tax_flag: "tds" })}
+          />
+          <TaxFlagOption
+            active={form.tax_flag === "tcs"}
+            label="TCS"
+            hint="Vendor adds on top"
+            onClick={() => setForm({ ...form, tax_flag: "tcs" })}
+          />
         </div>
       </Field>
 
+      {/* Less-important contact + identity fields. Hidden by default;
+          most of them rarely change after vendor creation. */}
       <details style={{ marginTop: 4 }}>
         <summary
           style={{
@@ -378,32 +293,41 @@ export function VendorForm({
             padding: "6px 0",
           }}
         >
-          + Bank details (optional)
+          + Additional details (PAN · phone · email · address · UPI)
         </summary>
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
-          <Field label="Bank name">
-            <input
-              value={form.bank_name}
-              onChange={(e) => setForm({ ...form, bank_name: e.target.value })}
-              style={INPUT_STYLE}
-            />
-          </Field>
-          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
-            <Field label="Account number">
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Field label="PAN">
               <input
-                value={form.bank_account}
-                onChange={(e) => setForm({ ...form, bank_account: e.target.value })}
+                value={form.pan}
+                onChange={(e) => setForm({ ...form, pan: e.target.value })}
                 style={{ ...INPUT_STYLE, fontFamily: "ui-monospace, monospace" }}
               />
             </Field>
-            <Field label="IFSC">
+            <Field label="Phone">
               <input
-                value={form.ifsc}
-                onChange={(e) => setForm({ ...form, ifsc: e.target.value })}
-                style={{ ...INPUT_STYLE, fontFamily: "ui-monospace, monospace" }}
+                value={form.phone}
+                onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                style={INPUT_STYLE}
               />
             </Field>
           </div>
+          <Field label="Email">
+            <input
+              type="email"
+              value={form.email}
+              onChange={(e) => setForm({ ...form, email: e.target.value })}
+              style={INPUT_STYLE}
+            />
+          </Field>
+          <Field label="Address">
+            <textarea
+              value={form.address}
+              onChange={(e) => setForm({ ...form, address: e.target.value })}
+              rows={2}
+              style={{ ...INPUT_STYLE, fontFamily: "inherit", resize: "vertical" }}
+            />
+          </Field>
           <Field label="UPI ID">
             <input
               value={form.upi_id}
@@ -616,6 +540,62 @@ function PaymentTermsPicker({
         </div>
       )}
     </div>
+  );
+}
+
+/** Mig 042 follow-on — single-pick tile for the TDS/TCS picker.
+ *  Three of these in a row replace the previous two checkbox+input
+ *  rows. No percent stored on the vendor; the rate is entered on
+ *  each bill. */
+function TaxFlagOption({
+  active,
+  label,
+  hint,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  hint: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        padding: "8px 10px",
+        background: active ? ACCOUNTS_TOKENS.accent : "#fff",
+        color: active ? "#fff" : "var(--text)",
+        border: `1px solid ${active ? ACCOUNTS_TOKENS.accent : ACCOUNTS_TOKENS.border}`,
+        borderRadius: 6,
+        cursor: "pointer",
+        display: "flex",
+        flexDirection: "column",
+        gap: 2,
+        alignItems: "flex-start",
+        textAlign: "left",
+      }}
+    >
+      <span
+        style={{
+          fontSize: 12,
+          fontWeight: 800,
+          letterSpacing: "0.04em",
+          textTransform: "uppercase",
+        }}
+      >
+        {label}
+      </span>
+      <span
+        style={{
+          fontSize: 10,
+          color: active ? "rgba(255,255,255,0.85)" : "var(--muted)",
+          lineHeight: 1.4,
+        }}
+      >
+        {hint}
+      </span>
+    </button>
   );
 }
 

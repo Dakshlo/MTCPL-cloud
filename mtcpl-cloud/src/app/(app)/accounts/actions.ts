@@ -993,20 +993,23 @@ export async function upsertBillVendorAction(formData: FormData): Promise<
     }
   }
 
-  // Migration 042 — TDS / TCS applicability + default rates. Two
-  // independent flags so a vendor can be flagged for both (rare but
-  // valid). Default rates are optional; if blank, NULL falls through.
+  // Migration 042 — TDS / TCS applicability.
+  // Follow-on (Daksh): the two flags are MUTUALLY EXCLUSIVE per
+  // vendor and the default percent is no longer stored on the
+  // vendor row. The accountant enters the rate on each bill. Form
+  // already enforces single-pick; this is the server-side guard.
   const tdsApplicable = String(formData.get("tds_applicable") || "") === "1";
   const tcsApplicable = String(formData.get("tcs_applicable") || "") === "1";
-  const parseRate = (key: string): number | null => {
-    const raw = String(formData.get(key) || "").trim();
-    if (raw === "") return null;
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n < 0 || n > 100) return null;
-    return n;
-  };
-  const defaultTdsPercent = tdsApplicable ? parseRate("default_tds_percent") : null;
-  const defaultTcsPercent = tcsApplicable ? parseRate("default_tcs_percent") : null;
+  if (tdsApplicable && tcsApplicable) {
+    return {
+      ok: false,
+      error:
+        "A vendor can be flagged for TDS or TCS, but not both. Pick one.",
+    };
+  }
+  // Defaults are always NULL'd — no per-vendor default rate.
+  const defaultTdsPercent = null;
+  const defaultTcsPercent = null;
 
   const payload: Record<string, unknown> = {
     name,
