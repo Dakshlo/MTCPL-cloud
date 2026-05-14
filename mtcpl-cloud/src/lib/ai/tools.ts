@@ -307,6 +307,188 @@ export const AI_TOOLS = [
   // carving / dispatch questions per business decision. The /carving
   // and /dispatch UIs remain fully functional; the assistant just
   // refuses to surface that data through chat.
+  // ── Finance department tools (Mig 028 / 037 / 042 / 043) ──────────
+  //
+  // The AI can now answer "kitna outstanding hai?", "T-2026-15 ka
+  // status kya hai?", "Naresh ka vendor account dikhao", "aaj kya
+  // pay karna hai?", "TDS deduct kitna hua year-to-date?".
+  // INVOICING is intentionally NOT exposed — Daksh asked to keep
+  // invoicing entirely out of scope (it's outgoing customer
+  // invoices, a separate workflow).
+  {
+    name: "get_finance_snapshot",
+    description:
+      "Finance department headline. Returns total outstanding (sum of every approved bill's amount_outstanding), due-bills count, pending-audit count, pay-today queue size + total, paid-today count + total, lifetime TDS deducted, lifetime TCS collected, and top 3 vendors by outstanding. **Use for any 'finance overview', 'how much do we owe right now', 'kya status hai accounts ka', 'pending kitna hai' question.** Pair with a STATS widget on the way out.",
+    input_schema: {
+      type: "object" as const,
+      properties: {},
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "list_due_bills",
+    description:
+      "List approved bills with amount_outstanding > 0. Default sort: oldest first by bill_date. Each row: token, vendor name, vendor's bill no, bill date, days since bill, amount_total, amount_tax (CGST+SGST+IGST), amount_tds, amount_tcs, amount_outstanding. Use for 'show me due bills', 'overdue bills', '90+ day bills', 'bills for vendor X', or any 'which bills' question. Pass `vendor` for fuzzy vendor match; pass `age_bucket` to filter by aging window (0_30 / 31_60 / 61_90 / 90_plus); pass `token` for a substring token search.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        vendor: { type: "string", description: "Optional — vendor name (fuzzy-matched against bill_vendors.name)." },
+        age_bucket: {
+          type: "string",
+          enum: ["0_30", "31_60", "61_90", "90_plus"],
+          description: "Optional — restrict to bills in this aging bucket (days since bill_date).",
+        },
+        token: { type: "string", description: "Optional — substring search on the bill token (e.g. '2026-1' matches T-2026-1, T-2026-10, etc.)." },
+        limit: { type: "number", description: "Default 25, max 200." },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "get_bill_detail",
+    description:
+      "Full detail of one bill: identity (token, vendor, bill_no, bill_date, cost_head, description), the complete tax breakdown (subtotal, CGST/SGST/IGST + their amounts, TDS%/TCS% + amounts, bill_total, payable_to_vendor), payment status (amount_paid, amount_outstanding, fully_paid flag), every payment row (proposed / confirmed / paid timestamps + amounts + method + reference), and audit trail (submitted / approved / rejected timestamps + names). **Use for any single-bill question** — 'show T-2026-15', 'iss bill ki details', 'kitne payment hue is bill ke'.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        token: { type: "string", description: "Bill token (e.g. 'T-2026-15'). Case-insensitive. Either `token` or `id` is required." },
+        id: { type: "string", description: "Bill UUID (alternative to token)." },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "get_vendor_finance",
+    description:
+      "Vendor profile from the finance side. Returns identity (name, GSTIN, PAN, phone, email, address), bank details (bank_name, bank_account, IFSC, UPI ID), payment terms (days after bill date), TDS/TCS applicability flags, lifetime totals (bills count, total billed, paid, outstanding, TDS deducted, TCS collected), and the 10 most recent bills. **Use for 'show me vendor X account', 'X ka account dikhao', 'how much do we owe X', 'X ka TDS kitna deduct hua', 'X ka bank account number'.** Vendor name is fuzzy-matched.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        vendor: { type: "string", description: "Vendor name (fuzzy-matched against bill_vendors.name). Partial names like 'shree cement' work." },
+      },
+      required: ["vendor"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "list_bill_vendors",
+    description:
+      "Master list of bill vendors (suppliers). Returns each vendor's name, category, GSTIN, payment_terms_days, TDS/TCS flags, current outstanding, and bills count. Use for 'list of vendors', 'kitne vendors hain', 'show all TDS-flagged vendors', 'who do we buy cement from'.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        active_only: { type: "boolean", description: "Default true. Pass false to include archived vendors." },
+        name_contains: { type: "string", description: "Optional — case-insensitive substring search on vendor name." },
+        tds_only: { type: "boolean", description: "Optional — only vendors flagged tds_applicable=true." },
+        tcs_only: { type: "boolean", description: "Optional — only vendors flagged tcs_applicable=true." },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "get_pay_today_status",
+    description:
+      "Snapshot of the current pay-today queue, grouped by stage: PROPOSED (accountant proposed, awaiting owner confirm), CONFIRMED (owner ticked, accountant ready to mark paid), PAID TODAY (already settled today). Each list carries token, vendor, proposed_amount, age. Use for 'aaj kya pay karna hai', 'pending payments to confirm', 'paid today total', 'pay today status'.",
+    input_schema: {
+      type: "object" as const,
+      properties: {},
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "get_finance_activity",
+    description:
+      "Recent finance audit log (bill_submitted, bill_approved, bill_rejected, payment_proposed, payment_confirmed, payment_paid, payment_cancelled, bill_vendor_created/updated/archived). Use for 'what happened in accounts today', 'who approved which bill', 'recent finance actions', 'accountant ki activity'. Pass `hours_ago` for sub-day windows (e.g. 2 for last 2 hours).",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        range: { type: "string", enum: ["today", "yesterday", "this_week", "this_month"], description: "Day-level window in IST." },
+        hours_ago: { type: "number", description: "Sub-day window from now (e.g. 2 = last 2 hours). Overrides range." },
+        action: { type: "string", description: "Optional — filter to a specific action like 'payment_paid' or 'bill_approved'." },
+        limit: { type: "number", description: "Default 30, max 200." },
+      },
+      additionalProperties: false,
+    },
+  },
+
+  // ── Inventory department tools (Mig 041 / 044) ─────────────────────
+  //
+  // Scaffolding inventory — Standard, Ledger, Transom, Jali. Storekeeper
+  // proposes movements (Buy / Issue / Return / Destroyed); Mafat +
+  // owner approve. Stock derives from approved movements.
+  {
+    name: "get_inventory_scaffolding_snapshot",
+    description:
+      "Scaffolding inventory headline. Returns total stock per component (Standard, Ledger, Transom, Jali, etc.) split between Plant warehouse and project sites. Includes pending movement count (awaiting audit). If `site` is passed, narrows to that one site's holdings. **Use for 'kitna scaffolding hai', 'plant pe kitne standards hain', 'show inventory', 'Site Alpha pe kya hai'.**",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        site: { type: "string", description: "Optional — site code (PLANT, ALPHA, etc.) or fuzzy site name. Omit for global breakdown." },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "list_inventory_sites",
+    description:
+      "List of every site where scaffolding can sit. Returns each site's code, name, manager, address, is_plant flag, is_active flag, started_on, plus the total piece count currently at that site. Use for 'how many sites do we have', 'list project sites', 'site list', 'which sites are active'.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        active_only: { type: "boolean", description: "Default true. Pass false to include archived sites." },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "get_inventory_movements_recent",
+    description:
+      "Recent scaffolding stock movements (issue / return / buy / destroyed). Returns batches with type, status (pending_approval / approved / rejected / cancelled), from/to sites, total qty, total component count, proposer name, timestamps. Use for 'recent stock movements', 'what scaffolding moved today', 'kya issue hua last week', 'storekeeper ki activity'. Pass `hours_ago` for sub-day windows.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        range: { type: "string", enum: ["today", "yesterday", "this_week", "this_month"], description: "Day-level window in IST." },
+        hours_ago: { type: "number", description: "Sub-day window (e.g. 2 = last 2 hours). Overrides range." },
+        status: {
+          type: "string",
+          enum: ["pending_approval", "approved", "rejected", "cancelled"],
+          description: "Optional — filter to one status. Omit for all.",
+        },
+        type: {
+          type: "string",
+          enum: ["issue", "return", "receive", "writeoff"],
+          description: "Optional — filter to one movement type. Note 'receive' is the DB enum value; user-facing label is 'Buy'. 'writeoff' is user-facing 'Destroyed'.",
+        },
+        site: { type: "string", description: "Optional — only batches touching this site (fuzzy match)." },
+        limit: { type: "number", description: "Default 25, max 200." },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "get_inventory_audit_queue",
+    description:
+      "Inventory movement batches awaiting crosscheck / owner approval (status='pending_approval'). Returns each batch with type, from/to sites, total qty, components involved, proposed_by name, age in hours. Use for 'pending inventory audits', 'kya inventory mein audit pending hai', 'how many batches awaiting Mafat'.",
+    input_schema: {
+      type: "object" as const,
+      properties: {},
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "list_scaffolding_components",
+    description:
+      "Master list of scaffolding component types currently in the catalog (Standard, Ledger, Transom, Jali + any custom types added later). Each row: name, component_type, size_spec, unit, current total quantity (across all sites), is_active flag. Use for 'list of scaffolding parts', 'kya components hain', 'find a component by name'.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        active_only: { type: "boolean", description: "Default true. Pass false to include archived components." },
+        name_contains: { type: "string", description: "Optional — case-insensitive substring on the component name." },
+      },
+      additionalProperties: false,
+    },
+  },
+
   {
     name: "list_blocks",
     description:
@@ -371,6 +553,32 @@ export async function runTool(name: string, input: Record<string, unknown>): Pro
         return JSON.stringify(await getAuditTrail(input));
       case "list_vendors":
         return JSON.stringify(await listVendors(input));
+      // Finance
+      case "get_finance_snapshot":
+        return JSON.stringify(await getFinanceSnapshot());
+      case "list_due_bills":
+        return JSON.stringify(await listDueBills(input));
+      case "get_bill_detail":
+        return JSON.stringify(await getBillDetail(input));
+      case "get_vendor_finance":
+        return JSON.stringify(await getVendorFinance(input));
+      case "list_bill_vendors":
+        return JSON.stringify(await listBillVendors(input));
+      case "get_pay_today_status":
+        return JSON.stringify(await getPayTodayStatus());
+      case "get_finance_activity":
+        return JSON.stringify(await getFinanceActivity(input));
+      // Inventory
+      case "get_inventory_scaffolding_snapshot":
+        return JSON.stringify(await getInventoryScaffoldingSnapshot(input));
+      case "list_inventory_sites":
+        return JSON.stringify(await listInventorySites(input));
+      case "get_inventory_movements_recent":
+        return JSON.stringify(await getInventoryMovementsRecent(input));
+      case "get_inventory_audit_queue":
+        return JSON.stringify(await getInventoryAuditQueue());
+      case "list_scaffolding_components":
+        return JSON.stringify(await listScaffoldingComponents(input));
       default:
         return JSON.stringify({ error: `Unknown tool: ${name}` });
     }
@@ -2109,3 +2317,1244 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+
+// ════════════════════════════════════════════════════════════════════════════
+// Finance department handlers (Mig 028 / 037 / 042 / 043)
+// ════════════════════════════════════════════════════════════════════════════
+//
+// All read-only. Bills go pending_approval → approved → fully_paid /
+// cancelled / rejected. Payments per bill: proposed → confirmed → paid
+// (or cancelled). Tax columns added by mig 042 (cgst/sgst/igst/tds/tcs
+// + their amount_* generated columns + amount_payable_to_vendor).
+// Bill-number deduplication is leading-zero-insensitive thanks to
+// vendor_bill_no_normalized (mig 043). All sums round to two decimals.
+
+/** Format ₹ amounts in Indian numbering for narration. */
+function inr(n: number): string {
+  return `₹${(n ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+}
+
+/** Fuzzy-resolve a vendor name against bill_vendors.name. Mirrors the
+ *  resolveTempleName pattern. Returns the canonical name on hit, or
+ *  a not-found / ambiguous shape so the caller can narrate properly. */
+async function resolveBillVendor(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  input: string,
+): Promise<
+  | { kind: "resolved"; name: string; id: string }
+  | { kind: "ambiguous"; candidates: Array<{ id: string; name: string }> }
+  | { kind: "not_found"; available: string[] }
+> {
+  const { data } = await admin
+    .from("bill_vendors")
+    .select("id, name, is_active")
+    .order("name");
+  const all = (data ?? []) as Array<{ id: string; name: string; is_active: boolean }>;
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const needle = norm(input);
+  if (!needle) return { kind: "not_found", available: all.map((v) => v.name) };
+
+  const exact = all.find((v) => norm(v.name) === needle);
+  if (exact) return { kind: "resolved", name: exact.name, id: exact.id };
+
+  const matches = all.filter((v) => {
+    const hay = norm(v.name);
+    return hay.includes(needle) || needle.includes(hay);
+  });
+  if (matches.length === 1) return { kind: "resolved", name: matches[0].name, id: matches[0].id };
+  if (matches.length > 1) {
+    return {
+      kind: "ambiguous",
+      candidates: matches.map((m) => ({ id: m.id, name: m.name })),
+    };
+  }
+  return { kind: "not_found", available: all.map((v) => v.name) };
+}
+
+async function getFinanceSnapshot() {
+  const admin = createAdminSupabaseClient();
+
+  const [
+    { data: dueRows },
+    { count: pendingAuditCount },
+    { data: payTodayRows, count: payTodayCount },
+    { data: paidTodayRows },
+    { data: allBillsForTax },
+  ] = await Promise.all([
+    admin
+      .from("bills")
+      .select(
+        "id, amount_outstanding, amount_total, amount_tds, amount_tcs, bill_vendor_id, bill_vendors(name)",
+      )
+      .eq("status", "approved")
+      .gt("amount_outstanding", 0),
+    admin
+      .from("bills")
+      .select("*", { count: "exact", head: true })
+      .eq("status", "pending_approval"),
+    admin
+      .from("bill_payments")
+      .select("proposed_amount, status", { count: "exact" })
+      .in("status", ["proposed", "confirmed"]),
+    admin
+      .from("bill_payments")
+      .select("paid_amount, paid_at")
+      .eq("status", "paid")
+      .gte("paid_at", istRange("today").from)
+      .lt("paid_at", istRange("today").to),
+    admin
+      .from("bills")
+      .select("amount_tds, amount_tcs, status")
+      .neq("status", "cancelled"),
+  ]);
+
+  type DueRow = {
+    id: string;
+    amount_outstanding: number;
+    amount_total: number;
+    amount_tds: number | null;
+    amount_tcs: number | null;
+    bill_vendor_id: string;
+    bill_vendors: { name: string } | { name: string }[] | null;
+  };
+  const due = ((dueRows ?? []) as unknown) as DueRow[];
+  const totalOutstanding = due.reduce((s, b) => s + Number(b.amount_outstanding), 0);
+
+  const payToday = payTodayRows ?? [];
+  const payTodayTotal = payToday.reduce((s, b) => s + Number(b.proposed_amount), 0);
+  const proposedCount = payToday.filter((p) => p.status === "proposed").length;
+  const confirmedCount = payToday.filter((p) => p.status === "confirmed").length;
+
+  const paidToday = paidTodayRows ?? [];
+  const paidTodayTotal = paidToday.reduce((s, b) => s + Number(b.paid_amount ?? 0), 0);
+
+  const allBills = allBillsForTax ?? [];
+  const totalTds = allBills.reduce((s, b) => s + Number((b as { amount_tds?: number }).amount_tds ?? 0), 0);
+  const totalTcs = allBills.reduce((s, b) => s + Number((b as { amount_tcs?: number }).amount_tcs ?? 0), 0);
+
+  // Top vendors by outstanding
+  const byVendor = new Map<string, { name: string; outstanding: number; bills: number }>();
+  for (const b of due) {
+    const v = Array.isArray(b.bill_vendors) ? b.bill_vendors[0] : b.bill_vendors;
+    const name = v?.name ?? "Unknown";
+    const cur = byVendor.get(name) ?? { name, outstanding: 0, bills: 0 };
+    cur.outstanding += Number(b.amount_outstanding);
+    cur.bills += 1;
+    byVendor.set(name, cur);
+  }
+  const topVendors = Array.from(byVendor.values())
+    .sort((a, b) => b.outstanding - a.outstanding)
+    .slice(0, 5)
+    .map((v) => ({ ...v, outstandingFmt: inr(v.outstanding) }));
+
+  return {
+    totalOutstandingInr: round2(totalOutstanding),
+    totalOutstandingFmt: inr(totalOutstanding),
+    dueBillsCount: due.length,
+    pendingAuditCount: pendingAuditCount ?? 0,
+    payToday: {
+      total: payTodayCount ?? 0,
+      proposed: proposedCount,
+      confirmed: confirmedCount,
+      totalInr: round2(payTodayTotal),
+      totalFmt: inr(payTodayTotal),
+    },
+    paidToday: {
+      count: paidToday.length,
+      totalInr: round2(paidTodayTotal),
+      totalFmt: inr(paidTodayTotal),
+    },
+    lifetimeTdsDeductedInr: round2(totalTds),
+    lifetimeTdsDeductedFmt: inr(totalTds),
+    lifetimeTcsCollectedInr: round2(totalTcs),
+    lifetimeTcsCollectedFmt: inr(totalTcs),
+    topVendorsByOutstanding: topVendors,
+  };
+}
+
+async function listDueBills(input: Record<string, unknown>) {
+  const admin = createAdminSupabaseClient();
+  const limit = Math.min(200, Math.max(1, Number(input.limit) || 25));
+  const tokenSubstr = typeof input.token === "string" ? input.token.trim() : "";
+  const ageBucket =
+    typeof input.age_bucket === "string" ? input.age_bucket : null;
+  const vendorInput = typeof input.vendor === "string" ? input.vendor.trim() : "";
+
+  let vendorId: string | null = null;
+  let vendorResolved: string | null = null;
+  if (vendorInput) {
+    const r = await resolveBillVendor(admin, vendorInput);
+    if (r.kind === "ambiguous") {
+      return {
+        ambiguous: true,
+        candidates: r.candidates.map((c) => c.name),
+      };
+    }
+    if (r.kind === "not_found") {
+      return {
+        error: `Vendor "${vendorInput}" not found.`,
+        availableVendors: r.available.slice(0, 30),
+      };
+    }
+    vendorId = r.id;
+    vendorResolved = r.name;
+  }
+
+  let q = admin
+    .from("bills")
+    .select(
+      "id, token, vendor_bill_no, bill_date, cost_head, amount_subtotal, amount_gst, amount_tds, amount_tcs, amount_total, amount_payable_to_vendor, amount_paid, amount_outstanding, bill_vendor_id, bill_vendors(name)",
+    )
+    .eq("status", "approved")
+    .gt("amount_outstanding", 0)
+    .order("bill_date", { ascending: true })
+    .limit(limit);
+  if (vendorId) q = q.eq("bill_vendor_id", vendorId);
+  if (tokenSubstr) {
+    const escaped = tokenSubstr.replace(/[%_]/g, (m) => `\\${m}`);
+    q = q.ilike("token", `%${escaped}%`);
+  }
+
+  const { data, error } = await q;
+  if (error) throw new Error(error.message);
+
+  const todayMs = Date.now();
+  type DueRow = {
+    id: string;
+    token: string;
+    vendor_bill_no: string;
+    bill_date: string;
+    cost_head: string | null;
+    amount_subtotal: number;
+    amount_gst: number | null;
+    amount_tds: number | null;
+    amount_tcs: number | null;
+    amount_total: number;
+    amount_payable_to_vendor: number | null;
+    amount_paid: number;
+    amount_outstanding: number;
+    bill_vendor_id: string;
+    bill_vendors: { name: string } | { name: string }[] | null;
+  };
+
+  const rows = ((data ?? []) as unknown as DueRow[]).map((b) => {
+    const v = Array.isArray(b.bill_vendors) ? b.bill_vendors[0] : b.bill_vendors;
+    const days = Math.floor((todayMs - new Date(b.bill_date).getTime()) / 86_400_000);
+    const bucket: "0_30" | "31_60" | "61_90" | "90_plus" =
+      days <= 30 ? "0_30" : days <= 60 ? "31_60" : days <= 90 ? "61_90" : "90_plus";
+    return {
+      token: b.token,
+      vendor: v?.name ?? "Unknown",
+      vendorBillNo: b.vendor_bill_no,
+      billDate: b.bill_date,
+      daysSinceBill: days,
+      ageBucket: bucket,
+      costHead: b.cost_head,
+      amountSubtotalInr: round2(Number(b.amount_subtotal)),
+      amountGstInr: round2(Number(b.amount_gst ?? 0)),
+      amountTdsInr: round2(Number(b.amount_tds ?? 0)),
+      amountTcsInr: round2(Number(b.amount_tcs ?? 0)),
+      amountTotalInr: round2(Number(b.amount_total)),
+      amountPayableToVendorInr: round2(Number(b.amount_payable_to_vendor ?? b.amount_total)),
+      amountPaidInr: round2(Number(b.amount_paid)),
+      amountOutstandingInr: round2(Number(b.amount_outstanding)),
+    };
+  });
+
+  const filtered = ageBucket
+    ? rows.filter((r) => r.ageBucket === ageBucket)
+    : rows;
+  const totalOutstanding = filtered.reduce((s, r) => s + r.amountOutstandingInr, 0);
+
+  return {
+    filters: {
+      vendor: vendorResolved,
+      tokenSubstr: tokenSubstr || null,
+      ageBucket,
+      limit,
+    },
+    totalOutstandingInr: round2(totalOutstanding),
+    totalOutstandingFmt: inr(totalOutstanding),
+    count: filtered.length,
+    bills: filtered,
+  };
+}
+
+async function getBillDetail(input: Record<string, unknown>) {
+  const admin = createAdminSupabaseClient();
+  const token = typeof input.token === "string" ? input.token.trim().toUpperCase() : "";
+  const id = typeof input.id === "string" ? input.id.trim() : "";
+  if (!token && !id) return { error: "Pass either `token` or `id`." };
+
+  let q = admin
+    .from("bills")
+    .select(
+      "id, token, vendor_bill_no, bill_date, description, cost_head, status, " +
+        "amount_subtotal, gst_percent, cgst_percent, sgst_percent, igst_percent, tds_percent, tcs_percent, " +
+        "amount_gst, amount_cgst, amount_sgst, amount_igst, amount_tds, amount_tcs, amount_total, " +
+        "amount_payable_to_vendor, amount_paid, amount_outstanding, rejection_note, " +
+        "submitted_at, approved_at, rejected_at, cancelled_at, " +
+        "bill_vendor_id, bill_vendors(id, name, gstin, pan, bank_name, bank_account, ifsc, tds_applicable, tcs_applicable)",
+    );
+  q = id ? q.eq("id", id) : q.eq("token", token);
+  const { data: rawData, error } = await q.maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!rawData) return { error: `Bill ${token || id} not found.` };
+
+  // PostgREST embedded-relation typing is too loose for TS, hand-shape it.
+  type BillVendorEmbed = {
+    id: string;
+    name: string;
+    gstin?: string | null;
+    pan?: string | null;
+    bank_name?: string | null;
+    bank_account?: string | null;
+    ifsc?: string | null;
+    tds_applicable?: boolean;
+    tcs_applicable?: boolean;
+  };
+  type BillFull = {
+    id: string;
+    token: string;
+    vendor_bill_no: string;
+    bill_date: string;
+    description: string;
+    cost_head: string | null;
+    status: string;
+    amount_subtotal: number;
+    gst_percent: number;
+    cgst_percent: number | null;
+    sgst_percent: number | null;
+    igst_percent: number | null;
+    tds_percent: number | null;
+    tcs_percent: number | null;
+    amount_gst: number;
+    amount_cgst: number | null;
+    amount_sgst: number | null;
+    amount_igst: number | null;
+    amount_tds: number | null;
+    amount_tcs: number | null;
+    amount_total: number;
+    amount_payable_to_vendor: number | null;
+    amount_paid: number;
+    amount_outstanding: number;
+    rejection_note: string | null;
+    submitted_at: string | null;
+    approved_at: string | null;
+    rejected_at: string | null;
+    cancelled_at: string | null;
+    bill_vendor_id: string;
+    bill_vendors: BillVendorEmbed | BillVendorEmbed[] | null;
+  };
+  const data = rawData as unknown as BillFull;
+  const v = Array.isArray(data.bill_vendors) ? data.bill_vendors[0] : data.bill_vendors;
+
+  // Payment history
+  const { data: pays } = await admin
+    .from("bill_payments")
+    .select(
+      "id, status, proposed_amount, paid_amount, payment_method, payment_reference, payment_note, proposed_at, confirmed_at, paid_at, cancelled_at, cancel_reason",
+    )
+    .eq("bill_id", data.id as string)
+    .order("proposed_at", { ascending: true });
+
+  return {
+    bill: {
+      token: data.token,
+      vendorName: v?.name ?? "Unknown",
+      vendorBillNo: data.vendor_bill_no,
+      billDate: data.bill_date,
+      description: data.description,
+      costHead: data.cost_head,
+      status: data.status,
+      submittedAt: data.submitted_at,
+      approvedAt: data.approved_at,
+      rejectedAt: data.rejected_at,
+      rejectionNote: data.rejection_note,
+      cancelledAt: data.cancelled_at,
+    },
+    vendor: v
+      ? {
+          name: v.name,
+          gstin: (v as { gstin?: string | null }).gstin ?? null,
+          pan: (v as { pan?: string | null }).pan ?? null,
+          bankName: (v as { bank_name?: string | null }).bank_name ?? null,
+          bankAccount: (v as { bank_account?: string | null }).bank_account ?? null,
+          ifsc: (v as { ifsc?: string | null }).ifsc ?? null,
+          tdsApplicable: (v as { tds_applicable?: boolean }).tds_applicable ?? false,
+          tcsApplicable: (v as { tcs_applicable?: boolean }).tcs_applicable ?? false,
+        }
+      : null,
+    amounts: {
+      subtotalInr: round2(Number(data.amount_subtotal)),
+      cgstPercent: Number(data.cgst_percent ?? 0),
+      cgstInr: round2(Number(data.amount_cgst ?? 0)),
+      sgstPercent: Number(data.sgst_percent ?? 0),
+      sgstInr: round2(Number(data.amount_sgst ?? 0)),
+      igstPercent: Number(data.igst_percent ?? 0),
+      igstInr: round2(Number(data.amount_igst ?? 0)),
+      totalGstPercent: Number(data.gst_percent),
+      gstInr: round2(Number(data.amount_gst)),
+      tdsPercent: Number(data.tds_percent ?? 0),
+      tdsInr: round2(Number(data.amount_tds ?? 0)),
+      tcsPercent: Number(data.tcs_percent ?? 0),
+      tcsInr: round2(Number(data.amount_tcs ?? 0)),
+      totalInr: round2(Number(data.amount_total)),
+      payableToVendorInr: round2(Number(data.amount_payable_to_vendor ?? data.amount_total)),
+      paidInr: round2(Number(data.amount_paid)),
+      outstandingInr: round2(Number(data.amount_outstanding)),
+    },
+    payments: (pays ?? []).map((p) => ({
+      status: p.status,
+      proposedAmountInr: round2(Number(p.proposed_amount)),
+      paidAmountInr: p.paid_amount != null ? round2(Number(p.paid_amount)) : null,
+      paymentMethod: p.payment_method,
+      paymentReference: p.payment_reference,
+      paymentNote: p.payment_note,
+      proposedAt: p.proposed_at,
+      confirmedAt: p.confirmed_at,
+      paidAt: p.paid_at,
+      cancelledAt: p.cancelled_at,
+      cancelReason: p.cancel_reason,
+    })),
+  };
+}
+
+async function getVendorFinance(input: Record<string, unknown>) {
+  const admin = createAdminSupabaseClient();
+  const name = typeof input.vendor === "string" ? input.vendor.trim() : "";
+  if (!name) return { error: "Pass a vendor name." };
+
+  const r = await resolveBillVendor(admin, name);
+  if (r.kind === "ambiguous") {
+    return { ambiguous: true, candidates: r.candidates.map((c) => c.name) };
+  }
+  if (r.kind === "not_found") {
+    return {
+      error: `Vendor "${name}" not found.`,
+      availableVendors: r.available.slice(0, 30),
+    };
+  }
+
+  const { data: vendor } = await admin
+    .from("bill_vendors")
+    .select("*")
+    .eq("id", r.id)
+    .maybeSingle();
+  if (!vendor) return { error: "Vendor disappeared mid-query." };
+
+  const { data: bills } = await admin
+    .from("bills")
+    .select(
+      "token, vendor_bill_no, bill_date, status, amount_total, amount_tds, amount_tcs, amount_paid, amount_outstanding",
+    )
+    .eq("bill_vendor_id", r.id)
+    .order("bill_date", { ascending: false });
+  const allBills = bills ?? [];
+
+  const lifetimeBilled = allBills.reduce((s, b) => s + Number(b.amount_total), 0);
+  const lifetimePaid = allBills.reduce((s, b) => s + Number(b.amount_paid), 0);
+  const lifetimeOutstanding = allBills
+    .filter((b) => b.status === "approved")
+    .reduce((s, b) => s + Number(b.amount_outstanding), 0);
+  const lifetimeTds = allBills
+    .filter((b) => b.status !== "cancelled" && b.status !== "rejected")
+    .reduce((s, b) => s + Number(b.amount_tds ?? 0), 0);
+  const lifetimeTcs = allBills
+    .filter((b) => b.status !== "cancelled" && b.status !== "rejected")
+    .reduce((s, b) => s + Number(b.amount_tcs ?? 0), 0);
+
+  return {
+    vendor: {
+      name: vendor.name,
+      category: vendor.category,
+      gstin: vendor.gstin,
+      pan: vendor.pan,
+      phone: vendor.phone,
+      email: vendor.email,
+      address: vendor.address,
+      bankName: vendor.bank_name,
+      bankAccount: vendor.bank_account,
+      ifsc: vendor.ifsc,
+      upiId: vendor.upi_id,
+      paymentTermsDays: vendor.payment_terms_days,
+      tdsApplicable: vendor.tds_applicable ?? false,
+      tcsApplicable: vendor.tcs_applicable ?? false,
+      isActive: vendor.is_active,
+    },
+    lifetime: {
+      billsCount: allBills.length,
+      billedInr: round2(lifetimeBilled),
+      billedFmt: inr(lifetimeBilled),
+      paidInr: round2(lifetimePaid),
+      paidFmt: inr(lifetimePaid),
+      outstandingInr: round2(lifetimeOutstanding),
+      outstandingFmt: inr(lifetimeOutstanding),
+      tdsDeductedInr: round2(lifetimeTds),
+      tdsDeductedFmt: inr(lifetimeTds),
+      tcsCollectedInr: round2(lifetimeTcs),
+      tcsCollectedFmt: inr(lifetimeTcs),
+    },
+    recentBills: allBills.slice(0, 10).map((b) => ({
+      token: b.token,
+      vendorBillNo: b.vendor_bill_no,
+      billDate: b.bill_date,
+      status: b.status,
+      amountTotalInr: round2(Number(b.amount_total)),
+      amountOutstandingInr: round2(Number(b.amount_outstanding)),
+    })),
+  };
+}
+
+async function listBillVendors(input: Record<string, unknown>) {
+  const admin = createAdminSupabaseClient();
+  const activeOnly = input.active_only !== false;
+  const nameContains = typeof input.name_contains === "string" ? input.name_contains.trim() : "";
+  const tdsOnly = input.tds_only === true;
+  const tcsOnly = input.tcs_only === true;
+
+  let q = admin
+    .from("bill_vendors")
+    .select(
+      "id, name, category, gstin, payment_terms_days, tds_applicable, tcs_applicable, is_active",
+    )
+    .order("name");
+  if (activeOnly) q = q.eq("is_active", true);
+  if (tdsOnly) q = q.eq("tds_applicable", true);
+  if (tcsOnly) q = q.eq("tcs_applicable", true);
+  if (nameContains) q = q.ilike("name", `%${nameContains}%`);
+
+  const { data, error } = await q;
+  if (error) throw new Error(error.message);
+  const vendors = data ?? [];
+
+  // Per-vendor outstanding + bill count via aggregate of bills.
+  const ids = vendors.map((v) => v.id);
+  const billsByVendor = new Map<string, { outstanding: number; bills: number }>();
+  if (ids.length > 0) {
+    const { data: agg } = await admin
+      .from("bills")
+      .select("bill_vendor_id, amount_outstanding, status")
+      .in("bill_vendor_id", ids);
+    for (const r of agg ?? []) {
+      const id = r.bill_vendor_id as string;
+      const cur = billsByVendor.get(id) ?? { outstanding: 0, bills: 0 };
+      cur.bills += 1;
+      if (r.status === "approved") cur.outstanding += Number(r.amount_outstanding);
+      billsByVendor.set(id, cur);
+    }
+  }
+
+  return {
+    count: vendors.length,
+    filters: { activeOnly, nameContains: nameContains || null, tdsOnly, tcsOnly },
+    vendors: vendors.map((v) => {
+      const stats = billsByVendor.get(v.id) ?? { outstanding: 0, bills: 0 };
+      return {
+        name: v.name,
+        category: v.category,
+        gstin: v.gstin,
+        paymentTermsDays: v.payment_terms_days,
+        tdsApplicable: v.tds_applicable ?? false,
+        tcsApplicable: v.tcs_applicable ?? false,
+        active: v.is_active,
+        billsCount: stats.bills,
+        outstandingInr: round2(stats.outstanding),
+      };
+    }),
+  };
+}
+
+async function getPayTodayStatus() {
+  const admin = createAdminSupabaseClient();
+  const today = istRange("today");
+
+  const [{ data: openRows }, { data: paidRows }] = await Promise.all([
+    admin
+      .from("bill_payments")
+      .select(
+        "id, status, proposed_amount, proposed_at, bill_id, bills(token, bill_vendors(name))",
+      )
+      .in("status", ["proposed", "confirmed"])
+      .order("proposed_at", { ascending: true }),
+    admin
+      .from("bill_payments")
+      .select(
+        "id, paid_amount, payment_method, payment_reference, paid_at, bill_id, bills(token, bill_vendors(name))",
+      )
+      .eq("status", "paid")
+      .gte("paid_at", today.from)
+      .lt("paid_at", today.to)
+      .order("paid_at", { ascending: true }),
+  ]);
+
+  type Row = {
+    id: string;
+    status?: string;
+    proposed_amount?: number;
+    proposed_at?: string;
+    paid_amount?: number;
+    payment_method?: string;
+    payment_reference?: string;
+    paid_at?: string;
+    bills: {
+      token: string;
+      bill_vendors: { name: string } | { name: string }[] | null;
+    } | { token: string; bill_vendors: { name: string } | { name: string }[] | null }[] | null;
+  };
+
+  function vendorOf(row: Row): string {
+    const bill = Array.isArray(row.bills) ? row.bills[0] : row.bills;
+    if (!bill) return "Unknown";
+    const v = Array.isArray(bill.bill_vendors) ? bill.bill_vendors[0] : bill.bill_vendors;
+    return v?.name ?? "Unknown";
+  }
+  function tokenOf(row: Row): string {
+    const bill = Array.isArray(row.bills) ? row.bills[0] : row.bills;
+    return bill?.token ?? "—";
+  }
+
+  const open = ((openRows ?? []) as unknown) as Row[];
+  const proposed = open
+    .filter((r) => r.status === "proposed")
+    .map((r) => ({
+      token: tokenOf(r),
+      vendor: vendorOf(r),
+      proposedAmountInr: round2(Number(r.proposed_amount)),
+      proposedAt: r.proposed_at,
+    }));
+  const confirmed = open
+    .filter((r) => r.status === "confirmed")
+    .map((r) => ({
+      token: tokenOf(r),
+      vendor: vendorOf(r),
+      proposedAmountInr: round2(Number(r.proposed_amount)),
+      proposedAt: r.proposed_at,
+    }));
+
+  const paid = (((paidRows ?? []) as unknown) as Row[]).map((r) => ({
+    token: tokenOf(r),
+    vendor: vendorOf(r),
+    paidAmountInr: round2(Number(r.paid_amount ?? 0)),
+    paymentMethod: r.payment_method ?? null,
+    paymentReference: r.payment_reference ?? null,
+    paidAt: r.paid_at,
+  }));
+
+  return {
+    proposed: {
+      count: proposed.length,
+      totalInr: round2(proposed.reduce((s, r) => s + r.proposedAmountInr, 0)),
+      rows: proposed,
+    },
+    confirmed: {
+      count: confirmed.length,
+      totalInr: round2(confirmed.reduce((s, r) => s + r.proposedAmountInr, 0)),
+      rows: confirmed,
+    },
+    paidToday: {
+      count: paid.length,
+      totalInr: round2(paid.reduce((s, r) => s + r.paidAmountInr, 0)),
+      rows: paid,
+    },
+  };
+}
+
+async function getFinanceActivity(input: Record<string, unknown>) {
+  const admin = createAdminSupabaseClient();
+  const limit = Math.min(200, Math.max(1, Number(input.limit) || 30));
+  const actionFilter = typeof input.action === "string" ? input.action.trim() : "";
+
+  let window: { from: string; to: string; label: string };
+  if (typeof input.hours_ago === "number") {
+    const w = istHoursWindow(input.hours_ago);
+    window = { from: w.from, to: w.to, label: `last ${w.hours} hr` };
+  } else {
+    const r = typeof input.range === "string"
+      ? (input.range as "today" | "yesterday" | "this_week" | "this_month")
+      : "today";
+    const w = istRange(r);
+    window = { from: w.from, to: w.to, label: r };
+  }
+
+  // Finance-domain action prefixes. We pull all and filter for these.
+  const FINANCE_PREFIXES = [
+    "bill_",
+    "payment_",
+  ];
+
+  let q = admin
+    .from("audit_logs")
+    .select("user_id, action, entity_type, entity_id, details, created_at")
+    .gte("created_at", window.from)
+    .lt("created_at", window.to)
+    .order("created_at", { ascending: false })
+    .limit(limit * 3); // pull extra so filtering doesn't undercut
+  if (actionFilter) q = q.eq("action", actionFilter);
+
+  const { data, error } = await q;
+  if (error) throw new Error(error.message);
+
+  const events = (data ?? []).filter((e) =>
+    FINANCE_PREFIXES.some((p) => (e.action as string).startsWith(p)),
+  ).slice(0, limit);
+
+  const userIds = [...new Set(events.map((e) => e.user_id).filter(Boolean))];
+  const profMap = new Map<string, string>();
+  if (userIds.length > 0) {
+    const { data: profs } = await admin
+      .from("profiles")
+      .select("id, full_name")
+      .in("id", userIds as string[]);
+    for (const p of profs ?? []) {
+      profMap.set((p as { id: string }).id, (p as { full_name?: string }).full_name ?? "Unknown");
+    }
+  }
+
+  const byAction: Record<string, number> = {};
+  for (const e of events) byAction[e.action as string] = (byAction[e.action as string] ?? 0) + 1;
+
+  return {
+    window: window.label,
+    count: events.length,
+    byAction,
+    events: events.map((e) => ({
+      at: e.created_at,
+      action: e.action,
+      who: profMap.get(e.user_id as string) ?? null,
+      entityType: e.entity_type,
+      entityId: e.entity_id,
+      details: e.details,
+    })),
+  };
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Inventory department handlers (Mig 041 / 044)
+// ════════════════════════════════════════════════════════════════════════════
+
+/** Resolve a site by code or fuzzy name. Sites are scoped tightly so
+ *  the resolver is simpler than for temples / vendors. */
+async function resolveSite(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  input: string,
+): Promise<
+  | { kind: "resolved"; id: string; code: string; name: string; is_plant: boolean }
+  | { kind: "not_found"; available: Array<{ code: string; name: string }> }
+> {
+  const { data } = await admin
+    .from("sites")
+    .select("id, code, name, is_plant, is_active")
+    .order("is_plant", { ascending: false })
+    .order("name");
+  const all = (data ?? []) as Array<{
+    id: string;
+    code: string;
+    name: string;
+    is_plant: boolean;
+    is_active: boolean;
+  }>;
+  const needle = input.toLowerCase().trim();
+  // Exact code match (PLANT, ALPHA…)
+  const byCode = all.find((s) => s.code.toLowerCase() === needle);
+  if (byCode) return { kind: "resolved", id: byCode.id, code: byCode.code, name: byCode.name, is_plant: byCode.is_plant };
+  // Substring on name
+  const byName = all.find((s) => s.name.toLowerCase().includes(needle));
+  if (byName) return { kind: "resolved", id: byName.id, code: byName.code, name: byName.name, is_plant: byName.is_plant };
+  return {
+    kind: "not_found",
+    available: all.map((s) => ({ code: s.code, name: s.name })),
+  };
+}
+
+/** Pull every site, every active component, and every approved /
+ *  pending_approval movement. Build the (component × site → qty)
+ *  map in JS. Mirrors the dashboard's `loadInventorySnapshot`. */
+async function loadInventorySnapshotForAi() {
+  const admin = createAdminSupabaseClient();
+  const [sitesRes, compRes, movRes] = await Promise.all([
+    admin
+      .from("sites")
+      .select("id, code, name, is_plant, is_active, manager_name")
+      .order("is_plant", { ascending: false })
+      .order("name"),
+    admin
+      .from("scaffolding_components")
+      .select("id, name, component_type, size_spec, unit, is_active, display_order")
+      .order("display_order"),
+    admin
+      .from("inventory_movements")
+      .select(
+        "component_id, qty, status, from_site_id, to_site_id, movement_type, proposed_at",
+      )
+      .in("status", ["approved", "pending_approval"]),
+  ]);
+
+  type Site = { id: string; code: string; name: string; is_plant: boolean; is_active: boolean; manager_name: string | null };
+  type Comp = { id: string; name: string; component_type: string; size_spec: string | null; unit: string; is_active: boolean; display_order: number };
+  type Mov = { component_id: string; qty: number; status: string; from_site_id: string | null; to_site_id: string | null; movement_type: string; proposed_at: string };
+
+  const sites = (sitesRes.data ?? []) as Site[];
+  const comps = (compRes.data ?? []) as Comp[];
+  const movs = (movRes.data ?? []) as Mov[];
+
+  // Per-(comp, site) on-hand + pending-out
+  type StockEntry = { onHand: number; pendingOut: number };
+  const stock = new Map<string, StockEntry>();
+  function key(compId: string, siteId: string) { return `${compId}::${siteId}`; }
+  function cell(compId: string, siteId: string): StockEntry {
+    const k = key(compId, siteId);
+    const cur = stock.get(k) ?? { onHand: 0, pendingOut: 0 };
+    stock.set(k, cur);
+    return cur;
+  }
+  for (const m of movs) {
+    const qty = Number(m.qty);
+    if (m.status === "approved") {
+      if (m.to_site_id) cell(m.component_id, m.to_site_id).onHand += qty;
+      if (m.from_site_id) cell(m.component_id, m.from_site_id).onHand -= qty;
+    } else if (m.status === "pending_approval") {
+      if (m.from_site_id) cell(m.component_id, m.from_site_id).pendingOut += qty;
+    }
+  }
+
+  return { sites, comps, movs, stock, key };
+}
+
+async function getInventoryScaffoldingSnapshot(input: Record<string, unknown>) {
+  const admin = createAdminSupabaseClient();
+  const siteInput = typeof input.site === "string" ? input.site.trim() : "";
+
+  const snap = await loadInventorySnapshotForAi();
+  const { sites, comps, movs, stock, key } = snap;
+  const plant = sites.find((s) => s.is_plant);
+  if (!plant) {
+    return {
+      error: "Plant site missing — run migration 041 + 044.",
+    };
+  }
+
+  let scopedSite: typeof sites[number] | null = null;
+  if (siteInput) {
+    const r = await resolveSite(admin, siteInput);
+    if (r.kind === "not_found") {
+      return {
+        error: `Site "${siteInput}" not found.`,
+        availableSites: r.available,
+      };
+    }
+    scopedSite = sites.find((s) => s.id === r.id) ?? null;
+  }
+
+  // Component rows: each tells how much is at plant + summed across sites + (if scoped) at the scoped site
+  const activeComps = comps.filter((c) => c.is_active);
+  const componentRows = activeComps.map((c) => {
+    const atPlant = stock.get(key(c.id, plant.id))?.onHand ?? 0;
+    const outAtSites = sites
+      .filter((s) => !s.is_plant)
+      .reduce((sum, s) => sum + (stock.get(key(c.id, s.id))?.onHand ?? 0), 0);
+    const pendingOutOfPlant = stock.get(key(c.id, plant.id))?.pendingOut ?? 0;
+    const atScopedSite = scopedSite
+      ? stock.get(key(c.id, scopedSite.id))?.onHand ?? 0
+      : null;
+    return {
+      name: c.name,
+      type: c.component_type,
+      sizeSpec: c.size_spec,
+      unit: c.unit,
+      atPlant,
+      outAtSites,
+      pendingOutOfPlant,
+      totalInPipeline: atPlant + outAtSites,
+      atScopedSite,
+    };
+  });
+
+  // Pending audit batches count
+  const pendingBatchIds = new Set<string>();
+  for (const m of movs) {
+    if (m.status === "pending_approval") {
+      pendingBatchIds.add(`${m.proposed_at}::${m.from_site_id ?? ""}::${m.to_site_id ?? ""}`);
+    }
+  }
+
+  // Per-site totals (active sites + plant)
+  const siteTotals = sites
+    .filter((s) => s.is_plant || s.is_active)
+    .map((s) => {
+      let total = 0;
+      for (const c of activeComps) {
+        total += stock.get(key(c.id, s.id))?.onHand ?? 0;
+      }
+      return { code: s.code, name: s.name, is_plant: s.is_plant, total };
+    });
+
+  return {
+    plant: { code: plant.code, name: plant.name },
+    scopedSite: scopedSite ? { code: scopedSite.code, name: scopedSite.name } : null,
+    totals: {
+      atPlant: componentRows.reduce((s, r) => s + r.atPlant, 0),
+      outAtSites: componentRows.reduce((s, r) => s + r.outAtSites, 0),
+      totalInPipeline: componentRows.reduce((s, r) => s + r.totalInPipeline, 0),
+      activeSites: siteTotals.filter((s) => !s.is_plant).length,
+      activeComponents: activeComps.length,
+      pendingAuditBatches: pendingBatchIds.size,
+    },
+    components: componentRows,
+    siteTotals,
+  };
+}
+
+async function listInventorySites(input: Record<string, unknown>) {
+  const admin = createAdminSupabaseClient();
+  const activeOnly = input.active_only !== false;
+  const snap = await loadInventorySnapshotForAi();
+  const { sites, comps, stock, key } = snap;
+
+  const activeComps = comps.filter((c) => c.is_active);
+  const filtered = activeOnly ? sites.filter((s) => s.is_active) : sites;
+  return {
+    count: filtered.length,
+    sites: filtered.map((s) => {
+      let total = 0;
+      for (const c of activeComps) {
+        total += stock.get(key(c.id, s.id))?.onHand ?? 0;
+      }
+      return {
+        code: s.code,
+        name: s.name,
+        isPlant: s.is_plant,
+        isActive: s.is_active,
+        managerName: s.manager_name,
+        totalPieces: total,
+      };
+    }),
+  };
+}
+
+async function getInventoryMovementsRecent(input: Record<string, unknown>) {
+  const admin = createAdminSupabaseClient();
+  const limit = Math.min(200, Math.max(1, Number(input.limit) || 25));
+  const statusFilter = typeof input.status === "string" ? input.status : null;
+  const typeFilter = typeof input.type === "string" ? input.type : null;
+  const siteInput = typeof input.site === "string" ? input.site.trim() : "";
+
+  let window: { from: string; to: string; label: string };
+  if (typeof input.hours_ago === "number") {
+    const w = istHoursWindow(input.hours_ago);
+    window = { from: w.from, to: w.to, label: `last ${w.hours} hr` };
+  } else {
+    const r = typeof input.range === "string"
+      ? (input.range as "today" | "yesterday" | "this_week" | "this_month")
+      : "today";
+    const w = istRange(r);
+    window = { from: w.from, to: w.to, label: r };
+  }
+
+  let siteIdFilter: string | null = null;
+  if (siteInput) {
+    const r = await resolveSite(admin, siteInput);
+    if (r.kind === "not_found") {
+      return { error: `Site "${siteInput}" not found.`, availableSites: r.available };
+    }
+    siteIdFilter = r.id;
+  }
+
+  let q = admin
+    .from("inventory_movements")
+    .select(
+      "id, batch_id, movement_type, status, from_site_id, to_site_id, component_id, qty, " +
+        "proposed_by, proposed_at, batch_note, approved_at, rejected_at, cancelled_at, " +
+        "sites!inventory_movements_from_site_id_fkey(code, name), " +
+        "scaffolding_components(name, component_type)",
+    )
+    .gte("proposed_at", window.from)
+    .lt("proposed_at", window.to)
+    .order("proposed_at", { ascending: false })
+    .limit(limit * 6);
+  if (statusFilter) q = q.eq("status", statusFilter);
+  if (typeFilter) q = q.eq("movement_type", typeFilter);
+  if (siteIdFilter) q = q.or(`from_site_id.eq.${siteIdFilter},to_site_id.eq.${siteIdFilter}`);
+
+  const { data: rawMov, error } = await q;
+  if (error) throw new Error(error.message);
+
+  // Hand-typed shape — PostgREST joined-row typing widens to a union
+  // including GenericStringError, which TS won't index into safely.
+  type MovRow = {
+    id: string;
+    batch_id: string;
+    movement_type: string;
+    status: string;
+    from_site_id: string | null;
+    to_site_id: string | null;
+    component_id: string;
+    qty: number;
+    proposed_by: string;
+    proposed_at: string;
+    batch_note: string | null;
+    scaffolding_components: { name: string } | { name: string }[] | null;
+  };
+  const movRows = (rawMov ?? []) as unknown as MovRow[];
+
+  // Resolve site names via a second tiny lookup (the embedded join above
+  // only covers from_site_id; we want both sides for narration).
+  const allSiteIds = new Set<string>();
+  for (const m of movRows) {
+    if (m.from_site_id) allSiteIds.add(m.from_site_id);
+    if (m.to_site_id) allSiteIds.add(m.to_site_id);
+  }
+  const siteMap = new Map<string, { code: string; name: string }>();
+  if (allSiteIds.size > 0) {
+    const { data: siteRows } = await admin
+      .from("sites")
+      .select("id, code, name")
+      .in("id", Array.from(allSiteIds));
+    for (const s of siteRows ?? []) {
+      siteMap.set((s as { id: string }).id, { code: (s as { code: string }).code, name: (s as { name: string }).name });
+    }
+  }
+
+  // Group by batch_id
+  type Batch = {
+    batchId: string;
+    type: string;
+    status: string;
+    fromSite: string | null;
+    toSite: string | null;
+    totalQty: number;
+    components: Array<{ name: string; qty: number }>;
+    proposedBy: string | null;
+    proposedAt: string;
+    batchNote: string | null;
+  };
+  const batches = new Map<string, Batch>();
+  const proposerIds = new Set<string>();
+  for (const m of movRows) {
+    proposerIds.add(m.proposed_by);
+    const fromSite = m.from_site_id ? siteMap.get(m.from_site_id)?.name ?? null : null;
+    const toSite = m.to_site_id ? siteMap.get(m.to_site_id)?.name ?? null : null;
+    const compInfo = Array.isArray(m.scaffolding_components)
+      ? m.scaffolding_components[0]
+      : m.scaffolding_components;
+    const compName = compInfo?.name ?? "Unknown";
+    const existing = batches.get(m.batch_id);
+    if (existing) {
+      existing.totalQty += Number(m.qty);
+      existing.components.push({ name: compName, qty: Number(m.qty) });
+    } else {
+      batches.set(m.batch_id, {
+        batchId: m.batch_id,
+        type: m.movement_type,
+        status: m.status,
+        fromSite,
+        toSite,
+        totalQty: Number(m.qty),
+        components: [{ name: compName, qty: Number(m.qty) }],
+        proposedBy: null,
+        proposedAt: m.proposed_at,
+        batchNote: m.batch_note,
+      });
+    }
+  }
+
+  // Resolve proposer names
+  if (proposerIds.size > 0) {
+    const { data: profs } = await admin
+      .from("profiles")
+      .select("id, full_name")
+      .in("id", Array.from(proposerIds));
+    const nameMap = new Map<string, string>();
+    for (const p of profs ?? []) {
+      nameMap.set((p as { id: string }).id, (p as { full_name?: string }).full_name ?? "Unknown");
+    }
+    for (const m of movRows) {
+      const b = batches.get(m.batch_id);
+      if (b && !b.proposedBy) {
+        b.proposedBy = nameMap.get(m.proposed_by) ?? "Unknown";
+      }
+    }
+  }
+
+  const list = Array.from(batches.values())
+    .sort((a, b) => new Date(b.proposedAt).getTime() - new Date(a.proposedAt).getTime())
+    .slice(0, limit);
+
+  // User-facing label remapping: receive→Buy, writeoff→Destroyed.
+  function userLabel(t: string) {
+    if (t === "receive") return "Buy";
+    if (t === "writeoff") return "Destroyed";
+    if (t === "issue") return "Issue";
+    if (t === "return") return "Return";
+    return t;
+  }
+
+  return {
+    window: window.label,
+    count: list.length,
+    batches: list.map((b) => ({
+      batchId: b.batchId,
+      type: b.type,
+      typeLabel: userLabel(b.type),
+      status: b.status,
+      fromSite: b.fromSite,
+      toSite: b.toSite,
+      totalQty: b.totalQty,
+      componentsCount: b.components.length,
+      components: b.components,
+      proposedBy: b.proposedBy,
+      proposedAt: b.proposedAt,
+      batchNote: b.batchNote,
+    })),
+  };
+}
+
+async function getInventoryAuditQueue() {
+  const admin = createAdminSupabaseClient();
+  const { data: rawData, error } = await admin
+    .from("inventory_movements")
+    .select(
+      "id, batch_id, movement_type, from_site_id, to_site_id, component_id, qty, proposed_by, proposed_at, batch_note, scaffolding_components(name)",
+    )
+    .eq("status", "pending_approval")
+    .order("proposed_at", { ascending: true });
+  if (error) throw new Error(error.message);
+
+  type MovRow = {
+    id: string;
+    batch_id: string;
+    movement_type: string;
+    from_site_id: string | null;
+    to_site_id: string | null;
+    component_id: string;
+    qty: number;
+    proposed_by: string;
+    proposed_at: string;
+    batch_note: string | null;
+    scaffolding_components: { name: string } | { name: string }[] | null;
+  };
+  const movRows = (rawData ?? []) as unknown as MovRow[];
+
+  const allSiteIds = new Set<string>();
+  const proposerIds = new Set<string>();
+  for (const m of movRows) {
+    if (m.from_site_id) allSiteIds.add(m.from_site_id);
+    if (m.to_site_id) allSiteIds.add(m.to_site_id);
+    proposerIds.add(m.proposed_by);
+  }
+
+  const [siteRes, profRes] = await Promise.all([
+    allSiteIds.size > 0
+      ? admin.from("sites").select("id, code, name").in("id", Array.from(allSiteIds))
+      : Promise.resolve({ data: [] as Array<{ id: string; code: string; name: string }> }),
+    proposerIds.size > 0
+      ? admin.from("profiles").select("id, full_name").in("id", Array.from(proposerIds))
+      : Promise.resolve({ data: [] as Array<{ id: string; full_name: string | null }> }),
+  ]);
+  const siteMap = new Map<string, string>();
+  for (const s of (siteRes as { data: Array<{ id: string; name: string }> }).data ?? []) {
+    siteMap.set(s.id, s.name);
+  }
+  const nameMap = new Map<string, string>();
+  for (const p of (profRes as { data: Array<{ id: string; full_name: string | null }> }).data ?? []) {
+    nameMap.set(p.id, p.full_name ?? "Unknown");
+  }
+
+  type Batch = {
+    batchId: string;
+    type: string;
+    fromSite: string | null;
+    toSite: string | null;
+    totalQty: number;
+    components: Array<{ name: string; qty: number }>;
+    proposedBy: string;
+    proposedAt: string;
+    ageHours: number;
+    batchNote: string | null;
+  };
+  const now = Date.now();
+  const batches = new Map<string, Batch>();
+  for (const m of movRows) {
+    const comp = Array.isArray(m.scaffolding_components)
+      ? m.scaffolding_components[0]
+      : m.scaffolding_components;
+    const compName = comp?.name ?? "Unknown";
+    const existing = batches.get(m.batch_id);
+    if (existing) {
+      existing.totalQty += Number(m.qty);
+      existing.components.push({ name: compName, qty: Number(m.qty) });
+    } else {
+      const proposedAtIso = m.proposed_at;
+      const ageHours = Math.round((now - new Date(proposedAtIso).getTime()) / 3_600_000);
+      batches.set(m.batch_id, {
+        batchId: m.batch_id,
+        type: m.movement_type,
+        fromSite: m.from_site_id ? siteMap.get(m.from_site_id) ?? null : null,
+        toSite: m.to_site_id ? siteMap.get(m.to_site_id) ?? null : null,
+        totalQty: Number(m.qty),
+        components: [{ name: compName, qty: Number(m.qty) }],
+        proposedBy: nameMap.get(m.proposed_by) ?? "Unknown",
+        proposedAt: proposedAtIso,
+        ageHours,
+        batchNote: m.batch_note,
+      });
+    }
+  }
+
+  function userLabel(t: string) {
+    if (t === "receive") return "Buy";
+    if (t === "writeoff") return "Destroyed";
+    if (t === "issue") return "Issue";
+    if (t === "return") return "Return";
+    return t;
+  }
+
+  return {
+    count: batches.size,
+    batches: Array.from(batches.values()).map((b) => ({
+      batchId: b.batchId,
+      type: b.type,
+      typeLabel: userLabel(b.type),
+      fromSite: b.fromSite,
+      toSite: b.toSite,
+      totalQty: b.totalQty,
+      components: b.components,
+      proposedBy: b.proposedBy,
+      proposedAt: b.proposedAt,
+      ageHours: b.ageHours,
+      batchNote: b.batchNote,
+    })),
+  };
+}
+
+async function listScaffoldingComponents(input: Record<string, unknown>) {
+  const admin = createAdminSupabaseClient();
+  const activeOnly = input.active_only !== false;
+  const nameContains = typeof input.name_contains === "string" ? input.name_contains.trim() : "";
+
+  const snap = await loadInventorySnapshotForAi();
+  let comps = snap.comps;
+  if (activeOnly) comps = comps.filter((c) => c.is_active);
+  if (nameContains) {
+    const needle = nameContains.toLowerCase();
+    comps = comps.filter((c) => c.name.toLowerCase().includes(needle));
+  }
+
+  return {
+    count: comps.length,
+    components: comps.map((c) => {
+      let total = 0;
+      for (const s of snap.sites) {
+        total += snap.stock.get(snap.key(c.id, s.id))?.onHand ?? 0;
+      }
+      return {
+        name: c.name,
+        type: c.component_type,
+        sizeSpec: c.size_spec,
+        unit: c.unit,
+        active: c.is_active,
+        totalQuantity: total,
+      };
+    }),
+  };
+}
