@@ -40,6 +40,249 @@ async function syncSessionStatus(sessionId: string) {
     .eq("id", sessionId);
 }
 
+// ──────────────────────────────────────────────────────────────────
+// Transfer earmark helpers (Migration 033)
+// ──────────────────────────────────────────────────────────────────
+// When a team_head submits "Cutting Done" with a slab claimed from
+// another block's plan, we EARMARK the donor immediately rather than
+// waiting for approval. This closes a race window where the donor
+// could quietly advance to 'done' between submission and approval,
+// causing approveCutAction to blow up with the
+// "donor block(s) [X] are no longer pending" error.
+//
+// Earmark = (cut_session_slabs.pending_transfer_to_csb_id IS NOT NULL).
+// Side-effect = donor.needs_reprint flips TRUE so the donor's operator
+// sees the existing red banner across all cutting views. On approval
+// the RPC deletes donor rows and the earmark naturally clears; on
+// rejection / cutter-edit we explicitly clear via clearTransferEarmarks.
+// The donor's needs_reprint stays sticky once set (matches the existing
+// "your plan changed; reprint" semantics — operator can choose to
+// reprint or not based on the reason text).
+
+type DonorMutability =
+  | "pending_worker"
+  | "pending_cut"
+  | "cutting"
+  | "done_prompt"
+  | "awaiting_approval"
+  | "awaiting_cutter_edit";
+
+const MUTABLE_DONOR_STATUSES: DonorMutability[] = [
+  "pending_worker",
+  "pending_cut",
+  "cutting",
+  "done_prompt",
+  "awaiting_approval",
+  "awaiting_cutter_edit",
+];
+
+/**
+ * Stamp donor cut_session_slabs rows with `pending_transfer_to_csb_id =
+ * myCsbId` for each slab in `slabIds`, and flip the donor
+ * cut_session_block to needs_reprint=TRUE with a reason that mentions
+ * the awaiting-audit block.
+ *
+ * Refuses (returns ok:false) if ANY of the precondition checks fail:
+ *  - slab not located on any cutting plan,
+ *  - donor block has already advanced past mutability,
+ *  - donor row is already earmarked by a different awaiting-audit block,
+ *  - slab points back at the caller's own csb (self-transfer).
+ *
+ * Atomic-ish: validation happens up-front, then a single bulk UPDATE
+ * stamps every donor slab. Race-guarded by `pending_transfer_to_csb_id
+ * IS NULL` in the UPDATE WHERE clause; the approveCutAction pre-flight
+ * remains as a safety net for anything that slips through.
+ */
+async function applyTransferEarmarks(
+  supabase: ReturnType<typeof createAdminSupabaseClient>,
+  myCsbId: string,
+  myBlockId: string,
+  slabIds: string[],
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (slabIds.length === 0) return { ok: true };
+
+  // 1. Fetch donor rows + donor csb status in one round-trip.
+  const { data: donorRows, error: donorErr } = await supabase
+    .from("cut_session_slabs")
+    .select(
+      "slab_requirement_id, cut_session_block_id, pending_transfer_to_csb_id, cut_session_blocks(id, block_id, status)",
+    )
+    .in("slab_requirement_id", slabIds);
+  if (donorErr) return { ok: false, error: donorErr.message };
+
+  type DonorRow = {
+    slab_requirement_id: string;
+    cut_session_block_id: string;
+    pending_transfer_to_csb_id: string | null;
+    cut_session_blocks:
+      | { id: string; block_id: string; status: string }
+      | { id: string; block_id: string; status: string }[]
+      | null;
+  };
+  const rows = (donorRows ?? []) as unknown as DonorRow[];
+  const rowFor = (slabId: string) =>
+    rows.find((r) => r.slab_requirement_id === slabId);
+  const donorOf = (r: DonorRow) =>
+    Array.isArray(r.cut_session_blocks)
+      ? r.cut_session_blocks[0] ?? null
+      : r.cut_session_blocks;
+
+  const missing: string[] = [];
+  const selfClaim: string[] = [];
+  const stuck: { donor: string; status: string }[] = [];
+  const alreadyClaimed: { donor: string }[] = [];
+
+  for (const slabId of slabIds) {
+    const row = rowFor(slabId);
+    if (!row) {
+      missing.push(slabId);
+      continue;
+    }
+    if (row.cut_session_block_id === myCsbId) {
+      selfClaim.push(slabId);
+      continue;
+    }
+    const donor = donorOf(row);
+    const status = donor?.status ?? "missing";
+    if (!donor || !MUTABLE_DONOR_STATUSES.includes(status as DonorMutability)) {
+      stuck.push({ donor: donor?.block_id ?? "?", status });
+      continue;
+    }
+    if (
+      row.pending_transfer_to_csb_id &&
+      row.pending_transfer_to_csb_id !== myCsbId
+    ) {
+      alreadyClaimed.push({ donor: donor.block_id });
+      continue;
+    }
+  }
+
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      error: `Cannot stage transfer — slab(s) [${missing.join(", ")}] could not be located on any cutting plan. Refresh and retry.`,
+    };
+  }
+  if (selfClaim.length > 0) {
+    return {
+      ok: false,
+      error: "Cannot transfer a slab to the same block — that's a no-op.",
+    };
+  }
+  if (stuck.length > 0) {
+    const labels = [
+      ...new Set(stuck.map((s) => `${s.donor} (${s.status})`)),
+    ].join(", ");
+    return {
+      ok: false,
+      error: `Cannot stage transfer — donor block(s) [${labels}] have advanced past the transferable state. Reload your inventory list before submitting.`,
+    };
+  }
+  if (alreadyClaimed.length > 0) {
+    const labels = [...new Set(alreadyClaimed.map((s) => s.donor))].join(", ");
+    return {
+      ok: false,
+      error: `Cannot stage transfer — slab(s) on [${labels}] are already earmarked by another awaiting-audit block. Wait for that audit to resolve.`,
+    };
+  }
+
+  // 2. Stamp donor cut_session_slabs rows.
+  const { error: stampErr } = await supabase
+    .from("cut_session_slabs")
+    .update({ pending_transfer_to_csb_id: myCsbId })
+    .in("slab_requirement_id", slabIds)
+    .neq("cut_session_block_id", myCsbId)
+    .is("pending_transfer_to_csb_id", null);
+  if (stampErr) return { ok: false, error: stampErr.message };
+
+  // 3. Flip donor needs_reprint with a "claimed pending audit" reason.
+  const donorCsbIds = [
+    ...new Set(rows.map((r) => r.cut_session_block_id)),
+  ].filter((id) => id !== myCsbId);
+  if (donorCsbIds.length > 0) {
+    const reason = `${slabIds.length} slab(s) claimed by ${myBlockId} pending audit on ${new Date().toLocaleDateString("en-IN")}`;
+    const now = new Date().toISOString();
+    const { error: bannerErr } = await supabase
+      .from("cut_session_blocks")
+      .update({
+        needs_reprint: true,
+        reprint_reason: reason,
+        updated_at: now,
+      })
+      .in("id", donorCsbIds);
+    if (bannerErr) return { ok: false, error: bannerErr.message };
+  }
+
+  return { ok: true };
+}
+
+/**
+ * Release earmarks previously stamped by applyTransferEarmarks.
+ * Used when the cutter / approver removes a slab from an awaiting-audit
+ * block's transferred_slab_ids list during editPendingApprovalAction.
+ *
+ * Donor.needs_reprint is intentionally NOT cleared — the operator may
+ * already have re-printed once and the sticky flag is the existing
+ * convention. If the layout was actually mutated by an earlier approved
+ * claim, that flag is correct anyway; if it wasn't, the worst case is
+ * one unnecessary reprint. Safe direction.
+ */
+async function clearTransferEarmarks(
+  supabase: ReturnType<typeof createAdminSupabaseClient>,
+  claimerCsbId: string,
+  slabIds: string[],
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (slabIds.length === 0) return { ok: true };
+
+  const { error } = await supabase
+    .from("cut_session_slabs")
+    .update({ pending_transfer_to_csb_id: null })
+    .in("slab_requirement_id", slabIds)
+    .eq("pending_transfer_to_csb_id", claimerCsbId);
+  if (error) return { ok: false, error: error.message };
+
+  return { ok: true };
+}
+
+/**
+ * Symmetric to applyTransferEarmarks: refuse the caller if any of THIS
+ * block's planned slabs is currently earmarked by another awaiting-audit
+ * block. Prevents the donor from finishing their own cut while a claim
+ * is still in flight.
+ */
+async function refuseIfMySlabsAreClaimed(
+  supabase: ReturnType<typeof createAdminSupabaseClient>,
+  myCsbId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { data: claimed, error } = await supabase
+    .from("cut_session_slabs")
+    .select("slab_requirement_id, pending_transfer_to_csb_id")
+    .eq("cut_session_block_id", myCsbId)
+    .not("pending_transfer_to_csb_id", "is", null);
+  if (error) return { ok: false, error: error.message };
+  if (!claimed || claimed.length === 0) return { ok: true };
+
+  const claimerCsbIds = [
+    ...new Set(
+      claimed
+        .map((r) => r.pending_transfer_to_csb_id as string | null)
+        .filter((v): v is string => Boolean(v)),
+    ),
+  ];
+  const { data: claimerBlocks } = await supabase
+    .from("cut_session_blocks")
+    .select("id, block_id")
+    .in("id", claimerCsbIds);
+  const labels = (claimerBlocks ?? [])
+    .map((b) => (b as { block_id: string }).block_id)
+    .join(", ");
+
+  return {
+    ok: false,
+    error: `Cannot finish — ${claimed.length} slab(s) on this block are currently claimed by ${labels || "another block"} awaiting audit. Wait for that audit to resolve, or ask the approver to remove the claim from their staged payload.`,
+  };
+}
+
 /**
  * Pending Approval → Waiting to Cut.
  *
@@ -281,6 +524,33 @@ export async function finishBlockAction(formData: FormData): Promise<FinishBlock
         throw new Error(
           "You do not have permission to transfer slabs from another block's plan. Contact a developer or authorised owner.",
         );
+      }
+    }
+
+    // Migration 033 — refuse if any of THIS block's planned slabs is
+    // currently earmarked by another awaiting-audit block. Symmetric
+    // to the donor lock we apply below: if someone is claiming a slab
+    // from me, I can't close out the block underneath them.
+    const incomingCheck = await refuseIfMySlabsAreClaimed(supabase, sessionBlockId);
+    if (!incomingCheck.ok) {
+      throw new Error(incomingCheck.error);
+    }
+
+    // Migration 033 — earmark the donor side BEFORE we stage the
+    // payload. This stamps cut_session_slabs.pending_transfer_to_csb_id
+    // + flips donor.needs_reprint=TRUE so the donor's operator sees the
+    // existing red banner across all cutting views. Refuses the whole
+    // submission if any precondition fails (donor advanced past
+    // mutability, slab already earmarked elsewhere, self-transfer).
+    if (transferredSlabIds.length > 0) {
+      const earmark = await applyTransferEarmarks(
+        supabase,
+        sessionBlockId,
+        blockId,
+        transferredSlabIds,
+      );
+      if (!earmark.ok) {
+        throw new Error(earmark.error);
       }
     }
 
@@ -852,7 +1122,7 @@ export async function editPendingApprovalAction(
   const { data: blockRow } = await supabase
     .from("cut_session_blocks")
     .select(
-      "id, status, block_id, submitted_for_approval_by, cut_session_id, cutter_edit_unlocked",
+      "id, status, block_id, submitted_for_approval_by, cut_session_id, cutter_edit_unlocked, pending_approval_payload",
     )
     .eq("id", sessionBlockId)
     .maybeSingle();
@@ -864,6 +1134,7 @@ export async function editPendingApprovalAction(
     submitted_for_approval_by: string | null;
     cut_session_id: string;
     cutter_edit_unlocked: boolean;
+    pending_approval_payload: PendingApprovalPayload | null;
   };
 
   const { canApproveCuts } = await import("@/lib/cutting-permissions");
@@ -936,6 +1207,36 @@ export async function editPendingApprovalAction(
     yard,
   };
   const now = new Date().toISOString();
+
+  // Migration 033 — diff transfers between OLD and NEW payloads and
+  // sync earmarks accordingly. Removed transfers release their donor
+  // earmark; added transfers stamp the donor (with full precondition
+  // checks via applyTransferEarmarks). Same atomic-ish model as
+  // finishBlockAction — validation up-front, bulk UPDATE after.
+  const oldTransfers = new Set(
+    block.pending_approval_payload?.transferred_slab_ids ?? [],
+  );
+  const newTransfers = new Set(transferredSlabIds);
+  const removedTransfers = [...oldTransfers].filter((id) => !newTransfers.has(id));
+  const addedTransfers = [...newTransfers].filter((id) => !oldTransfers.has(id));
+
+  if (removedTransfers.length > 0) {
+    const cleared = await clearTransferEarmarks(
+      supabase,
+      sessionBlockId,
+      removedTransfers,
+    );
+    if (!cleared.ok) return cleared;
+  }
+  if (addedTransfers.length > 0) {
+    const stamped = await applyTransferEarmarks(
+      supabase,
+      sessionBlockId,
+      block.block_id,
+      addedTransfers,
+    );
+    if (!stamped.ok) return stamped;
+  }
 
   const updatePayload: Record<string, unknown> = {
     pending_approval_payload: payload,
@@ -1054,86 +1355,11 @@ export async function acknowledgeReprintAction(formData: FormData) {
   await refreshPaths();
 }
 
-export async function undoDoneAction(formData: FormData) {
-  // Allow any role through requireAuth; permission is then refined
-  // below to: developer | owner | trusted-named-owner. This matches
-  // the UI gate so a button click can never produce a 403.
-  const { profile } = await requireAuth();
-  const { canTransferPlannedSlabs } = await import("@/lib/cutting-permissions");
-  if (
-    profile.role !== "developer" &&
-    profile.role !== "owner" &&
-    !canTransferPlannedSlabs(profile)
-  ) {
-    redirect("/cutting?toast=Only+owners+can+undo+a+cut");
-  }
-  const supabase = createAdminSupabaseClient();
-  const sessionBlockId = String(formData.get("session_block_id") || "");
-  const blockId = String(formData.get("block_id") || "");
-  const slabIds = JSON.parse(String(formData.get("slab_ids") || "[]")) as string[];
-  const restockedBlockId = String(formData.get("restocked_block_id") || "");
-  const sessionId = String(formData.get("session_id") || "");
-
-  await supabase
-    .from("blocks")
-    .update({ status: "reserved", updated_by: profile.id, updated_at: new Date().toISOString() })
-    .eq("id", blockId);
-
-  if (restockedBlockId) {
-    const ids = restockedBlockId.split(",").map((s) => s.trim()).filter(Boolean);
-    if (ids.length > 0) await supabase.from("blocks").delete().in("id", ids);
-  }
-
-  if (slabIds.length) {
-    await supabase
-      .from("slab_requirements")
-      .update({ status: "planned", updated_by: profile.id, updated_at: new Date().toISOString() })
-      .in("id", slabIds);
-  }
-
-  // Re-assign a cutter sequence number when reverting back to cutting.
-  // Same facility-scoped lowest-unused logic used by startCuttingAction.
-  const { facilityOfYard: facilityOfYardUndo } = await import("@/lib/yards");
-  const { data: undoBlockRow } = await supabase
-    .from("cut_session_blocks")
-    .select("layout")
-    .eq("id", sessionBlockId)
-    .maybeSingle();
-  const undoYard = (undoBlockRow?.layout as { blk?: { yard?: number } } | null)?.blk?.yard;
-  const undoFacility = facilityOfYardUndo(undoYard);
-  const { data: inUseAtUndo } = await supabase
-    .from("cut_session_blocks")
-    .select("cutting_seq, layout")
-    .eq("status", "cutting")
-    .not("cutting_seq", "is", null);
-  const usedAtUndo = new Set<number>();
-  for (const r of inUseAtUndo ?? []) {
-    const y = (r.layout as { blk?: { yard?: number } } | null)?.blk?.yard;
-    if (facilityOfYardUndo(y) === undoFacility && typeof r.cutting_seq === "number") {
-      usedAtUndo.add(r.cutting_seq);
-    }
-  }
-  let undoSeq = 1;
-  while (usedAtUndo.has(undoSeq)) undoSeq++;
-
-  await supabase
-    .from("cut_session_blocks")
-    .update({ status: "cutting", cutting_seq: undoSeq, restocked_block_id: null })
-    .eq("id", sessionBlockId);
-
-  await supabase
-    .from("cut_sessions")
-    .update({ status: "in_progress" })
-    .eq("id", sessionId);
-
-  await logAudit(profile.id, "cutting_undo_done", "cut_session_block", sessionBlockId, {
-    session_id: sessionId,
-    block_id: blockId,
-    slabs_reverted: slabIds,
-    restocked_block_id: restockedBlockId || null,
-    cutting_seq: undoSeq,
-  });
-
-  await refreshPaths();
-  redirect(`/cutting/${sessionBlockId}`);
-}
+// undoDoneAction was removed alongside the Undo button (see the
+// adjacent comment block in cutting/[id]/page.tsx). The approval
+// workflow added in migration 027 — Send back for edit, Allow cutter
+// to edit, Reject — covers every legitimate need for changing a
+// cutting submission BEFORE it commits. The Undo path was unsafe
+// post-commit because it left orphan cut_done slabs every time
+// extras or transfers were involved (MT-B-109, MT-B-113, MT-B-248
+// were all bitten by this). Keep approvals tight; no undo.

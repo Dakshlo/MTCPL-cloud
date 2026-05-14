@@ -393,7 +393,7 @@ function StatusPill({ status, wasCut }: { status: string; wasCut: boolean }) {
  *  filler at planning time, or an unplanned addition / transfer
  *  during cutting-done? Helps the team eyeball "this block
  *  picked up 3 extras at cutting time" at a glance. */
-function ProvenancePill({ kind }: { kind: "planned" | "filler" | "extra" }) {
+function ProvenancePill({ kind }: { kind: "planned" | "filler" | "extra" | "transferred" }) {
   if (kind === "planned") {
     return (
       <span title="In the original cut plan" style={{
@@ -415,8 +415,19 @@ function ProvenancePill({ kind }: { kind: "planned" | "filler" | "extra" }) {
       }}>FILLER</span>
     );
   }
+  if (kind === "transferred") {
+    return (
+      <span title="Claimed from another block's plan during Cutting Done — that block had to reprint" style={{
+        fontSize: 9, fontWeight: 700, padding: "1px 6px",
+        borderRadius: 3, color: "#fff",
+        background: "#7c3aed",
+        border: "1px solid #6d28d9",
+        letterSpacing: "0.04em",
+      }}>TRANSFER</span>
+    );
+  }
   return (
-    <span title="Added during Cutting-Done — manual extra from open inventory or transferred from another block's plan" style={{
+    <span title="Added during Cutting Done from open inventory — was not in the original plan" style={{
       fontSize: 9, fontWeight: 700, padding: "1px 6px",
       borderRadius: 3, color: "#b45309",
       background: "rgba(180,83,9,0.10)",

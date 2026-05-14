@@ -13,7 +13,6 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
 import { CuttingDetailPreview } from "../cutting-detail-preview";
 import { FinishBlockForm } from "../finish-block-form";
-import { UndoButton } from "../undo-button";
 import { RejectButton } from "../reject-button";
 import { PrimarySlabPreview } from "../primary-slab-preview";
 import { computeCutEfficiency, computeActualCutEfficiency, toCFT } from "@/lib/cut-efficiency";
@@ -24,7 +23,6 @@ import {
   rejectBlockAction,
   startCuttingAction,
   finishBlockAction,
-  undoDoneAction,
   acknowledgeReprintAction,
   approveCutFormAction,
   editPendingApprovalAction,
@@ -266,6 +264,74 @@ export default async function CuttingDetailPage({
   };
   const stagedPayload = (block as { pending_approval_payload?: StagedPayload | null })
     .pending_approval_payload ?? null;
+
+  // Resolve the donor block_id for each transferred slab in the staged
+  // payload. Daksh's ask: "in view and edit, show from which block the
+  // transferred slab came." Edit mode already shows it via
+  // extra-size-picker (each transferable carries donor_block_id). View
+  // mode (this audit summary) needed its own lookup because the staged
+  // payload only stores slab_requirement_ids.
+  //
+  // We may find multiple cut_session_slabs rows per slab id (e.g. a
+  // stale row left on a finished donor block alongside a live row on
+  // the actual donor). Priority order:
+  //   1. The row earmarked specifically for THIS cut_session_block
+  //      (pending_transfer_to_csb_id matches our id) — that's the
+  //      explicit reservation from Migration 033.
+  //   2. The row whose donor is in a non-terminal status — the live
+  //      planned slab.
+  //   3. Any row (last-resort fallback).
+  type TransferDonor = { block_id: string; status: string };
+  const transferDonorMap = new Map<string, TransferDonor>();
+  const stagedTransferIds = stagedPayload?.transferred_slab_ids ?? [];
+  if (stagedTransferIds.length > 0) {
+    const { data: donorLinks } = await supabase
+      .from("cut_session_slabs")
+      .select(
+        "slab_requirement_id, cut_session_block_id, pending_transfer_to_csb_id, cut_session_blocks!inner(id, block_id, status)",
+      )
+      .in("slab_requirement_id", stagedTransferIds)
+      .neq("cut_session_block_id", id);
+    type RawDonorRow = {
+      slab_requirement_id: string;
+      cut_session_block_id: string;
+      pending_transfer_to_csb_id: string | null;
+      cut_session_blocks:
+        | { id: string; block_id: string; status: string }
+        | { id: string; block_id: string; status: string }[]
+        | null;
+    };
+    const rawRows = (donorLinks ?? []) as unknown as RawDonorRow[];
+    for (const slabId of stagedTransferIds) {
+      const candidates: Array<{
+        block_id: string;
+        status: string;
+        earmarked: boolean;
+      }> = [];
+      for (const r of rawRows) {
+        if (r.slab_requirement_id !== slabId) continue;
+        const blk = Array.isArray(r.cut_session_blocks)
+          ? r.cut_session_blocks[0] ?? null
+          : r.cut_session_blocks;
+        if (!blk) continue;
+        candidates.push({
+          block_id: blk.block_id,
+          status: blk.status,
+          earmarked: r.pending_transfer_to_csb_id === id,
+        });
+      }
+      if (candidates.length === 0) continue;
+      const TERMINAL = ["done", "rejected"];
+      const pick =
+        candidates.find((c) => c.earmarked) ??
+        candidates.find((c) => !TERMINAL.includes(c.status)) ??
+        candidates[0];
+      transferDonorMap.set(slabId, {
+        block_id: pick.block_id,
+        status: pick.status,
+      });
+    }
+  }
 
   // When the cut is already done, fetch the REAL post-cut data so the
   // utilisation bar reflects what actually happened instead of the
@@ -1072,6 +1138,7 @@ export default async function CuttingDetailPage({
                     label="↔ Transferred from another block"
                     color="#7c3aed"
                     ids={transferIds}
+                    donorMap={transferDonorMap}
                   />
                 )}
                 {/* Remainders */}
@@ -1275,42 +1342,19 @@ export default async function CuttingDetailPage({
               </p>
             )}
           </div>
-          {/* Visible to:
-                – every developer
-                – every owner (existing rule)
-                – Naresh + Rajesh specifically, even if their stored
-                  role isn't "owner" (caught by canTransferPlannedSlabs).
-              The fallback exists because the original owner-only check
-              was excluding Naresh and Rajesh in production due to a
-              role-data mismatch. */}
-          {(profile.role === "owner"
-            || profile.role === "developer"
-            || canTransferPlannedSlabs(profile)) && (
-            <form action={undoDoneAction} style={{ display: "inline" }}>
-              <input
-                type="hidden"
-                name="session_block_id"
-                value={block.id}
-              />
-              <input
-                type="hidden"
-                name="session_id"
-                value={block.cut_session_id}
-              />
-              <input type="hidden" name="block_id" value={block.block_id} />
-              <input
-                type="hidden"
-                name="slab_ids"
-                value={JSON.stringify(slabReqIds)}
-              />
-              <input
-                type="hidden"
-                name="restocked_block_id"
-                value={block.restocked_block_id ?? ""}
-              />
-              <UndoButton message="Undo this cut? Block goes back to reserved and slabs back to planned." />
-            </form>
-          )}
+          {/* The "↩ Undo cut" button used to live here. Removed after
+              the cut-approval workflow (migration 027) shipped — every
+              cut now passes through an auditor who can Send back for
+              edit, Allow cutter to edit, or Reject before the cut
+              commits. Once approved, the cut is final.
+
+              History: the Undo path bypassed the RPC's careful
+              donor-block mutations and only reverted slabs from
+              layout.placed[], leaving orphaned cut_done slabs whenever
+              extras or transfers were involved. Multiple stuck-block
+              incidents (MT-B-109, MT-B-113, MT-B-248) traced back here.
+              Pre-commit guard rails make this rear-end escape hatch
+              unnecessary. */}
         </div>
       )}
 
@@ -1395,11 +1439,17 @@ function SlabIdList({
   color,
   ids,
   allSlabsById,
+  donorMap,
 }: {
   label: string;
   color: string;
   ids: string[];
   allSlabsById?: Map<string, { id: string; label?: string; temple?: string; sw?: number; sh?: number }>;
+  /** For the "Transferred from another block" list: slab id →
+   *  { block_id, status } of the donor. Renders as "from MT-B-269"
+   *  (with a warning hue when the donor is already done/rejected,
+   *  signalling a stale link row that needs cleanup). */
+  donorMap?: Map<string, { block_id: string; status: string }>;
 }) {
   if (ids.length === 0) return null;
   return (
@@ -1417,6 +1467,9 @@ function SlabIdList({
       <div className="chip-row" style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
         {ids.map((id) => {
           const s = allSlabsById?.get(id);
+          const donor = donorMap?.get(id);
+          const donorIsStale =
+            !!donor && (donor.status === "done" || donor.status === "rejected");
           return (
             <span
               key={id}
@@ -1443,6 +1496,36 @@ function SlabIdList({
                   <span style={{ color: "var(--muted)" }}>{s.temple}</span>
                 </>
               ) : null}
+              {donor && (
+                <>
+                  {" · "}
+                  <span
+                    style={{
+                      color: donorIsStale ? "#b91c1c" : color,
+                      fontWeight: 600,
+                    }}
+                    title={
+                      donorIsStale
+                        ? `Donor ${donor.block_id} is already ${donor.status} — stale link, contact a developer to clean up.`
+                        : `Claimed from ${donor.block_id} (currently ${donor.status})`
+                    }
+                  >
+                    {donorIsStale ? "⚠ " : "← "}from {donor.block_id}
+                    {donorIsStale ? ` (${donor.status})` : ""}
+                  </span>
+                </>
+              )}
+              {!donor && donorMap && (
+                <>
+                  {" · "}
+                  <span
+                    style={{ color: "var(--muted)", fontStyle: "italic" }}
+                    title="No donor cut_session_slabs row found — the slab may have been re-planned or the link cleaned up."
+                  >
+                    ← donor unknown
+                  </span>
+                </>
+              )}
             </span>
           );
         })}

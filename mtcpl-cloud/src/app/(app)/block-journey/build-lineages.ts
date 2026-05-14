@@ -64,6 +64,11 @@ export type BjSlabRow = {
   label: string | null;
   temple: string | null;
   status: string;
+  /** Migration 035 — tagged by finish_block_cut at cut time:
+   *  'planned' | 'extra' | 'transferred' | null (legacy / not yet
+   *  backfilled). The lineage card uses this to disambiguate the
+   *  "EXTRA" vs "TRANSFERRED" pill. */
+  cut_source_kind?: "planned" | "extra" | "transferred" | null;
 };
 
 export type BjCsbRow = {
@@ -120,16 +125,20 @@ export type LineageNode = {
     w: number;
     t: number;
     /** Provenance — how this slab ended up linked to this block:
-     *   • "planned"  — was in the original cut_session plan
-     *   • "filler"   — was in the plan but tagged is_filler at
-     *                  approval time (Fit-to-Fill cut-ahead)
-     *   • "extra"    — added at Cutting-Done time from the
-     *                  open-inventory or transferred-from-another-
-     *                  block flow (no cut_session_slabs row exists
-     *                  for it on this block).
+     *   • "planned"     — was in the original cut_session plan
+     *   • "filler"      — was in the plan but tagged is_filler at
+     *                     approval time (Fit-to-Fill cut-ahead)
+     *   • "extra"       — added at Cutting-Done time from the
+     *                     open-inventory shelf (no cut_session_slabs
+     *                     row exists for it on this block)
+     *   • "transferred" — claimed from another block's plan at
+     *                     Cutting-Done time. Migration 035 tags
+     *                     these via slab_requirements.cut_source_kind
+     *                     so the lineage view can show "TRANSFERRED"
+     *                     instead of lumping with "EXTRA".
      *  When the cut_session_slabs lookup data isn't supplied at
      *  buildLineages time, defaults to "planned" for back-compat. */
-    provenance: "planned" | "filler" | "extra";
+    provenance: "planned" | "filler" | "extra" | "transferred";
   }>;
   slabCftFromThis: number;     // sum of slabsFromThis[].cft
   children: LineageNode[];     // DIRECT children only (recursion carries deeper)
@@ -496,11 +505,23 @@ function buildTreeNode(
     cutAt,
     slabsFromThis: ownSlabs.map((s) => {
       const key = `${s.id}|${block.id}`;
-      // Provenance: if the cut_session_slabs index has a row that
-      // links this slab to THIS block, use it ("planned" or
-      // "filler"). Otherwise the slab arrived via the
-      // cutting-done extras path or a transfer — call it "extra".
-      const provenance = provenanceByKey.get(key) ?? "extra";
+      // Provenance precedence (Migration 035):
+      //   1. slab_requirements.cut_source_kind — set explicitly by
+      //      finish_block_cut at cut time. Only this can distinguish
+      //      "extra" (from open inventory) from "transferred"
+      //      (claimed from another block's plan), because in both
+      //      cases there's no cut_session_slabs link on this block.
+      //   2. cut_session_slabs link — "planned" / "filler" lookup.
+      //   3. Default — "extra" for legacy cuts predating Mig 035 with
+      //      no link and no source-kind tag.
+      let provenance: "planned" | "filler" | "extra" | "transferred";
+      if (s.cut_source_kind === "transferred") {
+        provenance = "transferred";
+      } else if (s.cut_source_kind === "extra") {
+        provenance = "extra";
+      } else {
+        provenance = provenanceByKey.get(key) ?? "extra";
+      }
       return {
         id: s.id,
         cft: toCFT(num(s.length_ft) * num(s.width_ft) * num(s.thickness_ft)),

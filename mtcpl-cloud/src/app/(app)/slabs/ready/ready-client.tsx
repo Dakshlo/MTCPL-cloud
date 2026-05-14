@@ -137,7 +137,8 @@ export function ReadySlabsClient({
         s.id.toLowerCase().includes(lower) ||
         s.label.toLowerCase().includes(lower) ||
         s.temple.toLowerCase().includes(lower) ||
-        (s.stone ?? "").toLowerCase().includes(lower),
+        (s.stone ?? "").toLowerCase().includes(lower) ||
+        (s.source_block_id ?? "").toLowerCase().includes(lower),
       );
     }
     const set = new Set<string>();
@@ -157,7 +158,8 @@ export function ReadySlabsClient({
         s.id.toLowerCase().includes(lower) ||
         s.label.toLowerCase().includes(lower) ||
         s.temple.toLowerCase().includes(lower) ||
-        (s.stone ?? "").toLowerCase().includes(lower),
+        (s.stone ?? "").toLowerCase().includes(lower) ||
+        (s.source_block_id ?? "").toLowerCase().includes(lower),
       );
     }
     const set = new Set<string>();
@@ -198,7 +200,8 @@ export function ReadySlabsClient({
         s.id.toLowerCase().includes(q) ||
         s.label.toLowerCase().includes(q) ||
         s.temple.toLowerCase().includes(q) ||
-        (s.stone ?? "").toLowerCase().includes(q)
+        (s.stone ?? "").toLowerCase().includes(q) ||
+        (s.source_block_id ?? "").toLowerCase().includes(q)
       );
     }
     if (dateFrom) rows = rows.filter(s => s.updated_at && s.updated_at >= dateFrom);
@@ -400,7 +403,7 @@ export function ReadySlabsClient({
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Code, label, temple, stone…"
+              placeholder="Code, label, temple, stone, block…"
             />
           </label>
 

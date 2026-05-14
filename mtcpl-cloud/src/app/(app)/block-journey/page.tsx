@@ -83,7 +83,7 @@ export default async function BlockJourneyPage({
     // out of it, regardless of where the slab is now.
     admin
       .from("slab_requirements")
-      .select("id, length_ft, width_ft, thickness_ft, source_block_id, label, temple, status")
+      .select("id, length_ft, width_ft, thickness_ft, source_block_id, label, temple, status, cut_source_kind")
       .not("source_block_id", "is", null)
       .in("status", [
         "cut_done",
