@@ -469,15 +469,23 @@ export default async function AccountsHomePage({
           live in the same GET form as the vendor select. One submit
           handles all four; an age-bucket click adds `age=...` via a
           separate Link, which we keep round-trippable through this
-          form via the hidden input. */}
+          form via the hidden input.
+          UI fix (Daksh OCD pass): rebuilt as a 5-column grid with a
+          fixed-height label row so every input lands on the same
+          baseline. The earlier flex-end layout had the Token field
+          riding higher than its neighbours because the per-field
+          "Type any part of T-YYYY-N" hint stretched its column. The
+          hint now lives below the entire row instead of under one
+          input. */}
       <form
         method="GET"
         style={{
-          display: "flex",
-          gap: 10,
+          display: "grid",
+          gridTemplateColumns: "minmax(140px, 1.4fr) minmax(160px, 1.6fr) minmax(140px, 1fr) minmax(140px, 1fr) auto",
+          alignItems: "end",
+          columnGap: 10,
+          rowGap: 4,
           marginBottom: 14,
-          alignItems: "flex-end",
-          flexWrap: "wrap",
           padding: "10px 12px",
           background: "var(--surface, #fff)",
           border: `1px solid ${ACCOUNTS_TOKENS.border}`,
@@ -487,7 +495,7 @@ export default async function AccountsHomePage({
       >
         {ageFilter && <input type="hidden" name="age" value={ageFilter} />}
 
-        <FilterField label="Token" hint="Type any part of T-YYYY-N">
+        <FilterField label="Token">
           <input
             type="search"
             name="token"
@@ -500,7 +508,7 @@ export default async function AccountsHomePage({
               borderRadius: 8,
               color: "var(--text)",
               fontFamily: "ui-monospace, monospace",
-              minWidth: 140,
+              width: "100%",
             }}
           />
         </FilterField>
@@ -516,7 +524,7 @@ export default async function AccountsHomePage({
               border: `1px solid ${ACCOUNTS_TOKENS.borderStrong}`,
               borderRadius: 8,
               color: "var(--text)",
-              minWidth: 180,
+              width: "100%",
             }}
           >
             <option value="">All vendors</option>
@@ -541,6 +549,7 @@ export default async function AccountsHomePage({
               borderRadius: 8,
               color: "var(--text)",
               fontFamily: "ui-monospace, monospace",
+              width: "100%",
             }}
           />
         </FilterField>
@@ -558,26 +567,41 @@ export default async function AccountsHomePage({
               borderRadius: 8,
               color: "var(--text)",
               fontFamily: "ui-monospace, monospace",
+              width: "100%",
             }}
           />
         </FilterField>
 
-        <button type="submit" style={BUTTON_STYLES.secondary}>
-          Apply filters
-        </button>
-        {(vendorFilter || ageFilter || tokenFilter || dateFromFilter || dateToFilter) && (
-          <Link
-            href="/accounts"
-            style={{
-              fontSize: 12,
-              color: "var(--muted)",
-              textDecoration: "underline",
-              padding: "6px 4px",
-            }}
-          >
-            Clear all
-          </Link>
-        )}
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button type="submit" style={BUTTON_STYLES.secondary}>
+            Apply filters
+          </button>
+          {(vendorFilter || ageFilter || tokenFilter || dateFromFilter || dateToFilter) && (
+            <Link
+              href="/accounts"
+              style={{
+                fontSize: 12,
+                color: "var(--muted)",
+                textDecoration: "underline",
+              }}
+            >
+              Clear
+            </Link>
+          )}
+        </div>
+
+        {/* Single hint row that spans all columns. Lives BELOW the
+            inputs so it doesn't push any one column out of line. */}
+        <span
+          style={{
+            gridColumn: "1 / -1",
+            fontSize: 10,
+            color: "var(--muted)",
+            marginTop: 2,
+          }}
+        >
+          Token: type any part of <code style={{ fontFamily: "ui-monospace, monospace" }}>T-YYYY-N</code>. Leave dates blank for an open-ended range.
+        </span>
       </form>
 
       {/* Multi-select propose table */}
@@ -605,15 +629,15 @@ export default async function AccountsHomePage({
   );
 }
 
-/** Mig 042 follow-on — small column wrapper for the filter inputs.
- *  Keeps every filter aligned on the same baseline. */
+/** Filter column wrapper. Label + input only — hints live on a
+ *  single row below the entire form so every input lands on the
+ *  same baseline (Daksh OCD fix: previously the Token column had a
+ *  per-field hint and sat higher than the others). */
 function FilterField({
   label,
-  hint,
   children,
 }: {
   label: string;
-  hint?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -622,6 +646,7 @@ function FilterField({
         display: "flex",
         flexDirection: "column",
         gap: 4,
+        minWidth: 0,
       }}
     >
       <span
@@ -636,9 +661,6 @@ function FilterField({
         {label}
       </span>
       {children}
-      {hint && (
-        <span style={{ fontSize: 10, color: "var(--muted)" }}>{hint}</span>
-      )}
     </label>
   );
 }

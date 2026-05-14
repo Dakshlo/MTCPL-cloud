@@ -260,23 +260,25 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
       </div>
 
       {/* ── ASK AI / BLOCK JOURNEY / ID LOOKUP / TV MODE ENTRIES ──
-          Four "insight" entry cards. They flow side-by-side on wide
-          screens and stack on narrow screens via flexWrap. ID Lookup
-          opens as a center-peek modal; TV Mode deep-links into the
-          carving floor's TV variant for the wall display. */}
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-        <div style={{ flex: "1 1 320px", minWidth: 0 }}>
-          <AskAiEntryCard />
-        </div>
-        <div style={{ flex: "1 1 320px", minWidth: 0 }}>
-          <BlockJourneyEntryCard />
-        </div>
-        <div style={{ flex: "1 1 320px", minWidth: 0 }}>
-          <IdSearchEntryCard />
-        </div>
-        <div style={{ flex: "1 1 320px", minWidth: 0 }}>
-          <TvModeEntryCard />
-        </div>
+          Four "insight" entry cards. CSS grid (not flex) so all
+          four cards equal-height regardless of description length
+          and regardless of how many wrap per row. Daksh: "the
+          cards are not one size — triggering my OCD." Grid's
+          align-items:stretch default makes the row height = the
+          tallest card's content height, and every Link inside
+          stretches to fill its cell. */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+          gap: 12,
+          alignItems: "stretch",
+        }}
+      >
+        <AskAiEntryCard />
+        <BlockJourneyEntryCard />
+        <IdSearchEntryCard />
+        <TvModeEntryCard />
       </div>
 
       {/* ── REPORT BUTTONS ──

@@ -10,7 +10,12 @@ export function AskAiEntryCard() {
     <Link
       href="/ask-ai"
       style={{
-        display: "block",
+        // Daksh: cards in a row must be one size. Switched to a
+        // flex container so children stretch + the card itself
+        // fills its grid cell via height:100%.
+        display: "flex",
+        flexDirection: "column",
+        height: "100%",
         textDecoration: "none",
         background: "linear-gradient(135deg, #2D2410 0%, #6b4f18 100%)",
         borderRadius: 12,

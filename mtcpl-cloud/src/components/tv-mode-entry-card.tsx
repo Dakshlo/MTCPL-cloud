@@ -22,7 +22,10 @@ export function TvModeEntryCard() {
       target="_blank"
       rel="noreferrer"
       style={{
-        display: "block",
+        // Daksh OCD fix — all four dashboard cards equal-height.
+        display: "flex",
+        flexDirection: "column",
+        height: "100%",
         textDecoration: "none",
         background: "linear-gradient(135deg, #1a1a1a 0%, #2D2410 60%, #6b4f18 100%)",
         borderRadius: 12,

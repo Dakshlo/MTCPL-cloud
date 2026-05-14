@@ -25,7 +25,11 @@ export function BlockJourneyEntryCard() {
       triggerContent={
         <div
           style={{
-            display: "block",
+            // Stretch to grid cell height (mig 044 follow-on / Daksh
+            // OCD fix) — all four dashboard cards equal-height.
+            display: "flex",
+            flexDirection: "column",
+            height: "100%",
             cursor: "pointer",
             textDecoration: "none",
             background: "linear-gradient(135deg, #1A2414 0%, #3d5a28 100%)",
