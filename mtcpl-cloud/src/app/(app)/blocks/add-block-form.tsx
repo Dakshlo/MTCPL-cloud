@@ -224,7 +224,7 @@ export function AddBlockForm({ suggestedId, vendors, stoneTypes }: { suggestedId
           <div className="add-panel-row" style={{ marginTop: 10 }}>
             <label className="stack" style={{ flex: "1 1 110px" }}>
               <span>Truck No.</span>
-              <input name="truck_no" placeholder="e.g. GJ01AB1234" />
+              <input name="truck_no" />
             </label>
             <label className="stack" style={{ flex: "2 1 160px" }}>
               <span>Vendor / Supplier</span>
@@ -232,7 +232,7 @@ export function AddBlockForm({ suggestedId, vendors, stoneTypes }: { suggestedId
             </label>
             <label className="stack" style={{ flex: "1 1 110px" }}>
               <span>Bill No.</span>
-              <input name="bill_no" placeholder="e.g. INV-2024-001" />
+              <input name="bill_no" />
             </label>
           </div>
         </details>

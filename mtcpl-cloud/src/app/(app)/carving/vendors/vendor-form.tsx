@@ -103,7 +103,7 @@ export function VendorForm({
           value={name}
           onChange={(e) => setName(e.target.value)}
           required
-          placeholder="e.g. Mohit Carving Works"
+
           style={{ padding: "8px 12px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
         />
       </label>
@@ -158,7 +158,7 @@ export function VendorForm({
             name="dropoff_location"
             value={dropoffLocation}
             onChange={(e) => setDropoffLocation(e.target.value)}
-            placeholder="e.g. Shade A, near gate"
+
             style={{ padding: "8px 12px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
           />
         </label>
@@ -203,7 +203,7 @@ export function VendorForm({
                       <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Machine code</span>
                       <input
                         type="text"
-                        placeholder="e.g. CNC-01"
+
                         value={m.machine_code}
                         onChange={(e) => updateMachine(idx, { machine_code: e.target.value })}
                         style={{ fontSize: 12, padding: "5px 9px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--surface)", color: "var(--text)", width: "100%" }}

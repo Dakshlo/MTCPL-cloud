@@ -2003,7 +2003,7 @@ function CompleteModal({
             autoFocus
             value={tempLocation}
             onChange={(e) => setTempLocation(e.target.value)}
-            placeholder="e.g. Polishing area · Yard 2 · vendor's truck"
+
             style={{ width: "100%", padding: "10px 12px", fontSize: 14, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
           />
           <div style={{ fontSize: 10, color: "var(--muted-light)", marginTop: 4 }}>
@@ -2318,7 +2318,7 @@ function EditLocationModal({
             autoFocus
             value={loc}
             onChange={(e) => setLoc(e.target.value)}
-            placeholder="e.g. Polishing area · Yard 2"
+
             style={{ width: "100%", padding: "10px 12px", fontSize: 14, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
           />
         </div>

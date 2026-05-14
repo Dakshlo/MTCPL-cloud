@@ -529,7 +529,7 @@ export function BlockGrid({
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginTop: 10 }}>
                     <label className="stack">
                       <span>Truck No.</span>
-                      <input name="truck_no" defaultValue={selected.truck_no ?? ""} placeholder="e.g. GJ01AB1234" />
+                      <input name="truck_no" defaultValue={selected.truck_no ?? ""} />
                     </label>
                     <label className="stack">
                       <span>Vendor</span>
@@ -537,7 +537,7 @@ export function BlockGrid({
                     </label>
                     <label className="stack">
                       <span>Bill No.</span>
-                      <input name="bill_no" defaultValue={selected.bill_no ?? ""} placeholder="e.g. INV-001" />
+                      <input name="bill_no" defaultValue={selected.bill_no ?? ""} />
                     </label>
                   </div>
                 </details>

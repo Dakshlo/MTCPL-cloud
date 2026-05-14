@@ -5,6 +5,7 @@ import { headers, cookies } from "next/headers";
 import { LogoutButton } from "@/components/logout-button";
 import { MobileNav } from "@/components/mobile-nav";
 import { NotificationBell } from "@/components/notification-bell";
+import { NavigationProgress } from "@/components/navigation-progress";
 import { RealtimeRefresh } from "@/components/realtime-refresh";
 import { Sidebar } from "@/components/sidebar";
 import { Toast } from "@/components/toast";
@@ -204,6 +205,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="app-shell">
+      <NavigationProgress />
       <RealtimeRefresh />
       <Heartbeat />
       <Sidebar

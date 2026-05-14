@@ -103,7 +103,7 @@ export function VendorSelect({
           <input
             value={newName}
             onChange={e => { setNewName(e.target.value); setAddError(""); setSubmitBlockError(""); }}
-            placeholder="e.g. YK Stone"
+
             style={{ flex: 1, fontSize: 13 }}
             onKeyDown={e => {
               if (e.key === "Enter") { e.preventDefault(); handleAdd(); }

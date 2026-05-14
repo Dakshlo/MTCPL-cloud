@@ -402,7 +402,7 @@ function BillAuditCard({
           <textarea
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            placeholder="e.g. Check the amount — total seems off. Re-confirm GST%."
+
             rows={3}
             style={{
               width: "100%",

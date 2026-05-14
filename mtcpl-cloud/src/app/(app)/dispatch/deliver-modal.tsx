@@ -73,7 +73,7 @@ export function DeliverModal({
               <span>Receiver Name (optional)</span>
               <input
                 name="receiver_name"
-                placeholder="e.g. Rajesh (Aasta Temple site engineer)"
+
               />
             </label>
 
@@ -82,7 +82,7 @@ export function DeliverModal({
               <textarea
                 name="delivery_note"
                 rows={3}
-                placeholder="e.g. Delivered 22 Apr ~3pm · all 4 slabs intact · no damage"
+
                 style={{ resize: "vertical", fontFamily: "inherit" }}
               />
             </label>

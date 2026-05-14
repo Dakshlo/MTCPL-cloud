@@ -548,7 +548,7 @@ function ApprovalCard({
           <textarea
             value={unlockNote}
             onChange={(e) => setUnlockNote(e.target.value)}
-            placeholder="e.g. 'Check slab MH-0018-2 — looks like it wasn't cut. Fix and resubmit.'"
+
             rows={3}
             style={{
               width: "100%",

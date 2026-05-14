@@ -330,7 +330,7 @@ function TransferModal({
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               rows={3}
-              placeholder="e.g. Mohit's machines all in maintenance — moving to Manthan."
+
               style={{ padding: "8px 12px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)", resize: "vertical", fontFamily: "inherit" }}
             />
             <span style={{ fontSize: 10, color: "var(--muted-light)" }}>

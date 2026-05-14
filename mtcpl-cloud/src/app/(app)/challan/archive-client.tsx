@@ -201,7 +201,7 @@ export function ChallanArchiveClient({
             type="text"
             value={truckFilter}
             onChange={(e) => setTruckFilter(e.target.value)}
-            placeholder="e.g. RJ-14"
+
             style={{ textTransform: "uppercase", fontFamily: "ui-monospace, monospace" }}
           />
         </label>

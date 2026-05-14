@@ -122,7 +122,7 @@ export function InvoiceForm({
               value={customerName}
               onChange={(e) => setCustomerName(e.target.value)}
               required
-              placeholder="e.g. Shri Aai Mataji Mandir, Vithuda"
+
               style={INPUT_STYLE}
             />
           </label>
@@ -208,7 +208,7 @@ export function InvoiceForm({
               }}
             >
               <input
-                placeholder="e.g. Pink stone slab, 4×3 ft"
+
                 value={it.description}
                 onChange={(e) => updateItem(idx, { description: e.target.value })}
                 style={INPUT_STYLE}

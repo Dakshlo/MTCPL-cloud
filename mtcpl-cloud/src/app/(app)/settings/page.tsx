@@ -486,7 +486,7 @@ export default async function SettingsPage() {
           <form action={addStoneTypeAction} className="settings-form-row">
             <label className="stack" style={{ flex: 2, minWidth: 180 }}>
               <span>Name (no spaces, e.g. RedStone)</span>
-              <input name="name" placeholder="e.g. RedStone" required style={{ fontFamily: "ui-monospace, monospace", fontWeight: 600 }} />
+              <input name="name" required style={{ fontFamily: "ui-monospace, monospace", fontWeight: 600 }} />
             </label>
             <label className="stack" style={{ flex: "0 0 auto", minWidth: 130 }}>
               <span>Category</span>
@@ -656,13 +656,13 @@ export default async function SettingsPage() {
           <form action={addTempleAction} className="settings-form-row">
             <label className="stack" style={{ flex: 2 }}>
               <span>Temple Name</span>
-              <input name="name" placeholder="e.g. Ram Mandir" required />
+              <input name="name" required />
             </label>
             <label className="stack" style={{ flex: 1 }}>
               <span>Code Prefix</span>
               <input
                 name="code_prefix"
-                placeholder="e.g. RM"
+
                 maxLength={6}
                 required
                 style={{ textTransform: "uppercase", fontFamily: "ui-monospace, monospace", fontWeight: 700 }}

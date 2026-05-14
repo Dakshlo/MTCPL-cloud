@@ -330,7 +330,7 @@ export function BillEntryForm({
                 type="text"
                 value={vendorBillNo}
                 onChange={(e) => setVendorBillNo(e.target.value)}
-                placeholder="e.g. INV/2026/0042"
+
                 style={INPUT_STYLE}
                 required
                 disabled={fieldsDisabled}
@@ -341,7 +341,7 @@ export function BillEntryForm({
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="e.g. 3× CNC tools (5mm cutter + 8mm cutter + 10mm router)"
+
               rows={3}
               style={{ ...INPUT_STYLE, resize: "vertical", fontFamily: "inherit" }}
               required
@@ -356,7 +356,7 @@ export function BillEntryForm({
               type="text"
               value={costHead}
               onChange={(e) => setCostHead(e.target.value)}
-              placeholder="e.g. Tools"
+
               style={INPUT_STYLE}
               disabled={fieldsDisabled}
             />

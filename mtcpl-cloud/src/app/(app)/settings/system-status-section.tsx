@@ -290,7 +290,7 @@ export function SystemStatusSection({
             <textarea
               value={maintenanceMessage}
               onChange={(e) => setMaintenanceMessage(e.target.value)}
-              placeholder="e.g. Back in 20 minutes after a quick database fix."
+
               rows={2}
               style={{
                 width: "100%",

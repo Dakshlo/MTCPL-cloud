@@ -87,7 +87,7 @@ export function DispatchModal({
               <span>Vehicle No. <span style={{ color: "#DC2626" }}>*</span></span>
               <input
                 name="vehicle_no"
-                placeholder="e.g. RJ-14-AB-1234"
+
                 required
                 autoCapitalize="characters"
                 autoCorrect="off"
@@ -112,11 +112,11 @@ export function DispatchModal({
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <label className="stack" style={{ flex: "1 1 180px" }}>
                 <span>Driver Name <span style={{ color: "#DC2626" }}>*</span></span>
-                <input name="driver_name" placeholder="e.g. Ramesh" required />
+                <input name="driver_name" required />
               </label>
               <label className="stack" style={{ flex: "1 1 140px" }}>
                 <span>Driver Phone</span>
-                <input name="driver_phone" placeholder="e.g. +91 98xxxxxx" type="tel" />
+                <input name="driver_phone" type="tel" />
               </label>
             </div>
 
@@ -135,7 +135,7 @@ export function DispatchModal({
               <textarea
                 name="notes"
                 rows={2}
-                placeholder="e.g. Deliver to site foreman Ramesh · handle pink slabs with care"
+
                 style={{ resize: "vertical", fontFamily: "inherit" }}
               />
             </label>

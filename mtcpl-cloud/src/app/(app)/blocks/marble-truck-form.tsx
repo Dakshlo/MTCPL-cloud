@@ -199,7 +199,7 @@ export function MarbleTruckForm({
             onChange={(e) => setTotalTonnes(e.target.value)}
             min="0.001"
             step="0.001"
-            placeholder="e.g. 30.000"
+
             required
           />
         </label>
@@ -214,7 +214,7 @@ export function MarbleTruckForm({
             min="1"
             max="50"
             step="1"
-            placeholder="e.g. 10"
+
             required
           />
         </label>
@@ -282,7 +282,7 @@ export function MarbleTruckForm({
               name="truck_no"
               value={truckNo}
               onChange={(e) => setTruckNo(e.target.value)}
-              placeholder="e.g. RJ-14-AB-1234"
+
             />
           </label>
 
@@ -298,7 +298,7 @@ export function MarbleTruckForm({
               name="bill_no"
               value={billNo}
               onChange={(e) => setBillNo(e.target.value)}
-              placeholder="e.g. INV-2042"
+
             />
           </label>
         </div>
@@ -309,7 +309,7 @@ export function MarbleTruckForm({
             name="notes"
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            placeholder="e.g. quality variance, delivery note, etc."
+
           />
         </label>
       </details>

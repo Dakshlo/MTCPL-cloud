@@ -72,7 +72,7 @@ export function RejectBillForm({ billId }: { billId: string }) {
         value={note}
         onChange={(e) => setNote(e.target.value)}
         rows={3}
-        placeholder="e.g. Check the amount — total seems off. Re-confirm GST%."
+
         style={{
           fontSize: 13,
           padding: "9px 12px",

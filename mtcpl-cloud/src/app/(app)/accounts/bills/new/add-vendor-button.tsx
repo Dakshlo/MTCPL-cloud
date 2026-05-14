@@ -164,7 +164,7 @@ export function AddVendorButton({
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Shree Cement Ltd"
+
               style={INPUT_STYLE}
               required
               autoFocus
@@ -211,7 +211,7 @@ export function AddVendorButton({
             <input
               value={bankName}
               onChange={(e) => setBankName(e.target.value)}
-              placeholder="e.g. PUNJAB NATIONAL BANK"
+
               style={INPUT_STYLE}
             />
           </Field>
@@ -220,7 +220,7 @@ export function AddVendorButton({
               <input
                 value={bankAccount}
                 onChange={(e) => setBankAccount(e.target.value)}
-                placeholder="e.g. 1230008700004797"
+
                 style={{ ...INPUT_STYLE, fontFamily: "ui-monospace, monospace" }}
               />
             </Field>
@@ -228,7 +228,7 @@ export function AddVendorButton({
               <input
                 value={ifsc}
                 onChange={(e) => setIfsc(e.target.value)}
-                placeholder="e.g. PUNB0123000"
+
                 style={{ ...INPUT_STYLE, fontFamily: "ui-monospace, monospace" }}
               />
             </Field>

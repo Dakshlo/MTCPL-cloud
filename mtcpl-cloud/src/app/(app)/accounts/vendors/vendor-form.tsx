@@ -206,7 +206,7 @@ export function VendorForm({
         <input
           value={form.bank_name}
           onChange={(e) => setForm({ ...form, bank_name: e.target.value })}
-          placeholder="e.g. PUNJAB NATIONAL BANK"
+
           style={INPUT_STYLE}
         />
       </Field>
@@ -215,7 +215,7 @@ export function VendorForm({
           <input
             value={form.bank_account}
             onChange={(e) => setForm({ ...form, bank_account: e.target.value })}
-            placeholder="e.g. 1230008700004797"
+
             style={{ ...INPUT_STYLE, fontFamily: "ui-monospace, monospace" }}
           />
         </Field>
@@ -223,7 +223,7 @@ export function VendorForm({
           <input
             value={form.ifsc}
             onChange={(e) => setForm({ ...form, ifsc: e.target.value })}
-            placeholder="e.g. PUNB0123000"
+
             style={{ ...INPUT_STYLE, fontFamily: "ui-monospace, monospace" }}
           />
         </Field>

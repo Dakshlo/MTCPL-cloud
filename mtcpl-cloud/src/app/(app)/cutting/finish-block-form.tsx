@@ -567,7 +567,7 @@ export function FinishBlockForm({
           type="text"
           value={stockLocation}
           onChange={(e) => setStockLocation(e.target.value)}
-          placeholder="e.g. Yard 2 · Polishing area · vendor pickup ramp"
+
           required
           style={{
             width: "100%",
