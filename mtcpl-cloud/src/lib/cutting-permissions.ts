@@ -48,25 +48,37 @@ export function canManageOperators(profile: Pick<Profile, "role" | "full_name">)
 }
 
 /**
- * Cutting-Done supervisor approval (migration 027). Only this small
- * set of people sees the top-bar Approvals button + can press
- * Approve / Edit / Send back for edit:
+ * Cutting-Done supervisor approval (migration 027 + Mig 037 follow-up).
+ * Sees the top-bar "Cutting Audit" badge + can press Approve / Edit /
+ * Allow cutter to edit:
  *
  *   - developer (always)
  *   - owner (always)
- *   - team_head, but ONLY if their profile has can_approve_cuts=TRUE
+ *   - team_head, carving_head, or crosscheck — but ONLY if their
+ *     profile has can_approve_cuts=TRUE.
  *
- * The flag is set on Rajesh Kumar's profile post-migration. Other
- * team_heads (Alkesh, Paresh Kumar, etc.) keep all their existing
- * capabilities but don't see the approval surface — by design,
- * cut approval is an owner-level checkpoint that one trusted
- * team_head handles in practice.
+ * Today the flag is intended to be set on:
+ *   - Rajesh Kumar (team_head)   — original cutting-audit deputy
+ *   - Parth Sompura (carving_head) — added per Daksh, second auditor
+ *   - Mafat Purohit (crosscheck)   — added per Daksh, third auditor
+ *
+ * Other holders of those roles keep their existing capabilities but
+ * don't see the audit surface unless the flag is set. The flag is the
+ * gate; the role list above is the narrow set we trust to even be
+ * eligible.
  */
+const CUT_APPROVE_FLAG_ELIGIBLE_ROLES = ["team_head", "carving_head", "crosscheck"] as const;
+
 export function canApproveCuts(
   profile: Pick<Profile, "role" | "can_approve_cuts">,
 ): boolean {
   if (profile.role === "developer") return true;
   if (profile.role === "owner") return true;
-  if (profile.role === "team_head" && profile.can_approve_cuts === true) return true;
+  if (
+    (CUT_APPROVE_FLAG_ELIGIBLE_ROLES as readonly string[]).includes(profile.role) &&
+    profile.can_approve_cuts === true
+  ) {
+    return true;
+  }
   return false;
 }
