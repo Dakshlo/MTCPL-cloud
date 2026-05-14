@@ -22,18 +22,24 @@ type SubNavItem = {
   label: string;
   icon: string;
   matchPrefix?: string;
+  /** Optional title for hover tooltip; useful where the short
+   *  label needs a fuller explanation. */
+  title?: string;
 };
 
+// Daksh-renamed labels (was Receive / Write-off / Audit Queue /
+// Catalog). The underlying movement-type enum values and URLs are
+// unchanged — only what the user sees.
 const SUB_NAV: SubNavItem[] = [
   { href: "/inventory/scaffolding", label: "Board", icon: "▦" },
-  { href: "/inventory/scaffolding/issue", label: "Issue", icon: "→" },
-  { href: "/inventory/scaffolding/return", label: "Return", icon: "←" },
-  { href: "/inventory/scaffolding/receive", label: "Receive", icon: "⤓" },
-  { href: "/inventory/scaffolding/writeoff", label: "Write-off", icon: "✕" },
-  { href: "/inventory/approvals", label: "Audit Queue", icon: "✓" },
+  { href: "/inventory/scaffolding/issue", label: "Issue", icon: "→", title: "Send stock to a project site" },
+  { href: "/inventory/scaffolding/return", label: "Return", icon: "←", title: "Site returns stock to the plant" },
+  { href: "/inventory/scaffolding/receive", label: "Buy", icon: "⤓", title: "Buy / receive new stock at the plant" },
+  { href: "/inventory/scaffolding/writeoff", label: "Destroyed", icon: "✕", title: "Mark stock as destroyed / damaged / lost" },
+  { href: "/inventory/approvals", label: "Approval List", icon: "✓", title: "Pending movements awaiting crosscheck / owner sign-off" },
   { href: "/inventory/scaffolding/history", label: "History", icon: "⊟" },
   { href: "/inventory/scaffolding/sites", label: "Sites", icon: "⌂" },
-  { href: "/inventory/scaffolding/components", label: "Catalog", icon: "⊞" },
+  { href: "/inventory/scaffolding/components", label: "Add Component Type", icon: "⊞", title: "Add, edit, or archive scaffolding component types" },
 ];
 
 export function InventoryShell({
@@ -120,16 +126,70 @@ export function InventoryShell({
           {actions && <div style={{ display: "flex", gap: 8 }}>{actions}</div>}
         </div>
 
-        {/* Sub-nav */}
+        {/* Sub-nav — polished version (Daksh: "make the total bar UI
+            good"). Lifted container with a subtle inset highlight,
+            each tab carries a soft hover wash, the active tab gets a
+            stronger pill + a copper bottom indicator. CSS-only,
+            scoped class names so it doesn't leak. */}
+        <style>{`
+          .inv-subnav-tab {
+            position: relative;
+            padding: 10px 16px;
+            font-size: 12px;
+            font-weight: 700;
+            text-decoration: none;
+            border-radius: 8px;
+            color: ${INV_THEME.steel};
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            letter-spacing: 0.02em;
+            white-space: nowrap;
+            transition: background 0.12s ease, color 0.12s ease, transform 0.12s ease;
+          }
+          .inv-subnav-tab:hover {
+            background: ${INV_THEME.cream};
+            color: ${INV_THEME.steelDark};
+          }
+          .inv-subnav-tab .inv-subnav-icon {
+            opacity: 0.6;
+            font-size: 13px;
+            line-height: 1;
+            transition: opacity 0.12s ease, transform 0.12s ease;
+          }
+          .inv-subnav-tab:hover .inv-subnav-icon {
+            opacity: 0.95;
+          }
+          .inv-subnav-tab-active {
+            background: linear-gradient(180deg, ${INV_THEME.steel} 0%, ${INV_THEME.steelDark} 100%) !important;
+            color: #fff !important;
+            box-shadow: 0 1px 0 rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.08);
+          }
+          .inv-subnav-tab-active .inv-subnav-icon {
+            opacity: 0.9;
+          }
+          .inv-subnav-tab-active::after {
+            content: "";
+            position: absolute;
+            left: 14px;
+            right: 14px;
+            bottom: -1px;
+            height: 2px;
+            background: ${INV_THEME.copper};
+            border-radius: 1px;
+          }
+        `}</style>
         <nav
           style={{
             display: "flex",
             flexWrap: "wrap",
-            gap: 4,
-            padding: 4,
+            gap: 2,
+            padding: 5,
             background: INV_THEME.paper,
             border: `1px solid ${INV_THEME.parchment}`,
-            borderRadius: 10,
+            borderRadius: 12,
+            boxShadow:
+              "0 1px 0 rgba(28, 52, 69, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.55)",
           }}
         >
           {SUB_NAV.map((item) => {
@@ -143,22 +203,12 @@ export function InventoryShell({
               <Link
                 key={item.href}
                 href={item.href}
-                style={{
-                  padding: "8px 14px",
-                  fontSize: 12,
-                  fontWeight: 700,
-                  textDecoration: "none",
-                  borderRadius: 6,
-                  background: active ? INV_THEME.steel : "transparent",
-                  color: active ? "#fff" : INV_THEME.steel,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  letterSpacing: "0.02em",
-                  whiteSpace: "nowrap",
-                }}
+                title={item.title ?? item.label}
+                className={`inv-subnav-tab${active ? " inv-subnav-tab-active" : ""}`}
               >
-                <span style={{ opacity: 0.7 }}>{item.icon}</span>
+                <span className="inv-subnav-icon" aria-hidden="true">
+                  {item.icon}
+                </span>
                 {item.label}
               </Link>
             );

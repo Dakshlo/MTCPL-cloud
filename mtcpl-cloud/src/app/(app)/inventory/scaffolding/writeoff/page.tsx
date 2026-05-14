@@ -22,7 +22,7 @@ export default async function WriteoffScaffoldingPage() {
   const snapshotResult = await loadInventorySnapshotOrSetup();
   if (snapshotResult.kind !== "ok") {
     return (
-      <InventoryShell title="Write-off" pathname={pathname}>
+      <InventoryShell title="Destroyed" pathname={pathname}>
         {snapshotResult.kind === "needs_migration" ? (
           <InventorySetupBanner missing={snapshotResult.missing} />
         ) : (
@@ -37,7 +37,7 @@ export default async function WriteoffScaffoldingPage() {
 
   if (!plant) {
     return (
-      <InventoryShell title="Write-off" pathname={pathname}>
+      <InventoryShell title="Destroyed" pathname={pathname}>
         <InventorySetupBanner missing="sites (PLANT row not seeded)" />
       </InventoryShell>
     );
@@ -48,7 +48,7 @@ export default async function WriteoffScaffoldingPage() {
 
   return (
     <InventoryShell
-      title="Write-off"
+      title="Destroyed"
       subtitle="Mark stock as damaged / lost — needs owner sign-off"
       pathname={pathname}
     >

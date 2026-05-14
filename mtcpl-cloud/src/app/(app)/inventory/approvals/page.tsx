@@ -49,7 +49,7 @@ export default async function InventoryApprovalsPage() {
   ] as const) {
     if (res.error?.code === PG_UNDEFINED_TABLE) {
       return (
-        <InventoryShell title="Inventory audit" pathname={pathname}>
+        <InventoryShell title="Approval List" pathname={pathname}>
           <InventorySetupBanner missing={name} />
         </InventoryShell>
       );
@@ -95,7 +95,7 @@ export default async function InventoryApprovalsPage() {
 
   return (
     <InventoryShell
-      title="Inventory audit"
+      title="Approval List"
       subtitle={`${batches.length} batch${batches.length === 1 ? "" : "es"} awaiting your decision`}
       pathname={pathname}
     >

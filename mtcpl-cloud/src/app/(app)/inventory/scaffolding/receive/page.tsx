@@ -23,7 +23,7 @@ export default async function ReceiveScaffoldingPage() {
   const snapshotResult = await loadInventorySnapshotOrSetup();
   if (snapshotResult.kind !== "ok") {
     return (
-      <InventoryShell title="Receive scaffolding" pathname={pathname}>
+      <InventoryShell title="Buy scaffolding" pathname={pathname}>
         {snapshotResult.kind === "needs_migration" ? (
           <InventorySetupBanner missing={snapshotResult.missing} />
         ) : (
@@ -38,7 +38,7 @@ export default async function ReceiveScaffoldingPage() {
 
   if (!plant) {
     return (
-      <InventoryShell title="Receive scaffolding" pathname={pathname}>
+      <InventoryShell title="Buy scaffolding" pathname={pathname}>
         <InventorySetupBanner missing="sites (PLANT row not seeded)" />
       </InventoryShell>
     );
@@ -49,8 +49,8 @@ export default async function ReceiveScaffoldingPage() {
 
   return (
     <InventoryShell
-      title="Receive scaffolding"
-      subtitle="Vendor delivery → Plant"
+      title="Buy scaffolding"
+      subtitle="New stock from vendor → Plant"
       pathname={pathname}
     >
       <MovementForm
