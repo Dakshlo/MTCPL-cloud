@@ -206,7 +206,7 @@ export function PayTodayClient({
                   letterSpacing: "-0.005em",
                   whiteSpace: "nowrap",
                 }}
-                title="Download an HDFC-compatible bulk-payment Excel for every confirmed row. Upload it in your HDFC NetBanking 'Bulk Upload' screen to release all payments in one go."
+                title="Download an HDFC ENet bulk-payment .xlsx for every confirmed row. Prerequisite: each vendor must be pre-registered in ENet's Beneficiary Master with their account + IFSC. The file matches HDFC's 7-column format (CBX Reference, Transfer From, Transfer To, Amount, Initiation date, Value date, Beneficiary name). Pick the same Business Product Rohit used for salary payments at upload time."
               >
                 📥 Download HDFC bulk-payment Excel
               </a>
