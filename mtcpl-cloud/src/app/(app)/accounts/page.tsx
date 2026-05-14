@@ -58,7 +58,7 @@ export default async function AccountsHomePage({
   let dueQuery = supabase
     .from("bills")
     .select(
-      "id, token, vendor_bill_no, bill_date, description, cost_head, amount_total, amount_paid, amount_outstanding, status, bill_vendor_id, bill_vendors(id, name)",
+      "id, token, vendor_bill_no, bill_date, description, cost_head, amount_total, amount_paid, amount_outstanding, status, approved_at, bill_vendor_id, bill_vendors(id, name, payment_terms_days)",
     )
     .eq("status", "approved")
     .gt("amount_outstanding", 0)
@@ -116,13 +116,19 @@ export default async function AccountsHomePage({
     amount_total: number;
     amount_paid: number;
     amount_outstanding: number;
+    approved_at: string | null;
     bill_vendor_id: string;
     bill_vendors:
-      | { id: string; name: string }
-      | { id: string; name: string }[]
+      | { id: string; name: string; payment_terms_days: number | null }
+      | { id: string; name: string; payment_terms_days: number | null }[]
       | null;
   };
   const dueRows = ((dueRaw ?? []) as unknown) as DbRow[];
+
+  // App-level default if a vendor hasn't set its own terms. Was the
+  // global "45 days" constant before mig 040 — keep here as fallback
+  // so legacy vendors still get a sensible warning.
+  const DEFAULT_PAYMENT_TERMS_DAYS = 45;
 
   const todayMs = Date.now();
   function bucketFor(dateStr: string): "0_30" | "31_60" | "61_90" | "90_plus" {
@@ -140,6 +146,12 @@ export default async function AccountsHomePage({
   const allDue: DueBillRow[] = dueRows.map((r) => {
     const v = Array.isArray(r.bill_vendors) ? r.bill_vendors[0] ?? null : r.bill_vendors;
     const days = daysSince(r.bill_date);
+    // Per-vendor payment terms (mig 040) — falls back to the legacy
+    // 45-day default if this vendor hasn't been migrated yet.
+    const terms =
+      v?.payment_terms_days != null
+        ? Number(v.payment_terms_days)
+        : DEFAULT_PAYMENT_TERMS_DAYS;
     return {
       id: r.id,
       token: r.token,
@@ -155,11 +167,13 @@ export default async function AccountsHomePage({
       ageBucket: bucketFor(r.bill_date),
       hasOpenPayment: openPaymentBillIds.has(r.id),
       daysSinceBill: days,
-      // 45-day rule — Daksh: "in our company we pay our due after
-      // around 45 days after bill generated of vendor". Soft guard:
-      // show a warning chip + propose-time banner, no hard block.
-      prematureForPayment: days < 45,
+      // Mig 040: premature = younger than THIS vendor's terms.
+      // Vendor with terms=0 ("current") never triggers — they want
+      // to be paid on receipt.
+      prematureForPayment: terms > 0 && days < terms,
+      paymentTermsDays: terms,
       paymentParts: paidPartsByBill.get(r.id) ?? [],
+      crosscheckedAt: r.approved_at,
     };
   });
 
@@ -219,19 +233,11 @@ export default async function AccountsHomePage({
             : "Finance overview. Audit fresh bills and queue today's payment batch."
         }
         actions={
-          <>
-            {isApprover && (
-              <Link href="/accounts/approvals" style={BUTTON_STYLES.secondary}>
-                ✓ Bills Audit
-              </Link>
-            )}
-            <Link href="/accounts/pay-today" style={BUTTON_STYLES.secondary}>
-              💸 Pay Today
-            </Link>
-            <Link href="/accounts/payments" style={BUTTON_STYLES.secondary}>
-              🗂️ Payment History
-            </Link>
-          </>
+          // Bills Audit + Payment History buttons removed — both live
+          // in the sidebar already, and Pay Today has its own top-bar
+          // badge for approvers. The hero now keeps only the headline
+          // KPIs below, no redundant nav.
+          undefined
         }
       />
 

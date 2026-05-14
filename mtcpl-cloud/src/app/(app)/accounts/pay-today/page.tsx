@@ -36,7 +36,7 @@ export default async function PayTodayPage() {
   const { data: openRowsRaw } = await supabase
     .from("bill_payments")
     .select(
-      "id, bill_id, status, proposed_amount, proposed_by, proposed_at, confirmed_by, confirmed_at, proposal_batch_id, bills(id, token, vendor_bill_no, bill_date, amount_outstanding, amount_total, bill_vendor_id, bill_vendors(id, name))",
+      "id, bill_id, status, proposed_amount, proposed_by, proposed_at, confirmed_by, confirmed_at, proposal_batch_id, bills(id, token, vendor_bill_no, bill_date, amount_outstanding, amount_total, bill_vendor_id, bill_vendors(id, name, payment_terms_days))",
     )
     .in("status", ["proposed", "confirmed"])
     .order("proposed_at", { ascending: false });
@@ -79,16 +79,16 @@ export default async function PayTodayPage() {
           amount_total: number;
           bill_vendor_id: string;
           bill_vendors:
-            | { id: string; name: string }
-            | { id: string; name: string }[]
+            | { id: string; name: string; payment_terms_days: number | null }
+            | { id: string; name: string; payment_terms_days: number | null }[]
             | null;
         }
       | null;
   };
   const open = ((openRowsRaw ?? []) as unknown) as OpenRow[];
 
-  // Daksh's 45-day rule. Same threshold as the dashboard-client constant.
-  const PREMATURE_PAYMENT_DAYS = 45;
+  // Mig 040 — per-vendor payment terms. Fallback to legacy 45.
+  const DEFAULT_PAYMENT_TERMS_DAYS = 45;
   function daysSince(dateStr: string | null): number | null {
     if (!dateStr) return null;
     return Math.floor((nowMs - new Date(dateStr).getTime()) / DAY_MS);
@@ -98,6 +98,10 @@ export default async function PayTodayPage() {
     const b = r.bills;
     const v = b ? (Array.isArray(b.bill_vendors) ? b.bill_vendors[0] ?? null : b.bill_vendors) : null;
     const d = daysSince(b?.bill_date ?? null);
+    const terms =
+      v?.payment_terms_days != null
+        ? Number(v.payment_terms_days)
+        : DEFAULT_PAYMENT_TERMS_DAYS;
     return {
       id: r.id,
       billId: r.bill_id,
@@ -115,7 +119,8 @@ export default async function PayTodayPage() {
       billOutstanding: b ? Number(b.amount_outstanding ?? 0) : 0,
       billTotal: b ? Number(b.amount_total ?? 0) : 0,
       daysSinceBill: d,
-      prematureForPayment: d !== null && d < PREMATURE_PAYMENT_DAYS,
+      paymentTermsDays: terms,
+      prematureForPayment: terms > 0 && d !== null && d < terms,
     };
   }
 

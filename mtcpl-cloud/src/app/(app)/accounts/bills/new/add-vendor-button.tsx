@@ -38,6 +38,10 @@ export function AddVendorButton({
   const [gstin, setGstin] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
+  // Mig 040 — payment terms picker carried by the quick-add too.
+  // Empty string = use app-level default (45). 0 = current. Otherwise
+  // an integer number of days after bill_date.
+  const [paymentTermsDays, setPaymentTermsDays] = useState<string>("");
 
   useEffect(() => setMounted(true), []);
 
@@ -57,6 +61,7 @@ export function AddVendorButton({
     setGstin("");
     setPhone("");
     setEmail("");
+    setPaymentTermsDays("");
     setError(null);
   }
 
@@ -71,6 +76,7 @@ export function AddVendorButton({
     fd.set("gstin", gstin.trim());
     fd.set("phone", phone.trim());
     fd.set("email", email.trim());
+    fd.set("payment_terms_days", paymentTermsDays.trim());
     startTransition(async () => {
       const r = await action(fd);
       if (!r.ok) {
@@ -173,6 +179,17 @@ export function AddVendorButton({
             />
           </Field>
 
+          <Field label="Payment terms">
+            <PaymentTermsQuickPicker
+              value={paymentTermsDays}
+              onChange={setPaymentTermsDays}
+            />
+            <span style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.45 }}>
+              Days after bill date this vendor is paid. Leave on Default to
+              use the app-level 45-day window.
+            </span>
+          </Field>
+
           {error && (
             <div
               role="alert"
@@ -259,5 +276,91 @@ function Field({
       </span>
       {children}
     </label>
+  );
+}
+
+// Compact pill-only payment terms picker used inside the quick-add
+// vendor modal. Full-form variant lives in vendor-form.tsx — same
+// preset set, kept in sync deliberately.
+const QUICK_PRESETS = [0, 10, 20, 30, 45, 60, 90] as const;
+
+function PaymentTermsQuickPicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  const numeric = value === "" ? null : Number(value);
+  const isPreset =
+    numeric !== null && (QUICK_PRESETS as readonly number[]).includes(numeric);
+  const showCustom = numeric !== null && !isPreset;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+        <PillBtn active={value === ""} onClick={() => onChange("")}>
+          Default
+        </PillBtn>
+        {QUICK_PRESETS.map((n) => (
+          <PillBtn
+            key={n}
+            active={numeric === n}
+            onClick={() => onChange(String(n))}
+          >
+            {n === 0 ? "Current" : `${n}d`}
+          </PillBtn>
+        ))}
+        <PillBtn
+          active={showCustom}
+          onClick={() => onChange(showCustom ? value : "120")}
+        >
+          Custom
+        </PillBtn>
+      </div>
+      {showCustom && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input
+            type="number"
+            min={0}
+            max={365}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            style={{ ...INPUT_STYLE, width: 110, fontFamily: "ui-monospace, monospace", textAlign: "right" }}
+          />
+          <span style={{ fontSize: 12, color: "var(--muted)" }}>
+            days after bill date
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PillBtn({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        padding: "5px 12px",
+        fontSize: 12,
+        fontWeight: 700,
+        background: active ? ACCOUNTS_TOKENS.accent : "transparent",
+        color: active ? "#fff" : "var(--text)",
+        border: `1px solid ${active ? ACCOUNTS_TOKENS.accent : ACCOUNTS_TOKENS.border}`,
+        borderRadius: 999,
+        cursor: "pointer",
+      }}
+    >
+      {children}
+    </button>
   );
 }

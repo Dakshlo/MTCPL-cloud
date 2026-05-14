@@ -183,6 +183,7 @@ export default async function BillVendorDetailPage({
             ifsc: vendor.ifsc,
             upi_id: vendor.upi_id,
             notes: vendor.notes,
+            payment_terms_days: vendor.payment_terms_days ?? null,
           }}
         />
 

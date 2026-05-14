@@ -866,6 +866,18 @@ export async function upsertBillVendorAction(formData: FormData): Promise<
   const name = String(formData.get("name") || "").trim();
   if (!name) return { ok: false, error: "Vendor name is required." };
 
+  // Migration 040 — parse payment_terms_days. Empty string or invalid
+  // input falls back to NULL (= use app-level default). Negative or
+  // unreasonably large values are clamped to NULL too.
+  const rawTermsDays = String(formData.get("payment_terms_days") || "").trim();
+  let paymentTermsDays: number | null = null;
+  if (rawTermsDays !== "") {
+    const parsed = Number(rawTermsDays);
+    if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 365) {
+      paymentTermsDays = Math.round(parsed);
+    }
+  }
+
   const payload: Record<string, unknown> = {
     name,
     category: String(formData.get("category") || "").trim() || null,
@@ -879,6 +891,7 @@ export async function upsertBillVendorAction(formData: FormData): Promise<
     ifsc: String(formData.get("ifsc") || "").trim() || null,
     upi_id: String(formData.get("upi_id") || "").trim() || null,
     notes: String(formData.get("notes") || "").trim() || null,
+    payment_terms_days: paymentTermsDays,
     updated_at: new Date().toISOString(),
     updated_by: profile.id,
   };

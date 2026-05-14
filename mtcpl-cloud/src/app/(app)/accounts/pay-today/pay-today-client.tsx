@@ -46,15 +46,17 @@ export type PayTodayRow = {
   billDate: string | null;
   billOutstanding: number;
   billTotal: number;
-  /** Daksh's 45-day rule (Mig 038 follow-up). Set in the page server
-   *  component from bill_date — same threshold as Due Bills uses. */
+  /** Mig 040 — per-vendor payment terms. Set in the page server
+   *  component from bill_date + vendor.payment_terms_days. */
   daysSinceBill: number | null;
   prematureForPayment: boolean;
+  /** The vendor's terms in days (or the app default 45 fallback). */
+  paymentTermsDays: number;
 };
 
-/** 45-day window before a bill should be paid — kept in sync with the
- *  same constant exported from dashboard-client. */
-export const PREMATURE_PAYMENT_DAYS = 45;
+/** Legacy app-level default — only used as a fallback when a vendor
+ *  hasn't set its own payment_terms_days. */
+export const DEFAULT_PAYMENT_TERMS_DAYS = 45;
 
 type ServerResult = { ok: true } | { ok: false; error: string };
 
@@ -118,17 +120,17 @@ export function PayTodayClient({
           <span style={{ fontSize: 20, lineHeight: 1 }} aria-hidden="true">⚠️</span>
           <div style={{ flex: 1 }}>
             <strong>
-              {prematureRows.length} payment{prematureRows.length === 1 ? "" : "s"} younger than {PREMATURE_PAYMENT_DAYS} days
+              {prematureRows.length} payment{prematureRows.length === 1 ? "" : "s"} below vendor payment terms
             </strong>
             <div style={{ marginTop: 4, fontSize: 12, lineHeight: 1.5 }}>
-              Company policy: pay {PREMATURE_PAYMENT_DAYS} days after bill date.
-              You can still mark these paid, but please double-check before
-              releasing the money. Bills affected:{" "}
+              Each vendor's terms (Vendor Account → payment terms) determine
+              when bills become payable. You can still mark these paid, but
+              please double-check before releasing the money. Bills affected:{" "}
               {prematureRows
                 .slice(0, 6)
                 .map(
                   (r) =>
-                    `${r.vendorName} (${r.daysSinceBill}d)`,
+                    `${r.vendorName} (${r.daysSinceBill}d / terms ${r.paymentTermsDays}d)`,
                 )
                 .join(", ")}
               {prematureRows.length > 6 ? `, and ${prematureRows.length - 6} more` : ""}.

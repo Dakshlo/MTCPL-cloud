@@ -36,9 +36,18 @@ export type DueBillRow = {
   hasOpenPayment: boolean;
   /** Days since bill_date. Used for the premature-payment guard. */
   daysSinceBill: number;
-  /** Daksh's 45-day rule: bills less than 45 days old shouldn't be
-   *  paid yet. Soft warning, not a hard block. */
+  /** Per-vendor payment terms (Mig 040): bills younger than this
+   *  vendor's terms shouldn't be paid yet. Soft warning, not a hard
+   *  block. Pre-Mig-040 vendors fall back to the app default (45). */
   prematureForPayment: boolean;
+  /** The vendor's actual terms in days — used for the warning text
+   *  ("Pay after 30d" varies per vendor now). */
+  paymentTermsDays: number;
+  /** When the bill was approved by the crosscheck role (or owner) —
+   *  shows in the Due Bills table so the accountant can see how long
+   *  it has been verified. NULL for legacy bills approved before the
+   *  Mig 027 timestamp field was added. */
+  crosscheckedAt: string | null;
   /** Breakdown of paid payments for this bill. Empty if nothing paid
    *  yet. Used to render chips under the Paid column. */
   paymentParts: Array<{
@@ -48,9 +57,10 @@ export type DueBillRow = {
   }>;
 };
 
-/** 45-day window before a bill should be paid — Daksh's company
- *  policy. Exposed so PayToday can use the same threshold. */
-export const PREMATURE_PAYMENT_DAYS = 45;
+/** Legacy global default — kept for back-compat with code paths that
+ *  haven't moved to per-vendor terms yet. Vendors that have an
+ *  explicit payment_terms_days override this. */
+export const DEFAULT_PAYMENT_TERMS_DAYS = 45;
 
 type ProposeResult =
   | { ok: true; batchId: string; rowsCreated: number; skipped: string[] }
@@ -210,7 +220,7 @@ export function DueBillsClient({
                 <th style={TABLE_STYLES.thRight}>Total</th>
                 <th style={TABLE_STYLES.thRight}>Paid</th>
                 <th style={TABLE_STYLES.thRight}>Outstanding</th>
-                <th style={TABLE_STYLES.th}>Age</th>
+                <th style={TABLE_STYLES.th}>Age / Verified</th>
                 {canPropose && <th style={TABLE_STYLES.thRight}>Propose</th>}
               </tr>
             </thead>
@@ -306,7 +316,26 @@ export function DueBillsClient({
                         bucket={r.ageBucket}
                         days={r.daysSinceBill}
                         premature={r.prematureForPayment}
+                        termsDays={r.paymentTermsDays}
                       />
+                      {r.crosscheckedAt && (
+                        <div
+                          style={{
+                            marginTop: 4,
+                            fontSize: 10,
+                            color: "var(--muted)",
+                            fontFamily: "ui-monospace, monospace",
+                            whiteSpace: "nowrap",
+                          }}
+                          title={`Crosschecked at ${new Date(r.crosscheckedAt).toLocaleString("en-IN")}`}
+                        >
+                          ✅{" "}
+                          {new Date(r.crosscheckedAt).toLocaleDateString("en-IN", {
+                            day: "numeric",
+                            month: "short",
+                          })}
+                        </div>
+                      )}
                     </td>
                     {canPropose && (
                       <td style={TABLE_STYLES.tdRight}>
@@ -373,10 +402,10 @@ export function DueBillsClient({
         </div>
       </div>
 
-      {/* Premature-payment warning (Daksh's 45-day rule). Renders
-          above the sticky bar when the current selection includes
-          any bill younger than PREMATURE_PAYMENT_DAYS. Soft block —
-          user can still proceed if they have a reason. */}
+      {/* Premature-payment warning (mig 040: per-vendor terms).
+          Renders above the sticky bar when the current selection
+          includes any bill younger than its vendor's terms. Soft
+          block — user can still proceed if they have a reason. */}
       {canPropose && prematureSelected.length > 0 && (
         <div
           style={{
@@ -400,14 +429,18 @@ export function DueBillsClient({
           <div style={{ flex: 1 }}>
             <strong>
               {prematureSelected.length} bill
-              {prematureSelected.length === 1 ? "" : "s"} younger than {PREMATURE_PAYMENT_DAYS} days
+              {prematureSelected.length === 1 ? "" : "s"} below vendor payment terms
             </strong>
             <div style={{ marginTop: 4, fontSize: 12, lineHeight: 1.5 }}>
-              Company policy: pay {PREMATURE_PAYMENT_DAYS} days after bill date.
-              You can still propose now, but please double-check before sending.
+              Each vendor's terms (Vendor Account → payment terms) determine
+              when bills become payable. You can still propose now, but please
+              double-check before sending.
               Bills affected:{" "}
               {prematureSelected
-                .map((r) => `${r.vendorName} (${r.daysSinceBill}d)`)
+                .map(
+                  (r) =>
+                    `${r.vendorName} (${r.daysSinceBill}d / terms ${r.paymentTermsDays}d)`,
+                )
                 .join(", ")}
               .
             </div>
@@ -462,10 +495,15 @@ function AgeBadge({
   bucket,
   days,
   premature,
+  termsDays,
 }: {
   bucket: DueBillRow["ageBucket"];
   days: number;
   premature?: boolean;
+  /** This vendor's payment terms in days. Drives the "Pay after Nd"
+   *  countdown text on the premature pill. Falls back to the legacy
+   *  45 if not supplied (mostly to keep call sites optional). */
+  termsDays?: number;
 }) {
   const tints: Record<DueBillRow["ageBucket"], { bg: string; fg: string; dot: string }> = {
     "0_30":    { bg: "#dcfce7", fg: "#166534", dot: "#22c55e" },
@@ -496,7 +534,7 @@ function AgeBadge({
       </span>
       {premature && (
         <span
-          title={`Pay after ${PREMATURE_PAYMENT_DAYS} days since bill date — Daksh's company policy`}
+          title={`Vendor's terms: ${termsDays ?? DEFAULT_PAYMENT_TERMS_DAYS}d after bill date`}
           style={{
             display: "inline-flex",
             alignItems: "center",
@@ -513,7 +551,7 @@ function AgeBadge({
             whiteSpace: "nowrap",
           }}
         >
-          ⚠ Pay after {PREMATURE_PAYMENT_DAYS - days}d
+          ⚠ Pay after {Math.max(0, (termsDays ?? DEFAULT_PAYMENT_TERMS_DAYS) - days)}d
         </span>
       )}
     </div>

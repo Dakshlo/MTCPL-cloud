@@ -41,6 +41,9 @@ export function VendorForm({
     ifsc?: string | null;
     upi_id?: string | null;
     notes?: string | null;
+    /** Mig 040 — days after bill_date this vendor is paid. null =
+     *  use the app-level default (45). 0 = pay on receipt. */
+    payment_terms_days?: number | null;
   };
   vendorId?: string;
   trigger?: React.ReactNode;
@@ -68,6 +71,13 @@ export function VendorForm({
     ifsc: initialValues?.ifsc ?? "",
     upi_id: initialValues?.upi_id ?? "",
     notes: initialValues?.notes ?? "",
+    // Payment terms — stored separately so we can roundtrip it as
+    // either a preset preset (0/10/20/30/45/60/90) or a custom int.
+    // Empty string = no value, falls back to app default.
+    payment_terms_days:
+      initialValues?.payment_terms_days != null
+        ? String(initialValues.payment_terms_days)
+        : "",
   };
 
   const [form, setForm] = useState(initial);
@@ -181,6 +191,16 @@ export function VendorForm({
           onChange={(e) => setForm({ ...form, address: e.target.value })}
           rows={2}
           style={{ ...INPUT_STYLE, fontFamily: "inherit", resize: "vertical" }}
+        />
+      </Field>
+
+      <Field
+        label="Payment terms (days after bill date)"
+        hint="When does this vendor expect to be paid? Drives the premature-payment warning in Due Bills + Pay Today."
+      >
+        <PaymentTermsPicker
+          value={form.payment_terms_days}
+          onChange={(v) => setForm({ ...form, payment_terms_days: v })}
         />
       </Field>
 
@@ -316,10 +336,12 @@ export function VendorForm({
 function Field({
   label,
   required,
+  hint,
   children,
 }: {
   label: string;
   required?: boolean;
+  hint?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -337,6 +359,114 @@ function Field({
         {required && <span style={{ color: ACCOUNTS_TOKENS.danger, marginLeft: 4 }}>*</span>}
       </span>
       {children}
+      {hint && (
+        <span
+          style={{
+            fontSize: 11,
+            color: "var(--muted)",
+            lineHeight: 1.45,
+          }}
+        >
+          {hint}
+        </span>
+      )}
     </label>
   );
+}
+
+// Preset payment-term pills + a custom input. Stored as the
+// string representation of an INT (or "" for "no term set"). 0
+// renders as "Current" (pay on receipt). NULL/"" means "use default".
+const PAYMENT_TERM_PRESETS = [0, 10, 20, 30, 45, 60, 90] as const;
+
+function PaymentTermsPicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  const numeric = value === "" ? null : Number(value);
+  const isPreset =
+    numeric !== null && (PAYMENT_TERM_PRESETS as readonly number[]).includes(numeric);
+  const showCustomInput = numeric !== null && !isPreset;
+
+  function presetLabel(n: number): string {
+    return n === 0 ? "Current" : `${n}d`;
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+        <button
+          type="button"
+          onClick={() => onChange("")}
+          style={pillStyle(value === "")}
+          title="Fall back to the app-level default (45 days)"
+        >
+          Default
+        </button>
+        {PAYMENT_TERM_PRESETS.map((n) => {
+          const isActive = numeric === n;
+          return (
+            <button
+              key={n}
+              type="button"
+              onClick={() => onChange(String(n))}
+              style={pillStyle(isActive)}
+              title={
+                n === 0
+                  ? "Pay this vendor on receipt of bill — never triggers the premature warning"
+                  : `Pay this vendor ${n} days after bill_date`
+              }
+            >
+              {presetLabel(n)}
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          onClick={() => onChange(showCustomInput ? value : "120")}
+          style={pillStyle(showCustomInput)}
+        >
+          Custom
+        </button>
+      </div>
+      {showCustomInput && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input
+            type="number"
+            min={0}
+            max={365}
+            step={1}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            style={{
+              ...INPUT_STYLE,
+              width: 110,
+              fontFamily: "ui-monospace, monospace",
+              textAlign: "right",
+            }}
+          />
+          <span style={{ fontSize: 12, color: "var(--muted)" }}>
+            days after bill date
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function pillStyle(active: boolean): React.CSSProperties {
+  return {
+    padding: "5px 12px",
+    fontSize: 12,
+    fontWeight: 700,
+    background: active ? ACCOUNTS_TOKENS.accent : "transparent",
+    color: active ? "#fff" : "var(--text)",
+    border: `1px solid ${active ? ACCOUNTS_TOKENS.accent : ACCOUNTS_TOKENS.border}`,
+    borderRadius: 999,
+    cursor: "pointer",
+    letterSpacing: "0.02em",
+  };
 }
