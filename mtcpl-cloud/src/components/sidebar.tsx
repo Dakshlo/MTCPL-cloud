@@ -62,21 +62,12 @@ const navEntries: NavEntry[] = [
     // Cutting verification view. Shows every slab cut from a block,
     // regardless of where it is now in the carving / dispatch
     // pipeline. Slabs DON'T drop off when the carving team picks
-    // them up — that drop-off lives on /slabs/ready/for-carving.
+    // them up — that drop-off lives on /slabs/ready/for-carving
+    // (now labelled "Ready Sizes Stock" under the CARVING section).
     href: "/slabs/ready",
     label: "Ready Sizes",
     icon: "✦",
     roles: ["developer", "owner", "team_head", "block_slab_entry", "carving_head"],
-  },
-  {
-    // Carving team's assignment surface. Mirror of Ready Sizes but
-    // filtered to status='cut_done' only — slabs leave as soon as
-    // they're assigned to a vendor. Routes to /carving for the
-    // actual assign flow.
-    href: "/slabs/ready/for-carving",
-    label: "Ready for Carving",
-    icon: "🎨",
-    roles: ["developer", "owner", "carving_head"],
   },
   // — Phase 2 carving module. Carving Jobs visible to owner +
   //   the new carving_head role (whose entire job is the carving
@@ -87,6 +78,19 @@ const navEntries: NavEntry[] = [
     type: "divider",
     label: "CARVING",
     roles: ["developer", "owner", "vendor", "carving_head"],
+  },
+  {
+    // Carving team's slab pick-up surface. Mirror of /slabs/ready but
+    // filtered to status='cut_done' only — slabs leave as soon as
+    // they're assigned to a vendor. Sits above Carving Jobs because
+    // the natural flow is: see what's available → assign → manage.
+    // Labelled "Ready Sizes Stock" per Daksh — the cutting-side
+    // history view ("Ready Sizes") stays under WORKSHOP for
+    // verification.
+    href: "/slabs/ready/for-carving",
+    label: "Ready Sizes Stock",
+    icon: "📦",
+    roles: ["developer", "owner", "carving_head"],
   },
   {
     href: "/carving",

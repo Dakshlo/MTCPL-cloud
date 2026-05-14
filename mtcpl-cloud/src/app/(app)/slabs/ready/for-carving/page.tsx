@@ -37,7 +37,7 @@ export default async function ReadyForCarvingPage() {
     <>
       <div className="page-header" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
         <div>
-          <h1>Ready for Carving</h1>
+          <h1>Ready Sizes Stock</h1>
           <p className="muted">
             Cut slabs waiting to be assigned to a CNC or manual carving
             vendor. As soon as a slab is assigned, it drops from this

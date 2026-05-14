@@ -17,8 +17,9 @@ import { ReadySlabsClient } from "./ready-client";
 // "completed" / etc.
 //
 // The carving team's ASSIGNMENT workflow lives at
-// /slabs/ready/for-carving (which queries cut_done only — slabs do
-// drop from that view as soon as they're assigned).
+// /slabs/ready/for-carving (sidebar label "Ready Sizes Stock",
+// under the CARVING section). That page queries cut_done only —
+// slabs drop from that view as soon as they're assigned.
 const POST_CUT_STATUSES = [
   "cut_done",
   "carving_assigned",
