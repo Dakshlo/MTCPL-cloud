@@ -6,20 +6,28 @@
 // parser rejected — every row came back amount=0 + blank beneficiary
 // because the column headers didn't match.
 //
-// Confirmed-working column layout (from MTCPL's salary upload):
+// Column layout (from MTCPL's working salary upload, with Daksh's
+// confirmations on which fields are user-provided vs bank-stamped):
 //
-//   1. CBX Reference number   — unique reference per row
+//   1. CBX Reference number   — BANK GENERATED. Column present in
+//                               the file but left blank. HDFC writes
+//                               C{seq}{DDMMYY}{HHMMSS} into it at
+//                               upload time (the working salary file
+//                               showed every row with HDFC's stamp).
 //   2. Transfer To            — vendor's bank account number
 //   3. Amount                 — plain number, no commas / no symbol
-//   4. Initiation date        — DD/MM/YYYY HH:MM:SS AM/PM
-//   5. Value date             — DD-MM-YYYY  (note: dashes, not slashes)
+//   4. Initiation date        — DD/MM/YYYY HH:MM:SS AM/PM. User-
+//                               provided (current time when we
+//                               generate the file).
+//   5. Value date             — DD-MM-YYYY  (dashes, not slashes)
 //   6. Beneficiary name       — vendor name (uppercase, must match
 //                               the registered Beneficiary Master entry)
+//   7. Input user             — BANK STAMPED at upload. Empty in our file.
+//   8. Input Date time        — BANK STAMPED at upload. Empty in our file.
 //
 // NOT in the file (HDFC handles these elsewhere):
 //   • Transfer From / Debit account — picked from the dropdown on the
-//     Upload File dialog at submit time. Daksh confirmed this from
-//     his actual upload flow, so we don't write a column for it.
+//     Upload File dialog at submit time.
 //   • IFSC — HDFC looks it up from the pre-registered Beneficiary
 //     Master by account number. Each vendor MUST be added to ENet's
 //     Beneficiary Master one-time (30-min cooling period for new
@@ -59,7 +67,7 @@ function formatValueDate(d: Date): string {
   return `${pad2(d.getDate())}-${pad2(d.getMonth() + 1)}-${d.getFullYear()}`;
 }
 
-/** DDMMYY without separators — used to build the CBX Reference. */
+/** DDMMYY without separators — used for the download filename. */
 function formatDDMMYY(d: Date): string {
   return `${pad2(d.getDate())}${pad2(d.getMonth() + 1)}${String(d.getFullYear()).slice(2)}`;
 }
@@ -112,7 +120,7 @@ export async function GET(_req: NextRequest) {
   // Build rows in HDFC's exact column order. xlsx writes columns in
   // the order keys appear in the FIRST row of json_to_sheet input, so
   // we keep this object literal order consistent across all rows.
-  const sheetRows = rawRows.map((r, idx) => {
+  const sheetRows = rawRows.map((r) => {
     const b = r.bills;
     const v = b
       ? Array.isArray(b.bill_vendors)
@@ -120,14 +128,11 @@ export async function GET(_req: NextRequest) {
         : b.bill_vendors
       : null;
     const amount = Number(r.proposed_amount) || 0;
-    // CBX Reference: HDFC's sample used C{seq}{DDMMYY}{HHMMSS}. We
-    // emit MT-{first8of payment uuid}-{DDMMYY}-{seq} so each row is
-    // unique AND traceable back to our bill_payment row from a bank
-    // statement.
-    const refSeq = String(idx + 1).padStart(4, "0");
-    const ref = `MT-${r.id.slice(0, 8)}-${dateStamp}-${refSeq}`;
     return {
-      "CBX Reference number": ref,
+      // CBX Reference: HDFC generates this on upload (C{seq}{DDMMYY}{HHMMSS}).
+      // We leave the column present but empty so the file structure
+      // matches HDFC's template; the bank fills it in post-upload.
+      "CBX Reference number": "",
       "Transfer To": (v?.bank_account ?? "").trim(),
       Amount: amount,
       "Initiation date": initiation,
@@ -137,6 +142,9 @@ export async function GET(_req: NextRequest) {
       // registered in the ENet Beneficiary Master — if HDFC's parser
       // is strict about case/spacing on lookup, the row will reject.
       "Beneficiary name": (v?.name ?? "").trim().toUpperCase(),
+      // Bank-stamped at upload — column present, value empty.
+      "Input user": "",
+      "Input Date time": "",
     };
   });
 
@@ -149,6 +157,8 @@ export async function GET(_req: NextRequest) {
     "Initiation date": "",
     "Value date": "",
     "Beneficiary name": "",
+    "Input user": "",
+    "Input Date time": "",
   };
 
   const ws = XLSX.utils.json_to_sheet(
@@ -161,6 +171,8 @@ export async function GET(_req: NextRequest) {
         "Initiation date",
         "Value date",
         "Beneficiary name",
+        "Input user",
+        "Input Date time",
       ],
     },
   );
@@ -172,6 +184,8 @@ export async function GET(_req: NextRequest) {
     { wch: 22 }, // Initiation date
     { wch: 14 }, // Value date
     { wch: 30 }, // Beneficiary name
+    { wch: 14 }, // Input user
+    { wch: 22 }, // Input Date time
   ];
 
   const wb = XLSX.utils.book_new();
