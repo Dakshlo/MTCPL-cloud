@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import {
   canApproveBills,
+  canConfirmPayments,
   canSubmitBills,
 } from "@/lib/accounts-permissions";
 import {
@@ -37,9 +38,14 @@ export default async function EditBillPage({ params }: { params: Params }) {
   const isApprover = canApproveBills(profile);
   const isSubmitter = bill.submitted_by === profile.id;
   const isBillerLike = canSubmitBills(profile);
+  // Mig 042 — owner can also edit an approved (due) bill so long as
+  // no payments have started yet. The actions.ts editBillAction
+  // enforces the same gate server-side.
+  const isOwnerLike = canConfirmPayments(profile);
   const canEditNow =
     (bill.status === "pending_approval" && isApprover) ||
-    (bill.status === "rejected" && (isApprover || isSubmitter || isBillerLike));
+    (bill.status === "rejected" && (isApprover || isSubmitter || isBillerLike)) ||
+    (bill.status === "approved" && isOwnerLike);
   if (!canEditNow) {
     redirect(`/accounts/bills/${id}`);
   }
@@ -76,7 +82,9 @@ export default async function EditBillPage({ params }: { params: Params }) {
         description={
           bill.status === "rejected"
             ? "This bill was sent back for edit. Fix the entry and resave — it goes back to the audit queue."
-            : "You're editing a bill while it's still in audit. The status stays the same after save."
+            : bill.status === "approved"
+              ? "Owner-only edit. The bill stays in 'approved' (due) status; only the entry details change. Locked once any payment is proposed."
+              : "You're editing a bill while it's still in audit. The status stays the same after save."
         }
         actions={
           <>

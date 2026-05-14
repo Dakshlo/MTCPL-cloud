@@ -650,8 +650,14 @@ function ConfirmedRow({
           </button>
         )}
         {canCancel && (
-          <button type="button" onClick={runCancel} disabled={pending} style={BUTTON_STYLES.ghost}>
-            Abort
+          <button
+            type="button"
+            onClick={runCancel}
+            disabled={pending}
+            style={BUTTON_STYLES.ghost}
+            title="Cancel this payment and return the bill to the due-bills list"
+          >
+            ↩ Send back to due
           </button>
         )}
       </div>
@@ -672,14 +678,26 @@ function MarkPaidForm({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  const [paidAmount, setPaidAmount] = useState<string>(String(row.proposedAmount));
+  // Migration 042 follow-on (Daksh):
+  // "why iam able to change amount paid in final stage it can open
+  // gate for shady work for emplyees."
+  //
+  // paid_amount is no longer editable at the Mark Paid stage. It's
+  // locked to the proposed_amount the owner confirmed. If the
+  // accountant needs to pay a different amount, the only path is:
+  //   1. Owner cancels the confirmed payment ("Send back to due")
+  //   2. Accountant proposes the new (lower) amount
+  //   3. Owner re-confirms
+  //   4. Accountant marks paid
+  // Server action (markPaymentPaidAction) also ignores the field
+  // from the form and reads proposed_amount from the row directly,
+  // so a hand-crafted POST can't bypass this.
+  const paidAmount = String(row.proposedAmount);
   const [method, setMethod] = useState<string>("neft");
   const [reference, setReference] = useState("");
   const [note, setNote] = useState("");
 
-  const paidNum = Number(paidAmount) || 0;
-  const isPartial = paidNum > 0 && paidNum < row.proposedAmount;
-  const exceedsOutstanding = paidNum > row.billOutstanding;
+  const paidNum = row.proposedAmount;
 
   // Mig 042 — UTR / reference is mandatory for every non-cash
   // payment method. Cash is the only method that legitimately has
@@ -691,12 +709,6 @@ function MarkPaidForm({
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
-    if (paidNum <= 0) return setError("Paid amount must be greater than zero.");
-    if (exceedsOutstanding) {
-      return setError(
-        `Paid amount exceeds the bill's outstanding ₹${row.billOutstanding.toLocaleString("en-IN")}.`,
-      );
-    }
     if (referenceMissing) {
       return setError(
         `${method.toUpperCase()} payments need a reference (UTR / cheque no / UPI txn id). Switch to "Cash" if no reference exists.`,
@@ -705,6 +717,9 @@ function MarkPaidForm({
     startTransition(async () => {
       const fd = new FormData();
       fd.set("payment_id", row.id);
+      // paid_amount is sent for the audit log, but the server action
+      // re-reads proposed_amount from the DB row and uses THAT as
+      // the source of truth — see markPaymentPaidAction.
       fd.set("paid_amount", paidAmount);
       fd.set("payment_method", method);
       fd.set("payment_reference", reference.trim());
@@ -739,48 +754,47 @@ function MarkPaidForm({
         <Money value={row.billOutstanding} size="large" tone="warning" />
       </div>
 
-      <Field label="Amount paid" required>
-        <div style={{ position: "relative" }}>
+      {/* Mig 042 follow-on — paid_amount is LOCKED to the confirmed
+          proposal. No editing at this stage; the only legal flow to
+          change the amount is owner clicks "Send back to due", the
+          accountant proposes a new amount, owner re-confirms. */}
+      <Field label="Amount to pay (locked to confirmed amount)" required>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            padding: "12px 14px",
+            background: ACCOUNTS_TOKENS.surfaceMuted,
+            border: `1.5px solid ${ACCOUNTS_TOKENS.borderStrong ?? ACCOUNTS_TOKENS.border}`,
+            borderRadius: 10,
+          }}
+        >
+          <span aria-hidden style={{ fontSize: 14 }}>🔒</span>
           <span
             style={{
-              position: "absolute",
-              left: 12,
-              top: "50%",
-              transform: "translateY(-50%)",
-              color: "var(--muted)",
               fontFamily: "ui-monospace, monospace",
-              fontSize: 13,
-              pointerEvents: "none",
+              fontSize: 18,
+              fontWeight: 800,
+              color: "var(--text)",
+              letterSpacing: "-0.01em",
             }}
           >
-            ₹
+            ₹{paidNum.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
           </span>
-          <input
-            type="number"
-            step="0.01"
-            min="0"
-            value={paidAmount}
-            onChange={(e) => setPaidAmount(e.target.value)}
-            style={{
-              ...INPUT_STYLE,
-              paddingLeft: 26,
-              fontFamily: "ui-monospace, monospace",
-              fontSize: 16,
-              fontWeight: 700,
-            }}
-            required
-          />
         </div>
-        {isPartial && (
-          <span style={{ fontSize: 11, color: ACCOUNTS_TOKENS.warning, fontWeight: 600, marginTop: 4 }}>
-            Partial payment — ₹{(row.proposedAmount - paidNum).toLocaleString("en-IN")} of the proposed amount remains in outstanding.
-          </span>
-        )}
-        {exceedsOutstanding && (
-          <span style={{ fontSize: 11, color: ACCOUNTS_TOKENS.danger, fontWeight: 600, marginTop: 4 }}>
-            Exceeds outstanding ₹{row.billOutstanding.toLocaleString("en-IN")}.
-          </span>
-        )}
+        <span
+          style={{
+            fontSize: 11,
+            color: "var(--muted)",
+            marginTop: 4,
+            lineHeight: 1.5,
+          }}
+        >
+          To pay a different amount, ask the owner to <strong>send the
+          proposal back to due</strong>. Re-propose with the corrected
+          amount and have it re-confirmed.
+        </span>
       </Field>
 
       <Field label="Payment method" required>
@@ -894,7 +908,7 @@ function MarkPaidForm({
         <button type="button" onClick={onSuccess} disabled={pending} style={BUTTON_STYLES.secondary}>
           Cancel
         </button>
-        <button type="submit" disabled={pending || exceedsOutstanding} style={BUTTON_STYLES.primary}>
+        <button type="submit" disabled={pending} style={BUTTON_STYLES.primary}>
           {pending ? "Saving…" : "✓ Record payment"}
         </button>
       </div>

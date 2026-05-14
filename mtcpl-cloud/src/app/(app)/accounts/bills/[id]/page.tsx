@@ -5,6 +5,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
 import {
   canApproveBills,
+  canConfirmPayments,
   canManageAccounts,
   canMarkPaid,
   canSubmitBills,
@@ -102,7 +103,11 @@ export default async function BillDetailPage({
     !isLocked &&
     ((bill.status === "rejected" &&
       (canApproveBills(profile) || isOwnBill || canSubmitBills(profile))) ||
-      (bill.status === "pending_approval" && canApproveBills(profile)));
+      (bill.status === "pending_approval" && canApproveBills(profile)) ||
+      // Mig 042 follow-on (Daksh): once a bill is in the due-bills
+      // list, only the owner can edit. Accountant cannot — they must
+      // ask the owner. The button stays hidden for them.
+      (bill.status === "approved" && canConfirmPayments(profile)));
 
   // Timeline events for the right rail
   const timeline: Array<{ at: string; label: string; by: string | null; tone: string }> = [];

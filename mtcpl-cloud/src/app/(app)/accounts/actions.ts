@@ -324,16 +324,24 @@ export async function rejectBillAction(formData: FormData): Promise<ActionResult
 // ──────────────────────────────────────────────────────────────────
 
 /**
- * Edit a bill in-flight. Two legal paths:
+ * Edit a bill in-flight. Three legal paths:
  *   1. The original biller (or any user with submit rights) editing
  *      their own bill while it sits in `rejected`. Save flips status
  *      back to `pending_approval` and clears the rejection note.
- *   2. An approver editing while the bill is in `pending_approval`.
- *      In-place edit, status unchanged — approver can edit-then-
- *      approve in one sitting.
+ *   2. An approver (crosscheck / owner / can_approve_bills) editing
+ *      while the bill is in `pending_approval`. In-place edit, status
+ *      unchanged — approver can edit-then-approve in one sitting.
+ *   3. The owner (canConfirmPayments) editing while the bill is in
+ *      `approved` — i.e. correcting a typo on a bill that's already
+ *      in the due-bills list. Locked the moment any non-cancelled
+ *      payment row exists. Mig 042 follow-on per Daksh: "even when
+ *      any entry need to be edited in due bills only owner can edit
+ *      it. and if account want to edit it will need to ask for
+ *      permission from owner."
  *
- * Locked the moment ANY non-cancelled `bill_payments` row exists —
- * preserves audit integrity once money has begun moving.
+ * Status is preserved on approved-bill edits (still 'approved' after
+ * save). Only the rejected-edit path transitions back to
+ * pending_approval.
  */
 export async function editBillAction(formData: FormData): Promise<ActionResult> {
   const { profile } = await requireAuth();
@@ -352,6 +360,10 @@ export async function editBillAction(formData: FormData): Promise<ActionResult> 
   const isApprover = canApproveBills(profile);
   const isSubmitter = bill.submitted_by === profile.id;
   const isBillerLike = canSubmitBills(profile);
+  // canConfirmPayments == owner / dev / can_approve_bills override.
+  // Accountant is intentionally excluded — they can't edit a due
+  // bill on their own; they have to ask the owner.
+  const isOwnerLike = canConfirmPayments(profile);
 
   let nextStatus: "pending_approval" | undefined;
   if (bill.status === "pending_approval") {
@@ -371,6 +383,15 @@ export async function editBillAction(formData: FormData): Promise<ActionResult> 
       };
     }
     nextStatus = "pending_approval";
+  } else if (bill.status === "approved") {
+    if (!isOwnerLike) {
+      return {
+        ok: false,
+        error:
+          "Only the owner can edit a bill once it's in the due-bills list. Ask the owner to make the correction.",
+      };
+    }
+    nextStatus = undefined; // stays in approved
   } else {
     return {
       ok: false,
@@ -754,16 +775,20 @@ export async function markPaymentPaidAction(formData: FormData): Promise<ActionR
   const supabase = createAdminSupabaseClient();
 
   const paymentId = String(formData.get("payment_id") || "").trim();
-  const paidAmount = Number(formData.get("paid_amount") || 0);
+  // Mig 042 follow-on (Daksh): paid_amount is no longer trusted from
+  // the form. We re-read proposed_amount from the DB row below and
+  // use that as the actual paid_amount. The form field is kept so
+  // legacy clients don't error, but its value is intentionally
+  // ignored — defense in depth against a hand-crafted POST that
+  // tries to bypass the locked Mark Paid input.
+  const _formPaidAmountIgnored = formData.get("paid_amount");
+  void _formPaidAmountIgnored;
   const methodRaw = String(formData.get("payment_method") || "").trim();
   const referenceTrimmed = String(formData.get("payment_reference") || "").trim();
   const reference = referenceTrimmed || null;
   const note = String(formData.get("payment_note") || "").trim() || null;
 
   if (!paymentId) return { ok: false, error: "Missing payment_id." };
-  if (!Number.isFinite(paidAmount) || paidAmount <= 0) {
-    return { ok: false, error: "Paid amount must be greater than zero." };
-  }
   const validMethods = new Set([
     "cash",
     "cheque",
@@ -803,10 +828,25 @@ export async function markPaymentPaidAction(formData: FormData): Promise<ActionR
     };
   }
 
-  // Sanity check: paid_amount cannot exceed (current outstanding + this row's
-  // own proposal contribution). The proposal hasn't reduced outstanding yet —
-  // outstanding only goes down once status flips to paid — so we just need
-  // paid_amount ≤ bill.amount_outstanding.
+  // Mig 042 follow-on — paid_amount equals proposed_amount, period.
+  // Owner confirmed an amount; that's what gets paid. To pay any
+  // different value, the only legal path is:
+  //   1. Owner sends the proposal back to due (cancelPaymentAction).
+  //   2. Accountant proposes again with the corrected amount.
+  //   3. Owner re-confirms.
+  //   4. Accountant marks paid (and lands back here with the new
+  //      proposed_amount).
+  const paidAmount = Number(payment.proposed_amount);
+  if (!Number.isFinite(paidAmount) || paidAmount <= 0) {
+    return {
+      ok: false,
+      error: "Proposed amount is invalid — refresh and ask the owner to re-confirm.",
+    };
+  }
+
+  // Sanity check kept for safety: paid_amount cannot exceed the
+  // bill's current outstanding. With the lock above, this should
+  // only trip if another payment marked the bill fully-paid first.
   const { data: billRow } = await supabase
     .from("bills")
     .select("amount_outstanding, token")
@@ -816,7 +856,7 @@ export async function markPaymentPaidAction(formData: FormData): Promise<ActionR
   if (paidAmount > outstanding) {
     return {
       ok: false,
-      error: `Paid amount ₹${paidAmount.toLocaleString("en-IN")} exceeds the bill's current outstanding ₹${outstanding.toLocaleString("en-IN")}.`,
+      error: `Proposal ₹${paidAmount.toLocaleString("en-IN")} exceeds the bill's current outstanding ₹${outstanding.toLocaleString("en-IN")}. Another payment may have already settled this bill — refresh.`,
     };
   }
 
@@ -866,8 +906,16 @@ export async function markPaymentPaidAction(formData: FormData): Promise<ActionR
 
 export async function cancelPaymentAction(formData: FormData): Promise<ActionResult> {
   const { profile } = await requireAuth();
-  if (!canManageAccounts(profile) && !canConfirmPayments(profile)) {
-    return { ok: false, error: "You do not have permission to cancel a payment." };
+  // Mig 042 follow-on — only owner / dev can send a proposed or
+  // confirmed payment back to due. The accountant used to be able
+  // to abort their own proposal; Daksh removed that to close the
+  // "shady work" gate (once proposed, only owner decides).
+  if (!canConfirmPayments(profile)) {
+    return {
+      ok: false,
+      error:
+        "Only the owner can send a payment back to due. Ask the owner to send it back, then re-propose with the corrected amount.",
+    };
   }
   const supabase = createAdminSupabaseClient();
   const paymentId = String(formData.get("payment_id") || "").trim();

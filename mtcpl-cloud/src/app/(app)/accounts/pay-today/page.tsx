@@ -223,7 +223,12 @@ export default async function PayTodayPage() {
         confirmedRows={confirmedRows}
         canConfirm={canConfirmPayments(profile)}
         canMarkPaid={canMarkPaid(profile)}
-        canCancel={canManageAccounts(profile) || canConfirmPayments(profile)}
+        // Mig 042 follow-on (Daksh): "once due are proposed for today
+        // no edit only one thing can happen — owner can send back to
+        // due which is already there." Accountant no longer has
+        // cancel/abort on a proposed or confirmed payment; only owner
+        // (and developer) can send it back to the due-bills list.
+        canCancel={canConfirmPayments(profile)}
         confirmAction={confirmPaymentsAction}
         markPaidAction={markPaymentPaidAction}
         cancelAction={cancelPaymentAction}
