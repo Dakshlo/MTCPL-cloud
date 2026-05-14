@@ -8,6 +8,7 @@ import { NotificationBell } from "@/components/notification-bell";
 import { NavigationProgress } from "@/components/navigation-progress";
 import { RealtimeRefresh } from "@/components/realtime-refresh";
 import { Sidebar } from "@/components/sidebar";
+import { TopbarTasksBadge, type TopbarTask } from "@/components/topbar-tasks-badge";
 import { Toast } from "@/components/toast";
 import { Heartbeat } from "@/components/heartbeat";
 import { requireAuth } from "@/lib/auth";
@@ -279,112 +280,26 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             </Link>
           </div>
           <div className="topbar-right">
-            {/* Cutting Audit button — visible only to approvers
-                (canApproveCuts: developer / owner / team_head Rajesh
-                Kumar with can_approve_cuts=TRUE). Migration 027.
-                Named "Cutting Audit" per user — the surface where
-                an approver audits cutter submissions before they
-                commit. Sits BETWEEN the user name (top-bar-left)
-                and the role pill. Red dot when count > 0, mirroring
-                the notification bell. */}
-            {approvalsBadge !== null && (
-              <Link
-                href="/cutting/approvals"
-                title={
-                  approvalsBadge > 0
-                    ? `${approvalsBadge} block${approvalsBadge === 1 ? "" : "s"} to audit`
-                    : "Cutting Audit queue (empty)"
-                }
-                style={{
-                  position: "relative",
-                  textDecoration: "none",
-                  fontSize: 12,
-                  fontWeight: 700,
-                  padding: "5px 12px",
-                  background: approvalsBadge > 0 ? "var(--gold)" : "var(--bg)",
-                  color: approvalsBadge > 0 ? "#fff" : "var(--text)",
-                  border: `1px solid ${approvalsBadge > 0 ? "var(--gold-dark)" : "var(--border)"}`,
-                  borderRadius: 6,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  whiteSpace: "nowrap",
-                }}
-              >
-                ✓ Cutting Audit
-                <span
-                  style={{
-                    fontSize: 11,
-                    fontFamily: "ui-monospace, monospace",
-                    fontWeight: 700,
-                    padding: "0 6px",
-                    borderRadius: 10,
-                    background:
-                      approvalsBadge > 0
-                        ? "rgba(255,255,255,0.25)"
-                        : "var(--border)",
-                    color: approvalsBadge > 0 ? "#fff" : "var(--muted)",
-                    minWidth: 18,
-                    textAlign: "center",
-                  }}
-                >
-                  {approvalsBadge}
-                </span>
-                {approvalsBadge > 0 && (
-                  <span
-                    style={{
-                      position: "absolute",
-                      top: -3,
-                      right: -3,
-                      width: 8,
-                      height: 8,
-                      borderRadius: "50%",
-                      background: "#dc2626",
-                      border: "1.5px solid var(--surface, #fff)",
-                    }}
-                  />
-                )}
-              </Link>
-            )}
-
-            {/* Crosscheck badge — mig 028 + 037. Verifiers (dev / owner /
-                crosscheck / profile.can_approve_bills) see pending bill
-                submissions to verify before they land in outstanding. */}
-            {billsAuditBadge !== null && (
-              <TopbarBadge
-                href="/accounts/approvals"
-                label="✅ Crosscheck"
-                count={billsAuditBadge}
-                emptyTitle="Crosscheck queue (empty)"
-                activeTitle={`${billsAuditBadge} bill${billsAuditBadge === 1 ? "" : "s"} to verify`}
-              />
-            )}
-
-            {/* Pay Today badge — migration 028. Accountant + owner + dev
-                see in-flight payment proposals + confirmed-ready-to-pay
-                rows. Click → /accounts/pay-today. */}
-            {payTodayBadge !== null && (
-              <TopbarBadge
-                href="/accounts/pay-today"
-                label="💸 Pay Today"
-                count={payTodayBadge}
-                emptyTitle="Pay Today queue (empty)"
-                activeTitle={`${payTodayBadge} payment${payTodayBadge === 1 ? "" : "s"} in flight`}
-              />
-            )}
-
-            {/* Inventory Audit badge — Mig 041. Crosscheck + owner +
-                dev see pending scaffolding movement batches that the
-                storekeeper submitted. Count is distinct batch_ids. */}
-            {inventoryAuditBadge !== null && (
-              <TopbarBadge
-                href="/inventory/approvals"
-                label="📦 Inventory Audit"
-                count={inventoryAuditBadge}
-                emptyTitle="Inventory Audit queue (empty)"
-                activeTitle={`${inventoryAuditBadge} batch${inventoryAuditBadge === 1 ? "" : "es"} awaiting audit`}
-              />
-            )}
+            {/* Consolidated tasks dropdown (Mig 044 follow-on per
+                Daksh: the four separate pills were clustering the
+                top bar). Single trigger pill showing the total
+                pending count; hover (or tap) opens a glass dropdown
+                with each enabled queue and its individual count.
+                The role gating is identical to the old per-pill
+                logic — each item is included only if its permission
+                helper said yes, so:
+                  developer / owner → all four
+                  crosscheck (Mafat) → Cutting + Crosscheck + Inventory
+                  team_head / carving_head with can_approve_cuts
+                    (Rajesh / Parth)    → Cutting Audit only
+                  accountant with can_approve_bills → adds Pay Today
+                Roles with zero items get nothing rendered. */}
+            <TopbarTasksBadge items={buildTopbarTaskItems({
+              approvalsBadge,
+              billsAuditBadge,
+              payTodayBadge,
+              inventoryAuditBadge,
+            })} />
 
             <span className="role-pill" style={
               profile.role === "developer" ? { background: "var(--gold)", color: "#fff", fontWeight: 700 } :
@@ -426,73 +341,75 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   );
 }
 
-/** Topbar action badge — same visual treatment as the Cutting Audit
- *  button above. Extracted because Bills Audit + Pay Today share it
- *  one-for-one. */
-function TopbarBadge({
-  href,
-  label,
-  count,
-  emptyTitle,
-  activeTitle,
-}: {
-  href: string;
-  label: string;
-  count: number;
-  emptyTitle: string;
-  activeTitle: string;
-}) {
-  const active = count > 0;
-  return (
-    <Link
-      href={href}
-      title={active ? activeTitle : emptyTitle}
-      style={{
-        position: "relative",
-        textDecoration: "none",
-        fontSize: 12,
-        fontWeight: 700,
-        padding: "5px 12px",
-        background: active ? "var(--gold)" : "var(--bg)",
-        color: active ? "#fff" : "var(--text)",
-        border: `1px solid ${active ? "var(--gold-dark)" : "var(--border)"}`,
-        borderRadius: 6,
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        whiteSpace: "nowrap",
-      }}
-    >
-      {label}
-      <span
-        style={{
-          fontSize: 11,
-          fontFamily: "ui-monospace, monospace",
-          fontWeight: 700,
-          padding: "0 6px",
-          borderRadius: 10,
-          background: active ? "rgba(255,255,255,0.25)" : "var(--border)",
-          color: active ? "#fff" : "var(--muted)",
-          minWidth: 18,
-          textAlign: "center",
-        }}
-      >
-        {count}
-      </span>
-      {active && (
-        <span
-          style={{
-            position: "absolute",
-            top: -3,
-            right: -3,
-            width: 8,
-            height: 8,
-            borderRadius: "50%",
-            background: "#dc2626",
-            border: "1.5px solid var(--surface, #fff)",
-          }}
-        />
-      )}
-    </Link>
-  );
+/** Build the items array for the consolidated TopbarTasksBadge.
+ *  Each helper-gated count (null = role not permitted) maps to a
+ *  single item in the dropdown. Roles with no permitted items get
+ *  zero items back → the badge hides itself entirely.
+ *
+ *  Daksh's role rules fall out automatically:
+ *    developer / owner            → all four items
+ *    crosscheck (Mafat)           → Cutting Audit + Crosscheck +
+ *                                   Inventory Audit (canApproveCuts
+ *                                   gated by the can_approve_cuts
+ *                                   flag on his profile;
+ *                                   canApproveBills + canApprove-
+ *                                   InventoryMovements include the
+ *                                   crosscheck role outright)
+ *    team_head / carving_head with can_approve_cuts (Rajesh / Parth)
+ *                                 → Cutting Audit only
+ *    accountant with can_approve_bills (Naresh)
+ *                                 → adds Pay Today + Crosscheck
+ *
+ *  The helper in layout above returns `null` when a role isn't
+ *  permitted (so we can hide the row entirely) and a number
+ *  otherwise. Hiding empty queues lets the dropdown stay short.
+ */
+function buildTopbarTaskItems(counts: {
+  approvalsBadge: number | null;
+  billsAuditBadge: number | null;
+  payTodayBadge: number | null;
+  inventoryAuditBadge: number | null;
+}): TopbarTask[] {
+  const items: TopbarTask[] = [];
+  if (counts.approvalsBadge !== null) {
+    items.push({
+      id: "cutting-audit",
+      href: "/cutting/approvals",
+      label: "Cutting Audit",
+      description: "Cutter submissions awaiting your sign-off",
+      count: counts.approvalsBadge,
+      icon: "✓",
+    });
+  }
+  if (counts.billsAuditBadge !== null) {
+    items.push({
+      id: "crosscheck",
+      href: "/accounts/approvals",
+      label: "Crosscheck",
+      description: "Bills waiting for verification",
+      count: counts.billsAuditBadge,
+      icon: "✅",
+    });
+  }
+  if (counts.payTodayBadge !== null) {
+    items.push({
+      id: "pay-today",
+      href: "/accounts/pay-today",
+      label: "Pay Today",
+      description: "Proposed + confirmed payments in flight",
+      count: counts.payTodayBadge,
+      icon: "💸",
+    });
+  }
+  if (counts.inventoryAuditBadge !== null) {
+    items.push({
+      id: "inventory-audit",
+      href: "/inventory/approvals",
+      label: "Inventory Audit",
+      description: "Stock movement batches awaiting audit",
+      count: counts.inventoryAuditBadge,
+      icon: "📦",
+    });
+  }
+  return items;
 }
