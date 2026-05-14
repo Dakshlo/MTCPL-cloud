@@ -65,7 +65,7 @@ const navEntries: NavEntry[] = [
     // them up — that drop-off lives on /slabs/ready/for-carving
     // (now labelled "Ready Sizes Stock" under the CARVING section).
     href: "/slabs/ready",
-    label: "Ready Sizes",
+    label: "Total Ready Sizes",
     icon: "✦",
     roles: ["developer", "owner", "team_head", "block_slab_entry", "carving_head"],
   },

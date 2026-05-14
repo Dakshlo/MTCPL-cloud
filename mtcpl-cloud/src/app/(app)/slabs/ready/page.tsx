@@ -54,11 +54,13 @@ export default async function ReadySlabsPage() {
     <>
       <div className="page-header">
         <div>
-          <h1>Ready Sizes</h1>
+          <h1>Total Ready Sizes</h1>
           <p className="muted">
-            Cutting verification — every slab cut from a block, with its current
-            lifecycle status. Filter to confirm yesterday&apos;s cut, find a slab
-            in carving, or export the lot to Excel.
+            Cutting verification — the complete list of slabs cut from any block,
+            sorted by most-recent. Lifecycle status is in the Status column;
+            filter by date / vendor / stone / grade or export to Excel. For the
+            actionable bucket-by-bucket view (cut → carving → completed), use{" "}
+            <strong>Ready Sizes Stock</strong> in the sidebar.
           </p>
         </div>
       </div>

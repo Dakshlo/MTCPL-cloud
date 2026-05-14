@@ -99,7 +99,14 @@ export function ReadySlabsClient({
   const [stoneFilter, setStoneFilter] = useState("all");
   const [templeFilter, setTempleFilter] = useState("all");
   const [qualityFilter, setQualityFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  // for-carving mode lands the carving team on the "Cut · awaiting
+  // carving" bucket so they see what's pickable first. Total Ready
+  // Sizes (verification mode) doesn't show the chip row at all, so
+  // its statusFilter is irrelevant; we default it to "all" for
+  // sanity.
+  const [statusFilter, setStatusFilter] = useState<string>(
+    mode === "for-carving" ? "cut_done" : "all",
+  );
   const [search, setSearch] = useState("");
   // Default to NO date filter — page lands showing every cut slab so
   // the cutting team can scroll back as far as they need. The quick
@@ -178,7 +185,11 @@ export function ReadySlabsClient({
     if (qualityFilter === "A") rows = rows.filter(s => s.quality === "A");
     else if (qualityFilter === "B") rows = rows.filter(s => s.quality === "B");
     else if (qualityFilter === "none") rows = rows.filter(s => !s.quality);
-    if (mode === "verification" && statusFilter !== "all") {
+    // statusFilter applies on the page that owns the chip row. With
+    // the move from verification → for-carving, that's the carving
+    // team's page now. The verification page intentionally has no
+    // chip row so statusFilter stays "all" and this is a no-op.
+    if (mode === "for-carving" && statusFilter !== "all") {
       rows = rows.filter((s) => s.status === statusFilter);
     }
     if (search) {
@@ -286,9 +297,12 @@ export function ReadySlabsClient({
         padding: "16px 18px",
         marginBottom: 14,
       }}>
-        {/* Status chip row — verification mode only. Lets the cutting
-            team quickly see + narrow to a lifecycle bucket. */}
-        {mode === "verification" && (
+        {/* Lifecycle chip row — for-carving mode owns this now (was
+            on verification originally). Total Ready Sizes is a flat
+            "every slab ever cut" view without buckets; Ready Sizes
+            Stock leads with the chip row so the carving team can
+            flip between buckets at a glance. */}
+        {mode === "for-carving" && (
           <div
             style={{
               display: "flex",
@@ -481,16 +495,15 @@ export function ReadySlabsClient({
                 { label: "Priority",     col: null },
                 { label: "Added",        col: "created_at" as SortCol },
                 { label: "Cut Done",     col: "updated_at" as SortCol },
-                // Status column only in verification mode — for-carving
-                // is always cut_done so the column would be a single
-                // repeated badge.
-                ...(mode === "verification"
-                  ? ([{ label: "Status", col: null }] as { label: string; col: SortCol | null }[])
-                  : ([] as { label: string; col: SortCol | null }[])),
-                // Action column — for-carving routes to the carving
-                // assign flow; verification has no actions.
+                // Status column on the for-carving page (where the
+                // chip row + multi-status query make it meaningful).
+                // Verification ("Total Ready Sizes") is a flat list
+                // without status badges — keep it simple.
                 ...(mode === "for-carving"
-                  ? ([{ label: "", col: null }] as { label: string; col: SortCol | null }[])
+                  ? ([
+                      { label: "Status", col: null },
+                      { label: "", col: null },
+                    ] as { label: string; col: SortCol | null }[])
                   : ([] as { label: string; col: SortCol | null }[])),
               ] as { label: string; col: SortCol | null }[]).map(({ label, col }) => (
                 <th
@@ -517,7 +530,7 @@ export function ReadySlabsClient({
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={mode === "verification" || mode === "for-carving" ? 12 : 11} style={{ padding: 32, textAlign: "center", color: "var(--muted)" }}>
+                <td colSpan={mode === "for-carving" ? 13 : 11} style={{ padding: 32, textAlign: "center", color: "var(--muted)" }}>
                   {slabs.length === 0 ? "No sizes have been cut yet." : "No sizes match the current filters."}
                 </td>
               </tr>
@@ -578,30 +591,34 @@ export function ReadySlabsClient({
                     </td>
                     <td style={{ padding: "9px 12px", whiteSpace: "nowrap", color: "var(--muted)", fontSize: 12 }}>{fmtDate(s.created_at)}</td>
                     <td style={{ padding: "9px 12px", whiteSpace: "nowrap", color: "var(--muted)", fontSize: 12 }}>{fmtDate(s.updated_at)}</td>
-                    {mode === "verification" && (
-                      <td style={{ padding: "9px 12px", whiteSpace: "nowrap" }}>
-                        <StatusChip status={s.status} />
-                      </td>
-                    )}
                     {mode === "for-carving" && (
-                      <td style={{ padding: "9px 12px", whiteSpace: "nowrap" }}>
-                        <Link
-                          href="/carving"
-                          style={{
-                            textDecoration: "none",
-                            fontSize: 11,
-                            fontWeight: 700,
-                            padding: "4px 10px",
-                            background: "var(--gold)",
-                            color: "#fff",
-                            border: "1px solid var(--gold-dark)",
-                            borderRadius: 6,
-                          }}
-                          title="Open the Carving Jobs page to assign this slab to a vendor"
-                        >
-                          Assign →
-                        </Link>
-                      </td>
+                      <>
+                        <td style={{ padding: "9px 12px", whiteSpace: "nowrap" }}>
+                          <StatusChip status={s.status} />
+                        </td>
+                        <td style={{ padding: "9px 12px", whiteSpace: "nowrap" }}>
+                          {s.status === "cut_done" ? (
+                            <Link
+                              href="/carving"
+                              style={{
+                                textDecoration: "none",
+                                fontSize: 11,
+                                fontWeight: 700,
+                                padding: "4px 10px",
+                                background: "var(--gold)",
+                                color: "#fff",
+                                border: "1px solid var(--gold-dark)",
+                                borderRadius: 6,
+                              }}
+                              title="Open the Carving Jobs page to assign this slab to a vendor"
+                            >
+                              Assign →
+                            </Link>
+                          ) : (
+                            <span className="muted" style={{ fontSize: 11 }}>—</span>
+                          )}
+                        </td>
+                      </>
                     )}
                   </tr>
                 );
@@ -613,7 +630,7 @@ export function ReadySlabsClient({
 
       <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>
         Columns: Size Code · From Block · Temple · Label · Stone · Quality · Dimensions · CFT · Priority · Added · Cut Done
-        {mode === "verification" ? " · Status" : ""}
+        {mode === "for-carving" ? " · Status · Assign" : ""}
       </p>
     </div>
   );

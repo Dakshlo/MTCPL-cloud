@@ -3,15 +3,28 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { ReadySlabsClient } from "../ready-client";
 
-// Carving-team's slab-pickup surface. Sister page to /slabs/ready —
-// same table UI, same filters — but the query is locked to
-// `status='cut_done'`. The moment a slab gets assigned to carving
-// (status → 'carving_assigned'), it drops off THIS view. The cutting
-// team's /slabs/ready keeps showing it for verification.
+// Carving team's slab-pickup + lifecycle-bucket view. Sister page to
+// /slabs/ready (Total Ready Sizes) — same query (every post-cut
+// status), same table UI, plus the lifecycle filter chip row at the
+// top so the carving team can flip between buckets:
 //
-// The actual assignment happens on /carving (Unassigned tab). The
-// "Assign →" button on each row routes there; we don't duplicate the
-// carving-assign modal here.
+//   "Cut · awaiting carving" — default. The pickable bucket.
+//                              "Assign →" button on each row.
+//   "Carving assigned"       — already given to a vendor. No action.
+//   "Being carved"           — vendor is working on it.
+//   "Carving done"           — back from vendor, ready to dispatch.
+//   "Dispatched"             — gone.
+//
+// Total Ready Sizes drops the chip row (just a flat list); this page
+// keeps it so the carving team has the at-a-glance breakdown.
+const POST_CUT_STATUSES = [
+  "cut_done",
+  "carving_assigned",
+  "carving_in_progress",
+  "completed",
+  "dispatched",
+];
+
 export default async function ReadyForCarvingPage() {
   await requireAuth(["developer", "owner", "carving_head"]);
 
@@ -23,7 +36,7 @@ export default async function ReadyForCarvingPage() {
       .select(
         "id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority, created_at, updated_at, source_block_id",
       )
-      .eq("status", "cut_done")
+      .in("status", POST_CUT_STATUSES)
       .order("updated_at", { ascending: false }),
     admin.from("stone_types").select("name").order("name"),
   ]);
@@ -39,10 +52,11 @@ export default async function ReadyForCarvingPage() {
         <div>
           <h1>Ready Sizes Stock</h1>
           <p className="muted">
-            Cut slabs waiting to be assigned to a CNC or manual carving
-            vendor. As soon as a slab is assigned, it drops from this
-            list — find the full cut history (including assigned /
-            in-carving / completed) on <Link href="/slabs/ready" style={{ color: "var(--gold-dark)", fontWeight: 600 }}>Ready Sizes</Link>.
+            Carving team&apos;s stockpile view, bucketed by lifecycle.
+            Default lands on <strong>Cut · awaiting carving</strong> —
+            click any other chip above the table to peek at slabs
+            already assigned, being carved, completed, or dispatched.
+            Assign → routes to <Link href="/carving" style={{ color: "var(--gold-dark)", fontWeight: 600 }}>Carving Jobs</Link>.
           </p>
         </div>
         <Link
