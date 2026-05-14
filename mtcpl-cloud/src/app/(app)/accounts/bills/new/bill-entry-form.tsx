@@ -909,7 +909,9 @@ function DuplicateBillPeek({
         </dl>
         <p style={{ margin: 0, fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>
           A bill with this number already exists for this vendor in this
-          financial year. Same bill no. is allowed in a different FY.
+          financial year. Leading zeros are ignored — <strong>1, 01, 001,
+          00001</strong> all match the same number. Same bill no. is
+          allowed in a different FY.
         </p>
         <div style={{ display: "flex", justifyContent: "flex-end" }}>
           <button
