@@ -37,6 +37,30 @@ type NavDivider = {
 
 type NavEntry = NavItem | NavDivider;
 
+// Mig 044 follow-on — per-department accent colour for the
+// department switcher tiles in the sidebar. Each tile wears its
+// accent as a top border (and on hover as a soft background wash),
+// so the four rooms feel distinct at a glance.
+const DEPT_ACCENTS: Record<Department, string> = {
+  production: "#c9a14a",  // MTCPL gold — matches the brand
+  finance:    "#5e8c4e",  // emerald — money
+  invoicing:  "#7a8db8",  // slate-blue — paper / outgoing
+  inventory:  "#c87850",  // copper — matches inventory module theme
+};
+
+/** Convert "#rrggbb" → "rgba(r,g,b,a)" so we can mix tile accents
+ *  with the dark sidebar without committing to a separate CSS file.
+ *  Falls back to the input string if it's not a 6-digit hex (lets
+ *  rgba() / named colours pass through untouched). */
+function hexToAlpha(hex: string, alpha: number): string {
+  const m = /^#?([0-9a-fA-F]{6})$/.exec(hex);
+  if (!m) return hex;
+  const r = parseInt(m[1].slice(0, 2), 16);
+  const g = parseInt(m[1].slice(2, 4), 16);
+  const b = parseInt(m[1].slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 // Migration 036 note: each entry carries a `department`. Entries
 // without an explicit tag default to 'production' below. The sidebar
 // filters by (role) AND (department === activeDepartment) for users
@@ -368,75 +392,113 @@ export function Sidebar({
         </span>
       </div>
 
-      {/* Department switcher (Migration 036) — developer + owner only.
-          A horizontal pill row that lets the user "enter" one of the
-          three operational departments. The active pill is highlighted
-          and inert; the others post a form to setActiveDepartmentAction,
-          which updates profiles.active_department and redirects to the
-          department's landing page.
-
-          Pills sit above the user block so the active department is
-          the first thing the eye lands on when scanning the sidebar. */}
+      {/* Department switcher (Migration 036; refreshed in Mig 044
+          follow-on per Daksh — original tiles read odd against the
+          dark sidebar, plain text floating on white).
+          Redesign:
+            • Container blends with the sidebar (dark inset panel
+              with a subtle gold inner ring) instead of the bright
+              white surface card.
+            • Each tile is a stacked icon-over-label target with a
+              per-department accent colour so the four feel like
+              distinct rooms, not four button-shaped strings.
+            • Active tile carries the gold gradient + a small
+              indicator pip; inactive tiles wear their department's
+              accent at low opacity on a dark base.
+          Sits above the user block so the active department is
+          the first thing the eye lands on when scanning. */}
       {switchable && (
         <div
           style={{
             display: "flex",
             flexDirection: "column",
-            gap: 6,
-            padding: "10px 14px 4px",
+            gap: 8,
+            padding: "12px 14px 8px",
           }}
         >
           <span
             style={{
-              fontSize: 10,
-              fontWeight: 700,
-              color: "var(--muted)",
+              fontSize: 9,
+              fontWeight: 800,
+              color: "rgba(255,255,255,0.55)",
               textTransform: "uppercase",
-              letterSpacing: "0.08em",
+              letterSpacing: "0.14em",
+              paddingLeft: 2,
             }}
           >
             Department
           </span>
-          {/* 2×2 grid — Production / Finance on top row, Invoicing /
-              Inventory on bottom row. Was a single horizontal flex
-              row which overflowed/scrolled once we hit 4 departments. */}
           <div
             style={{
               display: "grid",
               gridTemplateColumns: "1fr 1fr",
-              gap: 4,
-              background: "var(--surface)",
-              border: "1px solid var(--border)",
-              borderRadius: 8,
-              padding: 3,
+              gap: 6,
+              background:
+                "linear-gradient(180deg, rgba(0,0,0,0.32) 0%, rgba(0,0,0,0.18) 100%)",
+              border: "1px solid rgba(201, 161, 74, 0.18)",
+              borderRadius: 10,
+              padding: 6,
+              boxShadow: "inset 0 1px 2px rgba(0,0,0,0.28)",
             }}
           >
             {DEPARTMENTS.map((d) => {
               const isActive = d.id === currentDept;
+              const accent = DEPT_ACCENTS[d.id] ?? DEPT_ACCENTS.production;
+
+              // Active tile — solid gold gradient + indicator pip.
               if (isActive) {
                 return (
                   <span
                     key={d.id}
                     title={d.tooltip}
                     style={{
-                      textAlign: "center",
-                      padding: "6px 4px",
-                      fontSize: 11,
-                      fontWeight: 700,
-                      background: "var(--gold)",
+                      position: "relative",
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 4,
+                      padding: "10px 6px 8px",
+                      borderRadius: 7,
+                      background:
+                        "linear-gradient(135deg, #d4b056 0%, #c9a14a 55%, #a4823a 100%)",
                       color: "#fff",
-                      borderRadius: 5,
-                      letterSpacing: "0.02em",
                       cursor: "default",
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
+                      boxShadow:
+                        "0 2px 0 rgba(0,0,0,0.28), 0 0 0 1px rgba(255,255,255,0.18) inset",
+                      letterSpacing: "0.02em",
                     }}
                   >
-                    {d.icon} {d.label}
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        position: "absolute",
+                        top: 5,
+                        right: 6,
+                        width: 6,
+                        height: 6,
+                        borderRadius: "50%",
+                        background: "#fff",
+                        boxShadow: "0 0 0 2px rgba(255,255,255,0.35)",
+                      }}
+                    />
+                    <span style={{ fontSize: 18, lineHeight: 1 }}>{d.icon}</span>
+                    <span
+                      style={{
+                        fontSize: 10.5,
+                        fontWeight: 800,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.06em",
+                      }}
+                    >
+                      {d.label}
+                    </span>
                   </span>
                 );
               }
+
+              // Inactive tile — dark base with the dept accent
+              // creeping in via a top border + hover background tint.
               return (
                 <form
                   key={d.id}
@@ -453,21 +515,45 @@ export function Sidebar({
                     disabled={switching}
                     style={{
                       width: "100%",
-                      padding: "6px 4px",
-                      fontSize: 11,
-                      fontWeight: 600,
-                      background: "transparent",
-                      color: "var(--text)",
-                      border: "none",
-                      borderRadius: 5,
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 4,
+                      padding: "10px 6px 8px",
+                      borderRadius: 7,
+                      background:
+                        "linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(0,0,0,0.08) 100%)",
+                      color: "rgba(255,255,255,0.78)",
+                      border: `1px solid rgba(255,255,255,0.08)`,
+                      borderTop: `2px solid ${accent}`,
                       cursor: switching ? "wait" : "pointer",
-                      opacity: switching ? 0.6 : 1,
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
+                      opacity: switching ? 0.55 : 1,
+                      transition:
+                        "background 0.12s ease, color 0.12s ease, transform 0.12s ease",
+                    }}
+                    onMouseEnter={(e) => {
+                      if (switching) return;
+                      e.currentTarget.style.background = `linear-gradient(180deg, ${hexToAlpha(accent, 0.18)} 0%, ${hexToAlpha(accent, 0.06)} 100%)`;
+                      e.currentTarget.style.color = "#fff";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background =
+                        "linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(0,0,0,0.08) 100%)";
+                      e.currentTarget.style.color = "rgba(255,255,255,0.78)";
                     }}
                   >
-                    {d.icon} {d.label}
+                    <span style={{ fontSize: 18, lineHeight: 1 }}>{d.icon}</span>
+                    <span
+                      style={{
+                        fontSize: 10.5,
+                        fontWeight: 700,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.06em",
+                      }}
+                    >
+                      {d.label}
+                    </span>
                   </button>
                 </form>
               );
