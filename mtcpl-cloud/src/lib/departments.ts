@@ -34,7 +34,7 @@
 
 import type { AppRole } from "@/lib/types";
 
-export type Department = "production" | "finance" | "inventory";
+export type Department = "production" | "finance" | "inventory" | "invoicing";
 
 /** Static metadata for the switcher pill row. Order here = order in
  *  the UI. */
@@ -59,7 +59,14 @@ export const DEPARTMENTS: ReadonlyArray<{
     label: "Finance",
     icon: "💼",
     landingHref: "/accounts",
-    tooltip: "Bills · Payments · Vendor accounts",
+    tooltip: "Incoming bills · Payments · Vendor accounts",
+  },
+  {
+    id: "invoicing",
+    label: "Invoicing",
+    icon: "🧾",
+    landingHref: "/invoicing",
+    tooltip: "Outgoing customer invoices — generate, print, archive",
   },
   {
     id: "inventory",
@@ -72,6 +79,7 @@ export const DEPARTMENTS: ReadonlyArray<{
 
 const FINANCE_PREFIXES = ["/accounts"] as const;
 const INVENTORY_PREFIXES = ["/inventory"] as const;
+const INVOICING_PREFIXES = ["/invoicing"] as const;
 
 /**
  * Given a request pathname, return which department owns it. Used by
@@ -86,6 +94,9 @@ export function departmentForRoute(pathname: string): Department {
   }
   for (const p of INVENTORY_PREFIXES) {
     if (pathname === p || pathname.startsWith(p + "/")) return "inventory";
+  }
+  for (const p of INVOICING_PREFIXES) {
+    if (pathname === p || pathname.startsWith(p + "/")) return "invoicing";
   }
   return "production";
 }
@@ -142,7 +153,7 @@ export function canSwitchDepartment(role: AppRole): boolean {
  */
 export function rolePermittedDepartments(role: AppRole): Department[] {
   if (canSwitchDepartment(role)) {
-    return ["production", "finance", "inventory"];
+    return ["production", "finance", "invoicing", "inventory"];
   }
   const locked = lockedDepartmentForRole(role);
   return locked ? [locked] : [];

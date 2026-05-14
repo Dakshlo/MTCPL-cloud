@@ -111,7 +111,7 @@ export async function getAuthContext() {
     theme_preference?: "light" | "dark" | null;
     can_approve_cuts?: boolean;
     can_approve_bills?: boolean;
-    active_department?: "production" | "finance" | "inventory" | null;
+    active_department?: "production" | "finance" | "inventory" | "invoicing" | null;
   };
   let { data: profile } = (await admin
     .from("profiles")

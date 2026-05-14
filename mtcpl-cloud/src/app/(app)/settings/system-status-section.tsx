@@ -36,11 +36,12 @@ export function SystemStatusSection({
   updatedByName: string | null;
   takeDownAction: (formData: FormData) => Promise<Result>;
   bringUpAction: (formData: FormData) => Promise<Result>;
-  /** Migration 036 — which department this card controls. Posted as a
-   *  hidden form field so takeSystemDownAction / bringSystemUpAction
-   *  target the right row in system_settings. `null` = legacy global
-   *  flag (system_status row from migration 031). */
-  department?: "production" | "finance" | "inventory" | null;
+  /** Migration 036 (+ 038 added 'invoicing') — which department this
+   *  card controls. Posted as a hidden form field so takeSystemDownAction
+   *  / bringSystemUpAction target the right row in system_settings.
+   *  `null` = legacy global flag (system_status row from migration
+   *  031). */
+  department?: "production" | "finance" | "inventory" | "invoicing" | null;
   /** Display title — e.g. "Production · System status". Defaults to
    *  "System status" for the legacy global card. */
   scopeLabel?: string;

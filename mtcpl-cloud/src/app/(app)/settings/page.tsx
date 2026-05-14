@@ -12,6 +12,7 @@ import { PeekSection } from "@/components/peek-section";
 import { getSystemStatus, getDepartmentStatus } from "@/lib/system-status";
 import { getProfilesMap } from "@/lib/profiles";
 import { SystemStatusSection } from "./system-status-section";
+import { MaintenanceCollapsible } from "./maintenance-collapsible";
 
 // All assignable roles — only shown to developer.
 //
@@ -96,17 +97,18 @@ export default async function SettingsPage() {
   // System Status — load global + per-department flags (Migration 036).
   // Each falls back to `down: false` if the relevant migration hasn't
   // run, so the page renders normally even on a fresh deploy.
-  const [systemStatus, productionStatus, financeStatus, inventoryStatus] = await Promise.all([
+  const [systemStatus, productionStatus, financeStatus, invoicingStatus, inventoryStatus] = await Promise.all([
     getSystemStatus(),
     getDepartmentStatus("production"),
     getDepartmentStatus("finance"),
+    getDepartmentStatus("invoicing"),
     getDepartmentStatus("inventory"),
   ]);
   // Build a single lookup for updated_by → display name across all
-  // four rows. Cheaper than four parallel single-row lookups.
+  // five rows. Cheaper than five parallel single-row lookups.
   const profilesMapForSystem: Record<string, string> = await (async () => {
     const ids = new Set<string>(
-      [systemStatus, productionStatus, financeStatus, inventoryStatus]
+      [systemStatus, productionStatus, financeStatus, invoicingStatus, inventoryStatus]
         .map((s) => s.updatedBy)
         .filter((v): v is string => Boolean(v)),
     );
@@ -125,6 +127,9 @@ export default async function SettingsPage() {
     : null;
   const financeUpdatedByName = financeStatus.updatedBy
     ? profilesMapForSystem[financeStatus.updatedBy] ?? null
+    : null;
+  const invoicingUpdatedByName = invoicingStatus.updatedBy
+    ? profilesMapForSystem[invoicingStatus.updatedBy] ?? null
     : null;
   const inventoryUpdatedByName = inventoryStatus.updatedBy
     ? profilesMapForSystem[inventoryStatus.updatedBy] ?? null
@@ -273,70 +278,13 @@ export default async function SettingsPage() {
         </div>
       </div>
 
-      {/* System Status — DEVELOPER ONLY. Migration 036 introduced
-          per-department maintenance flags alongside the legacy global
-          kill-switch. Four cards in order of blast radius:
-            1. Global       — the original kill-switch from mig 031.
-                              Locks everyone in every department.
-            2. Production   — Cutting / Carving / Dispatch / etc.
-            3. Finance      — /accounts/* (Bills + Payments).
-            4. Inventory    — placeholder for the v2 inventory module.
-          Each is independent: you can take Finance down without
-          affecting Production, etc. Developers always retain a way
-          back via this page (developer override on the lock screen
-          is also still there). */}
-      {currentUser.role === "developer" && (
-        <>
-          <SystemStatusSection
-            isDown={systemStatus.down}
-            message={systemStatus.message}
-            updatedAt={systemStatus.updatedAt}
-            updatedByName={systemUpdatedByName}
-            takeDownAction={takeSystemDownAction}
-            bringUpAction={bringSystemUpAction}
-            department={null}
-            scopeLabel="System status — Global"
-            scopeIcon="🛡️"
-            scopeDescription="Locks every department at once — the nuclear option. Use for total deploys or DB-wide maintenance."
-          />
-          <SystemStatusSection
-            isDown={productionStatus.down}
-            message={productionStatus.message}
-            updatedAt={productionStatus.updatedAt}
-            updatedByName={productionUpdatedByName}
-            takeDownAction={takeSystemDownAction}
-            bringUpAction={bringSystemUpAction}
-            department="production"
-            scopeLabel="Production"
-            scopeIcon="🏭"
-            scopeDescription="Locks the cutting / carving / dispatch flow. Finance + Inventory stay live."
-          />
-          <SystemStatusSection
-            isDown={financeStatus.down}
-            message={financeStatus.message}
-            updatedAt={financeStatus.updatedAt}
-            updatedByName={financeUpdatedByName}
-            takeDownAction={takeSystemDownAction}
-            bringUpAction={bringSystemUpAction}
-            department="finance"
-            scopeLabel="Finance"
-            scopeIcon="💼"
-            scopeDescription="Locks the accounts module (/accounts/*). Production + Inventory stay live."
-          />
-          <SystemStatusSection
-            isDown={inventoryStatus.down}
-            message={inventoryStatus.message}
-            updatedAt={inventoryStatus.updatedAt}
-            updatedByName={inventoryUpdatedByName}
-            takeDownAction={takeSystemDownAction}
-            bringUpAction={bringSystemUpAction}
-            department="inventory"
-            scopeLabel="Inventory"
-            scopeIcon="📦"
-            scopeDescription="Locks the (stub) inventory module. Production + Finance stay live."
-          />
-        </>
-      )}
+      {/* System Status cards are now tucked into a collapsible at the
+          BOTTOM of the page (after Full System Backup). Migrating
+          out of the top slot per Daksh — these toggles are
+          rarely-used + high-impact, so hiding them behind a click
+          keeps the page focused on daily-use sections (Users,
+          Stone Types, Temple Codes, etc.). See <MaintenanceCollapsible>
+          rendered below the AutoBackup PeekSection. */}
 
       {/* User Management — owner, team_head, developer */}
       {(currentUser.role === "owner" || currentUser.role === "developer" || currentUser.role === "team_head") && (
@@ -1040,6 +988,82 @@ export default async function SettingsPage() {
               Supabase Pro snapshot backups. */}
           <AutoBackup />
         </PeekSection>
+      )}
+
+      {/* Maintenance & system status — DEVELOPER ONLY. Tucked into a
+          collapsible at the very bottom so it doesn't compete with
+          daily-use sections at the top. Five cards in order of blast
+          radius:
+            1. Global       — the legacy kill-switch (mig 031). Locks
+                              everyone in every department.
+            2. Production   — Cutting / Carving / Dispatch / etc.
+            3. Finance      — /accounts/* (Bills + Payments).
+            4. Invoicing    — /invoicing/* (mig 038, outgoing invoices).
+            5. Inventory    — placeholder for the v2 inventory module.
+          Each is independent. */}
+      {currentUser.role === "developer" && (
+        <MaintenanceCollapsible>
+          <SystemStatusSection
+            isDown={systemStatus.down}
+            message={systemStatus.message}
+            updatedAt={systemStatus.updatedAt}
+            updatedByName={systemUpdatedByName}
+            takeDownAction={takeSystemDownAction}
+            bringUpAction={bringSystemUpAction}
+            department={null}
+            scopeLabel="System status — Global"
+            scopeIcon="🛡️"
+            scopeDescription="Locks every department at once — the nuclear option. Use for total deploys or DB-wide maintenance."
+          />
+          <SystemStatusSection
+            isDown={productionStatus.down}
+            message={productionStatus.message}
+            updatedAt={productionStatus.updatedAt}
+            updatedByName={productionUpdatedByName}
+            takeDownAction={takeSystemDownAction}
+            bringUpAction={bringSystemUpAction}
+            department="production"
+            scopeLabel="Production"
+            scopeIcon="🏭"
+            scopeDescription="Locks the cutting / carving / dispatch flow. Finance + Invoicing + Inventory stay live."
+          />
+          <SystemStatusSection
+            isDown={financeStatus.down}
+            message={financeStatus.message}
+            updatedAt={financeStatus.updatedAt}
+            updatedByName={financeUpdatedByName}
+            takeDownAction={takeSystemDownAction}
+            bringUpAction={bringSystemUpAction}
+            department="finance"
+            scopeLabel="Finance"
+            scopeIcon="💼"
+            scopeDescription="Locks the accounts module (/accounts/*). Production + Invoicing + Inventory stay live."
+          />
+          <SystemStatusSection
+            isDown={invoicingStatus.down}
+            message={invoicingStatus.message}
+            updatedAt={invoicingStatus.updatedAt}
+            updatedByName={invoicingUpdatedByName}
+            takeDownAction={takeSystemDownAction}
+            bringUpAction={bringSystemUpAction}
+            department="invoicing"
+            scopeLabel="Invoicing"
+            scopeIcon="🧾"
+            scopeDescription="Locks the customer-invoicing module (/invoicing/*). Production + Finance + Inventory stay live."
+          />
+          <SystemStatusSection
+            isDown={inventoryStatus.down}
+            message={inventoryStatus.message}
+            updatedAt={inventoryStatus.updatedAt}
+            updatedByName={inventoryUpdatedByName}
+            takeDownAction={takeSystemDownAction}
+            bringUpAction={bringSystemUpAction}
+            department="inventory"
+            scopeLabel="Inventory"
+            scopeIcon="📦"
+            scopeDescription="Locks the (stub) inventory module. Production + Finance + Invoicing stay live."
+          />
+        </MaintenanceCollapsible>
       )}
     </>
   );

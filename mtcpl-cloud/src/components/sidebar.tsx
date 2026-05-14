@@ -188,6 +188,29 @@ const navEntries: NavEntry[] = [
     roles: ["developer", "owner", "accountant"],
     department: "finance",
   },
+  // ── INVOICING section (Migration 038 — outgoing customer invoices) ──
+  // Locked to developer + owner for v1. Add a dedicated invoicer role
+  // later if Daksh wants to delegate the daily generation work.
+  {
+    type: "divider",
+    label: "INVOICING",
+    roles: ["developer", "owner"],
+    department: "invoicing",
+  },
+  {
+    href: "/invoicing",
+    label: "All Invoices",
+    icon: "🧾",
+    roles: ["developer", "owner"],
+    department: "invoicing",
+  },
+  {
+    href: "/invoicing/new",
+    label: "New Invoice",
+    icon: "✚",
+    roles: ["developer", "owner"],
+    department: "invoicing",
+  },
   // ── INVENTORY section (Migration 036 — stub for v1) ──────────────
   // Single placeholder entry. The page is a "coming soon" panel.
   // Locked to developer + owner until the real inventory module ships.
