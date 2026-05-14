@@ -183,7 +183,7 @@ const navEntries: NavEntry[] = [
   },
   {
     href: "/accounts/vendors",
-    label: "Vendors Profile (Bill)",
+    label: "Vendor Account",
     icon: "🏢",
     roles: ["developer", "owner", "accountant"],
     department: "finance",
