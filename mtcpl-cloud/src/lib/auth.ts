@@ -43,7 +43,15 @@ export function getDefaultRouteForRole(role?: AppRole | null) {
     case "crosscheck":
       // Mig 037 — crosscheck role's only job is the bill verification
       // gate. Their natural landing is the audit queue.
+      // Mig 041 adds an Inventory Audit queue to the same human's
+      // plate, but the bill queue is still the primary daily duty,
+      // so the bill audit stays as the default landing.
       return "/accounts/approvals";
+    case "storekeeper":
+      // Mig 041 — yard employee. The scaffolding board is the
+      // primary workspace; everything else (issue/return forms,
+      // sites, catalog) is a click away from there.
+      return "/inventory/scaffolding";
     case "worker":
       return "/pending";
     default:

@@ -30,7 +30,15 @@ export type AppRole =
   //   fallback.
   | "biller"
   | "accountant"
-  | "crosscheck";
+  | "crosscheck"
+  // Migration 041 — Inventory module (Scaffolding v1).
+  //
+  // storekeeper — the yard employee who manages physical stock.
+  //   Proposes every movement (issue / return / receive / writeoff).
+  //   Locked to the Inventory department. Crosscheck (Mafat) +
+  //   owner approve their submissions; the storekeeper cannot
+  //   approve their own work (segregation of duties).
+  | "storekeeper";
 
 export type StoneType = "PinkStone" | "WhiteStone";
 

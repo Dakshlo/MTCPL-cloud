@@ -72,8 +72,8 @@ export const DEPARTMENTS: ReadonlyArray<{
     id: "inventory",
     label: "Inventory",
     icon: "📦",
-    landingHref: "/inventory",
-    tooltip: "Stock tracking (coming soon)",
+    landingHref: "/inventory/scaffolding",
+    tooltip: "Scaffolding · Stock movements · Site holdings",
   },
 ] as const;
 
@@ -106,9 +106,16 @@ export function departmentForRoute(pathname: string): Department {
  * role can switch freely (developer + owner only).
  *
  * Roles map to one department implicitly:
- *   • biller, accountant            → Finance
+ *   • biller, accountant, crosscheck → Finance
+ *   • storekeeper                    → Inventory (mig 041)
  *   • developer, owner               → null  (can switch)
  *   • everyone else                  → Production
+ *
+ * Note on crosscheck: Mafat Purohit holds this role and audits BOTH
+ * the bill queue (his primary work) and the inventory queue (mig 041
+ * follow-on). The role still locks to Finance — the Inventory Audit
+ * badge surfaces on the top bar from any page, so he's never far
+ * from either queue.
  */
 export function lockedDepartmentForRole(role: AppRole): Department | null {
   switch (role) {
@@ -117,7 +124,10 @@ export function lockedDepartmentForRole(role: AppRole): Department | null {
       return null;
     case "biller":
     case "accountant":
+    case "crosscheck":
       return "finance";
+    case "storekeeper":
+      return "inventory";
     default:
       return "production";
   }

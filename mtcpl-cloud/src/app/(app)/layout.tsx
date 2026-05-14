@@ -12,6 +12,7 @@ import { Heartbeat } from "@/components/heartbeat";
 import { requireAuth } from "@/lib/auth";
 import { canApproveCuts } from "@/lib/cutting-permissions";
 import { canApproveBills, canConfirmPayments } from "@/lib/accounts-permissions";
+import { canApproveInventoryMovements } from "@/lib/inventory-permissions";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getEffectiveStatus, getDepartmentStatus } from "@/lib/system-status";
 import {
@@ -149,6 +150,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   let approvalsBadge: number | null = null;
   let billsAuditBadge: number | null = null;
   let payTodayBadge: number | null = null;
+  let inventoryAuditBadge: number | null = null;
   const supabase = createAdminSupabaseClient();
   if (canApproveCuts(profile)) {
     const { count } = await supabase
@@ -177,6 +179,21 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       .select("*", { count: "exact", head: true })
       .in("status", ["proposed", "confirmed"]);
     payTodayBadge = count ?? 0;
+  }
+  // Inventory Audit badge — Mig 041. Crosscheck (Mafat) + owner +
+  // dev see pending storekeeper submissions. Indexed by the partial
+  // inventory_movements_pending_idx so the COUNT is sub-millisecond.
+  // The badge counts BATCHES (distinct batch_id), not rows — a 6-item
+  // issue is one decision, not six.
+  if (canApproveInventoryMovements(profile)) {
+    const { data: pendingBatches } = await supabase
+      .from("inventory_movements")
+      .select("batch_id")
+      .eq("status", "pending_approval");
+    const uniqueBatches = new Set(
+      (pendingBatches ?? []).map((r) => r.batch_id as string),
+    );
+    inventoryAuditBadge = uniqueBatches.size;
   }
 
   return (
@@ -345,6 +362,19 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                 count={payTodayBadge}
                 emptyTitle="Pay Today queue (empty)"
                 activeTitle={`${payTodayBadge} payment${payTodayBadge === 1 ? "" : "s"} in flight`}
+              />
+            )}
+
+            {/* Inventory Audit badge — Mig 041. Crosscheck + owner +
+                dev see pending scaffolding movement batches that the
+                storekeeper submitted. Count is distinct batch_ids. */}
+            {inventoryAuditBadge !== null && (
+              <TopbarBadge
+                href="/inventory/approvals"
+                label="📦 Inventory Audit"
+                count={inventoryAuditBadge}
+                emptyTitle="Inventory Audit queue (empty)"
+                activeTitle={`${inventoryAuditBadge} batch${inventoryAuditBadge === 1 ? "" : "es"} awaiting audit`}
               />
             )}
 

@@ -211,20 +211,70 @@ const navEntries: NavEntry[] = [
     roles: ["developer", "owner"],
     department: "invoicing",
   },
-  // ── INVENTORY section (Migration 036 — stub for v1) ──────────────
-  // Single placeholder entry. The page is a "coming soon" panel.
-  // Locked to developer + owner until the real inventory module ships.
+  // ── INVENTORY section (Migration 041 — Scaffolding v1) ──────────
+  // New 'storekeeper' role lives here; crosscheck (Mafat) also sees
+  // the Audit Queue entry because the same human audits both bills
+  // and inventory. Owner + developer see everything.
   {
     type: "divider",
     label: "INVENTORY",
-    roles: ["developer", "owner"],
+    roles: ["developer", "owner", "storekeeper", "crosscheck"],
     department: "inventory",
   },
   {
-    href: "/inventory",
-    label: "Inventory",
-    icon: "📦",
-    roles: ["developer", "owner"],
+    href: "/inventory/scaffolding",
+    label: "Scaffolding Board",
+    icon: "▦",
+    roles: ["developer", "owner", "storekeeper", "crosscheck"],
+    department: "inventory",
+  },
+  {
+    href: "/inventory/scaffolding/issue",
+    label: "Issue to Site",
+    icon: "→",
+    roles: ["developer", "owner", "storekeeper"],
+    department: "inventory",
+  },
+  {
+    href: "/inventory/scaffolding/return",
+    label: "Return from Site",
+    icon: "←",
+    roles: ["developer", "owner", "storekeeper"],
+    department: "inventory",
+  },
+  {
+    href: "/inventory/scaffolding/receive",
+    label: "Receive Stock",
+    icon: "⤓",
+    roles: ["developer", "owner", "storekeeper"],
+    department: "inventory",
+  },
+  {
+    href: "/inventory/approvals",
+    label: "Audit Queue",
+    icon: "✅",
+    roles: ["developer", "owner", "crosscheck"],
+    department: "inventory",
+  },
+  {
+    href: "/inventory/scaffolding/history",
+    label: "Movement History",
+    icon: "⊟",
+    roles: ["developer", "owner", "storekeeper", "crosscheck"],
+    department: "inventory",
+  },
+  {
+    href: "/inventory/scaffolding/sites",
+    label: "Sites",
+    icon: "⌂",
+    roles: ["developer", "owner", "storekeeper"],
+    department: "inventory",
+  },
+  {
+    href: "/inventory/scaffolding/components",
+    label: "Component Catalog",
+    icon: "⊞",
+    roles: ["developer", "owner", "storekeeper"],
     department: "inventory",
   },
 ];
@@ -246,6 +296,7 @@ function roleLabel(role: AppRole): string {
     biller: "BILLER",
     accountant: "ACCOUNTANT",
     crosscheck: "CROSSCHECK",
+    storekeeper: "STOREKEEPER",
   };
   return labels[role] ?? role.replace(/_/g, " ").toUpperCase();
 }

@@ -8,6 +8,101 @@ Reverse-chronological. Most recent at top. Append to TOP when shipping new work.
 
 ## Recent (this Claude session)
 
+### `(pending)` · Inventory module — Scaffolding v1 (migration 041)
+
+Brand-new vertical for tracking scaffolding parts across the plant + 4+ ongoing sites. First inventory category; later modules (CNC tools, cement, motors) will be parallel `*_components` + reuse the same `sites` + `inventory_movements` tables.
+
+**The problem:** scaffolding parts cycle between the plant and active projects. Today there's no central record of "Site Alpha currently has 50 standards", so parts get misplaced and the owner has to walk the yard to know where stock is.
+
+**Schema (migration 041):**
+- `ALTER TYPE public.app_role ADD VALUE 'storekeeper'` (outside the BEGIN/COMMIT block).
+- Three enums: `inventory_movement_type` (`issue | return | receive | writeoff | transfer | adjust` — last two reserved for v2), `inventory_movement_status` (`pending_approval | approved | rejected | cancelled`), `scaffolding_component_type` (12 values for the SVG icon mapping).
+- `sites` — one row per physical location stock can sit. `is_plant=TRUE` is a singleton row (partial unique index enforces). Pre-seeded with `('PLANT', 'Plant (Warehouse)')`; project sites added through `/inventory/scaffolding/sites`.
+- `scaffolding_components` — catalog. UNIQUE `(component_type, size_spec)`. Pre-seeded with 18 common variants (Daksh confirmed: 5 Standards, 4 Ledgers, 2 Transoms, 7 singletons). Storekeeper can edit / archive / add through `/inventory/scaffolding/components`.
+- `inventory_movements` — append-only ledger. `batch_id` groups items moved together (one approval decision per batch). `from_site_id` / `to_site_id` NULL semantics: NULL-from means external vendor (receive), NULL-to means external discard (writeoff). Coherence CHECKs enforce the (type → endpoints) signature on insert.
+- Read-only RLS on all three new tables; writes go through admin-client server actions.
+- Partial indexes for the pending-approval queue, per-site approved feeds, per-component aggregates, and batch lookup.
+- No materialised stock table for v1 — qty-on-hand is computed on the fly from `loadInventorySnapshot()`. The dataset is small enough that the JS reduce is sub-millisecond. Materialise later via trigger if needed.
+
+**State machine:**
+```
+storekeeper proposes ──► pending_approval ──[approve]──► approved (counted)
+                            │   ▲                              
+                            │   │                              
+                       [reject]│                               
+                            ▼  │                               
+                         rejected ──[storekeeper edits + resubmits]── new batch
+                            │
+                            └── (or cancelled by storekeeper before approval)
+```
+
+Crosscheck (Mafat) is the audit role — same human handles the bill verification queue, separate top-bar badge for each. Owner is the fallback approver.
+
+**Server actions (`src/app/(app)/inventory/actions.ts`):**
+- `proposeMovementAction` — storekeeper / owner / dev. Accepts `movement_type` + `site_id` + `component_ids[]` / `qtys[]` / `notes[]`. Validates qty ≤ available (with pending-out netted) for outgoing types; receive has no cap.
+- `approveBatchAction` + `approveBatchFormAction` — crosscheck / owner / dev. Race-guard `WHERE status='pending_approval'`.
+- `rejectBatchAction` + `rejectBatchFormAction` — note required.
+- `cancelBatchAction` — storekeeper can only cancel their own pending batch; owner / dev can cancel any.
+- `upsertSiteAction` + `archiveSiteAction` + `unarchiveSiteAction` — sites CRUD.
+- `upsertComponentAction` + `archiveComponentAction` + `unarchiveComponentAction` — component catalog CRUD.
+
+**UI surfaces (all under `/inventory/`):**
+- `/inventory/scaffolding` — the board. Site switcher (hanging-tag tabs), KPI strip on plant view, component cards grouped by type. Cards show big icon + qty + stock-level dots (red/amber/green).
+- `/inventory/scaffolding/issue` — "send to a site" shopping-cart UX. Left pane = plant stock with available qty; right pane = cart with qty + line notes; submits → `pending_approval` batch.
+- `/inventory/scaffolding/return` — reverse of issue.
+- `/inventory/scaffolding/receive` — vendor delivery → plant. No source caps.
+- `/inventory/scaffolding/writeoff` — damaged / lost. Source can be plant or a site.
+- `/inventory/approvals` — Mafat's audit queue. Approve / Send back per batch.
+- `/inventory/scaffolding/history` — vertical timeline (chronological feed of batches with status pills). Filters: status / type / site. Distinct from finance's tabular ledger.
+- `/inventory/scaffolding/sites` — sites CRUD.
+- `/inventory/scaffolding/components` — catalog CRUD with live icon preview by type.
+
+**Visual identity (distinct from Production + Finance):**
+- Palette: steel blue `#2c4a5e` / warm copper `#c87850` / cream paper `#fbf8f1` / parchment border `#dfd5c2`.
+- Shared `InventoryShell` wrapper applies the palette + sub-nav to every inventory route.
+- 12 hand-drawn monochrome SVG icons in `_components/component-icon.tsx`, one per `scaffolding_component_type` value. Pickup via `<ComponentIcon type={c.component_type} />` — no per-row image upload (deferred to v2 once Supabase Storage is wired).
+
+**Roles + permissions (`src/lib/inventory-permissions.ts`):**
+- `canManageInventory` — developer / owner / **storekeeper** (proposes movements, manages catalog + sites).
+- `canApproveInventoryMovements` — developer / owner / **crosscheck** (Mafat).
+- `canViewInventory` — all of the above.
+- Sidebar: new INVENTORY section with 8 entries. Storekeeper sees writes (Board / Issue / Return / Receive / History / Sites / Catalog); crosscheck sees Board / History / Audit Queue.
+- New top-bar badge **"📦 Inventory Audit (N)"** counting distinct pending `batch_id`s. Visible to crosscheck / owner / dev.
+
+**Files added:**
+- `supabase/migrations/041_inventory_scaffolding.sql`
+- `src/lib/inventory-permissions.ts`
+- `src/app/(app)/inventory/actions.ts`
+- `src/app/(app)/inventory/_components/{theme.ts, component-icon.tsx, stock.ts, inventory-shell.tsx, component-card.tsx, site-switcher.tsx, movement-form-client.tsx}`
+- `src/app/(app)/inventory/scaffolding/{page.tsx, issue/page.tsx, return/page.tsx, receive/page.tsx, writeoff/page.tsx}`
+- `src/app/(app)/inventory/scaffolding/sites/{page.tsx, sites-client.tsx}`
+- `src/app/(app)/inventory/scaffolding/components/{page.tsx, components-client.tsx}`
+- `src/app/(app)/inventory/scaffolding/history/page.tsx`
+- `src/app/(app)/inventory/approvals/{page.tsx, approvals-client.tsx}`
+
+**Files modified:**
+- `src/lib/types.ts` — `AppRole` union adds `storekeeper`.
+- `src/lib/auth.ts` — landing route for storekeeper → `/inventory/scaffolding`.
+- `src/lib/departments.ts` — locks `storekeeper` to Inventory; also corrects `crosscheck` from "production" fallthrough to "finance" (their original intended primary department); Inventory's `landingHref` now points at the real board instead of the placeholder.
+- `src/components/sidebar.tsx` — INVENTORY section replaced with 8 real entries; `roleLabel` adds `STOREKEEPER`.
+- `src/app/(app)/layout.tsx` — new `inventoryAuditBadge` query + `📦 Inventory Audit` top-bar badge.
+- `src/app/(app)/inventory/page.tsx` — placeholder replaced with `redirect("/inventory/scaffolding")`.
+
+**Out of scope (v1 — deferred to v2):**
+- Per-component photo upload (waiting on Supabase Storage; icons-only for now).
+- Site-to-site direct transfer (`transfer` enum value reserved; storekeeper routes through plant).
+- Physical-count `adjust` movements.
+- Per-component reorder threshold (stock-level dots use hardcoded 10-pcs cutoff).
+- Linking received movements back to a finance bill (`bills.inventory_ref_token` stays NULL; cross-link comes when CNC tools land in v2).
+- Other inventory categories (CNC tools, cement, motors) — scaffolding ships first; same shell + permissions + audit pattern will fold in their own `*_components` table and routes.
+
+**Verification before merging:**
+1. Run migration 041 in Supabase SQL Editor — the `ALTER TYPE` lines first (outside transaction), then the BEGIN/COMMIT block.
+2. Assign a storekeeper role to one profile: `UPDATE profiles SET role='storekeeper', active_department='inventory', is_active=TRUE WHERE full_name ILIKE '%<name>%';`
+3. As storekeeper: add a project site, propose an issue.
+4. As Mafat: open `/inventory/approvals`, approve.
+5. As anyone with view access: refresh the board — site should show the issued qty; plant should show the deducted qty.
+
 ### `(pending)` · Accounts / Finance module (migration 028)
 
 Brand-new vertical for supplier-bill accounting. Two new roles, three new tables, ten new routes, two new top-bar badges. Strictly orthogonal to cutting / carving — separate vendor master, separate workflow, separate sidebar section.
