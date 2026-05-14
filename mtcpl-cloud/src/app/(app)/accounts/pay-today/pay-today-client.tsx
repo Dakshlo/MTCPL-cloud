@@ -103,10 +103,13 @@ export function PayTodayClient({
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 26 }}>
       {prematureRows.length > 0 && (
+        // Mig 042 follow-on (Daksh): the verbose warning didn't
+        // portray its purpose — too much to read. Now: one short
+        // sentence, then the affected bills as small chips below.
         <div
           role="alert"
           style={{
-            padding: "12px 16px",
+            padding: "10px 14px",
             background: "rgba(251, 191, 36, 0.10)",
             border: "1.5px solid #f59e0b",
             borderLeft: "5px solid #b45309",
@@ -114,28 +117,57 @@ export function PayTodayClient({
             fontSize: 13,
             color: "#78350f",
             display: "flex",
-            alignItems: "flex-start",
+            alignItems: "center",
             gap: 12,
+            flexWrap: "wrap",
           }}
         >
-          <span style={{ fontSize: 20, lineHeight: 1 }} aria-hidden="true">⚠️</span>
-          <div style={{ flex: 1 }}>
-            <strong>
-              {prematureRows.length} payment{prematureRows.length === 1 ? "" : "s"} below vendor payment terms
-            </strong>
-            <div style={{ marginTop: 4, fontSize: 12, lineHeight: 1.5 }}>
-              Each vendor's terms (Vendor Account → payment terms) determine
-              when bills become payable. You can still mark these paid, but
-              please double-check before releasing the money. Bills affected:{" "}
-              {prematureRows
-                .slice(0, 6)
-                .map(
-                  (r) =>
-                    `${r.vendorName} (${r.daysSinceBill}d / terms ${r.paymentTermsDays}d)`,
-                )
-                .join(", ")}
-              {prematureRows.length > 6 ? `, and ${prematureRows.length - 6} more` : ""}.
-            </div>
+          <span style={{ fontSize: 18, lineHeight: 1 }} aria-hidden="true">⚠️</span>
+          <strong style={{ fontSize: 13 }}>
+            Paying early —{" "}
+            {prematureRows.length} bill{prematureRows.length === 1 ? "" : "s"}{" "}
+            below vendor terms. Double-check before release.
+          </strong>
+          <div
+            style={{
+              display: "flex",
+              gap: 5,
+              flexWrap: "wrap",
+              flex: "1 1 auto",
+              minWidth: 0,
+              justifyContent: "flex-end",
+            }}
+          >
+            {prematureRows.slice(0, 8).map((r) => (
+              <span
+                key={r.id}
+                title={`${r.vendorName} · ${r.daysSinceBill} days since bill · terms ${r.paymentTermsDays}d`}
+                style={{
+                  padding: "2px 8px",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  background: "rgba(180, 83, 9, 0.12)",
+                  color: "#78350f",
+                  borderRadius: 999,
+                  fontFamily: "ui-monospace, monospace",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {r.vendorName} {r.daysSinceBill}d/{r.paymentTermsDays}d
+              </span>
+            ))}
+            {prematureRows.length > 8 && (
+              <span
+                style={{
+                  padding: "2px 8px",
+                  fontSize: 11,
+                  color: "#78350f",
+                  fontWeight: 700,
+                }}
+              >
+                +{prematureRows.length - 8} more
+              </span>
+            )}
           </div>
         </div>
       )}

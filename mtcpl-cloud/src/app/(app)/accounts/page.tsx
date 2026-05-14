@@ -23,7 +23,15 @@ import {
   Money,
 } from "./_ui/components";
 
-type SearchParams = Promise<{ vendor?: string; age?: string }>;
+type SearchParams = Promise<{
+  vendor?: string;
+  age?: string;
+  // Mig 042 follow-on — Daksh: "give search with token no. on due
+  // bill. and also user can choose date from to for due page."
+  token?: string;
+  date_from?: string;
+  date_to?: string;
+}>;
 
 export default async function AccountsHomePage({
   searchParams,
@@ -45,6 +53,9 @@ export default async function AccountsHomePage({
   const sp = await searchParams;
   const vendorFilter = sp.vendor ?? "";
   const ageFilter = sp.age ?? "";
+  const tokenFilter = (sp.token ?? "").trim();
+  const dateFromFilter = (sp.date_from ?? "").trim();
+  const dateToFilter = (sp.date_to ?? "").trim();
 
   const supabase = createAdminSupabaseClient();
 
@@ -65,6 +76,17 @@ export default async function AccountsHomePage({
     .order("bill_date", { ascending: true })
     .limit(1000);
   if (vendorFilter) dueQuery = dueQuery.eq("bill_vendor_id", vendorFilter);
+  // Mig 042 follow-on — token substring search + bill-date range.
+  // Token uses ilike with surrounding wildcards so partial entries
+  // ("2026" or "T-2026-1") all hit. Date range is inclusive on both
+  // ends.
+  if (tokenFilter) {
+    // Escape % and _ so users can search for literal characters
+    const escaped = tokenFilter.replace(/[%_]/g, (m) => `\\${m}`);
+    dueQuery = dueQuery.ilike("token", `%${escaped}%`);
+  }
+  if (dateFromFilter) dueQuery = dueQuery.gte("bill_date", dateFromFilter);
+  if (dateToFilter) dueQuery = dueQuery.lte("bill_date", dateToFilter);
 
   const { data: dueRaw, error } = await dueQuery;
   if (error) throw new Error(error.message);
@@ -387,6 +409,9 @@ export default async function AccountsHomePage({
               total={allDue.reduce((s, b) => s + b.amountOutstanding, 0)}
               accent={ACCOUNTS_TOKENS.accent}
               vendor={vendorFilter}
+              token={tokenFilter}
+              dateFrom={dateFromFilter}
+              dateTo={dateToFilter}
             />
             <AgeBucket
               label="0–30 days"
@@ -396,6 +421,9 @@ export default async function AccountsHomePage({
               total={bucketTotals["0_30"]}
               accent={ACCOUNTS_TOKENS.success}
               vendor={vendorFilter}
+              token={tokenFilter}
+              dateFrom={dateFromFilter}
+              dateTo={dateToFilter}
             />
             <AgeBucket
               label="31–60 days"
@@ -405,6 +433,9 @@ export default async function AccountsHomePage({
               total={bucketTotals["31_60"]}
               accent="#f59e0b"
               vendor={vendorFilter}
+              token={tokenFilter}
+              dateFrom={dateFromFilter}
+              dateTo={dateToFilter}
             />
             <AgeBucket
               label="61–90 days"
@@ -414,6 +445,9 @@ export default async function AccountsHomePage({
               total={bucketTotals["61_90"]}
               accent="#ea580c"
               vendor={vendorFilter}
+              token={tokenFilter}
+              dateFrom={dateFromFilter}
+              dateTo={dateToFilter}
             />
             <AgeBucket
               label="90+ days"
@@ -423,37 +457,66 @@ export default async function AccountsHomePage({
               total={bucketTotals["90_plus"]}
               accent={ACCOUNTS_TOKENS.danger}
               vendor={vendorFilter}
+              token={tokenFilter}
+              dateFrom={dateFromFilter}
+              dateTo={dateToFilter}
             />
           </div>
         </div>
       )}
 
-      {/* Vendor filter */}
-      <div
+      {/* Mig 042 follow-on — token search + bill-date range filter
+          live in the same GET form as the vendor select. One submit
+          handles all four; an age-bucket click adds `age=...` via a
+          separate Link, which we keep round-trippable through this
+          form via the hidden input. */}
+      <form
+        method="GET"
         style={{
           display: "flex",
           gap: 10,
           marginBottom: 14,
-          alignItems: "center",
+          alignItems: "flex-end",
           flexWrap: "wrap",
+          padding: "10px 12px",
+          background: "var(--surface, #fff)",
+          border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+          borderRadius: 10,
+          boxShadow: ACCOUNTS_TOKENS.shadow,
         }}
       >
-        <form method="GET" style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
-          {ageFilter && <input type="hidden" name="age" value={ageFilter} />}
-          <label style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-            Vendor
-          </label>
-          <select
-            name="vendor"
-            defaultValue={vendorFilter}
+        {ageFilter && <input type="hidden" name="age" value={ageFilter} />}
+
+        <FilterField label="Token" hint="Type any part of T-YYYY-N">
+          <input
+            type="search"
+            name="token"
+            defaultValue={tokenFilter}
             style={{
-              padding: "6px 12px",
+              padding: "6px 10px",
               fontSize: 13,
               background: "#fff",
               border: `1px solid ${ACCOUNTS_TOKENS.borderStrong}`,
               borderRadius: 8,
               color: "var(--text)",
-              minWidth: 200,
+              fontFamily: "ui-monospace, monospace",
+              minWidth: 140,
+            }}
+          />
+        </FilterField>
+
+        <FilterField label="Vendor">
+          <select
+            name="vendor"
+            defaultValue={vendorFilter}
+            style={{
+              padding: "6px 10px",
+              fontSize: 13,
+              background: "#fff",
+              border: `1px solid ${ACCOUNTS_TOKENS.borderStrong}`,
+              borderRadius: 8,
+              color: "var(--text)",
+              minWidth: 180,
             }}
           >
             <option value="">All vendors</option>
@@ -463,16 +526,59 @@ export default async function AccountsHomePage({
               </option>
             ))}
           </select>
-          <button type="submit" style={BUTTON_STYLES.secondary}>
-            Apply filter
-          </button>
-          {(vendorFilter || ageFilter) && (
-            <Link href="/accounts" style={{ fontSize: 12, color: "var(--muted)", textDecoration: "underline" }}>
-              Clear all
-            </Link>
-          )}
-        </form>
-      </div>
+        </FilterField>
+
+        <FilterField label="Bill date — from">
+          <input
+            type="date"
+            name="date_from"
+            defaultValue={dateFromFilter}
+            style={{
+              padding: "6px 10px",
+              fontSize: 13,
+              background: "#fff",
+              border: `1px solid ${ACCOUNTS_TOKENS.borderStrong}`,
+              borderRadius: 8,
+              color: "var(--text)",
+              fontFamily: "ui-monospace, monospace",
+            }}
+          />
+        </FilterField>
+
+        <FilterField label="to">
+          <input
+            type="date"
+            name="date_to"
+            defaultValue={dateToFilter}
+            style={{
+              padding: "6px 10px",
+              fontSize: 13,
+              background: "#fff",
+              border: `1px solid ${ACCOUNTS_TOKENS.borderStrong}`,
+              borderRadius: 8,
+              color: "var(--text)",
+              fontFamily: "ui-monospace, monospace",
+            }}
+          />
+        </FilterField>
+
+        <button type="submit" style={BUTTON_STYLES.secondary}>
+          Apply filters
+        </button>
+        {(vendorFilter || ageFilter || tokenFilter || dateFromFilter || dateToFilter) && (
+          <Link
+            href="/accounts"
+            style={{
+              fontSize: 12,
+              color: "var(--muted)",
+              textDecoration: "underline",
+              padding: "6px 4px",
+            }}
+          >
+            Clear all
+          </Link>
+        )}
+      </form>
 
       {/* Multi-select propose table */}
       {filteredDue.length === 0 && allDue.length === 0 ? (
@@ -499,6 +605,44 @@ export default async function AccountsHomePage({
   );
 }
 
+/** Mig 042 follow-on — small column wrapper for the filter inputs.
+ *  Keeps every filter aligned on the same baseline. */
+function FilterField({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 4,
+      }}
+    >
+      <span
+        style={{
+          fontSize: 10,
+          fontWeight: 800,
+          color: "var(--muted)",
+          textTransform: "uppercase",
+          letterSpacing: "0.05em",
+        }}
+      >
+        {label}
+      </span>
+      {children}
+      {hint && (
+        <span style={{ fontSize: 10, color: "var(--muted)" }}>{hint}</span>
+      )}
+    </label>
+  );
+}
+
 function AgeBucket({
   label,
   value,
@@ -507,6 +651,9 @@ function AgeBucket({
   total,
   accent,
   vendor,
+  token,
+  dateFrom,
+  dateTo,
 }: {
   label: string;
   value: string;
@@ -515,11 +662,20 @@ function AgeBucket({
   total: number;
   accent: string;
   vendor: string;
+  // Mig 042 follow-on — bucket links now preserve token + date
+  // range filters too, so the user can narrow by token and click
+  // a bucket without losing their search.
+  token: string;
+  dateFrom: string;
+  dateTo: string;
 }) {
   const isActive = current === value;
   const params = new URLSearchParams();
   if (value) params.set("age", value);
   if (vendor) params.set("vendor", vendor);
+  if (token) params.set("token", token);
+  if (dateFrom) params.set("date_from", dateFrom);
+  if (dateTo) params.set("date_to", dateTo);
   const href = `/accounts${params.toString() ? `?${params.toString()}` : ""}`;
   return (
     <Link
