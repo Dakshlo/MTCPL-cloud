@@ -173,18 +173,57 @@ export function PayTodayClient({
         total={confirmedRows.reduce((s, r) => s + r.proposedAmount, 0)}
       >
         {confirmedRows.length > 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {confirmedRows.map((row) => (
-              <ConfirmedRow
-                key={row.id}
-                row={row}
-                canMarkPaid={canMarkPaid}
-                canCancel={canCancel}
-                cancelAction={cancelAction}
-                onMarkPaid={() => setActiveMarkRow(row)}
-              />
-            ))}
-          </div>
+          <>
+            {/* HDFC bulk-payment Excel download — Daksh's bank
+                accepts an .xlsx with all beneficiary + amount info
+                in one upload. Generated from every CONFIRMED row
+                with the per-vendor bank details we already store.
+                Plain <a> with download attribute so the browser
+                handles the .xlsx response directly. */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                marginBottom: 10,
+                flexWrap: "wrap",
+                gap: 8,
+              }}
+            >
+              <a
+                href="/api/accounts/hdfc-payment-export"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "8px 16px",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  background: "#fff",
+                  color: "#1e293b",
+                  border: "1.5px solid #1e3a5f",
+                  borderRadius: 8,
+                  textDecoration: "none",
+                  letterSpacing: "-0.005em",
+                  whiteSpace: "nowrap",
+                }}
+                title="Download an HDFC-compatible bulk-payment Excel for every confirmed row. Upload it in your HDFC NetBanking 'Bulk Upload' screen to release all payments in one go."
+              >
+                📥 Download HDFC bulk-payment Excel
+              </a>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {confirmedRows.map((row) => (
+                <ConfirmedRow
+                  key={row.id}
+                  row={row}
+                  canMarkPaid={canMarkPaid}
+                  canCancel={canCancel}
+                  cancelAction={cancelAction}
+                  onMarkPaid={() => setActiveMarkRow(row)}
+                />
+              ))}
+            </div>
+          </>
         )}
       </SectionBlock>
 

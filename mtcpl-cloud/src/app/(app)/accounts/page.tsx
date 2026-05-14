@@ -233,11 +233,12 @@ export default async function AccountsHomePage({
             : "Finance overview. Audit fresh bills and queue today's payment batch."
         }
         actions={
-          // Bills Audit + Payment History buttons removed — both live
-          // in the sidebar already, and Pay Today has its own top-bar
-          // badge for approvers. The hero now keeps only the headline
-          // KPIs below, no redundant nav.
-          undefined
+          // Bills Audit + Payment History dropped (already in
+          // sidebar). Pay Today kept here — it's the one daily-use
+          // CTA the accountant launches from this page.
+          <Link href="/accounts/pay-today" style={BUTTON_STYLES.secondary}>
+            💸 Pay Today
+          </Link>
         }
       />
 
