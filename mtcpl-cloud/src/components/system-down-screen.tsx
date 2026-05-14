@@ -16,6 +16,7 @@
 //      dev still needs to poke around while the rest of the team is
 //      locked out.
 
+import Link from "next/link";
 import {
   bringSystemUpFormAction,
   enableDevMaintenanceBypassAction,
@@ -26,11 +27,24 @@ export function SystemDownScreen({
   message,
   updatedAt,
   updatedByName,
+  availableDepartments,
 }: {
   isDeveloper: boolean;
   message: string | null;
   updatedAt: string | null;
   updatedByName: string | null;
+  /** Departments that are NOT down right now AND the current user has
+   *  access to. Rendered as quick-jump buttons on the lock screen so
+   *  the owner / developer can navigate away from a single-department
+   *  outage without needing to type a URL or sign out. Empty for
+   *  global locks (everything else is locked too) and for locked
+   *  roles that can't switch (biller, accountant, etc). */
+  availableDepartments?: ReadonlyArray<{
+    id: string;
+    label: string;
+    icon: string;
+    href: string;
+  }>;
 }) {
   return (
     <div
@@ -121,6 +135,69 @@ export function SystemDownScreen({
               minute: "2-digit",
             })}
             {updatedByName ? ` · by ${updatedByName}` : ""}
+          </div>
+        )}
+
+        {/* Quick-jump to other departments still live. Visible only
+            when this is a per-department lock (the layout passes
+            availableDepartments only in that case) AND the user has
+            permission to access at least one other department.
+            Crucial for owner / developer: production going down
+            shouldn't strand them out of Finance + Inventory. */}
+        {availableDepartments && availableDepartments.length > 0 && (
+          <div
+            style={{
+              marginTop: 4,
+              marginBottom: 18,
+              padding: "14px 16px",
+              background: "rgba(34, 197, 94, 0.10)",
+              border: "1px solid rgba(74, 222, 128, 0.30)",
+              borderRadius: 12,
+              textAlign: "left",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 10,
+                fontWeight: 800,
+                color: "#86efac",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                marginBottom: 10,
+              }}
+            >
+              Other departments still live
+            </div>
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                flexWrap: "wrap",
+                justifyContent: "center",
+              }}
+            >
+              {availableDepartments.map((d) => (
+                <Link
+                  key={d.id}
+                  href={d.href}
+                  style={{
+                    flex: "1 1 140px",
+                    padding: "10px 14px",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    textAlign: "center",
+                    background: "rgba(255, 255, 255, 0.08)",
+                    color: "#f0fdf4",
+                    border: "1px solid rgba(74, 222, 128, 0.45)",
+                    borderRadius: 8,
+                    textDecoration: "none",
+                    letterSpacing: "-0.005em",
+                  }}
+                >
+                  {d.icon} Go to {d.label}
+                </Link>
+              ))}
+            </div>
           </div>
         )}
 

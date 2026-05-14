@@ -13,8 +13,14 @@ import { requireAuth } from "@/lib/auth";
 import { canApproveCuts } from "@/lib/cutting-permissions";
 import { canApproveBills } from "@/lib/accounts-permissions";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { getEffectiveStatus } from "@/lib/system-status";
-import { departmentForRoute, effectiveDepartment } from "@/lib/departments";
+import { getEffectiveStatus, getDepartmentStatus } from "@/lib/system-status";
+import {
+  DEPARTMENTS,
+  canSwitchDepartment,
+  departmentForRoute,
+  effectiveDepartment,
+  type Department,
+} from "@/lib/departments";
 import { getProfilesMap } from "@/lib/profiles";
 import { SystemDownScreen } from "@/components/system-down-screen";
 import {
@@ -76,12 +82,48 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     const decoratedMessage = effectiveStatus.message
       ? `${scopeLabel} · ${effectiveStatus.message}`
       : `${scopeLabel} is currently offline.`;
+
+    // Quick-jump to other departments still live. Only relevant for
+    // per-department locks (a global lock means every alternative is
+    // also locked) AND for users who can switch departments
+    // (developer + owner). Cheap 3-row lookup — only happens on the
+    // locked-page-load path. We re-query each dept's flag instead of
+    // reusing effectiveStatus so the user always sees fresh state.
+    let availableDepartments: Array<{
+      id: string;
+      label: string;
+      icon: string;
+      href: string;
+    }> = [];
+    if (
+      effectiveStatus.source === "department" &&
+      canSwitchDepartment(profile.role)
+    ) {
+      const otherDepts: Department[] = (["production", "finance", "inventory"] as const).filter(
+        (d) => d !== requestDept,
+      );
+      const statuses = await Promise.all(otherDepts.map((d) => getDepartmentStatus(d)));
+      for (let i = 0; i < otherDepts.length; i++) {
+        const dId = otherDepts[i];
+        if (statuses[i].down) continue;
+        const meta = DEPARTMENTS.find((d) => d.id === dId);
+        if (!meta) continue;
+        availableDepartments.push({
+          id: dId,
+          label: meta.label,
+          icon: meta.icon,
+          href: meta.landingHref,
+        });
+      }
+    }
+
     return (
       <SystemDownScreen
         isDeveloper={profile.role === "developer"}
         message={decoratedMessage}
         updatedAt={effectiveStatus.updatedAt}
         updatedByName={updatedByName}
+        availableDepartments={availableDepartments}
       />
     );
   }
