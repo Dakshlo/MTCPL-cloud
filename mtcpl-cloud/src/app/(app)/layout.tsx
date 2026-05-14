@@ -9,6 +9,7 @@ import { NavigationProgress } from "@/components/navigation-progress";
 import { RealtimeRefresh } from "@/components/realtime-refresh";
 import { Sidebar } from "@/components/sidebar";
 import { TopbarTasksBadge, type TopbarTask } from "@/components/topbar-tasks-badge";
+import { TopbarIdLookup } from "@/components/topbar-id-lookup";
 import { Toast } from "@/components/toast";
 import { Heartbeat } from "@/components/heartbeat";
 import { requireAuth } from "@/lib/auth";
@@ -280,6 +281,20 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             </Link>
           </div>
           <div className="topbar-right">
+            {/* ID Lookup quick-access dropdown — sits to the left of
+                the Tasks pill. Permitted roles: developer / owner /
+                team_head / crosscheck / carving_head. Same hover-
+                expand glass pattern as TopbarTasksBadge; opens a
+                search input that hits lookupId() and renders the
+                stage-first result panel inline. Use case: someone in
+                the workshop sees a stencilled stone and wants to
+                know where it sits in the system. */}
+            {(profile.role === "developer" ||
+              profile.role === "owner" ||
+              profile.role === "team_head" ||
+              profile.role === "crosscheck" ||
+              profile.role === "carving_head") && <TopbarIdLookup />}
+
             {/* Consolidated tasks dropdown (Mig 044 follow-on per
                 Daksh: the four separate pills were clustering the
                 top bar). Single trigger pill showing the total

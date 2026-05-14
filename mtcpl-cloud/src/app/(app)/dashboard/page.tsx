@@ -6,7 +6,6 @@ import { canTransferPlannedSlabs } from "@/lib/cutting-permissions";
 import { PushPanel } from "./push-panel";
 import { AskAiEntryCard } from "@/components/ask-ai-entry-card";
 import { BlockJourneyEntryCard } from "@/components/block-journey-entry-card";
-import { IdSearchEntryCard } from "@/components/id-search-entry-card";
 import { TvModeEntryCard } from "@/components/tv-mode-entry-card";
 import { PeekSection } from "@/components/peek-section";
 import { PeekIframe } from "@/components/peek-iframe";
@@ -259,14 +258,11 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
         </div>
       </div>
 
-      {/* ── ASK AI / BLOCK JOURNEY / ID LOOKUP / TV MODE ENTRIES ──
-          Four "insight" entry cards. CSS grid (not flex) so all
-          four cards equal-height regardless of description length
-          and regardless of how many wrap per row. Daksh: "the
-          cards are not one size — triggering my OCD." Grid's
-          align-items:stretch default makes the row height = the
-          tallest card's content height, and every Link inside
-          stretches to fill its cell. */}
+      {/* ── ASK AI / BLOCK JOURNEY / TV MODE ENTRIES ──
+          ID Lookup moved to the topbar (TopbarIdLookup) so anyone
+          on the workshop floor can pull up a slab/block status from
+          any page, not just the dashboard. Three cards remain;
+          grid still auto-fits and equalises heights. */}
       <div
         style={{
           display: "grid",
@@ -277,7 +273,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
       >
         <AskAiEntryCard />
         <BlockJourneyEntryCard />
-        <IdSearchEntryCard />
         <TvModeEntryCard />
       </div>
 

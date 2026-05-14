@@ -1,12 +1,17 @@
 "use server";
 
 /**
- * Dashboard ID lookup — owner / developer only.
+ * ID lookup — owner / developer / team_head / crosscheck / carving_head.
  *
- * The owner is roaming the floor and sees a slab or block stencilled
- * with an ID. They open the dashboard search card, type the id, and
- * get the full system view: where the slab is, what temple it's for,
- * its size, when it was cut, where it is now (yard / carving vendor /
+ * Originally a dashboard-only card for owner+dev. Daksh promoted it
+ * to a topbar quick-access dropdown (TopbarIdLookup) and widened the
+ * roles: anyone who genuinely walks the floor and finds a stone
+ * stencilled with an ID should be able to look it up.
+ *
+ * Anyone is roaming the floor and sees a slab or block stencilled
+ * with an ID. They open the search, type the id, and get the full
+ * system view: where the slab is, what temple it's for, its size,
+ * when it was cut, where it is now (yard / carving vendor /
  * dispatched). Same for blocks (yard, dimensions, cutting status,
  * how many slabs derived).
  *
@@ -105,7 +110,15 @@ export type NotFoundResult = {
 export type LookupResult = SlabResult | BlockResult | NotFoundResult;
 
 export async function lookupId(query: string): Promise<LookupResult> {
-  await requireAuth(["developer", "owner"]);
+  // Mig 044 follow-on (Daksh): widened from dev/owner only to
+  // every role that legitimately walks the workshop floor.
+  await requireAuth([
+    "developer",
+    "owner",
+    "team_head",
+    "crosscheck",
+    "carving_head",
+  ]);
   const admin = createAdminSupabaseClient();
 
   // Normalise: trim + uppercase. Slab and block IDs in the system are
