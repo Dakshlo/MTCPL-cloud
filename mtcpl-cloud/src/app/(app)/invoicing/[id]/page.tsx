@@ -104,9 +104,12 @@ export default async function InvoiceDetailPage({ params }: { params: Params }) 
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            {/* Use the dark logo here — invoice prints on white paper
+                and /logo-light.png is the white-on-dark version used in
+                the sidebar. The dark version actually renders. */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src="/logo-light.png"
+              src="/logo-dark.png"
               alt="MTCPL"
               style={{ width: 64, height: 64, objectFit: "contain" }}
             />
@@ -274,14 +277,40 @@ export default async function InvoiceDetailPage({ params }: { params: Params }) 
         </div>
       </div>
 
-      {/* Print-only CSS — hide app chrome when printing. */}
+      {/* Print-only CSS — hide app chrome when printing. The actual
+          mobile-nav class is `.mobile-bottom-nav` (not `.mobile-nav`),
+          which is why the previous rule missed it and Daksh saw the
+          nav-bar items at the bottom of the print preview. We also
+          knock out any leftover MTCPL gradient body background and
+          force the invoice card to fill the page edge-to-edge. */}
       <style>{`
         @media print {
-          body { background: #fff !important; }
-          .sidebar, .topbar, .mobile-nav, .print-hide { display: none !important; }
-          .page-card, .main-shell { padding: 0 !important; margin: 0 !important; box-shadow: none !important; border: 0 !important; background: #fff !important; }
-          .invoice-print { box-shadow: none !important; border: 0 !important; max-width: 100% !important; }
+          html, body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
+          .sidebar,
+          .topbar,
+          .mobile-bottom-nav,
+          .mobile-nav,
+          nav.mobile-bottom-nav,
+          .app-shell > aside,
+          .print-hide { display: none !important; }
+          .app-shell, .page-card, .main-shell, .page-content {
+            display: block !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            box-shadow: none !important;
+            border: 0 !important;
+            background: #fff !important;
+            grid-template-columns: 1fr !important;
+          }
+          .invoice-print {
+            box-shadow: none !important;
+            border: 0 !important;
+            max-width: 100% !important;
+            margin: 0 !important;
+            padding: 24px !important;
+          }
         }
+        @page { margin: 14mm; }
       `}</style>
     </section>
   );

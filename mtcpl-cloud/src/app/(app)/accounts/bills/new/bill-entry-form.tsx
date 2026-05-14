@@ -253,7 +253,12 @@ export function BillEntryForm({
                 min="0"
                 value={subtotal}
                 onChange={(e) => setSubtotal(e.target.value)}
-                placeholder="50000"
+                // No placeholder here — Daksh's dad mistook the previous
+                // "50000" hint for a pre-filled value and tried to
+                // submit without entering anything. Keep the field
+                // visually empty so it's obvious it needs input.
+                placeholder=""
+                aria-label="Subtotal in rupees, required"
                 style={{
                   ...INPUT_STYLE,
                   paddingLeft: 26,
@@ -491,17 +496,39 @@ function FormField({
 }) {
   return (
     <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {/* Bolder + darker labels so required fields are obvious at a
+          glance — Daksh's dad missed the subtotal because the old
+          muted/uppercase style read more like a hint than a prompt. */}
       <span
         style={{
-          fontSize: 11,
+          fontSize: 13,
           fontWeight: 700,
-          color: "var(--muted)",
-          textTransform: "uppercase",
-          letterSpacing: "0.05em",
+          color: "var(--text)",
+          letterSpacing: "-0.005em",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
         }}
       >
         {label}
-        {required && <span style={{ color: ACCOUNTS_TOKENS.danger, marginLeft: 4 }}>*</span>}
+        {required && (
+          <span
+            title="Required"
+            style={{
+              color: ACCOUNTS_TOKENS.danger,
+              fontWeight: 800,
+              fontSize: 12,
+              padding: "1px 6px",
+              borderRadius: 4,
+              background: "rgba(220, 38, 38, 0.08)",
+              border: "1px solid rgba(220, 38, 38, 0.30)",
+              letterSpacing: "0.04em",
+              textTransform: "uppercase",
+            }}
+          >
+            * Required
+          </span>
+        )}
       </span>
       {children}
       {hint && <span style={{ fontSize: 11, color: "var(--muted)" }}>{hint}</span>}

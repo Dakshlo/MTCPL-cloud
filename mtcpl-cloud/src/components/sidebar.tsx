@@ -379,9 +379,13 @@ export function Sidebar({
           >
             Department
           </span>
+          {/* 2×2 grid — Production / Finance on top row, Invoicing /
+              Inventory on bottom row. Was a single horizontal flex
+              row which overflowed/scrolled once we hit 4 departments. */}
           <div
             style={{
-              display: "flex",
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
               gap: 4,
               background: "var(--surface)",
               border: "1px solid var(--border)",
@@ -397,9 +401,8 @@ export function Sidebar({
                     key={d.id}
                     title={d.tooltip}
                     style={{
-                      flex: 1,
                       textAlign: "center",
-                      padding: "5px 6px",
+                      padding: "6px 4px",
                       fontSize: 11,
                       fontWeight: 700,
                       background: "var(--gold)",
@@ -407,6 +410,9 @@ export function Sidebar({
                       borderRadius: 5,
                       letterSpacing: "0.02em",
                       cursor: "default",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
                     }}
                   >
                     {d.icon} {d.label}
@@ -420,7 +426,7 @@ export function Sidebar({
                   onSubmit={() => {
                     startSwitchTransition(() => {});
                   }}
-                  style={{ flex: 1, margin: 0 }}
+                  style={{ margin: 0 }}
                 >
                   <input type="hidden" name="department" value={d.id} />
                   <button
@@ -429,7 +435,7 @@ export function Sidebar({
                     disabled={switching}
                     style={{
                       width: "100%",
-                      padding: "5px 6px",
+                      padding: "6px 4px",
                       fontSize: 11,
                       fontWeight: 600,
                       background: "transparent",
@@ -438,6 +444,9 @@ export function Sidebar({
                       borderRadius: 5,
                       cursor: switching ? "wait" : "pointer",
                       opacity: switching ? 0.6 : 1,
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
                     }}
                   >
                     {d.icon} {d.label}

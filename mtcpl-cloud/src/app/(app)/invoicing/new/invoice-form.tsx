@@ -27,15 +27,36 @@ const INPUT_STYLE: React.CSSProperties = {
   color: "var(--text)",
 };
 
+// Bolder + darker label style (matches the bill-entry form polish so
+// the two flows feel consistent). Required-field asterisk is rendered
+// inline via the `*` in the label string + a small "Required" pill.
 const LABEL_STYLE: React.CSSProperties = {
   display: "block",
-  fontSize: 11,
+  fontSize: 13,
   fontWeight: 700,
-  color: "var(--muted)",
-  textTransform: "uppercase",
-  letterSpacing: "0.05em",
+  color: "var(--text)",
+  letterSpacing: "-0.005em",
   marginBottom: 4,
 };
+
+// Visual chip for required-field markers. Embedded next to the label
+// text via <RequiredPill /> below.
+const REQUIRED_PILL_STYLE: React.CSSProperties = {
+  color: "#b91c1c",
+  fontWeight: 800,
+  fontSize: 10,
+  padding: "1px 6px",
+  borderRadius: 4,
+  background: "rgba(220, 38, 38, 0.08)",
+  border: "1px solid rgba(220, 38, 38, 0.30)",
+  letterSpacing: "0.04em",
+  textTransform: "uppercase",
+  marginLeft: 6,
+};
+
+function RequiredPill() {
+  return <span style={REQUIRED_PILL_STYLE}>* Required</span>;
+}
 
 export function InvoiceForm({
   action,
@@ -93,7 +114,9 @@ export function InvoiceForm({
       <Section title="Customer">
         <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
           <label>
-            <span style={LABEL_STYLE}>Customer name *</span>
+            <span style={LABEL_STYLE}>
+              Customer name <RequiredPill />
+            </span>
             <input
               name="customer_name"
               value={customerName}
@@ -104,7 +127,9 @@ export function InvoiceForm({
             />
           </label>
           <label>
-            <span style={LABEL_STYLE}>Invoice date *</span>
+            <span style={LABEL_STYLE}>
+              Invoice date <RequiredPill />
+            </span>
             <input
               type="date"
               name="invoice_date"
