@@ -212,9 +212,18 @@ const navEntries: NavEntry[] = [
     department: "invoicing",
   },
   // ── INVENTORY section (Migration 041 — Scaffolding v1) ──────────
-  // New 'storekeeper' role lives here; crosscheck (Mafat) also sees
-  // the Audit Queue entry because the same human audits both bills
-  // and inventory. Owner + developer see everything.
+  // Deliberately minimal: one entry per role. The scaffolding board
+  // itself surfaces a horizontal sub-nav (Board / Issue / Return /
+  // Receive / Write-off / Audit / History / Sites / Catalog) so the
+  // sidebar doesn't need to duplicate those eight rows — that just
+  // doubles the navigation surface and clutters the rail.
+  //
+  // Per Daksh: "if everything is on this page, remove the other
+  // scaffolding entries from the menu."
+  //
+  // Crosscheck (Mafat) gets a direct shortcut to the audit queue,
+  // mirroring the /accounts/approvals shortcut he already has on
+  // the finance sidebar.
   {
     type: "divider",
     label: "INVENTORY",
@@ -223,29 +232,8 @@ const navEntries: NavEntry[] = [
   },
   {
     href: "/inventory/scaffolding",
-    label: "Scaffolding Board",
-    icon: "▦",
-    roles: ["developer", "owner", "storekeeper", "crosscheck"],
-    department: "inventory",
-  },
-  {
-    href: "/inventory/scaffolding/issue",
-    label: "Issue to Site",
-    icon: "→",
-    roles: ["developer", "owner", "storekeeper"],
-    department: "inventory",
-  },
-  {
-    href: "/inventory/scaffolding/return",
-    label: "Return from Site",
-    icon: "←",
-    roles: ["developer", "owner", "storekeeper"],
-    department: "inventory",
-  },
-  {
-    href: "/inventory/scaffolding/receive",
-    label: "Receive Stock",
-    icon: "⤓",
+    label: "Scaffolding",
+    icon: "📦",
     roles: ["developer", "owner", "storekeeper"],
     department: "inventory",
   },
@@ -253,28 +241,7 @@ const navEntries: NavEntry[] = [
     href: "/inventory/approvals",
     label: "Audit Queue",
     icon: "✅",
-    roles: ["developer", "owner", "crosscheck"],
-    department: "inventory",
-  },
-  {
-    href: "/inventory/scaffolding/history",
-    label: "Movement History",
-    icon: "⊟",
-    roles: ["developer", "owner", "storekeeper", "crosscheck"],
-    department: "inventory",
-  },
-  {
-    href: "/inventory/scaffolding/sites",
-    label: "Sites",
-    icon: "⌂",
-    roles: ["developer", "owner", "storekeeper"],
-    department: "inventory",
-  },
-  {
-    href: "/inventory/scaffolding/components",
-    label: "Component Catalog",
-    icon: "⊞",
-    roles: ["developer", "owner", "storekeeper"],
+    roles: ["crosscheck"],
     department: "inventory",
   },
 ];
