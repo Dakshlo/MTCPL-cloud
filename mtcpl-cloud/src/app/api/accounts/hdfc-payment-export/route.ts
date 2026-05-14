@@ -6,28 +6,30 @@
 // parser rejected — every row came back amount=0 + blank beneficiary
 // because the column headers didn't match.
 //
-// Column layout (from MTCPL's working salary upload, with Daksh's
-// confirmations on which fields are user-provided vs bank-stamped):
+// Column layout (mirrors HDFC's working salary file template exactly;
+// some columns we fill, some we leave blank for the bank or the
+// upload dialog to stamp):
 //
-//   1. CBX Reference number   — BANK GENERATED. Column present in
-//                               the file but left blank. HDFC writes
-//                               C{seq}{DDMMYY}{HHMMSS} into it at
-//                               upload time (the working salary file
-//                               showed every row with HDFC's stamp).
-//   2. Transfer To            — vendor's bank account number
-//   3. Amount                 — plain number, no commas / no symbol
-//   4. Initiation date        — DD/MM/YYYY HH:MM:SS AM/PM. User-
-//                               provided (current time when we
-//                               generate the file).
-//   5. Value date             — DD-MM-YYYY  (dashes, not slashes)
-//   6. Beneficiary name       — vendor name (uppercase, must match
-//                               the registered Beneficiary Master entry)
-//   7. Input user             — BANK STAMPED at upload. Empty in our file.
-//   8. Input Date time        — BANK STAMPED at upload. Empty in our file.
+//   1. CBX Reference number   — BANK GENERATED. Column kept, empty.
+//                               HDFC writes C{seq}{DDMMYY}{HHMMSS}.
+//   2. Transfer From          — Column kept, empty. Daksh confirmed
+//                               the debit account is picked from the
+//                               dropdown on the Upload File dialog at
+//                               submit time. We don't write a value
+//                               but keep the column so the file's
+//                               structure matches HDFC's template
+//                               exactly (defensive — some parsers
+//                               key off column position).
+//   3. Transfer To            — vendor's bank account number (we fill)
+//   4. Amount                 — plain number (we fill)
+//   5. Initiation date        — DD/MM/YYYY HH:MM:SS AM/PM (we fill)
+//   6. Value date             — DD-MM-YYYY (we fill)
+//   7. Beneficiary name       — uppercase, must match the registered
+//                               Beneficiary Master entry (we fill)
+//   8. Input user             — BANK STAMPED. Column kept, empty.
+//   9. Input Date time        — BANK STAMPED. Column kept, empty.
 //
-// NOT in the file (HDFC handles these elsewhere):
-//   • Transfer From / Debit account — picked from the dropdown on the
-//     Upload File dialog at submit time.
+// NOT in the file at all:
 //   • IFSC — HDFC looks it up from the pre-registered Beneficiary
 //     Master by account number. Each vendor MUST be added to ENet's
 //     Beneficiary Master one-time (30-min cooling period for new
@@ -129,10 +131,13 @@ export async function GET(_req: NextRequest) {
       : null;
     const amount = Number(r.proposed_amount) || 0;
     return {
-      // CBX Reference: HDFC generates this on upload (C{seq}{DDMMYY}{HHMMSS}).
-      // We leave the column present but empty so the file structure
-      // matches HDFC's template; the bank fills it in post-upload.
+      // CBX Reference: HDFC generates on upload (C{seq}{DDMMYY}{HHMMSS}).
+      // Column kept, value blank.
       "CBX Reference number": "",
+      // Transfer From: picked from the dropdown at upload time.
+      // Column kept, value blank, so the file structure matches
+      // HDFC's template exactly.
+      "Transfer From": "",
       "Transfer To": (v?.bank_account ?? "").trim(),
       Amount: amount,
       "Initiation date": initiation,
@@ -152,6 +157,7 @@ export async function GET(_req: NextRequest) {
   // there's nothing to pay. Useful for sanity-checking the format.
   const headerOnly: Record<string, string | number> = {
     "CBX Reference number": "",
+    "Transfer From": "",
     "Transfer To": "",
     Amount: 0,
     "Initiation date": "",
@@ -166,6 +172,7 @@ export async function GET(_req: NextRequest) {
     {
       header: [
         "CBX Reference number",
+        "Transfer From",
         "Transfer To",
         "Amount",
         "Initiation date",
@@ -179,6 +186,7 @@ export async function GET(_req: NextRequest) {
 
   ws["!cols"] = [
     { wch: 22 }, // CBX Reference
+    { wch: 18 }, // Transfer From
     { wch: 18 }, // Transfer To
     { wch: 12 }, // Amount
     { wch: 22 }, // Initiation date
