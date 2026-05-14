@@ -1,40 +1,32 @@
 // ──────────────────────────────────────────────────────────────────
 // HDFC ENet bulk-payment Excel export
 // ──────────────────────────────────────────────────────────────────
-// Generates an .xlsx in the exact column layout HDFC's ENet bulk-
-// upload screen expects. The first attempt (initial commit) used a
-// generic "name / account / IFSC" structure which HDFC's parser
-// rejected — every row came back amount=0 + blank beneficiary
+// Generates an .xlsx for HDFC ENet's bulk-upload screen. Initial
+// attempt used a generic name/account/IFSC structure which HDFC's
+// parser rejected — every row came back amount=0 + blank beneficiary
 // because the column headers didn't match.
 //
-// The real format, confirmed from a working salary upload at
-// MTCPL's actual ENet, is 7 columns in this exact order:
+// Confirmed-working column layout (from MTCPL's salary upload):
 //
-//   1. CBX Reference number   — unique reference per row, must be
-//                               non-empty and unique within the file
-//   2. Transfer From          — MTCPL's HDFC debit account number
-//   3. Transfer To            — vendor's bank account number (lookup
-//                               into ENet Beneficiary Master)
-//   4. Amount                 — plain number, no commas / no symbol
-//   5. Initiation date        — DD/MM/YYYY HH:MM:SS AM/PM
-//   6. Value date             — DD-MM-YYYY  (note: dashes, not slashes)
-//   7. Beneficiary name       — vendor name (uppercase, must match
-//                               the name registered in the ENet
-//                               Beneficiary Master)
+//   1. CBX Reference number   — unique reference per row
+//   2. Transfer To            — vendor's bank account number
+//   3. Amount                 — plain number, no commas / no symbol
+//   4. Initiation date        — DD/MM/YYYY HH:MM:SS AM/PM
+//   5. Value date             — DD-MM-YYYY  (note: dashes, not slashes)
+//   6. Beneficiary name       — vendor name (uppercase, must match
+//                               the registered Beneficiary Master entry)
 //
-// IFSC is NOT in the file — HDFC looks it up from the pre-registered
-// beneficiary by account number. This means each vendor MUST be
-// added to the ENet Beneficiary Master first (one-time per vendor)
-// before the bulk file can pay them. New beneficiaries also have a
-// 30-min cooling period in ENet.
-//
-// Payment mode (NEFT vs RTGS) is NOT a column either — it's set by
-// the "Business Product" dropdown at upload time. Mixing modes in
-// one file isn't supported; large payments (>= ₹2L typically RTGS)
-// need a separate file upload.
-//
-// MTCPL's debit account is currently hardcoded below — move to an
-// env var (or a system_settings row) when convenient.
+// NOT in the file (HDFC handles these elsewhere):
+//   • Transfer From / Debit account — picked from the dropdown on the
+//     Upload File dialog at submit time. Daksh confirmed this from
+//     his actual upload flow, so we don't write a column for it.
+//   • IFSC — HDFC looks it up from the pre-registered Beneficiary
+//     Master by account number. Each vendor MUST be added to ENet's
+//     Beneficiary Master one-time (30-min cooling period for new
+//     entries) before the bulk file can pay them.
+//   • Payment mode (NEFT/RTGS) — set by the "Business Product"
+//     dropdown at upload time. Mixed-mode files aren't supported;
+//     large payments (≥ ₹2L → RTGS) need a separate upload.
 // ──────────────────────────────────────────────────────────────────
 
 import { NextRequest, NextResponse } from "next/server";
@@ -45,13 +37,6 @@ import {
   canManageAccounts,
 } from "@/lib/accounts-permissions";
 import * as XLSX from "xlsx";
-
-// MTCPL's HDFC current account that funds these payouts. Sourced
-// from the working salary file Rohit uploaded on 06-Apr-2026
-// (Transfer From column was 50200034844082 in every row). Update
-// this if Daksh switches accounts.
-const MTCPL_DEBIT_ACCOUNT =
-  process.env.MTCPL_HDFC_DEBIT_ACCOUNT?.trim() || "50200034844082";
 
 function pad2(n: number) {
   return String(n).padStart(2, "0");
@@ -143,7 +128,6 @@ export async function GET(_req: NextRequest) {
     const ref = `MT-${r.id.slice(0, 8)}-${dateStamp}-${refSeq}`;
     return {
       "CBX Reference number": ref,
-      "Transfer From": MTCPL_DEBIT_ACCOUNT,
       "Transfer To": (v?.bank_account ?? "").trim(),
       Amount: amount,
       "Initiation date": initiation,
@@ -160,7 +144,6 @@ export async function GET(_req: NextRequest) {
   // there's nothing to pay. Useful for sanity-checking the format.
   const headerOnly: Record<string, string | number> = {
     "CBX Reference number": "",
-    "Transfer From": MTCPL_DEBIT_ACCOUNT,
     "Transfer To": "",
     Amount: 0,
     "Initiation date": "",
@@ -173,7 +156,6 @@ export async function GET(_req: NextRequest) {
     {
       header: [
         "CBX Reference number",
-        "Transfer From",
         "Transfer To",
         "Amount",
         "Initiation date",
@@ -185,7 +167,6 @@ export async function GET(_req: NextRequest) {
 
   ws["!cols"] = [
     { wch: 22 }, // CBX Reference
-    { wch: 18 }, // Transfer From
     { wch: 18 }, // Transfer To
     { wch: 12 }, // Amount
     { wch: 22 }, // Initiation date
