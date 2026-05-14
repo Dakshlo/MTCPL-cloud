@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
+import Link from "next/link";
 
 type Slab = {
   id: string;
@@ -16,6 +17,37 @@ type Slab = {
   created_at: string | null;
   updated_at: string | null;
 };
+
+/** Display chip for the slab's post-cut lifecycle position. */
+const STATUS_TINT: Record<string, { label: string; bg: string; fg: string }> = {
+  cut_done:             { label: "Cut · awaiting carving", bg: "rgba(34,197,94,0.14)",  fg: "#15803d" },
+  carving_assigned:     { label: "Carving assigned",        bg: "rgba(245,158,11,0.16)", fg: "#92400e" },
+  carving_in_progress:  { label: "Being carved",            bg: "rgba(59,130,246,0.14)", fg: "#1e40af" },
+  completed:            { label: "Carving done",            bg: "rgba(16,185,129,0.16)", fg: "#0f766e" },
+  dispatched:           { label: "Dispatched",              bg: "rgba(148,163,184,0.18)", fg: "#475569" },
+};
+
+function StatusChip({ status }: { status: string }) {
+  const t = STATUS_TINT[status] ?? { label: status, bg: "rgba(0,0,0,0.06)", fg: "var(--muted)" };
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        fontSize: 10,
+        fontWeight: 700,
+        padding: "2px 8px",
+        borderRadius: 999,
+        background: t.bg,
+        color: t.fg,
+        letterSpacing: "0.04em",
+        textTransform: "uppercase",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {t.label}
+    </span>
+  );
+}
 
 function fmtDate(iso: string | null) {
   if (!iso) return "—";
@@ -39,12 +71,23 @@ function calcCft(l: number, w: number, t: number) {
 
 type SortCol = "id" | "temple" | "stone" | "cft" | "created_at" | "updated_at";
 
-export function ReadySlabsClient({ slabs, stoneNames: _stoneNames, templeNames: _templeNames }: {
+export function ReadySlabsClient({
+  slabs,
+  stoneNames: _stoneNames,
+  templeNames: _templeNames,
+  mode = "verification",
+}: {
   slabs: Slab[];
   /** @deprecated derived from slabs directly */
   stoneNames?: string[];
   /** @deprecated derived from slabs directly */
   templeNames?: string[];
+  /** "verification" — show every post-cut status with a Status column +
+   *      status-filter chip row. Used on /slabs/ready by the cutting team.
+   *  "for-carving" — only cut_done slabs (server-side); status column is
+   *      hidden, action column shows "Assign →" routing to /carving.
+   *      Used on /slabs/ready/for-carving by the carving team. */
+  mode?: "verification" | "for-carving";
 }) {
   void _stoneNames;
   void _templeNames;
@@ -53,6 +96,7 @@ export function ReadySlabsClient({ slabs, stoneNames: _stoneNames, templeNames: 
   const [stoneFilter, setStoneFilter] = useState("all");
   const [templeFilter, setTempleFilter] = useState("all");
   const [qualityFilter, setQualityFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   // Default to "today only" so the page lands focused on what just
   // came off the cutting floor. The user can clear or pick a wider
@@ -130,6 +174,9 @@ export function ReadySlabsClient({ slabs, stoneNames: _stoneNames, templeNames: 
     if (qualityFilter === "A") rows = rows.filter(s => s.quality === "A");
     else if (qualityFilter === "B") rows = rows.filter(s => s.quality === "B");
     else if (qualityFilter === "none") rows = rows.filter(s => !s.quality);
+    if (mode === "verification" && statusFilter !== "all") {
+      rows = rows.filter((s) => s.status === statusFilter);
+    }
     if (search) {
       const q = search.toLowerCase();
       rows = rows.filter(s =>
@@ -158,7 +205,7 @@ export function ReadySlabsClient({ slabs, stoneNames: _stoneNames, templeNames: 
     });
 
     return rows;
-  }, [slabs, stoneFilter, templeFilter, qualityFilter, search, dateFrom, dateTo, sortBy, sortDir]);
+  }, [slabs, stoneFilter, templeFilter, qualityFilter, statusFilter, mode, search, dateFrom, dateTo, sortBy, sortDir]);
 
   const totalCft = filtered.reduce((sum, s) => sum + calcCft(s.length_ft, s.width_ft, s.thickness_ft), 0);
 
@@ -176,6 +223,7 @@ export function ReadySlabsClient({ slabs, stoneNames: _stoneNames, templeNames: 
     setStoneFilter("all");
     setTempleFilter("all");
     setQualityFilter("all");
+    setStatusFilter("all");
     setSearch("");
     setDateFrom("");
     setDateTo("");
@@ -208,6 +256,22 @@ export function ReadySlabsClient({ slabs, stoneNames: _stoneNames, templeNames: 
     }
   }
 
+  // Status counts (verification mode only) — chip row at the top of
+  // the filter panel that doubles as a quick "where are these slabs
+  // now?" snapshot for the cutting team.
+  const statusCounts = useMemo(() => {
+    const c: Record<string, number> = {};
+    for (const s of slabs) c[s.status] = (c[s.status] ?? 0) + 1;
+    return c;
+  }, [slabs]);
+  const orderedStatusKeys = [
+    "cut_done",
+    "carving_assigned",
+    "carving_in_progress",
+    "completed",
+    "dispatched",
+  ];
+
   return (
     <div>
       {/* Filter Panel */}
@@ -218,6 +282,69 @@ export function ReadySlabsClient({ slabs, stoneNames: _stoneNames, templeNames: 
         padding: "16px 18px",
         marginBottom: 14,
       }}>
+        {/* Status chip row — verification mode only. Lets the cutting
+            team quickly see + narrow to a lifecycle bucket. */}
+        {mode === "verification" && (
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 6,
+              marginBottom: 12,
+              paddingBottom: 12,
+              borderBottom: "1px dashed var(--border)",
+              alignItems: "center",
+            }}
+          >
+            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginRight: 4 }}>
+              Lifecycle
+            </span>
+            <button
+              type="button"
+              onClick={() => setStatusFilter("all")}
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                padding: "4px 10px",
+                borderRadius: 999,
+                border: `1px solid ${statusFilter === "all" ? "var(--gold-dark)" : "var(--border)"}`,
+                background: statusFilter === "all" ? "rgba(180,115,51,0.10)" : "var(--bg)",
+                color: statusFilter === "all" ? "var(--gold-dark)" : "var(--muted)",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              All ({slabs.length})
+            </button>
+            {orderedStatusKeys.map((k) => {
+              const t = STATUS_TINT[k];
+              const count = statusCounts[k] ?? 0;
+              const isActive = statusFilter === k;
+              if (count === 0) return null;
+              return (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setStatusFilter(k)}
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    padding: "4px 10px",
+                    borderRadius: 999,
+                    border: `1px solid ${isActive ? t.fg : "var(--border)"}`,
+                    background: isActive ? t.bg : "var(--bg)",
+                    color: isActive ? t.fg : "var(--muted)",
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {t.label} ({count})
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "flex-end" }}>
 
           {/* Stone — cascades from temple+quality+search */}
@@ -349,6 +476,17 @@ export function ReadySlabsClient({ slabs, stoneNames: _stoneNames, templeNames: 
                 { label: "Priority",     col: null },
                 { label: "Added",        col: "created_at" as SortCol },
                 { label: "Cut Done",     col: "updated_at" as SortCol },
+                // Status column only in verification mode — for-carving
+                // is always cut_done so the column would be a single
+                // repeated badge.
+                ...(mode === "verification"
+                  ? ([{ label: "Status", col: null }] as { label: string; col: SortCol | null }[])
+                  : ([] as { label: string; col: SortCol | null }[])),
+                // Action column — for-carving routes to the carving
+                // assign flow; verification has no actions.
+                ...(mode === "for-carving"
+                  ? ([{ label: "", col: null }] as { label: string; col: SortCol | null }[])
+                  : ([] as { label: string; col: SortCol | null }[])),
               ] as { label: string; col: SortCol | null }[]).map(({ label, col }) => (
                 <th
                   key={label}
@@ -374,7 +512,7 @@ export function ReadySlabsClient({ slabs, stoneNames: _stoneNames, templeNames: 
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={10} style={{ padding: 32, textAlign: "center", color: "var(--muted)" }}>
+                <td colSpan={mode === "verification" || mode === "for-carving" ? 11 : 10} style={{ padding: 32, textAlign: "center", color: "var(--muted)" }}>
                   {slabs.length === 0 ? "No sizes have been cut yet." : "No sizes match the current filters."}
                 </td>
               </tr>
@@ -417,6 +555,31 @@ export function ReadySlabsClient({ slabs, stoneNames: _stoneNames, templeNames: 
                     </td>
                     <td style={{ padding: "9px 12px", whiteSpace: "nowrap", color: "var(--muted)", fontSize: 12 }}>{fmtDate(s.created_at)}</td>
                     <td style={{ padding: "9px 12px", whiteSpace: "nowrap", color: "var(--muted)", fontSize: 12 }}>{fmtDate(s.updated_at)}</td>
+                    {mode === "verification" && (
+                      <td style={{ padding: "9px 12px", whiteSpace: "nowrap" }}>
+                        <StatusChip status={s.status} />
+                      </td>
+                    )}
+                    {mode === "for-carving" && (
+                      <td style={{ padding: "9px 12px", whiteSpace: "nowrap" }}>
+                        <Link
+                          href="/carving"
+                          style={{
+                            textDecoration: "none",
+                            fontSize: 11,
+                            fontWeight: 700,
+                            padding: "4px 10px",
+                            background: "var(--gold)",
+                            color: "#fff",
+                            border: "1px solid var(--gold-dark)",
+                            borderRadius: 6,
+                          }}
+                          title="Open the Carving Jobs page to assign this slab to a vendor"
+                        >
+                          Assign →
+                        </Link>
+                      </td>
+                    )}
                   </tr>
                 );
               })
@@ -427,6 +590,7 @@ export function ReadySlabsClient({ slabs, stoneNames: _stoneNames, templeNames: 
 
       <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>
         Columns: Size Code · Temple · Label · Stone · Quality · Dimensions · CFT · Priority · Added · Cut Done
+        {mode === "verification" ? " · Status" : ""}
       </p>
     </div>
   );

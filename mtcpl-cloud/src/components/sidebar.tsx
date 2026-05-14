@@ -59,10 +59,24 @@ const navEntries: NavEntry[] = [
     roles: ["developer", "owner", "cutting_operator", "team_head"],
   },
   {
+    // Cutting verification view. Shows every slab cut from a block,
+    // regardless of where it is now in the carving / dispatch
+    // pipeline. Slabs DON'T drop off when the carving team picks
+    // them up — that drop-off lives on /slabs/ready/for-carving.
     href: "/slabs/ready",
     label: "Ready Sizes",
     icon: "✦",
     roles: ["developer", "owner", "team_head", "block_slab_entry", "carving_head"],
+  },
+  {
+    // Carving team's assignment surface. Mirror of Ready Sizes but
+    // filtered to status='cut_done' only — slabs leave as soon as
+    // they're assigned to a vendor. Routes to /carving for the
+    // actual assign flow.
+    href: "/slabs/ready/for-carving",
+    label: "Ready for Carving",
+    icon: "🎨",
+    roles: ["developer", "owner", "carving_head"],
   },
   // — Phase 2 carving module. Carving Jobs visible to owner +
   //   the new carving_head role (whose entire job is the carving
@@ -224,8 +238,16 @@ export function Sidebar({
       return pathname.startsWith("/slabs/view") || pathname.startsWith("/planning");
     // /slabs only matches the slabs list page itself, not sub-pages with their own nav items
     if (href === "/slabs") return pathname === "/slabs";
-    // /slabs/ready is its own top-level item
-    if (href === "/slabs/ready") return pathname.startsWith("/slabs/ready");
+    // /slabs/ready owns the main Ready Sizes page; /slabs/ready/for-carving
+    // is its sibling sidebar entry. The match needs to be precise so
+    // both don't light up at once when the user is on either page.
+    if (href === "/slabs/ready") {
+      return (
+        pathname === "/slabs/ready" ||
+        (pathname.startsWith("/slabs/ready/") && !pathname.startsWith("/slabs/ready/for-carving"))
+      );
+    }
+    if (href === "/slabs/ready/for-carving") return pathname.startsWith("/slabs/ready/for-carving");
     // /carving owns the Carving Jobs nav. /carving/floor + /carving/[id]
     // are sub-routes that should NOT light up the parent (Floor View
     // gets its own pill, detail pages don't need either lit).

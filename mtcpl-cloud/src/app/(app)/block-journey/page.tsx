@@ -74,11 +74,24 @@ export default async function BlockJourneyPage({
         "id, stone, yard, quality, category, length_ft, width_ft, height_ft, tonnes, truck_entry_id, status, created_at, created_by, updated_at",
       )
       .eq("category", "Reused"),
+    // Block Journey shows what each block "produced" — counting only
+    // status='cut_done' meant slabs disappeared from the lineage as
+    // soon as the carving team picked them up, making the recovery
+    // % drop for any block whose slabs had progressed beyond cut_done.
+    // Include the full post-cut lifecycle here so the lineage
+    // continues to credit the parent block for every slab that came
+    // out of it, regardless of where the slab is now.
     admin
       .from("slab_requirements")
       .select("id, length_ft, width_ft, thickness_ft, source_block_id, label, temple, status")
       .not("source_block_id", "is", null)
-      .eq("status", "cut_done"),
+      .in("status", [
+        "cut_done",
+        "carving_assigned",
+        "carving_in_progress",
+        "completed",
+        "dispatched",
+      ]),
     admin
       .from("cut_session_blocks")
       .select("block_id, status, updated_at")
