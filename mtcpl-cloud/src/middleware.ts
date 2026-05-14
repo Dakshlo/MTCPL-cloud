@@ -2,8 +2,17 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
 export async function middleware(request: NextRequest) {
+  // Migration 036 — surface the request pathname as a header so
+  // Server Components can read it via next/headers. The root layout
+  // uses this to map the incoming route to a department
+  // (Production / Finance / Inventory) and check the matching
+  // per-dept maintenance flag. Next.js doesn't expose pathname to
+  // Server Components otherwise.
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-pathname", request.nextUrl.pathname);
+
   let response = NextResponse.next({
-    request
+    request: { headers: requestHeaders },
   });
 
   const supabase = createServerClient(
@@ -17,7 +26,7 @@ export async function middleware(request: NextRequest) {
         setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value, options }) => request.cookies.set(name, value));
           response = NextResponse.next({
-            request
+            request: { headers: requestHeaders },
           });
           cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(name, value, options));
         }

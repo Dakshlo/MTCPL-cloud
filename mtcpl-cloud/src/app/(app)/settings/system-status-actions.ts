@@ -1,23 +1,50 @@
 "use server";
 
 // Server actions for the developer-only system maintenance toggle.
-// Migration 031 created the row. These actions just flip its `down`
-// field. requireAuth + role-check on the developer role gate both
-// directions.
+// Migration 031 created the global flag. Migration 036 added three
+// per-department flags (production_status, finance_status,
+// inventory_status). The same set of actions handles both: pass
+// `department` in the form data, and the action targets the matching
+// system_settings row. Omit it and you target the legacy global flag
+// (back-compat for any existing callers).
+//
+// requireAuth + developer-role check gates every write.
 
 import { revalidatePath } from "next/cache";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
+import { deptStatusKey } from "@/lib/system-status";
+import type { Department } from "@/lib/departments";
 
 type Result = { ok: true } | { ok: false; error: string };
 
-async function setSystemDown(down: boolean, message: string | null): Promise<Result> {
+const VALID_DEPTS: ReadonlyArray<Department> = ["production", "finance", "inventory"];
+
+function resolveKey(formData: FormData): { key: string; auditLabel: string } {
+  const raw = String(formData.get("department") || "").trim();
+  if ((VALID_DEPTS as readonly string[]).includes(raw)) {
+    return {
+      key: deptStatusKey(raw as Department),
+      auditLabel: raw,
+    };
+  }
+  // Legacy / explicit "global" path — flips the system_status row
+  // introduced by migration 031.
+  return { key: "system_status", auditLabel: "global" };
+}
+
+async function setSystemDown(
+  formData: FormData,
+  down: boolean,
+  message: string | null,
+): Promise<Result> {
   const { profile } = await requireAuth();
   if (profile.role !== "developer") {
     return { ok: false, error: "Only a developer can change system status." };
   }
   const supabase = createAdminSupabaseClient();
+  const { key, auditLabel } = resolveKey(formData);
 
   const { error } = await supabase
     .from("system_settings")
@@ -26,17 +53,15 @@ async function setSystemDown(down: boolean, message: string | null): Promise<Res
       updated_at: new Date().toISOString(),
       updated_by: profile.id,
     })
-    .eq("key", "system_status");
+    .eq("key", key);
 
   if (error) {
-    // Most likely: migration 031 wasn't run on this environment.
-    // Surface a clear, actionable error.
     return {
       ok: false,
       error:
         error.message?.includes("system_settings") ||
         error.message?.toLowerCase().includes("does not exist")
-          ? "system_settings table missing — run migration 031 first."
+          ? "system_settings table missing — run migrations 031 + 036 first."
           : error.message,
     };
   }
@@ -45,35 +70,34 @@ async function setSystemDown(down: boolean, message: string | null): Promise<Res
     profile.id,
     down ? "system_taken_down" : "system_brought_up",
     "system_settings",
-    "system_status",
-    { message },
+    key,
+    { scope: auditLabel, message },
   );
 
-  // Force every page in the app to re-read the flag on next request.
+  // Force every page in the app to re-read on next request.
   revalidatePath("/", "layout");
   return { ok: true };
 }
 
-/** Toggle the maintenance flag on. Visible only to developers via the
- *  Settings page's System Status section, behind a double-confirm dialog. */
+/** Toggle a department (or the global flag) DOWN. The Settings page
+ *  posts `department` = 'production' / 'finance' / 'inventory'.
+ *  Omitting `department` falls back to the global system_status row. */
 export async function takeSystemDownAction(formData: FormData): Promise<Result> {
   const message = (String(formData.get("message") || "")).trim() || null;
-  return setSystemDown(true, message);
+  return setSystemDown(formData, true, message);
 }
 
-/** Toggle the maintenance flag off. Shown to developers on the
- *  full-screen maintenance page itself (so they can bring it back
- *  without being locked out), AND on the Settings page. */
-export async function bringSystemUpAction(_formData: FormData): Promise<Result> {
-  return setSystemDown(false, null);
+/** Toggle a department (or the global flag) UP. The SystemDownScreen
+ *  posts no department, so it falls back to clearing the global flag
+ *  — which is intentional: when the dev hits the recovery button on
+ *  the lock screen, they're probably trying to unwedge the whole app.
+ *  To bring up a specific department they use the Settings page. */
+export async function bringSystemUpAction(formData: FormData): Promise<Result> {
+  return setSystemDown(formData, false, null);
 }
 
 /** Void wrapper of bringSystemUpAction for direct `<form action>`
- *  usage on the SystemDownScreen (which has no client-side
- *  result-handling — `revalidatePath('/', 'layout')` inside the
- *  inner action causes the screen to re-render with the flag
- *  flipped). On the rare error case (DB unreachable mid-toggle) we
- *  log server-side and the screen stays — developer can retry. */
+ *  usage on the SystemDownScreen. */
 export async function bringSystemUpFormAction(formData: FormData) {
   const result = await bringSystemUpAction(formData);
   if (!result.ok) {

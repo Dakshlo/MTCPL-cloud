@@ -42,6 +42,11 @@ export type Profile = {
    *  always qualify in code regardless of the bit (the
    *  canApproveBills helper enforces that). */
   can_approve_bills?: boolean;
+  /** Migration 036 — which "department" the user is currently in.
+   *  Only meaningful for developer + owner (the lockedDepartmentForRole
+   *  helper enforces the lock for every other role). Defaults to
+   *  'production' for existing accounts. See src/lib/departments.ts. */
+  active_department?: "production" | "finance" | "inventory" | null;
 };
 
 export type Vendor = {

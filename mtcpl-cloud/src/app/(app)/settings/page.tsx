@@ -9,7 +9,7 @@ import { stoneDisplayName } from "@/lib/stone-utils";
 import type { AppRole } from "@/lib/types";
 import { AutoBackup } from "@/components/auto-backup";
 import { PeekSection } from "@/components/peek-section";
-import { getSystemStatus } from "@/lib/system-status";
+import { getSystemStatus, getDepartmentStatus } from "@/lib/system-status";
 import { getProfilesMap } from "@/lib/profiles";
 import { SystemStatusSection } from "./system-status-section";
 
@@ -86,19 +86,42 @@ export default async function SettingsPage() {
   const { profile: currentUser } = await requireAuth(["owner", "team_head", "developer"]);
   const admin = createAdminSupabaseClient();
 
-  // System Status — read once, render developer-only section below.
-  // getSystemStatus() falls back to `down: false` if migration 031
-  // hasn't run, so the page renders normally either way.
-  const systemStatus = await getSystemStatus();
-  let systemUpdatedByName: string | null = null;
-  if (systemStatus.updatedBy) {
+  // System Status — load global + per-department flags (Migration 036).
+  // Each falls back to `down: false` if the relevant migration hasn't
+  // run, so the page renders normally even on a fresh deploy.
+  const [systemStatus, productionStatus, financeStatus, inventoryStatus] = await Promise.all([
+    getSystemStatus(),
+    getDepartmentStatus("production"),
+    getDepartmentStatus("finance"),
+    getDepartmentStatus("inventory"),
+  ]);
+  // Build a single lookup for updated_by → display name across all
+  // four rows. Cheaper than four parallel single-row lookups.
+  const profilesMapForSystem: Record<string, string> = await (async () => {
+    const ids = new Set<string>(
+      [systemStatus, productionStatus, financeStatus, inventoryStatus]
+        .map((s) => s.updatedBy)
+        .filter((v): v is string => Boolean(v)),
+    );
+    if (ids.size === 0) return {};
     try {
-      const map = await getProfilesMap();
-      systemUpdatedByName = map[systemStatus.updatedBy] ?? null;
+      return await getProfilesMap();
     } catch {
-      systemUpdatedByName = null;
+      return {};
     }
-  }
+  })();
+  const systemUpdatedByName = systemStatus.updatedBy
+    ? profilesMapForSystem[systemStatus.updatedBy] ?? null
+    : null;
+  const productionUpdatedByName = productionStatus.updatedBy
+    ? profilesMapForSystem[productionStatus.updatedBy] ?? null
+    : null;
+  const financeUpdatedByName = financeStatus.updatedBy
+    ? profilesMapForSystem[financeStatus.updatedBy] ?? null
+    : null;
+  const inventoryUpdatedByName = inventoryStatus.updatedBy
+    ? profilesMapForSystem[inventoryStatus.updatedBy] ?? null
+    : null;
 
   // Screen time — developer only
   const istNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
@@ -243,20 +266,69 @@ export default async function SettingsPage() {
         </div>
       </div>
 
-      {/* System Status — DEVELOPER ONLY. Kill-switch that locks the
-          whole app behind a maintenance screen. Goes at the TOP of
-          the settings page because (a) it's the highest-impact action
-          here and (b) when it's "Down" the developer needs to find
-          the recovery button fast. */}
+      {/* System Status — DEVELOPER ONLY. Migration 036 introduced
+          per-department maintenance flags alongside the legacy global
+          kill-switch. Four cards in order of blast radius:
+            1. Global       — the original kill-switch from mig 031.
+                              Locks everyone in every department.
+            2. Production   — Cutting / Carving / Dispatch / etc.
+            3. Finance      — /accounts/* (Bills + Payments).
+            4. Inventory    — placeholder for the v2 inventory module.
+          Each is independent: you can take Finance down without
+          affecting Production, etc. Developers always retain a way
+          back via this page (developer override on the lock screen
+          is also still there). */}
       {currentUser.role === "developer" && (
-        <SystemStatusSection
-          isDown={systemStatus.down}
-          message={systemStatus.message}
-          updatedAt={systemStatus.updatedAt}
-          updatedByName={systemUpdatedByName}
-          takeDownAction={takeSystemDownAction}
-          bringUpAction={bringSystemUpAction}
-        />
+        <>
+          <SystemStatusSection
+            isDown={systemStatus.down}
+            message={systemStatus.message}
+            updatedAt={systemStatus.updatedAt}
+            updatedByName={systemUpdatedByName}
+            takeDownAction={takeSystemDownAction}
+            bringUpAction={bringSystemUpAction}
+            department={null}
+            scopeLabel="System status — Global"
+            scopeIcon="🛡️"
+            scopeDescription="Locks every department at once — the nuclear option. Use for total deploys or DB-wide maintenance."
+          />
+          <SystemStatusSection
+            isDown={productionStatus.down}
+            message={productionStatus.message}
+            updatedAt={productionStatus.updatedAt}
+            updatedByName={productionUpdatedByName}
+            takeDownAction={takeSystemDownAction}
+            bringUpAction={bringSystemUpAction}
+            department="production"
+            scopeLabel="Production"
+            scopeIcon="🏭"
+            scopeDescription="Locks the cutting / carving / dispatch flow. Finance + Inventory stay live."
+          />
+          <SystemStatusSection
+            isDown={financeStatus.down}
+            message={financeStatus.message}
+            updatedAt={financeStatus.updatedAt}
+            updatedByName={financeUpdatedByName}
+            takeDownAction={takeSystemDownAction}
+            bringUpAction={bringSystemUpAction}
+            department="finance"
+            scopeLabel="Finance"
+            scopeIcon="💼"
+            scopeDescription="Locks the accounts module (/accounts/*). Production + Inventory stay live."
+          />
+          <SystemStatusSection
+            isDown={inventoryStatus.down}
+            message={inventoryStatus.message}
+            updatedAt={inventoryStatus.updatedAt}
+            updatedByName={inventoryUpdatedByName}
+            takeDownAction={takeSystemDownAction}
+            bringUpAction={bringSystemUpAction}
+            department="inventory"
+            scopeLabel="Inventory"
+            scopeIcon="📦"
+            scopeDescription="Locks the (stub) inventory module. Production + Finance stay live."
+          />
+        </>
       )}
 
       {/* User Management — owner, team_head, developer */}

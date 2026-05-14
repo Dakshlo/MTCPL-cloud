@@ -25,6 +25,10 @@ export function SystemStatusSection({
   updatedByName,
   takeDownAction,
   bringUpAction,
+  department,
+  scopeLabel,
+  scopeIcon,
+  scopeDescription,
 }: {
   isDown: boolean;
   message: string | null;
@@ -32,6 +36,18 @@ export function SystemStatusSection({
   updatedByName: string | null;
   takeDownAction: (formData: FormData) => Promise<Result>;
   bringUpAction: (formData: FormData) => Promise<Result>;
+  /** Migration 036 — which department this card controls. Posted as a
+   *  hidden form field so takeSystemDownAction / bringSystemUpAction
+   *  target the right row in system_settings. `null` = legacy global
+   *  flag (system_status row from migration 031). */
+  department?: "production" | "finance" | "inventory" | null;
+  /** Display title — e.g. "Production · System status". Defaults to
+   *  "System status" for the legacy global card. */
+  scopeLabel?: string;
+  /** Emoji or single-char icon shown in the avatar tile. */
+  scopeIcon?: string;
+  /** Short copy under the title explaining what this toggle locks. */
+  scopeDescription?: string;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -48,11 +64,17 @@ export function SystemStatusSection({
     setError(null);
   }
 
+  function withDept(fd: FormData): FormData {
+    if (department) fd.set("department", department);
+    return fd;
+  }
+
   function runTakeDown() {
     setError(null);
     startTransition(async () => {
       const fd = new FormData();
       fd.set("message", maintenanceMessage.trim());
+      withDept(fd);
       const r = await takeDownAction(fd);
       if (!r.ok) {
         setError(r.error);
@@ -66,7 +88,9 @@ export function SystemStatusSection({
   function runBringUp() {
     setError(null);
     startTransition(async () => {
-      const r = await bringUpAction(new FormData());
+      const fd = new FormData();
+      withDept(fd);
+      const r = await bringUpAction(fd);
       if (!r.ok) {
         setError(r.error);
         return;
@@ -74,6 +98,15 @@ export function SystemStatusSection({
       router.refresh();
     });
   }
+
+  const titleText = scopeLabel ?? "System status";
+  const iconText = scopeIcon ?? (isDown ? "🛠️" : "🟢");
+  const descriptionDown = scopeDescription
+    ? `${scopeDescription} The recovery button below brings it back live.`
+    : "The whole app is locked for everyone. Bring it back live below when you're done. You'll also see the same lock screen yourself, with this same button on it as a recovery.";
+  const descriptionUp = scopeDescription
+    ? scopeDescription
+    : "Developer-only kill-switch. Takes the entire app offline — every user sees a maintenance screen with nothing clickable. Use during deploys or critical fixes. The toggle requires a typed confirmation.";
 
   return (
     <div
@@ -109,13 +142,13 @@ export function SystemStatusSection({
           }}
           aria-hidden="true"
         >
-          {isDown ? "🛠️" : "🟢"}
+          {iconText}
         </div>
 
         <div style={{ flex: 1, minWidth: 220 }}>
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <h2 style={{ margin: 0, fontSize: 17, fontWeight: 800, letterSpacing: "-0.01em" }}>
-              System status
+              {titleText}
             </h2>
             <span
               style={{
@@ -133,20 +166,7 @@ export function SystemStatusSection({
             </span>
           </div>
           <p style={{ margin: "6px 0 0", fontSize: 13, color: "var(--muted)", lineHeight: 1.55 }}>
-            {isDown ? (
-              <>
-                The whole app is locked for everyone. Bring it back live below
-                when you're done. You'll also see the same lock screen
-                yourself, with this same button on it as a recovery.
-              </>
-            ) : (
-              <>
-                <strong>Developer-only kill-switch.</strong> Takes the entire
-                app offline — every user sees a maintenance screen with
-                nothing clickable. Use during deploys or critical fixes. The
-                toggle requires a typed confirmation.
-              </>
-            )}
+            {isDown ? descriptionDown : descriptionUp}
           </p>
           {isDown && message && (
             <p

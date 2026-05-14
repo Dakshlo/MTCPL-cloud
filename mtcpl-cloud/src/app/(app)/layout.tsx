@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { headers } from "next/headers";
 
 import { LogoutButton } from "@/components/logout-button";
 import { MobileNav } from "@/components/mobile-nav";
@@ -12,7 +13,8 @@ import { requireAuth } from "@/lib/auth";
 import { canApproveCuts } from "@/lib/cutting-permissions";
 import { canApproveBills } from "@/lib/accounts-permissions";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { getSystemStatus } from "@/lib/system-status";
+import { getEffectiveStatus } from "@/lib/system-status";
+import { departmentForRoute, effectiveDepartment } from "@/lib/departments";
 import { getProfilesMap } from "@/lib/profiles";
 import { SystemDownScreen } from "@/components/system-down-screen";
 
@@ -23,29 +25,50 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   const { profile } = await requireAuth();
   const displayName = profile.vendor_name || profile.full_name || profile.phone || "MTCPL User";
 
-  // ── System maintenance gate (migration 031) ────────────────────
-  // Developer can take the whole app offline via Settings → System
-  // Status. While down, every authenticated user (including the
-  // developer who flipped it) sees the maintenance screen instead
-  // of the normal shell. getSystemStatus() falls back to
-  // `down: false` if the table or row is missing — so deploying
-  // this code before running migration 031 keeps the app live.
-  const systemStatus = await getSystemStatus();
-  if (systemStatus.down) {
+  // Pathname from middleware (Migration 036). Used to figure out which
+  // department the current route belongs to so the maintenance check
+  // can be department-aware. Falls back to '/' if the header is missing
+  // (e.g. middleware not yet redeployed) — that maps to Production.
+  const h = await headers();
+  const pathname = h.get("x-pathname") ?? "/";
+  const requestDept = departmentForRoute(pathname);
+
+  // ── System maintenance gate (migration 031 + 036) ──────────────
+  // Two layers: a global flag (legacy from migration 031) AND three
+  // per-department flags (Migration 036). getEffectiveStatus returns
+  // the first DOWN it finds across (global, then this route's
+  // department). Developer override stays — devs see the down screen
+  // with a "Bring back live" button on it.
+  const effectiveStatus = await getEffectiveStatus(requestDept);
+  if (effectiveStatus.down) {
     let updatedByName: string | null = null;
-    if (systemStatus.updatedBy) {
+    if (effectiveStatus.updatedBy) {
       try {
         const map = await getProfilesMap();
-        updatedByName = map[systemStatus.updatedBy] ?? null;
+        updatedByName = map[effectiveStatus.updatedBy] ?? null;
       } catch {
         updatedByName = null;
       }
     }
+    // Decorate the message with the affected scope so the lock
+    // screen is unambiguous about what's down (vs. the legacy
+    // "everything is down" reading).
+    const scopeLabel =
+      effectiveStatus.source === "global"
+        ? "All systems"
+        : requestDept === "production"
+          ? "Production"
+          : requestDept === "finance"
+            ? "Finance"
+            : "Inventory";
+    const decoratedMessage = effectiveStatus.message
+      ? `${scopeLabel} · ${effectiveStatus.message}`
+      : `${scopeLabel} is currently offline.`;
     return (
       <SystemDownScreen
         isDeveloper={profile.role === "developer"}
-        message={systemStatus.message}
-        updatedAt={systemStatus.updatedAt}
+        message={decoratedMessage}
+        updatedAt={effectiveStatus.updatedAt}
         updatedByName={updatedByName}
       />
     );
@@ -94,6 +117,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         displayName={displayName}
         role={profile.role}
         themePreference={profile.theme_preference ?? null}
+        activeDepartment={effectiveDepartment(profile.role, profile.active_department ?? null)}
       />
 
       <main className="main-shell">

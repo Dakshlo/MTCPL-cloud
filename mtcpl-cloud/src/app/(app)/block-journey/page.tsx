@@ -61,6 +61,38 @@ export default async function BlockJourneyPage({
 
   const admin = createAdminSupabaseClient();
 
+  // Paginated slab_requirements fetch — Block Journey was silently
+  // truncating to PostgREST's 1000-row default page, which dropped any
+  // slab past the first 1000 rows. Once a block's slabs had progressed
+  // beyond row 1000 (e.g. MT-B-223 / ASTA-0005), the lineage card lost
+  // them and showed "cut recorded but no slabs linked". Same fix the
+  // cutting picker already uses — walk 1000-row pages up to 50000.
+  async function fetchAllPostCutSlabs() {
+    const PAGE = 1000;
+    const MAX = 50000;
+    const out: unknown[] = [];
+    for (let offset = 0; offset < MAX; offset += PAGE) {
+      const { data, error } = await admin
+        .from("slab_requirements")
+        .select("id, length_ft, width_ft, thickness_ft, source_block_id, label, temple, status, cut_source_kind")
+        .not("source_block_id", "is", null)
+        .in("status", [
+          "cut_done",
+          "carving_assigned",
+          "carving_in_progress",
+          "completed",
+          "dispatched",
+        ])
+        .order("id", { ascending: true })
+        .range(offset, offset + PAGE - 1);
+      if (error) throw new Error(error.message);
+      if (!data || data.length === 0) break;
+      out.push(...data);
+      if (data.length < PAGE) break;
+    }
+    return { data: out, error: null as null };
+  }
+
   const [freshR, reusedR, cutDoneR, doneCsbR, stoneTypesR, trucksR, cutSessionSlabsR] = await Promise.all([
     admin
       .from("blocks")
@@ -80,18 +112,9 @@ export default async function BlockJourneyPage({
     // % drop for any block whose slabs had progressed beyond cut_done.
     // Include the full post-cut lifecycle here so the lineage
     // continues to credit the parent block for every slab that came
-    // out of it, regardless of where the slab is now.
-    admin
-      .from("slab_requirements")
-      .select("id, length_ft, width_ft, thickness_ft, source_block_id, label, temple, status, cut_source_kind")
-      .not("source_block_id", "is", null)
-      .in("status", [
-        "cut_done",
-        "carving_assigned",
-        "carving_in_progress",
-        "completed",
-        "dispatched",
-      ]),
+    // out of it, regardless of where the slab is now. Pagination
+    // is required — see fetchAllPostCutSlabs comment above.
+    fetchAllPostCutSlabs(),
     admin
       .from("cut_session_blocks")
       .select("block_id, status, updated_at")

@@ -105,6 +105,8 @@ export async function getAuthContext() {
     is_active: boolean;
     theme_preference?: "light" | "dark" | null;
     can_approve_cuts?: boolean;
+    can_approve_bills?: boolean;
+    active_department?: "production" | "finance" | "inventory" | null;
   };
   let { data: profile } = (await admin
     .from("profiles")

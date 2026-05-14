@@ -2,7 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useTransition } from "react";
 import type { AppRole } from "@/lib/types";
+import {
+  DEPARTMENTS,
+  canSwitchDepartment,
+  effectiveDepartment,
+  type Department,
+} from "@/lib/departments";
+import { setActiveDepartmentAction } from "@/app/(app)/department-actions";
 import { ThemeToggle } from "./theme-toggle";
 
 type NavItem = {
@@ -11,170 +19,177 @@ type NavItem = {
   label: string;
   icon: string;
   roles: AppRole[];
+  /** Migration 036 — which department this entry belongs to. Default
+   *  is 'production'. Sidebar filters entries down to the user's
+   *  current active_department in addition to the existing role
+   *  check. */
+  department?: Department;
 };
 
 type NavDivider = {
   type: "divider";
   label?: string;
   roles: AppRole[];
+  /** Same dept tag — divider only renders if at least one ITEM in the
+   *  current department is visible below it. */
+  department?: Department;
 };
 
 type NavEntry = NavItem | NavDivider;
 
+// Migration 036 note: each entry carries a `department`. Entries
+// without an explicit tag default to 'production' below. The sidebar
+// filters by (role) AND (department === activeDepartment) for users
+// who can switch (developer + owner); for everyone else the role
+// filter alone is sufficient since their role implicitly limits them.
 const navEntries: NavEntry[] = [
   {
     href: "/dashboard",
     label: "Dashboard",
     icon: "◈",
     roles: ["developer", "owner"],
+    department: "production",
   },
   {
     href: "/blocks",
     label: "Blocks",
     icon: "▣",
     roles: ["developer", "owner", "team_head", "block_slab_entry", "block_entry"],
+    department: "production",
   },
   {
     href: "/slabs",
     label: "Required Sizes",
     icon: "▤",
     roles: ["developer", "owner", "team_head", "slab_entry", "block_slab_entry"],
+    department: "production",
   },
   {
     href: "/slabs/view",
     label: "Plan Generator",
     icon: "⌘",
     roles: ["developer", "owner", "team_head"],
+    department: "production",
   },
   // — Section break before workshop / execution items —
   {
     type: "divider",
     label: "WORKSHOP",
     roles: ["developer", "owner", "team_head", "cutting_operator"],
+    department: "production",
   },
   {
     href: "/cutting",
     label: "Cutting",
     icon: "✂",
     roles: ["developer", "owner", "cutting_operator", "team_head"],
+    department: "production",
   },
   {
-    // Cutting verification view. Shows every slab cut from a block,
-    // regardless of where it is now in the carving / dispatch
-    // pipeline. Slabs DON'T drop off when the carving team picks
-    // them up — that drop-off lives on /slabs/ready/for-carving
-    // (now labelled "Ready Sizes Stock" under the CARVING section).
     href: "/slabs/ready",
     label: "Total Ready Sizes",
     icon: "✦",
     roles: ["developer", "owner", "team_head", "block_slab_entry", "carving_head"],
+    department: "production",
   },
-  // — Phase 2 carving module. Carving Jobs visible to owner +
-  //   the new carving_head role (whose entire job is the carving
-  //   pipeline → dispatch). Dispatch shared with carving_head too
-  //   so they can hand finished pieces off without bouncing to
-  //   the owner. —
   {
     type: "divider",
     label: "CARVING",
     roles: ["developer", "owner", "vendor", "carving_head"],
+    department: "production",
   },
   {
-    // Carving team's slab pick-up surface. Mirror of /slabs/ready but
-    // filtered to status='cut_done' only — slabs leave as soon as
-    // they're assigned to a vendor. Sits above Carving Jobs because
-    // the natural flow is: see what's available → assign → manage.
-    // Labelled "Ready Sizes Stock" per Daksh — the cutting-side
-    // history view ("Ready Sizes") stays under WORKSHOP for
-    // verification.
     href: "/slabs/ready/for-carving",
     label: "Ready Sizes Stock",
     icon: "📦",
     roles: ["developer", "owner", "carving_head"],
+    department: "production",
   },
   {
     href: "/carving",
     label: "Carving Jobs",
     icon: "🎨",
     roles: ["developer", "owner", "carving_head"],
+    department: "production",
   },
   {
     href: "/dispatch",
     label: "Dispatch",
     icon: "🚚",
     roles: ["developer", "owner", "carving_head"],
+    department: "production",
   },
-  // Challan removed from sidebar at Daksh's request — it's reachable
-  // from a button on the Dispatch page header, which is the natural
-  // path (you finalise a dispatch, then look at the challan).
   {
     href: "/vendor",
     label: "My Jobs",
     icon: "👤",
     roles: ["developer", "vendor"],
+    department: "production",
   },
   {
-    // Migration 025 — slab transfer dispatch list. Visibility is
-    // intentionally narrow: only the runner role (slab_transfer)
-    // who actually moves slabs from cutting yard to vendor shades,
-    // plus developer for oversight. Owner + carving_head used to
-    // see it but Daksh asked to drop them — this is a runner-only
-    // workstation, not a managerial surface.
     href: "/carving/transfer",
     label: "Slab Transfer",
     icon: "🚧",
     roles: ["developer", "slab_transfer"],
+    department: "production",
   },
-  // ── ACCOUNTS section (migration 028) ────────────────────────────
-  // The new accounting / finance vertical.
-  //
-  // Per-role visibility:
-  //   • biller    — NO sidebar entries. They land on /accounts/bills/new
-  //                  by default (getDefaultRouteForRole), and the page
-  //                  headers cross-link to /accounts/bills with the
-  //                  "← All bills" + "+ New bill" buttons.
-  //   • developer/owner — sidebar entries except:
-  //                       - Enter Bill (reached via "+ New bill" CTA on All Bills)
-  //                       - Pay Today + Bills Audit (top-bar count badges)
-  //   • accountant — full visibility incl. Pay Today (their queue surface).
-  //                  No top-bar badge for accountant by design — the
-  //                  sidebar entry is their entry point.
+  // ── ACCOUNTS section (Finance department, migration 028) ─────────
   {
     type: "divider",
     label: "ACCOUNTS",
     roles: ["developer", "owner", "accountant"],
+    department: "finance",
   },
   {
     href: "/accounts/bills",
     label: "All Bills",
     icon: "📑",
     roles: ["developer", "owner", "accountant"],
+    department: "finance",
   },
   {
     href: "/accounts",
     label: "Due Bills",
     icon: "💰",
     roles: ["developer", "owner", "accountant"],
+    department: "finance",
   },
   {
-    // Accountant-only sidebar entry. dev + owner have the top-bar
-    // badge with live count — they don't need a sidebar duplicate.
     href: "/accounts/pay-today",
     label: "Pay Today",
     icon: "💸",
     roles: ["accountant"],
+    department: "finance",
   },
   {
     href: "/accounts/payments",
     label: "Payment History",
     icon: "🗂️",
     roles: ["developer", "owner", "accountant"],
+    department: "finance",
   },
   {
     href: "/accounts/vendors",
     label: "Vendors Profile (Bill)",
     icon: "🏢",
     roles: ["developer", "owner", "accountant"],
+    department: "finance",
+  },
+  // ── INVENTORY section (Migration 036 — stub for v1) ──────────────
+  // Single placeholder entry. The page is a "coming soon" panel.
+  // Locked to developer + owner until the real inventory module ships.
+  {
+    type: "divider",
+    label: "INVENTORY",
+    roles: ["developer", "owner"],
+    department: "inventory",
+  },
+  {
+    href: "/inventory",
+    label: "Inventory",
+    icon: "📦",
+    roles: ["developer", "owner"],
+    department: "inventory",
   },
 ];
 
@@ -202,31 +217,41 @@ export function Sidebar({
   role,
   displayName,
   themePreference,
+  activeDepartment,
 }: {
   role: AppRole;
   displayName?: string;
-  /** User's saved theme preference (from profiles.theme_preference).
-   * Passed down to ThemeToggle so it can reconcile cross-device:
-   * login on a new browser → localStorage empty → DB value wins. */
   themePreference?: "light" | "dark" | null;
+  /** Migration 036 — the user's current active_department from
+   *  profiles. For developer + owner this controls which entries are
+   *  shown (filtered to one department at a time); for every other
+   *  role this is effectively pinned by their role and the filter is
+   *  a no-op. */
+  activeDepartment?: Department | null;
 }) {
   const pathname = usePathname();
+  const [switching, startSwitchTransition] = useTransition();
 
-  // Standard role-based filter.
+  const switchable = canSwitchDepartment(role);
+  const currentDept = effectiveDepartment(role, activeDepartment ?? null);
+
+  // Step 1: standard role-based filter (unchanged from migration 028).
   let visibleEntries = navEntries.filter((entry) => entry.roles.includes(role));
 
+  // Step 2 (Migration 036): department filter for switchable roles.
+  // Locked roles (everyone except dev/owner) keep the full role-filtered
+  // set — their role already narrowed them to one department's worth
+  // of entries.
+  if (switchable) {
+    visibleEntries = visibleEntries.filter(
+      (entry) => (entry.department ?? "production") === currentDept,
+    );
+  }
+
   // ── Name-based overrides ───────────────────────────────────────────
-  // Specific named users get extra nav entries even if their stored
-  // role wouldn't normally show them. Rajesh is a team_head in the
-  // database but should still see Dashboard (where his stripped
-  // Block-Journey-only variant is rendered). Match policy mirrors
-  // canTransferPlannedSlabs in src/lib/cutting-permissions.ts —
-  // substring match on UPPERCASED full name.
   const upperName = (displayName ?? "").toUpperCase();
   const isNamedTrustedUser = upperName.includes("RAJESH") || upperName.includes("NARESH");
   if (isNamedTrustedUser && !visibleEntries.some((e) => e.type !== "divider" && e.href === "/dashboard")) {
-    // Inject Dashboard at the very top of the nav (matches the order
-    // owners + developers see).
     const dashboardEntry = navEntries.find(
       (e) => e.type !== "divider" && (e as NavItem).href === "/dashboard",
     );
@@ -287,6 +312,105 @@ export function Sidebar({
           MTCPL
         </span>
       </div>
+
+      {/* Department switcher (Migration 036) — developer + owner only.
+          A horizontal pill row that lets the user "enter" one of the
+          three operational departments. The active pill is highlighted
+          and inert; the others post a form to setActiveDepartmentAction,
+          which updates profiles.active_department and redirects to the
+          department's landing page.
+
+          Pills sit above the user block so the active department is
+          the first thing the eye lands on when scanning the sidebar. */}
+      {switchable && (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+            padding: "10px 14px 4px",
+          }}
+        >
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              color: "var(--muted)",
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+            }}
+          >
+            Department
+          </span>
+          <div
+            style={{
+              display: "flex",
+              gap: 4,
+              background: "var(--surface)",
+              border: "1px solid var(--border)",
+              borderRadius: 8,
+              padding: 3,
+            }}
+          >
+            {DEPARTMENTS.map((d) => {
+              const isActive = d.id === currentDept;
+              if (isActive) {
+                return (
+                  <span
+                    key={d.id}
+                    title={d.tooltip}
+                    style={{
+                      flex: 1,
+                      textAlign: "center",
+                      padding: "5px 6px",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      background: "var(--gold)",
+                      color: "#fff",
+                      borderRadius: 5,
+                      letterSpacing: "0.02em",
+                      cursor: "default",
+                    }}
+                  >
+                    {d.icon} {d.label}
+                  </span>
+                );
+              }
+              return (
+                <form
+                  key={d.id}
+                  action={setActiveDepartmentAction}
+                  onSubmit={() => {
+                    startSwitchTransition(() => {});
+                  }}
+                  style={{ flex: 1, margin: 0 }}
+                >
+                  <input type="hidden" name="department" value={d.id} />
+                  <button
+                    type="submit"
+                    title={d.tooltip}
+                    disabled={switching}
+                    style={{
+                      width: "100%",
+                      padding: "5px 6px",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      background: "transparent",
+                      color: "var(--text)",
+                      border: "none",
+                      borderRadius: 5,
+                      cursor: switching ? "wait" : "pointer",
+                      opacity: switching ? 0.6 : 1,
+                    }}
+                  >
+                    {d.icon} {d.label}
+                  </button>
+                </form>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* User */}
       <div className="sidebar-user">

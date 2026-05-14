@@ -261,6 +261,10 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
     sw: number;
     sh: number;
     sd: number;
+    /** Migration 035 tag — used to render a purple TRANSFER badge on
+     *  the Done-tab chip when the slab came from another block's
+     *  plan, vs the orange "+ added" badge for inventory extras. */
+    cut_source_kind: "planned" | "extra" | "transferred" | null;
   };
   type ActualRemainder = { id: string; l: number; w: number; h: number; status: string };
   const actualSlabsByParent = new Map<string, ActualSlab[]>();
@@ -276,7 +280,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
     // Actually cut slabs for these blocks
     const { data: realSlabRows } = await supabase
       .from("slab_requirements")
-      .select("id, label, temple, length_ft, width_ft, thickness_ft, source_block_id, status")
+      .select("id, label, temple, length_ft, width_ft, thickness_ft, source_block_id, status, cut_source_kind")
       .in("source_block_id", parentBlockIds)
       .eq("status", "cut_done");
     for (const s of realSlabRows ?? []) {
@@ -296,6 +300,9 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
         sw,
         sh,
         sd,
+        cut_source_kind: (s as { cut_source_kind?: string | null }).cut_source_kind as
+          | "planned" | "extra" | "transferred" | null
+          ?? null,
       });
       actualSlabRowsByParent.set(s.source_block_id, rowList);
     }
@@ -846,25 +853,48 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                   const realRows = isDoneStatus ? actualSlabRowsByParent.get(block.block_id) : undefined;
                   if (isDoneStatus && realRows && realRows.length > 0) {
                     // Anything in the real cut list that wasn't in the
-                    // original cut_session_slabs is a manual / unplanned
-                    // add — flag it with a coloured badge.
+                    // original cut_session_slabs is a manual addition.
+                    // Migration 035's cut_source_kind distinguishes
+                    // 'transferred' (claimed from another block's plan)
+                    // from 'extra' (pulled off open inventory).
                     const plannedIds = new Set(block.cut_session_slabs.map((s) => s.slab_requirement_id));
-                    const manualCount = realRows.filter((s) => !plannedIds.has(s.id)).length;
+                    const isTransfer = (s: ActualSlabRow) => s.cut_source_kind === "transferred";
+                    const isExtra = (s: ActualSlabRow) =>
+                      !plannedIds.has(s.id) && s.cut_source_kind !== "transferred";
+                    const extraCount = realRows.filter(isExtra).length;
+                    const transferCount = realRows.filter(isTransfer).length;
                     return (
                       <>
                         <div className="chip-row" style={{ marginTop: 8 }}>
                           {realRows.map((s) => {
-                            const isManual = !plannedIds.has(s.id);
+                            const transfer = isTransfer(s);
+                            const extra = isExtra(s);
+                            const isManual = transfer || extra;
+                            const chipStyle = transfer
+                              ? {
+                                  background: "rgba(124,58,237,0.10)",
+                                  border: "1px solid rgba(124,58,237,0.45)",
+                                  color: "var(--text)",
+                                }
+                              : extra
+                                ? {
+                                    background: "rgba(120,53,15,0.12)",
+                                    border: "1px solid rgba(180,83,9,0.45)",
+                                    color: "var(--text)",
+                                  }
+                                : undefined;
                             return (
                               <span
                                 className="plan-chip"
                                 key={s.id}
-                                style={isManual ? {
-                                  background: "rgba(120,53,15,0.12)",
-                                  border: "1px solid rgba(180,83,9,0.45)",
-                                  color: "var(--text)",
-                                } : undefined}
-                                title={isManual ? "Added from inventory during Cutting Done — not in original plan" : undefined}
+                                style={chipStyle}
+                                title={
+                                  transfer
+                                    ? "Transferred from another block's plan during Cutting Done — that block had to reprint"
+                                    : extra
+                                      ? "Added from open inventory during Cutting Done — not in original plan"
+                                      : undefined
+                                }
                               >
                                 {s.id}
                                 {(s.sw != null || s.sh != null || s.sd != null) && (
@@ -879,19 +909,21 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                                     fontSize: 9,
                                     fontWeight: 700,
                                     letterSpacing: "0.05em",
-                                    color: "#b45309",
+                                    color: transfer ? "#6d28d9" : "#b45309",
                                     textTransform: "uppercase",
                                   }}>
-                                    + added
+                                    {transfer ? "↔ transfer" : "+ added"}
                                   </span>
                                 )}
                               </span>
                             );
                           })}
                         </div>
-                        {manualCount > 0 && (
+                        {(extraCount > 0 || transferCount > 0) && (
                           <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
-                            {manualCount} slab{manualCount === 1 ? "" : "s"} added from inventory during cutting (unplanned)
+                            {extraCount > 0 && `${extraCount} slab${extraCount === 1 ? "" : "s"} added from inventory`}
+                            {extraCount > 0 && transferCount > 0 && " · "}
+                            {transferCount > 0 && `${transferCount} slab${transferCount === 1 ? "" : "s"} transferred from another block`}
                           </div>
                         )}
                       </>
