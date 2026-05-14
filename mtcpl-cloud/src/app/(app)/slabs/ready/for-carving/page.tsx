@@ -21,7 +21,7 @@ export default async function ReadyForCarvingPage() {
     admin
       .from("slab_requirements")
       .select(
-        "id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority, created_at, updated_at",
+        "id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority, created_at, updated_at, source_block_id",
       )
       .eq("status", "cut_done")
       .order("updated_at", { ascending: false }),

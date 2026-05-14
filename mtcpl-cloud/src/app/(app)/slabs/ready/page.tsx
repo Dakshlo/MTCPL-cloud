@@ -37,7 +37,7 @@ export default async function ReadySlabsPage() {
     admin
       .from("slab_requirements")
       .select(
-        "id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority, created_at, updated_at",
+        "id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority, created_at, updated_at, source_block_id",
       )
       .in("status", POST_CUT_STATUSES)
       .order("updated_at", { ascending: false }),

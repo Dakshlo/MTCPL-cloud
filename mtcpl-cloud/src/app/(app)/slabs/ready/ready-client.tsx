@@ -16,6 +16,9 @@ type Slab = {
   priority: boolean;
   created_at: string | null;
   updated_at: string | null;
+  /** Block this slab was cut from. Set by finish_block_cut RPC at
+   *  approval time. Older / manually-entered slabs may be NULL. */
+  source_block_id?: string | null;
 };
 
 /** Display chip for the slab's post-cut lifecycle position. */
@@ -98,13 +101,14 @@ export function ReadySlabsClient({
   const [qualityFilter, setQualityFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
-  // Default to "today only" so the page lands focused on what just
-  // came off the cutting floor. The user can clear or pick a wider
-  // range using the quick buttons (Yesterday / Last 3 days /
-  // Last 7 / 30 / 90). `today` is also declared lower for the quick
-  // buttons; this initialiser uses the same value at mount.
-  const [dateFrom, setDateFrom] = useState<string>(() => new Date().toISOString().slice(0, 10));
-  const [dateTo, setDateTo] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  // Default to NO date filter — page lands showing every cut slab so
+  // the cutting team can scroll back as far as they need. The quick
+  // preset buttons (Today / Yesterday / Last 3 / 7 / 30 / 90) and the
+  // manual date inputs let them narrow when they want a smaller
+  // window. (Earlier default was "today only" which hid 99% of the
+  // history on first load — Daksh asked to drop it.)
+  const [dateFrom, setDateFrom] = useState<string>("");
+  const [dateTo, setDateTo] = useState<string>("");
   const [sortBy, setSortBy] = useState<SortCol>("updated_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [exporting, setExporting] = useState(false);
@@ -467,6 +471,7 @@ export function ReadySlabsClient({
             <tr style={{ background: "var(--surface-alt)", borderBottom: "2px solid var(--border)" }}>
               {([
                 { label: "Size Code",    col: "id" as SortCol },
+                { label: "From Block",   col: null },
                 { label: "Temple",       col: "temple" as SortCol },
                 { label: "Label",        col: null },
                 { label: "Stone",        col: "stone" as SortCol },
@@ -512,7 +517,7 @@ export function ReadySlabsClient({
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={mode === "verification" || mode === "for-carving" ? 11 : 10} style={{ padding: 32, textAlign: "center", color: "var(--muted)" }}>
+                <td colSpan={mode === "verification" || mode === "for-carving" ? 12 : 11} style={{ padding: 32, textAlign: "center", color: "var(--muted)" }}>
                   {slabs.length === 0 ? "No sizes have been cut yet." : "No sizes match the current filters."}
                 </td>
               </tr>
@@ -529,6 +534,24 @@ export function ReadySlabsClient({
                   >
                     <td style={{ padding: "9px 12px", fontFamily: "ui-monospace, monospace", fontWeight: 600, whiteSpace: "nowrap" }}>
                       {s.id}
+                    </td>
+                    <td style={{ padding: "9px 12px", whiteSpace: "nowrap", fontSize: 12 }}>
+                      {s.source_block_id ? (
+                        <Link
+                          href={`/block-journey?focus=${encodeURIComponent(s.source_block_id)}`}
+                          style={{
+                            fontFamily: "ui-monospace, monospace",
+                            fontWeight: 600,
+                            color: "var(--gold-dark)",
+                            textDecoration: "none",
+                          }}
+                          title={`Open block journey for ${s.source_block_id}`}
+                        >
+                          {s.source_block_id}
+                        </Link>
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
                     </td>
                     <td style={{ padding: "9px 12px", whiteSpace: "nowrap", fontSize: 12 }}>{s.temple}</td>
                     <td style={{ padding: "9px 12px", fontSize: 12, color: "var(--muted)" }}>{s.label}</td>
@@ -589,7 +612,7 @@ export function ReadySlabsClient({
       </div>
 
       <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>
-        Columns: Size Code · Temple · Label · Stone · Quality · Dimensions · CFT · Priority · Added · Cut Done
+        Columns: Size Code · From Block · Temple · Label · Stone · Quality · Dimensions · CFT · Priority · Added · Cut Done
         {mode === "verification" ? " · Status" : ""}
       </p>
     </div>
