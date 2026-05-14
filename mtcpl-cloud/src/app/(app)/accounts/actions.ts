@@ -51,7 +51,12 @@ export async function submitBillAction(
   formData: FormData,
 ): Promise<
   | { ok: true; billId: string; token: string }
-  | { ok: false; error: string }
+  // Mig 042 follow-on (Daksh): "don't show that duplicate bill
+  // [banner] down when it's duplicate" — instead surface a small
+  // centered peek. The action now tags the duplicate with an
+  // errorCode so the client can render a focused modal rather than
+  // the generic inline error banner.
+  | { ok: false; error: string; errorCode?: "DUPLICATE_BILL" }
 > {
   const { profile } = await requireAuth();
   if (!canSubmitBills(profile)) {
@@ -128,14 +133,14 @@ export async function submitBillAction(
 
     if (error) {
       if (error.code === PG_UNIQUE_VIOLATION) {
-        // Migration 039: uniqueness is now scoped to (vendor, bill_no,
+        // Migration 039: uniqueness is scoped to (vendor, bill_no,
         // financial_year). The same bill_no IS allowed in a different
-        // FY — explain that in the error so the user understands the
-        // rule and can check the bill_date.
+        // FY. Tagged with errorCode so the client renders a tight
+        // center-peek instead of the long inline banner.
         return {
           ok: false,
-          error:
-            "Duplicate bill — this vendor already has a bill with this number in the same financial year (April → March). Vendors can re-use a bill number across financial years, so check the bill date if you think this is a different entry.",
+          errorCode: "DUPLICATE_BILL",
+          error: "Duplicate bill — already exists for this vendor in the same financial year.",
         };
       }
       return { ok: false, error: error.message };
@@ -343,7 +348,12 @@ export async function rejectBillAction(formData: FormData): Promise<ActionResult
  * save). Only the rejected-edit path transitions back to
  * pending_approval.
  */
-export async function editBillAction(formData: FormData): Promise<ActionResult> {
+export async function editBillAction(
+  formData: FormData,
+): Promise<
+  | { ok: true }
+  | { ok: false; error: string; errorCode?: "DUPLICATE_BILL" }
+> {
   const { profile } = await requireAuth();
   const supabase = createAdminSupabaseClient();
   const billId = String(formData.get("bill_id") || "").trim();
@@ -483,7 +493,8 @@ export async function editBillAction(formData: FormData): Promise<ActionResult> 
     if (updErr.code === PG_UNIQUE_VIOLATION) {
       return {
         ok: false,
-        error: "Another bill from this vendor already uses this bill number.",
+        errorCode: "DUPLICATE_BILL",
+        error: "Duplicate bill — already exists for this vendor in the same financial year.",
       };
     }
     return { ok: false, error: updErr.message };

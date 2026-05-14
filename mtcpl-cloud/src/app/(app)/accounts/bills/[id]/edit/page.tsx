@@ -71,7 +71,16 @@ export default async function EditBillPage({ params }: { params: Params }) {
   async function editAndReturn(formData: FormData) {
     "use server";
     const result = await editBillAction(formData);
-    if (!result.ok) return { ok: false as const, error: result.error };
+    if (!result.ok) {
+      // Mig 042 follow-on — propagate the duplicate-bill code so
+      // the BillEntryForm can render its center-peek modal in
+      // edit mode too.
+      return {
+        ok: false as const,
+        error: result.error,
+        errorCode: result.errorCode,
+      };
+    }
     return { ok: true as const, billId: id, token: "" };
   }
 

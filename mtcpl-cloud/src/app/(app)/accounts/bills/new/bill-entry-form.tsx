@@ -38,7 +38,11 @@ export type BillVendorOption = {
 
 type SubmitResult =
   | { ok: true; billId: string; token: string }
-  | { ok: false; error: string };
+  // Mig 042 follow-on (Daksh): duplicate-bill errors are surfaced
+  // as a small center-peek modal instead of the long inline banner
+  // — the action tags the result with errorCode='DUPLICATE_BILL' so
+  // the form can render the focused popup.
+  | { ok: false; error: string; errorCode?: "DUPLICATE_BILL" };
 
 // GST quick-picks. Each entry splits the rate into CGST + SGST
 // (intra-state) by default. Users can switch to IGST (inter-state)
@@ -79,6 +83,15 @@ export function BillEntryForm({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // Mig 042 follow-on (Daksh) — duplicate-bill errors get their own
+  // small centered modal. Captures the conflicting bill no + vendor
+  // name + financial year so the popup can show "Invoice X with
+  // VENDOR in FY 2026" directly.
+  const [duplicateInfo, setDuplicateInfo] = useState<{
+    vendorName: string;
+    vendorBillNo: string;
+    financialYear: number;
+  } | null>(null);
 
   const today = useMemo(() => {
     const d = new Date();
@@ -221,6 +234,26 @@ export function BillEntryForm({
     startTransition(async () => {
       const result = await submitAction(formData);
       if (!result.ok) {
+        // Mig 042 follow-on — duplicate-bill error goes into a
+        // center-peek modal instead of the bottom error banner.
+        // Other errors keep the inline banner.
+        if (
+          (result as { errorCode?: "DUPLICATE_BILL" }).errorCode ===
+          "DUPLICATE_BILL"
+        ) {
+          // Financial year follows the Indian FY rule used in mig 039:
+          // April–March. A bill_date of 15 May 2026 → FY 2026; a
+          // 15 Feb 2026 → FY 2025.
+          const d = new Date(billDate);
+          const month = d.getMonth(); // 0-indexed
+          const fy = month >= 3 ? d.getFullYear() : d.getFullYear() - 1;
+          setDuplicateInfo({
+            vendorName: selectedVendor?.name ?? "this vendor",
+            vendorBillNo: vendorBillNo.trim(),
+            financialYear: fy,
+          });
+          return;
+        }
         setError(result.error);
         return;
       }
@@ -239,6 +272,7 @@ export function BillEntryForm({
   }
 
   return (
+    <>
     <form
       onSubmit={handleSubmit}
       style={{
@@ -758,6 +792,146 @@ export function BillEntryForm({
         </p>
       </aside>
     </form>
+
+    {/* Mig 042 follow-on (Daksh): centered duplicate-bill peek
+        instead of the long red banner at the bottom of the form.
+        Renders only when the server tagged the error with
+        errorCode='DUPLICATE_BILL'. Direct, three short lines of info,
+        single Close button. */}
+    {duplicateInfo && (
+      <DuplicateBillPeek
+        info={duplicateInfo}
+        onClose={() => setDuplicateInfo(null)}
+      />
+    )}
+    </>
+  );
+}
+
+function DuplicateBillPeek({
+  info,
+  onClose,
+}: {
+  info: { vendorName: string; vendorBillNo: string; financialYear: number };
+  onClose: () => void;
+}) {
+  return (
+    <div
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="duplicate-bill-title"
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(15, 23, 42, 0.45)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 250,
+        animation: "fadeIn 0.15s",
+      }}
+    >
+      <style>{`
+        @keyframes mtcpl-dupe-pop {
+          from { opacity: 0; transform: scale(0.94); }
+          to   { opacity: 1; transform: scale(1); }
+        }
+      `}</style>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "#fff",
+          borderRadius: 14,
+          padding: "22px 24px 18px",
+          minWidth: 320,
+          maxWidth: 420,
+          width: "92%",
+          boxShadow: "0 20px 60px rgba(15, 23, 42, 0.25)",
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
+          animation: "mtcpl-dupe-pop 0.15s ease-out",
+          borderTop: `4px solid ${ACCOUNTS_TOKENS.danger}`,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 22 }} aria-hidden>⚠️</span>
+          <h2
+            id="duplicate-bill-title"
+            style={{
+              margin: 0,
+              fontSize: 16,
+              fontWeight: 800,
+              color: ACCOUNTS_TOKENS.danger,
+              letterSpacing: "-0.01em",
+            }}
+          >
+            Duplicate bill
+          </h2>
+        </div>
+        <dl
+          style={{
+            margin: 0,
+            display: "grid",
+            gridTemplateColumns: "auto 1fr",
+            rowGap: 6,
+            columnGap: 14,
+            fontSize: 13,
+          }}
+        >
+          <dt style={{ color: "var(--muted)", fontWeight: 600 }}>Invoice no.</dt>
+          <dd
+            style={{
+              margin: 0,
+              fontFamily: "ui-monospace, monospace",
+              fontWeight: 700,
+              color: "var(--text)",
+            }}
+          >
+            {info.vendorBillNo}
+          </dd>
+          <dt style={{ color: "var(--muted)", fontWeight: 600 }}>Vendor</dt>
+          <dd style={{ margin: 0, fontWeight: 700, color: "var(--text)" }}>
+            {info.vendorName}
+          </dd>
+          <dt style={{ color: "var(--muted)", fontWeight: 600 }}>FY</dt>
+          <dd
+            style={{
+              margin: 0,
+              fontFamily: "ui-monospace, monospace",
+              fontWeight: 700,
+              color: "var(--text)",
+            }}
+          >
+            {info.financialYear} – {info.financialYear + 1}
+          </dd>
+        </dl>
+        <p style={{ margin: 0, fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>
+          A bill with this number already exists for this vendor in this
+          financial year. Same bill no. is allowed in a different FY.
+        </p>
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <button
+            type="button"
+            onClick={onClose}
+            autoFocus
+            style={{
+              padding: "8px 16px",
+              fontSize: 13,
+              fontWeight: 700,
+              background: ACCOUNTS_TOKENS.danger,
+              color: "#fff",
+              border: "none",
+              borderRadius: 8,
+              cursor: "pointer",
+            }}
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
