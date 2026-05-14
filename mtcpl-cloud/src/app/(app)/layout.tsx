@@ -282,18 +282,46 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           </div>
           <div className="topbar-right">
             {/* ID Lookup quick-access dropdown — sits to the left of
-                the Tasks pill. Permitted roles: developer / owner /
-                team_head / crosscheck / carving_head. Same hover-
-                expand glass pattern as TopbarTasksBadge; opens a
-                search input that hits lookupId() and renders the
-                stage-first result panel inline. Use case: someone in
-                the workshop sees a stencilled stone and wants to
-                know where it sits in the system. */}
-            {(profile.role === "developer" ||
-              profile.role === "owner" ||
-              profile.role === "team_head" ||
-              profile.role === "crosscheck" ||
-              profile.role === "carving_head") && <TopbarIdLookup />}
+                the Tasks pill. The pill is always labelled "Find ID";
+                its search panel adapts to the active department so
+                the user gets relevant results without leaving their
+                workspace:
+                  Production → slab / block lookup
+                  Finance    → bill token / vendor / payment reference
+                  Inventory  → site / scaffolding component
+                Per-department role gating:
+                  Production → developer / owner / team_head /
+                               crosscheck / carving_head (unchanged)
+                  Finance    → developer / owner / accountant
+                  Inventory  → developer / owner only (Daksh:
+                               "only roles that hop between
+                               departments need it here") */}
+            {(() => {
+              const dept = effectiveDepartment(
+                profile.role,
+                profile.active_department ?? null,
+              );
+              const role = profile.role;
+              const showProduction =
+                dept === "production" &&
+                (role === "developer" ||
+                  role === "owner" ||
+                  role === "team_head" ||
+                  role === "crosscheck" ||
+                  role === "carving_head");
+              const showFinance =
+                dept === "finance" &&
+                (role === "developer" ||
+                  role === "owner" ||
+                  role === "accountant");
+              const showInventory =
+                dept === "inventory" &&
+                (role === "developer" || role === "owner");
+              if (showProduction) return <TopbarIdLookup domain="production" />;
+              if (showFinance) return <TopbarIdLookup domain="finance" />;
+              if (showInventory) return <TopbarIdLookup domain="inventory" />;
+              return null;
+            })()}
 
             {/* Consolidated tasks dropdown (Mig 044 follow-on per
                 Daksh: the four separate pills were clustering the

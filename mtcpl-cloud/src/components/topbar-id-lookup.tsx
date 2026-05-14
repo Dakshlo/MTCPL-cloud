@@ -1,26 +1,42 @@
 "use client";
 
 // ──────────────────────────────────────────────────────────────────
-// Topbar ID Lookup — quick "where is this stone?" search.
+// Topbar ID Lookup — department-aware quick search.
 // ──────────────────────────────────────────────────────────────────
-// Daksh: "feature for when someone in the workshop finds a stone
-// with a code on it, they should get all info — first WHERE IT IS
-// (stage), then everything else (dimensions, temple, CFT, source
-// block / derived slabs)."
+// Daksh originally asked for this as a "find stone on the floor"
+// tool. Later (this pass): the same pill should adapt to the user's
+// active department:
 //
-// Visibility (gated by the parent — layout.tsx renders this only
-// for the permitted roles, mirroring lookupId's requireAuth):
-//   developer · owner · team_head · crosscheck · carving_head
+//   Production → slab / block lookup (original behaviour)
+//   Finance    → bill token / vendor / payment-reference / vendor
+//                bill no lookup
+//   Inventory  → site / component lookup with stock breakdown
 //
-// Interaction: same hover-or-tap pattern as TopbarTasksBadge, same
-// frosted-glass aesthetic, same ripple-bloom open animation. Search
-// input auto-focuses on open; Enter submits; result panel replaces
-// the input below.
+// Trigger pill label stays "Find ID" everywhere; only the panel's
+// placeholder, search action, and result rendering swap.
+//
+// Visibility per department is gated at the layout level:
+//   Production → developer / owner / team_head / crosscheck /
+//                carving_head (unchanged)
+//   Finance    → developer / owner / accountant
+//   Inventory  → developer / owner only (per Daksh — only the two
+//                roles that hop between departments need it here;
+//                storekeeper has the in-page tools)
 // ──────────────────────────────────────────────────────────────────
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { lookupId, type LookupResult } from "@/app/(app)/dashboard/lookup-action";
+import {
+  lookupFinance,
+  type FinanceLookupResult,
+} from "@/app/(app)/accounts/lookup-action";
+import {
+  lookupInventory,
+  type InventoryLookupResult,
+} from "@/app/(app)/inventory/lookup-action";
+
+export type LookupDomain = "production" | "finance" | "inventory";
 
 const STATUS_TONE: Record<string, { fg: string; bg: string }> = {
   open:                { fg: "#0f766e", bg: "rgba(15,118,110,0.10)" },
@@ -55,15 +71,24 @@ function fmtNum(n: number, digits = 1): string {
   });
 }
 
-export function TopbarIdLookup() {
+type AnyLookupResult = LookupResult | FinanceLookupResult | InventoryLookupResult;
+
+export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<LookupResult | null>(null);
+  const [result, setResult] = useState<AnyLookupResult | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+
+  // Domain reset — switching active department wipes the input + result.
+  useEffect(() => {
+    setQuery("");
+    setResult(null);
+    setError(null);
+  }, [domain]);
 
   // Auto-focus the search input when the panel opens.
   useEffect(() => {
@@ -122,7 +147,14 @@ export function TopbarIdLookup() {
     setError(null);
     setResult(null);
     try {
-      const res = await lookupId(q);
+      let res: AnyLookupResult;
+      if (domain === "finance") {
+        res = await lookupFinance(q);
+      } else if (domain === "inventory") {
+        res = await lookupInventory(q);
+      } else {
+        res = await lookupId(q);
+      }
       setResult(res);
       if (qRaw !== undefined) setQuery(q);
     } catch (e) {
@@ -131,6 +163,8 @@ export function TopbarIdLookup() {
       setLoading(false);
     }
   }
+
+  const domainConfig = DOMAIN_CONFIG[domain];
 
   return (
     <div
@@ -204,14 +238,37 @@ export function TopbarIdLookup() {
           >
             <div
               style={{
-                fontSize: 10,
-                fontWeight: 800,
-                color: "rgba(15, 23, 42, 0.55)",
-                textTransform: "uppercase",
-                letterSpacing: "0.1em",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 8,
               }}
             >
-              Look up a slab or block ID
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 800,
+                  color: "rgba(15, 23, 42, 0.55)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.1em",
+                }}
+              >
+                {domainConfig.title}
+              </span>
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 800,
+                  color: domainConfig.accent,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.1em",
+                  padding: "2px 8px",
+                  borderRadius: 999,
+                  background: `${domainConfig.accent}1a`,
+                }}
+              >
+                {domainConfig.deptLabel}
+              </span>
             </div>
 
             {/* Search row */}
@@ -227,7 +284,7 @@ export function TopbarIdLookup() {
                 type="search"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="WF-0001 · MT-B-245 · AGROHA-0002-13"
+                placeholder={domainConfig.placeholder}
                 style={{
                   flex: 1,
                   padding: "9px 12px",
@@ -278,7 +335,7 @@ export function TopbarIdLookup() {
                 {error}
               </div>
             )}
-            {result && <ResultPanel result={result} onPick={runSearch} />}
+            {result && <ResultPanel result={result} domain={domain} onPick={runSearch} />}
 
             {!loading && !result && !error && (
               <p
@@ -289,9 +346,7 @@ export function TopbarIdLookup() {
                   lineHeight: 1.5,
                 }}
               >
-                Type any slab or block ID (case-insensitive, leading /
-                trailing space OK). Hit <strong>Find</strong> or press
-                Enter.
+                {domainConfig.helpText}
               </p>
             )}
           </div>
@@ -301,15 +356,77 @@ export function TopbarIdLookup() {
   );
 }
 
+// ── Domain config ─────────────────────────────────────────────────
+
+const DOMAIN_CONFIG: Record<
+  LookupDomain,
+  {
+    title: string;
+    deptLabel: string;
+    accent: string;
+    placeholder: string;
+    helpText: React.ReactNode;
+  }
+> = {
+  production: {
+    title: "Look up a slab or block ID",
+    deptLabel: "Production",
+    accent: "#c9a14a",
+    placeholder: "WF-0001 · MT-B-245 · AGROHA-0002-13",
+    helpText: (
+      <>
+        Type any slab or block ID (case-insensitive, leading / trailing
+        space OK). Hit <strong>Find</strong> or press Enter.
+      </>
+    ),
+  },
+  finance: {
+    title: "Look up a bill, vendor, or payment",
+    deptLabel: "Finance",
+    accent: "#5e8c4e",
+    placeholder: "T-2026-15 · Shree Cement · UTR1234567890",
+    helpText: (
+      <>
+        Type a bill <strong>token</strong> (T-YYYY-N), a{" "}
+        <strong>vendor name</strong>, or a <strong>payment reference</strong>{" "}
+        (UTR / cheque no). Partial matches work.
+      </>
+    ),
+  },
+  inventory: {
+    title: "Look up a site or scaffolding component",
+    deptLabel: "Inventory",
+    accent: "#c87850",
+    placeholder: "PLANT · Whitefield Apts · Standard · Jali",
+    helpText: (
+      <>
+        Type a <strong>site code or name</strong> (PLANT, ALPHA…) or a{" "}
+        <strong>component name</strong> (Standard, Ledger, Transom, Jali).
+      </>
+    ),
+  },
+};
+
 // ── Result panel ──────────────────────────────────────────────────
 
 function ResultPanel({
   result,
+  domain,
   onPick,
 }: {
-  result: LookupResult;
+  result: LookupResult | FinanceLookupResult | InventoryLookupResult;
+  domain: LookupDomain;
   onPick: (q: string) => void;
 }) {
+  // Finance results
+  if (result.kind === "bill") return <FinanceBillPanel result={result} />;
+  if (result.kind === "vendor") return <FinanceVendorPanel result={result} />;
+  if (result.kind === "payment_reference")
+    return <FinancePaymentPanel result={result} />;
+  // Inventory results
+  if (result.kind === "site") return <InventorySitePanel result={result} />;
+  if (result.kind === "component") return <InventoryComponentPanel result={result} />;
+  // Production results (slab / block) handled below alongside not_found
   if (result.kind === "not_found") {
     return (
       <div
@@ -340,38 +457,49 @@ function ResultPanel({
               Did you mean…
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              {result.suggestions.map((s) => (
-                <button
-                  key={`${s.kind}-${s.id}`}
-                  type="button"
-                  onClick={() => onPick(s.id)}
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    padding: "8px 10px",
-                    background: "#fff",
-                    border: "1px solid rgba(15,23,42,0.08)",
-                    borderRadius: 8,
-                    cursor: "pointer",
-                    textAlign: "left",
-                    fontSize: 12,
-                  }}
-                >
-                  <span
+              {result.suggestions.map((s, i) => {
+                // Production suggestions carry `id`; finance/inventory
+                // suggestions carry `label`. Normalise to whichever's
+                // present, then feed that string back to onPick when
+                // the user clicks (so the same query lands and
+                // resolves to a hit on retry).
+                const display =
+                  "label" in s
+                    ? (s as { label: string }).label
+                    : (s as { id: string }).id;
+                return (
+                  <button
+                    key={`${s.kind}-${display}-${i}`}
+                    type="button"
+                    onClick={() => onPick(display)}
                     style={{
-                      fontFamily: "ui-monospace, monospace",
-                      fontWeight: 800,
-                      color: "var(--text)",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      padding: "8px 10px",
+                      background: "#fff",
+                      border: "1px solid rgba(15,23,42,0.08)",
+                      borderRadius: 8,
+                      cursor: "pointer",
+                      textAlign: "left",
+                      fontSize: 12,
                     }}
                   >
-                    {s.id}
-                  </span>
-                  <span style={{ color: "rgba(15,23,42,0.55)", fontSize: 11 }}>
-                    {s.hint}
-                  </span>
-                </button>
-              ))}
+                    <span
+                      style={{
+                        fontFamily: "ui-monospace, monospace",
+                        fontWeight: 800,
+                        color: "var(--text)",
+                      }}
+                    >
+                      {display}
+                    </span>
+                    <span style={{ color: "rgba(15,23,42,0.55)", fontSize: 11 }}>
+                      {s.hint}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </>
         )}
@@ -379,8 +507,12 @@ function ResultPanel({
     );
   }
 
+  // Production fall-through. The `domain` prop is read mostly via the
+  // earlier branches; here we just exhaust the union.
+  void domain;
   if (result.kind === "slab") return <SlabResultPanel result={result} />;
-  return <BlockResultPanel result={result} />;
+  if (result.kind === "block") return <BlockResultPanel result={result} />;
+  return null;
 }
 
 function StagePill({ status }: { status: string }) {
@@ -866,6 +998,775 @@ function BlockResultPanel({ result }: { result: Extract<LookupResult, { kind: "b
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Finance result panels
+// ════════════════════════════════════════════════════════════════════════════
+
+function inr(n: number): string {
+  return `₹${(n ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+}
+
+function FinanceBillPanel({ result }: { result: Extract<FinanceLookupResult, { kind: "bill" }> }) {
+  const { bill, amounts, payments } = result;
+  const a = amounts;
+
+  // "Where it is now" line for the bill: status + a context sentence.
+  let context: string | null = null;
+  if (bill.status === "fully_paid") context = "Fully paid";
+  else if (bill.status === "approved") {
+    if (a.paidInr > 0) context = `Partially paid — ${inr(a.outstandingInr)} still owed`;
+    else context = `Due — pay ${inr(a.payableToVendorInr)} to vendor`;
+  } else if (bill.status === "pending_approval") context = "Awaiting crosscheck / owner sign-off";
+  else if (bill.status === "rejected") context = bill.rejectionNote ?? "Rejected";
+  else if (bill.status === "cancelled") context = "Cancelled";
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+        background: "rgba(15, 23, 42, 0.04)",
+        borderRadius: 10,
+        padding: 12,
+      }}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <div
+          style={{
+            fontSize: 10,
+            fontWeight: 800,
+            color: "rgba(15,23,42,0.55)",
+            textTransform: "uppercase",
+            letterSpacing: "0.1em",
+          }}
+        >
+          Where it is now
+        </div>
+        <StagePill status={bill.status} />
+        {context && (
+          <div style={{ fontSize: 12, color: "var(--text)", fontWeight: 600 }}>
+            {context}
+          </div>
+        )}
+      </div>
+
+      <div style={{ height: 1, background: "rgba(15,23,42,0.08)" }} />
+
+      <div>
+        <div
+          style={{
+            fontSize: 10,
+            fontWeight: 800,
+            color: "rgba(15,23,42,0.55)",
+            textTransform: "uppercase",
+            letterSpacing: "0.1em",
+            marginBottom: 4,
+          }}
+        >
+          Bill {bill.token}
+        </div>
+        <Field k="Vendor" v={bill.vendorName} />
+        <Field k="Vendor bill no" v={bill.vendorBillNo} mono />
+        <Field k="Bill date" v={fmtDate(bill.billDate)} />
+        {bill.description && (
+          <Field k="Description" v={bill.description.slice(0, 80) + (bill.description.length > 80 ? "…" : "")} />
+        )}
+      </div>
+
+      <div style={{ height: 1, background: "rgba(15,23,42,0.08)" }} />
+
+      <div>
+        <div
+          style={{
+            fontSize: 10,
+            fontWeight: 800,
+            color: "rgba(15,23,42,0.55)",
+            textTransform: "uppercase",
+            letterSpacing: "0.1em",
+            marginBottom: 4,
+          }}
+        >
+          Amounts
+        </div>
+        <Field k="Subtotal" v={inr(a.subtotalInr)} mono />
+        {a.cgstPercent > 0 && <Field k={`CGST ${a.cgstPercent}%`} v={inr(a.cgstInr)} mono />}
+        {a.sgstPercent > 0 && <Field k={`SGST ${a.sgstPercent}%`} v={inr(a.sgstInr)} mono />}
+        {a.igstPercent > 0 && <Field k={`IGST ${a.igstPercent}%`} v={inr(a.igstInr)} mono />}
+        {a.tdsPercent > 0 && (
+          <Field
+            k={`− TDS ${a.tdsPercent}%`}
+            v={<span style={{ color: "#b91c1c" }}>{inr(a.tdsInr)}</span>}
+            mono
+          />
+        )}
+        {a.tcsPercent > 0 && (
+          <Field k={`+ TCS ${a.tcsPercent}%`} v={inr(a.tcsInr)} mono />
+        )}
+        <Field k="Total" v={<strong>{inr(a.totalInr)}</strong>} mono />
+        {(a.tdsPercent > 0 || a.tcsPercent > 0) && (
+          <Field
+            k="Pay vendor"
+            v={
+              <span style={{ color: "#15803d", fontWeight: 800 }}>
+                {inr(a.payableToVendorInr)}
+              </span>
+            }
+            mono
+          />
+        )}
+        {a.paidInr > 0 && (
+          <Field
+            k="Paid"
+            v={<span style={{ color: "#15803d" }}>{inr(a.paidInr)}</span>}
+            mono
+          />
+        )}
+        {a.outstandingInr > 0 && (
+          <Field
+            k="Outstanding"
+            v={<span style={{ color: "#b45309", fontWeight: 800 }}>{inr(a.outstandingInr)}</span>}
+            mono
+          />
+        )}
+      </div>
+
+      {payments.length > 0 && (
+        <>
+          <div style={{ height: 1, background: "rgba(15,23,42,0.08)" }} />
+          <div>
+            <div
+              style={{
+                fontSize: 10,
+                fontWeight: 800,
+                color: "rgba(15,23,42,0.55)",
+                textTransform: "uppercase",
+                letterSpacing: "0.1em",
+                marginBottom: 4,
+              }}
+            >
+              Payments · {payments.length}
+            </div>
+            {payments.map((p, i) => (
+              <div
+                key={i}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: 11,
+                  padding: "3px 0",
+                  borderBottom:
+                    i < payments.length - 1 ? "1px dashed rgba(15,23,42,0.06)" : undefined,
+                }}
+              >
+                <span style={{ color: "rgba(15,23,42,0.65)" }}>
+                  {p.status.toUpperCase()} ·{" "}
+                  {p.paymentMethod ? p.paymentMethod.toUpperCase() : "—"}
+                  {p.paymentReference && (
+                    <>
+                      {" · "}
+                      <code style={{ fontFamily: "ui-monospace, monospace" }}>
+                        {p.paymentReference}
+                      </code>
+                    </>
+                  )}
+                </span>
+                <span
+                  style={{
+                    fontFamily: "ui-monospace, monospace",
+                    fontWeight: 700,
+                    color: "var(--text)",
+                  }}
+                >
+                  {inr(p.paidAmountInr ?? p.proposedAmountInr)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      <Link
+        href={`/accounts/bills/${bill.id}`}
+        style={{
+          padding: "7px 10px",
+          fontSize: 11,
+          fontWeight: 700,
+          background: "var(--gold)",
+          color: "#fff",
+          border: "1px solid var(--gold-dark)",
+          borderRadius: 7,
+          textDecoration: "none",
+          textAlign: "center",
+        }}
+      >
+        Open full bill →
+      </Link>
+    </div>
+  );
+}
+
+function FinanceVendorPanel({ result }: { result: Extract<FinanceLookupResult, { kind: "vendor" }> }) {
+  const { vendor, lifetime, recentBills } = result;
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+        background: "rgba(15, 23, 42, 0.04)",
+        borderRadius: 10,
+        padding: 12,
+      }}
+    >
+      <div>
+        <div
+          style={{
+            fontSize: 10,
+            fontWeight: 800,
+            color: "rgba(15,23,42,0.55)",
+            textTransform: "uppercase",
+            letterSpacing: "0.1em",
+          }}
+        >
+          Vendor
+        </div>
+        <div
+          style={{
+            fontSize: 16,
+            fontWeight: 800,
+            color: "var(--text)",
+            letterSpacing: "-0.01em",
+            marginTop: 2,
+          }}
+        >
+          {vendor.name}
+        </div>
+        <div style={{ fontSize: 11, color: "rgba(15,23,42,0.55)", marginTop: 3 }}>
+          {vendor.category ?? "—"}
+          {vendor.gstin && <> · GSTIN <code style={{ fontFamily: "ui-monospace, monospace" }}>{vendor.gstin}</code></>}
+          {vendor.phone && <> · {vendor.phone}</>}
+        </div>
+      </div>
+
+      <div style={{ height: 1, background: "rgba(15,23,42,0.08)" }} />
+
+      <div>
+        <div
+          style={{
+            fontSize: 10,
+            fontWeight: 800,
+            color: "rgba(15,23,42,0.55)",
+            textTransform: "uppercase",
+            letterSpacing: "0.1em",
+            marginBottom: 4,
+          }}
+        >
+          Lifetime · {lifetime.billsCount} bills
+        </div>
+        <Field k="Billed" v={inr(lifetime.billedInr)} mono />
+        <Field k="Paid" v={<span style={{ color: "#15803d" }}>{inr(lifetime.paidInr)}</span>} mono />
+        {lifetime.outstandingInr > 0 && (
+          <Field
+            k="Outstanding"
+            v={<span style={{ color: "#b45309", fontWeight: 800 }}>{inr(lifetime.outstandingInr)}</span>}
+            mono
+          />
+        )}
+        {vendor.tdsApplicable && (
+          <Field
+            k="TDS deducted"
+            v={<span style={{ color: "#b91c1c" }}>{inr(lifetime.tdsDeductedInr)}</span>}
+            mono
+          />
+        )}
+        {vendor.tcsApplicable && (
+          <Field k="TCS collected" v={inr(lifetime.tcsCollectedInr)} mono />
+        )}
+      </div>
+
+      {(vendor.bankName || vendor.bankAccount) && (
+        <>
+          <div style={{ height: 1, background: "rgba(15,23,42,0.08)" }} />
+          <div>
+            <div
+              style={{
+                fontSize: 10,
+                fontWeight: 800,
+                color: "rgba(15,23,42,0.55)",
+                textTransform: "uppercase",
+                letterSpacing: "0.1em",
+                marginBottom: 4,
+              }}
+            >
+              Bank
+            </div>
+            {vendor.bankName && <Field k="Bank" v={vendor.bankName} />}
+            {vendor.bankAccount && <Field k="A/c no" v={vendor.bankAccount} mono />}
+            {vendor.ifsc && <Field k="IFSC" v={vendor.ifsc} mono />}
+          </div>
+        </>
+      )}
+
+      {recentBills.length > 0 && (
+        <>
+          <div style={{ height: 1, background: "rgba(15,23,42,0.08)" }} />
+          <div>
+            <div
+              style={{
+                fontSize: 10,
+                fontWeight: 800,
+                color: "rgba(15,23,42,0.55)",
+                textTransform: "uppercase",
+                letterSpacing: "0.1em",
+                marginBottom: 4,
+              }}
+            >
+              Recent bills
+            </div>
+            {recentBills.map((b) => (
+              <Link
+                key={b.token}
+                href={`/accounts/bills?token=${encodeURIComponent(b.token)}`}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  padding: "4px 0",
+                  fontSize: 11,
+                  textDecoration: "none",
+                  color: "var(--text)",
+                }}
+              >
+                <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>
+                  {b.token}
+                </span>
+                <span style={{ color: "rgba(15,23,42,0.55)" }}>
+                  {fmtDate(b.billDate)} · {b.status}
+                </span>
+                <span style={{ fontFamily: "ui-monospace, monospace" }}>
+                  {inr(b.amountTotalInr)}
+                </span>
+              </Link>
+            ))}
+          </div>
+        </>
+      )}
+
+      <Link
+        href={`/accounts/vendors/${vendor.id}`}
+        style={{
+          padding: "7px 10px",
+          fontSize: 11,
+          fontWeight: 700,
+          background: "var(--gold)",
+          color: "#fff",
+          border: "1px solid var(--gold-dark)",
+          borderRadius: 7,
+          textDecoration: "none",
+          textAlign: "center",
+        }}
+      >
+        Open vendor account →
+      </Link>
+    </div>
+  );
+}
+
+function FinancePaymentPanel({ result }: { result: Extract<FinanceLookupResult, { kind: "payment_reference" }> }) {
+  const p = result.payment;
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+        background: "rgba(15, 23, 42, 0.04)",
+        borderRadius: 10,
+        padding: 12,
+      }}
+    >
+      <div>
+        <div
+          style={{
+            fontSize: 10,
+            fontWeight: 800,
+            color: "rgba(15,23,42,0.55)",
+            textTransform: "uppercase",
+            letterSpacing: "0.1em",
+          }}
+        >
+          Payment matched
+        </div>
+        <div style={{ fontSize: 14, fontWeight: 800, color: "#15803d", marginTop: 4 }}>
+          {inr(p.paidAmountInr)} paid to {p.vendorName}
+        </div>
+      </div>
+      <Field k="Method" v={p.paymentMethod ? p.paymentMethod.toUpperCase() : "—"} mono />
+      <Field k="Reference" v={p.paymentReference} mono />
+      <Field k="Paid on" v={fmtDate(p.paidAt)} />
+      <Field k="Bill" v={p.billToken} mono />
+      <div style={{ display: "flex", gap: 8 }}>
+        {p.billId && (
+          <Link
+            href={`/accounts/bills/${p.billId}`}
+            style={{
+              flex: 1,
+              padding: "7px 10px",
+              fontSize: 11,
+              fontWeight: 700,
+              background: "var(--bg)",
+              color: "var(--text)",
+              border: "1px solid var(--border)",
+              borderRadius: 7,
+              textDecoration: "none",
+              textAlign: "center",
+            }}
+          >
+            Open bill
+          </Link>
+        )}
+        <Link
+          href={`/accounts/payments/${p.id}/voucher`}
+          style={{
+            flex: 1,
+            padding: "7px 10px",
+            fontSize: 11,
+            fontWeight: 700,
+            background: "var(--gold)",
+            color: "#fff",
+            border: "1px solid var(--gold-dark)",
+            borderRadius: 7,
+            textDecoration: "none",
+            textAlign: "center",
+          }}
+        >
+          🖨 Voucher →
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Inventory result panels
+// ════════════════════════════════════════════════════════════════════════════
+
+function InventorySitePanel({ result }: { result: Extract<InventoryLookupResult, { kind: "site" }> }) {
+  const { site, totalPieces, componentHoldings, recentBatches } = result;
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+        background: "rgba(15, 23, 42, 0.04)",
+        borderRadius: 10,
+        padding: 12,
+      }}
+    >
+      <div>
+        <div
+          style={{
+            fontSize: 10,
+            fontWeight: 800,
+            color: "rgba(15,23,42,0.55)",
+            textTransform: "uppercase",
+            letterSpacing: "0.1em",
+          }}
+        >
+          {site.isPlant ? "Plant / warehouse" : "Project site"}
+        </div>
+        <div
+          style={{
+            fontSize: 16,
+            fontWeight: 800,
+            color: "var(--text)",
+            marginTop: 2,
+            letterSpacing: "-0.01em",
+          }}
+        >
+          {site.name}{" "}
+          <code
+            style={{
+              fontFamily: "ui-monospace, monospace",
+              fontSize: 11,
+              fontWeight: 700,
+              color: "rgba(15,23,42,0.55)",
+              marginLeft: 4,
+            }}
+          >
+            {site.code}
+          </code>
+        </div>
+        {site.managerName && (
+          <div style={{ fontSize: 11, color: "rgba(15,23,42,0.55)", marginTop: 2 }}>
+            👤 {site.managerName}
+          </div>
+        )}
+      </div>
+
+      <div style={{ height: 1, background: "rgba(15,23,42,0.08)" }} />
+
+      <div>
+        <div
+          style={{
+            fontSize: 10,
+            fontWeight: 800,
+            color: "rgba(15,23,42,0.55)",
+            textTransform: "uppercase",
+            letterSpacing: "0.1em",
+            marginBottom: 4,
+          }}
+        >
+          Current stock · {totalPieces} pcs total
+        </div>
+        {componentHoldings.length === 0 ? (
+          <div style={{ fontSize: 12, color: "rgba(15,23,42,0.55)" }}>
+            Nothing here right now.
+          </div>
+        ) : (
+          componentHoldings.map((c) => (
+            <Field
+              key={c.componentName}
+              k={c.componentName}
+              v={`${c.qty.toLocaleString("en-IN")} pcs`}
+              mono
+            />
+          ))
+        )}
+      </div>
+
+      {recentBatches.length > 0 && (
+        <>
+          <div style={{ height: 1, background: "rgba(15,23,42,0.08)" }} />
+          <div>
+            <div
+              style={{
+                fontSize: 10,
+                fontWeight: 800,
+                color: "rgba(15,23,42,0.55)",
+                textTransform: "uppercase",
+                letterSpacing: "0.1em",
+                marginBottom: 4,
+              }}
+            >
+              Recent movements
+            </div>
+            {recentBatches.map((b) => (
+              <div
+                key={b.batchId}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: 11,
+                  padding: "3px 0",
+                }}
+              >
+                <span>
+                  {b.direction === "in" ? "↓" : "↑"} {b.typeLabel}
+                  {b.counterpartyName && <> · {b.counterpartyName}</>}
+                </span>
+                <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>
+                  {b.totalQty} pcs
+                </span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      <Link
+        href={`/inventory/scaffolding?site=${site.id}`}
+        style={{
+          padding: "7px 10px",
+          fontSize: 11,
+          fontWeight: 700,
+          background: "var(--gold)",
+          color: "#fff",
+          border: "1px solid var(--gold-dark)",
+          borderRadius: 7,
+          textDecoration: "none",
+          textAlign: "center",
+        }}
+      >
+        Open on board →
+      </Link>
+    </div>
+  );
+}
+
+function InventoryComponentPanel({ result }: { result: Extract<InventoryLookupResult, { kind: "component" }> }) {
+  const { component, totals, byLocation } = result;
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+        background: "rgba(15, 23, 42, 0.04)",
+        borderRadius: 10,
+        padding: 12,
+      }}
+    >
+      <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+        {component.imageDataUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={component.imageDataUrl}
+            alt={component.name}
+            width={56}
+            height={56}
+            style={{ objectFit: "contain", flexShrink: 0 }}
+          />
+        ) : (
+          <div
+            style={{
+              width: 56,
+              height: 56,
+              flexShrink: 0,
+              background: "rgba(15, 23, 42, 0.08)",
+              borderRadius: 10,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 11,
+              fontWeight: 800,
+              color: "rgba(15,23,42,0.45)",
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+            }}
+          >
+            {component.type.slice(0, 4)}
+          </div>
+        )}
+        <div>
+          <div
+            style={{
+              fontSize: 10,
+              fontWeight: 800,
+              color: "rgba(15,23,42,0.55)",
+              textTransform: "uppercase",
+              letterSpacing: "0.1em",
+            }}
+          >
+            Component
+          </div>
+          <div
+            style={{
+              fontSize: 16,
+              fontWeight: 800,
+              color: "var(--text)",
+              letterSpacing: "-0.01em",
+              marginTop: 2,
+            }}
+          >
+            {component.name}
+          </div>
+          <div style={{ fontSize: 11, color: "rgba(15,23,42,0.55)", marginTop: 2 }}>
+            {component.type}
+            {component.sizeSpec && <> · {component.sizeSpec}</>} · {component.unit}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ height: 1, background: "rgba(15,23,42,0.08)" }} />
+
+      <div>
+        <div
+          style={{
+            fontSize: 10,
+            fontWeight: 800,
+            color: "rgba(15,23,42,0.55)",
+            textTransform: "uppercase",
+            letterSpacing: "0.1em",
+            marginBottom: 4,
+          }}
+        >
+          Totals
+        </div>
+        <Field k="At plant" v={`${totals.atPlant.toLocaleString("en-IN")} pcs`} mono />
+        <Field k="Out at sites" v={`${totals.outAtSites.toLocaleString("en-IN")} pcs`} mono />
+        <Field
+          k="Total in fleet"
+          v={
+            <strong>
+              {totals.totalInPipeline.toLocaleString("en-IN")} pcs
+            </strong>
+          }
+          mono
+        />
+        {totals.pendingOut > 0 && (
+          <Field
+            k="Pending issue"
+            v={
+              <span style={{ color: "#b45309" }}>
+                {totals.pendingOut.toLocaleString("en-IN")} pcs awaiting audit
+              </span>
+            }
+            mono
+          />
+        )}
+      </div>
+
+      {byLocation.length > 0 && (
+        <>
+          <div style={{ height: 1, background: "rgba(15,23,42,0.08)" }} />
+          <div>
+            <div
+              style={{
+                fontSize: 10,
+                fontWeight: 800,
+                color: "rgba(15,23,42,0.55)",
+                textTransform: "uppercase",
+                letterSpacing: "0.1em",
+                marginBottom: 4,
+              }}
+            >
+              By location
+            </div>
+            {byLocation
+              .filter((l) => l.qty > 0 || l.pendingOut > 0)
+              .map((l) => (
+                <Field
+                  key={l.siteCode}
+                  k={l.isPlant ? `🏭 ${l.siteName}` : `🏗 ${l.siteName}`}
+                  v={
+                    <>
+                      {l.qty.toLocaleString("en-IN")} pcs
+                      {l.pendingOut > 0 && (
+                        <span style={{ color: "#b45309", marginLeft: 6 }}>
+                          (−{l.pendingOut} pending)
+                        </span>
+                      )}
+                    </>
+                  }
+                  mono
+                />
+              ))}
+          </div>
+        </>
+      )}
+
+      <Link
+        href="/inventory/scaffolding"
+        style={{
+          padding: "7px 10px",
+          fontSize: 11,
+          fontWeight: 700,
+          background: "var(--gold)",
+          color: "#fff",
+          border: "1px solid var(--gold-dark)",
+          borderRadius: 7,
+          textDecoration: "none",
+          textAlign: "center",
+        }}
+      >
+        Open scaffolding board →
+      </Link>
     </div>
   );
 }
