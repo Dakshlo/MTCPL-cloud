@@ -44,6 +44,16 @@ export function VendorForm({
     /** Mig 040 — days after bill_date this vendor is paid. null =
      *  use the app-level default (45). 0 = pay on receipt. */
     payment_terms_days?: number | null;
+    /** Mig 042 — when on, the bill-entry form surfaces a TDS% input
+     *  when this vendor is picked. We deduct TDS from the
+     *  amount-payable-to-vendor at payment time. */
+    tds_applicable?: boolean | null;
+    default_tds_percent?: number | null;
+    /** Mig 042 — when on, the bill-entry form surfaces a TCS% input
+     *  for this vendor. TCS is added on top of GST and we pay it
+     *  to the vendor (they remit to govt). */
+    tcs_applicable?: boolean | null;
+    default_tcs_percent?: number | null;
   };
   vendorId?: string;
   trigger?: React.ReactNode;
@@ -78,6 +88,16 @@ export function VendorForm({
       initialValues?.payment_terms_days != null
         ? String(initialValues.payment_terms_days)
         : "",
+    tds_applicable: initialValues?.tds_applicable === true,
+    default_tds_percent:
+      initialValues?.default_tds_percent != null
+        ? String(initialValues.default_tds_percent)
+        : "",
+    tcs_applicable: initialValues?.tcs_applicable === true,
+    default_tcs_percent:
+      initialValues?.default_tcs_percent != null
+        ? String(initialValues.default_tcs_percent)
+        : "",
   };
 
   const [form, setForm] = useState(initial);
@@ -88,7 +108,15 @@ export function VendorForm({
     if (!form.name.trim()) return setError("Vendor name is required.");
     const fd = new FormData();
     if (vendorId) fd.set("id", vendorId);
-    for (const [k, v] of Object.entries(form)) fd.set(k, v ?? "");
+    for (const [k, v] of Object.entries(form)) {
+      // Booleans need to serialise to "1" / "" so the server can read
+      // them off FormData (which only carries strings).
+      if (typeof v === "boolean") {
+        fd.set(k, v ? "1" : "");
+      } else {
+        fd.set(k, v ?? "");
+      }
+    }
     startTransition(async () => {
       const r = await action(fd);
       if (!r.ok) {
@@ -202,6 +230,140 @@ export function VendorForm({
           value={form.payment_terms_days}
           onChange={(v) => setForm({ ...form, payment_terms_days: v })}
         />
+      </Field>
+
+      {/* Mig 042 — TDS / TCS applicability. Two independent toggles.
+          When a flag is on, the bill-entry form for this vendor will
+          surface the matching tax input (pre-filled with the default
+          rate). The accountant can still override per bill. */}
+      <Field
+        label="Tax deductions / collections"
+        hint="If this vendor needs TDS deducted from your payment, or charges TCS on top of GST, flag it here. The bill form will then prompt for the rate."
+      >
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
+            background: ACCOUNTS_TOKENS.surfaceMuted,
+            border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+            borderRadius: 8,
+            padding: "10px 12px",
+          }}
+        >
+          {/* TDS row */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "auto 1fr auto",
+              gap: 10,
+              alignItems: "center",
+            }}
+          >
+            <label
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                cursor: "pointer",
+                fontSize: 12,
+                fontWeight: 700,
+                color: "var(--text)",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={form.tds_applicable}
+                onChange={(e) =>
+                  setForm({ ...form, tds_applicable: e.target.checked })
+                }
+              />
+              TDS applicable
+            </label>
+            <span style={{ fontSize: 11, color: "var(--muted)" }}>
+              We deduct from payment → remit to govt
+            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <input
+                type="number"
+                step="0.01"
+                min={0}
+                max={100}
+                value={form.default_tds_percent}
+                onChange={(e) =>
+                  setForm({ ...form, default_tds_percent: e.target.value })
+                }
+                disabled={!form.tds_applicable}
+                placeholder="0"
+                style={{
+                  ...INPUT_STYLE,
+                  width: 70,
+                  fontFamily: "ui-monospace, monospace",
+                  textAlign: "right",
+                  opacity: form.tds_applicable ? 1 : 0.4,
+                }}
+                aria-label="Default TDS percent"
+              />
+              <span style={{ fontSize: 11, color: "var(--muted)" }}>%</span>
+            </div>
+          </div>
+          {/* TCS row */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "auto 1fr auto",
+              gap: 10,
+              alignItems: "center",
+            }}
+          >
+            <label
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                cursor: "pointer",
+                fontSize: 12,
+                fontWeight: 700,
+                color: "var(--text)",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={form.tcs_applicable}
+                onChange={(e) =>
+                  setForm({ ...form, tcs_applicable: e.target.checked })
+                }
+              />
+              TCS applicable
+            </label>
+            <span style={{ fontSize: 11, color: "var(--muted)" }}>
+              Vendor adds on top → we pay vendor inclusive
+            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <input
+                type="number"
+                step="0.01"
+                min={0}
+                max={100}
+                value={form.default_tcs_percent}
+                onChange={(e) =>
+                  setForm({ ...form, default_tcs_percent: e.target.value })
+                }
+                disabled={!form.tcs_applicable}
+                placeholder="0"
+                style={{
+                  ...INPUT_STYLE,
+                  width: 70,
+                  fontFamily: "ui-monospace, monospace",
+                  textAlign: "right",
+                  opacity: form.tcs_applicable ? 1 : 0.4,
+                }}
+                aria-label="Default TCS percent"
+              />
+              <span style={{ fontSize: 11, color: "var(--muted)" }}>%</span>
+            </div>
+          </div>
+        </div>
       </Field>
 
       <details style={{ marginTop: 4 }}>

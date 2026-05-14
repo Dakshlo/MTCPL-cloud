@@ -27,7 +27,7 @@ export default async function EditBillPage({ params }: { params: Params }) {
   const { data: bill } = await supabase
     .from("bills")
     .select(
-      "id, bill_vendor_id, vendor_bill_no, bill_date, description, cost_head, amount_subtotal, gst_percent, status, submitted_by",
+      "id, bill_vendor_id, vendor_bill_no, bill_date, description, cost_head, amount_subtotal, gst_percent, cgst_percent, sgst_percent, igst_percent, tds_percent, tcs_percent, status, submitted_by",
     )
     .eq("id", id)
     .maybeSingle();
@@ -55,7 +55,9 @@ export default async function EditBillPage({ params }: { params: Params }) {
 
   const { data: vendorRows } = await supabase
     .from("bill_vendors")
-    .select("id, name, category, gstin")
+    .select(
+      "id, name, category, gstin, tds_applicable, default_tds_percent, tcs_applicable, default_tcs_percent",
+    )
     .eq("is_active", true)
     .order("name");
   const vendors: BillVendorOption[] = (vendorRows ?? []) as BillVendorOption[];
@@ -99,6 +101,11 @@ export default async function EditBillPage({ params }: { params: Params }) {
           cost_head: bill.cost_head,
           amount_subtotal: Number(bill.amount_subtotal),
           gst_percent: Number(bill.gst_percent),
+          cgst_percent: Number(bill.cgst_percent ?? 0),
+          sgst_percent: Number(bill.sgst_percent ?? 0),
+          igst_percent: Number(bill.igst_percent ?? 0),
+          tds_percent: Number(bill.tds_percent ?? 0),
+          tcs_percent: Number(bill.tcs_percent ?? 0),
         }}
       />
     </section>

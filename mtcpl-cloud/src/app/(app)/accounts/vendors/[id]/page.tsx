@@ -43,7 +43,7 @@ export default async function BillVendorDetailPage({
   const { data: billsRaw } = await supabase
     .from("bills")
     .select(
-      "id, token, vendor_bill_no, bill_date, description, amount_total, amount_paid, amount_outstanding, status",
+      "id, token, vendor_bill_no, bill_date, description, amount_total, amount_paid, amount_outstanding, amount_tds, amount_tcs, amount_payable_to_vendor, status",
     )
     .eq("bill_vendor_id", id)
     .order("bill_date", { ascending: false })
@@ -57,6 +57,9 @@ export default async function BillVendorDetailPage({
     amount_total: number;
     amount_paid: number;
     amount_outstanding: number;
+    amount_tds: number | null;
+    amount_tcs: number | null;
+    amount_payable_to_vendor: number | null;
     status: string;
   }>;
 
@@ -65,6 +68,18 @@ export default async function BillVendorDetailPage({
     .reduce((s, b) => s + Number(b.amount_outstanding), 0);
   const totalPaid = bills.reduce((s, b) => s + Number(b.amount_paid), 0);
   const billsCount = bills.length;
+
+  // Mig 042 — running totals of TDS deducted + TCS collected on
+  // bills that aren't cancelled. Cancelled / rejected bills carry no
+  // tax obligation so they're excluded; pending_approval bills are
+  // counted because they DO carry a tax intent (we'll surface them
+  // separately if Daksh wants).
+  const totalTdsDeducted = bills
+    .filter((b) => b.status !== "cancelled" && b.status !== "rejected")
+    .reduce((s, b) => s + Number(b.amount_tds ?? 0), 0);
+  const totalTcsCollected = bills
+    .filter((b) => b.status !== "cancelled" && b.status !== "rejected")
+    .reduce((s, b) => s + Number(b.amount_tcs ?? 0), 0);
 
   return (
     <section className="page-card">
@@ -156,38 +171,106 @@ export default async function BillVendorDetailPage({
         </div>
       </div>
 
-      {/* Edit + Bill history side by side */}
-      <div
+      {/* Mig 042 — tax-summary strip (only shown when this vendor
+          has at least one bill carrying TDS or TCS). Lifetime
+          totals across all non-cancelled bills. */}
+      {(vendor.tds_applicable ||
+        vendor.tcs_applicable ||
+        totalTdsDeducted > 0 ||
+        totalTcsCollected > 0) && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+            gap: 10,
+            marginBottom: 18,
+          }}
+        >
+          <TaxSummaryCard
+            label="TDS deducted lifetime"
+            value={totalTdsDeducted}
+            sub={
+              vendor.tds_applicable
+                ? `Vendor flagged${vendor.default_tds_percent != null ? ` @ default ${vendor.default_tds_percent}%` : ""}`
+                : "Not flagged for TDS"
+            }
+            tone="danger"
+          />
+          <TaxSummaryCard
+            label="TCS collected lifetime"
+            value={totalTcsCollected}
+            sub={
+              vendor.tcs_applicable
+                ? `Vendor flagged${vendor.default_tcs_percent != null ? ` @ default ${vendor.default_tcs_percent}%` : ""}`
+                : "Not flagged for TCS"
+            }
+            tone="accent"
+          />
+        </div>
+      )}
+
+      {/* Bill history is now the primary content. Edit-vendor lives
+          inside a <details> collapsible above it so the long
+          vertical form doesn't dominate the page. Click "Edit
+          vendor" to expand; the form is identical to the side-rail
+          variant otherwise. */}
+      <details
         style={{
-          display: "grid",
-          gridTemplateColumns: "minmax(280px, 360px) minmax(0, 1fr)",
-          gap: 18,
-          alignItems: "flex-start",
+          marginBottom: 16,
+          background: "#fff",
+          border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+          borderRadius: 12,
+          padding: "14px 18px",
+          boxShadow: ACCOUNTS_TOKENS.shadow,
         }}
       >
-        <VendorForm
-          action={upsertBillVendorAction}
-          mode="edit"
-          vendorId={id}
-          nameLocked={!canRenameBillVendor(profile)}
-          initialValues={{
-            name: vendor.name,
-            category: vendor.category,
-            gstin: vendor.gstin,
-            pan: vendor.pan,
-            address: vendor.address,
-            phone: vendor.phone,
-            email: vendor.email,
-            bank_name: vendor.bank_name,
-            bank_account: vendor.bank_account,
-            ifsc: vendor.ifsc,
-            upi_id: vendor.upi_id,
-            notes: vendor.notes,
-            payment_terms_days: vendor.payment_terms_days ?? null,
+        <summary
+          style={{
+            cursor: "pointer",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            fontSize: 13,
+            fontWeight: 700,
+            color: ACCOUNTS_TOKENS.accent,
+            letterSpacing: "0.01em",
           }}
-        />
+        >
+          ✎ Edit vendor details
+          <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 500 }}>
+            (bank info · GSTIN · payment terms · TDS / TCS flags)
+          </span>
+        </summary>
+        <div style={{ marginTop: 14 }}>
+          <VendorForm
+            action={upsertBillVendorAction}
+            mode="edit"
+            vendorId={id}
+            nameLocked={!canRenameBillVendor(profile)}
+            initialValues={{
+              name: vendor.name,
+              category: vendor.category,
+              gstin: vendor.gstin,
+              pan: vendor.pan,
+              address: vendor.address,
+              phone: vendor.phone,
+              email: vendor.email,
+              bank_name: vendor.bank_name,
+              bank_account: vendor.bank_account,
+              ifsc: vendor.ifsc,
+              upi_id: vendor.upi_id,
+              notes: vendor.notes,
+              payment_terms_days: vendor.payment_terms_days ?? null,
+              tds_applicable: vendor.tds_applicable ?? false,
+              default_tds_percent: vendor.default_tds_percent ?? null,
+              tcs_applicable: vendor.tcs_applicable ?? false,
+              default_tcs_percent: vendor.default_tcs_percent ?? null,
+            }}
+          />
+        </div>
+      </details>
 
-        <div>
+      <div>
           <div
             style={{
               display: "flex",
@@ -219,6 +302,12 @@ export default async function BillVendorDetailPage({
                       <th style={TABLE_STYLES.th}>Date</th>
                       <th style={TABLE_STYLES.th}>Bill no</th>
                       <th style={TABLE_STYLES.thRight}>Total</th>
+                      {(vendor.tds_applicable || totalTdsDeducted > 0) && (
+                        <th style={TABLE_STYLES.thRight}>TDS</th>
+                      )}
+                      {(vendor.tcs_applicable || totalTcsCollected > 0) && (
+                        <th style={TABLE_STYLES.thRight}>TCS</th>
+                      )}
                       <th style={TABLE_STYLES.thRight}>Outstanding</th>
                       <th style={TABLE_STYLES.th}>Status</th>
                     </tr>
@@ -257,6 +346,24 @@ export default async function BillVendorDetailPage({
                         <td style={TABLE_STYLES.tdRight}>
                           <Money value={Number(b.amount_total)} tone="muted" />
                         </td>
+                        {(vendor.tds_applicable || totalTdsDeducted > 0) && (
+                          <td style={TABLE_STYLES.tdRight}>
+                            {Number(b.amount_tds ?? 0) > 0 ? (
+                              <Money value={Number(b.amount_tds)} tone="danger" />
+                            ) : (
+                              <span style={{ fontSize: 11, color: "var(--muted)" }}>—</span>
+                            )}
+                          </td>
+                        )}
+                        {(vendor.tcs_applicable || totalTcsCollected > 0) && (
+                          <td style={TABLE_STYLES.tdRight}>
+                            {Number(b.amount_tcs ?? 0) > 0 ? (
+                              <Money value={Number(b.amount_tcs)} tone="muted" />
+                            ) : (
+                              <span style={{ fontSize: 11, color: "var(--muted)" }}>—</span>
+                            )}
+                          </td>
+                        )}
                         <td style={TABLE_STYLES.tdRight}>
                           {Number(b.amount_outstanding) > 0 ? (
                             <Money value={Number(b.amount_outstanding)} tone="warning" />
@@ -274,8 +381,62 @@ export default async function BillVendorDetailPage({
               </div>
             </div>
           )}
-        </div>
       </div>
     </section>
+  );
+}
+
+/** Mig 042 — small KPI card for the TDS / TCS lifetime totals at
+ *  the top of the vendor profile. */
+function TaxSummaryCard({
+  label,
+  value,
+  sub,
+  tone,
+}: {
+  label: string;
+  value: number;
+  sub: string;
+  tone: "danger" | "accent";
+}) {
+  const accent =
+    tone === "danger" ? ACCOUNTS_TOKENS.danger : ACCOUNTS_TOKENS.accent;
+  return (
+    <div
+      style={{
+        background: "#fff",
+        border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+        borderLeft: `3px solid ${accent}`,
+        borderRadius: 10,
+        padding: "12px 14px",
+        boxShadow: ACCOUNTS_TOKENS.shadow,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          fontWeight: 800,
+          color: "var(--muted)",
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          fontSize: 18,
+          fontWeight: 800,
+          color: accent,
+          fontFamily: "ui-monospace, monospace",
+          marginTop: 4,
+        }}
+      >
+        ₹{value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+      </div>
+      <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+        {sub}
+      </div>
+    </div>
   );
 }

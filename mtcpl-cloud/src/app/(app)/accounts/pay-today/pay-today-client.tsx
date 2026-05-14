@@ -681,6 +681,13 @@ function MarkPaidForm({
   const isPartial = paidNum > 0 && paidNum < row.proposedAmount;
   const exceedsOutstanding = paidNum > row.billOutstanding;
 
+  // Mig 042 — UTR / reference is mandatory for every non-cash
+  // payment method. Cash is the only method that legitimately has
+  // no reference. Without it the voucher won't print correctly + we
+  // lose audit trail to the bank statement.
+  const referenceMandatory = method !== "cash";
+  const referenceMissing = referenceMandatory && !reference.trim();
+
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
@@ -688,6 +695,11 @@ function MarkPaidForm({
     if (exceedsOutstanding) {
       return setError(
         `Paid amount exceeds the bill's outstanding ₹${row.billOutstanding.toLocaleString("en-IN")}.`,
+      );
+    }
+    if (referenceMissing) {
+      return setError(
+        `${method.toUpperCase()} payments need a reference (UTR / cheque no / UPI txn id). Switch to "Cash" if no reference exists.`,
       );
     }
     startTransition(async () => {
@@ -804,14 +816,52 @@ function MarkPaidForm({
         </div>
       </Field>
 
-      <Field label="Reference (cheque no / UTR / UPI txn)">
+      <Field
+        label={
+          referenceMandatory
+            ? `Reference (UTR / cheque no / UPI txn) — required for ${method.toUpperCase()}`
+            : "Reference (cheque no / UTR / UPI txn)"
+        }
+        required={referenceMandatory}
+      >
         <input
           type="text"
           value={reference}
           onChange={(e) => setReference(e.target.value)}
-          placeholder="e.g. UTR1234567890"
-          style={{ ...INPUT_STYLE, fontFamily: "ui-monospace, monospace" }}
+          placeholder={
+            method === "neft" || method === "rtgs" || method === "imps"
+              ? "e.g. UTR1234567890"
+              : method === "cheque"
+                ? "e.g. 000123"
+                : method === "upi"
+                  ? "e.g. 2026051411234567"
+                  : method === "cash"
+                    ? "optional — receipt no, if any"
+                    : "e.g. UTR / txn id"
+          }
+          required={referenceMandatory}
+          aria-invalid={referenceMissing ? true : undefined}
+          style={{
+            ...INPUT_STYLE,
+            fontFamily: "ui-monospace, monospace",
+            borderColor: referenceMissing
+              ? ACCOUNTS_TOKENS.danger
+              : (INPUT_STYLE as React.CSSProperties).borderColor,
+          }}
         />
+        {referenceMissing && (
+          <span
+            style={{
+              fontSize: 11,
+              color: ACCOUNTS_TOKENS.danger,
+              fontWeight: 600,
+              marginTop: 4,
+            }}
+          >
+            UTR / reference is required for {method.toUpperCase()}. The voucher
+            won't print without it.
+          </span>
+        )}
       </Field>
 
       <Field label="Note (optional)">

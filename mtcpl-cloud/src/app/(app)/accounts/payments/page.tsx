@@ -273,6 +273,7 @@ export default async function PaymentsHistoryPage({
                   <th style={TABLE_STYLES.th}>Reference</th>
                   <th style={TABLE_STYLES.th}>Note</th>
                   <th style={TABLE_STYLES.th}>By</th>
+                  <th style={TABLE_STYLES.th}>Voucher</th>
                 </tr>
               </thead>
               <tbody>
@@ -342,6 +343,28 @@ export default async function PaymentsHistoryPage({
                       </td>
                       <td style={{ ...TABLE_STYLES.td, fontSize: 12, color: "var(--muted)" }}>
                         {p.paid_by ? profilesMap[p.paid_by] ?? "—" : "—"}
+                      </td>
+                      <td style={TABLE_STYLES.td}>
+                        <Link
+                          href={`/accounts/payments/${p.id}/voucher`}
+                          title="Open printable voucher"
+                          style={{
+                            textDecoration: "none",
+                            color: ACCOUNTS_TOKENS.accent,
+                            fontWeight: 700,
+                            fontSize: 11,
+                            padding: "3px 10px",
+                            background: ACCOUNTS_TOKENS.accentLight,
+                            border: `1px solid ${ACCOUNTS_TOKENS.accentBorder ?? ACCOUNTS_TOKENS.accent}`,
+                            borderRadius: 6,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 4,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          🖨 Voucher
+                        </Link>
                       </td>
                     </tr>
                   );

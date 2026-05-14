@@ -58,7 +58,7 @@ export default async function AccountsHomePage({
   let dueQuery = supabase
     .from("bills")
     .select(
-      "id, token, vendor_bill_no, bill_date, description, cost_head, amount_total, amount_paid, amount_outstanding, status, approved_at, bill_vendor_id, bill_vendors(id, name, payment_terms_days)",
+      "id, token, vendor_bill_no, bill_date, description, cost_head, amount_total, amount_gst, amount_tds, amount_tcs, amount_payable_to_vendor, amount_paid, amount_outstanding, status, approved_at, bill_vendor_id, bill_vendors(id, name, payment_terms_days)",
     )
     .eq("status", "approved")
     .gt("amount_outstanding", 0)
@@ -114,6 +114,10 @@ export default async function AccountsHomePage({
     description: string;
     cost_head: string | null;
     amount_total: number;
+    amount_gst: number | null;
+    amount_tds: number | null;
+    amount_tcs: number | null;
+    amount_payable_to_vendor: number | null;
     amount_paid: number;
     amount_outstanding: number;
     approved_at: string | null;
@@ -162,6 +166,10 @@ export default async function AccountsHomePage({
       description: r.description,
       costHead: r.cost_head,
       amountTotal: Number(r.amount_total),
+      amountGst: Number(r.amount_gst ?? 0),
+      amountTds: Number(r.amount_tds ?? 0),
+      amountTcs: Number(r.amount_tcs ?? 0),
+      amountPayableToVendor: Number(r.amount_payable_to_vendor ?? r.amount_total),
       amountPaid: Number(r.amount_paid),
       amountOutstanding: Number(r.amount_outstanding),
       ageBucket: bucketFor(r.bill_date),

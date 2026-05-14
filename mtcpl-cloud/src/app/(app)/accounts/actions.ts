@@ -65,10 +65,24 @@ export async function submitBillAction(
   const description = String(formData.get("description") || "").trim();
   const costHead = String(formData.get("cost_head") || "").trim() || null;
   const amountSubtotalRaw = String(formData.get("amount_subtotal") || "0");
-  const gstPercentRaw = String(formData.get("gst_percent") || "0");
+
+  // Migration 042 — tax breakdown. The form sends CGST/SGST/IGST
+  // separately; gst_percent is computed as their sum so the existing
+  // amount_gst / amount_total generated columns keep working
+  // unchanged. TDS/TCS percent are direct inputs gated on the
+  // vendor's tds_applicable / tcs_applicable flags.
+  const cgstPercent = Number(formData.get("cgst_percent") || 0);
+  const sgstPercent = Number(formData.get("sgst_percent") || 0);
+  const igstPercent = Number(formData.get("igst_percent") || 0);
+  const tdsPercent = Number(formData.get("tds_percent") || 0);
+  const tcsPercent = Number(formData.get("tcs_percent") || 0);
 
   const amountSubtotal = Number(amountSubtotalRaw);
-  const gstPercent = Number(gstPercentRaw);
+  const taxOk = (n: number) => Number.isFinite(n) && n >= 0 && n <= 100;
+  const gstPercent =
+    Number.isFinite(cgstPercent) && Number.isFinite(sgstPercent) && Number.isFinite(igstPercent)
+      ? cgstPercent + sgstPercent + igstPercent
+      : Number(formData.get("gst_percent") || 0);
 
   if (!billVendorId) return { ok: false, error: "Pick a beneficiary." };
   if (!vendorBillNo) return { ok: false, error: "Vendor's bill number is required." };
@@ -77,8 +91,17 @@ export async function submitBillAction(
   if (!Number.isFinite(amountSubtotal) || amountSubtotal <= 0) {
     return { ok: false, error: "Subtotal amount must be greater than zero." };
   }
+  if (!taxOk(cgstPercent) || !taxOk(sgstPercent) || !taxOk(igstPercent)) {
+    return { ok: false, error: "CGST / SGST / IGST must each be between 0 and 100." };
+  }
   if (!Number.isFinite(gstPercent) || gstPercent < 0 || gstPercent > 100) {
-    return { ok: false, error: "GST% must be between 0 and 100." };
+    return { ok: false, error: "Total GST (CGST + SGST + IGST) must be between 0 and 100." };
+  }
+  if (!taxOk(tdsPercent)) {
+    return { ok: false, error: "TDS% must be between 0 and 100." };
+  }
+  if (!taxOk(tcsPercent)) {
+    return { ok: false, error: "TCS% must be between 0 and 100." };
   }
 
   try {
@@ -92,6 +115,11 @@ export async function submitBillAction(
         cost_head: costHead,
         amount_subtotal: amountSubtotal,
         gst_percent: gstPercent,
+        cgst_percent: cgstPercent,
+        sgst_percent: sgstPercent,
+        igst_percent: igstPercent,
+        tds_percent: tdsPercent,
+        tcs_percent: tcsPercent,
         status: "pending_approval",
         submitted_by: profile.id,
       })
@@ -125,6 +153,11 @@ export async function submitBillAction(
         vendor_bill_no: vendorBillNo,
         amount_subtotal: amountSubtotal,
         gst_percent: gstPercent,
+        cgst_percent: cgstPercent,
+        sgst_percent: sgstPercent,
+        igst_percent: igstPercent,
+        tds_percent: tdsPercent,
+        tcs_percent: tcsPercent,
         amount_total: totalAmount,
       }),
       notify(
@@ -367,8 +400,19 @@ export async function editBillAction(formData: FormData): Promise<ActionResult> 
   const description = String(formData.get("description") || "").trim();
   const costHead = String(formData.get("cost_head") || "").trim() || null;
   const amountSubtotal = Number(formData.get("amount_subtotal") || 0);
-  const gstPercent = Number(formData.get("gst_percent") || 0);
   const billVendorId = String(formData.get("bill_vendor_id") || "").trim();
+
+  // Mig 042 — tax breakdown
+  const cgstPercent = Number(formData.get("cgst_percent") || 0);
+  const sgstPercent = Number(formData.get("sgst_percent") || 0);
+  const igstPercent = Number(formData.get("igst_percent") || 0);
+  const tdsPercent = Number(formData.get("tds_percent") || 0);
+  const tcsPercent = Number(formData.get("tcs_percent") || 0);
+  const taxOk = (n: number) => Number.isFinite(n) && n >= 0 && n <= 100;
+  const gstPercent =
+    Number.isFinite(cgstPercent) && Number.isFinite(sgstPercent) && Number.isFinite(igstPercent)
+      ? cgstPercent + sgstPercent + igstPercent
+      : Number(formData.get("gst_percent") || 0);
 
   if (!billVendorId || !vendorBillNo || !billDate || !description) {
     return { ok: false, error: "All fields are required to save the edit." };
@@ -376,8 +420,14 @@ export async function editBillAction(formData: FormData): Promise<ActionResult> 
   if (!Number.isFinite(amountSubtotal) || amountSubtotal <= 0) {
     return { ok: false, error: "Subtotal must be greater than zero." };
   }
+  if (!taxOk(cgstPercent) || !taxOk(sgstPercent) || !taxOk(igstPercent)) {
+    return { ok: false, error: "CGST / SGST / IGST must each be between 0 and 100." };
+  }
   if (!Number.isFinite(gstPercent) || gstPercent < 0 || gstPercent > 100) {
-    return { ok: false, error: "GST% must be between 0 and 100." };
+    return { ok: false, error: "Total GST (CGST + SGST + IGST) must be between 0 and 100." };
+  }
+  if (!taxOk(tdsPercent) || !taxOk(tcsPercent)) {
+    return { ok: false, error: "TDS / TCS must each be between 0 and 100." };
   }
 
   const now = new Date().toISOString();
@@ -389,6 +439,11 @@ export async function editBillAction(formData: FormData): Promise<ActionResult> 
     cost_head: costHead,
     amount_subtotal: amountSubtotal,
     gst_percent: gstPercent,
+    cgst_percent: cgstPercent,
+    sgst_percent: sgstPercent,
+    igst_percent: igstPercent,
+    tds_percent: tdsPercent,
+    tcs_percent: tcsPercent,
     updated_at: now,
   };
   if (nextStatus) {
@@ -701,7 +756,8 @@ export async function markPaymentPaidAction(formData: FormData): Promise<ActionR
   const paymentId = String(formData.get("payment_id") || "").trim();
   const paidAmount = Number(formData.get("paid_amount") || 0);
   const methodRaw = String(formData.get("payment_method") || "").trim();
-  const reference = String(formData.get("payment_reference") || "").trim() || null;
+  const referenceTrimmed = String(formData.get("payment_reference") || "").trim();
+  const reference = referenceTrimmed || null;
   const note = String(formData.get("payment_note") || "").trim() || null;
 
   if (!paymentId) return { ok: false, error: "Missing payment_id." };
@@ -720,6 +776,17 @@ export async function markPaymentPaidAction(formData: FormData): Promise<ActionR
   ]);
   if (!validMethods.has(methodRaw)) {
     return { ok: false, error: "Pick a valid payment method." };
+  }
+  // Mig 042 — per Daksh: UTR / reference is mandatory for every
+  // non-cash payment method. Cash legitimately has no reference, so
+  // it's the one exception. The voucher won't print without a
+  // reference, so enforce at the action level too.
+  if (methodRaw !== "cash" && !referenceTrimmed) {
+    const methodLabel = methodRaw.toUpperCase();
+    return {
+      ok: false,
+      error: `${methodLabel} requires a reference (UTR / cheque no / UPI txn id). Cash is the only method that can leave the field blank.`,
+    };
   }
 
   const { data: payment, error: loadErr } = await supabase
@@ -878,6 +945,21 @@ export async function upsertBillVendorAction(formData: FormData): Promise<
     }
   }
 
+  // Migration 042 — TDS / TCS applicability + default rates. Two
+  // independent flags so a vendor can be flagged for both (rare but
+  // valid). Default rates are optional; if blank, NULL falls through.
+  const tdsApplicable = String(formData.get("tds_applicable") || "") === "1";
+  const tcsApplicable = String(formData.get("tcs_applicable") || "") === "1";
+  const parseRate = (key: string): number | null => {
+    const raw = String(formData.get(key) || "").trim();
+    if (raw === "") return null;
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0 || n > 100) return null;
+    return n;
+  };
+  const defaultTdsPercent = tdsApplicable ? parseRate("default_tds_percent") : null;
+  const defaultTcsPercent = tcsApplicable ? parseRate("default_tcs_percent") : null;
+
   const payload: Record<string, unknown> = {
     name,
     category: String(formData.get("category") || "").trim() || null,
@@ -891,6 +973,10 @@ export async function upsertBillVendorAction(formData: FormData): Promise<
     ifsc: String(formData.get("ifsc") || "").trim() || null,
     upi_id: String(formData.get("upi_id") || "").trim() || null,
     notes: String(formData.get("notes") || "").trim() || null,
+    tds_applicable: tdsApplicable,
+    tcs_applicable: tcsApplicable,
+    default_tds_percent: defaultTdsPercent,
+    default_tcs_percent: defaultTcsPercent,
     payment_terms_days: paymentTermsDays,
     updated_at: new Date().toISOString(),
     updated_by: profile.id,

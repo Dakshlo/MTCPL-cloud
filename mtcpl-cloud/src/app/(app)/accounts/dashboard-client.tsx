@@ -30,6 +30,14 @@ export type DueBillRow = {
   description: string;
   costHead: string | null;
   amountTotal: number;
+  /** Mig 042 — tax breakdown surfaced in the table so the accountant
+   *  can see at a glance how much of the total is tax + whether the
+   *  bill carries TDS / TCS adjustments. */
+  amountGst: number;
+  amountTds: number;
+  amountTcs: number;
+  /** Net of TDS, gross of TCS — what we actually pay the vendor. */
+  amountPayableToVendor: number;
   amountPaid: number;
   amountOutstanding: number;
   ageBucket: "0_30" | "31_60" | "61_90" | "90_plus";
@@ -218,6 +226,10 @@ export function DueBillsClient({
                 <th style={TABLE_STYLES.th}>Bill date</th>
                 <th style={TABLE_STYLES.th}>Cost head</th>
                 <th style={TABLE_STYLES.thRight}>Total</th>
+                {/* Mig 042 — tax column: GST amount per bill, plus a
+                    small TDS / TCS chip under it when the bill carries
+                    them. Daksh: "show tax amount after total". */}
+                <th style={TABLE_STYLES.thRight}>Tax</th>
                 <th style={TABLE_STYLES.thRight}>Paid</th>
                 <th style={TABLE_STYLES.thRight}>Outstanding</th>
                 <th style={TABLE_STYLES.th}>Age / Verified</th>
@@ -304,6 +316,13 @@ export function DueBillsClient({
                     </td>
                     <td style={TABLE_STYLES.tdRight}>
                       <Money value={r.amountTotal} tone="muted" />
+                    </td>
+                    <td style={TABLE_STYLES.tdRight}>
+                      <TaxCell
+                        gst={r.amountGst}
+                        tds={r.amountTds}
+                        tcs={r.amountTcs}
+                      />
                     </td>
                     <td style={TABLE_STYLES.tdRight}>
                       <PaidCell paid={r.amountPaid} parts={r.paymentParts} />
@@ -553,6 +572,79 @@ function AgeBadge({
         >
           ⚠ Pay after {Math.max(0, (termsDays ?? DEFAULT_PAYMENT_TERMS_DAYS) - days)}d
         </span>
+      )}
+    </div>
+  );
+}
+
+/** Mig 042 — tax column on the due-bills table. Shows the GST
+ *  amount prominently and stacks small TDS / TCS chips underneath
+ *  for the bills that carry them, so the accountant sees the tax
+ *  composition at a glance. */
+function TaxCell({
+  gst,
+  tds,
+  tcs,
+}: {
+  gst: number;
+  tds: number;
+  tcs: number;
+}) {
+  if (gst <= 0 && tds <= 0 && tcs <= 0) {
+    return <span style={{ fontSize: 12, color: "var(--muted)" }}>—</span>;
+  }
+  return (
+    <div
+      style={{
+        display: "inline-flex",
+        flexDirection: "column",
+        alignItems: "flex-end",
+        gap: 2,
+      }}
+    >
+      {gst > 0 ? (
+        <Money value={gst} tone="muted" />
+      ) : (
+        <span style={{ fontSize: 12, color: "var(--muted)" }}>—</span>
+      )}
+      {(tds > 0 || tcs > 0) && (
+        <div
+          style={{
+            display: "inline-flex",
+            gap: 4,
+            fontFamily: "ui-monospace, monospace",
+            fontSize: 10,
+          }}
+        >
+          {tds > 0 && (
+            <span
+              title="TDS deducted from vendor payment"
+              style={{
+                padding: "1px 6px",
+                borderRadius: 4,
+                background: ACCOUNTS_TOKENS.dangerLight,
+                color: ACCOUNTS_TOKENS.danger,
+                fontWeight: 700,
+              }}
+            >
+              −TDS ₹{tds.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+            </span>
+          )}
+          {tcs > 0 && (
+            <span
+              title="TCS collected by vendor — included in payable"
+              style={{
+                padding: "1px 6px",
+                borderRadius: 4,
+                background: ACCOUNTS_TOKENS.accentLight,
+                color: ACCOUNTS_TOKENS.accent,
+                fontWeight: 700,
+              }}
+            >
+              +TCS ₹{tcs.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+            </span>
+          )}
+        </div>
       )}
     </div>
   );

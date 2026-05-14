@@ -26,7 +26,7 @@ import {
 } from "../../_ui/components";
 
 type Params = Promise<{ id: string }>;
-type SearchParams = Promise<{ error?: string; saved?: string }>;
+type SearchParams = Promise<{ error?: string; saved?: string; just_submitted?: string }>;
 
 export default async function BillDetailPage({
   params,
@@ -43,7 +43,7 @@ export default async function BillDetailPage({
   const { data: bill } = await supabase
     .from("bills")
     .select(
-      "id, token, vendor_bill_no, bill_date, description, cost_head, amount_subtotal, gst_percent, amount_gst, amount_total, amount_paid, amount_outstanding, status, rejection_note, submitted_by, submitted_at, approved_by, approved_at, rejected_by, rejected_at, cancelled_by, cancelled_at, bill_vendor_id, bill_vendors(id, name, category, gstin, phone, email, address, bank_name, bank_account, ifsc, upi_id)",
+      "id, token, vendor_bill_no, bill_date, description, cost_head, amount_subtotal, gst_percent, cgst_percent, sgst_percent, igst_percent, tds_percent, tcs_percent, amount_gst, amount_cgst, amount_sgst, amount_igst, amount_tds, amount_tcs, amount_total, amount_payable_to_vendor, amount_paid, amount_outstanding, status, rejection_note, submitted_by, submitted_at, approved_by, approved_at, rejected_by, rejected_at, cancelled_by, cancelled_at, bill_vendor_id, bill_vendors(id, name, category, gstin, phone, email, address, bank_name, bank_account, ifsc, upi_id, tds_applicable, tcs_applicable)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -195,6 +195,93 @@ export default async function BillDetailPage({
         <FlashBanner tone="danger"><strong>Action failed:</strong> {sp.error}</FlashBanner>
       )}
 
+      {/* Mig 042 — fresh-submit banner. Renders only when the
+          page is reached via the new-bill redirect with
+          `?just_submitted=1`. The token blinks (CSS animation) and
+          sits big at the top of the page so the biller is reminded
+          to write it on the physical bill. Once they leave/refresh
+          without the flag, it goes away. */}
+      {sp.just_submitted && (
+        <>
+          {/* Style block for the blink animation. Scoped to this page
+              via a unique class name so it can't leak. */}
+          <style>{`
+            @keyframes mtcpl-token-blink {
+              0%,   60%  { opacity: 1; transform: scale(1); }
+              80%        { opacity: 0.35; transform: scale(0.985); }
+              100%       { opacity: 1; transform: scale(1); }
+            }
+            .mtcpl-token-blink {
+              animation: mtcpl-token-blink 1.4s ease-in-out infinite;
+            }
+            @media (prefers-reduced-motion: reduce) {
+              .mtcpl-token-blink { animation: none; }
+            }
+          `}</style>
+          <div
+            style={{
+              marginBottom: 18,
+              padding: "16px 22px",
+              background: "linear-gradient(135deg, #fff7ed 0%, #fffaf3 100%)",
+              border: `2px solid ${ACCOUNTS_TOKENS.warning}`,
+              borderRadius: 14,
+              display: "flex",
+              gap: 18,
+              alignItems: "center",
+              justifyContent: "space-between",
+              flexWrap: "wrap",
+              boxShadow: "0 4px 12px rgba(217, 119, 6, 0.18)",
+            }}
+          >
+            <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
+              <span style={{ fontSize: 34, lineHeight: 1 }} aria-hidden>✍️</span>
+              <div>
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 800,
+                    color: ACCOUNTS_TOKENS.warning,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                  }}
+                >
+                  Write this on the physical bill before filing
+                </div>
+                <div
+                  style={{
+                    marginTop: 2,
+                    fontSize: 13,
+                    color: "var(--text)",
+                    lineHeight: 1.5,
+                    fontWeight: 600,
+                  }}
+                >
+                  Bill submitted and queued for crosscheck audit. Pen the
+                  token below on the paper bill so we can match it back to
+                  this entry later.
+                </div>
+              </div>
+            </div>
+            <code
+              className="mtcpl-token-blink"
+              style={{
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                fontSize: 32,
+                fontWeight: 800,
+                padding: "10px 22px",
+                background: "#fff",
+                color: ACCOUNTS_TOKENS.warning,
+                border: `3px dashed ${ACCOUNTS_TOKENS.warning}`,
+                borderRadius: 10,
+                letterSpacing: "0.04em",
+              }}
+            >
+              {bill.token}
+            </code>
+          </div>
+        </>
+      )}
+
       {/* Hero block — token, vendor, total, status */}
       <div
         style={{
@@ -246,14 +333,92 @@ export default async function BillDetailPage({
             </p>
           </div>
         </div>
-        <div style={{ textAlign: "right" }}>
+        <div style={{ textAlign: "right", minWidth: 220 }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
-            Total
+            Bill total
           </div>
           <Money value={Number(bill.amount_total)} size="hero" tone="accent" />
-          <div style={{ marginTop: 4, display: "flex", gap: 14, justifyContent: "flex-end", flexWrap: "wrap", fontFamily: "ui-monospace, monospace", fontSize: 11, color: "var(--muted)" }}>
-            <span>Net <Money value={Number(bill.amount_subtotal)} size="small" tone="muted" /></span>
-            <span>GST {Number(bill.gst_percent)}% <Money value={Number(bill.amount_gst)} size="small" tone="muted" /></span>
+          {/* Full tax breakdown — CGST + SGST OR IGST, plus TDS / TCS
+              when the bill carried them. Existing bills (entered
+              before mig 042) have all the new percents at 0 and just
+              fall back to showing the legacy GST line. */}
+          <div
+            style={{
+              marginTop: 8,
+              fontSize: 11,
+              fontFamily: "ui-monospace, monospace",
+              color: "var(--muted)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 3,
+              alignItems: "flex-end",
+            }}
+          >
+            <BreakdownRow label="Net" value={Number(bill.amount_subtotal)} />
+            {Number(bill.cgst_percent ?? 0) > 0 && (
+              <BreakdownRow
+                label={`CGST ${Number(bill.cgst_percent)}%`}
+                value={Number(bill.amount_cgst ?? 0)}
+              />
+            )}
+            {Number(bill.sgst_percent ?? 0) > 0 && (
+              <BreakdownRow
+                label={`SGST ${Number(bill.sgst_percent)}%`}
+                value={Number(bill.amount_sgst ?? 0)}
+              />
+            )}
+            {Number(bill.igst_percent ?? 0) > 0 && (
+              <BreakdownRow
+                label={`IGST ${Number(bill.igst_percent)}%`}
+                value={Number(bill.amount_igst ?? 0)}
+              />
+            )}
+            {/* Legacy bills (mig 028) that only have gst_percent and
+                no breakdown — show the single GST line. */}
+            {Number(bill.cgst_percent ?? 0) === 0 &&
+              Number(bill.sgst_percent ?? 0) === 0 &&
+              Number(bill.igst_percent ?? 0) === 0 &&
+              Number(bill.gst_percent) > 0 && (
+                <BreakdownRow
+                  label={`GST ${Number(bill.gst_percent)}%`}
+                  value={Number(bill.amount_gst)}
+                />
+              )}
+            {Number(bill.tds_percent ?? 0) > 0 && (
+              <BreakdownRow
+                label={`− TDS ${Number(bill.tds_percent)}%`}
+                value={Number(bill.amount_tds ?? 0)}
+                tone="danger"
+              />
+            )}
+            {Number(bill.tcs_percent ?? 0) > 0 && (
+              <BreakdownRow
+                label={`+ TCS ${Number(bill.tcs_percent)}%`}
+                value={Number(bill.amount_tcs ?? 0)}
+              />
+            )}
+            {(Number(bill.tds_percent ?? 0) > 0 ||
+              Number(bill.tcs_percent ?? 0) > 0) && (
+              <div
+                style={{
+                  marginTop: 4,
+                  paddingTop: 4,
+                  borderTop: `1px dashed ${ACCOUNTS_TOKENS.border}`,
+                  width: "100%",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontWeight: 700,
+                  color: ACCOUNTS_TOKENS.success,
+                }}
+              >
+                <span>Pay vendor</span>
+                <span>
+                  ₹{Number(
+                    bill.amount_payable_to_vendor ?? bill.amount_total,
+                  ).toLocaleString("en-IN")}
+                </span>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -389,6 +554,7 @@ export default async function BillDetailPage({
                       <th style={TABLE_STYLES.thRight}>Paid</th>
                       <th style={TABLE_STYLES.th}>Method · Ref</th>
                       <th style={TABLE_STYLES.th}>Who</th>
+                      <th style={TABLE_STYLES.th}>Voucher</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -446,6 +612,32 @@ export default async function BillDetailPage({
                                 : p.proposed_by
                                   ? profilesMap[p.proposed_by]
                                   : "—"}
+                        </td>
+                        <td style={{ ...TABLE_STYLES.td, fontSize: 12 }}>
+                          {p.status === "paid" ? (
+                            <Link
+                              href={`/accounts/payments/${p.id}/voucher`}
+                              title="Open the printable payment voucher"
+                              style={{
+                                textDecoration: "none",
+                                color: ACCOUNTS_TOKENS.accent,
+                                fontWeight: 700,
+                                fontSize: 11,
+                                padding: "3px 10px",
+                                background: ACCOUNTS_TOKENS.accentLight,
+                                border: `1px solid ${ACCOUNTS_TOKENS.accentBorder ?? ACCOUNTS_TOKENS.accent}`,
+                                borderRadius: 6,
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 4,
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              🖨 Voucher
+                            </Link>
+                          ) : (
+                            <span style={{ color: "var(--muted)" }}>—</span>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -690,6 +882,37 @@ function Section({
         )}
       </div>
       {children}
+    </div>
+  );
+}
+
+/** Compact "label / value" line for the tax breakdown column.
+ *  Mig 042 — shows one row per non-zero tax line so the bill detail
+ *  carries the full breakdown the accountant needs. */
+function BreakdownRow({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone?: "muted" | "danger";
+}) {
+  const color =
+    tone === "danger" ? ACCOUNTS_TOKENS.danger : "var(--muted)";
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        width: "100%",
+        gap: 10,
+      }}
+    >
+      <span style={{ color }}>{label}</span>
+      <span style={{ color: "var(--text)", fontWeight: 600 }}>
+        ₹{value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+      </span>
     </div>
   );
 }
