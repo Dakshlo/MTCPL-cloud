@@ -317,9 +317,11 @@ export async function finishBlockAction(formData: FormData): Promise<FinishBlock
         submitted_for_approval_at: now,
         submitted_for_approval_by: profile.id,
         // Clear send-back trail if this is a cutter resubmission.
+        // Also re-lock the cutter-edit flag — migration 032 model.
         sent_back_at: null,
         sent_back_by: null,
         sent_back_note: null,
+        cutter_edit_unlocked: false,
         updated_at: now,
       })
       .eq("id", sessionBlockId)
@@ -653,12 +655,23 @@ export async function approveCutFormAction(formData: FormData) {
 }
 
 /**
- * Send a pending-approval block back to the cutter for edits.
- * Approver-only. Flips status to 'awaiting_cutter_edit' and
- * stores an optional note ("check slab X — looks like it wasn't
- * cut"). The cutter sees the Edit button on their next visit and
- * the note prominently. Resubmission flips back to
- * 'awaiting_approval'.
+ * Unlock the cutter-edit permission for an awaiting_approval block.
+ * Approver-only.
+ *
+ * Migration 032 changed the model: instead of flipping status to
+ * 'awaiting_cutter_edit' (and moving the block out of the audit
+ * queue), we keep the block at 'awaiting_approval' throughout and
+ * set the `cutter_edit_unlocked` flag. The cutter (team_head
+ * submitter) ALWAYS sees their submissions in the queue; the flag
+ * is the only thing that gates whether the Edit button shows up.
+ *
+ * The auditor can re-lock at any time via lockCutterEditAction (or
+ * just approve as-is). The cutter's save through
+ * editPendingApprovalAction automatically re-locks.
+ *
+ * `requestCutterEditAction` is kept as the export name for
+ * backward-compat with any inline references; semantically it now
+ * means "give the cutter the unlock token".
  */
 export async function requestCutterEditAction(
   formData: FormData,
@@ -666,7 +679,7 @@ export async function requestCutterEditAction(
   const { profile } = await requireAuth(["developer", "owner", "team_head"]);
   const { canApproveCuts } = await import("@/lib/cutting-permissions");
   if (!canApproveCuts(profile)) {
-    return { ok: false, error: "You do not have permission to send cuts back." };
+    return { ok: false, error: "You do not have permission to unlock cutter edits." };
   }
   const supabase = createAdminSupabaseClient();
 
@@ -676,7 +689,7 @@ export async function requestCutterEditAction(
 
   const { data: blockRow } = await supabase
     .from("cut_session_blocks")
-    .select("id, status, block_id, submitted_for_approval_by")
+    .select("id, status, block_id, submitted_for_approval_by, cutter_edit_unlocked")
     .eq("id", sessionBlockId)
     .maybeSingle();
   if (!blockRow) return { ok: false, error: "Block not found." };
@@ -685,6 +698,7 @@ export async function requestCutterEditAction(
     status: string;
     block_id: string;
     submitted_for_approval_by: string | null;
+    cutter_edit_unlocked: boolean;
   };
   if (block.status !== "awaiting_approval") {
     return {
@@ -694,10 +708,12 @@ export async function requestCutterEditAction(
   }
 
   const now = new Date().toISOString();
+  // Set the unlock flag + record who unlocked + the note. Status
+  // STAYS awaiting_approval — that's the whole point of migration 032.
   const { error: updErr } = await supabase
     .from("cut_session_blocks")
     .update({
-      status: "awaiting_cutter_edit",
+      cutter_edit_unlocked: true,
       sent_back_at: now,
       sent_back_by: profile.id,
       sent_back_note: note,
@@ -708,15 +724,15 @@ export async function requestCutterEditAction(
   if (updErr) return { ok: false, error: updErr.message };
 
   void Promise.all([
-    logAudit(profile.id, "cut_sent_back_for_edit", "cut_session_block", sessionBlockId, {
+    logAudit(profile.id, "cut_cutter_edit_unlocked", "cut_session_block", sessionBlockId, {
       block_id: block.block_id,
       note,
     }),
     notify(
-      "cut_sent_back",
-      `Block ${block.block_id} sent back for edit`,
+      "cut_cutter_edit_unlocked",
+      `Block ${block.block_id} unlocked for cutter edit`,
       {
-        message: note ?? "Approver requested changes.",
+        message: note ?? "Auditor requested changes — edit and resubmit.",
         entityType: "cut_session_block",
         entityId: sessionBlockId,
         actorId: profile.id,
@@ -729,6 +745,47 @@ export async function requestCutterEditAction(
   ]).catch((e) =>
     console.warn("[requestCutterEditAction] cleanup failed (non-fatal)", e),
   );
+
+  await refreshPaths();
+  return { ok: true };
+}
+
+/**
+ * Revoke the cutter-edit unlock. Approver-only.
+ * Useful when the auditor accidentally unlocks, or decides to edit
+ * in place and approve instead of waiting for the cutter.
+ */
+export async function lockCutterEditAction(
+  formData: FormData,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { profile } = await requireAuth(["developer", "owner", "team_head"]);
+  const { canApproveCuts } = await import("@/lib/cutting-permissions");
+  if (!canApproveCuts(profile)) {
+    return { ok: false, error: "You do not have permission to lock cutter edits." };
+  }
+  const supabase = createAdminSupabaseClient();
+  const sessionBlockId = String(formData.get("session_block_id") || "");
+  if (!sessionBlockId) return { ok: false, error: "Missing session_block_id" };
+
+  const now = new Date().toISOString();
+  const { data: updated, error } = await supabase
+    .from("cut_session_blocks")
+    .update({
+      cutter_edit_unlocked: false,
+      // Keep sent_back_note for audit reference — only the flag goes off.
+      updated_at: now,
+    })
+    .eq("id", sessionBlockId)
+    .eq("status", "awaiting_approval")
+    .select("id, block_id")
+    .single();
+
+  if (error) return { ok: false, error: error.message };
+  if (!updated) return { ok: false, error: "Block not in awaiting_approval — refresh and retry." };
+
+  void logAudit(profile.id, "cut_cutter_edit_locked", "cut_session_block", sessionBlockId, {
+    block_id: updated.block_id,
+  });
 
   await refreshPaths();
   return { ok: true };
@@ -794,7 +851,9 @@ export async function editPendingApprovalAction(
   // Authorise this specific edit attempt.
   const { data: blockRow } = await supabase
     .from("cut_session_blocks")
-    .select("id, status, block_id, submitted_for_approval_by, cut_session_id")
+    .select(
+      "id, status, block_id, submitted_for_approval_by, cut_session_id, cutter_edit_unlocked",
+    )
     .eq("id", sessionBlockId)
     .maybeSingle();
   if (!blockRow) return { ok: false, error: "Block not found." };
@@ -804,45 +863,60 @@ export async function editPendingApprovalAction(
     block_id: string;
     submitted_for_approval_by: string | null;
     cut_session_id: string;
+    cutter_edit_unlocked: boolean;
   };
 
   const { canApproveCuts } = await import("@/lib/cutting-permissions");
   const isApprover = canApproveCuts(profile);
   const isOriginalSubmitter = block.submitted_for_approval_by === profile.id;
 
-  let nextStatus: "awaiting_approval" | "awaiting_cutter_edit";
+  // Migration 032 model: status stays at awaiting_approval throughout.
+  // The cutter (team_head submitter) can ONLY edit when the auditor
+  // has flipped cutter_edit_unlocked = TRUE. Approvers can always edit.
+  // The `awaiting_cutter_edit` branch below is kept defensively for
+  // any legacy rows that weren't migrated.
+  let isCutterResubmission = false;
   if (block.status === "awaiting_approval") {
-    // Only approvers can edit while in approval queue (cutters are
-    // locked out per Daksh's request — they can only edit when sent
-    // back).
-    if (!isApprover) {
-      return {
-        ok: false,
-        error:
-          "You can only edit when the approver sends the block back for edit. Wait for review.",
-      };
-    }
-    nextStatus = "awaiting_approval";
-  } else if (block.status === "awaiting_cutter_edit") {
-    // Cutter must own the block (or be an approver, who can also
-    // step in if the cutter is unavailable).
-    if (!isApprover && !isOriginalSubmitter) {
-      // Fallback: allow team_head OR cutting_operator broadly. The
-      // shop's Cutting Done form is actually filled by team_heads
-      // (Alkesh, Paresh, etc.) — `cutting_operator` is a fallback
-      // for any shift handoff where the original submitter isn't
-      // re-logged in.
-      if (
-        profile.role !== "team_head" &&
-        profile.role !== "cutting_operator"
-      ) {
+    if (isApprover) {
+      // Approver path — always allowed. No state change.
+    } else {
+      // Cutter / team_head path — needs the unlock token.
+      if (!block.cutter_edit_unlocked) {
+        return {
+          ok: false,
+          error:
+            "Editing is locked. Ask the auditor (dev / owner / Rajesh) to allow cutter edit first.",
+        };
+      }
+      // Must own the block, OR be a team_head / cutting_operator fallback
+      // (shift handoff).
+      const isCutterRole =
+        isOriginalSubmitter ||
+        profile.role === "team_head" ||
+        profile.role === "cutting_operator";
+      if (!isCutterRole) {
         return {
           ok: false,
           error: "Only the original cutter or an approver can edit this block.",
         };
       }
+      isCutterResubmission = true;
     }
-    nextStatus = "awaiting_approval"; // cutter resubmits → back to queue
+  } else if (block.status === "awaiting_cutter_edit") {
+    // Legacy branch: pre-migration-032 rows. Accept the edit and
+    // also flip status back to awaiting_approval as part of the save.
+    if (
+      !isApprover &&
+      !isOriginalSubmitter &&
+      profile.role !== "team_head" &&
+      profile.role !== "cutting_operator"
+    ) {
+      return {
+        ok: false,
+        error: "Only the original cutter or an approver can edit this block.",
+      };
+    }
+    isCutterResubmission = !isApprover;
   } else {
     return {
       ok: false,
@@ -867,12 +941,18 @@ export async function editPendingApprovalAction(
     pending_approval_payload: payload,
     approval_edited_at: now,
     approval_edited_by: profile.id,
-    status: nextStatus,
+    // Always end up at awaiting_approval (migration 032 model — no
+    // status flips). Legacy awaiting_cutter_edit rows also normalise
+    // here so the system can converge on the new model gradually.
+    status: "awaiting_approval",
     updated_at: now,
   };
-  // When the cutter resubmits, clear the send-back trail.
-  if (block.status === "awaiting_cutter_edit") {
+  // When the cutter resubmits, clear the send-back trail AND re-lock
+  // the unlock flag. The auditor will need to explicitly unlock again
+  // if they want another edit pass.
+  if (isCutterResubmission) {
     updatePayload.sent_back_note = null;
+    updatePayload.cutter_edit_unlocked = false;
   }
 
   const { error: updErr } = await supabase
@@ -887,10 +967,11 @@ export async function editPendingApprovalAction(
       block_id: block.block_id,
       edited_by_role: profile.role,
       from_status: block.status,
-      to_status: nextStatus,
+      to_status: "awaiting_approval",
+      is_cutter_resubmission: isCutterResubmission,
     }),
-    // If cutter resubmitted, ping approvers.
-    block.status === "awaiting_cutter_edit"
+    // If cutter resubmitted, ping approvers so they re-review.
+    isCutterResubmission
       ? notify(
           "cut_resubmitted",
           `Block ${block.block_id} resubmitted for approval`,

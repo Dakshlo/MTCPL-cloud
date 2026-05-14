@@ -218,29 +218,33 @@ export default async function CuttingDetailPage({
   const isCutting = block.status === "cutting" || block.status === "done_prompt";
   const isDone = block.status === "done";
   const isRejected = block.status === "rejected";
-  // Migration 027 — approval-flow states.
+  // Migration 027 + 032 — approval-flow state.
+  // Status is now always `awaiting_approval` while in audit. The
+  // legacy `awaiting_cutter_edit` value is kept for backward compat
+  // (any pre-migration row falls into this branch and is treated
+  // identically to an "unlocked" awaiting_approval).
   const isAwaitingApproval = block.status === "awaiting_approval";
-  const isAwaitingCutterEdit = block.status === "awaiting_cutter_edit";
-  const isInApprovalFlow = isAwaitingApproval || isAwaitingCutterEdit;
+  const isLegacyCutterEdit = block.status === "awaiting_cutter_edit";
+  const isInApprovalFlow = isAwaitingApproval || isLegacyCutterEdit;
+  const cutterEditUnlocked =
+    (block as { cutter_edit_unlocked?: boolean | null }).cutter_edit_unlocked === true ||
+    isLegacyCutterEdit;
   const allowTransfer = canTransferPlannedSlabs(profile);
   const isApprover = canApproveCuts(profile);
   // Cutter ownership — submitted_for_approval_by is set when the
-  // block enters the approval flow. Either the submitter or a
-  // generic cutting_operator (fallback for shift handoffs) can edit
-  // a sent-back block.
+  // block enters the approval flow.
   const isOriginalSubmitter =
     (block as { submitted_for_approval_by?: string | null })
       .submitted_for_approval_by === profile.id;
+  // Cutter can edit only when the auditor has unlocked the row.
+  // Approver can edit any time.
   const canEditApprovalNow =
-    (isAwaitingApproval && isApprover) ||
-    (isAwaitingCutterEdit &&
-      (isApprover ||
-        isOriginalSubmitter ||
-        // Same fallback used by editPendingApprovalAction — team_head
-        // (the actual Cutting Done submitter in this shop) and
-        // cutting_operator can step in for shift handoffs.
-        profile.role === "team_head" ||
-        profile.role === "cutting_operator"));
+    isInApprovalFlow &&
+    (isApprover ||
+      (cutterEditUnlocked &&
+        (isOriginalSubmitter ||
+          profile.role === "team_head" ||
+          profile.role === "cutting_operator")));
   // Resolve the staged payload safely — JSONB returned as `unknown`.
   type StagedPayload = {
     cut_slab_ids?: string[];
@@ -381,29 +385,31 @@ export default async function CuttingDetailPage({
               ● Live Cutting
             </span>
           )}
-          {isAwaitingApproval && (
-            <span
-              className="role-pill"
-              style={{
-                background: "var(--gold)",
-                color: "#fff",
-                fontWeight: 700,
-              }}
-            >
-              👀 Awaiting Approval
-            </span>
-          )}
-          {isAwaitingCutterEdit && (
-            <span
-              className="role-pill"
-              style={{
-                background: "#b45309",
-                color: "#fff",
-                fontWeight: 700,
-              }}
-            >
-              ↩ Sent Back for Edit
-            </span>
+          {isInApprovalFlow && (
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+              <span
+                className="role-pill"
+                style={{
+                  background: "var(--gold)",
+                  color: "#fff",
+                  fontWeight: 700,
+                }}
+              >
+                👀 Awaiting Audit
+              </span>
+              {cutterEditUnlocked && (
+                <span
+                  className="role-pill"
+                  style={{
+                    background: "#16a34a",
+                    color: "#fff",
+                    fontWeight: 700,
+                  }}
+                >
+                  🔓 Cutter can edit
+                </span>
+              )}
+            </div>
           )}
           {isDone && (
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -850,10 +856,10 @@ export default async function CuttingDetailPage({
                   ✏ Editing pending approval
                 </p>
                 <p className="muted" style={{ margin: "4px 0 0", fontSize: 12 }}>
-                  {isApprover && isAwaitingApproval
-                    ? "Fix any details and press Save. The block stays in your approval queue — press Approve there once you're happy."
-                    : isAwaitingCutterEdit
-                      ? "Apply the requested changes and save. The block goes back to the approver for re-review."
+                  {isApprover
+                    ? "Fix any details and press Save. The block stays in the audit queue — press Approve there once you're happy."
+                    : cutterEditUnlocked
+                      ? "Auditor unlocked this for you to edit. Apply the requested changes and save — your save re-locks the row so the auditor re-reviews."
                       : "Editing staged Cutting-Done payload."}
                 </p>
               </div>
@@ -897,27 +903,45 @@ export default async function CuttingDetailPage({
           );
         }
 
-        // Non-edit mode → banner + buttons.
+        // Non-edit mode → banner + submission summary + buttons.
+        const allSlabsById = new Map(
+          placed.map((s) => [s.id, s] as const),
+        );
+        const cutIds = stagedPayload?.cut_slab_ids ?? [];
+        const notCutIds = stagedPayload?.not_cut_slab_ids ?? [];
+        const extraIds = stagedPayload?.extra_slab_ids ?? [];
+        const transferIds = stagedPayload?.transferred_slab_ids ?? [];
+        const remainders = stagedPayload?.remainders ?? [];
         return (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {/* Status banner */}
             <div
               style={{
                 padding: "14px 16px",
-                background: isAwaitingApproval
-                  ? "rgba(232,197,114,0.14)"
-                  : "rgba(180,83,9,0.10)",
-                border: `1.5px solid ${isAwaitingApproval ? "var(--gold)" : "rgba(180,83,9,0.45)"}`,
-                borderLeft: `5px solid ${isAwaitingApproval ? "var(--gold-dark)" : "#b45309"}`,
+                background: cutterEditUnlocked
+                  ? "rgba(34, 197, 94, 0.10)"
+                  : "rgba(232,197,114,0.14)",
+                border: `1.5px solid ${cutterEditUnlocked ? "rgba(22, 163, 74, 0.45)" : "var(--gold)"}`,
+                borderLeft: `5px solid ${cutterEditUnlocked ? "#16a34a" : "var(--gold-dark)"}`,
                 borderRadius: 8,
               }}
             >
-              <p style={{ margin: 0, fontWeight: 700, color: isAwaitingApproval ? "var(--gold-dark)" : "#b45309", fontSize: 14 }}>
-                {isAwaitingApproval ? "👀 Awaiting approval" : "↩ Sent back for edit"}
+              <p
+                style={{
+                  margin: 0,
+                  fontWeight: 700,
+                  color: cutterEditUnlocked ? "#15803d" : "var(--gold-dark)",
+                  fontSize: 14,
+                }}
+              >
+                {cutterEditUnlocked
+                  ? "🔓 Awaiting audit · cutter can edit"
+                  : "👀 Awaiting audit"}
               </p>
               <p style={{ margin: "5px 0 0", fontSize: 12, color: "var(--muted)" }}>
-                {isAwaitingApproval
-                  ? "Cutter has submitted the Cutting Done form. No slab or donor mutations have happened yet — they fire on approve."
-                  : "Approver asked the cutter to fix the submission. Once the cutter saves, the block goes back to Awaiting approval."}
+                {cutterEditUnlocked
+                  ? "Auditor has unlocked editing for the cutter. Status stays awaiting audit — once cutter saves, the unlock auto-clears and the auditor re-reviews."
+                  : "Cutter has submitted the Cutting Done form. No slab or donor mutations have happened yet — they fire on approve."}
               </p>
               {stagedSubmittedAt && (
                 <p style={{ margin: "8px 0 0", fontSize: 11, color: "var(--muted)" }}>
@@ -938,13 +962,13 @@ export default async function CuttingDetailPage({
                   )}
                 </p>
               )}
-              {isAwaitingCutterEdit && stagedSentBackNote && (
+              {cutterEditUnlocked && stagedSentBackNote && (
                 <div
                   style={{
                     marginTop: 10,
                     padding: "10px 12px",
                     background: "rgba(255,255,255,0.5)",
-                    border: "1px solid rgba(180,83,9,0.35)",
+                    border: "1px solid rgba(22, 163, 74, 0.35)",
                     borderRadius: 6,
                   }}
                 >
@@ -952,13 +976,13 @@ export default async function CuttingDetailPage({
                     style={{
                       fontSize: 10,
                       fontWeight: 700,
-                      color: "#b45309",
+                      color: "#15803d",
                       textTransform: "uppercase",
                       letterSpacing: "0.06em",
                       marginBottom: 4,
                     }}
                   >
-                    Approver note
+                    🔓 Auditor note · cutter can edit
                     {stagedSentBackBy && profilesMap[stagedSentBackBy]
                       ? ` · from ${profilesMap[stagedSentBackBy]}`
                       : ""}
@@ -981,13 +1005,164 @@ export default async function CuttingDetailPage({
               )}
             </div>
 
-            {/* Per-role actions. Send-back uses the inline form on the
-                approvals list page (which has a textarea for the note).
-                On this detail page we keep it simple — Edit link to
-                ?edit=approval, Approve via inline POST. The full
-                approve/send-back conversation lives on the queue. */}
+            {/* SUBMISSION SUMMARY — what the cutter staged.
+                Shown to everyone with view access to the block so the
+                auditor can see, at a glance, exactly which slabs were
+                marked cut vs not, what extras were added, etc.
+                Fixes the "View doesn't show selected slabs" issue. */}
+            {stagedPayload && (
+              <div
+                style={{
+                  padding: "14px 16px",
+                  background: "var(--bg)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 8,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: "var(--muted)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.06em",
+                    marginBottom: 12,
+                  }}
+                >
+                  📝 Pending submission · what's been staged
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginBottom: 12 }}>
+                  <SummaryStat label="Cut" count={cutIds.length} color="#15803d" />
+                  <SummaryStat label="Not cut" count={notCutIds.length} color="#b91c1c" />
+                  <SummaryStat label="From inventory" count={extraIds.length} color="#b45309" />
+                  <SummaryStat label="Transferred" count={transferIds.length} color="#7c3aed" />
+                  <SummaryStat label="Remainder pieces" count={remainders.length} color="#0f766e" />
+                </div>
+
+                {/* Cut slabs */}
+                {cutIds.length > 0 && (
+                  <SlabIdList
+                    label="✂️ Marked cut"
+                    color="#15803d"
+                    ids={cutIds}
+                    allSlabsById={allSlabsById}
+                  />
+                )}
+                {/* Not cut */}
+                {notCutIds.length > 0 && (
+                  <SlabIdList
+                    label="◌ Not cut (returns to Open)"
+                    color="#b91c1c"
+                    ids={notCutIds}
+                    allSlabsById={allSlabsById}
+                  />
+                )}
+                {/* Extras */}
+                {extraIds.length > 0 && (
+                  <SlabIdList
+                    label="📦 From open inventory"
+                    color="#b45309"
+                    ids={extraIds}
+                  />
+                )}
+                {/* Transfers */}
+                {transferIds.length > 0 && (
+                  <SlabIdList
+                    label="↔ Transferred from another block"
+                    color="#7c3aed"
+                    ids={transferIds}
+                  />
+                )}
+                {/* Remainders */}
+                {remainders.length > 0 && (
+                  <div style={{ marginTop: 12 }}>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: "#0f766e",
+                        marginBottom: 6,
+                      }}
+                    >
+                      ♻ Restocked remainder pieces ({remainders.length})
+                    </div>
+                    <div className="chip-row" style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {remainders.map((r, i) => (
+                        <span
+                          key={i}
+                          className="plan-chip"
+                          style={{
+                            background: "rgba(15, 118, 110, 0.10)",
+                            border: "1px solid rgba(15, 118, 110, 0.30)",
+                            fontFamily: "ui-monospace, monospace",
+                            fontSize: 11,
+                          }}
+                        >
+                          {r.l}×{r.w}×{r.h}″
+                          {r.quality ? ` · ${r.quality}` : ""}
+                          {r.yard ? ` · Yard ${r.yard}` : ""}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Stock location */}
+                <div
+                  style={{
+                    marginTop: 14,
+                    padding: "10px 12px",
+                    background: "var(--surface)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 6,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <span style={{ fontSize: 14 }}>📍</span>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: "var(--muted)",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                    }}
+                  >
+                    Stock location
+                  </span>
+                  <strong style={{ fontSize: 13, color: "var(--text)" }}>
+                    {stagedPayload.stock_location ?? "—"}
+                  </strong>
+                  {stagedPayload.restock && (
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        color: "#0f766e",
+                        background: "rgba(15,118,110,0.14)",
+                        padding: "2px 8px",
+                        borderRadius: 999,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.05em",
+                      }}
+                    >
+                      ♻ Restock
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Per-role actions. Send-back (now "unlock") happens on
+                the audit-queue page where the note textarea lives.
+                On this detail page we keep it simple — Approve + Edit
+                + jump to the queue for the unlock conversation. */}
             <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-              {isApprover && isAwaitingApproval && (
+              {isApprover && (
                 <>
                   <form action={approveCutFormAction}>
                     <input type="hidden" name="session_block_id" value={block.id} />
@@ -1019,45 +1194,31 @@ export default async function CuttingDetailPage({
                       background: "var(--bg)",
                       border: "1px solid var(--border)",
                       borderRadius: 6,
-                      color: "#b45309",
+                      color: cutterEditUnlocked ? "#b45309" : "#15803d",
                       fontWeight: 600,
                     }}
-                    title="Open approvals queue to leave a note and send back to the cutter"
+                    title={
+                      cutterEditUnlocked
+                        ? "Open audit queue to lock the cutter edit back"
+                        : "Open audit queue to allow the cutter to edit this block"
+                    }
                   >
-                    ↩ Send back (in queue)
+                    {cutterEditUnlocked
+                      ? "🔒 Lock cutter edit (in queue)"
+                      : "🔓 Allow cutter edit (in queue)"}
                   </Link>
                 </>
               )}
-              {isApprover && isAwaitingCutterEdit && (
-                <>
-                  <Link
-                    href={`/cutting/${block.id}?edit=approval`}
-                    style={{
-                      textDecoration: "none",
-                      fontSize: 13,
-                      padding: "8px 16px",
-                      background: "var(--bg)",
-                      border: "1px solid var(--border)",
-                      borderRadius: 6,
-                      color: "var(--text)",
-                      fontWeight: 600,
-                    }}
-                  >
-                    ✏ Edit
-                  </Link>
-                  <form action={approveCutFormAction}>
-                    <input type="hidden" name="session_block_id" value={block.id} />
-                    <button
-                      className="primary-button"
-                      type="submit"
-                      title="Approve as-is, skipping the cutter edit"
-                    >
-                      ✓ Approve as-is
-                    </button>
-                  </form>
-                </>
+              {!isApprover && cutterEditUnlocked && canEditApprovalNow && (
+                <Link
+                  href={`/cutting/${block.id}?edit=approval`}
+                  className="primary-button"
+                  style={{ textDecoration: "none", padding: "8px 16px", fontWeight: 700 }}
+                >
+                  ✏ Edit submission
+                </Link>
               )}
-              {!isApprover && isAwaitingApproval && (
+              {!isApprover && !cutterEditUnlocked && (
                 <span
                   className="muted"
                   style={{
@@ -1067,18 +1228,9 @@ export default async function CuttingDetailPage({
                     borderRadius: 6,
                   }}
                 >
-                  Waiting for approver review. You'll see an Edit button if
-                  they send it back.
+                  Waiting for auditor review. You'll see an Edit button if
+                  they unlock editing for you.
                 </span>
-              )}
-              {!isApprover && isAwaitingCutterEdit && canEditApprovalNow && (
-                <Link
-                  href={`/cutting/${block.id}?edit=approval`}
-                  className="primary-button"
-                  style={{ textDecoration: "none", padding: "8px 16px", fontWeight: 700 }}
-                >
-                  ✏ Edit submission
-                </Link>
               )}
             </div>
           </div>
@@ -1182,5 +1334,119 @@ export default async function CuttingDetailPage({
         </div>
       )}
     </section>
+  );
+}
+
+/** Compact stat tile for the Submission Summary block on the cutting
+ *  detail page. Surfaces the per-bucket counts (Cut / Not cut / Extras
+ *  / Transferred / Remainders) so the auditor reads them at a glance. */
+function SummaryStat({
+  label,
+  count,
+  color,
+}: {
+  label: string;
+  count: number;
+  color: string;
+}) {
+  return (
+    <div
+      style={{
+        padding: "10px 12px",
+        background: `${color}11`,
+        border: `1px solid ${color}33`,
+        borderRadius: 6,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          fontWeight: 700,
+          color: "var(--muted)",
+          textTransform: "uppercase",
+          letterSpacing: "0.05em",
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          fontSize: 22,
+          fontWeight: 800,
+          color,
+          letterSpacing: "-0.02em",
+          marginTop: 2,
+          fontFamily: "ui-monospace, monospace",
+        }}
+      >
+        {count}
+      </div>
+    </div>
+  );
+}
+
+/** Render a labelled chip-row of slab IDs. When `allSlabsById` is
+ *  provided we also surface the slab's planned size + temple inline,
+ *  which is useful for the Cut / Not-cut buckets (those slabs were
+ *  part of the original plan). For Extras / Transfers we just show
+ *  IDs because the slabs aren't in the parent block's placed array. */
+function SlabIdList({
+  label,
+  color,
+  ids,
+  allSlabsById,
+}: {
+  label: string;
+  color: string;
+  ids: string[];
+  allSlabsById?: Map<string, { id: string; label?: string; temple?: string; sw?: number; sh?: number }>;
+}) {
+  if (ids.length === 0) return null;
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div
+        style={{
+          fontSize: 11,
+          fontWeight: 700,
+          color,
+          marginBottom: 6,
+        }}
+      >
+        {label} ({ids.length})
+      </div>
+      <div className="chip-row" style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+        {ids.map((id) => {
+          const s = allSlabsById?.get(id);
+          return (
+            <span
+              key={id}
+              className="plan-chip"
+              style={{
+                background: `${color}11`,
+                border: `1px solid ${color}33`,
+                fontFamily: "ui-monospace, monospace",
+                fontSize: 11,
+              }}
+            >
+              <strong>{id}</strong>
+              {s && (s.sw != null || s.sh != null) && (
+                <>
+                  {" · "}
+                  <span style={{ color: "var(--muted)" }}>
+                    {s.sw ?? "—"}×{s.sh ?? "—"}″
+                  </span>
+                </>
+              )}
+              {s?.temple ? (
+                <>
+                  {" · "}
+                  <span style={{ color: "var(--muted)" }}>{s.temple}</span>
+                </>
+              ) : null}
+            </span>
+          );
+        })}
+      </div>
+    </div>
   );
 }

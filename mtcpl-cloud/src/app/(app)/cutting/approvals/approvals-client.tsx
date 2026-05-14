@@ -1,24 +1,24 @@
 "use client";
 
 /**
- * Approvals queue — list view + per-row controls.
+ * Cutting Audit queue — single list, unlock-flag based.
  *
- * Sections
- *   A. Awaiting approval — cutter has submitted, approver hasn't acted.
- *   B. Sent back for edit — approver asked the cutter to fix.
+ * Migration 032 retired the second "Sent back for edit" section.
+ * Every block in the audit queue sits at status='awaiting_approval'.
+ * What changes per-row is `cutterEditUnlocked` — when true, the
+ * cutter (team_head submitter) gets an Edit button. When false,
+ * only the auditor can edit / approve.
  *
- * Buttons by role × status
- *   awaiting_approval + approver  → [✓ Approve] [✏ Edit] [↩ Send back]
- *   awaiting_approval + cutter    → read-only ("Waiting for review")
- *   awaiting_cutter_edit + approver → [✏ Edit] [✓ Approve as-is]
- *   awaiting_cutter_edit + cutter (own) → [✏ Edit] (with note shown)
- *   anything else / not-own → read-only
+ * Buttons by role × unlock state
+ *   Auditor + locked   → [✓ Approve] [✏ Edit] [🔓 Allow cutter to edit]
+ *   Auditor + unlocked → [✓ Approve] [✏ Edit] [🔒 Lock cutter edit]
+ *                        + small "🔓 Cutter can edit · note" indicator
+ *   Cutter + locked    → read-only ("Waiting for auditor review")
+ *   Cutter + unlocked  → [✏ Edit submission] · "Auditor unlocked editing"
+ *                        + sent-back-note prominently
  *
- * Edit doesn't open a modal — it navigates to the existing
- * /cutting/[id] detail page, which re-uses the same 3D preview +
- * FinishBlockForm with `initialPayload` pre-filled. Keeping a single
- * canonical surface for the cutter form avoids drift between two
- * UI copies.
+ * Edit doesn't open a modal — it navigates to /cutting/[id]?edit=approval
+ * which renders the pre-filled FinishBlockForm.
  */
 
 import Link from "next/link";
@@ -27,17 +27,17 @@ import { useRouter } from "next/navigation";
 
 export type ApprovalRow = {
   id: string;
-  status: "awaiting_approval" | "awaiting_cutter_edit";
   blockId: string;
   sessionCode: string | null;
   stone: string | null;
   yard: number | null;
+  cutterEditUnlocked: boolean;
   submittedAt: string | null;
   submittedByName: string | null;
   operatorName: string | null;
-  sentBackAt: string | null;
-  sentBackByName: string | null;
-  sentBackNote: string | null;
+  unlockAt: string | null;
+  unlockByName: string | null;
+  unlockNote: string | null;
   editedAt: string | null;
   editedByName: string | null;
   payloadSummary: {
@@ -56,68 +56,19 @@ type ServerResult = { ok: true } | { ok: false; error: string };
 
 export function ApprovalsClient({
   canApprove,
-  awaitingApproval,
-  awaitingCutterEdit,
-  approveAction,
-  sendBackAction,
-}: {
-  canApprove: boolean;
-  awaitingApproval: ApprovalRow[];
-  awaitingCutterEdit: ApprovalRow[];
-  approveAction: (formData: FormData) => Promise<ServerResult>;
-  sendBackAction: (formData: FormData) => Promise<ServerResult>;
-}) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 24, marginTop: 18 }}>
-      <Section
-        title="Awaiting approval"
-        emoji="👀"
-        emptyMessage={
-          canApprove
-            ? "Nothing waiting for approval right now."
-            : "You don't have any submissions waiting for approval."
-        }
-        rows={awaitingApproval}
-        canApprove={canApprove}
-        approveAction={approveAction}
-        sendBackAction={sendBackAction}
-      />
-      <Section
-        title="Sent back for edit"
-        emoji="↩"
-        emptyMessage={
-          canApprove
-            ? "Nothing currently sitting with cutters for edits."
-            : "Nothing was sent back to you. You'll see it here when an approver asks for changes."
-        }
-        rows={awaitingCutterEdit}
-        canApprove={canApprove}
-        approveAction={approveAction}
-        sendBackAction={sendBackAction}
-      />
-    </div>
-  );
-}
-
-function Section({
-  title,
-  emoji,
-  emptyMessage,
   rows,
-  canApprove,
   approveAction,
-  sendBackAction,
+  unlockAction,
+  lockAction,
 }: {
-  title: string;
-  emoji: string;
-  emptyMessage: string;
-  rows: ApprovalRow[];
   canApprove: boolean;
+  rows: ApprovalRow[];
   approveAction: (formData: FormData) => Promise<ServerResult>;
-  sendBackAction: (formData: FormData) => Promise<ServerResult>;
+  unlockAction: (formData: FormData) => Promise<ServerResult>;
+  lockAction: (formData: FormData) => Promise<ServerResult>;
 }) {
   return (
-    <div>
+    <div style={{ marginTop: 18 }}>
       <div
         style={{
           display: "flex",
@@ -129,11 +80,20 @@ function Section({
         }}
       >
         <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "var(--text)" }}>
-          {emoji} {title}
+          👀 Awaiting audit
         </h2>
         <span className="muted" style={{ fontSize: 12 }}>
           {rows.length} block{rows.length === 1 ? "" : "s"}
         </span>
+        {rows.some((r) => r.cutterEditUnlocked) && (
+          <span style={{ fontSize: 11, color: "var(--muted)" }}>
+            ·{" "}
+            <span style={{ color: "#15803d", fontWeight: 600 }}>
+              {rows.filter((r) => r.cutterEditUnlocked).length} unlocked
+            </span>
+            {" "}for cutter edit
+          </span>
+        )}
       </div>
 
       {rows.length === 0 ? (
@@ -147,7 +107,9 @@ function Section({
             borderRadius: 6,
           }}
         >
-          {emptyMessage}
+          {canApprove
+            ? "Nothing waiting for audit right now."
+            : "You don't have any Cutting Done submissions waiting for audit."}
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -157,7 +119,8 @@ function Section({
               row={row}
               canApprove={canApprove}
               approveAction={approveAction}
-              sendBackAction={sendBackAction}
+              unlockAction={unlockAction}
+              lockAction={lockAction}
             />
           ))}
         </div>
@@ -170,24 +133,26 @@ function ApprovalCard({
   row,
   canApprove,
   approveAction,
-  sendBackAction,
+  unlockAction,
+  lockAction,
 }: {
   row: ApprovalRow;
   canApprove: boolean;
   approveAction: (formData: FormData) => Promise<ServerResult>;
-  sendBackAction: (formData: FormData) => Promise<ServerResult>;
+  unlockAction: (formData: FormData) => Promise<ServerResult>;
+  lockAction: (formData: FormData) => Promise<ServerResult>;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [actionError, setActionError] = useState<string | null>(null);
-  const [showSendBack, setShowSendBack] = useState(false);
-  const [sendBackNote, setSendBackNote] = useState("");
+  const [showUnlock, setShowUnlock] = useState(false);
+  const [unlockNote, setUnlockNote] = useState("");
 
   const summary = row.payloadSummary;
-  const isAwaitingApproval = row.status === "awaiting_approval";
-  const isCutterEdit = row.status === "awaiting_cutter_edit";
+  const unlocked = row.cutterEditUnlocked;
 
-  const canCutterEditThisRow = isCutterEdit && (canApprove || row.isOwnSubmission);
+  // Cutters edit only when unlocked. Approvers edit any time.
+  const cutterCanEdit = !canApprove && unlocked && row.isOwnSubmission;
 
   function runApprove() {
     setActionError(null);
@@ -203,19 +168,33 @@ function ApprovalCard({
     });
   }
 
-  function runSendBack() {
+  function runUnlock() {
     setActionError(null);
     startTransition(async () => {
       const fd = new FormData();
       fd.set("session_block_id", row.id);
-      fd.set("note", sendBackNote.trim());
-      const result = await sendBackAction(fd);
+      fd.set("note", unlockNote.trim());
+      const result = await unlockAction(fd);
       if (!result.ok) {
         setActionError(result.error);
         return;
       }
-      setShowSendBack(false);
-      setSendBackNote("");
+      setShowUnlock(false);
+      setUnlockNote("");
+      router.refresh();
+    });
+  }
+
+  function runLock() {
+    setActionError(null);
+    startTransition(async () => {
+      const fd = new FormData();
+      fd.set("session_block_id", row.id);
+      const result = await lockAction(fd);
+      if (!result.ok) {
+        setActionError(result.error);
+        return;
+      }
       router.refresh();
     });
   }
@@ -224,8 +203,8 @@ function ApprovalCard({
     <div
       className="plan-card"
       style={
-        isCutterEdit
-          ? { borderLeft: "5px solid #b45309", background: "rgba(180,83,9,0.05)" }
+        unlocked
+          ? { borderLeft: "5px solid #16a34a", background: "rgba(34, 197, 94, 0.05)" }
           : { borderLeft: "5px solid var(--gold-dark)" }
       }
     >
@@ -251,8 +230,7 @@ function ApprovalCard({
               : "—"}
             {row.submittedByName && (
               <>
-                {" "}
-                by{" "}
+                {" "}by{" "}
                 <span style={{ color: "var(--gold-dark)", fontWeight: 600 }}>
                   {row.submittedByName}
                 </span>
@@ -283,29 +261,36 @@ function ApprovalCard({
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
-          {isAwaitingApproval ? (
+          <span
+            className="role-pill"
+            style={{
+              background: "var(--gold)",
+              color: "#fff",
+              fontWeight: 700,
+              fontSize: 11,
+            }}
+          >
+            👀 Awaiting audit
+          </span>
+          {unlocked && (
             <span
-              className="role-pill"
               style={{
-                background: "var(--gold)",
-                color: "#fff",
+                fontSize: 10,
                 fontWeight: 700,
-                fontSize: 11,
+                padding: "2px 8px",
+                borderRadius: 999,
+                background: "rgba(34, 197, 94, 0.14)",
+                color: "#15803d",
+                letterSpacing: "0.05em",
+                textTransform: "uppercase",
               }}
+              title={
+                row.unlockNote
+                  ? `Cutter can edit · note: ${row.unlockNote}`
+                  : "Cutter can edit this block"
+              }
             >
-              👀 Awaiting approval
-            </span>
-          ) : (
-            <span
-              className="role-pill"
-              style={{
-                background: "#b45309",
-                color: "#fff",
-                fontWeight: 700,
-                fontSize: 11,
-              }}
-            >
-              ↩ Sent back for edit
+              🔓 Cutter unlocked
             </span>
           )}
           <Link
@@ -327,7 +312,6 @@ function ApprovalCard({
         </div>
       </div>
 
-      {/* Payload summary chips */}
       {summary && (
         <div
           className="chip-row"
@@ -385,14 +369,16 @@ function ApprovalCard({
         </div>
       )}
 
-      {/* Sent-back note prominently displayed when present */}
-      {isCutterEdit && row.sentBackNote && (
+      {/* Sent-back / unlock note — prominently shown when present and
+          the block is currently unlocked. Auditor sees this for context;
+          cutter sees this as the "what to fix" reminder. */}
+      {unlocked && row.unlockNote && (
         <div
           style={{
             marginTop: 10,
             padding: "10px 12px",
-            background: "rgba(180,83,9,0.10)",
-            border: "1px solid rgba(180,83,9,0.35)",
+            background: "rgba(34, 197, 94, 0.10)",
+            border: "1px solid rgba(22, 163, 74, 0.35)",
             borderRadius: 6,
           }}
         >
@@ -400,22 +386,21 @@ function ApprovalCard({
             style={{
               fontSize: 10,
               fontWeight: 700,
-              color: "#b45309",
+              color: "#15803d",
               textTransform: "uppercase",
               letterSpacing: "0.06em",
               marginBottom: 4,
             }}
           >
-            ↩ Approver note
-            {row.sentBackByName ? ` · from ${row.sentBackByName}` : ""}
+            🔓 Auditor note · cutter can edit
+            {row.unlockByName ? ` · from ${row.unlockByName}` : ""}
           </div>
           <p style={{ margin: 0, fontSize: 13, color: "var(--text)", lineHeight: 1.5 }}>
-            {row.sentBackNote}
+            {row.unlockNote}
           </p>
         </div>
       )}
 
-      {/* Action error banner */}
       {actionError && (
         <div
           role="alert"
@@ -433,13 +418,12 @@ function ApprovalCard({
         </div>
       )}
 
-      {/* Per-row buttons */}
       <div
         className="record-actions"
         style={{ marginTop: 12, gap: 8, display: "flex", flexWrap: "wrap" }}
       >
-        {/* Approver actions on awaiting_approval */}
-        {canApprove && isAwaitingApproval && (
+        {/* Auditor — full action set */}
+        {canApprove && (
           <>
             <button
               type="button"
@@ -466,60 +450,50 @@ function ApprovalCard({
             >
               ✏ Edit
             </Link>
-            <button
-              type="button"
-              onClick={() => setShowSendBack((v) => !v)}
-              disabled={pending}
-              style={{
-                fontSize: 13,
-                padding: "8px 16px",
-                background: showSendBack ? "rgba(180,83,9,0.18)" : "var(--bg)",
-                border: "1px solid var(--border)",
-                borderRadius: 6,
-                color: "#b45309",
-                fontWeight: 600,
-                cursor: pending ? "wait" : "pointer",
-              }}
-            >
-              ↩ Send back for edit
-            </button>
+            {unlocked ? (
+              <button
+                type="button"
+                onClick={runLock}
+                disabled={pending}
+                style={{
+                  fontSize: 13,
+                  padding: "8px 16px",
+                  background: "var(--bg)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                  color: "#b45309",
+                  fontWeight: 600,
+                  cursor: pending ? "wait" : "pointer",
+                }}
+                title="Revoke cutter's edit permission. Cutter goes back to read-only."
+              >
+                🔒 Lock cutter edit
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setShowUnlock((v) => !v)}
+                disabled={pending}
+                style={{
+                  fontSize: 13,
+                  padding: "8px 16px",
+                  background: showUnlock ? "rgba(22, 163, 74, 0.14)" : "var(--bg)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                  color: "#15803d",
+                  fontWeight: 600,
+                  cursor: pending ? "wait" : "pointer",
+                }}
+                title="Allow the cutter to edit this block. Status stays awaiting_approval."
+              >
+                🔓 Allow cutter to edit
+              </button>
+            )}
           </>
         )}
 
-        {/* Approver actions on awaiting_cutter_edit */}
-        {canApprove && isCutterEdit && (
-          <>
-            <Link
-              href={`/cutting/${row.id}?edit=approval`}
-              style={{
-                textDecoration: "none",
-                fontSize: 13,
-                padding: "8px 16px",
-                background: "var(--bg)",
-                border: "1px solid var(--border)",
-                borderRadius: 6,
-                color: "var(--text)",
-                fontWeight: 600,
-                whiteSpace: "nowrap",
-              }}
-            >
-              ✏ Edit
-            </Link>
-            <button
-              type="button"
-              className="primary-button"
-              onClick={runApprove}
-              disabled={pending}
-              style={{ fontSize: 13 }}
-              title="Approve as-is (skip cutter edit)"
-            >
-              {pending ? "Approving…" : "✓ Approve as-is"}
-            </button>
-          </>
-        )}
-
-        {/* Cutter editing their own block that was sent back */}
-        {!canApprove && canCutterEditThisRow && (
+        {/* Cutter — view-only or edit (when unlocked) */}
+        {cutterCanEdit && (
           <Link
             href={`/cutting/${row.id}?edit=approval`}
             className="primary-button"
@@ -534,9 +508,7 @@ function ApprovalCard({
             ✏ Edit submission
           </Link>
         )}
-
-        {/* Cutter on their own block in awaiting_approval — read-only */}
-        {!canApprove && isAwaitingApproval && row.isOwnSubmission && (
+        {!canApprove && !cutterCanEdit && row.isOwnSubmission && (
           <span
             className="muted"
             style={{
@@ -546,14 +518,13 @@ function ApprovalCard({
               borderRadius: 6,
             }}
           >
-            Waiting for approver review. You'll get a button to edit if they
-            send it back.
+            Waiting for auditor review. You'll get an Edit button if
+            they unlock the row for you.
           </span>
         )}
       </div>
 
-      {/* Send-back dialog (inline) */}
-      {showSendBack && canApprove && isAwaitingApproval && (
+      {showUnlock && canApprove && !unlocked && (
         <div
           style={{
             marginTop: 12,
@@ -575,9 +546,9 @@ function ApprovalCard({
             Note for the cutter (optional)
           </label>
           <textarea
-            value={sendBackNote}
-            onChange={(e) => setSendBackNote(e.target.value)}
-            placeholder="e.g. Check slab MH-0018-2 — looks like it wasn't actually cut. Also re-confirm the transfer from Block 12."
+            value={unlockNote}
+            onChange={(e) => setUnlockNote(e.target.value)}
+            placeholder="e.g. 'Check slab MH-0018-2 — looks like it wasn't cut. Fix and resubmit.'"
             rows={3}
             style={{
               width: "100%",
@@ -594,18 +565,18 @@ function ApprovalCard({
           <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
             <button
               type="button"
-              onClick={runSendBack}
+              onClick={runUnlock}
               disabled={pending}
               className="primary-button"
-              style={{ fontSize: 13, background: "#b45309" }}
+              style={{ fontSize: 13, background: "#16a34a" }}
             >
-              {pending ? "Sending back…" : "↩ Confirm send back"}
+              {pending ? "Unlocking…" : "🔓 Allow cutter to edit"}
             </button>
             <button
               type="button"
               onClick={() => {
-                setShowSendBack(false);
-                setSendBackNote("");
+                setShowUnlock(false);
+                setUnlockNote("");
               }}
               disabled={pending}
               style={{
