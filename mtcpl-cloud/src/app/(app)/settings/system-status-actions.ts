@@ -18,14 +18,16 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
 import { deptStatusKey } from "@/lib/system-status";
 import type { Department } from "@/lib/departments";
+import {
+  DEV_BYPASS_COOKIE,
+  DEV_BYPASS_MAX_AGE_SECONDS,
+} from "@/lib/dev-bypass";
 
-/** Cookie name for the developer maintenance-bypass override (Mig 036
- *  follow-up). When present and the user is a developer, the root
- *  layout skips the system-down screen and lets them continue into
- *  the app while everyone else is still locked. Short-lived so it
- *  doesn't survive an inadvertent browser switch. */
-export const DEV_BYPASS_COOKIE = "dev_maint_bypass";
-const DEV_BYPASS_MAX_AGE_SECONDS = 60 * 60 * 4; // 4 hours
+// Re-exporting non-async constants from this file would crash the
+// Next.js build because of the "use server" directive — server-action
+// modules may only export async functions. See src/lib/dev-bypass.ts
+// for DEV_BYPASS_COOKIE / DEV_BYPASS_MAX_AGE_SECONDS, imported above
+// and used below.
 
 type Result = { ok: true } | { ok: false; error: string };
 

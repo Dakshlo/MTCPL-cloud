@@ -23,10 +23,8 @@ import {
 } from "@/lib/departments";
 import { getProfilesMap } from "@/lib/profiles";
 import { SystemDownScreen } from "@/components/system-down-screen";
-import {
-  DEV_BYPASS_COOKIE,
-  disableDevMaintenanceBypassAction,
-} from "@/app/(app)/settings/system-status-actions";
+import { DEV_BYPASS_COOKIE } from "@/lib/dev-bypass";
+import { disableDevMaintenanceBypassAction } from "@/app/(app)/settings/system-status-actions";
 
 const SETTINGS_ROLES = ["developer", "owner", "team_head"];
 const NOTIFICATION_ROLES = ["developer"]; // flip to include "team_head" at rollout
