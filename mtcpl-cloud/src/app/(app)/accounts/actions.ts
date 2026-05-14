@@ -100,9 +100,14 @@ export async function submitBillAction(
 
     if (error) {
       if (error.code === PG_UNIQUE_VIOLATION) {
+        // Migration 039: uniqueness is now scoped to (vendor, bill_no,
+        // financial_year). The same bill_no IS allowed in a different
+        // FY — explain that in the error so the user understands the
+        // rule and can check the bill_date.
         return {
           ok: false,
-          error: `This bill number is already on file for this vendor. Pick a different bill number or open the existing entry.`,
+          error:
+            "Duplicate bill — this vendor already has a bill with this number in the same financial year (April → March). Vendors can re-use a bill number across financial years, so check the bill date if you think this is a different entry.",
         };
       }
       return { ok: false, error: error.message };
