@@ -654,6 +654,28 @@ export async function upsertComponentAction(
   const description = String(formData.get("description") || "").trim() || null;
   const displayOrderRaw = String(formData.get("display_order") || "0").trim();
   const displayOrder = Number(displayOrderRaw);
+  // Mig 044 — image upload as data URL. Empty string means clear
+  // any existing image. We validate the shape lightly + cap size
+  // server-side too as defence in depth.
+  const imageDataUrlRaw = String(formData.get("image_data_url") || "");
+  let imageDataUrl: string | null = imageDataUrlRaw.trim() || null;
+  if (imageDataUrl) {
+    if (!imageDataUrl.startsWith("data:image/")) {
+      return {
+        ok: false,
+        error: "Image upload must be a data URL (data:image/...).",
+      };
+    }
+    // Base64 expands by ~4/3, so 300 KB encoded ≈ 220 KB raw.
+    // Match the client cap of 200 KB raw with a small safety
+    // margin.
+    if (imageDataUrl.length > 300_000) {
+      return {
+        ok: false,
+        error: "Image is too large — keep it under 200 KB.",
+      };
+    }
+  }
 
   if (!name) return { ok: false, error: "Component name is required." };
   if (!componentType) return { ok: false, error: "Pick a component type." };
@@ -673,6 +695,7 @@ export async function upsertComponentAction(
           unit,
           description,
           display_order: displayOrder,
+          image_data_url: imageDataUrl,
           updated_by: profile.id,
         })
         .eq("id", id);
@@ -698,6 +721,7 @@ export async function upsertComponentAction(
           unit,
           description,
           display_order: displayOrder,
+          image_data_url: imageDataUrl,
           is_active: true,
           created_by: profile.id,
         })

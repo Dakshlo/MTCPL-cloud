@@ -21,6 +21,11 @@ export type ScaffoldingComponentType =
   | "standard"
   | "ledger"
   | "transom"
+  // Mig 044 — perforated screen panel. Catalog collapsed to four
+  // top-level types: Standard / Ledger / Transom / Jali. The other
+  // historical types stay in the union so legacy inventory_movements
+  // rows that point at them keep deserializing cleanly.
+  | "jali"
   | "brace"
   | "jack_base"
   | "u_head"
@@ -182,6 +187,25 @@ function TieRod({ size = 64, style }: IconProps) {
   );
 }
 
+function Jali({ size = 64, style }: IconProps) {
+  return (
+    <svg {...baseProps(size)} style={style} aria-label="Jali">
+      {/* Outer frame */}
+      <rect x="14" y="14" width="68" height="68" rx="3" />
+      {/* Perforated grid — three rows × three cols of small openings */}
+      <rect x="24" y="24" width="14" height="14" rx="2" />
+      <rect x="42" y="24" width="14" height="14" rx="2" />
+      <rect x="60" y="24" width="14" height="14" rx="2" />
+      <rect x="24" y="42" width="14" height="14" rx="2" />
+      <rect x="42" y="42" width="14" height="14" rx="2" />
+      <rect x="60" y="42" width="14" height="14" rx="2" />
+      <rect x="24" y="60" width="14" height="14" rx="2" />
+      <rect x="42" y="60" width="14" height="14" rx="2" />
+      <rect x="60" y="60" width="14" height="14" rx="2" />
+    </svg>
+  );
+}
+
 function Other({ size = 64, style }: IconProps) {
   return (
     <svg {...baseProps(size)} style={style} aria-label="Other">
@@ -196,6 +220,7 @@ const ICONS: Record<ScaffoldingComponentType, (p: IconProps) => ReactElement> = 
   standard: Standard,
   ledger: Ledger,
   transom: Transom,
+  jali: Jali,
   brace: Brace,
   jack_base: JackBase,
   u_head: UHead,
@@ -211,11 +236,37 @@ export function ComponentIcon({
   type,
   size = 64,
   style,
+  imageDataUrl,
 }: {
   type: ScaffoldingComponentType;
   size?: number;
   style?: CSSProperties;
+  /** Mig 044 — when the catalog has a real PNG uploaded for the
+   *  component, render that instead of the SVG fallback. Daksh
+   *  uploads transparent PNGs via the catalog tab; cards across
+   *  the inventory module pick them up automatically. */
+  imageDataUrl?: string | null;
 }) {
+  if (imageDataUrl) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={imageDataUrl}
+        alt={labelForComponentType(type)}
+        width={size}
+        height={size}
+        style={{
+          objectFit: "contain",
+          // Pull the visual centre slightly tighter than the SVG
+          // bounding box so user-uploaded PNGs with their own
+          // padding still feel "filled".
+          maxWidth: "100%",
+          maxHeight: "100%",
+          ...style,
+        }}
+      />
+    );
+  }
   const Glyph = ICONS[type] ?? Other;
   return <Glyph size={size} style={style} />;
 }
@@ -229,6 +280,8 @@ export function labelForComponentType(t: ScaffoldingComponentType): string {
       return "Ledger";
     case "transom":
       return "Transom";
+    case "jali":
+      return "Jali";
     case "brace":
       return "Brace";
     case "jack_base":
@@ -254,6 +307,7 @@ export const COMPONENT_TYPE_OPTIONS: ScaffoldingComponentType[] = [
   "standard",
   "ledger",
   "transom",
+  "jali",
   "brace",
   "jack_base",
   "u_head",

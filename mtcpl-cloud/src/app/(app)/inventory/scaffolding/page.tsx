@@ -231,6 +231,7 @@ export default async function ScaffoldingBoardPage({
                       unit={c.unit}
                       qty={qty}
                       pendingOut={pending}
+                      imageDataUrl={c.image_data_url}
                       secondaryLine={
                         showPlant && outAtSites > 0
                           ? `+${outAtSites.toLocaleString("en-IN")} out at sites`

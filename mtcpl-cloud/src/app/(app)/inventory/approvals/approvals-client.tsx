@@ -255,6 +255,7 @@ export function ApprovalsClient({
                       <ComponentIcon
                         type={(c?.component_type ?? "other") as never}
                         size={32}
+                        imageDataUrl={c?.image_data_url ?? undefined}
                       />
                     </span>
                     <div style={{ flex: 1, minWidth: 0 }}>

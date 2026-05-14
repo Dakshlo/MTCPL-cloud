@@ -430,7 +430,11 @@ export default async function HistoryPage({
                         }}
                       >
                         <span style={{ color: INV_THEME.steel }}>
-                          <ComponentIcon type={typeKey} size={22} />
+                          <ComponentIcon
+                            type={typeKey}
+                            size={22}
+                            imageDataUrl={c?.image_data_url ?? undefined}
+                          />
                         </span>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div

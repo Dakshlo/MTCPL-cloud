@@ -21,6 +21,7 @@ export function ComponentCard({
   secondaryLine,
   href,
   emphasis,
+  imageDataUrl,
 }: {
   name: string;
   componentType: ScaffoldingComponentType;
@@ -33,6 +34,9 @@ export function ComponentCard({
   /** If provided, the card wraps in an <a>. */
   href?: string;
   emphasis?: "default" | "muted";
+  /** Mig 044 — uploaded PNG (data URL) for the component. When
+   *  present the card shows the real image instead of the SVG. */
+  imageDataUrl?: string | null;
 }) {
   const level = stockLevel(qty);
   const muted = emphasis === "muted";
@@ -64,7 +68,11 @@ export function ComponentCard({
           minHeight: 80,
         }}
       >
-        <ComponentIcon type={componentType} size={72} />
+        <ComponentIcon
+          type={componentType}
+          size={88}
+          imageDataUrl={imageDataUrl ?? undefined}
+        />
       </div>
 
       {/* Name + size */}

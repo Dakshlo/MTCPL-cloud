@@ -41,6 +41,9 @@ export type ScaffoldingComponent = {
   description: string | null;
   display_order: number;
   is_active: boolean;
+  /** Mig 044 — optional uploaded PNG (transparent background, data
+   *  URL) shown on inventory cards instead of the SVG fallback. */
+  image_data_url: string | null;
   created_at: string;
   updated_at: string;
 };

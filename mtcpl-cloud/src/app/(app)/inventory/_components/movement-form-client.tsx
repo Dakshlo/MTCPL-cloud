@@ -36,6 +36,10 @@ type ComponentLite = {
   size_spec: string | null;
   unit: string;
   display_order: number;
+  // Mig 044 — optional uploaded PNG (data URL). When present, the
+  // catalog tile + cart row render the real image instead of the
+  // SVG fallback.
+  image_data_url?: string | null;
 };
 
 type StockEntry = { onHand: number; pendingOut: number };
@@ -349,7 +353,11 @@ export function MovementForm({
                             color: inCart ? "#fff" : INV_THEME.steel,
                           }}
                         >
-                          <ComponentIcon type={c.component_type as never} size={28} />
+                          <ComponentIcon
+                            type={c.component_type as never}
+                            size={28}
+                            imageDataUrl={c.image_data_url ?? undefined}
+                          />
                           <div style={{ display: "flex", flexDirection: "column" }}>
                             <span
                               style={{
@@ -479,7 +487,11 @@ export function MovementForm({
                       color: INV_THEME.steel,
                     }}
                   >
-                    <ComponentIcon type={c.component_type as never} size={22} />
+                    <ComponentIcon
+                      type={c.component_type as never}
+                      size={22}
+                      imageDataUrl={c.image_data_url ?? undefined}
+                    />
                     <span
                       style={{
                         fontSize: 11,

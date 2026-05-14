@@ -218,7 +218,11 @@ function ComponentRow({
       }}
     >
       <span style={{ color: INV_THEME.steel }}>
-        <ComponentIcon type={c.component_type} size={32} />
+        <ComponentIcon
+          type={c.component_type}
+          size={32}
+          imageDataUrl={c.image_data_url ?? undefined}
+        />
       </span>
       <div>
         <div style={{ fontWeight: 800, fontSize: 13, color: INV_THEME.steel }}>
@@ -274,8 +278,43 @@ function ComponentForm({
   const [type, setType] = useState<ScaffoldingComponentType>(
     component?.component_type ?? "standard",
   );
+  // Mig 044 — image upload. The user picks a PNG (transparent
+  // recommended); we read it into a data URL and store the full
+  // string in scaffolding_components.image_data_url. Tiny files
+  // for ~4 components, no Supabase Storage needed.
+  const [imageDataUrl, setImageDataUrl] = useState<string | null>(
+    component?.image_data_url ?? null,
+  );
+  const [imageError, setImageError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Max accepted upload size — keeps the DB row small + the JSON
+  // round-trip fast. 200 KB is plenty for a transparent PNG icon.
+  const MAX_IMAGE_BYTES = 200 * 1024;
+
+  async function onImagePick(e: React.ChangeEvent<HTMLInputElement>) {
+    setImageError(null);
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setImageError("Pick an image file (PNG / JPG / WebP).");
+      return;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      setImageError(
+        `Image is ${Math.round(file.size / 1024)} KB — keep it under ${MAX_IMAGE_BYTES / 1024} KB so cards stay snappy.`,
+      );
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result === "string") setImageDataUrl(result);
+    };
+    reader.onerror = () => setImageError("Couldn't read the file.");
+    reader.readAsDataURL(file);
+  }
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -283,6 +322,9 @@ function ComponentForm({
     setSubmitting(true);
     const fd = new FormData(e.currentTarget);
     if (mode === "edit" && component) fd.append("id", component.id);
+    // Send the image data URL alongside. Empty string clears any
+    // previously-saved image; non-empty replaces it.
+    fd.set("image_data_url", imageDataUrl ?? "");
     const res = await upsertComponentAction(fd);
     if (!res.ok) {
       setError(res.error);
@@ -307,7 +349,11 @@ function ComponentForm({
       }}
     >
       <div style={{ color: INV_THEME.steel }}>
-        <ComponentIcon type={type} size={48} />
+        <ComponentIcon
+          type={type}
+          size={48}
+          imageDataUrl={imageDataUrl ?? undefined}
+        />
       </div>
       <Field label="Type">
         <select
@@ -366,6 +412,98 @@ function ComponentForm({
           style={inputStyle}
         />
       </Field>
+
+      {/* Mig 044 — image upload. PNG (transparent) recommended.
+          Reads the file as a data URL; preview shows the resulting
+          image at card-sized scale so the user sees what cards will
+          look like before saving. Max 200 KB. */}
+      <Field label="Image (PNG, transparent)" wide>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 14,
+            background: INV_THEME.cream,
+            border: `1px solid ${INV_THEME.parchment}`,
+            borderRadius: 8,
+            padding: 10,
+          }}
+        >
+          <div
+            style={{
+              width: 80,
+              height: 80,
+              flexShrink: 0,
+              background: "#fff",
+              border: `1px dashed ${INV_THEME.parchment}`,
+              borderRadius: 6,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: INV_THEME.steel,
+            }}
+          >
+            <ComponentIcon
+              type={type}
+              size={64}
+              imageDataUrl={imageDataUrl ?? undefined}
+            />
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={onImagePick}
+              style={{ fontSize: 12 }}
+              aria-label="Upload component image"
+            />
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              {imageDataUrl && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setImageDataUrl(null);
+                    setImageError(null);
+                  }}
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    background: "transparent",
+                    color: INV_THEME.stockOut,
+                    border: "none",
+                    cursor: "pointer",
+                    padding: 0,
+                    textDecoration: "underline",
+                  }}
+                >
+                  Remove image
+                </button>
+              )}
+              <span
+                style={{
+                  fontSize: 10,
+                  color: INV_THEME.steelLight,
+                  marginLeft: imageDataUrl ? "auto" : 0,
+                }}
+              >
+                PNG / JPG / WebP, ≤ 200 KB
+              </span>
+            </div>
+            {imageError && (
+              <span
+                style={{
+                  fontSize: 11,
+                  color: INV_THEME.stockOut,
+                  fontWeight: 600,
+                }}
+              >
+                {imageError}
+              </span>
+            )}
+          </div>
+        </div>
+      </Field>
+
       {error && (
         <div
           role="alert"
