@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 const WATCHED_TABLES = [
+  // Production tables
   "blocks",
   "slab_requirements",
   "cut_sessions",
@@ -13,7 +14,16 @@ const WATCHED_TABLES = [
   "cut_session_slabs",
   "carving_items",
   "dispatch_logs",
-  "notifications"
+  "notifications",
+  // Mig 052 follow-on (Daksh, May 2026): finance pages weren't
+  // auto-refreshing when the owner confirmed a payment on his PC —
+  // the accountant's screen stayed stale until manual reload. Same
+  // for vendor edits, new bills, bank-reject flips. Adding the
+  // three core accounting tables to the watch list — every page in
+  // /accounts/* re-fetches on the next event within ~450ms.
+  "bills",
+  "bill_payments",
+  "bill_vendors",
 ] as const;
 
 export function RealtimeRefresh() {
