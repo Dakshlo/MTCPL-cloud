@@ -13,6 +13,7 @@
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { runOptimization, type BlockRow, type SlabRow } from "@/lib/planning/packing";
 import { facilityOfYard, YARDS_BY_FACILITY, type Facility } from "@/lib/yards";
+import { POST_CUT_STATUSES } from "@/lib/slab-statuses";
 import {
   buildLineages,
   aggregateLineages,
@@ -2208,11 +2209,15 @@ async function getStoneEfficiency(input: Record<string, unknown>) {
       .from("blocks")
       .select("id, stone, yard, quality, category, length_ft, width_ft, height_ft, status, created_at, created_by")
       .eq("category", "Reused"),
+    // Match /block-journey/page.tsx — credit each block for every slab
+    // that came out of it, regardless of where the slab is now (carving
+    // / completed / dispatched / rejected). cut_done-only is the
+    // MT-B-246 bug. POST_CUT_STATUSES is the shared canonical set.
     admin
       .from("slab_requirements")
       .select("id, length_ft, width_ft, thickness_ft, source_block_id, label, temple, status")
       .not("source_block_id", "is", null)
-      .eq("status", "cut_done"),
+      .in("status", POST_CUT_STATUSES),
     admin.from("cut_session_blocks").select("block_id, status").eq("status", "done"),
   ]);
 

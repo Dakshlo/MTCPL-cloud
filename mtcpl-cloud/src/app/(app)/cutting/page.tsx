@@ -13,6 +13,7 @@ import { RejectButton } from "./reject-button";
 import { UndoApproveButton } from "./undo-approve-button";
 import { CuttingTimer } from "./cutting-timer";
 import { computeCutEfficiency, computeActualCutEfficiency } from "@/lib/cut-efficiency";
+import { POST_CUT_STATUSES } from "@/lib/slab-statuses";
 import { yardLabel, facilityOfYard, facilityLabel, FACILITIES, type Facility } from "@/lib/yards";
 import { PrintReportButton } from "./print-report-button";
 import { SelectionProvider } from "./selection-context";
@@ -277,12 +278,24 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
   if (activeTab === "done" && rows.length > 0) {
     const parentBlockIds = [...new Set(rows.map(r => r.block_id).filter(Boolean))];
 
-    // Actually cut slabs for these blocks
+    // Actually cut slabs for these blocks.
+    //
+    // Bug fix (Daksh, MT-B-246): the previous query used
+    //   .eq("status", "cut_done")
+    // which only returned slabs still sitting at the cut_done stage.
+    // As soon as a slab was assigned to carving / dispatched / rejected
+    // its status flipped and it vanished from the Done-card chip row —
+    // so a block that produced 8 slabs over time would look like it
+    // produced 3 because the others had already moved downstream.
+    //
+    // POST_CUT_STATUSES is the shared constant for "slab was physically
+    // produced from a block" — keeps every consumer (this page,
+    // /slabs/ready, /block-journey, the exports, the AI tool) in sync.
     const { data: realSlabRows } = await supabase
       .from("slab_requirements")
       .select("id, label, temple, length_ft, width_ft, thickness_ft, source_block_id, status, cut_source_kind")
       .in("source_block_id", parentBlockIds)
-      .eq("status", "cut_done");
+      .in("status", POST_CUT_STATUSES);
     for (const s of realSlabRows ?? []) {
       if (!s.source_block_id) continue;
       const sw = Number(s.length_ft);

@@ -28,6 +28,10 @@ const STATUS_TINT: Record<string, { label: string; bg: string; fg: string }> = {
   carving_in_progress:  { label: "Being carved",            bg: "rgba(59,130,246,0.14)", fg: "#1e40af" },
   completed:            { label: "Carving done",            bg: "rgba(16,185,129,0.16)", fg: "#0f766e" },
   dispatched:           { label: "Dispatched",              bg: "rgba(148,163,184,0.18)", fg: "#475569" },
+  // Broken-during-carving terminal status. Still kept visible so the
+  // cutting team can audit "which slabs from MT-B-246 are alive vs
+  // destroyed" — the source block stays credited for cutting them.
+  rejected:             { label: "Broken / rejected",        bg: "rgba(220,38,38,0.14)",  fg: "#991b1b" },
 };
 
 function StatusChip({ status }: { status: string }) {
@@ -288,6 +292,7 @@ export function ReadySlabsClient({
     "carving_in_progress",
     "completed",
     "dispatched",
+    "rejected",
   ];
 
   return (

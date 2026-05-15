@@ -11,7 +11,14 @@
 
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { POST_CUT_STATUSES } from "@/lib/slab-statuses";
 import { ReadySlabsClient } from "@/app/(app)/slabs/ready/ready-client";
+
+// Match the standalone /slabs/ready page: the embed kiosk view must
+// show the same slabs (including ones in carving / dispatch / rejected),
+// otherwise the kiosk and the in-app page give different counts for the
+// same block — the bug Daksh hit with MT-B-246. POST_CUT_STATUSES is the
+// shared canonical set so this never drifts.
 
 export default async function EmbedReadySlabsPage() {
   await requireAuth(["owner", "team_head", "block_slab_entry"]);
@@ -20,8 +27,8 @@ export default async function EmbedReadySlabsPage() {
   const [{ data, error }, { data: stoneTypeRows }] = await Promise.all([
     admin
       .from("slab_requirements")
-      .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority, created_at, updated_at")
-      .eq("status", "cut_done")
+      .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority, created_at, updated_at, source_block_id")
+      .in("status", POST_CUT_STATUSES)
       .order("updated_at", { ascending: false }),
     admin.from("stone_types").select("name").order("name"),
   ]);

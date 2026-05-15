@@ -19,6 +19,7 @@ import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { POST_CUT_STATUSES } from "@/lib/slab-statuses";
 import {
   buildLineages,
   type BjBlockRow,
@@ -58,11 +59,15 @@ export async function GET(req: NextRequest) {
         "id, stone, yard, quality, category, length_ft, width_ft, height_ft, status, created_at, created_by",
       )
       .eq("category", "Reused"),
+    // Match the in-app /block-journey page: lineage credits a block for
+    // every slab that came out of it, regardless of where the slab is
+    // now in the carving/dispatch pipeline (including rejected as
+    // broken). cut_done-only was the MT-B-246 bug.
     admin
       .from("slab_requirements")
       .select("id, length_ft, width_ft, thickness_ft, source_block_id, label, temple, status")
       .not("source_block_id", "is", null)
-      .eq("status", "cut_done"),
+      .in("status", POST_CUT_STATUSES),
     admin
       .from("cut_session_blocks")
       .select("block_id, status")

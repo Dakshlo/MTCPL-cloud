@@ -13,6 +13,7 @@ import { requireAuth, getDefaultRouteForRole } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
 import { canTransferPlannedSlabs } from "@/lib/cutting-permissions";
+import { POST_CUT_STATUSES } from "@/lib/slab-statuses";
 import { BlockJourneyClient } from "@/components/block-journey-client";
 import type { StoneCategory } from "@/lib/stone-categories";
 import {
@@ -58,11 +59,15 @@ export default async function EmbedBlockJourneyPage({
         "id, stone, yard, quality, category, length_ft, width_ft, height_ft, tonnes, truck_entry_id, status, created_at, created_by, updated_at",
       )
       .eq("category", "Reused"),
+    // Match the in-app /block-journey page (see comment there): slabs
+    // that have moved past cut_done still count toward what each block
+    // produced — otherwise the lineage card silently loses them once
+    // carving picks them up. Same MT-B-246 class of bug.
     admin
       .from("slab_requirements")
       .select("id, length_ft, width_ft, thickness_ft, source_block_id, label, temple, status")
       .not("source_block_id", "is", null)
-      .eq("status", "cut_done"),
+      .in("status", POST_CUT_STATUSES),
     admin
       .from("cut_session_blocks")
       .select("block_id, status, updated_at")

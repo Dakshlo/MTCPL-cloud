@@ -1,5 +1,6 @@
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { POST_CUT_STATUSES } from "@/lib/slab-statuses";
 import { ReadySlabsClient } from "./ready-client";
 
 // Per Daksh's note: the Ready Sizes page is the cutting team's
@@ -9,24 +10,17 @@ import { ReadySlabsClient } from "./ready-client";
 // broke the cutting team's audit ability — they couldn't go back
 // and check whether yesterday's MT-B-248 actually produced 11 slabs.
 //
-// New behaviour: include EVERY post-cut status in the query so a
-// slab stays visible from the moment it's cut all the way through
-// dispatch. The status badge on each row makes the current
-// lifecycle position obvious; a status filter on the client lets
-// the cutting team narrow to "just cut" / "in carving" /
-// "completed" / etc.
+// Now uses the shared POST_CUT_STATUSES constant (src/lib/slab-statuses.ts)
+// so a slab stays visible from the moment it's cut all the way through
+// dispatch — and even after being rejected as a broken slab during
+// carving. The status badge on each row makes the current lifecycle
+// position obvious; a status filter on the client lets the cutting
+// team narrow to "just cut" / "in carving" / "completed" / etc.
 //
 // The carving team's ASSIGNMENT workflow lives at
 // /slabs/ready/for-carving (sidebar label "Ready Sizes Stock",
 // under the CARVING section). That page queries cut_done only —
 // slabs drop from that view as soon as they're assigned.
-const POST_CUT_STATUSES = [
-  "cut_done",
-  "carving_assigned",
-  "carving_in_progress",
-  "completed",
-  "dispatched",
-];
 
 export default async function ReadySlabsPage() {
   const { profile } = await requireAuth(["owner", "team_head", "block_slab_entry", "carving_head"]);

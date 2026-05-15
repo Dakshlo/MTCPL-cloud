@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { POST_CUT_STATUSES } from "@/lib/slab-statuses";
 import { ReadySlabsClient } from "../ready-client";
 
 // Carving team's slab-pickup + lifecycle-bucket view. Sister page to
-// /slabs/ready (Total Ready Sizes) — same query (every post-cut
-// status), same table UI, plus the lifecycle filter chip row at the
-// top so the carving team can flip between buckets:
+// /slabs/ready (Total Ready Sizes) — same query (POST_CUT_STATUSES),
+// same table UI, plus the lifecycle filter chip row at the top so the
+// carving team can flip between buckets:
 //
 //   "Cut · awaiting carving" — default. The pickable bucket.
 //                              "Assign →" button on each row.
@@ -14,16 +15,10 @@ import { ReadySlabsClient } from "../ready-client";
 //   "Being carved"           — vendor is working on it.
 //   "Carving done"           — back from vendor, ready to dispatch.
 //   "Dispatched"             — gone.
+//   "Broken / rejected"      — destroyed during carving. Audit only.
 //
 // Total Ready Sizes drops the chip row (just a flat list); this page
 // keeps it so the carving team has the at-a-glance breakdown.
-const POST_CUT_STATUSES = [
-  "cut_done",
-  "carving_assigned",
-  "carving_in_progress",
-  "completed",
-  "dispatched",
-];
 
 export default async function ReadyForCarvingPage() {
   await requireAuth(["developer", "owner", "carving_head"]);

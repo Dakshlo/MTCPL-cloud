@@ -16,6 +16,7 @@ import { FinishBlockForm } from "../finish-block-form";
 import { RejectButton } from "../reject-button";
 import { PrimarySlabPreview } from "../primary-slab-preview";
 import { computeCutEfficiency, computeActualCutEfficiency, toCFT } from "@/lib/cut-efficiency";
+import { POST_CUT_STATUSES } from "@/lib/slab-statuses";
 import { EfficiencyBar } from "@/components/efficiency-bar";
 import { yardLabel } from "@/lib/yards";
 import {
@@ -341,12 +342,17 @@ export default async function CuttingDetailPage({
   let actualSlabs: Array<{ sw: number; sh: number; sd: number }> | null = null;
   let actualRemainders: Array<{ id: string; l: number; w: number; h: number; status: string }> | null = null;
   if (isDone) {
+    // Mirror the cutting list-page fix (Daksh, MT-B-246): slabs cut from
+    // this block keep contributing to actual utilisation even after they
+    // move on to carving / dispatch / get rejected. status='cut_done'
+    // alone would shrink the utilisation bar artificially as downstream
+    // work progressed. POST_CUT_STATUSES is the shared canonical set.
     const [{ data: cutDoneSlabs }, restockedList] = await Promise.all([
       supabase
         .from("slab_requirements")
         .select("id, length_ft, width_ft, thickness_ft")
         .eq("source_block_id", block.block_id)
-        .eq("status", "cut_done"),
+        .in("status", POST_CUT_STATUSES),
       (async () => {
         const raw = block.restocked_block_id
           ? String(block.restocked_block_id).split(",").map((s: string) => s.trim()).filter(Boolean)

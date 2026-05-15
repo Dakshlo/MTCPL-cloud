@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { POST_CUT_STATUSES } from "@/lib/slab-statuses";
 import * as XLSX from "xlsx";
 
 export async function GET(req: NextRequest) {
@@ -13,10 +14,15 @@ export async function GET(req: NextRequest) {
   const from    = searchParams.get("from")    || "";
   const to      = searchParams.get("to")      || "";
 
+  // Match the in-app /slabs/ready page: a slab is part of "ready sizes"
+  // verification list from the moment it's cut all the way through
+  // dispatch (including broken/rejected). Filtering to cut_done only
+  // would silently drop slabs the moment they enter carving — see
+  // MT-B-246 bug. POST_CUT_STATUSES is the shared canonical set.
   let query = admin
     .from("slab_requirements")
-    .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, priority, created_at, updated_at")
-    .eq("status", "cut_done")
+    .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority, source_block_id, created_at, updated_at")
+    .in("status", POST_CUT_STATUSES)
     .order("updated_at", { ascending: false });
 
   if (stone)  query = query.eq("stone", stone);

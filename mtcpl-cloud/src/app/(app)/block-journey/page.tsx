@@ -21,6 +21,7 @@ import { requireAuth, getDefaultRouteForRole } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
 import { canTransferPlannedSlabs } from "@/lib/cutting-permissions";
+import { POST_CUT_STATUSES } from "@/lib/slab-statuses";
 import { BlockJourneyClient } from "@/components/block-journey-client";
 import type { StoneCategory } from "@/lib/stone-categories";
 import {
@@ -76,13 +77,7 @@ export default async function BlockJourneyPage({
         .from("slab_requirements")
         .select("id, length_ft, width_ft, thickness_ft, source_block_id, label, temple, status, cut_source_kind")
         .not("source_block_id", "is", null)
-        .in("status", [
-          "cut_done",
-          "carving_assigned",
-          "carving_in_progress",
-          "completed",
-          "dispatched",
-        ])
+        .in("status", POST_CUT_STATUSES)
         .order("id", { ascending: true })
         .range(offset, offset + PAGE - 1);
       if (error) throw new Error(error.message);
