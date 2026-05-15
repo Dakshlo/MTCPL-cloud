@@ -2598,6 +2598,7 @@ async function getBillDetail(input: Record<string, unknown>) {
         "amount_subtotal, gst_percent, cgst_percent, sgst_percent, igst_percent, tds_percent, tcs_percent, " +
         "amount_gst, amount_cgst, amount_sgst, amount_igst, amount_tds, amount_tcs, amount_total, " +
         "amount_payable_to_vendor, amount_paid, amount_outstanding, rejection_note, " +
+        "partial_rejection_amount, partial_rejection_note, partial_rejection_at, " +
         "submitted_at, approved_at, rejected_at, cancelled_at, " +
         "bill_vendor_id, bill_vendors(id, name, gstin, pan, bank_name, bank_account, ifsc, tds_applicable, tcs_applicable)",
     );
@@ -2644,6 +2645,9 @@ async function getBillDetail(input: Record<string, unknown>) {
     amount_paid: number;
     amount_outstanding: number;
     rejection_note: string | null;
+    partial_rejection_amount: number | null;
+    partial_rejection_note: string | null;
+    partial_rejection_at: string | null;
     submitted_at: string | null;
     approved_at: string | null;
     rejected_at: string | null;
@@ -2705,6 +2709,14 @@ async function getBillDetail(input: Record<string, unknown>) {
       tcsPercent: Number(data.tcs_percent ?? 0),
       tcsInr: round2(Number(data.amount_tcs ?? 0)),
       totalInr: round2(Number(data.amount_total)),
+      // Mig 045 — partial rejection deducts from payable. The
+      // assistant should report BOTH the vendor's invoice total
+      // (totalInr) and what we actually pay
+      // (payableToVendorInr). If partialRejectionAmountInr > 0,
+      // the two will differ.
+      partialRejectionAmountInr: round2(Number(data.partial_rejection_amount ?? 0)),
+      partialRejectionNote: data.partial_rejection_note,
+      partialRejectionAt: data.partial_rejection_at,
       payableToVendorInr: round2(Number(data.amount_payable_to_vendor ?? data.amount_total)),
       paidInr: round2(Number(data.amount_paid)),
       outstandingInr: round2(Number(data.amount_outstanding)),

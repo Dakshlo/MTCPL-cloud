@@ -574,6 +574,202 @@ export async function cancelBillAction(formData: FormData): Promise<ActionResult
 }
 
 // ──────────────────────────────────────────────────────────────────
+// Partial rejection (debit-note math) — migration 045
+// ──────────────────────────────────────────────────────────────────
+// Use case: vendor invoiced ₹100k of material, only ₹60k is good.
+// We mark a ₹40k partial rejection on the bill. The generated
+// amount_payable_to_vendor + amount_outstanding columns recompute
+// off the surviving ₹60k subtotal (factoring GST + TDS + TCS).
+//
+// Per Daksh: no new approval gate — the crosscheck role verifies
+// rejections via the existing bill audit trail. Notification fans
+// out to owner + crosscheck so Mafat sees it in his queue.
+
+export async function markPartialRejectionAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canManageAccounts(profile)) {
+    return {
+      ok: false,
+      error: "Only the owner / accountant / developer can mark a partial rejection.",
+    };
+  }
+  const supabase = createAdminSupabaseClient();
+
+  const billId = String(formData.get("bill_id") || "").trim();
+  const amtRaw = String(formData.get("partial_rejection_amount") || "").trim();
+  const note = String(formData.get("partial_rejection_note") || "").trim();
+  const amount = Number(amtRaw);
+
+  if (!billId) return { ok: false, error: "Missing bill_id." };
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { ok: false, error: "Rejection amount must be greater than zero." };
+  }
+  if (!note || note.length < 3) {
+    return {
+      ok: false,
+      error: "Please add a short note explaining why this material was rejected.",
+    };
+  }
+
+  // Race-guard: bill must be 'approved' AND have no 'paid' payments.
+  // (We allow 'pending_approval' too — if the rejection is known
+  // before the bill is approved, the approver should be able to see
+  // the adjusted payable while reviewing.)
+  const { data: bill } = await supabase
+    .from("bills")
+    .select("id, token, status, amount_subtotal, partial_rejection_amount")
+    .eq("id", billId)
+    .maybeSingle();
+  if (!bill) return { ok: false, error: "Bill not found." };
+  if (!["approved", "pending_approval"].includes(bill.status)) {
+    return {
+      ok: false,
+      error: `Cannot mark rejection on a ${bill.status} bill. Only approved or pending bills.`,
+    };
+  }
+  if (amount > Number(bill.amount_subtotal)) {
+    return {
+      ok: false,
+      error: `Rejection (₹${amount.toLocaleString("en-IN")}) cannot exceed the bill subtotal (₹${Number(
+        bill.amount_subtotal,
+      ).toLocaleString("en-IN")}).`,
+    };
+  }
+
+  // Lock: once any payment has hit 'paid', the rejection is frozen.
+  const { count: paidCount } = await supabase
+    .from("bill_payments")
+    .select("*", { count: "exact", head: true })
+    .eq("bill_id", billId)
+    .eq("status", "paid");
+  if ((paidCount ?? 0) > 0) {
+    return {
+      ok: false,
+      error: "Cannot change rejection — a payment has already been marked paid.",
+    };
+  }
+
+  const now = new Date().toISOString();
+  const { error: updErr } = await supabase
+    .from("bills")
+    .update({
+      partial_rejection_amount: amount,
+      partial_rejection_note: note,
+      partial_rejection_at: now,
+      partial_rejection_by: profile.id,
+      updated_at: now,
+    })
+    .eq("id", billId);
+  if (updErr) return { ok: false, error: updErr.message };
+
+  const wasUpdate = Number(bill.partial_rejection_amount ?? 0) > 0;
+  void logAudit(
+    profile.id,
+    wasUpdate ? "bill_partial_rejection_updated" : "bill_partial_rejection_marked",
+    "bill",
+    billId,
+    {
+      token: bill.token,
+      amount_rejected: amount,
+      previous_amount: Number(bill.partial_rejection_amount ?? 0),
+      note,
+    },
+  );
+  void notify(
+    "bill_partial_rejection",
+    `Partial rejection on ${bill.token}`,
+    {
+      message: `₹${amount.toLocaleString("en-IN")} marked as rejected. ${note}`,
+      entityType: "bill",
+      entityId: billId,
+      actorId: profile.id,
+      // Crosscheck + owner see it. Accountant doesn't need a notif —
+      // they're typically the one marking it.
+      targetRoles: ["crosscheck", "owner", "developer"],
+    },
+  );
+  await refreshAccountsPaths();
+  return { ok: true };
+}
+
+export async function clearPartialRejectionAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canManageAccounts(profile)) {
+    return {
+      ok: false,
+      error: "Only the owner / accountant / developer can clear a partial rejection.",
+    };
+  }
+  const supabase = createAdminSupabaseClient();
+
+  const billId = String(formData.get("bill_id") || "").trim();
+  if (!billId) return { ok: false, error: "Missing bill_id." };
+
+  const { data: bill } = await supabase
+    .from("bills")
+    .select("id, token, partial_rejection_amount")
+    .eq("id", billId)
+    .maybeSingle();
+  if (!bill) return { ok: false, error: "Bill not found." };
+  if (Number(bill.partial_rejection_amount ?? 0) === 0) {
+    return { ok: false, error: "Nothing to clear — bill has no partial rejection." };
+  }
+
+  // Same paid-lock check as the marking action — once cash has
+  // moved, the rejection event is frozen.
+  const { count: paidCount } = await supabase
+    .from("bill_payments")
+    .select("*", { count: "exact", head: true })
+    .eq("bill_id", billId)
+    .eq("status", "paid");
+  if ((paidCount ?? 0) > 0) {
+    return {
+      ok: false,
+      error: "Cannot clear rejection — a payment has already been marked paid.",
+    };
+  }
+
+  const previousAmount = Number(bill.partial_rejection_amount);
+  const now = new Date().toISOString();
+  const { error: updErr } = await supabase
+    .from("bills")
+    .update({
+      partial_rejection_amount: 0,
+      partial_rejection_note: null,
+      partial_rejection_at: null,
+      partial_rejection_by: null,
+      updated_at: now,
+    })
+    .eq("id", billId);
+  if (updErr) return { ok: false, error: updErr.message };
+
+  void logAudit(
+    profile.id,
+    "bill_partial_rejection_cleared",
+    "bill",
+    billId,
+    { token: bill.token, previous_amount: previousAmount },
+  );
+  void notify(
+    "bill_partial_rejection_cleared",
+    `Partial rejection cleared on ${bill.token}`,
+    {
+      message: `Previous rejection of ₹${previousAmount.toLocaleString("en-IN")} cleared.`,
+      entityType: "bill",
+      entityId: billId,
+      actorId: profile.id,
+      targetRoles: ["crosscheck", "owner", "developer"],
+    },
+  );
+  await refreshAccountsPaths();
+  return { ok: true };
+}
+
+// ──────────────────────────────────────────────────────────────────
 // Payment proposal / confirmation / execution
 // ──────────────────────────────────────────────────────────────────
 
@@ -1145,6 +1341,23 @@ export async function cancelBillFormAction(formData: FormData) {
     );
   }
   redirect("/accounts/bills");
+}
+
+/** Form-action wrapper around clearPartialRejectionAction — keeps the
+ *  bill detail page's `<form action={...}>` happy (those need void
+ *  returns). Stays on the bill page so the user sees the cleared
+ *  state inline. */
+export async function clearPartialRejectionFormAction(formData: FormData) {
+  const result = await clearPartialRejectionAction(formData);
+  const billId = String(formData.get("bill_id") || "");
+  if (!result.ok) {
+    redirect(
+      `/accounts/bills/${encodeURIComponent(billId)}?error=${encodeURIComponent(result.error)}`,
+    );
+  }
+  // Stay on the bill page — user just cleared an attribute, not
+  // archived the bill.
+  redirect(`/accounts/bills/${encodeURIComponent(billId)}`);
 }
 
 export async function archiveBillVendorFormAction(formData: FormData) {

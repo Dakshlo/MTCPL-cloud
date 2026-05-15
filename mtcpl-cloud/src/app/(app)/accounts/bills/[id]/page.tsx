@@ -13,8 +13,10 @@ import {
 import {
   approveBillFormAction,
   cancelBillFormAction,
+  clearPartialRejectionFormAction,
 } from "../../actions";
 import { RejectBillForm } from "./reject-bill-form";
+import { PartialRejectionForm } from "./partial-rejection-form";
 import {
   ACCOUNTS_TOKENS,
   BillStatusPill,
@@ -44,7 +46,7 @@ export default async function BillDetailPage({
   const { data: bill } = await supabase
     .from("bills")
     .select(
-      "id, token, vendor_bill_no, bill_date, description, cost_head, amount_subtotal, gst_percent, cgst_percent, sgst_percent, igst_percent, tds_percent, tcs_percent, amount_gst, amount_cgst, amount_sgst, amount_igst, amount_tds, amount_tcs, amount_total, amount_payable_to_vendor, amount_paid, amount_outstanding, status, rejection_note, submitted_by, submitted_at, approved_by, approved_at, rejected_by, rejected_at, cancelled_by, cancelled_at, bill_vendor_id, bill_vendors(id, name, category, gstin, phone, email, address, bank_name, bank_account, ifsc, upi_id, tds_applicable, tcs_applicable)",
+      "id, token, vendor_bill_no, bill_date, description, cost_head, amount_subtotal, gst_percent, cgst_percent, sgst_percent, igst_percent, tds_percent, tcs_percent, amount_gst, amount_cgst, amount_sgst, amount_igst, amount_tds, amount_tcs, amount_total, amount_payable_to_vendor, amount_paid, amount_outstanding, status, rejection_note, partial_rejection_amount, partial_rejection_note, partial_rejection_at, partial_rejection_by, submitted_by, submitted_at, approved_by, approved_at, rejected_by, rejected_at, cancelled_by, cancelled_at, bill_vendor_id, bill_vendors(id, name, category, gstin, phone, email, address, bank_name, bank_account, ifsc, upi_id, tds_applicable, tcs_applicable)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -141,6 +143,16 @@ export default async function BillDetailPage({
       label: "Cancelled",
       by: bill.cancelled_by ? profilesMap[bill.cancelled_by] ?? null : null,
       tone: ACCOUNTS_TOKENS.neutral,
+    });
+  }
+  if (bill.partial_rejection_at && Number(bill.partial_rejection_amount ?? 0) > 0) {
+    timeline.push({
+      at: bill.partial_rejection_at,
+      label: `Partial rejection · ₹${Number(bill.partial_rejection_amount).toLocaleString("en-IN")}`,
+      by: bill.partial_rejection_by
+        ? profilesMap[bill.partial_rejection_by] ?? null
+        : null,
+      tone: ACCOUNTS_TOKENS.warning,
     });
   }
   for (const p of payments) {
@@ -389,6 +401,17 @@ export default async function BillDetailPage({
                   value={Number(bill.amount_gst)}
                 />
               )}
+            {/* Mig 045 — partial rejection (debit-note math). When set,
+                the surviving subtotal drives TDS/TCS, so render the
+                rejection line BEFORE the tax rows so the breakdown
+                reads top-to-bottom in calc order. */}
+            {Number(bill.partial_rejection_amount ?? 0) > 0 && (
+              <BreakdownRow
+                label="− Rejected"
+                value={Number(bill.partial_rejection_amount ?? 0)}
+                tone="warning"
+              />
+            )}
             {Number(bill.tds_percent ?? 0) > 0 && (
               <BreakdownRow
                 label={`− TDS ${Number(bill.tds_percent)}%`}
@@ -403,7 +426,8 @@ export default async function BillDetailPage({
               />
             )}
             {(Number(bill.tds_percent ?? 0) > 0 ||
-              Number(bill.tcs_percent ?? 0) > 0) && (
+              Number(bill.tcs_percent ?? 0) > 0 ||
+              Number(bill.partial_rejection_amount ?? 0) > 0) && (
               <div
                 style={{
                   marginTop: 4,
@@ -447,9 +471,45 @@ export default async function BillDetailPage({
             }}
           >
             <SummaryCard
-              label="Total"
-              value={<Money value={Number(bill.amount_total)} size="large" />}
-              tone={ACCOUNTS_TOKENS.neutral}
+              label={
+                Number(bill.partial_rejection_amount ?? 0) > 0
+                  ? "Pay vendor"
+                  : "Total"
+              }
+              value={
+                Number(bill.partial_rejection_amount ?? 0) > 0 ? (
+                  // Surviving payable: shows the cashflow-truth number
+                  // after rejection, with the original bill total as a
+                  // muted strike-through label so the auditor can see
+                  // both at a glance.
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                    <Money
+                      value={Number(
+                        bill.amount_payable_to_vendor ?? bill.amount_total,
+                      )}
+                      size="large"
+                      tone="warning"
+                    />
+                    <span
+                      style={{
+                        fontSize: 10,
+                        color: "var(--muted)",
+                        textDecoration: "line-through",
+                        fontFamily: "ui-monospace, monospace",
+                      }}
+                    >
+                      was ₹{Number(bill.amount_total).toLocaleString("en-IN")}
+                    </span>
+                  </div>
+                ) : (
+                  <Money value={Number(bill.amount_total)} size="large" />
+                )
+              }
+              tone={
+                Number(bill.partial_rejection_amount ?? 0) > 0
+                  ? ACCOUNTS_TOKENS.warning
+                  : ACCOUNTS_TOKENS.neutral
+              }
             />
             <SummaryCard
               label="Paid"
@@ -474,6 +534,146 @@ export default async function BillDetailPage({
               tone={Number(bill.amount_outstanding) > 0 ? ACCOUNTS_TOKENS.warning : ACCOUNTS_TOKENS.success}
             />
           </div>
+
+          {/* Partial rejection (mig 045) — visible when:
+                (a) a rejection is already marked (always render the
+                    info card so the team can see what / who / why,
+                    plus Edit + Clear buttons if still editable), OR
+                (b) bill is approved or pending-approval AND no payment
+                    has been paid yet AND user can manage accounts —
+                    then render the "+ Mark partial rejection" button.
+              Locked once any payment hits status='paid'.
+          */}
+          {(() => {
+            const rejectionAmt = Number(bill.partial_rejection_amount ?? 0);
+            const isLockedByPaidPayment = payments.some((p) => p.status === "paid");
+            const canMarkOrEdit =
+              canManageAccounts(profile) &&
+              !isLockedByPaidPayment &&
+              (bill.status === "approved" || bill.status === "pending_approval");
+            const showCard = rejectionAmt > 0 || canMarkOrEdit;
+            if (!showCard) return null;
+            const rejectedByName = bill.partial_rejection_by
+              ? profilesMap[bill.partial_rejection_by] ?? "Unknown"
+              : null;
+            return (
+              <div
+                style={{
+                  background: rejectionAmt > 0 ? ACCOUNTS_TOKENS.warningLight : "#fff",
+                  border: `1px solid ${rejectionAmt > 0 ? ACCOUNTS_TOKENS.warning : ACCOUNTS_TOKENS.border}`,
+                  borderLeft: rejectionAmt > 0 ? `4px solid ${ACCOUNTS_TOKENS.warning}` : `1px solid ${ACCOUNTS_TOKENS.border}`,
+                  borderRadius: 10,
+                  padding: 16,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 10,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 10,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 800,
+                      color: rejectionAmt > 0 ? ACCOUNTS_TOKENS.warning : "var(--muted)",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                    }}
+                  >
+                    Partial rejection
+                    {isLockedByPaidPayment && rejectionAmt > 0 && (
+                      <span
+                        style={{
+                          marginLeft: 8,
+                          padding: "1px 6px",
+                          borderRadius: 4,
+                          fontSize: 9,
+                          background: "rgba(15,23,42,0.08)",
+                          color: "var(--muted)",
+                          letterSpacing: "0.05em",
+                        }}
+                      >
+                        🔒 LOCKED
+                      </span>
+                    )}
+                  </div>
+                  {rejectionAmt > 0 && (
+                    <div style={{ fontSize: 14, fontWeight: 800, color: ACCOUNTS_TOKENS.warning, fontFamily: "ui-monospace, monospace" }}>
+                      −₹{rejectionAmt.toLocaleString("en-IN")}
+                    </div>
+                  )}
+                </div>
+
+                {rejectionAmt > 0 && (
+                  <>
+                    <p
+                      style={{
+                        margin: 0,
+                        fontSize: 13,
+                        color: "var(--text)",
+                        lineHeight: 1.5,
+                        whiteSpace: "pre-wrap",
+                      }}
+                    >
+                      {bill.partial_rejection_note ?? "—"}
+                    </p>
+                    {(rejectedByName || bill.partial_rejection_at) && (
+                      <p style={{ margin: 0, fontSize: 11, color: "var(--muted)" }}>
+                        {rejectedByName ? `Marked by ${rejectedByName}` : "Marked"}
+                        {bill.partial_rejection_at
+                          ? ` · ${new Date(bill.partial_rejection_at).toLocaleString("en-IN", {
+                              day: "numeric",
+                              month: "short",
+                              year: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}`
+                          : ""}
+                      </p>
+                    )}
+                  </>
+                )}
+
+                {canMarkOrEdit && (
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "stretch" }}>
+                    <PartialRejectionForm
+                      billId={bill.id}
+                      maxAmount={Number(bill.amount_subtotal)}
+                      currentAmount={rejectionAmt}
+                      currentNote={bill.partial_rejection_note ?? null}
+                    />
+                    {rejectionAmt > 0 && (
+                      <form action={clearPartialRejectionFormAction}>
+                        <input type="hidden" name="bill_id" value={bill.id} />
+                        <button
+                          type="submit"
+                          style={{
+                            ...BUTTON_STYLES.ghost,
+                            color: ACCOUNTS_TOKENS.danger,
+                            borderColor: ACCOUNTS_TOKENS.danger,
+                          }}
+                          title="Remove this rejection — payable resets to the full bill total"
+                        >
+                          🗑 Clear rejection
+                        </button>
+                      </form>
+                    )}
+                  </div>
+                )}
+                {rejectionAmt > 0 && isLockedByPaidPayment && (
+                  <p style={{ margin: 0, fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}>
+                    A payment has been marked paid — this rejection is now frozen for audit.
+                  </p>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Description */}
           <Section title="Description">
@@ -901,10 +1101,16 @@ function BreakdownRow({
 }: {
   label: string;
   value: number;
-  tone?: "muted" | "danger";
+  /** "warning" added mig 045 for the partial-rejection row — visually
+   *  distinct from TDS "danger" while still reading as a deduction. */
+  tone?: "muted" | "danger" | "warning";
 }) {
   const color =
-    tone === "danger" ? ACCOUNTS_TOKENS.danger : "var(--muted)";
+    tone === "danger"
+      ? ACCOUNTS_TOKENS.danger
+      : tone === "warning"
+        ? ACCOUNTS_TOKENS.warning
+        : "var(--muted)";
   return (
     <div
       style={{

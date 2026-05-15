@@ -8,6 +8,44 @@ Reverse-chronological. Most recent at top. Append to TOP when shipping new work.
 
 ## Recent (this Claude session)
 
+### `(pending)` · Finance — partial rejection / debit-note math (migration 045)
+
+Real-world scenario Daksh flagged: vendor sends a bill for ₹100,000 + 18% GST = ₹118,000 for raw material; on inspection only 60% is usable. Vendor's paper invoice still says ₹118,000 (audit truth) but MTCPL only owes ₹70,800 on the surviving subtotal. The system previously had no way to express this gap — accountant either overpaid or hand-edited the proposed amount, losing the audit trail.
+
+**Schema (migration 045):**
+- 4 new columns on `bills`: `partial_rejection_amount NUMERIC(14,2) DEFAULT 0` (CHECK: 0 ≤ amount ≤ subtotal), `partial_rejection_note TEXT`, `partial_rejection_at TIMESTAMPTZ`, `partial_rejection_by UUID → profiles`.
+- DROP + RECREATE four generated columns (`amount_tds`, `amount_tcs`, `amount_payable_to_vendor`, `amount_outstanding`) with rejection-aware formulas. Surviving subtotal = `amount_subtotal − COALESCE(partial_rejection_amount, 0)`, then GST/TDS/TCS compute off that.
+- `amount_gst`, `amount_cgst`, `amount_sgst`, `amount_igst`, `amount_total` stay UNCHANGED — those represent the vendor's invoice (audit truth), not what we pay.
+- Drop + recreate `bills_due_idx` (depends on `amount_outstanding`). Add new partial index `bills_partial_rejection_idx` on `partial_rejection_at DESC` where amount > 0 — supports future "rejection report" queries.
+- Backward-compatible: existing rows with `partial_rejection_amount = 0` produce the exact same numbers as pre-migration.
+
+**Server actions:**
+- `markPartialRejectionAction(formData)` — owner/accountant/developer only. Status must be `approved` or `pending_approval`. Refused if any payment row has `status='paid'`. Audit `bill_partial_rejection_marked` (or `_updated`) + notify `crosscheck`/`owner`/`developer` so Mafat sees it in his audit queue.
+- `clearPartialRejectionAction(formData)` — same permissions, same paid-lock. Resets to 0/null. Audit `bill_partial_rejection_cleared`.
+- `clearPartialRejectionFormAction(formData)` — void-returning wrapper for `<form action>` use on the bill detail page.
+
+**UI (bill detail page):**
+- New "Partial rejection" card sits between the summary tiles and the Description section. Two modes:
+  - **Empty + editable** → "+ Mark partial rejection" button (owner/accountant only).
+  - **Marked** → big −₹amount header, reason text, who/when, plus "Edit" + "Clear" buttons (until first payment hits paid; then locked with a 🔒 LOCKED badge).
+- Bill summary breakdown shows a new "− Rejected" row in warning amber colour between GST and TDS lines.
+- Top-right "Total" summary card switches label to "Pay vendor" when rejection is active, shows the adjusted payable + the original total as a muted strike-through line ("was ₹118,000").
+- Audit timeline gets a new amber event row for the rejection event.
+
+**Permissions: no new role gate.** Reuses `canManageAccounts` (developer/owner/accountant). Per Daksh's call: "the crosscheck verifies it like how it already works" — the existing notification + audit log are sufficient; no separate approval step.
+
+**Out of scope (v2):**
+- Multiple rejection events per bill (current schema: one rejection per bill, editable in place).
+- Quantity-based rejection (requires line-itemized bills — different feature).
+- Separate credit-note bill (Tally / SAP-style two-row approach — discussed as "Option B" in design notes).
+- Vendor-issued credit note number capture.
+
+**Daksh's intent line** (verbatim from chat): *"now from that 100000 only 60 of mateial is good so we cancalled remaing material now we only need to pay 60000 to vednor but bill is gentrted accounding to 100000."*
+
+### `(pending)` · Cut audit chips — full dims + label + description (commit 13abeb7)
+
+On `/cutting/[id]` for a pending-approval block, the staged-slab chips were under-serving auditors. Fixed by single-file change in `src/app/(app)/cutting/[id]/page.tsx`. New DB query (`slab_requirements` IN-clause for all staged IDs) loads `label + description + L/W/T` in one round-trip. Two-line chip layout: `ID · L×W×T″ · LABEL` on top, `TEMPLE · description` (truncated 300px, full on hover) below. From-inventory and Transferred chips now receive the unified `allSlabsById` map (previously ID-only). Donor pill moved to its own line for transferred chips.
+
 ### `(pending)` · Inventory module — Scaffolding v1 (migration 041)
 
 Brand-new vertical for tracking scaffolding parts across the plant + 4+ ongoing sites. First inventory category; later modules (CNC tools, cement, motors) will be parallel `*_components` + reuse the same `sites` + `inventory_movements` tables.
