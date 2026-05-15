@@ -64,7 +64,20 @@ export default async function CuttingDetailPage({
   params: Params;
   searchParams: SearchParams;
 }) {
-  const { profile } = await requireAuth(["owner", "team_head", "cutting_operator"]);
+  // Audit-side roles need to open this page too — the View button on
+  // each /cutting/approvals card lands here. Before May 2026 the list
+  // was just ["owner","team_head","cutting_operator"]; Parth
+  // (carving_head) and Mafat (crosscheck) got bounced to /slabs/ready
+  // when they clicked View. `developer` was also missing and only
+  // got in via the dev-bypass — adding it explicitly for clarity.
+  const { profile } = await requireAuth([
+    "developer",
+    "owner",
+    "team_head",
+    "carving_head",
+    "crosscheck",
+    "cutting_operator",
+  ]);
   const { id } = await params;
   const sp = await searchParams;
   const wantsApprovalEdit = sp.edit === "approval";

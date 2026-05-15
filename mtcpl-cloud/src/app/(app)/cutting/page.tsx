@@ -122,7 +122,17 @@ function istTodayBounds() {
 }
 
 export default async function CuttingPage({ searchParams }: { searchParams: SearchParams }) {
-  const { profile } = await requireAuth(["owner", "team_head", "cutting_operator", "developer"]);
+  // Audit-side roles (carving_head, crosscheck) need read access so the
+  // tabs they're approving from the queue match what they see here.
+  // Same widening as /cutting/[id] and /cutting/approvals.
+  const { profile } = await requireAuth([
+    "developer",
+    "owner",
+    "team_head",
+    "carving_head",
+    "crosscheck",
+    "cutting_operator",
+  ]);
   const params = await searchParams;
   const activeTab: Tab = (params.tab as Tab) || defaultTab(profile.role);
   const supabase = createAdminSupabaseClient();
