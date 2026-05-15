@@ -1229,6 +1229,11 @@ export async function upsertBillVendorAction(formData: FormData): Promise<
     bank_name: String(formData.get("bank_name") || "").trim() || null,
     bank_account: String(formData.get("bank_account") || "").trim() || null,
     ifsc: String(formData.get("ifsc") || "").trim() || null,
+    // Mig 047 — HDFC's bulk payment file requires the bene name to
+    // match what HDFC has registered. Server-side belt-and-braces: cap
+    // to 20 chars (the form already truncates to 20 client-side).
+    hdfc_bene_name:
+      String(formData.get("hdfc_bene_name") || "").trim().slice(0, 20) || null,
     upi_id: String(formData.get("upi_id") || "").trim() || null,
     notes: String(formData.get("notes") || "").trim() || null,
     tds_applicable: tdsApplicable,

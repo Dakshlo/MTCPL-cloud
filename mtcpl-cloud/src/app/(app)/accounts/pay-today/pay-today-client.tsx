@@ -243,9 +243,38 @@ export function PayTodayClient({
                   letterSpacing: "-0.005em",
                   whiteSpace: "nowrap",
                 }}
-                title="Download an HDFC ENet bulk-payment .xlsx for every confirmed row. Prerequisite: each vendor must be pre-registered in ENet's Beneficiary Master with their account + IFSC. The file matches HDFC's 7-column format (CBX Reference, Transfer From, Transfer To, Amount, Initiation date, Value date, Beneficiary name). Pick the same Business Product Rohit used for salary payments at upload time."
+                title="HDFC ENet bulk-payment .xlsx — 7-column corporate-banking portal format. Vendors must be pre-registered in ENet's Beneficiary Master."
               >
-                📥 Download HDFC bulk-payment Excel
+                📥 ENet Excel (.xlsx)
+              </a>
+              {/* Mig 047 — second HDFC format: the RBI File Format
+                  for bulk NEFT/RTGS (.001 CSV, 28 columns). HDFC
+                  gave Daksh this format in May 2025 — use it if
+                  your accountant uses the RBI bulk-upload screen
+                  rather than the ENet portal. Pre-flight check on
+                  the route refuses generation if any vendor lacks
+                  hdfc_bene_name / bank_account / ifsc / bank_name
+                  and shows a fix list. */}
+              <a
+                href="/api/accounts/hdfc-export"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "8px 16px",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  background: "var(--gold)",
+                  color: "#fff",
+                  border: "1.5px solid var(--gold-dark)",
+                  borderRadius: 8,
+                  textDecoration: "none",
+                  letterSpacing: "-0.005em",
+                  whiteSpace: "nowrap",
+                }}
+                title="HDFC RBI bulk-payment file — 28-column CSV with .001 extension. NEFT/RTGS auto-picked by amount (<₹2L = NEFT, ≥₹2L = RTGS). Requires each vendor's HDFC Beneficiary Name to be filled on the vendor record."
+              >
+                📥 RBI Bulk File (.001 CSV)
               </a>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>

@@ -39,6 +39,10 @@ export function VendorForm({
     bank_name?: string | null;
     bank_account?: string | null;
     ifsc?: string | null;
+    /** Mig 047 — exact bene name as registered on HDFC's portal.
+     *  Required for the HDFC bulk-payment file export. Max 20 chars
+     *  per HDFC's spec (column E hard limit). */
+    hdfc_bene_name?: string | null;
     upi_id?: string | null;
     notes?: string | null;
     /** Mig 040 — days after bill_date this vendor is paid. null =
@@ -79,6 +83,7 @@ export function VendorForm({
     bank_name: initialValues?.bank_name ?? "",
     bank_account: initialValues?.bank_account ?? "",
     ifsc: initialValues?.ifsc ?? "",
+    hdfc_bene_name: initialValues?.hdfc_bene_name ?? "",
     upi_id: initialValues?.upi_id ?? "",
     notes: initialValues?.notes ?? "",
     // Payment terms — stored separately so we can roundtrip it as
@@ -228,6 +233,38 @@ export function VendorForm({
           />
         </Field>
       </div>
+
+      {/* Mig 047 — HDFC's bulk payment file (.001) requires the bene
+          name to EXACTLY MATCH what HDFC has on record. The internal
+          vendor name above can differ — this field carries the
+          HDFC-side label. Max 20 chars (HDFC's hard cap), all caps,
+          no special characters. The export auto-uppercases + strips
+          specials at file-gen time, but matching what HDFC has on
+          record means the upload doesn't reject. */}
+      <Field
+        label="HDFC Beneficiary Name"
+        hint="Exact name HDFC has registered for this vendor — max 20 chars, will be sent as-is on the bulk payment file. Leave blank if you don't use HDFC bulk upload for this vendor."
+      >
+        <input
+          value={form.hdfc_bene_name}
+          onChange={(e) =>
+            setForm({
+              ...form,
+              // Soft-trim to 20 chars while typing so the user doesn't
+              // overshoot. HDFC will reject the row at the bank if it's
+              // longer; we surface that constraint up-front.
+              hdfc_bene_name: e.target.value.slice(0, 20),
+            })
+          }
+          maxLength={20}
+          placeholder="e.g. PARESH KMR ENT"
+          style={{
+            ...INPUT_STYLE,
+            fontFamily: "ui-monospace, monospace",
+            textTransform: "uppercase",
+          }}
+        />
+      </Field>
 
       <Field
         label="Payment terms (days after bill date)"
