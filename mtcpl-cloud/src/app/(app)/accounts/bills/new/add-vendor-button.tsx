@@ -71,6 +71,21 @@ export function AddVendorButton({
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
 
+  // Daksh (May 2026): on small laptop screens the modal's form was
+  // taller than the viewport, so scrolling moved the *page behind*
+  // the modal instead of the modal itself. Lock body scroll while
+  // the modal is open — the backdrop's own overflow-y (below) is
+  // what handles "form taller than viewport" by scrolling the whole
+  // dialog inside the dim layer.
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
+
   function reset() {
     setName("");
     setCategory("");
@@ -147,9 +162,16 @@ export function AddVendorButton({
           position: "fixed",
           inset: 0,
           background: "rgba(15, 23, 42, 0.45)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
+          // Daksh (May 2026): grid + place-items centers the form
+          // when it fits, and lets the BACKDROP scroll when the form
+          // is taller than the viewport. Body scroll is locked above
+          // so the page behind no longer moves. Padding gives the
+          // form breathing room at the very top / bottom on short
+          // laptop screens.
+          display: "grid",
+          placeItems: "center",
+          overflowY: "auto",
+          padding: "20px 16px",
           zIndex: 200,
           animation: "fadeIn 0.15s",
         }}

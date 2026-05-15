@@ -294,6 +294,19 @@ export function PrivateNotesModal({
     return () => document.removeEventListener("keydown", onEsc);
   }, [mode]);
 
+  // ── Body-scroll lock while the modal is open ─────────────────────
+  // Daksh (May 2026): on small laptop screens, scrolling inside the
+  // open modal was moving the page behind it. Lock body overflow so
+  // any vertical motion stays inside the modal's own scroll area.
+  useEffect(() => {
+    if (mode === "closed") return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [mode]);
+
   // ── The tiny entry button. Renders in-flow, ~22px, muted. ────────
   // stopPropagation on click + mousedown so the parent <summary>
   // element on the vendor profile page doesn't toggle <details>
@@ -355,9 +368,12 @@ export function PrivateNotesModal({
           background: "rgba(15, 23, 42, 0.5)",
           backdropFilter: "blur(6px)",
           WebkitBackdropFilter: "blur(6px)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
+          // Daksh (May 2026): grid + place-items + overflow-y:auto so
+          // a too-tall modal on a small laptop screen scrolls within
+          // the backdrop instead of pushing the page behind it.
+          display: "grid",
+          placeItems: "center",
+          overflowY: "auto",
           zIndex: 1000,
           padding: 16,
         }}
