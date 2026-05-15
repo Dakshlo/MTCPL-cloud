@@ -347,6 +347,48 @@ export default async function CuttingDetailPage({
     }
   }
 
+  // Chip enrichment for the pending-submission section (Daksh, May 2026):
+  // The audit page chips need to show every audit-relevant field —
+  // full L×W×T, label, temple, description — so Parth / Mafat /
+  // Naresh can verify a staged slab against the floor without
+  // clicking through. Layout JSON doesn't carry description, and
+  // extras/transfers aren't in `placed`, so we run ONE IN-clause
+  // query against slab_requirements for every ID that appears in
+  // any of the four staged buckets (cut / not_cut / extra /
+  // transferred). Bounded by payload size (<20 rows typically).
+  //
+  // Computed at page top-level (not inside the render IIFE) because
+  // server components can only `await` at the function root.
+  type ChipSlabRow = {
+    id: string;
+    label: string | null;
+    temple: string | null;
+    description: string | null;
+    length_ft: number;
+    width_ft: number;
+    thickness_ft: number;
+  };
+  let chipSlabRows: ChipSlabRow[] = [];
+  if (stagedPayload) {
+    const stagedIdSet = new Set<string>([
+      ...(stagedPayload.cut_slab_ids ?? []),
+      ...(stagedPayload.not_cut_slab_ids ?? []),
+      ...(stagedPayload.extra_slab_ids ?? []),
+      ...(stagedPayload.transferred_slab_ids ?? []),
+    ]);
+    if (stagedIdSet.size > 0) {
+      const { data: chipData, error: chipErr } = await supabase
+        .from("slab_requirements")
+        .select("id, label, temple, description, length_ft, width_ft, thickness_ft")
+        .in("id", Array.from(stagedIdSet));
+      if (chipErr) {
+        console.warn("[cutting/[id]] chip slab fetch failed", chipErr);
+      } else {
+        chipSlabRows = (chipData ?? []) as ChipSlabRow[];
+      }
+    }
+  }
+
   // When the cut is already done, fetch the REAL post-cut data so the
   // utilisation bar reflects what actually happened instead of the
   // planner's projection. For pending/in-progress we stick with the
@@ -989,14 +1031,53 @@ export default async function CuttingDetailPage({
         }
 
         // Non-edit mode → banner + submission summary + buttons.
-        const allSlabsById = new Map(
-          placed.map((s) => [s.id, s] as const),
-        );
         const cutIds = stagedPayload?.cut_slab_ids ?? [];
         const notCutIds = stagedPayload?.not_cut_slab_ids ?? [];
         const extraIds = stagedPayload?.extra_slab_ids ?? [];
         const transferIds = stagedPayload?.transferred_slab_ids ?? [];
         const remainders = stagedPayload?.remainders ?? [];
+
+        // Build a unified slab-info lookup for the staged chips.
+        // chipSlabRows was loaded at page top-level (DB row per
+        // staged ID, carries label + description + L/W/T). Layout
+        // `placed` is the defensive fallback for any ID that the
+        // DB query couldn't resolve (e.g. row got deleted between
+        // cutting-done submission and audit).
+        const allSlabsById = new Map<
+          string,
+          {
+            id: string;
+            label?: string | null;
+            temple?: string | null;
+            description?: string | null;
+            sw?: number;
+            sh?: number;
+            sd?: number;
+          }
+        >();
+        for (const s of chipSlabRows) {
+          allSlabsById.set(s.id, {
+            id: s.id,
+            label: s.label,
+            temple: s.temple,
+            description: s.description,
+            sw: Number(s.length_ft),
+            sh: Number(s.width_ft),
+            sd: Number(s.thickness_ft),
+          });
+        }
+        for (const s of placed) {
+          if (allSlabsById.has(s.id)) continue;
+          allSlabsById.set(s.id, {
+            id: s.id,
+            label: s.label,
+            temple: s.temple,
+            description: null,
+            sw: s.sw,
+            sh: s.sh,
+            sd: s.sd,
+          });
+        }
         return (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             {/* Status banner */}
@@ -1143,20 +1224,25 @@ export default async function CuttingDetailPage({
                     allSlabsById={allSlabsById}
                   />
                 )}
-                {/* Extras */}
+                {/* Extras — Daksh: pass the map so these chips show
+                    dims + label + temple + description like Marked cut /
+                    Not cut do (previously was ID-only). */}
                 {extraIds.length > 0 && (
                   <SlabIdList
                     label="📦 From open inventory"
                     color="#b45309"
                     ids={extraIds}
+                    allSlabsById={allSlabsById}
                   />
                 )}
-                {/* Transfers */}
+                {/* Transfers — same enrichment as extras, on top of the
+                    existing donor pill. */}
                 {transferIds.length > 0 && (
                   <SlabIdList
                     label="↔ Transferred from another block"
                     color="#7c3aed"
                     ids={transferIds}
+                    allSlabsById={allSlabsById}
                     donorMap={transferDonorMap}
                   />
                 )}
@@ -1449,10 +1535,16 @@ function SummaryStat({
 }
 
 /** Render a labelled chip-row of slab IDs. When `allSlabsById` is
- *  provided we also surface the slab's planned size + temple inline,
- *  which is useful for the Cut / Not-cut buckets (those slabs were
- *  part of the original plan). For Extras / Transfers we just show
- *  IDs because the slabs aren't in the parent block's placed array. */
+ *  provided we surface every audit-relevant field on the chip:
+ *  dimensions (L×W×T), the slab's pre-cut label (BEAM-4 etc.),
+ *  temple, and description. Daksh asked for parity across all four
+ *  buckets — extras and transfers now receive the same map, so the
+ *  data isn't "Marked cut only" anymore. The chip lays out as two
+ *  compact lines: primary identifiers up top, contextual prose
+ *  (temple + description, truncated) below.
+ *
+ *  See the chipSlabRows DB query in the main page for how the map
+ *  is built (DB-first + layout `placed` fallback). */
 function SlabIdList({
   label,
   color,
@@ -1463,7 +1555,18 @@ function SlabIdList({
   label: string;
   color: string;
   ids: string[];
-  allSlabsById?: Map<string, { id: string; label?: string; temple?: string; sw?: number; sh?: number }>;
+  allSlabsById?: Map<
+    string,
+    {
+      id: string;
+      label?: string | null;
+      temple?: string | null;
+      description?: string | null;
+      sw?: number;
+      sh?: number;
+      sd?: number;
+    }
+  >;
   /** For the "Transferred from another block" list: slab id →
    *  { block_id, status } of the donor. Renders as "from MT-B-269"
    *  (with a warning hue when the donor is already done/rejected,
@@ -1489,6 +1592,18 @@ function SlabIdList({
           const donor = donorMap?.get(id);
           const donorIsStale =
             !!donor && (donor.status === "done" || donor.status === "rejected");
+          // Compose a single hover-tooltip so the auditor can see
+          // every field at once on long-press / mouseover — even when
+          // the truncated description in line 2 doesn't fit visually.
+          const hoverLines: string[] = [];
+          if (s?.label) hoverLines.push(`Label: ${s.label}`);
+          if (s?.temple) hoverLines.push(`Temple: ${s.temple}`);
+          if (s?.description) hoverLines.push(`Description: ${s.description}`);
+          const hoverTitle = hoverLines.length > 0 ? hoverLines.join("\n") : undefined;
+
+          // Has anything for line 2 (the muted context line)?
+          const hasLineTwo = !!(s?.temple || s?.description);
+
           return (
             <span
               key={id}
@@ -1498,52 +1613,81 @@ function SlabIdList({
                 border: `1px solid ${color}33`,
                 fontFamily: "ui-monospace, monospace",
                 fontSize: 11,
+                display: "inline-flex",
+                flexDirection: "column",
+                alignItems: "flex-start",
+                padding: "5px 9px",
+                gap: 2,
+                maxWidth: 320,
               }}
+              title={hoverTitle}
             >
-              <strong>{id}</strong>
-              {s && (s.sw != null || s.sh != null) && (
-                <>
-                  {" · "}
-                  <span style={{ color: "var(--muted)" }}>
-                    {s.sw ?? "—"}×{s.sh ?? "—"}″
-                  </span>
-                </>
+              {/* Line 1 — primary identifiers: ID · dims · label */}
+              <span style={{ whiteSpace: "nowrap" }}>
+                <strong>{id}</strong>
+                {s && (s.sw != null || s.sh != null || s.sd != null) && (
+                  <>
+                    {" · "}
+                    <span style={{ color: "var(--muted)" }}>
+                      {s.sw ?? "—"}×{s.sh ?? "—"}
+                      {s.sd != null ? `×${s.sd}` : ""}″
+                    </span>
+                  </>
+                )}
+                {s?.label ? (
+                  <>
+                    {" · "}
+                    <span style={{ color: "var(--text)", fontWeight: 600 }}>
+                      {s.label}
+                    </span>
+                  </>
+                ) : null}
+              </span>
+
+              {/* Line 2 — muted context: temple · description (truncates) */}
+              {hasLineTwo && (
+                <span
+                  style={{
+                    color: "var(--muted)",
+                    fontSize: 10,
+                    maxWidth: 300,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {s?.temple ? s.temple : ""}
+                  {s?.temple && s?.description ? " · " : ""}
+                  {s?.description ?? ""}
+                </span>
               )}
-              {s?.temple ? (
-                <>
-                  {" · "}
-                  <span style={{ color: "var(--muted)" }}>{s.temple}</span>
-                </>
-              ) : null}
+
+              {/* Donor pill — only for the Transferred bucket. Lives
+                  on its own line so the chip stays readable. */}
               {donor && (
-                <>
-                  {" · "}
-                  <span
-                    style={{
-                      color: donorIsStale ? "#b91c1c" : color,
-                      fontWeight: 600,
-                    }}
-                    title={
-                      donorIsStale
-                        ? `Donor ${donor.block_id} is already ${donor.status} — stale link, contact a developer to clean up.`
-                        : `Claimed from ${donor.block_id} (currently ${donor.status})`
-                    }
-                  >
-                    {donorIsStale ? "⚠ " : "← "}from {donor.block_id}
-                    {donorIsStale ? ` (${donor.status})` : ""}
-                  </span>
-                </>
+                <span
+                  style={{
+                    color: donorIsStale ? "#b91c1c" : color,
+                    fontWeight: 600,
+                    fontSize: 10,
+                  }}
+                  title={
+                    donorIsStale
+                      ? `Donor ${donor.block_id} is already ${donor.status} — stale link, contact a developer to clean up.`
+                      : `Claimed from ${donor.block_id} (currently ${donor.status})`
+                  }
+                >
+                  {donorIsStale ? "⚠ " : "← "}from {donor.block_id}
+                  {donorIsStale ? ` (${donor.status})` : ""}
+                </span>
               )}
               {!donor && donorMap && (
-                <>
-                  {" · "}
-                  <span
-                    style={{ color: "var(--muted)", fontStyle: "italic" }}
-                    title="No donor cut_session_slabs row found — the slab may have been re-planned or the link cleaned up."
-                  >
-                    ← donor unknown
-                  </span>
-                </>
+                <span
+                  style={{ color: "var(--muted)", fontStyle: "italic", fontSize: 10 }}
+                  title="No donor cut_session_slabs row found — the slab may have been re-planned or the link cleaned up."
+                >
+                  ← donor unknown
+                </span>
               )}
             </span>
           );
