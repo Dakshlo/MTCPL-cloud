@@ -1105,10 +1105,198 @@ export async function markPaymentPaidAction(formData: FormData): Promise<ActionR
         targetRoles: ["owner", "developer"],
       },
     ),
+    // Mig 050 follow-on (Daksh, May 2026): send the vendor an
+    // email with the payment voucher attached as PDF. Fire-and-
+    // forget — if email fails, payment is still successfully
+    // marked paid. Helper silently no-ops if RESEND_API_KEY is
+    // missing, so the system works without the email config too.
+    sendVendorPaymentEmail(paymentId, payment.bill_id as string, profile.id),
   ]).catch((e) => console.warn("[markPaymentPaidAction] cleanup failed", e));
 
   await refreshAccountsPaths();
   return { ok: true };
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Vendor payment email — sends after successful Mark Paid
+// ──────────────────────────────────────────────────────────────────
+// Fetches bill + vendor + payment, builds the HTML body + PDF
+// attachment, calls Resend. Logs to audit_logs whether the email
+// went through or was skipped. NEVER throws — outer caller is
+// fire-and-forget.
+
+async function sendVendorPaymentEmail(
+  paymentId: string,
+  billId: string,
+  actorId: string,
+): Promise<void> {
+  try {
+    const admin = createAdminSupabaseClient();
+    const [{ data: paymentRow }, { data: billRow }] = await Promise.all([
+      admin
+        .from("bill_payments")
+        .select("paid_amount, payment_method, payment_reference, payment_note, paid_at")
+        .eq("id", paymentId)
+        .maybeSingle(),
+      admin
+        .from("bills")
+        .select(
+          "token, vendor_bill_no, bill_date, description, " +
+            "bill_vendors(id, name, email, address, gstin)",
+        )
+        .eq("id", billId)
+        .maybeSingle(),
+    ]);
+
+    if (!paymentRow || !billRow) {
+      console.warn("[sendVendorPaymentEmail] missing rows", { paymentId, billId });
+      return;
+    }
+
+    type VendorEmbed = {
+      id: string;
+      name: string;
+      email: string | null;
+      address: string | null;
+      gstin: string | null;
+    };
+    const billRowAny = billRow as unknown as {
+      token: string;
+      vendor_bill_no: string;
+      bill_date: string;
+      description: string;
+      bill_vendors: VendorEmbed | VendorEmbed[] | null;
+    };
+    const vendor = Array.isArray(billRowAny.bill_vendors)
+      ? billRowAny.bill_vendors[0]
+      : billRowAny.bill_vendors;
+
+    if (!vendor || !vendor.email) {
+      // Vendor has no email — nothing to send. Quiet skip.
+      void logAudit(actorId, "vendor_payment_email_skipped", "bill_payment", paymentId, {
+        reason: vendor ? "vendor has no email on record" : "vendor row missing",
+      });
+      return;
+    }
+
+    const { sendEmail, buildVoucherEmailHtml, buildVoucherEmailText } =
+      await import("@/lib/email");
+    const { buildVoucherPdf } = await import("@/lib/voucher-pdf");
+    const { numberToIndianWords } = await import(
+      "@/app/(app)/accounts/payments/[id]/voucher/number-to-words"
+    );
+
+    const paidAmount = Number(
+      (paymentRow as { paid_amount?: number | null }).paid_amount ?? 0,
+    );
+    const amountInWords = numberToIndianWords(paidAmount);
+
+    // Company info — kept in sync with the on-screen voucher
+    // (src/app/(app)/accounts/payments/[id]/voucher/voucher-view.tsx).
+    // If MTCPL's registered office moves, update BOTH places.
+    const company = {
+      name: "MATESHWARI TEMPLE CONSTRUCTION PVT LTD",
+      addressLines: [
+        "C-109, RIICO Industrial Area 1/A",
+        "Sirohi Road, Pindwara",
+        "Rajasthan — 307022",
+      ],
+    };
+
+    // ── Build the PDF attachment ─────────────────────────────────
+    const pdfBytes = await buildVoucherPdf({
+      company,
+      vendor: {
+        name: vendor.name,
+        address: vendor.address,
+        gstin: vendor.gstin,
+      },
+      bill: {
+        token: billRowAny.token,
+        vendorBillNo: billRowAny.vendor_bill_no,
+        billDate: billRowAny.bill_date,
+        description: billRowAny.description,
+      },
+      payment: {
+        paidAmount,
+        paymentMethod:
+          (paymentRow as { payment_method?: string | null }).payment_method ?? null,
+        paymentReference:
+          (paymentRow as { payment_reference?: string | null }).payment_reference ?? null,
+        paymentNote:
+          (paymentRow as { payment_note?: string | null }).payment_note ?? null,
+        paidAt:
+          (paymentRow as { paid_at?: string | null }).paid_at ?? null,
+      },
+      amountInWords,
+    });
+    const pdfBase64 = Buffer.from(pdfBytes).toString("base64");
+
+    // ── Send ────────────────────────────────────────────────────
+    const html = buildVoucherEmailHtml({
+      vendorName: vendor.name,
+      billToken: billRowAny.token,
+      vendorBillNo: billRowAny.vendor_bill_no,
+      paidAmount,
+      amountInWords,
+      paymentMethod:
+        (paymentRow as { payment_method?: string | null }).payment_method ?? null,
+      paymentReference:
+        (paymentRow as { payment_reference?: string | null }).payment_reference ?? null,
+      paidAtIso:
+        (paymentRow as { paid_at?: string | null }).paid_at ?? null,
+      companyName: company.name,
+      companyAddressLines: company.addressLines,
+    });
+    const text = buildVoucherEmailText({
+      vendorName: vendor.name,
+      billToken: billRowAny.token,
+      vendorBillNo: billRowAny.vendor_bill_no,
+      paidAmount,
+      amountInWords,
+      paymentMethod:
+        (paymentRow as { payment_method?: string | null }).payment_method ?? null,
+      paymentReference:
+        (paymentRow as { payment_reference?: string | null }).payment_reference ?? null,
+      paidAtIso:
+        (paymentRow as { paid_at?: string | null }).paid_at ?? null,
+      companyName: company.name,
+    });
+
+    const result = await sendEmail({
+      to: vendor.email,
+      subject: `Payment received — Bill ${billRowAny.token} — ₹${paidAmount.toLocaleString("en-IN")}`,
+      html,
+      text,
+      attachments: [
+        {
+          filename: `voucher-${billRowAny.token}.pdf`,
+          content: pdfBase64,
+        },
+      ],
+    });
+
+    void logAudit(
+      actorId,
+      result.ok
+        ? "vendor_payment_email_sent"
+        : result.skipped
+          ? "vendor_payment_email_skipped"
+          : "vendor_payment_email_failed",
+      "bill_payment",
+      paymentId,
+      {
+        to: vendor.email,
+        provider_id: result.ok ? result.id : null,
+        error: !result.ok ? result.error : null,
+        skipped: !result.ok && result.skipped ? true : false,
+      },
+    );
+  } catch (e) {
+    // Catch-all so the markPaymentPaidAction outer Promise.all
+    // never sees an unhandled rejection.
+    console.warn("[sendVendorPaymentEmail] failed", e);
+  }
 }
 
 export async function cancelPaymentAction(formData: FormData): Promise<ActionResult> {
