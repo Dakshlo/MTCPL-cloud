@@ -943,16 +943,6 @@ function RoyaltyColumn({
                 {e.description}
               </span>
             )}
-            <span style={{ fontSize: 10, color: "var(--muted)" }}>
-              {new Date(e.createdAt).toLocaleString("en-IN", {
-                timeZone: "Asia/Kolkata",
-                day: "numeric",
-                month: "short",
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-              {e.createdByName ? ` · ${e.createdByName}` : ""}
-            </span>
           </div>
         ))}
       </div>
