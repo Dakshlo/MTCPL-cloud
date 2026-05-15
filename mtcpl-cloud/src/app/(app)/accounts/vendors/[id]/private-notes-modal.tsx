@@ -563,10 +563,6 @@ export function PrivateNotesModal({
               {/* ROYALTY POINTS TAB — non-monetary unit tracking */}
               {tab === "royalty" && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  <p style={{ margin: 0, fontSize: 11, color: "var(--muted)", lineHeight: 1.5 }}>
-                    Numeric units — NOT money. Every add / cancel is recorded in the audit log with the value, the vendor, and who did it. Soft-cancel only; no hard delete.
-                  </p>
-
                   {/* Net balance summary */}
                   <div
                     style={{
