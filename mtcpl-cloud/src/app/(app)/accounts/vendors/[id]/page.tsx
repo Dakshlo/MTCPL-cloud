@@ -250,7 +250,11 @@ export default async function BillVendorDetailPage({
               <summary> so clicking the lock doesn't toggle <details>. */}
           <PrivateNotesModal
             vendorId={id}
-            canShow={profile.role === "developer" || profile.role === "owner"}
+            canShow={
+              profile.role === "developer" ||
+              profile.role === "owner" ||
+              profile.role === "accountant"
+            }
           />
         </summary>
         <div style={{ marginTop: 14 }}>

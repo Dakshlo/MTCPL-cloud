@@ -1383,7 +1383,13 @@ export async function archiveBillVendorFormAction(formData: FormData) {
 type Profile = Awaited<ReturnType<typeof requireAuth>>["profile"];
 
 function canAccessPrivateNotes(p: Profile): boolean {
-  return p.role === "developer" || p.role === "owner";
+  // Daksh (May 2026): accountant added — they manage vendors day-to-day
+  // and need parity with owner/dev access for private notes.
+  return (
+    p.role === "developer" ||
+    p.role === "owner" ||
+    p.role === "accountant"
+  );
 }
 
 type PassphraseRow = {
