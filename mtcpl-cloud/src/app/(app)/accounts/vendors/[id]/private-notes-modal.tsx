@@ -30,8 +30,16 @@ import {
   clearVendorPrivateNoteAction,
 } from "../../actions";
 
-const SESSION_KEY_PREFIX = "vn_unlock_v1_";
-const PASSPHRASE_KEY = "vn_passphrase_v1";
+// Mig 050 follow-on (Daksh, May 2026): session-scoped unlock removed
+// per request — "asks every time" is now the default behaviour.
+// Previously these keys held a sessionStorage flag + stashed
+// passphrase so reopens within the same tab skipped the prompt.
+// That was too loose for Daksh's threat model. Each modal open now
+// asks for the passphrase fresh.
+//
+// The constants remain so any old sessionStorage values left over
+// from a previous deploy are intentionally NOT used — readers
+// always re-verify against the server on every action regardless.
 
 type Mode = "closed" | "loading" | "set" | "unlock" | "edit";
 
@@ -55,38 +63,6 @@ export function PrivateNotesModal({
 
   if (!canShow) return null;
 
-  function tryReadPassphraseFromSession(): string | null {
-    try {
-      return sessionStorage.getItem(PASSPHRASE_KEY);
-    } catch {
-      return null;
-    }
-  }
-
-  function isUnlockedThisSession(): boolean {
-    try {
-      return sessionStorage.getItem(SESSION_KEY_PREFIX + vendorId) === "1";
-    } catch {
-      return false;
-    }
-  }
-
-  function markUnlocked() {
-    try {
-      sessionStorage.setItem(SESSION_KEY_PREFIX + vendorId, "1");
-    } catch {
-      /* ignore — falls through to per-action passphrase prompt */
-    }
-  }
-
-  function stashPassphrase(plain: string) {
-    try {
-      sessionStorage.setItem(PASSPHRASE_KEY, plain);
-    } catch {
-      /* ignore */
-    }
-  }
-
   async function open() {
     setError(null);
     setMode("loading");
@@ -100,13 +76,9 @@ export function PrivateNotesModal({
       setMode("set");
       return;
     }
-    // Passphrase set — check if we have a stashed one from this
-    // session already.
-    const cached = tryReadPassphraseFromSession();
-    if (cached && isUnlockedThisSession()) {
-      await loadContent(cached);
-      return;
-    }
+    // Always prompt for the passphrase on open. Previous version
+    // cached an unlock for the tab session; Daksh's call: ask every
+    // time so an unattended screen doesn't leak the notes.
     setMode("unlock");
   }
 
@@ -124,8 +96,6 @@ export function PrivateNotesModal({
     setUpdatedAt(result.updatedAt);
     setUpdatedByName(result.updatedByName);
     setPassphrase(plain);
-    markUnlocked();
-    stashPassphrase(plain);
     setMode("edit");
   }
 
