@@ -887,6 +887,7 @@ export default async function BillDetailPage({
                 {vendor.email && <KV k="Email" v={vendor.email} />}
                 {vendor.upi_id && <KV k="UPI" v={vendor.upi_id} mono />}
                 {vendor.bank_name && <KV k="Bank" v={vendor.bank_name} />}
+                {vendor.bank_account && <KV k="A/C No." v={vendor.bank_account} mono />}
                 {vendor.ifsc && <KV k="IFSC" v={vendor.ifsc} mono />}
               </dl>
             </div>

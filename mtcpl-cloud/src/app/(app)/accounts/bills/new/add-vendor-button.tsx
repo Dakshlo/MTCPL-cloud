@@ -50,6 +50,12 @@ export function AddVendorButton({
   const [bankName, setBankName] = useState("");
   const [bankAccount, setBankAccount] = useState("");
   const [ifsc, setIfsc] = useState("");
+  // Mig 047 follow-on (Daksh, May 2026): HDFC bulk-payment bene name.
+  // Auto-derived from vendor name as user types (sanitised + 20 chars)
+  // unless the user has manually edited it — `hdfcTouched` tracks
+  // that so a manual edit isn't clobbered by subsequent name changes.
+  const [hdfcBeneName, setHdfcBeneName] = useState("");
+  const [hdfcTouched, setHdfcTouched] = useState(false);
   // Single-pick tri-state. Matches the vendor-edit form picker.
   const [taxFlag, setTaxFlag] = useState<"none" | "tds" | "tcs">("none");
 
@@ -75,8 +81,22 @@ export function AddVendorButton({
     setBankName("");
     setBankAccount("");
     setIfsc("");
+    setHdfcBeneName("");
+    setHdfcTouched(false);
     setTaxFlag("none");
     setError(null);
+  }
+
+  /** Match the regex used by the bulk-default SQL + HDFC export
+   *  sanitiser. Uppercases, strips characters HDFC bans, collapses
+   *  whitespace, trims to 20 chars. */
+  function sanitiseForHdfc(input: string): string {
+    return input
+      .toUpperCase()
+      .replace(/[^A-Z0-9 .]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 20);
   }
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -95,6 +115,10 @@ export function AddVendorButton({
     fd.set("bank_name", bankName.trim());
     fd.set("bank_account", bankAccount.trim());
     fd.set("ifsc", ifsc.trim().toUpperCase());
+    // Mig 047 — HDFC bene name (max 20, all caps, no specials).
+    // Server action also sanitises but client sends the already-clean
+    // value so what the user sees in the field is what gets stored.
+    fd.set("hdfc_bene_name", sanitiseForHdfc(hdfcBeneName));
     fd.set("tds_applicable", taxFlag === "tds" ? "1" : "");
     fd.set("tcs_applicable", taxFlag === "tcs" ? "1" : "");
     fd.set("default_tds_percent", "");
@@ -163,8 +187,14 @@ export function AddVendorButton({
           <Field label="Vendor name" required>
             <input
               value={name}
-              onChange={(e) => setName(e.target.value)}
-
+              onChange={(e) => {
+                const next = e.target.value;
+                setName(next);
+                // Auto-mirror into the HDFC bene field until the user
+                // manually edits it — keeps "name = bene name" the
+                // common case without forcing two typings.
+                if (!hdfcTouched) setHdfcBeneName(sanitiseForHdfc(next));
+              }}
               style={INPUT_STYLE}
               required
               autoFocus
@@ -233,6 +263,31 @@ export function AddVendorButton({
               />
             </Field>
           </div>
+
+          {/* Mig 047 follow-on — HDFC bulk-payment beneficiary name.
+              Pre-fills from the vendor name (sanitised, ≤20 chars) as
+              the user types but stays editable. Once the user types
+              into THIS field, `hdfcTouched` flips and we stop
+              clobbering it on subsequent vendor-name edits. HDFC's
+              file format only allows A–Z, 0–9, space, and period
+              (max 20 chars) — server action re-sanitises defensively. */}
+          <Field label="HDFC beneficiary name">
+            <input
+              value={hdfcBeneName}
+              onChange={(e) => {
+                setHdfcBeneName(e.target.value.slice(0, 20));
+                setHdfcTouched(true);
+              }}
+              placeholder="Auto-filled from name; edit if needed"
+              maxLength={20}
+              style={{ ...INPUT_STYLE, fontFamily: "ui-monospace, monospace", textTransform: "uppercase" }}
+            />
+            <span style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.45 }}>
+              Used on HDFC bulk-payment CSV. Max 20 chars, A–Z / 0–9 /
+              space / period only. Auto-copied from the vendor name —
+              change here if the bank account is held under a different name.
+            </span>
+          </Field>
 
           {/* Mig 042 follow-on — TDS/TCS picker. Mutually exclusive;
               no rate stored on the vendor (entered on each bill). */}
