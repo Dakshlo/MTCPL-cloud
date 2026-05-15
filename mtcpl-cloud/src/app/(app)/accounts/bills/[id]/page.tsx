@@ -75,7 +75,10 @@ export default async function BillDetailPage({
   const { data: paymentsRaw } = await supabase
     .from("bill_payments")
     .select(
-      "id, status, proposed_amount, proposed_by, proposed_at, confirmed_by, confirmed_at, paid_amount, payment_method, payment_reference, payment_note, paid_by, paid_at, cancelled_by, cancelled_at, cancel_reason",
+      // Mig 052 follow-on: pull bank-rejection metadata so the
+      // timeline below can render the 🏦 entry. previous_payment_id
+      // lets us hint "retry of <earlier id>" on the retry row.
+      "id, status, proposed_amount, proposed_by, proposed_at, confirmed_by, confirmed_at, paid_amount, payment_method, payment_reference, payment_note, paid_by, paid_at, cancelled_by, cancelled_at, cancel_reason, bank_rejected_at, bank_rejected_by, bank_rejection_reason, previous_payment_id",
     )
     .eq("bill_id", id)
     .order("proposed_at", { ascending: false });
@@ -96,9 +99,23 @@ export default async function BillDetailPage({
     cancelled_by: string | null;
     cancelled_at: string | null;
     cancel_reason: string | null;
+    bank_rejected_at: string | null;
+    bank_rejected_by: string | null;
+    bank_rejection_reason: string | null;
+    previous_payment_id: string | null;
   }>;
 
-  const hasOpenPayment = payments.some((p) => p.status === "proposed" || p.status === "confirmed");
+  // Mig 052 — bank_rejected counts as an "open / in-flight" state
+  // for the purposes of preventing the bill from being edited from
+  // under it. Treat it like proposed/confirmed for locking, AND for
+  // hasOpenPayment so the due-bills view still recognises the
+  // payment is mid-cycle (rather than re-offering it as fully open).
+  const hasOpenPayment = payments.some(
+    (p) =>
+      p.status === "proposed" ||
+      p.status === "confirmed" ||
+      p.status === "bank_rejected",
+  );
   const isLocked = payments.some((p) => p.status !== "cancelled");
   const isOwnBill = bill.submitted_by === profile.id;
   const canEdit =
@@ -184,6 +201,16 @@ export default async function BillDetailPage({
         label: `Payment cancelled${p.cancel_reason ? ` · ${p.cancel_reason}` : ""}`,
         by: p.cancelled_by ? profilesMap[p.cancelled_by] ?? null : null,
         tone: ACCOUNTS_TOKENS.neutral,
+      });
+    }
+    // Mig 052 — bank-rejection event in the timeline. Surfaces the
+    // reason inline so the auditor doesn't have to drill anywhere.
+    if (p.bank_rejected_at) {
+      timeline.push({
+        at: p.bank_rejected_at,
+        label: `🏦 Bank rejected${p.bank_rejection_reason ? ` · ${p.bank_rejection_reason}` : ""}`,
+        by: p.bank_rejected_by ? profilesMap[p.bank_rejected_by] ?? null : null,
+        tone: ACCOUNTS_TOKENS.danger,
       });
     }
   }

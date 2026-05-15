@@ -203,10 +203,13 @@ const BILL_STATUS_TINT: Record<string, { label: string; bg: string; fg: string; 
 };
 
 const PAYMENT_STATUS_TINT: Record<string, { label: string; bg: string; fg: string; dot: string }> = {
-  proposed:  { label: "Proposed",  bg: "#e0e7ff", fg: "#3730a3", dot: "#6366f1" },
-  confirmed: { label: "Confirmed", bg: "#fef3c7", fg: "#92400e", dot: "#f59e0b" },
-  paid:      { label: "Paid",      bg: "#dcfce7", fg: "#166534", dot: "#22c55e" },
-  cancelled: { label: "Cancelled", bg: "#f1f5f9", fg: "#475569", dot: "#94a3b8" },
+  proposed:      { label: "Proposed",      bg: "#e0e7ff", fg: "#3730a3", dot: "#6366f1" },
+  confirmed:     { label: "Confirmed",     bg: "#fef3c7", fg: "#92400e", dot: "#f59e0b" },
+  paid:          { label: "Paid",          bg: "#dcfce7", fg: "#166534", dot: "#22c55e" },
+  cancelled:     { label: "Cancelled",     bg: "#f1f5f9", fg: "#475569", dot: "#94a3b8" },
+  // Mig 052 — bank refused this row (wrong IFSC, account closed,
+  // NSF, etc.). Distinct red tint so it stands out vs cancelled.
+  bank_rejected: { label: "Bank rejected", bg: "#fee2e2", fg: "#991b1b", dot: "#dc2626" },
 };
 
 export function BillStatusPill({ status }: { status: string }) {

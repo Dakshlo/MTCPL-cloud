@@ -1028,10 +1028,15 @@ export async function markPaymentPaidAction(formData: FormData): Promise<ActionR
     .maybeSingle();
   if (loadErr) return { ok: false, error: loadErr.message };
   if (!payment) return { ok: false, error: "Payment row not found." };
-  if (payment.status !== "confirmed") {
+  // Mig 052 — Mark Paid is also the manual-rescue path for
+  // bank_rejected rows. The vendor was paid by cash / RTGS done
+  // outside HDFC bulk after the file bounced, and the accountant
+  // wants to close the loop without re-proposing. Same paid_amount
+  // (= proposed_amount), same audit trail.
+  if (payment.status !== "confirmed" && payment.status !== "bank_rejected") {
     return {
       ok: false,
-      error: `Payment is not in 'confirmed' state (current: ${payment.status}).`,
+      error: `Payment is not in a markable state (current: ${payment.status}). Only confirmed or bank-rejected payments can be marked paid.`,
     };
   }
 
@@ -1361,7 +1366,11 @@ export async function cancelPaymentAction(formData: FormData): Promise<ActionRes
       updated_at: now,
     })
     .eq("id", paymentId)
-    .in("status", ["proposed", "confirmed"])
+    // Mig 052 — bank_rejected also goes back to due via this same
+    // path. "↩ Send to due" on a rejected row is the final give-up
+    // exit: row flips to cancelled, bill drops back into the
+    // outstanding pool, accountant can re-propose later.
+    .in("status", ["proposed", "confirmed", "bank_rejected"])
     .select("id, bill_id")
     .single();
 
@@ -1376,6 +1385,165 @@ export async function cancelPaymentAction(formData: FormData): Promise<ActionRes
   void logAudit(profile.id, "payment_cancelled", "bill_payment", paymentId, {
     bill_id: updated.bill_id,
     reason,
+  });
+  await refreshAccountsPaths();
+  return { ok: true };
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Mig 052 — bank-rejected payment lifecycle
+// ──────────────────────────────────────────────────────────────────
+// Pattern: HDFC bulk file is uploaded. Bank processes each row
+// independently. Some succeed, some fail (wrong IFSC, account
+// closed, beneficiary-name mismatch, NSF, etc.). The accountant
+// flags the failed rows here so they leave the "Confirmed" section
+// without going all the way back to "due" (which would lose the
+// proposal/confirm history). Rejected rows wait in a holding
+// section on Pay Today until the accountant chooses: try again
+// (re-propose), mark paid manually, or send back to due.
+// ──────────────────────────────────────────────────────────────────
+
+export async function bankRejectPaymentAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canMarkPaid(profile)) {
+    return {
+      ok: false,
+      error:
+        "Only the accountant / owner can mark a payment bank-rejected.",
+    };
+  }
+  const supabase = createAdminSupabaseClient();
+
+  const paymentId = String(formData.get("payment_id") || "").trim();
+  const reason = String(formData.get("rejection_reason") || "").trim();
+  if (!paymentId) return { ok: false, error: "Missing payment_id." };
+  if (reason.length < 3) {
+    return {
+      ok: false,
+      error:
+        "Tell us why the bank refused this payment (min 3 chars). e.g. 'Wrong IFSC', 'Account closed', 'Insufficient funds'.",
+    };
+  }
+
+  // Confirm the row is currently 'confirmed' — bank can only refuse
+  // a row that was actually sent. proposed rows haven't reached the
+  // bank yet, paid rows are done, cancelled is cancelled.
+  const { data: payment, error: loadErr } = await supabase
+    .from("bill_payments")
+    .select("id, status, bill_id, proposed_amount")
+    .eq("id", paymentId)
+    .maybeSingle();
+  if (loadErr) return { ok: false, error: loadErr.message };
+  if (!payment) return { ok: false, error: "Payment row not found." };
+  if (payment.status !== "confirmed") {
+    return {
+      ok: false,
+      error: `Payment is not in 'confirmed' state (current: ${payment.status}). Only confirmed payments can be marked bank-rejected.`,
+    };
+  }
+
+  const now = new Date().toISOString();
+  const { error: updErr } = await supabase
+    .from("bill_payments")
+    .update({
+      status: "bank_rejected",
+      bank_rejected_at: now,
+      bank_rejected_by: profile.id,
+      bank_rejection_reason: reason,
+      updated_at: now,
+    })
+    .eq("id", paymentId);
+
+  if (updErr) return { ok: false, error: updErr.message };
+
+  void logAudit(profile.id, "payment_bank_rejected", "bill_payment", paymentId, {
+    bill_id: payment.bill_id,
+    proposed_amount: Number(payment.proposed_amount),
+    reason,
+  });
+  await refreshAccountsPaths();
+  return { ok: true };
+}
+
+/** Create a fresh `proposed` payment row for the same bill, linked
+ *  to the bank_rejected row via previous_payment_id. The new row
+ *  joins the proposed pool — the owner confirms it in a future
+ *  batch (the existing batching UI handles "which group" selection
+ *  by ticking proposed rows together before confirming).
+ *
+ *  The original bank_rejected row stays as-is, preserving the
+ *  rejection history. The retry chain can be walked via
+ *  previous_payment_id (see migration 052 diagnostic notes). */
+export async function retryBankRejectedPaymentAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canMarkPaid(profile)) {
+    return {
+      ok: false,
+      error: "Only the accountant / owner can re-propose a bank-rejected payment.",
+    };
+  }
+  const supabase = createAdminSupabaseClient();
+
+  const paymentId = String(formData.get("payment_id") || "").trim();
+  if (!paymentId) return { ok: false, error: "Missing payment_id." };
+
+  const { data: rejected, error: loadErr } = await supabase
+    .from("bill_payments")
+    .select("id, status, bill_id, proposed_amount")
+    .eq("id", paymentId)
+    .maybeSingle();
+  if (loadErr) return { ok: false, error: loadErr.message };
+  if (!rejected) return { ok: false, error: "Payment row not found." };
+  if (rejected.status !== "bank_rejected") {
+    return {
+      ok: false,
+      error: `Only bank-rejected payments can be retried (current: ${rejected.status}).`,
+    };
+  }
+
+  // Sanity: don't propose more than the bill's current outstanding.
+  // If another payment closed the bill between rejection and retry
+  // (e.g. cash settlement), surface a clear error rather than
+  // creating a phantom proposal.
+  const { data: billRow } = await supabase
+    .from("bills")
+    .select("amount_outstanding, token")
+    .eq("id", rejected.bill_id as string)
+    .maybeSingle();
+  const outstanding = Number(billRow?.amount_outstanding ?? 0);
+  const proposedAmount = Number(rejected.proposed_amount);
+  if (outstanding <= 0) {
+    return {
+      ok: false,
+      error:
+        "This bill has no outstanding balance — it was settled by another payment. Send the rejected row to due to clean it up.",
+    };
+  }
+  const retryAmount = Math.min(proposedAmount, outstanding);
+
+  const now = new Date().toISOString();
+  const { data: created, error: insErr } = await supabase
+    .from("bill_payments")
+    .insert({
+      bill_id: rejected.bill_id,
+      status: "proposed",
+      proposed_amount: retryAmount,
+      proposed_by: profile.id,
+      proposed_at: now,
+      previous_payment_id: rejected.id,
+    })
+    .select("id")
+    .single();
+  if (insErr) return { ok: false, error: insErr.message };
+
+  void logAudit(profile.id, "payment_retry_proposed", "bill_payment", created.id, {
+    bill_id: rejected.bill_id,
+    proposed_amount: retryAmount,
+    previous_payment_id: rejected.id,
   });
   await refreshAccountsPaths();
   return { ok: true };

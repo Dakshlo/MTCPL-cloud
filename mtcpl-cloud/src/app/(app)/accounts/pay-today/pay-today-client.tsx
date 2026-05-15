@@ -63,26 +63,51 @@ export type PayTodayRow = {
  *  hasn't set its own payment_terms_days. */
 export const DEFAULT_PAYMENT_TERMS_DAYS = 45;
 
+/** Mig 052 — bank_rejected payments live in their own holding
+ *  section between Confirmed and Paid Today. The row carries
+ *  enough context for the accountant to decide the next step
+ *  (try again, mark paid manually, send back to due) without
+ *  drilling into the bill. */
+export type BankRejectedRow = {
+  id: string;
+  billId: string;
+  vendorName: string;
+  billToken: string;
+  vendorBillNo: string;
+  billOutstanding: number;
+  proposedAmount: number;
+  batchId: string | null;
+  rejectedAt: string | null;
+  rejectedByName: string | null;
+  rejectionReason: string;
+};
+
 type ServerResult = { ok: true } | { ok: false; error: string };
 
 export function PayTodayClient({
   proposedRows,
   confirmedRows,
+  bankRejectedRows,
   canConfirm,
   canMarkPaid,
   canCancel,
   confirmAction,
   markPaidAction,
   cancelAction,
+  bankRejectAction,
+  retryBankRejectedAction,
 }: {
   proposedRows: PayTodayRow[];
   confirmedRows: PayTodayRow[];
+  bankRejectedRows: BankRejectedRow[];
   canConfirm: boolean;
   canMarkPaid: boolean;
   canCancel: boolean;
   confirmAction: (formData: FormData) => Promise<ServerResult>;
   markPaidAction: (formData: FormData) => Promise<ServerResult>;
   cancelAction: (formData: FormData) => Promise<ServerResult>;
+  bankRejectAction: (formData: FormData) => Promise<ServerResult>;
+  retryBankRejectedAction: (formData: FormData) => Promise<ServerResult>;
 }) {
   const proposedBatches = useMemo(() => {
     const map = new Map<string, PayTodayRow[]>();
@@ -132,6 +157,40 @@ export function PayTodayClient({
   // batch-grouping for paid lives there, not here.)
 
   const [activeMarkRow, setActiveMarkRow] = useState<PayTodayRow | null>(null);
+  // Mig 052 — opens the "Reason for bank decline" slide-over for a
+  // confirmed row. Separate from activeMarkRow because the two flows
+  // can never overlap (a row is either Mark Paid or Bank Decline,
+  // never both at once).
+  const [activeBankRejectRow, setActiveBankRejectRow] =
+    useState<PayTodayRow | null>(null);
+  // Mig 052 — adapter for the "Mark paid manually" affordance on a
+  // bank-rejected row. The Mark Paid slide-over expects a
+  // PayTodayRow, so we synthesise a minimal one (status='confirmed'
+  // for the slide-over's UX; server action accepts bank_rejected
+  // too, see actions.ts).
+  function synthesisePayRowFromRejected(r: BankRejectedRow): PayTodayRow {
+    return {
+      id: r.id,
+      billId: r.billId,
+      status: "confirmed",
+      proposedAmount: r.proposedAmount,
+      proposedByName: null,
+      proposedAt: null,
+      confirmedByName: null,
+      confirmedAt: null,
+      batchId: r.batchId,
+      vendorName: r.vendorName,
+      billToken: r.billToken,
+      vendorBillNo: r.vendorBillNo,
+      billDate: null,
+      billOutstanding: r.billOutstanding,
+      billTotal: 0,
+      daysSinceBill: null,
+      prematureForPayment: false,
+      paymentTermsDays: DEFAULT_PAYMENT_TERMS_DAYS,
+      hdfcCsvDownloaded: false,
+    };
+  }
 
   // Daksh's 45-day rule — count premature rows across both sections so
   // the warning banner is visible regardless of which step the payment
@@ -266,9 +325,98 @@ export function PayTodayClient({
             canCancel={canCancel}
             cancelAction={cancelAction}
             onMarkPaid={(row) => setActiveMarkRow(row)}
+            // Mig 052 — bank-decline trigger on confirmed rows.
+            onBankReject={
+              canMarkPaid
+                ? (row) => setActiveBankRejectRow(row)
+                : undefined
+            }
           />
         ))}
       </SectionBlock>
+
+      {/* Mig 052 — Bank Rejected section. Sits between Confirmed and
+          Paid Today so it's visible mid-flow: the rejected rows are
+          "in flight pending next action" and the accountant needs
+          to clear them before end-of-day. Section only renders when
+          there's at least one rejected row, to keep the page tidy
+          on clean days. */}
+      {bankRejectedRows.length > 0 && (
+        <SectionBlock
+          sectionId="section-bank-rejected"
+          title="Bank rejected — awaiting next action"
+          emoji="🏦"
+          emptyMessage="" /* never shown, since we gate on length > 0 */
+          count={bankRejectedRows.length}
+          total={bankRejectedRows.reduce((s, r) => s + r.proposedAmount, 0)}
+          tint="#b91c1c"
+        >
+          <div
+            style={{
+              padding: "10px 12px",
+              background: "rgba(185, 28, 28, 0.06)",
+              border: "1px solid rgba(185, 28, 28, 0.25)",
+              borderRadius: 10,
+              marginBottom: 10,
+              fontSize: 12,
+              color: "#7f1d1d",
+              lineHeight: 1.5,
+            }}
+          >
+            HDFC refused these rows. Pick what to do for each: <strong>🔁 Try
+            again</strong> drops it back into the proposed pool so it can join
+            tomorrow's batch, <strong>💸 Mark paid manually</strong> closes it
+            (cash / RTGS done outside HDFC bulk), or <strong>↩ Send to due</strong>
+            cancels and returns it to the outstanding-bills list.
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {bankRejectedRows.map((r) => (
+              <BankRejectedRowCard
+                key={r.id}
+                row={r}
+                canMarkPaid={canMarkPaid}
+                canCancel={canCancel}
+                cancelAction={cancelAction}
+                retryAction={retryBankRejectedAction}
+                onMarkPaidManually={() =>
+                  setActiveMarkRow(synthesisePayRowFromRejected(r))
+                }
+              />
+            ))}
+          </div>
+        </SectionBlock>
+      )}
+
+      {/* Mig 052 — Bank decline reason slide-over */}
+      <SidePanel
+        open={activeBankRejectRow !== null}
+        onClose={() => setActiveBankRejectRow(null)}
+        title={
+          activeBankRejectRow ? (
+            <span>
+              Bank declined ·{" "}
+              <code style={{ fontFamily: "ui-monospace, monospace", fontSize: 14, color: "#b91c1c" }}>
+                {activeBankRejectRow.billToken}
+              </code>
+            </span>
+          ) : (
+            "Bank declined"
+          )
+        }
+        description={
+          activeBankRejectRow
+            ? `${activeBankRejectRow.vendorName} · ₹${activeBankRejectRow.proposedAmount.toLocaleString("en-IN")}`
+            : undefined
+        }
+      >
+        {activeBankRejectRow && (
+          <BankRejectForm
+            row={activeBankRejectRow}
+            bankRejectAction={bankRejectAction}
+            onSuccess={() => setActiveBankRejectRow(null)}
+          />
+        )}
+      </SidePanel>
 
       {/* Mark-paid slide-over */}
       <SidePanel
@@ -678,6 +826,7 @@ function ConfirmedBatch({
   canCancel,
   cancelAction,
   onMarkPaid,
+  onBankReject,
 }: {
   batchId: string;
   batchIndex: number;
@@ -686,6 +835,10 @@ function ConfirmedBatch({
   canCancel: boolean;
   cancelAction: (formData: FormData) => Promise<ServerResult>;
   onMarkPaid: (row: PayTodayRow) => void;
+  /** Mig 052 — when set, ConfirmedRow renders a "❌ Bank declined"
+   *  button alongside Mark Paid / Send to due. Undefined for users
+   *  who don't have canMarkPaid permission. */
+  onBankReject?: (row: PayTodayRow) => void;
 }) {
   const total = rows.reduce((s, r) => s + r.proposedAmount, 0);
   const downloadableCount = rows.filter((r) => !r.hdfcCsvDownloaded).length;
@@ -1070,6 +1223,7 @@ function ConfirmedBatch({
             canCancel={canCancel}
             cancelAction={cancelAction}
             onMarkPaid={() => onMarkPaid(row)}
+            onBankReject={onBankReject ? () => onBankReject(row) : undefined}
           />
         ))}
       </div>
@@ -1083,12 +1237,16 @@ function ConfirmedRow({
   canCancel,
   cancelAction,
   onMarkPaid,
+  onBankReject,
 }: {
   row: PayTodayRow;
   canMarkPaid: boolean;
   canCancel: boolean;
   cancelAction: (formData: FormData) => Promise<ServerResult>;
   onMarkPaid: () => void;
+  /** Mig 052 — accountant clicked "❌ Bank declined" on this row.
+   *  Opens the reason slide-over. Undefined hides the button. */
+  onBankReject?: () => void;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -1199,6 +1357,28 @@ function ConfirmedRow({
         {canMarkPaid && (
           <button type="button" onClick={onMarkPaid} style={BUTTON_STYLES.primary}>
             💸 Mark paid
+          </button>
+        )}
+        {/* Mig 052 — only visible to canMarkPaid users (accountant /
+            owner / dev). Click → opens reason slide-over → on submit,
+            row moves to the Bank Rejected section. */}
+        {onBankReject && (
+          <button
+            type="button"
+            onClick={onBankReject}
+            style={{
+              padding: "8px 14px",
+              fontSize: 12,
+              fontWeight: 700,
+              background: "transparent",
+              color: "#b91c1c",
+              border: "1px solid rgba(185, 28, 28, 0.45)",
+              borderRadius: 8,
+              cursor: "pointer",
+            }}
+            title="The bank refused this row (wrong IFSC, account closed, NSF, etc.). Moves it to the holding section instead of cancelling outright."
+          >
+            ❌ Bank declined
           </button>
         )}
         {canCancel && (
@@ -1493,5 +1673,341 @@ function Field({
       </span>
       {children}
     </label>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// Mig 052 — Bank-rejected lifecycle UI
+// ══════════════════════════════════════════════════════════════════
+
+/** Slide-over content for "❌ Bank declined" on a confirmed row.
+ *  Captures the required rejection reason and flips the payment to
+ *  status='bank_rejected' via bankRejectAction. Reason is mandatory
+ *  at both the client and server (≥3 chars) — the audit log keeps
+ *  it forever so there's always a "why" for every rejection. */
+function BankRejectForm({
+  row,
+  bankRejectAction,
+  onSuccess,
+}: {
+  row: PayTodayRow;
+  bankRejectAction: (formData: FormData) => Promise<ServerResult>;
+  onSuccess: () => void;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [reason, setReason] = useState("");
+
+  const REASON_QUICK_PICKS = [
+    "Wrong IFSC",
+    "Account closed",
+    "Beneficiary name mismatch",
+    "Insufficient funds",
+    "Account does not exist",
+  ];
+
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError(null);
+    const trimmed = reason.trim();
+    if (trimmed.length < 3) {
+      return setError("Tell us why HDFC refused this payment (min 3 chars).");
+    }
+    startTransition(async () => {
+      const fd = new FormData();
+      fd.set("payment_id", row.id);
+      fd.set("rejection_reason", trimmed);
+      const r = await bankRejectAction(fd);
+      if (!r.ok) {
+        setError(r.error);
+        return;
+      }
+      router.refresh();
+      onSuccess();
+    });
+  }
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      style={{ display: "flex", flexDirection: "column", gap: 16 }}
+    >
+      <div
+        style={{
+          padding: "12px 14px",
+          background: "rgba(185, 28, 28, 0.06)",
+          border: "1px solid rgba(185, 28, 28, 0.25)",
+          borderRadius: 10,
+          fontSize: 12,
+          color: "#7f1d1d",
+          lineHeight: 1.5,
+        }}
+      >
+        Marking this row as <strong>bank declined</strong> moves it out of
+        Confirmed and into the holding section below. The bill stays open —
+        you can retry, mark paid manually, or send back to due from there.
+      </div>
+
+      <Field label="Reason" required>
+        <textarea
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="e.g. Wrong IFSC, Account closed, Insufficient funds"
+          rows={3}
+          required
+          minLength={3}
+          maxLength={500}
+          style={{
+            ...INPUT_STYLE,
+            fontFamily: "inherit",
+            resize: "vertical",
+          }}
+        />
+      </Field>
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+        {REASON_QUICK_PICKS.map((q) => (
+          <button
+            key={q}
+            type="button"
+            onClick={() => setReason(q)}
+            style={{
+              padding: "4px 10px",
+              fontSize: 11,
+              fontWeight: 600,
+              background: reason === q ? "#b91c1c" : "transparent",
+              color: reason === q ? "#fff" : "#7f1d1d",
+              border: "1px solid rgba(185, 28, 28, 0.35)",
+              borderRadius: 999,
+              cursor: "pointer",
+            }}
+          >
+            {q}
+          </button>
+        ))}
+      </div>
+
+      {error && (
+        <div
+          role="alert"
+          style={{
+            padding: "10px 12px",
+            background: ACCOUNTS_TOKENS.dangerLight,
+            color: ACCOUNTS_TOKENS.danger,
+            border: `1px solid ${ACCOUNTS_TOKENS.danger}`,
+            borderRadius: 8,
+            fontSize: 13,
+          }}
+        >
+          {error}
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+        <button
+          type="submit"
+          disabled={pending || reason.trim().length < 3}
+          style={{
+            padding: "9px 16px",
+            fontSize: 13,
+            fontWeight: 700,
+            background: "#b91c1c",
+            color: "#fff",
+            border: "1px solid #991b1b",
+            borderRadius: 8,
+            cursor: pending ? "wait" : "pointer",
+            opacity: reason.trim().length < 3 ? 0.55 : 1,
+          }}
+        >
+          {pending ? "Recording…" : "❌ Mark bank declined"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/** Holding-section row. Sits between Confirmed and Paid Today. Three
+ *  exits: Try again (re-propose), Mark paid manually (cash/RTGS done
+ *  outside HDFC), or Send to due (final give-up). */
+function BankRejectedRowCard({
+  row,
+  canMarkPaid,
+  canCancel,
+  cancelAction,
+  retryAction,
+  onMarkPaidManually,
+}: {
+  row: BankRejectedRow;
+  canMarkPaid: boolean;
+  canCancel: boolean;
+  cancelAction: (formData: FormData) => Promise<ServerResult>;
+  retryAction: (formData: FormData) => Promise<ServerResult>;
+  onMarkPaidManually: () => void;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  function runRetry() {
+    setError(null);
+    startTransition(async () => {
+      const fd = new FormData();
+      fd.set("payment_id", row.id);
+      const r = await retryAction(fd);
+      if (!r.ok) setError(r.error);
+      else router.refresh();
+    });
+  }
+
+  function runSendToDue() {
+    setError(null);
+    if (
+      !window.confirm(
+        `Send ${row.vendorName} · ${row.billToken} (₹${row.proposedAmount.toLocaleString("en-IN")}) back to the due-bills list?\n\nThe rejection record stays in audit history. You'll have to propose this bill again from Due Bills when ready.`,
+      )
+    ) {
+      return;
+    }
+    startTransition(async () => {
+      const fd = new FormData();
+      fd.set("payment_id", row.id);
+      fd.set("cancel_reason", "bank_rejected_then_sent_to_due");
+      const r = await cancelAction(fd);
+      if (!r.ok) setError(r.error);
+      else router.refresh();
+    });
+  }
+
+  return (
+    <div
+      style={{
+        background: "#fff",
+        border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+        borderLeft: "5px solid #b91c1c",
+        borderRadius: 12,
+        padding: "14px 16px",
+        boxShadow: ACCOUNTS_TOKENS.shadow,
+        display: "flex",
+        gap: 14,
+        flexWrap: "wrap",
+        alignItems: "flex-start",
+      }}
+    >
+      <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flex: 1, minWidth: 0 }}>
+        <VendorAvatar name={row.vendorName} size={42} />
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 4 }}>
+            <strong style={{ fontSize: 14 }}>{row.vendorName}</strong>
+            <code
+              style={{
+                fontSize: 11,
+                fontFamily: "ui-monospace, monospace",
+                padding: "2px 8px",
+                background: ACCOUNTS_TOKENS.accentLight,
+                color: ACCOUNTS_TOKENS.accent,
+                borderRadius: 4,
+                fontWeight: 700,
+              }}
+            >
+              {row.billToken}
+            </code>
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                padding: "2px 8px",
+                borderRadius: 999,
+                background: "rgba(185, 28, 28, 0.12)",
+                color: "#b91c1c",
+                border: "1px solid rgba(185, 28, 28, 0.35)",
+                letterSpacing: "0.04em",
+                textTransform: "uppercase",
+              }}
+            >
+              🏦 Bank rejected
+            </span>
+          </div>
+          <p style={{ margin: "0 0 6px", fontSize: 12, color: "var(--muted)" }}>
+            Bill <code style={{ fontFamily: "ui-monospace, monospace" }}>{row.vendorBillNo}</code>
+            {" · Outstanding "}
+            <Money value={row.billOutstanding} size="small" tone="muted" />
+          </p>
+          <div
+            style={{
+              fontSize: 12,
+              padding: "8px 10px",
+              background: "rgba(185, 28, 28, 0.05)",
+              borderRadius: 8,
+              border: "1px dashed rgba(185, 28, 28, 0.25)",
+              color: "#7f1d1d",
+              lineHeight: 1.5,
+            }}
+          >
+            <strong>Reason:</strong> {row.rejectionReason || "—"}
+          </div>
+          {row.rejectedAt && (
+            <p style={{ margin: "6px 0 0", fontSize: 11, color: "var(--muted)" }}>
+              Declined{" "}
+              {new Date(row.rejectedAt).toLocaleString("en-IN", {
+                timeZone: "Asia/Kolkata",
+                day: "numeric",
+                month: "short",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+              {row.rejectedByName ? ` · ${row.rejectedByName}` : ""}
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div style={{ textAlign: "right" }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+          Was confirmed
+        </div>
+        <Money value={row.proposedAmount} size="large" tone="warning" />
+      </div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", width: "100%", justifyContent: "flex-end", marginTop: 6 }}>
+        {error && (
+          <span style={{ fontSize: 12, color: ACCOUNTS_TOKENS.danger, marginRight: "auto" }}>
+            {error}
+          </span>
+        )}
+        {canMarkPaid && (
+          <button
+            type="button"
+            onClick={runRetry}
+            disabled={pending}
+            style={BUTTON_STYLES.primary}
+            title="Create a fresh proposed payment for the same amount. The new row enters the Proposed pool — confirm it alongside whatever else you're batching."
+          >
+            🔁 Try again
+          </button>
+        )}
+        {canMarkPaid && (
+          <button
+            type="button"
+            onClick={onMarkPaidManually}
+            style={BUTTON_STYLES.secondary}
+            title="The vendor was paid by another method (cash, separate RTGS, UPI). Close this rejection by recording the actual payment."
+          >
+            💸 Mark paid manually
+          </button>
+        )}
+        {canCancel && (
+          <button
+            type="button"
+            onClick={runSendToDue}
+            disabled={pending}
+            style={BUTTON_STYLES.ghost}
+            title="Final give-up. The bill goes back to the outstanding list; propose again later if needed."
+          >
+            ↩ Send to due
+          </button>
+        )}
+      </div>
+    </div>
   );
 }

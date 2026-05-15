@@ -9,11 +9,17 @@ import {
   canMarkPaid,
 } from "@/lib/accounts-permissions";
 import {
+  bankRejectPaymentAction,
   cancelPaymentAction,
   confirmPaymentsAction,
   markPaymentPaidAction,
+  retryBankRejectedPaymentAction,
 } from "../actions";
-import { PayTodayClient, type PayTodayRow } from "./pay-today-client";
+import {
+  PayTodayClient,
+  type BankRejectedRow,
+  type PayTodayRow,
+} from "./pay-today-client";
 import {
   AccountsHero,
   ACCOUNTS_TOKENS,
@@ -59,6 +65,20 @@ export default async function PayTodayPage() {
     .gte("paid_at", todayStartIso)
     .lt("paid_at", tomorrowStartIso)
     .order("paid_at", { ascending: false });
+
+  // Mig 052 — bank-rejected payments waiting for next action.
+  // Unbounded by date: a row stays here until the accountant
+  // explicitly retries / pays manually / sends back to due. We do
+  // cap at 200 to avoid pathological growth, but in practice this
+  // section should hold ≤10 rows at any time.
+  const { data: bankRejectedRowsRaw } = await supabase
+    .from("bill_payments")
+    .select(
+      "id, bill_id, status, proposed_amount, proposed_at, confirmed_at, bank_rejected_at, bank_rejected_by, bank_rejection_reason, proposal_batch_id, bills(id, token, vendor_bill_no, bill_date, amount_outstanding, amount_total, bill_vendor_id, bill_vendors(id, name))",
+    )
+    .eq("status", "bank_rejected")
+    .order("bank_rejected_at", { ascending: false })
+    .limit(200);
 
   type OpenRow = {
     id: string;
@@ -178,6 +198,58 @@ export default async function PayTodayPage() {
   const proposedTotal = proposedRows.reduce((s, r) => s + r.proposedAmount, 0);
   const confirmedTotal = confirmedRows.reduce((s, r) => s + r.proposedAmount, 0);
 
+  // Mig 052 — bank-rejected rows for the holding section.
+  type BankRejectedRowRaw = {
+    id: string;
+    bill_id: string;
+    status: string;
+    proposed_amount: number;
+    proposed_at: string | null;
+    confirmed_at: string | null;
+    bank_rejected_at: string | null;
+    bank_rejected_by: string | null;
+    bank_rejection_reason: string | null;
+    proposal_batch_id: string | null;
+    bills:
+      | {
+          id: string;
+          token: string;
+          vendor_bill_no: string;
+          bill_date: string;
+          amount_outstanding: number;
+          amount_total: number;
+          bill_vendor_id: string;
+          bill_vendors:
+            | { id: string; name: string }
+            | { id: string; name: string }[]
+            | null;
+        }
+      | null;
+  };
+  const bankRejectedRaw = ((bankRejectedRowsRaw ?? []) as unknown) as BankRejectedRowRaw[];
+  const bankRejectedRows: BankRejectedRow[] = bankRejectedRaw.map((r) => {
+    const b = r.bills;
+    const v = b
+      ? Array.isArray(b.bill_vendors)
+        ? b.bill_vendors[0] ?? null
+        : b.bill_vendors
+      : null;
+    return {
+      id: r.id,
+      billId: r.bill_id,
+      vendorName: v?.name ?? "—",
+      billToken: b?.token ?? "—",
+      vendorBillNo: b?.vendor_bill_no ?? "—",
+      billOutstanding: b ? Number(b.amount_outstanding ?? 0) : 0,
+      proposedAmount: Number(r.proposed_amount ?? 0),
+      batchId: r.proposal_batch_id,
+      rejectedAt: r.bank_rejected_at,
+      rejectedByName: r.bank_rejected_by ? profilesMap[r.bank_rejected_by] ?? "Unknown" : null,
+      rejectionReason: r.bank_rejection_reason ?? "",
+    };
+  });
+  const bankRejectedTotal = bankRejectedRows.reduce((s, r) => s + r.proposedAmount, 0);
+
   return (
     <section className="page-card">
       <AccountsHero
@@ -223,6 +295,15 @@ export default async function PayTodayPage() {
           value={confirmedTotal}
           dotColor={SECTION_COLORS.confirmed}
         />
+        {bankRejectedRows.length > 0 && (
+          <FlowPill
+            href="#section-bank-rejected"
+            label="Bank rejected"
+            count={bankRejectedRows.length}
+            value={bankRejectedTotal}
+            dotColor="#b91c1c"
+          />
+        )}
         <FlowPill
           href="#section-paid-today"
           label="Paid today"
@@ -235,6 +316,7 @@ export default async function PayTodayPage() {
       <PayTodayClient
         proposedRows={proposedRows}
         confirmedRows={confirmedRows}
+        bankRejectedRows={bankRejectedRows}
         canConfirm={canConfirmPayments(profile)}
         canMarkPaid={canMarkPaid(profile)}
         // Mig 042 follow-on (Daksh): "once due are proposed for today
@@ -246,6 +328,9 @@ export default async function PayTodayPage() {
         confirmAction={confirmPaymentsAction}
         markPaidAction={markPaymentPaidAction}
         cancelAction={cancelPaymentAction}
+        // Mig 052 — bank-rejected flow.
+        bankRejectAction={bankRejectPaymentAction}
+        retryBankRejectedAction={retryBankRejectedPaymentAction}
       />
 
       {/* Paid today section — Mig 042 follow-on: sticky color-banded
