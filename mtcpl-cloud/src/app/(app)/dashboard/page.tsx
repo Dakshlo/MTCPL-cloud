@@ -59,7 +59,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
     const istObj = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
     const hr = istObj.getHours();
     const greeting = hr < 12 ? "Good morning" : hr < 17 ? "Good afternoon" : "Good evening";
-    const dateDisplay = istObj.toLocaleDateString("en-IN", {
+    const dateDisplay = istObj.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata",
       weekday: "long",
       day: "numeric",
       month: "long",
@@ -206,7 +206,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
   const hr = istObj.getHours();
   const greeting = hr < 12 ? "Good morning" : hr < 17 ? "Good afternoon" : "Good evening";
   const ownerName = profile.full_name || "there";
-  const dateDisplay = istObj.toLocaleDateString("en-IN", {
+  const dateDisplay = istObj.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata",
     weekday: "long",
     day: "numeric",
     month: "long",

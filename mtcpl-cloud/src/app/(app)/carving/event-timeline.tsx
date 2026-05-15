@@ -20,7 +20,7 @@ const EVENT_META: Record<string, { icon: string; color: string; label: string }>
 };
 
 function fmt(iso: string) {
-  return new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  return new Date(iso).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
 export function EventTimeline({ events }: { events: Event[] }) {

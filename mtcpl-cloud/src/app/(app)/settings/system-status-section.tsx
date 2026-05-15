@@ -187,7 +187,7 @@ export function SystemStatusSection({
           {isDown && updatedAt && (
             <p style={{ margin: "8px 0 0", fontSize: 11, color: "var(--muted)" }}>
               Down since{" "}
-              {new Date(updatedAt).toLocaleString("en-IN", {
+              {new Date(updatedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata",
                 day: "numeric",
                 month: "short",
                 hour: "2-digit",

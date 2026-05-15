@@ -166,7 +166,7 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
               )}
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span className="muted">Assigned</span>
-                <span>{new Date(jobRow.assigned_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</span>
+                <span>{new Date(jobRow.assigned_at).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}</span>
               </div>
               {assignedByProfile && (
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
@@ -178,7 +178,7 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
                 <span className="muted">Deadline</span>
                 <span style={{ fontWeight: 700, color: overdue ? "#DC2626" : daysUntilDeadline !== null && daysUntilDeadline <= 2 ? "#D97706" : "var(--text)" }}>
                   {jobRow.due_at
-                    ? `${new Date(jobRow.due_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}${overdue ? ` (overdue by ${Math.abs(daysUntilDeadline!)}d)` : daysUntilDeadline !== null ? ` (${daysUntilDeadline}d)` : ""}`
+                    ? `${new Date(jobRow.due_at).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" })}${overdue ? ` (overdue by ${Math.abs(daysUntilDeadline!)}d)` : daysUntilDeadline !== null ? ` (${daysUntilDeadline}d)` : ""}`
                     : "—"}
                 </span>
               </div>

@@ -107,7 +107,7 @@ export async function GET(req: NextRequest) {
     "Quality": l.rootQuality ?? "",
     "Size bucket": l.category === "sandstone" ? l.sizeBucket : "",
     "Added": l.rootCreatedAt
-      ? new Date(l.rootCreatedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+      ? new Date(l.rootCreatedAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric" })
       : "",
     // Sandstone columns
     "Original CFT": l.category === "sandstone" ? round(l.originalCft) : "",
@@ -128,7 +128,7 @@ export async function GET(req: NextRequest) {
     "Descendants": l.descendantCount,
     "Resolved": l.isResolved ? "Yes" : "No",
     "Last activity": l.lastActivityAt
-      ? new Date(l.lastActivityAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+      ? new Date(l.lastActivityAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric" })
       : "",
   }));
 

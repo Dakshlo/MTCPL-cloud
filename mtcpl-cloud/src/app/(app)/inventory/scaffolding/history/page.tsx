@@ -355,7 +355,7 @@ export default async function HistoryPage({
                     >
                       <span>
                         Proposed{" "}
-                        {new Date(g.proposed_at).toLocaleString("en-IN", {
+                        {new Date(g.proposed_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata",
                           day: "2-digit",
                           month: "short",
                           hour: "2-digit",

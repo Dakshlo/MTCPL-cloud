@@ -341,7 +341,7 @@ export default async function BillDetailPage({
             <p style={{ margin: "4px 0 0", fontSize: 13, color: "var(--muted)" }}>
               Vendor bill <code style={{ fontFamily: "ui-monospace, monospace", color: "var(--text)" }}>{bill.vendor_bill_no}</code>
               {" · "}
-              {new Date(bill.bill_date).toLocaleDateString("en-IN", {
+              {new Date(bill.bill_date).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata",
                 day: "numeric",
                 month: "long",
                 year: "numeric",
@@ -627,7 +627,7 @@ export default async function BillDetailPage({
                       <p style={{ margin: 0, fontSize: 11, color: "var(--muted)" }}>
                         {rejectedByName ? `Marked by ${rejectedByName}` : "Marked"}
                         {bill.partial_rejection_at
-                          ? ` · ${new Date(bill.partial_rejection_at).toLocaleString("en-IN", {
+                          ? ` · ${new Date(bill.partial_rejection_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata",
                               day: "numeric",
                               month: "short",
                               year: "numeric",
@@ -770,14 +770,14 @@ export default async function BillDetailPage({
                         </td>
                         <td style={{ ...TABLE_STYLES.td, fontSize: 12, color: "var(--muted)" }}>
                           {p.paid_at
-                            ? new Date(p.paid_at).toLocaleString("en-IN", {
+                            ? new Date(p.paid_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata",
                                 day: "numeric",
                                 month: "short",
                                 hour: "2-digit",
                                 minute: "2-digit",
                               })
                             : p.proposed_at
-                              ? new Date(p.proposed_at).toLocaleString("en-IN", {
+                              ? new Date(p.proposed_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata",
                                   day: "numeric",
                                   month: "short",
                                   hour: "2-digit",
@@ -1011,7 +1011,7 @@ export default async function BillDetailPage({
                       {e.label}
                     </div>
                     <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 1 }}>
-                      {new Date(e.at).toLocaleString("en-IN", {
+                      {new Date(e.at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata",
                         day: "numeric",
                         month: "short",
                         hour: "2-digit",

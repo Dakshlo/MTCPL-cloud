@@ -149,7 +149,7 @@ export default async function InvoiceDetailPage({ params }: { params: Params }) 
             </div>
             <div style={{ fontSize: 11, color: "#475569", marginTop: 4 }}>
               Date:{" "}
-              {new Date(inv.invoice_date).toLocaleDateString("en-IN", {
+              {new Date(inv.invoice_date).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata",
                 day: "numeric",
                 month: "long",
                 year: "numeric",

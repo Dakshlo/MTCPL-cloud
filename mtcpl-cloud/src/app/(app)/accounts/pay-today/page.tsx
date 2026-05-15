@@ -317,7 +317,7 @@ export default async function PayTodayPage() {
                       </td>
                       <td style={{ ...TABLE_STYLES.td, fontSize: 12, color: "var(--muted)" }}>
                         {p.paidAt
-                          ? new Date(p.paidAt).toLocaleTimeString("en-IN", {
+                          ? new Date(p.paidAt).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata",
                               hour: "2-digit",
                               minute: "2-digit",
                             })

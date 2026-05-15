@@ -57,7 +57,7 @@ const STATUS_TONE: Record<string, { fg: string; bg: string }> = {
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("en-IN", {
+  return new Date(iso).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata",
     day: "numeric",
     month: "short",
     year: "numeric",

@@ -1314,7 +1314,7 @@ function MachineCard({
               </div>
             {machine.maintenance_flagged_at && (
               <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 4 }}>
-                Flagged {new Date(machine.maintenance_flagged_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                Flagged {new Date(machine.maintenance_flagged_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
               </div>
             )}
           </div>
@@ -2497,7 +2497,7 @@ function HistoryEventRow({ event }: { event: MachineHistory["events"][number] })
     deactivated: { icon: "—", label: "Deactivated", color: "var(--muted)" },
   };
   const c = cfg[event.event_type] ?? { icon: "•", label: event.event_type.replace(/_/g, " "), color: "var(--muted)" };
-  const when = new Date(event.created_at).toLocaleString("en-IN", {
+  const when = new Date(event.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata",
     day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
   });
   return (

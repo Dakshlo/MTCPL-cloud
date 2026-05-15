@@ -130,7 +130,7 @@ export default async function VendorJobDetailPage({ params }: { params: Promise<
             </div>
             {job.due_at && (
               <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
-                Target: {new Date(job.due_at).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}
+                Target: {new Date(job.due_at).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "long", year: "numeric" })}
               </div>
             )}
             {machine && (

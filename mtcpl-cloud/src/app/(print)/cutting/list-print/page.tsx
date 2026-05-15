@@ -172,7 +172,7 @@ export default async function CuttingListPrintPage({ searchParams }: { searchPar
     }
   }
 
-  const printDate = new Date().toLocaleString("en-IN", {
+  const printDate = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata",
     day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit",
   });
 

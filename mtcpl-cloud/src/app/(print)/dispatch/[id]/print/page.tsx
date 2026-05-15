@@ -94,7 +94,7 @@ export default async function DispatchChallanPrintPage({ params }: { params: Par
     ? new Date(dispatch.expected_delivery_date)
     : null;
 
-  const printDate = new Date().toLocaleString("en-IN", {
+  const printDate = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata",
     day: "numeric",
     month: "long",
     year: "numeric",
@@ -288,10 +288,10 @@ export default async function DispatchChallanPrintPage({ params }: { params: Par
             <div className="doc-ref-date">
               <div>
                 Dispatched:{" "}
-                {dispatchedDate.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                {dispatchedDate.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}
               </div>
               <div>
-                {dispatchedDate.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })} · by{" "}
+                {dispatchedDate.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" })} · by{" "}
                 {dispatcherName}
               </div>
               <div>Printed: {printDate}</div>
@@ -327,7 +327,7 @@ export default async function DispatchChallanPrintPage({ params }: { params: Par
             <div>
               <div className="meta-label">Expected Delivery</div>
               <div className="meta-val">
-                {expectedDelivery.toLocaleDateString("en-IN", {
+                {expectedDelivery.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata",
                   day: "numeric",
                   month: "short",
                   year: "numeric",
@@ -395,7 +395,7 @@ export default async function DispatchChallanPrintPage({ params }: { params: Par
         {dispatch.delivered_at && (
           <div className="delivered-banner">
             ✓ Delivered on{" "}
-            {new Date(dispatch.delivered_at).toLocaleDateString("en-IN", {
+            {new Date(dispatch.delivered_at).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata",
               day: "numeric",
               month: "long",
               year: "numeric",

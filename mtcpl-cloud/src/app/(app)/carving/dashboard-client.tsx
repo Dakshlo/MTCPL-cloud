@@ -332,7 +332,7 @@ export function CarvingDashboardClient({
 
   function fmtDate(iso: string | null) {
     if (!iso) return "—";
-    return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+    return new Date(iso).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" });
   }
 
   function daysUntil(iso: string | null) {
@@ -2439,10 +2439,10 @@ function JobDetailPeek({
   const machineCode = job.cnc_machine_id ? machineCodeById[job.cnc_machine_id] ?? null : null;
 
   const fmtDate = (iso: string | null | undefined) =>
-    iso ? new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—";
+    iso ? new Date(iso).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" }) : "—";
   const fmtDateTime = (iso: string | null | undefined) =>
     iso
-      ? new Date(iso).toLocaleString("en-IN", {
+      ? new Date(iso).toLocaleString("en-IN", { timeZone: "Asia/Kolkata",
           day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
         })
       : "—";
@@ -2868,7 +2868,7 @@ function JobTimelineSection({ jobId }: { jobId: string }) {
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {events.map((e) => {
-            const when = new Date(e.created_at).toLocaleString("en-IN", {
+            const when = new Date(e.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata",
               day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
             });
             const colour =

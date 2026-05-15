@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
 
   function fmtDate(iso: string | null) {
     if (!iso) return "";
-    return new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+    return new Date(iso).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric" });
   }
 
   const rows = (data ?? []).map(b => {

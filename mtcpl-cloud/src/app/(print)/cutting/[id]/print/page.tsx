@@ -88,7 +88,7 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
   const operatorName = operator?.name ?? null;
 
   const plannerName = session?.planned_by ? (profilesMap[session.planned_by] ?? "Unknown") : null;
-  const printDate = new Date().toLocaleDateString("en-IN", {
+  const printDate = new Date().toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata",
     day: "numeric", month: "long", year: "numeric",
   });
 
@@ -549,7 +549,7 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
           <div className="doc-date">
             <div>Printed: {printDate}</div>
             {session?.created_at && (
-              <div>Plan date: {new Date(session.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</div>
+              <div>Plan date: {new Date(session.created_at).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}</div>
             )}
           </div>
         </div>

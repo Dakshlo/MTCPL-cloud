@@ -107,7 +107,7 @@ export default async function InvoicingListPage() {
                       {r.invoice_number}
                     </td>
                     <td style={td}>
-                      {new Date(r.invoice_date).toLocaleDateString("en-IN", {
+                      {new Date(r.invoice_date).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata",
                         day: "numeric",
                         month: "short",
                         year: "numeric",

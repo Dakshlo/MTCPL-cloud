@@ -1112,7 +1112,7 @@ export default async function CuttingDetailPage({
               {stagedSubmittedAt && (
                 <p style={{ margin: "8px 0 0", fontSize: 11, color: "var(--muted)" }}>
                   Submitted{" "}
-                  {new Date(stagedSubmittedAt).toLocaleString("en-IN", {
+                  {new Date(stagedSubmittedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata",
                     day: "numeric",
                     month: "short",
                     hour: "2-digit",
@@ -1155,7 +1155,7 @@ export default async function CuttingDetailPage({
                     {stagedSentBackAt && (
                       <span style={{ color: "var(--muted)", marginLeft: 6 }}>
                         ·{" "}
-                        {new Date(stagedSentBackAt).toLocaleString("en-IN", {
+                        {new Date(stagedSentBackAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata",
                           day: "numeric",
                           month: "short",
                           hour: "2-digit",
@@ -1439,7 +1439,7 @@ export default async function CuttingDetailPage({
             {block.updated_at && (
               <p className="muted" style={{ margin: "4px 0 0", fontSize: 12 }}>
                 Completed:{" "}
-                {new Date(block.updated_at).toLocaleDateString("en-IN", {
+                {new Date(block.updated_at).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata",
                   day: "numeric",
                   month: "short",
                   year: "numeric",

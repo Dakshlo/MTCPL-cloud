@@ -609,7 +609,7 @@ function ProposedBatch({
         {rows[0]?.proposedAt && (
           <span style={{ fontSize: 11, color: "var(--muted)", marginLeft: "auto" }}>
             Proposed{" "}
-            {new Date(rows[0].proposedAt).toLocaleString("en-IN", {
+            {new Date(rows[0].proposedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata",
               day: "numeric",
               month: "short",
               hour: "2-digit",
@@ -821,7 +821,7 @@ function ConfirmedRow({
           {row.confirmedAt && (
             <p style={{ margin: 0, fontSize: 11, color: "var(--muted)" }}>
               Confirmed{" "}
-              {new Date(row.confirmedAt).toLocaleString("en-IN", {
+              {new Date(row.confirmedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata",
                 day: "numeric",
                 month: "short",
                 hour: "2-digit",

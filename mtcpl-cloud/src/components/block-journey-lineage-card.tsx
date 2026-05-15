@@ -116,7 +116,7 @@ function SandstoneLineageCard({
           <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
             Original <strong style={{ color: "var(--text)" }}>{l.originalCft.toFixed(2)} CFT</strong>
             {l.rootCreatedAt && (
-              <> · Added {new Date(l.rootCreatedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</>
+              <> · Added {new Date(l.rootCreatedAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}</>
             )}
             {createdByName && (
               <> by <span style={{ color: "var(--gold-dark)", fontWeight: 600 }}>{createdByName}</span></>
@@ -125,7 +125,7 @@ function SandstoneLineageCard({
               <>
                 {" · "}
                 <span style={{ color: "#15803d", fontWeight: 600 }}>
-                  ✓ Cut {new Date(l.tree.cutAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                  ✓ Cut {new Date(l.tree.cutAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}
                 </span>
               </>
             )}
@@ -274,7 +274,7 @@ function TreeView({ node, depth }: { node: LineageNode; depth: number }) {
           <StatusPill status={node.status} wasCut={node.wasCut} />
           {node.createdAt && (
             <span style={{ fontSize: 11, color: "var(--muted)" }}>
-              · {node.isRoot ? "added" : "created"} {new Date(node.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
+              · {node.isRoot ? "added" : "created"} {new Date(node.createdAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" })}
             </span>
           )}
         </div>
@@ -561,7 +561,7 @@ function MarbleLineageCard({
             </span>
             {l.rootCreatedAt && (
               <>
-                {" · "}Added {new Date(l.rootCreatedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                {" · "}Added {new Date(l.rootCreatedAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}
               </>
             )}
             {createdByName && (
@@ -573,7 +573,7 @@ function MarbleLineageCard({
               <>
                 {" · "}
                 <span style={{ color: "#15803d", fontWeight: 600 }}>
-                  ✓ Cut {new Date(l.tree.cutAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                  ✓ Cut {new Date(l.tree.cutAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}
                 </span>
               </>
             )}

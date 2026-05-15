@@ -145,7 +145,7 @@ export function SlabCard(props: SlabCardProps) {
           )}
           {deadline && (
             <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", marginTop: 3 }}>
-              ⏱ Deadline: {new Date(deadline).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+              ⏱ Deadline: {new Date(deadline).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}
             </div>
           )}
         </div>

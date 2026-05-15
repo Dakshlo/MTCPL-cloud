@@ -128,7 +128,7 @@ export function SystemDownScreen({
             }}
           >
             Locked at{" "}
-            {new Date(updatedAt).toLocaleString("en-IN", {
+            {new Date(updatedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata",
               day: "numeric",
               month: "short",
               hour: "2-digit",

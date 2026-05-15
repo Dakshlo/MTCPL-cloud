@@ -90,14 +90,14 @@ export default async function VendorDetailPage({ params }: { params: Promise<{ i
                       {j.slab_requirement_id}
                     </span>
                     <span className="muted" style={{ marginLeft: 10, fontSize: 11 }}>
-                      assigned {new Date(j.assigned_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
+                      assigned {new Date(j.assigned_at).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" })}
                     </span>
                   </div>
                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                     <span className="role-pill" style={{ fontSize: 10 }}>{j.status}</span>
                     {due && (
                       <span style={{ fontSize: 10, fontWeight: 700, color: overdue ? "#DC2626" : "var(--muted)" }}>
-                        due {due.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
+                        due {due.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" })}
                       </span>
                     )}
                   </div>

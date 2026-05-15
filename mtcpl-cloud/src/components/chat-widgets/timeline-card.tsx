@@ -45,8 +45,8 @@ function fmtDate(raw?: string): string {
   if (!raw) return "";
   const d = new Date(raw);
   if (!isFinite(d.getTime())) return raw;
-  const date = d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
-  const time = d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+  const date = d.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" });
+  const time = d.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true });
   return `${date} · ${time}`;
 }
 

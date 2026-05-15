@@ -332,7 +332,7 @@ export default async function BillVendorDetailPage({
                           </Link>
                         </td>
                         <td style={{ ...TABLE_STYLES.td, fontSize: 12, color: "var(--muted)" }}>
-                          {new Date(b.bill_date).toLocaleDateString("en-IN", {
+                          {new Date(b.bill_date).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata",
                             day: "numeric",
                             month: "short",
                             year: "numeric",

@@ -135,7 +135,7 @@ export function PushPanel({
                   </td>
                   <td style={{ padding: "10px 14px" }}>
                     {s.deadline
-                      ? <span style={{ fontSize: 12, fontWeight: 600, color: "var(--gold-dark)" }}>{new Date(s.deadline).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</span>
+                      ? <span style={{ fontSize: 12, fontWeight: 600, color: "var(--gold-dark)" }}>{new Date(s.deadline).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" })}</span>
                       : <span style={{ fontSize: 11, color: "var(--muted-light)" }}>—</span>
                     }
                   </td>

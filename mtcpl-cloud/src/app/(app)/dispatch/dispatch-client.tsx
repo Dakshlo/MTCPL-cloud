@@ -712,7 +712,7 @@ function DispatchRow({
   const chalan = chalanLabel(row.challan_number, row.id);
   const dispatchedAt = new Date(row.dispatched_at);
   const expected = row.expected_delivery_date
-    ? new Date(row.expected_delivery_date).toLocaleDateString("en-IN", {
+    ? new Date(row.expected_delivery_date).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata",
         day: "numeric",
         month: "short",
         year: "numeric",
@@ -774,8 +774,8 @@ function DispatchRow({
           )}
         </div>
         <div style={{ marginTop: 3, fontSize: 11, color: "var(--muted)" }}>
-          Dispatched {dispatchedAt.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}{" "}
-          at {dispatchedAt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+          Dispatched {dispatchedAt.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}{" "}
+          at {dispatchedAt.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" })}
           {row.dispatcher ? ` by ${row.dispatcher}` : ""}
           {expected && ` · Expected delivery ${expected}`}
         </div>
@@ -912,9 +912,9 @@ function DeliveredTab({ rows, legacy }: { rows: DeliveredRow[]; legacy: LegacyDi
                 </span>
               </div>
               <div style={{ marginTop: 3, fontSize: 11, color: "var(--muted)" }}>
-                Dispatched {dispatchedAt.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
+                Dispatched {dispatchedAt.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" })}
                 {" · "}Delivered{" "}
-                {deliveredAt.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                {deliveredAt.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}
                 {r.delivered_by_name ? ` · confirmed by ${r.delivered_by_name}` : ""}
                 {r.receiver_name ? ` · received by ${r.receiver_name}` : ""}
               </div>
@@ -979,7 +979,7 @@ function DeliveredTab({ rows, legacy }: { rows: DeliveredRow[]; legacy: LegacyDi
                 }}
               >
                 <strong>{l.slab_id}</strong> · Dispatched{" "}
-                {new Date(l.dispatched_at).toLocaleDateString("en-IN", {
+                {new Date(l.dispatched_at).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata",
                   day: "numeric",
                   month: "short",
                   year: "numeric",

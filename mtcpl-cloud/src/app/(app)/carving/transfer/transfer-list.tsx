@@ -839,11 +839,11 @@ function DeliveredCard({ row, stoneTypes }: { row: DeliveredRow; stoneTypes: Sto
   const dims = `${row.length_ft}×${row.width_ft}×${row.thickness_ft}″`;
   const deliveredAt = new Date(row.delivered_at);
   const ist = deliveredAt.toLocaleString("en-IN", {
+    timeZone: "Asia/Kolkata",
     day: "numeric",
     month: "short",
     hour: "2-digit",
     minute: "2-digit",
-    timeZone: "Asia/Kolkata",
   });
   const ageMin = (Date.now() - deliveredAt.getTime()) / 60000;
   const isFresh = ageMin < 60;

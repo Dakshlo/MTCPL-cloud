@@ -221,7 +221,7 @@ function ApprovalCard({
           <p style={{ margin: "4px 0 0", fontSize: 11, color: "var(--muted)" }}>
             Submitted{" "}
             {row.submittedAt
-              ? new Date(row.submittedAt).toLocaleString("en-IN", {
+              ? new Date(row.submittedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata",
                   day: "numeric",
                   month: "short",
                   hour: "2-digit",
@@ -249,7 +249,7 @@ function ApprovalCard({
           {row.editedAt && (
             <p style={{ margin: "2px 0 0", fontSize: 11, color: "var(--muted)" }}>
               Last edited{" "}
-              {new Date(row.editedAt).toLocaleString("en-IN", {
+              {new Date(row.editedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata",
                 day: "numeric",
                 month: "short",
                 hour: "2-digit",

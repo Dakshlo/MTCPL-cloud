@@ -289,7 +289,7 @@ export function DueBillsClient({
                       </code>
                     </td>
                     <td style={{ ...TABLE_STYLES.td, fontSize: 12, color: "var(--muted)" }}>
-                      {new Date(r.billDate).toLocaleDateString("en-IN", {
+                      {new Date(r.billDate).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata",
                         day: "numeric",
                         month: "short",
                         year: "numeric",
@@ -349,7 +349,7 @@ export function DueBillsClient({
                           title={`Crosschecked at ${new Date(r.crosscheckedAt).toLocaleString("en-IN")}`}
                         >
                           ✅{" "}
-                          {new Date(r.crosscheckedAt).toLocaleDateString("en-IN", {
+                          {new Date(r.crosscheckedAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata",
                             day: "numeric",
                             month: "short",
                           })}
@@ -679,7 +679,7 @@ function PaidCell({
         >
           {parts.map((p, i) => {
             const datePart = p.paidAt
-              ? new Date(p.paidAt).toLocaleDateString("en-IN", {
+              ? new Date(p.paidAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata",
                   day: "numeric",
                   month: "short",
                 })

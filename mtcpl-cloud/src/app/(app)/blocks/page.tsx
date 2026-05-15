@@ -324,9 +324,9 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
     const isToday = d.toDateString() === now.toDateString();
     const yest = new Date(now);
     yest.setDate(yest.getDate() - 1);
-    if (isToday) return d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+    if (isToday) return d.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" });
     if (d.toDateString() === yest.toDateString()) return "Yesterday";
-    return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+    return d.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" });
   }
 
   return (

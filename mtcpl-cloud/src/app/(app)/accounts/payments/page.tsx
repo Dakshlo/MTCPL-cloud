@@ -287,7 +287,7 @@ export default async function PaymentsHistoryPage({
                     >
                       <td style={{ ...TABLE_STYLES.td, fontSize: 12, color: "var(--muted)" }}>
                         {p.paid_at
-                          ? new Date(p.paid_at).toLocaleString("en-IN", {
+                          ? new Date(p.paid_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata",
                               day: "numeric",
                               month: "short",
                               year: "numeric",

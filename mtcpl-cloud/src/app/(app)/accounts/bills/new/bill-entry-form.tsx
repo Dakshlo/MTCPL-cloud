@@ -665,7 +665,7 @@ export function BillEntryForm({
         {(billDate || vendorBillNo) && (
           <div style={{ fontSize: 12, color: "var(--muted)" }}>
             {billDate &&
-              new Date(billDate).toLocaleDateString("en-IN", {
+              new Date(billDate).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata",
                 day: "numeric",
                 month: "short",
                 year: "numeric",

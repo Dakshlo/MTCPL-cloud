@@ -87,7 +87,7 @@ export default async function CuttingLabelsPrintPage({ params }: { params: Param
   ]);
 
   const slabRows = (slabs ?? []) as SlabRow[];
-  const printedAt = new Date().toLocaleString("en-IN", {
+  const printedAt = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata",
     day: "numeric",
     month: "long",
     year: "numeric",

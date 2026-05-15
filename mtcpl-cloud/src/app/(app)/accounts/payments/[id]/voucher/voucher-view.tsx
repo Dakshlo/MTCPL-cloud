@@ -188,7 +188,7 @@ export function VoucherView({
           <KV k="Voucher No" v={voucherNo} mono />
           <KV
             k="Voucher Date"
-            v={paidDate.toLocaleDateString("en-IN", {
+            v={paidDate.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata",
               day: "2-digit",
               month: "2-digit",
               year: "numeric",
@@ -216,7 +216,7 @@ export function VoucherView({
           />
           <KV
             k="Bill Date"
-            v={new Date(bill.billDate).toLocaleDateString("en-IN", {
+            v={new Date(bill.billDate).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata",
               day: "2-digit",
               month: "2-digit",
               year: "numeric",
@@ -292,7 +292,7 @@ export function VoucherView({
           ({amountInWords} Only) against bill{" "}
           <strong>{bill.token}</strong>
           {" "}({bill.vendorBillNo}) dated{" "}
-          {new Date(bill.billDate).toLocaleDateString("en-IN", {
+          {new Date(bill.billDate).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata",
             day: "2-digit",
             month: "long",
             year: "numeric",
@@ -354,7 +354,7 @@ export function VoucherView({
         >
           This is a computer-generated voucher and does not require a physical
           signature unless otherwise marked above. Voucher generated{" "}
-          {new Date().toLocaleString("en-IN", {
+          {new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata",
             day: "2-digit",
             month: "short",
             year: "numeric",

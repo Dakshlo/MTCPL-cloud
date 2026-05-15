@@ -1149,7 +1149,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                         {block.updated_at
                           ? ` · ${new Date(block.updated_at).toLocaleDateString(
                               "en-IN",
-                              { day: "numeric", month: "short" }
+                              { timeZone: "Asia/Kolkata", day: "numeric", month: "short" }
                             )}`
                           : ""}
                       </span>
@@ -1169,7 +1169,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                           }}
                           title={
                             block.approved_at
-                              ? `Approved on ${new Date(block.approved_at).toLocaleString("en-IN", {
+                              ? `Approved on ${new Date(block.approved_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata",
                                   day: "numeric",
                                   month: "short",
                                   year: "numeric",
@@ -1530,7 +1530,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                                   ? ` · Restocked ${block.restocked_block_id.split(",").length} piece(s)`
                                   : " · Block discarded"}
                                 {block.updated_at
-                                  ? ` · ${new Date(block.updated_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}`
+                                  ? ` · ${new Date(block.updated_at).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}`
                                   : ""}
                               </span>
                               {/* Historical Done-tab card — same approver
@@ -1549,7 +1549,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                                   }}
                                   title={
                                     block.approved_at
-                                      ? `Approved on ${new Date(block.approved_at).toLocaleString("en-IN", {
+                                      ? `Approved on ${new Date(block.approved_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata",
                                           day: "numeric",
                                           month: "short",
                                           year: "numeric",
@@ -1659,7 +1659,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                                 <p className="muted" style={{ margin: "2px 0 0", fontSize: 12 }}>
                                   {block.cut_sessions?.session_code}
                                   {blk ? ` · ${blk.stone} · ${yardLabel(blk.yard)}` : ""}
-                                  {block.updated_at ? ` · ${new Date(block.updated_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}` : ""}
+                                  {block.updated_at ? ` · ${new Date(block.updated_at).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" })}` : ""}
                                 </p>
                               </div>
                               <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>

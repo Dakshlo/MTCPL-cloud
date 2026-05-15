@@ -246,7 +246,7 @@ function BillAuditCard({
               Vendor bill{" "}
               <code style={{ fontFamily: "ui-monospace, monospace", color: "var(--text)" }}>{row.vendorBillNo}</code>
               {" · "}
-              {new Date(row.billDate).toLocaleDateString("en-IN", {
+              {new Date(row.billDate).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata",
                 day: "numeric",
                 month: "short",
                 year: "numeric",
@@ -264,7 +264,7 @@ function BillAuditCard({
             <p style={{ margin: "8px 0 0", fontSize: 11, color: "var(--muted)" }}>
               Submitted{" "}
               {row.submittedAt
-                ? new Date(row.submittedAt).toLocaleString("en-IN", {
+                ? new Date(row.submittedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata",
                     day: "numeric",
                     month: "short",
                     hour: "2-digit",
