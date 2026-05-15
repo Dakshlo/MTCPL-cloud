@@ -40,6 +40,30 @@ type MissingFieldReason = {
 };
 
 export async function GET(req: NextRequest) {
+  // Top-level try/catch — without this, any runtime error inside the
+  // route handler is rendered by Next.js as an HTML 500 error page.
+  // The browser receives HTML when it expected an attachment, opens
+  // it in a new window, and Daksh sees source code instead of a
+  // download. With this wrapper, every failure path returns a JSON
+  // body the user can at least see the error text from.
+  try {
+    return await handleHdfcExport(req);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Unknown error";
+    console.error("[/api/accounts/hdfc-export] crashed", e);
+    return NextResponse.json(
+      {
+        error:
+          "HDFC export failed: " +
+          msg +
+          ". Tell Daksh and screenshot — the route's catch-all caught this so the rest of the system is unaffected.",
+      },
+      { status: 500 },
+    );
+  }
+}
+
+async function handleHdfcExport(req: NextRequest) {
   const { profile } = await requireAuth();
   if (!canManageAccounts(profile)) {
     return NextResponse.json(
@@ -234,14 +258,21 @@ export async function GET(req: NextRequest) {
   // Filename suffix increments per file generated within the same
   // calendar day. Driven off audit_logs so anyone on the team using
   // a different browser still sees a fresh sequence number.
-  const todayIST = new Date(
-    new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }),
-  );
-  const istY = todayIST.getFullYear();
-  const istM = todayIST.getMonth();
-  const istD = todayIST.getDate();
-  const dayStart = new Date(istY, istM, istD, 0, 0, 0).toISOString();
-  const dayEnd = new Date(istY, istM, istD, 23, 59, 59).toISOString();
+  //
+  // Earlier attempt parsed `new Date(toLocaleString)` which returned
+  // Invalid Date on Vercel's Node ICU build and crashed the route
+  // with "RangeError: Invalid time value" at the next .toISOString().
+  // Now using direct UTC math: IST = UTC + 5:30. Bulletproof,
+  // engine-agnostic.
+  const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const nowMs = Date.now();
+  const istNowMs = nowMs + IST_OFFSET_MS;
+  const istMidnightMs = Math.floor(istNowMs / DAY_MS) * DAY_MS;
+  const dayStartMs = istMidnightMs - IST_OFFSET_MS;
+  const dayEndMs = dayStartMs + DAY_MS - 1;
+  const dayStart = new Date(dayStartMs).toISOString();
+  const dayEnd = new Date(dayEndMs).toISOString();
   const { count: priorTodayCount } = await admin
     .from("audit_logs")
     .select("id", { count: "exact", head: true })

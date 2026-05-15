@@ -121,8 +121,9 @@ export function buildReferenceNumber(beneName: string, valueDate: Date): string 
 }
 
 /** Fallback email used when a vendor row has no email of its own.
- *  TODO Daksh — swap to your actual email when confirmed. */
-export const DEFAULT_BENE_EMAIL = "DAKSH@MADHUSUDANCRAFTS.COM";
+ *  Confirmed by Daksh on 15 May 2026 — his personal Gmail handles
+ *  bounce-backs for HDFC payment notifications. */
+export const DEFAULT_BENE_EMAIL = "DASKHLOHAR0097@GMAIL.COM";
 
 /** Client code prefix on the filename — HDFC will assign one to
  *  MTCPL. Until Daksh sends it, the placeholder per his note is
