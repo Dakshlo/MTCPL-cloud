@@ -220,13 +220,26 @@ export default async function SettingsPage() {
     role: string;
     last_seen_at: string | null;
     last_path: string | null;
+    // Mig 046 — login-location columns. Always nullable; populated by
+    // the LoginLocationProbe client component.
+    last_login_at: string | null;
+    last_login_ip: string | null;
+    last_login_city: string | null;
+    last_login_region: string | null;
+    last_login_country: string | null;
+    last_login_gps_lat: number | null;
+    last_login_gps_lng: number | null;
+    last_login_gps_accuracy_m: number | null;
+    last_login_gps_status: string | null;
   };
   let liveUsers: LiveUserRow[] = [];
-  if (currentUser.role === "developer") {
+  if (currentUser.role === "developer" || currentUser.role === "owner") {
     const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
     const { data } = await admin
       .from("profiles")
-      .select("id, full_name, role, last_seen_at, last_path")
+      .select(
+        "id, full_name, role, last_seen_at, last_path, last_login_at, last_login_ip, last_login_city, last_login_region, last_login_country, last_login_gps_lat, last_login_gps_lng, last_login_gps_accuracy_m, last_login_gps_status",
+      )
       .gte("last_seen_at", fiveMinAgo)
       .order("last_seen_at", { ascending: false })
       .limit(50);
@@ -822,8 +835,10 @@ export default async function SettingsPage() {
           Live Users (developer only — most actionable signal when
           someone needs help), Screen Time, Audit Log, Backup. */}
 
-      {/* 0. Live Users — developer only */}
-      {currentUser.role === "developer" && (
+      {/* 0. Live Users — developer + owner. Mig 046 added the
+          Location column so Daksh can spot users hitting the system
+          from outside the factory. */}
+      {(currentUser.role === "developer" || currentUser.role === "owner") && (
         <PeekSection
           icon="🛰"
           title="Live Users"
@@ -831,9 +846,9 @@ export default async function SettingsPage() {
           subtitle={
             liveUsers.length === 0
               ? "Nobody seen in the last 5 minutes — everyone is offline."
-              : `Who's online RIGHT NOW (last 5 min) and which page they're on. Updates each time someone navigates or every 2 minutes.`
+              : `Who's online RIGHT NOW (last 5 min), which page they're on, and where they signed in from. Updates each time someone navigates or every 2 minutes.`
           }
-          modalMaxWidth={900}
+          modalMaxWidth={1100}
         >
           <div className="settings-card" style={{ padding: 0, overflow: "hidden" }}>
             {liveUsers.length === 0 ? (
@@ -847,6 +862,7 @@ export default async function SettingsPage() {
                     <th style={{ padding: "10px 16px", textAlign: "left", fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>User</th>
                     <th style={{ padding: "10px 16px", textAlign: "left", fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Role</th>
                     <th style={{ padding: "10px 16px", textAlign: "left", fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>On Page</th>
+                    <th style={{ padding: "10px 16px", textAlign: "left", fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Location</th>
                     <th style={{ padding: "10px 16px", textAlign: "left", fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Last Seen</th>
                   </tr>
                 </thead>
@@ -862,6 +878,39 @@ export default async function SettingsPage() {
                           : elapsedSec < 300
                             ? `${Math.floor(elapsedSec / 60)}m ago`
                             : new Date(u.last_seen_at!).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" });
+
+                    // Mig 046 — location renderer. Two layers:
+                    //   • IP-level: city / region from Vercel headers
+                    //   • GPS-level: lat/lng if browser permission was
+                    //     granted, exposed as a 📍 link to Google Maps
+                    // gps_status tells us whether GPS was granted,
+                    // denied, or unavailable so we can show the right
+                    // icon next to the city line.
+                    const cityLine = [
+                      u.last_login_city,
+                      u.last_login_region,
+                      u.last_login_country,
+                    ]
+                      .filter((s) => !!s)
+                      .join(", ");
+                    const gpsAvail =
+                      u.last_login_gps_status === "granted" &&
+                      u.last_login_gps_lat != null &&
+                      u.last_login_gps_lng != null;
+                    const gpsLabel =
+                      u.last_login_gps_status === "granted"
+                        ? "📍 GPS"
+                        : u.last_login_gps_status === "denied"
+                          ? "🚫 GPS denied"
+                          : u.last_login_gps_status === "timeout"
+                            ? "⏱ GPS timeout"
+                            : u.last_login_gps_status === "unavailable"
+                              ? "✖ no GPS"
+                              : null;
+                    const mapsHref = gpsAvail
+                      ? `https://www.google.com/maps/search/?api=1&query=${u.last_login_gps_lat},${u.last_login_gps_lng}`
+                      : null;
+
                     return (
                       <tr key={u.id} style={{ borderBottom: "1px solid var(--border)" }}>
                         <td style={{ padding: "10px 16px", fontWeight: 600 }}>
@@ -887,6 +936,59 @@ export default async function SettingsPage() {
                             </span>
                           )}
                         </td>
+                        <td style={{ padding: "10px 16px", fontSize: 12, minWidth: 200 }}>
+                          {!u.last_login_at && (
+                            <span className="muted" style={{ fontStyle: "italic" }}>
+                              not captured yet
+                            </span>
+                          )}
+                          {u.last_login_at && (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                              <span style={{ color: "var(--text)", fontWeight: 600 }}>
+                                {cityLine || "—"}
+                              </span>
+                              <span
+                                className="muted"
+                                style={{
+                                  fontSize: 11,
+                                  fontFamily: "ui-monospace, monospace",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 6,
+                                  flexWrap: "wrap",
+                                }}
+                              >
+                                {u.last_login_ip ?? "—"}
+                                {gpsAvail && mapsHref && (
+                                  <a
+                                    href={mapsHref}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    style={{
+                                      color: "#0ea5e9",
+                                      textDecoration: "none",
+                                      fontWeight: 700,
+                                    }}
+                                    title={`GPS: ${u.last_login_gps_lat?.toFixed(6)}, ${u.last_login_gps_lng?.toFixed(6)} (±${u.last_login_gps_accuracy_m ?? "?"}m) — open in Google Maps`}
+                                  >
+                                    📍 Map
+                                  </a>
+                                )}
+                                {!gpsAvail && gpsLabel && (
+                                  <span
+                                    style={{
+                                      color: "var(--muted)",
+                                      fontSize: 10,
+                                    }}
+                                    title="Browser GPS permission state"
+                                  >
+                                    {gpsLabel}
+                                  </span>
+                                )}
+                              </span>
+                            </div>
+                          )}
+                        </td>
                         <td style={{ padding: "10px 16px", color: "#22c55e", fontWeight: 600, fontSize: 12 }}>
                           {lastSeenLabel}
                         </td>
@@ -898,6 +1000,8 @@ export default async function SettingsPage() {
             )}
             <p className="muted" style={{ fontSize: 11, padding: "10px 16px", borderTop: "1px solid var(--border)", margin: 0 }}>
               Path is captured on every soft nav + every 2-minute heartbeat. May lag by up to 2 min on rapid navigation.
+              {" · "}
+              Location is captured once per browser session at login. City + IP are always recorded; precise GPS only if the user grants browser permission (📍 = granted, 🚫 = denied).
             </p>
           </div>
         </PeekSection>

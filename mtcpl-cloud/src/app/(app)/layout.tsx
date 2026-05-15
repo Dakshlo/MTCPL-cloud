@@ -12,6 +12,7 @@ import { TopbarTasksBadge, type TopbarTask } from "@/components/topbar-tasks-bad
 import { TopbarIdLookup } from "@/components/topbar-id-lookup";
 import { Toast } from "@/components/toast";
 import { Heartbeat } from "@/components/heartbeat";
+import { LoginLocationProbe } from "@/components/login-location-probe";
 import { requireAuth } from "@/lib/auth";
 import { canApproveCuts } from "@/lib/cutting-permissions";
 import { canApproveBills, canConfirmPayments } from "@/lib/accounts-permissions";
@@ -210,6 +211,11 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       <NavigationProgress />
       <RealtimeRefresh />
       <Heartbeat />
+      {/* Mig 046 — one-shot login-location probe. Captures IP + city
+          server-side, and tries browser GPS once per session. Fully
+          fire-and-forget; never blocks anything. Visible in the Live
+          Users panel on /settings (developer + owner). */}
+      <LoginLocationProbe />
       <Sidebar
         displayName={displayName}
         role={profile.role}
