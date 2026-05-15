@@ -135,11 +135,20 @@ export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
     }
     setOpen(true);
   }
-  // Daksh (May 2026): removed scheduleClose. Hover opens, but the
-  // panel no longer auto-closes when the cursor drifts away —
-  // users were losing their typed search query when the mouse left
-  // the trigger row. Close paths: outside-click, Esc, or selecting
-  // a result row (which sets open=false explicitly).
+  // Daksh (May 2026 follow-on): bring back hover-out auto-close —
+  // BUT only when the input is empty. The moment the user has typed
+  // anything into the search field, the panel is "pinned open" and
+  // a stray mouse-leave can't dismiss it. The pin lifts again as
+  // soon as the field is empty. Outside-click + Esc still close
+  // unconditionally so the panel is never trapped.
+  //
+  // 180ms grace lets the cursor travel from the pill into the panel
+  // without triggering a close mid-flight.
+  function scheduleClose() {
+    if (query.trim()) return; // pinned by typed value
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    closeTimer.current = setTimeout(() => setOpen(false), 180);
+  }
 
   async function runSearch(qRaw?: string) {
     const q = (qRaw ?? query).trim();
@@ -171,6 +180,7 @@ export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
     <div
       ref={wrapperRef}
       onMouseEnter={openNow}
+      onMouseLeave={scheduleClose}
       style={{ position: "relative", display: "inline-block" }}
     >
       {/* Trigger pill */}

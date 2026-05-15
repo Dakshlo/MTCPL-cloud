@@ -131,17 +131,21 @@ export function TopbarTasksBadge({ items }: { items: TopbarTask[] }) {
     setOpen(true);
   }
 
-  // Daksh (May 2026): removed onMouseLeave → scheduleClose. Hovering
-  // opens, but the dropdown no longer auto-closes when the mouse
-  // drifts off — users were losing dropdown state mid-interaction
-  // because their cursor would slip past the panel edge. Close paths
-  // now: outside-click, Esc, or clicking a row link (which sets
-  // open=false in its own handler).
+  // Daksh (May 2026 follow-on): bring back the hover-out auto-close.
+  // 180ms grace so a quick cursor slip from the pill to the panel
+  // doesn't lose the dropdown. The Tasks pill has no input to pin
+  // open — so close behaviour is purely "leave to close, click row /
+  // Esc / outside-click also closes."
+  function scheduleClose() {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    closeTimer.current = setTimeout(() => setOpen(false), 180);
+  }
 
   return (
     <div
       ref={wrapperRef}
       onMouseEnter={openNow}
+      onMouseLeave={scheduleClose}
       style={{ position: "relative", display: "inline-block" }}
     >
       {/* Trigger pill */}
