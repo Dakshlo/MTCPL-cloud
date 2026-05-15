@@ -169,7 +169,11 @@ export function BillEntryForm({
   const igstAmount = Math.round(subtotalNum * igstNum) / 100;
   const gstAmount = cgstAmount + sgstAmount + igstAmount;
   const totalAmount = Math.round((subtotalNum + gstAmount) * 100) / 100;
-  const tdsAmount = Math.round(totalAmount * tdsNum) / 100;
+  // Mig 049 — TDS is on the NET subtotal (per CBDT Circular 23/2017),
+  // not on subtotal + GST. TCS stays on the GROSS total per Section
+  // 206C(1H). These are the two formulas the DB's generated columns
+  // also use, so the form preview matches the saved values.
+  const tdsAmount = Math.round(subtotalNum * tdsNum) / 100;
   const tcsAmount = Math.round(totalAmount * tcsNum) / 100;
   const payableToVendor =
     Math.round((totalAmount - tdsAmount + tcsAmount) * 100) / 100;
