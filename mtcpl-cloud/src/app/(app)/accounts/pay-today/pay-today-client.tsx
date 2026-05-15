@@ -211,12 +211,13 @@ export function PayTodayClient({
       >
         {confirmedRows.length > 0 && (
           <>
-            {/* HDFC bulk-payment Excel download — Daksh's bank
-                accepts an .xlsx with all beneficiary + amount info
-                in one upload. Generated from every CONFIRMED row
-                with the per-vendor bank details we already store.
-                Plain <a> with download attribute so the browser
-                handles the .xlsx response directly. */}
+            {/* HDFC bulk-payment file download — Daksh confirmed the
+                RBI bulk-upload screen (28-column format) is what
+                MTCPL uses; the older ENet button has been removed.
+                Currently outputs as .xlsx with header row for visual
+                verification — production mode (CSV .001 without
+                header) toggles on once Daksh signs off on a real
+                test upload to HDFC. */}
             <div
               style={{
                 display: "flex",
@@ -226,35 +227,6 @@ export function PayTodayClient({
                 gap: 8,
               }}
             >
-              <a
-                href="/api/accounts/hdfc-payment-export"
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 8,
-                  padding: "8px 16px",
-                  fontSize: 13,
-                  fontWeight: 700,
-                  background: "#fff",
-                  color: "#1e293b",
-                  border: "1.5px solid #1e3a5f",
-                  borderRadius: 8,
-                  textDecoration: "none",
-                  letterSpacing: "-0.005em",
-                  whiteSpace: "nowrap",
-                }}
-                title="HDFC ENet bulk-payment .xlsx — 7-column corporate-banking portal format. Vendors must be pre-registered in ENet's Beneficiary Master."
-              >
-                📥 ENet Excel (.xlsx)
-              </a>
-              {/* Mig 047 — second HDFC format: the RBI File Format
-                  for bulk NEFT/RTGS (.001 CSV, 28 columns). HDFC
-                  gave Daksh this format in May 2025 — use it if
-                  your accountant uses the RBI bulk-upload screen
-                  rather than the ENet portal. Pre-flight check on
-                  the route refuses generation if any vendor lacks
-                  hdfc_bene_name / bank_account / ifsc / bank_name
-                  and shows a fix list. */}
               <a
                 href="/api/accounts/hdfc-export"
                 style={{
@@ -272,9 +244,9 @@ export function PayTodayClient({
                   letterSpacing: "-0.005em",
                   whiteSpace: "nowrap",
                 }}
-                title="HDFC RBI bulk-payment file — 28-column CSV with .001 extension. NEFT/RTGS auto-picked by amount (<₹2L = NEFT, ≥₹2L = RTGS). Requires each vendor's HDFC Beneficiary Name to be filled on the vendor record."
+                title="HDFC RBI bulk-payment file — 28 columns. Auto-picks N/R/I per row (I = HDFC-to-HDFC internal, R = ≥₹2L, N = NEFT below that). Testing mode now outputs .xlsx with header row; production mode will switch to .001 CSV without header once you confirm a successful upload."
               >
-                📥 RBI Bulk File (.001 CSV)
+                📥 Download HDFC payment file
               </a>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
