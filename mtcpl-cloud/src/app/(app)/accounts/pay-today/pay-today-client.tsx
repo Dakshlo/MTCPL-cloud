@@ -95,17 +95,41 @@ export function PayTodayClient({
     return [...map.entries()].map(([batchId, rows]) => ({ batchId, rows }));
   }, [proposedRows]);
 
-  // Mig 048 — HDFC CSV download-lock counts. Drives the two
-  // header buttons (Preview Excel always shows all; Download CSV
-  // only the not-yet-downloaded set).
-  const hdfcDownloadableCount = useMemo(
-    () => confirmedRows.filter((r) => !r.hdfcCsvDownloaded).length,
-    [confirmedRows],
-  );
-  const hdfcLockedCount = useMemo(
-    () => confirmedRows.filter((r) => r.hdfcCsvDownloaded).length,
-    [confirmedRows],
-  );
+  // Daksh follow-on (May 2026): group confirmed rows by their
+  // proposal_batch_id so each batch can be downloaded as its OWN
+  // HDFC file. Stops a "13 in confirmed = one 13-row CSV" problem
+  // when two propose-pay-today batches stack up — each batch
+  // becomes its own upload to HDFC instead.
+  const confirmedBatches = useMemo(() => {
+    const map = new Map<string, PayTodayRow[]>();
+    for (const r of confirmedRows) {
+      const key = r.batchId ?? "unbatched";
+      const list = map.get(key) ?? [];
+      list.push(r);
+      map.set(key, list);
+    }
+    // Sort batches by the earliest proposedAt within each (oldest
+    // first — keeps the queue feeling like a queue).
+    return [...map.entries()]
+      .map(([batchId, rows]) => ({
+        batchId,
+        rows,
+        proposedAt: rows.reduce<string | null>((earliest, r) => {
+          if (!r.proposedAt) return earliest;
+          if (!earliest) return r.proposedAt;
+          return r.proposedAt < earliest ? r.proposedAt : earliest;
+        }, null),
+      }))
+      .sort((a, b) => {
+        if (!a.proposedAt && !b.proposedAt) return 0;
+        if (!a.proposedAt) return 1;
+        if (!b.proposedAt) return -1;
+        return a.proposedAt.localeCompare(b.proposedAt);
+      });
+  }, [confirmedRows]);
+
+  // (Paid Today section is rendered in the server page —
+  // batch-grouping for paid lives there, not here.)
 
   const [activeMarkRow, setActiveMarkRow] = useState<PayTodayRow | null>(null);
 
@@ -225,131 +249,25 @@ export function PayTodayClient({
         total={confirmedRows.reduce((s, r) => s + r.proposedAmount, 0)}
         tint={SECTION_COLORS.confirmed}
       >
-        {confirmedRows.length > 0 && (
-          <>
-            {/* HDFC bulk-payment file — two-button flow per Daksh
-                (mig 048):
-                  • Preview Excel — verify, repeat as needed
-                  • Final CSV    — single-shot, locks each row
-                                   afterwards so the accountant
-                                   can't re-issue and double-pay.
-                The locked count + downloadable count come from the
-                parent page via downloadableCount / lockedCount, set
-                from a server-side query of bill_payments where
-                hdfc_csv_downloaded_at IS NULL / NOT NULL on the
-                currently-confirmed rows. */}
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "flex-end",
-                alignItems: "center",
-                marginBottom: 10,
-                flexWrap: "wrap",
-                gap: 8,
-              }}
-            >
-              {hdfcLockedCount > 0 && (
-                <span
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 600,
-                    color: "var(--muted)",
-                    fontFamily: "ui-monospace, monospace",
-                    marginRight: 4,
-                  }}
-                  title={`${hdfcLockedCount} confirmed payment${hdfcLockedCount === 1 ? "" : "s"} already included in a previous CSV download. They stay visible until you mark them paid. To re-issue, ask a developer to unlock.`}
-                >
-                  🔒 {hdfcLockedCount} already downloaded
-                </span>
-              )}
-              <a
-                href="/api/accounts/hdfc-export?format=xlsx"
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 8,
-                  padding: "8px 16px",
-                  fontSize: 13,
-                  fontWeight: 700,
-                  background: "#fff",
-                  color: "var(--gold-dark)",
-                  border: "1.5px solid var(--gold-dark)",
-                  borderRadius: 8,
-                  textDecoration: "none",
-                  letterSpacing: "-0.005em",
-                  whiteSpace: "nowrap",
-                }}
-                title="HDFC preview file — all currently confirmed payments, including ones already in flight. With header row. Use this to verify columns and amounts before downloading the real CSV. Doesn't lock anything."
-              >
-                👁 Preview (Excel)
-              </a>
-              <a
-                href={
-                  hdfcDownloadableCount > 0
-                    ? "/api/accounts/hdfc-export?format=csv"
-                    : "#"
-                }
-                onClick={(e) => {
-                  if (hdfcDownloadableCount === 0) {
-                    e.preventDefault();
-                    return;
-                  }
-                  // Soft confirm — accountant clicks once, file
-                  // downloads, lock fires. No way back without dev
-                  // intervention, so the dialog is worth the friction.
-                  const ok = window.confirm(
-                    `Download ${hdfcDownloadableCount} payment${
-                      hdfcDownloadableCount === 1 ? "" : "s"
-                    } as HDFC CSV?\n\nThese rows will be LOCKED — they won't appear in any future CSV download. To re-issue you'll need a developer.\n\nProceed only if you're about to upload this file to HDFC.`,
-                  );
-                  if (!ok) e.preventDefault();
-                }}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 8,
-                  padding: "8px 16px",
-                  fontSize: 13,
-                  fontWeight: 700,
-                  background:
-                    hdfcDownloadableCount > 0 ? "var(--gold)" : "var(--border)",
-                  color:
-                    hdfcDownloadableCount > 0 ? "#fff" : "var(--muted)",
-                  border:
-                    hdfcDownloadableCount > 0
-                      ? "1.5px solid var(--gold-dark)"
-                      : "1.5px solid var(--border)",
-                  borderRadius: 8,
-                  textDecoration: "none",
-                  letterSpacing: "-0.005em",
-                  whiteSpace: "nowrap",
-                  opacity: hdfcDownloadableCount > 0 ? 1 : 0.55,
-                  cursor: hdfcDownloadableCount > 0 ? "pointer" : "not-allowed",
-                }}
-                title={
-                  hdfcDownloadableCount > 0
-                    ? `Generate the final HDFC CSV for ${hdfcDownloadableCount} payment${hdfcDownloadableCount === 1 ? "" : "s"}. Locks each row — no second download possible.`
-                    : "All currently confirmed payments are already in a previous CSV download."
-                }
-                aria-disabled={hdfcDownloadableCount === 0}
-              >
-                📥 Download CSV ({hdfcDownloadableCount})
-              </a>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {confirmedRows.map((row) => (
-                <ConfirmedRow
-                  key={row.id}
-                  row={row}
-                  canMarkPaid={canMarkPaid}
-                  canCancel={canCancel}
-                  cancelAction={cancelAction}
-                  onMarkPaid={() => setActiveMarkRow(row)}
-                />
-              ))}
-            </div>
-          </>
-        )}
+        {/* Mig 048 + Daksh follow-on (May 2026): confirmed rows
+            grouped by their propose_pay_today batch. Each batch gets
+            its OWN Preview Excel + Download CSV buttons so 8
+            confirmed today + 5 confirmed tomorrow stay two separate
+            HDFC uploads, not one merged 13-row file.
+            ConfirmedBatch component renders the batch header + the
+            per-batch download controls + the rows. */}
+        {confirmedBatches.map((batch, idx) => (
+          <ConfirmedBatch
+            key={batch.batchId}
+            batchId={batch.batchId}
+            batchIndex={idx + 1}
+            rows={batch.rows}
+            canMarkPaid={canMarkPaid}
+            canCancel={canCancel}
+            cancelAction={cancelAction}
+            onMarkPaid={(row) => setActiveMarkRow(row)}
+          />
+        ))}
       </SectionBlock>
 
       {/* Mark-paid slide-over */}
@@ -723,6 +641,259 @@ function ProposedBatch({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Confirmed-section batch card. Mirrors ProposedBatch but for the
+ *  Confirmed-Ready-to-Pay stage.
+ *
+ *  Each card =
+ *    • Batch header (number, total ₹, payment count, proposed-at)
+ *    • Per-batch buttons: Preview Excel + Download CSV (locks per
+ *      batch — different batches stay independent).
+ *    • A column of ConfirmedRow components (existing UI).
+ *
+ *  Lock semantics:
+ *    All rows in this batch already downloaded → grey "🔒 In HDFC
+ *      file" badge, Download CSV button disabled.
+ *    Partial → some rows in the batch are locked, others aren't.
+ *      Download button covers the un-locked subset. (Rare in
+ *      practice — usually a batch is fully downloaded as one file.)
+ *    None downloaded → Download CSV active, will lock the whole
+ *      batch on click. */
+function ConfirmedBatch({
+  batchId,
+  batchIndex,
+  rows,
+  canMarkPaid,
+  canCancel,
+  cancelAction,
+  onMarkPaid,
+}: {
+  batchId: string;
+  batchIndex: number;
+  rows: PayTodayRow[];
+  canMarkPaid: boolean;
+  canCancel: boolean;
+  cancelAction: (formData: FormData) => Promise<ServerResult>;
+  onMarkPaid: (row: PayTodayRow) => void;
+}) {
+  const total = rows.reduce((s, r) => s + r.proposedAmount, 0);
+  const downloadableCount = rows.filter((r) => !r.hdfcCsvDownloaded).length;
+  const lockedCount = rows.filter((r) => r.hdfcCsvDownloaded).length;
+  const allLocked = downloadableCount === 0 && rows.length > 0;
+  const someLocked = lockedCount > 0;
+
+  // Earliest proposedAt in the batch (used in the header label).
+  const earliestProposedAt = rows.reduce<string | null>((acc, r) => {
+    if (!r.proposedAt) return acc;
+    if (!acc) return r.proposedAt;
+    return r.proposedAt < acc ? r.proposedAt : acc;
+  }, null);
+
+  const isUnbatched = batchId === "unbatched";
+  const previewHref = isUnbatched
+    ? "/api/accounts/hdfc-export?format=xlsx"
+    : `/api/accounts/hdfc-export?format=xlsx&batch_id=${encodeURIComponent(batchId)}`;
+  const csvHref =
+    downloadableCount > 0
+      ? isUnbatched
+        ? "/api/accounts/hdfc-export?format=csv"
+        : `/api/accounts/hdfc-export?format=csv&batch_id=${encodeURIComponent(batchId)}`
+      : "#";
+
+  return (
+    <div
+      style={{
+        marginBottom: 14,
+        background: "#fff",
+        border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+        borderLeft: `5px solid var(--section-tint, ${ACCOUNTS_TOKENS.success})`,
+        borderRadius: 12,
+        boxShadow: ACCOUNTS_TOKENS.shadow,
+        overflow: "hidden",
+      }}
+    >
+      {/* Batch header */}
+      <div
+        style={{
+          padding: "12px 16px",
+          background: ACCOUNTS_TOKENS.successLight,
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 800,
+              color: ACCOUNTS_TOKENS.success,
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+              display: "flex",
+              gap: 10,
+              alignItems: "center",
+              flexWrap: "wrap",
+            }}
+          >
+            <span>📦 Batch {batchIndex}</span>
+            <span style={{ color: "var(--muted)", fontWeight: 600 }}>
+              {rows.length} payment{rows.length === 1 ? "" : "s"}
+            </span>
+            <span style={{ color: "var(--muted)" }}>·</span>
+            <span style={{ color: "var(--muted)", fontFamily: "ui-monospace, monospace" }}>
+              ₹{total.toLocaleString("en-IN")}
+            </span>
+            {earliestProposedAt && (
+              <>
+                <span style={{ color: "var(--muted)" }}>·</span>
+                <span style={{ color: "var(--muted)", fontWeight: 600 }}>
+                  Proposed{" "}
+                  {new Date(earliestProposedAt).toLocaleString("en-IN", {
+                    timeZone: "Asia/Kolkata",
+                    day: "numeric",
+                    month: "short",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </span>
+              </>
+            )}
+            {allLocked && (
+              <span
+                style={{
+                  padding: "2px 8px",
+                  borderRadius: 4,
+                  fontSize: 10,
+                  background: "rgba(168,85,247,0.16)",
+                  color: "#7c3aed",
+                  border: "1px solid rgba(168,85,247,0.35)",
+                  fontWeight: 700,
+                  letterSpacing: "0.05em",
+                }}
+                title="Whole batch already included in a downloaded HDFC CSV"
+              >
+                🔒 IN HDFC FILE
+              </span>
+            )}
+            {someLocked && !allLocked && (
+              <span
+                style={{
+                  padding: "2px 8px",
+                  borderRadius: 4,
+                  fontSize: 10,
+                  background: "rgba(168,85,247,0.10)",
+                  color: "#7c3aed",
+                  border: "1px solid rgba(168,85,247,0.25)",
+                  fontWeight: 700,
+                }}
+              >
+                {lockedCount}/{rows.length} LOCKED
+              </span>
+            )}
+          </div>
+          {isUnbatched && (
+            <p
+              style={{
+                margin: "4px 0 0",
+                fontSize: 11,
+                color: ACCOUNTS_TOKENS.warning,
+                fontStyle: "italic",
+              }}
+            >
+              Legacy data — these confirmed payments lack a batch ID.
+              Download will include ALL such payments.
+            </p>
+          )}
+        </div>
+
+        {/* Per-batch action buttons */}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <a
+            href={previewHref}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "6px 12px",
+              fontSize: 12,
+              fontWeight: 700,
+              background: "#fff",
+              color: "var(--gold-dark)",
+              border: "1.5px solid var(--gold-dark)",
+              borderRadius: 8,
+              textDecoration: "none",
+              whiteSpace: "nowrap",
+            }}
+            title="Preview this batch as an .xlsx with header row. Doesn't lock anything."
+          >
+            👁 Preview (Excel)
+          </a>
+          <a
+            href={csvHref}
+            onClick={(e) => {
+              if (downloadableCount === 0) {
+                e.preventDefault();
+                return;
+              }
+              const ok = window.confirm(
+                `Download Batch ${batchIndex} (${downloadableCount} payment${
+                  downloadableCount === 1 ? "" : "s"
+                }, ₹${rows
+                  .filter((r) => !r.hdfcCsvDownloaded)
+                  .reduce((s, r) => s + r.proposedAmount, 0)
+                  .toLocaleString("en-IN")}) as HDFC CSV?\n\nThese rows will be LOCKED. To re-issue you'll need a developer.\n\nProceed only if you're about to upload this file to HDFC.`,
+              );
+              if (!ok) e.preventDefault();
+            }}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "6px 12px",
+              fontSize: 12,
+              fontWeight: 700,
+              background: downloadableCount > 0 ? "var(--gold)" : "var(--border)",
+              color: downloadableCount > 0 ? "#fff" : "var(--muted)",
+              border:
+                downloadableCount > 0
+                  ? "1.5px solid var(--gold-dark)"
+                  : "1.5px solid var(--border)",
+              borderRadius: 8,
+              textDecoration: "none",
+              whiteSpace: "nowrap",
+              opacity: downloadableCount > 0 ? 1 : 0.55,
+              cursor: downloadableCount > 0 ? "pointer" : "not-allowed",
+            }}
+            title={
+              downloadableCount > 0
+                ? `Generate Batch ${batchIndex}'s HDFC CSV. Locks these ${downloadableCount} row(s).`
+                : "This batch is already in a downloaded HDFC CSV."
+            }
+            aria-disabled={downloadableCount === 0}
+          >
+            📥 Download CSV ({downloadableCount})
+          </a>
+        </div>
+      </div>
+
+      {/* Individual rows */}
+      <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+        {rows.map((row) => (
+          <ConfirmedRow
+            key={row.id}
+            row={row}
+            canMarkPaid={canMarkPaid}
+            canCancel={canCancel}
+            cancelAction={cancelAction}
+            onMarkPaid={() => onMarkPaid(row)}
+          />
+        ))}
+      </div>
     </div>
   );
 }
