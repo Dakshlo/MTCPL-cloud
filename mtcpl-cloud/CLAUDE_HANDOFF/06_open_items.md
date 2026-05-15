@@ -64,6 +64,38 @@ Ask Daksh which mechanism so the precise off-switch can be given.
 ### 3. Detailed cost report (Phase 2 of CNC Reports)
 The simpler PDF is shipped (production summary — daily SQFT/CFT per machine). The DETAILED PDF (electricity / maintenance / tools / salary cost lines, opening / current / nett unit, working days, per-SQFT cost) needs an INPUT UI for the cost numbers since they're not tracked in the system. Daksh hasn't requested it yet — will do when asked.
 
+### 4. Broken / rejected slab UX (Daksh flagged May 2026, follow-up)
+Context: while fixing the MT-B-246 bug ("Cut Done card showed 3 of 8
+slabs"), I confirmed `slab_requirements.status='rejected'` is the
+terminal state for slabs broken during carving (carving/actions.ts
+line 1235 — `reason === "broken_slab"` flow). It now flows through
+`POST_CUT_STATUSES` in `src/lib/slab-statuses.ts` so a destroyed slab
+still:
+  - shows on the source block's Cut Done card
+  - counts in Block Journey recovery %
+  - appears under a red "Broken / rejected" lifecycle chip on /slabs/ready
+
+Daksh's open thread (raised the same session): **does the broken-slab
+workflow need its own first-class UI?** Today the only place a slab
+becomes "rejected" is via the carving issue-report flow. There's no
+dedicated audit page that says "5 slabs broken this month, here's
+which vendors and which source blocks." Possible follow-ups when
+Daksh raises this:
+
+1. Add a "Broken slabs" report under the carving section: list by
+   month, by vendor, by source block. Helps spot a vendor who keeps
+   breaking slabs.
+2. Surface "broken slab" totals on the source-block recovery card so
+   "what survived" is obvious next to "what was cut."
+3. Optional: a "rejection reason" free-text column on
+   `slab_requirements` so the broken-slab list shows WHY (currently
+   the reason is captured at the carving_items level but not mirrored
+   to the slab row).
+
+None of this is in scope until Daksh asks. The shared
+`POST_CUT_STATUSES` constant is the contract — every existing
+audit/verification view already counts rejected slabs correctly.
+
 ---
 
 ## Pending features Daksh has mentioned
