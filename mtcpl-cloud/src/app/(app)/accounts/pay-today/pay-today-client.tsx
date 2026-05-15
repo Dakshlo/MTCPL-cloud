@@ -662,6 +662,14 @@ function ProposedBatch({
  *      practice — usually a batch is fully downloaded as one file.)
  *    None downloaded → Download CSV active, will lock the whole
  *      batch on click. */
+type MissingFieldReason = {
+  paymentId: string;
+  billToken: string;
+  vendorId: string;
+  vendorName: string;
+  missing: string[];
+};
+
 function ConfirmedBatch({
   batchId,
   batchIndex,
@@ -684,6 +692,14 @@ function ConfirmedBatch({
   const lockedCount = rows.filter((r) => r.hdfcCsvDownloaded).length;
   const allLocked = downloadableCount === 0 && rows.length > 0;
   const someLocked = lockedCount > 0;
+
+  // Mig 048 follow-on (Daksh): pre-flight the export so a missing-
+  // field error renders as a tidy panel in-page, not raw JSON in a
+  // new tab. Click → fetch ?check_only=1 → if missing[], show the
+  // panel below the buttons; if ok, fire the actual download URL.
+  const [missing, setMissing] = useState<MissingFieldReason[] | null>(null);
+  const [otherError, setOtherError] = useState<string | null>(null);
+  const [checking, setChecking] = useState<"" | "xlsx" | "csv">("");
 
   // Earliest proposedAt in the batch (used in the header label).
   const earliestProposedAt = rows.reduce<string | null>((acc, r) => {
@@ -813,8 +829,32 @@ function ConfirmedBatch({
 
         {/* Per-batch action buttons */}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <a
-            href={previewHref}
+          <button
+            type="button"
+            disabled={checking !== ""}
+            onClick={async () => {
+              setMissing(null);
+              setOtherError(null);
+              setChecking("xlsx");
+              try {
+                const checkUrl = `${previewHref}&check_only=1`;
+                const r = await fetch(checkUrl, { credentials: "same-origin" });
+                if (r.ok) {
+                  window.location.href = previewHref;
+                  return;
+                }
+                const body = await r.json().catch(() => null);
+                if (body && Array.isArray(body.missing) && body.missing.length > 0) {
+                  setMissing(body.missing as MissingFieldReason[]);
+                } else {
+                  setOtherError(body?.error ?? `Preflight failed (HTTP ${r.status}).`);
+                }
+              } catch (e) {
+                setOtherError(e instanceof Error ? e.message : "Network error");
+              } finally {
+                setChecking("");
+              }
+            }}
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -826,29 +866,53 @@ function ConfirmedBatch({
               color: "var(--gold-dark)",
               border: "1.5px solid var(--gold-dark)",
               borderRadius: 8,
-              textDecoration: "none",
               whiteSpace: "nowrap",
+              cursor: checking ? "wait" : "pointer",
+              opacity: checking === "xlsx" ? 0.6 : 1,
             }}
             title="Preview this batch as an .xlsx with header row. Doesn't lock anything."
           >
-            👁 Preview (Excel)
-          </a>
-          <a
-            href={csvHref}
-            onClick={(e) => {
-              if (downloadableCount === 0) {
-                e.preventDefault();
-                return;
+            {checking === "xlsx" ? "Checking…" : "👁 Preview (Excel)"}
+          </button>
+          <button
+            type="button"
+            disabled={checking !== "" || downloadableCount === 0}
+            onClick={async () => {
+              if (downloadableCount === 0) return;
+              setMissing(null);
+              setOtherError(null);
+              setChecking("csv");
+              try {
+                const checkUrl = `${previewHref.replace("format=xlsx", "format=csv")}&check_only=1`;
+                const r = await fetch(checkUrl, { credentials: "same-origin" });
+                if (r.ok) {
+                  // Pre-flight clean → confirm before firing the
+                  // real download (which locks the rows).
+                  const finalUrl = previewHref.replace("format=xlsx", "format=csv");
+                  const totalToPay = rows
+                    .filter((row) => !row.hdfcCsvDownloaded)
+                    .reduce((s, row) => s + row.proposedAmount, 0);
+                  const ok = window.confirm(
+                    `Download Batch ${batchIndex} (${downloadableCount} payment${
+                      downloadableCount === 1 ? "" : "s"
+                    }, ₹${totalToPay.toLocaleString(
+                      "en-IN",
+                    )}) as HDFC CSV?\n\nThese rows will be LOCKED. To re-issue you'll need a developer.\n\nProceed only if you're about to upload this file to HDFC.`,
+                  );
+                  if (ok) window.location.href = finalUrl;
+                  return;
+                }
+                const body = await r.json().catch(() => null);
+                if (body && Array.isArray(body.missing) && body.missing.length > 0) {
+                  setMissing(body.missing as MissingFieldReason[]);
+                } else {
+                  setOtherError(body?.error ?? `Preflight failed (HTTP ${r.status}).`);
+                }
+              } catch (e) {
+                setOtherError(e instanceof Error ? e.message : "Network error");
+              } finally {
+                setChecking("");
               }
-              const ok = window.confirm(
-                `Download Batch ${batchIndex} (${downloadableCount} payment${
-                  downloadableCount === 1 ? "" : "s"
-                }, ₹${rows
-                  .filter((r) => !r.hdfcCsvDownloaded)
-                  .reduce((s, r) => s + r.proposedAmount, 0)
-                  .toLocaleString("en-IN")}) as HDFC CSV?\n\nThese rows will be LOCKED. To re-issue you'll need a developer.\n\nProceed only if you're about to upload this file to HDFC.`,
-              );
-              if (!ok) e.preventDefault();
             }}
             style={{
               display: "inline-flex",
@@ -864,22 +928,137 @@ function ConfirmedBatch({
                   ? "1.5px solid var(--gold-dark)"
                   : "1.5px solid var(--border)",
               borderRadius: 8,
-              textDecoration: "none",
               whiteSpace: "nowrap",
-              opacity: downloadableCount > 0 ? 1 : 0.55,
-              cursor: downloadableCount > 0 ? "pointer" : "not-allowed",
+              opacity: downloadableCount > 0 ? (checking === "csv" ? 0.6 : 1) : 0.55,
+              cursor:
+                checking !== ""
+                  ? "wait"
+                  : downloadableCount > 0
+                    ? "pointer"
+                    : "not-allowed",
             }}
             title={
               downloadableCount > 0
                 ? `Generate Batch ${batchIndex}'s HDFC CSV. Locks these ${downloadableCount} row(s).`
                 : "This batch is already in a downloaded HDFC CSV."
             }
-            aria-disabled={downloadableCount === 0}
           >
-            📥 Download CSV ({downloadableCount})
-          </a>
+            {checking === "csv" ? "Checking…" : `📥 Download CSV (${downloadableCount})`}
+          </button>
         </div>
       </div>
+
+      {/* Mig 048 follow-on — missing-fields panel. Shown when a
+          preflight came back with missing[]. Each row links to the
+          vendor's edit page so the accountant can fix in one click. */}
+      {missing && missing.length > 0 && (
+        <div
+          role="alert"
+          style={{
+            margin: "0 12px 12px",
+            padding: "12px 14px",
+            background: "rgba(220, 38, 38, 0.06)",
+            border: "1px solid rgba(220, 38, 38, 0.35)",
+            borderLeft: "4px solid #b91c1c",
+            borderRadius: 10,
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+          }}
+        >
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#7f1d1d" }}>
+            ⚠ {missing.length} vendor{missing.length === 1 ? "" : "s"} need fixing before this batch can be downloaded
+          </div>
+          <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 6 }}>
+            {missing.map((m) => (
+              <li
+                key={m.paymentId}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  fontSize: 12,
+                  padding: "6px 10px",
+                  background: "#fff",
+                  border: "1px solid var(--border)",
+                  borderRadius: 8,
+                  flexWrap: "wrap",
+                }}
+              >
+                <code
+                  style={{
+                    fontFamily: "ui-monospace, monospace",
+                    fontSize: 11,
+                    padding: "1px 6px",
+                    background: "var(--surface-alt, #f3f4f6)",
+                    borderRadius: 4,
+                    color: "var(--muted)",
+                  }}
+                >
+                  {m.billToken}
+                </code>
+                <Link
+                  href={`/accounts/vendors/${m.vendorId}`}
+                  style={{
+                    color: "#1d4ed8",
+                    fontWeight: 700,
+                    textDecoration: "none",
+                  }}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {m.vendorName} →
+                </Link>
+                <span style={{ color: "var(--muted)" }}>missing:</span>
+                {m.missing.map((field) => (
+                  <span
+                    key={field}
+                    style={{
+                      padding: "2px 8px",
+                      fontSize: 10,
+                      fontWeight: 700,
+                      borderRadius: 4,
+                      background: "rgba(220, 38, 38, 0.12)",
+                      color: "#7f1d1d",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.04em",
+                    }}
+                  >
+                    {field}
+                  </span>
+                ))}
+              </li>
+            ))}
+          </ul>
+          <p
+            style={{
+              margin: 0,
+              fontSize: 11,
+              color: "var(--muted)",
+              fontStyle: "italic",
+            }}
+          >
+            Click each vendor name → fill the missing fields → save → come back and retry the download.
+          </p>
+        </div>
+      )}
+
+      {otherError && !missing && (
+        <div
+          role="alert"
+          style={{
+            margin: "0 12px 12px",
+            padding: "10px 12px",
+            background: "rgba(220, 38, 38, 0.06)",
+            border: "1px solid rgba(220, 38, 38, 0.35)",
+            borderRadius: 8,
+            fontSize: 12,
+            color: "#7f1d1d",
+          }}
+        >
+          {otherError}
+        </div>
+      )}
 
       {/* Individual rows */}
       <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>

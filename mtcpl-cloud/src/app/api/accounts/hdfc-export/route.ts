@@ -77,6 +77,13 @@ async function handleHdfcExport(req: NextRequest) {
   const paymentIdsParam = sp.get("payment_ids") || "";
   const formatParam = (sp.get("format") || "xlsx").toLowerCase();
   const wantsCsv = formatParam === "csv" || formatParam === "001";
+  // Mig 048 follow-on (Daksh, May 2026): the client buttons call
+  // this route first with ?check_only=1 so they can show a nice
+  // missing-fields panel instead of dumping raw JSON in a new tab.
+  // check_only runs the same pre-flight validation but DOES NOT
+  // generate the file, DOES NOT mark anything as downloaded.
+  // Returns 200 { ok: true } when clean, 400 with missing[] when not.
+  const checkOnly = sp.get("check_only") === "1";
 
   // Mig 048 download-lock semantics:
   //   xlsx (preview) → returns every CONFIRMED payment in scope,
@@ -238,6 +245,20 @@ async function handleHdfcExport(req: NextRequest) {
       },
       { status: 400 },
     );
+  }
+
+  // check_only mode: pre-flight passed, but we don't generate the
+  // file. Tells the client "yes, you can download this safely" so
+  // it can proceed to the real call (which will lock).
+  if (checkOnly) {
+    return NextResponse.json({
+      ok: true,
+      eligibleCount: validRows.length,
+      totalInr: validRows.reduce(
+        (s, r) => s + Number(r.payment.proposed_amount),
+        0,
+      ),
+    });
   }
 
   // ── Build the export rows ────────────────────────────────────────
