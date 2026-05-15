@@ -6,17 +6,28 @@ Live document. Update as things resolve.
 
 ## ⏰ Reminders for Daksh
 
-### 0. Flip Rajesh Kumar's approver bit after migration 027
+### 0. Flip cut-approval bits — Rajesh / Parth / Mafat
 
-Migration 027 (Cutting approval workflow) ships the `profiles.can_approve_cuts` column with default `FALSE`. After running the migration, run this UPDATE in the SQL editor:
+Migration 027 (Cutting approval workflow) ships the `profiles.can_approve_cuts` column with default `FALSE`. After running the migration, flip the flag for each named auditor:
 
 ```sql
+-- Rajesh Kumar — team_head, original cutting-audit deputy
 UPDATE public.profiles
    SET can_approve_cuts = TRUE
  WHERE full_name ILIKE 'RAJESH KUMAR%';
+
+-- Parth Sompura — carving_head, second auditor (Daksh, May 2026)
+UPDATE public.profiles
+   SET can_approve_cuts = TRUE
+ WHERE full_name ILIKE 'PARTH%' AND role = 'carving_head';
+
+-- Mafat Purohit — crosscheck, third auditor (Daksh, May 2026)
+UPDATE public.profiles
+   SET can_approve_cuts = TRUE
+ WHERE full_name ILIKE 'MAFAT%' AND role = 'crosscheck';
 ```
 
-Without this, the top-bar **✓ Approvals** button never shows for Rajesh and the approval queue is invisible to him. Developer + Owner roles always qualify in code regardless — Rajesh is the only `team_head` that needs the bit flipped today. Add new approvers the same way.
+Without these flips the top-bar **Tasks → Cutting Audit** row stays empty for that user and the `/cutting/approvals` page is invisible to them. Developer + Owner roles always qualify in code regardless. Add new approvers the same way (role must be `team_head` / `carving_head` / `crosscheck` AND the flag must be TRUE — both gates apply per `canApproveCuts` in `src/lib/cutting-permissions.ts`).
 
 ### 0b. Flip Naresh's bill-approver bit after migration 028
 

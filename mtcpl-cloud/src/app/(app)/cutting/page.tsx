@@ -51,6 +51,13 @@ type BlockRow = {
    *  have been approved before the operator workflow existed. */
   operator_id?: string | null;
   operators?: { id: string; name: string } | null;
+  /** Mig 027 audit trail — who signed off the cutting-done submission
+   *  + when. Surfaced as "Approved by NAME · DATE" on the Done card so
+   *  the team can see at a glance which auditor cleared each block.
+   *  Multiple people approve (Naresh / Rajesh / Parth / Mafat / dev /
+   *  owner) so the name matters. */
+  approved_by?: string | null;
+  approved_at?: string | null;
 };
 
 function defaultTab(role: string): Tab {
@@ -217,7 +224,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
       const { data, error } = await supabase
         .from("cut_session_blocks")
         .select(
-          "id, status, block_id, restocked_block_id, layout, updated_at, cut_session_id, cutting_seq, needs_reprint, reprint_reason, operator_id, operators(id, name), cut_sessions(session_code, kerf_mm, planned_by), cut_session_slabs(slab_requirement_id)"
+          "id, status, block_id, restocked_block_id, layout, updated_at, cut_session_id, cutting_seq, needs_reprint, reprint_reason, operator_id, approved_by, approved_at, operators(id, name), cut_sessions(session_code, kerf_mm, planned_by), cut_session_slabs(slab_requirement_id)"
         )
         .in("status", statusFilter)
         .order("updated_at", { ascending })
@@ -1136,6 +1143,38 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                             )}`
                           : ""}
                       </span>
+                      {/* Approver attribution — multiple users can sign
+                          off (Naresh / Rajesh / Parth / Mafat / dev /
+                          owner). Daksh wants the named auditor on the
+                          card so accountability is visible at a glance. */}
+                      {block.approved_by && profilesMap[block.approved_by] && (
+                        <span
+                          className="role-pill"
+                          style={{
+                            fontSize: 11,
+                            background: "rgba(34,197,94,0.10)",
+                            border: "1px solid rgba(34,197,94,0.35)",
+                            color: "#15803d",
+                            fontWeight: 600,
+                          }}
+                          title={
+                            block.approved_at
+                              ? `Approved on ${new Date(block.approved_at).toLocaleString("en-IN", {
+                                  day: "numeric",
+                                  month: "short",
+                                  year: "numeric",
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })}`
+                              : "Approved"
+                          }
+                        >
+                          ✓ Approved by{" "}
+                          <strong style={{ fontWeight: 700 }}>
+                            {profilesMap[block.approved_by]}
+                          </strong>
+                        </span>
+                      )}
                       {eff && (
                         <span
                           title={useActual ? "Real numbers from the completed cut" : "Planner's projection"}
@@ -1484,6 +1523,38 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                                   ? ` · ${new Date(block.updated_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}`
                                   : ""}
                               </span>
+                              {/* Historical Done-tab card — same approver
+                                  pill as the live Done Today card so the
+                                  named auditor stays attached to the
+                                  record forever. */}
+                              {block.approved_by && profilesMap[block.approved_by] && (
+                                <span
+                                  className="role-pill"
+                                  style={{
+                                    fontSize: 11,
+                                    background: "rgba(34,197,94,0.10)",
+                                    border: "1px solid rgba(34,197,94,0.35)",
+                                    color: "#15803d",
+                                    fontWeight: 600,
+                                  }}
+                                  title={
+                                    block.approved_at
+                                      ? `Approved on ${new Date(block.approved_at).toLocaleString("en-IN", {
+                                          day: "numeric",
+                                          month: "short",
+                                          year: "numeric",
+                                          hour: "2-digit",
+                                          minute: "2-digit",
+                                        })}`
+                                      : "Approved"
+                                  }
+                                >
+                                  ✓ Approved by{" "}
+                                  <strong style={{ fontWeight: 700 }}>
+                                    {profilesMap[block.approved_by]}
+                                  </strong>
+                                </span>
+                              )}
                               {effEarlier && (
                                 <span
                                   title={useActualEarlier ? "Real numbers from the completed cut" : "Planner's projection"}

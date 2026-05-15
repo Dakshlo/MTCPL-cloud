@@ -743,7 +743,17 @@ type PendingApprovalPayload = {
 export async function approveCutAction(
   formData: FormData,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const { profile } = await requireAuth(["developer", "owner", "team_head"]);
+  // Role allow-list widened to mirror the approvals page — carving_head
+  // (Parth) and crosscheck (Mafat) are gated by can_approve_cuts but
+  // were being kicked out at the requireAuth step before they ever
+  // reached the canApproveCuts check.
+  const { profile } = await requireAuth([
+    "developer",
+    "owner",
+    "team_head",
+    "carving_head",
+    "crosscheck",
+  ]);
   const { canApproveCuts } = await import("@/lib/cutting-permissions");
   if (!canApproveCuts(profile)) {
     return { ok: false, error: "You do not have permission to approve cuts." };
@@ -1007,7 +1017,15 @@ export async function approveCutFormAction(formData: FormData) {
 export async function requestCutterEditAction(
   formData: FormData,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const { profile } = await requireAuth(["developer", "owner", "team_head"]);
+  // Same widening as approveCutAction — Parth (carving_head) and Mafat
+  // (crosscheck) need to be able to send a row back for cutter edits.
+  const { profile } = await requireAuth([
+    "developer",
+    "owner",
+    "team_head",
+    "carving_head",
+    "crosscheck",
+  ]);
   const { canApproveCuts } = await import("@/lib/cutting-permissions");
   if (!canApproveCuts(profile)) {
     return { ok: false, error: "You do not have permission to unlock cutter edits." };
@@ -1089,7 +1107,14 @@ export async function requestCutterEditAction(
 export async function lockCutterEditAction(
   formData: FormData,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const { profile } = await requireAuth(["developer", "owner", "team_head"]);
+  // Same widening as approveCutAction.
+  const { profile } = await requireAuth([
+    "developer",
+    "owner",
+    "team_head",
+    "carving_head",
+    "crosscheck",
+  ]);
   const { canApproveCuts } = await import("@/lib/cutting-permissions");
   if (!canApproveCuts(profile)) {
     return { ok: false, error: "You do not have permission to lock cutter edits." };

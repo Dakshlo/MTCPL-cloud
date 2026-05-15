@@ -12,7 +12,15 @@ export function getDefaultRouteForRole(role?: AppRole | null) {
     case "team_head":
       return "/slabs";
     case "carving_head":
-      return "/slabs/ready";
+      // Daksh (May 2026): Total Ready Sizes removed from the
+      // carving_head sidebar — they already have Ready Sizes Stock
+      // (the actionable bucket view at /slabs/ready/for-carving), and
+      // having both was redundant for the carving role. Landing page
+      // moved to the actionable view too. Side effect: when Parth or
+      // any future carving_head clicks a page they don't have access
+      // to, they bounce back to a useful workspace instead of a
+      // verification list they don't own.
+      return "/slabs/ready/for-carving";
     case "dispatch":
     case "block_slab_entry":
     case "block_entry":

@@ -36,10 +36,22 @@ type PendingPayload = {
 };
 
 export default async function CuttingApprovalsPage() {
+  // Approval audience: dev + owner (always), team_head + carving_head +
+  // crosscheck (gated by can_approve_cuts flag — see canApproveCuts
+  // below), and cutting_operator (read-only resubmit path).
+  //
+  // Before: only ["developer","owner","team_head","cutting_operator"]
+  // was listed → Parth (carving_head) + Mafat (crosscheck) clicked the
+  // top-bar Cutting Audit link and got bounced to their default route
+  // (ready-size for the carving head) by requireAuth's role guard. The
+  // can_approve_cuts flag was already wired in canApproveCuts(), but
+  // requireAuth's role allow-list never let those roles reach the page.
   const { profile } = await requireAuth([
     "developer",
     "owner",
     "team_head",
+    "carving_head",
+    "crosscheck",
     "cutting_operator",
   ]);
   const canApprove = canApproveCuts(profile);
