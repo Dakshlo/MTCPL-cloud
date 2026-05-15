@@ -8,6 +8,7 @@ import {
 } from "@/lib/accounts-permissions";
 import { upsertBillVendorAction } from "../../actions";
 import { VendorForm } from "../vendor-form";
+import { PrivateNotesModal } from "./private-notes-modal";
 import {
   AccountsHero,
   ACCOUNTS_TOKENS,
@@ -227,8 +228,9 @@ export default async function BillVendorDetailPage({
         <summary
           style={{
             cursor: "pointer",
-            display: "inline-flex",
+            display: "flex",
             alignItems: "center",
+            justifyContent: "space-between",
             gap: 8,
             fontSize: 13,
             fontWeight: 700,
@@ -236,9 +238,31 @@ export default async function BillVendorDetailPage({
             letterSpacing: "0.01em",
           }}
         >
-          ✎ Edit vendor details
-          <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 500 }}>
-            (bank info · GSTIN · payment terms · TDS / TCS flags)
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+            ✎ Edit vendor details
+            <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 500 }}>
+              (bank info · GSTIN · payment terms · TDS / TCS flags)
+            </span>
+          </span>
+          {/* Mig 050 — tiny low-visibility 🔒 button for vendor
+              private notes. Sits at the far right of the Edit
+              summary row so it's reachable from the vendor profile
+              without clicking into the details panel. Modal component
+              does its own role check internally too. */}
+          <span
+            onClick={(e) => {
+              // Prevent the <summary> from toggling <details> when
+              // the user clicks the lock button.
+              e.stopPropagation();
+              e.preventDefault();
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{ display: "inline-flex" }}
+          >
+            <PrivateNotesModal
+              vendorId={id}
+              canShow={profile.role === "developer" || profile.role === "owner"}
+            />
           </span>
         </summary>
         <div style={{ marginTop: 14 }}>

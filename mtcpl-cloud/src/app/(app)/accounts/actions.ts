@@ -1372,3 +1372,302 @@ export async function archiveBillVendorFormAction(formData: FormData) {
   }
   redirect("/accounts/vendors");
 }
+
+// ──────────────────────────────────────────────────────────────────
+// Vendor private notes (mig 050) — passphrase-gated scratchpad
+// ──────────────────────────────────────────────────────────────────
+// Text-only per-vendor notes. Role-gated to developer/owner, with a
+// passphrase prompt before content is loaded or saved. Each action
+// logs to audit_logs so the feature is auditable end-to-end.
+
+type Profile = Awaited<ReturnType<typeof requireAuth>>["profile"];
+
+function canAccessPrivateNotes(p: Profile): boolean {
+  return p.role === "developer" || p.role === "owner";
+}
+
+type PassphraseRow = {
+  algo: string;
+  salt: string;
+  hash: string | null;
+};
+
+async function readPassphraseRow(): Promise<PassphraseRow | null> {
+  const admin = createAdminSupabaseClient();
+  const { data } = await admin
+    .from("system_settings")
+    .select("value")
+    .eq("key", "vendor_notes_password")
+    .maybeSingle();
+  if (!data) return null;
+  const v = (data as { value: unknown }).value;
+  if (!v || typeof v !== "object") return null;
+  const cast = v as Record<string, unknown>;
+  if (typeof cast.algo !== "string" || typeof cast.salt !== "string") {
+    return null;
+  }
+  return {
+    algo: cast.algo,
+    salt: cast.salt,
+    hash: typeof cast.hash === "string" ? cast.hash : null,
+  };
+}
+
+/** Returns whether the passphrase has been set yet. Used by the
+ *  modal to decide between "SET passphrase" and "ENTER passphrase"
+ *  modes. Doesn't reveal the hash itself. */
+export async function getVendorNotesPassphraseStatusAction(): Promise<
+  { ok: true; isSet: boolean } | { ok: false; error: string }
+> {
+  const { profile } = await requireAuth();
+  if (!canAccessPrivateNotes(profile)) {
+    return { ok: false, error: "Not authorised." };
+  }
+  const row = await readPassphraseRow();
+  if (!row) return { ok: false, error: "Passphrase row not seeded — run migration 050." };
+  return { ok: true, isSet: row.hash !== null };
+}
+
+/** Sets (or rotates) the passphrase. When the existing hash is
+ *  non-null, the caller must supply `current_plain` and it must
+ *  verify. When existing hash is null (first-use), `current_plain`
+ *  is ignored — the very first set is open to whoever has
+ *  developer/owner access. */
+export async function setVendorNotesPassphraseAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canAccessPrivateNotes(profile)) {
+    return { ok: false, error: "Not authorised." };
+  }
+  const newPlain = String(formData.get("new_plain") || "").trim();
+  const currentPlain = String(formData.get("current_plain") || "").trim();
+
+  if (newPlain.length < 6) {
+    return { ok: false, error: "Passphrase must be at least 6 characters." };
+  }
+  if (newPlain.length > 200) {
+    return { ok: false, error: "Passphrase too long (max 200 characters)." };
+  }
+
+  const row = await readPassphraseRow();
+  if (!row) {
+    return { ok: false, error: "Passphrase row missing — contact a developer." };
+  }
+
+  const { verifyPassphrase, hashPassphrase } = await import("@/lib/private-notes");
+
+  // If a hash already exists, the caller must verify the current
+  // passphrase before rotation. First-time set (hash === null) is
+  // allowed without verification.
+  if (row.hash !== null) {
+    if (!currentPlain) {
+      return { ok: false, error: "Enter the current passphrase to rotate it." };
+    }
+    if (!verifyPassphrase(currentPlain, row.salt, row.hash)) {
+      return { ok: false, error: "Current passphrase is incorrect." };
+    }
+  }
+
+  const newHash = hashPassphrase(newPlain, row.salt);
+  const admin = createAdminSupabaseClient();
+  const { error } = await admin
+    .from("system_settings")
+    .update({
+      value: { algo: row.algo, salt: row.salt, hash: newHash },
+      updated_at: new Date().toISOString(),
+      updated_by: profile.id,
+    })
+    .eq("key", "vendor_notes_password");
+  if (error) return { ok: false, error: error.message };
+
+  void logAudit(
+    profile.id,
+    row.hash === null
+      ? "vendor_notes_passphrase_set"
+      : "vendor_notes_passphrase_rotated",
+    "system_setting",
+    "vendor_notes_password",
+    {},
+  );
+  return { ok: true };
+}
+
+/** Verifies the supplied passphrase. Doesn't touch any notes; pure
+ *  authn check. Returns ok:true if valid. */
+export async function verifyVendorNotesPassphraseAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canAccessPrivateNotes(profile)) {
+    return { ok: false, error: "Not authorised." };
+  }
+  const plain = String(formData.get("plain") || "");
+  if (!plain) return { ok: false, error: "Passphrase required." };
+
+  const row = await readPassphraseRow();
+  if (!row || row.hash === null) {
+    return { ok: false, error: "Passphrase has not been set yet." };
+  }
+
+  const { verifyPassphrase } = await import("@/lib/private-notes");
+  if (!verifyPassphrase(plain, row.salt, row.hash)) {
+    return { ok: false, error: "Incorrect passphrase." };
+  }
+  return { ok: true };
+}
+
+/** Reads a vendor's private note. Caller must re-prove the
+ *  passphrase on every read (not just the unlock-once-per-session
+ *  flag on the client) so a stolen auth cookie alone can't pull
+ *  content. */
+export async function getVendorPrivateNoteAction(
+  formData: FormData,
+): Promise<
+  | { ok: true; content: string; updatedAt: string | null; updatedByName: string | null }
+  | { ok: false; error: string }
+> {
+  const { profile } = await requireAuth();
+  if (!canAccessPrivateNotes(profile)) {
+    return { ok: false, error: "Not authorised." };
+  }
+  const vendorId = String(formData.get("vendor_id") || "").trim();
+  const plain = String(formData.get("passphrase") || "");
+  if (!vendorId) return { ok: false, error: "Missing vendor_id." };
+
+  const row = await readPassphraseRow();
+  if (!row || row.hash === null) {
+    return { ok: false, error: "Passphrase has not been set yet." };
+  }
+  const { verifyPassphrase } = await import("@/lib/private-notes");
+  if (!verifyPassphrase(plain, row.salt, row.hash)) {
+    return { ok: false, error: "Incorrect passphrase." };
+  }
+
+  const admin = createAdminSupabaseClient();
+  const { data: note } = await admin
+    .from("vendor_private_notes")
+    .select("content, updated_at, updated_by")
+    .eq("bill_vendor_id", vendorId)
+    .maybeSingle();
+  const content = (note as { content?: string } | null)?.content ?? "";
+  const updatedAt = (note as { updated_at?: string } | null)?.updated_at ?? null;
+  const updatedById = (note as { updated_by?: string | null } | null)?.updated_by ?? null;
+
+  let updatedByName: string | null = null;
+  if (updatedById) {
+    const { data: prof } = await admin
+      .from("profiles")
+      .select("full_name")
+      .eq("id", updatedById)
+      .maybeSingle();
+    updatedByName = (prof as { full_name?: string } | null)?.full_name ?? null;
+  }
+
+  void logAudit(profile.id, "vendor_note_viewed", "bill_vendor", vendorId, {
+    content_length: content.length,
+  });
+  return { ok: true, content, updatedAt, updatedByName };
+}
+
+/** Saves (insert or update) a vendor's private note. Re-checks
+ *  passphrase. Audit log captures content_length only, never the
+ *  actual content. */
+export async function saveVendorPrivateNoteAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canAccessPrivateNotes(profile)) {
+    return { ok: false, error: "Not authorised." };
+  }
+  const vendorId = String(formData.get("vendor_id") || "").trim();
+  const content = String(formData.get("content") || "");
+  const plain = String(formData.get("passphrase") || "");
+  if (!vendorId) return { ok: false, error: "Missing vendor_id." };
+  if (content.length > 10000) {
+    return { ok: false, error: "Note is too long (max 10,000 characters)." };
+  }
+
+  const row = await readPassphraseRow();
+  if (!row || row.hash === null) {
+    return { ok: false, error: "Passphrase has not been set yet." };
+  }
+  const { verifyPassphrase } = await import("@/lib/private-notes");
+  if (!verifyPassphrase(plain, row.salt, row.hash)) {
+    return { ok: false, error: "Incorrect passphrase." };
+  }
+
+  const admin = createAdminSupabaseClient();
+  const now = new Date().toISOString();
+  // Upsert by bill_vendor_id (UNIQUE constraint guarantees one row).
+  const { error } = await admin
+    .from("vendor_private_notes")
+    .upsert(
+      {
+        bill_vendor_id: vendorId,
+        content,
+        updated_at: now,
+        updated_by: profile.id,
+      },
+      { onConflict: "bill_vendor_id" },
+    );
+  if (error) return { ok: false, error: error.message };
+
+  void logAudit(profile.id, "vendor_note_saved", "bill_vendor", vendorId, {
+    content_length: content.length,
+  });
+  return { ok: true };
+}
+
+/** Clears a vendor's private note (sets content to empty string).
+ *  The row stays in place for forensic recovery from backups.
+ *  Logged in audit_logs with the pre-clear content length so
+ *  there's a record of how much was removed. */
+export async function clearVendorPrivateNoteAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canAccessPrivateNotes(profile)) {
+    return { ok: false, error: "Not authorised." };
+  }
+  const vendorId = String(formData.get("vendor_id") || "").trim();
+  const plain = String(formData.get("passphrase") || "");
+  if (!vendorId) return { ok: false, error: "Missing vendor_id." };
+
+  const row = await readPassphraseRow();
+  if (!row || row.hash === null) {
+    return { ok: false, error: "Passphrase has not been set yet." };
+  }
+  const { verifyPassphrase } = await import("@/lib/private-notes");
+  if (!verifyPassphrase(plain, row.salt, row.hash)) {
+    return { ok: false, error: "Incorrect passphrase." };
+  }
+
+  const admin = createAdminSupabaseClient();
+  // Read prior length for audit before clearing.
+  const { data: prior } = await admin
+    .from("vendor_private_notes")
+    .select("content")
+    .eq("bill_vendor_id", vendorId)
+    .maybeSingle();
+  const priorLength = (prior as { content?: string } | null)?.content?.length ?? 0;
+
+  const now = new Date().toISOString();
+  const { error } = await admin
+    .from("vendor_private_notes")
+    .upsert(
+      {
+        bill_vendor_id: vendorId,
+        content: "",
+        updated_at: now,
+        updated_by: profile.id,
+      },
+      { onConflict: "bill_vendor_id" },
+    );
+  if (error) return { ok: false, error: error.message };
+
+  void logAudit(profile.id, "vendor_note_cleared", "bill_vendor", vendorId, {
+    cleared_length: priorLength,
+  });
+  return { ok: true };
+}
