@@ -135,10 +135,11 @@ export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
     }
     setOpen(true);
   }
-  function scheduleClose() {
-    if (closeTimer.current) clearTimeout(closeTimer.current);
-    closeTimer.current = setTimeout(() => setOpen(false), 220);
-  }
+  // Daksh (May 2026): removed scheduleClose. Hover opens, but the
+  // panel no longer auto-closes when the cursor drifts away —
+  // users were losing their typed search query when the mouse left
+  // the trigger row. Close paths: outside-click, Esc, or selecting
+  // a result row (which sets open=false explicitly).
 
   async function runSearch(qRaw?: string) {
     const q = (qRaw ?? query).trim();
@@ -170,7 +171,6 @@ export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
     <div
       ref={wrapperRef}
       onMouseEnter={openNow}
-      onMouseLeave={scheduleClose}
       style={{ position: "relative", display: "inline-block" }}
     >
       {/* Trigger pill */}
