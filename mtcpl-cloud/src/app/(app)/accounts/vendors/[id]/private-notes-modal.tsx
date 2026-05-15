@@ -20,6 +20,7 @@
 // of the client flag (defence in depth).
 
 import { useEffect, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import {
   getVendorNotesPassphraseStatusAction,
@@ -331,9 +332,17 @@ export function PrivateNotesModal({
   if (mode === "closed") return triggerButton;
 
   // ── Modal backdrop ───────────────────────────────────────────────
-  return (
+  // Rendered via React Portal into document.body so click events
+  // inside the modal don't bubble back up through the <summary>
+  // element on the vendor profile (which would otherwise toggle the
+  // <details> "Edit vendor details" panel every time the user
+  // interacted with the modal).
+  //
+  // typeof document check guards SSR — portal can't run server-side.
+  if (typeof document === "undefined") return triggerButton;
+
+  const modalContent = (
     <>
-      {triggerButton}
       <div
         role="dialog"
         aria-modal="true"
@@ -676,6 +685,13 @@ export function PrivateNotesModal({
           )}
         </div>
       </div>
+    </>
+  );
+
+  return (
+    <>
+      {triggerButton}
+      {createPortal(modalContent, document.body)}
     </>
   );
 }
