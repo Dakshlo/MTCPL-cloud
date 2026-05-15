@@ -245,25 +245,13 @@ export default async function BillVendorDetailPage({
             </span>
           </span>
           {/* Mig 050 — tiny low-visibility 🔒 button for vendor
-              private notes. Sits at the far right of the Edit
-              summary row so it's reachable from the vendor profile
-              without clicking into the details panel. Modal component
-              does its own role check internally too. */}
-          <span
-            onClick={(e) => {
-              // Prevent the <summary> from toggling <details> when
-              // the user clicks the lock button.
-              e.stopPropagation();
-              e.preventDefault();
-            }}
-            onMouseDown={(e) => e.stopPropagation()}
-            style={{ display: "inline-flex" }}
-          >
-            <PrivateNotesModal
-              vendorId={id}
-              canShow={profile.role === "developer" || profile.role === "owner"}
-            />
-          </span>
+              private notes. The modal client component handles its
+              own click event + stops propagation to the parent
+              <summary> so clicking the lock doesn't toggle <details>. */}
+          <PrivateNotesModal
+            vendorId={id}
+            canShow={profile.role === "developer" || profile.role === "owner"}
+          />
         </summary>
         <div style={{ marginTop: 14 }}>
           <VendorForm

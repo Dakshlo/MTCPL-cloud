@@ -224,10 +224,18 @@ export function PrivateNotesModal({
   }, [mode]);
 
   // ── The tiny entry button. Renders in-flow, ~22px, muted. ────────
+  // stopPropagation on click + mousedown so the parent <summary>
+  // element on the vendor profile page doesn't toggle <details>
+  // when the user clicks the lock. Same for preventDefault.
   const triggerButton = (
     <button
       type="button"
-      onClick={open}
+      onClick={(e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        open();
+      }}
+      onMouseDown={(e) => e.stopPropagation()}
       title="Private notes"
       style={{
         display: "inline-flex",
