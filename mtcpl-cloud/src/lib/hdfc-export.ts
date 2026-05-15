@@ -125,10 +125,11 @@ export function buildReferenceNumber(beneName: string, valueDate: Date): string 
  *  bounce-backs for HDFC payment notifications. */
 export const DEFAULT_BENE_EMAIL = "DASKHLOHAR0097@GMAIL.COM";
 
-/** Client code prefix on the filename — HDFC will assign one to
- *  MTCPL. Until Daksh sends it, the placeholder per his note is
- *  "1111". */
-export const HDFC_CLIENT_CODE = "1111";
+/** Client code prefix on the filename. HDFC assigned this to MTCPL
+ *  on 15 May 2026 — per Daksh, code is "5604". This becomes the
+ *  4-char prefix on every payment file: e.g. `56041505.001` for
+ *  May 15's first file of the day. */
+export const HDFC_CLIENT_CODE = "5604";
 
 /** Build the filename per HDFC spec: {ClientCode}{DD}{MM}.{NNN}
  *  e.g. 11111505.001 — for May 15, first file of the day.
