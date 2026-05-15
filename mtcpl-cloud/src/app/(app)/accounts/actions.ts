@@ -1147,19 +1147,24 @@ async function sendVendorPaymentEmail(
     }
 
     const admin = createAdminSupabaseClient();
-    const [{ data: paymentRow }, { data: billRow }] = await Promise.all([
+    const [{ data: paymentRow }, { data: billRow }, { data: actorRow }] = await Promise.all([
       admin
         .from("bill_payments")
-        .select("paid_amount, payment_method, payment_reference, payment_note, paid_at")
+        .select("paid_amount, payment_method, payment_reference, payment_note, paid_at, paid_by")
         .eq("id", paymentId)
         .maybeSingle(),
       admin
         .from("bills")
         .select(
-          "token, vendor_bill_no, bill_date, description, " +
-            "bill_vendors(id, name, email, address, gstin)",
+          "token, vendor_bill_no, bill_date, description, cost_head, " +
+            "bill_vendors(id, name, email, address, gstin, pan, bank_account, ifsc)",
         )
         .eq("id", billId)
+        .maybeSingle(),
+      admin
+        .from("profiles")
+        .select("full_name")
+        .eq("id", actorId)
         .maybeSingle(),
     ]);
 
@@ -1174,12 +1179,16 @@ async function sendVendorPaymentEmail(
       email: string | null;
       address: string | null;
       gstin: string | null;
+      pan: string | null;
+      bank_account: string | null;
+      ifsc: string | null;
     };
     const billRowAny = billRow as unknown as {
       token: string;
       vendor_bill_no: string;
       bill_date: string;
       description: string;
+      cost_head: string | null;
       bill_vendors: VendorEmbed | VendorEmbed[] | null;
     };
     const vendor = Array.isArray(billRowAny.bill_vendors)
@@ -1218,6 +1227,9 @@ async function sendVendorPaymentEmail(
       ],
     };
 
+    const actorName =
+      (actorRow as { full_name?: string | null } | null)?.full_name ?? null;
+
     // ── Build the PDF attachment ─────────────────────────────────
     const pdfBytes = await buildVoucherPdf({
       company,
@@ -1225,14 +1237,19 @@ async function sendVendorPaymentEmail(
         name: vendor.name,
         address: vendor.address,
         gstin: vendor.gstin,
+        pan: vendor.pan,
+        bankAccount: vendor.bank_account,
+        ifsc: vendor.ifsc,
       },
       bill: {
         token: billRowAny.token,
         vendorBillNo: billRowAny.vendor_bill_no,
         billDate: billRowAny.bill_date,
         description: billRowAny.description,
+        costHead: billRowAny.cost_head,
       },
       payment: {
+        paymentId,
         paidAmount,
         paymentMethod:
           (paymentRow as { payment_method?: string | null }).payment_method ?? null,
@@ -1242,6 +1259,7 @@ async function sendVendorPaymentEmail(
           (paymentRow as { payment_note?: string | null }).payment_note ?? null,
         paidAt:
           (paymentRow as { paid_at?: string | null }).paid_at ?? null,
+        paidByName: actorName,
       },
       amountInWords,
     });
