@@ -45,7 +45,7 @@ ALTER TABLE public.bill_payments
 -- now" query to confirmed-but-not-yet-downloaded rows. Tiny
 -- maintenance cost (NULL rows aren't indexed), big read win.
 CREATE INDEX IF NOT EXISTS bill_payments_hdfc_pending_idx
-  ON public.bill_payments (proposed_batch_id, proposed_at DESC)
+  ON public.bill_payments (proposal_batch_id, proposed_at DESC)
   WHERE status = 'confirmed' AND hdfc_csv_downloaded_at IS NULL;
 
 NOTIFY pgrst, 'reload schema';

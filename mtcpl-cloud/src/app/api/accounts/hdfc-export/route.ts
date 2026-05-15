@@ -84,14 +84,14 @@ export async function GET(req: NextRequest) {
   let q = admin
     .from("bill_payments")
     .select(
-      "id, status, proposed_amount, proposed_batch_id, bill_id, hdfc_csv_downloaded_at, " +
+      "id, status, proposed_amount, proposal_batch_id, bill_id, hdfc_csv_downloaded_at, " +
         "bills!inner(id, token, description, cost_head, partial_rejection_amount, amount_payable_to_vendor, amount_outstanding, " +
         "bill_vendors!inner(id, name, hdfc_bene_name, bank_account, ifsc, bank_name, email))",
     )
     .eq("status", "confirmed");
 
   if (batchId) {
-    q = q.eq("proposed_batch_id", batchId);
+    q = q.eq("proposal_batch_id", batchId);
   } else if (paymentIds.length > 0) {
     q = q.in("id", paymentIds);
   }
@@ -145,7 +145,7 @@ export async function GET(req: NextRequest) {
     id: string;
     status: string;
     proposed_amount: number;
-    proposed_batch_id: string | null;
+    proposal_batch_id: string | null;
     bill_id: string;
     hdfc_csv_downloaded_at: string | null;
     bills: Bill | Bill[] | null;
