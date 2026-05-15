@@ -36,6 +36,10 @@ const UI_ROLES_ALL = [
   { value: "slab_transfer",    label: "SLAB TRANSFER" },
   { value: "accountant",       label: "ACCOUNTANT" },
   { value: "crosscheck",       label: "CROSSCHECK" },
+  // Mig 053 — Final Audit role. Has full accountant powers PLUS
+  // owner backup for confirming proposed payments + approving bills.
+  // Primary daily duty is the /accounts/final-audit page.
+  { value: "final_auditor",    label: "FINAL AUDITOR" },
 ];
 
 // Roles owner/team-head can assign — cannot promote to owner or developer
@@ -66,6 +70,8 @@ const ROLE_ACCESS: Record<string, string[]> = {
   dispatch:         ["Dashboard"],
   vendor:           ["My Jobs"],
   slab_transfer:    ["Slab Transfer"],
+  // Mig 053 — final auditor sees the full finance toolbox.
+  final_auditor:    ["All Bills", "Crosscheck Queue", "Due Bills", "Pay Today", "Final Audit", "Payment History", "Vendor Account"],
 };
 
 function roleLabel(role: string): string {
