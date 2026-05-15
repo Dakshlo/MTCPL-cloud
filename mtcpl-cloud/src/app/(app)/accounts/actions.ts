@@ -1131,6 +1131,21 @@ async function sendVendorPaymentEmail(
   actorId: string,
 ): Promise<void> {
   try {
+    // Early-return when the email provider isn't configured. Saves
+    // ~100ms of pointless PDF generation per Mark Paid. The audit
+    // entry still gets written so you can see how many emails
+    // would have gone out once the API key lands.
+    if (!process.env.RESEND_API_KEY) {
+      void logAudit(
+        actorId,
+        "vendor_payment_email_skipped",
+        "bill_payment",
+        paymentId,
+        { reason: "RESEND_API_KEY not configured" },
+      );
+      return;
+    }
+
     const admin = createAdminSupabaseClient();
     const [{ data: paymentRow }, { data: billRow }] = await Promise.all([
       admin
