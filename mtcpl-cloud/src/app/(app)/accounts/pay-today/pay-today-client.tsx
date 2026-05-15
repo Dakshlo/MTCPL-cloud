@@ -53,6 +53,10 @@ export type PayTodayRow = {
   prematureForPayment: boolean;
   /** The vendor's terms in days (or the app default 45 fallback). */
   paymentTermsDays: number;
+  /** Mig 048 — true if this payment has already been included in
+   *  a previous HDFC CSV download. Used to render a 🔒 badge on
+   *  the row and to exclude from the "downloadable now" count. */
+  hdfcCsvDownloaded: boolean;
 };
 
 /** Legacy app-level default — only used as a fallback when a vendor
@@ -90,6 +94,18 @@ export function PayTodayClient({
     }
     return [...map.entries()].map(([batchId, rows]) => ({ batchId, rows }));
   }, [proposedRows]);
+
+  // Mig 048 — HDFC CSV download-lock counts. Drives the two
+  // header buttons (Preview Excel always shows all; Download CSV
+  // only the not-yet-downloaded set).
+  const hdfcDownloadableCount = useMemo(
+    () => confirmedRows.filter((r) => !r.hdfcCsvDownloaded).length,
+    [confirmedRows],
+  );
+  const hdfcLockedCount = useMemo(
+    () => confirmedRows.filter((r) => r.hdfcCsvDownloaded).length,
+    [confirmedRows],
+  );
 
   const [activeMarkRow, setActiveMarkRow] = useState<PayTodayRow | null>(null);
 
@@ -211,24 +227,43 @@ export function PayTodayClient({
       >
         {confirmedRows.length > 0 && (
           <>
-            {/* HDFC bulk-payment file download — Daksh confirmed the
-                RBI bulk-upload screen (28-column format) is what
-                MTCPL uses; the older ENet button has been removed.
-                Currently outputs as .xlsx with header row for visual
-                verification — production mode (CSV .001 without
-                header) toggles on once Daksh signs off on a real
-                test upload to HDFC. */}
+            {/* HDFC bulk-payment file — two-button flow per Daksh
+                (mig 048):
+                  • Preview Excel — verify, repeat as needed
+                  • Final CSV    — single-shot, locks each row
+                                   afterwards so the accountant
+                                   can't re-issue and double-pay.
+                The locked count + downloadable count come from the
+                parent page via downloadableCount / lockedCount, set
+                from a server-side query of bill_payments where
+                hdfc_csv_downloaded_at IS NULL / NOT NULL on the
+                currently-confirmed rows. */}
             <div
               style={{
                 display: "flex",
                 justifyContent: "flex-end",
+                alignItems: "center",
                 marginBottom: 10,
                 flexWrap: "wrap",
                 gap: 8,
               }}
             >
+              {hdfcLockedCount > 0 && (
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: "var(--muted)",
+                    fontFamily: "ui-monospace, monospace",
+                    marginRight: 4,
+                  }}
+                  title={`${hdfcLockedCount} confirmed payment${hdfcLockedCount === 1 ? "" : "s"} already included in a previous CSV download. They stay visible until you mark them paid. To re-issue, ask a developer to unlock.`}
+                >
+                  🔒 {hdfcLockedCount} already downloaded
+                </span>
+              )}
               <a
-                href="/api/accounts/hdfc-export"
+                href="/api/accounts/hdfc-export?format=xlsx"
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
@@ -236,17 +271,69 @@ export function PayTodayClient({
                   padding: "8px 16px",
                   fontSize: 13,
                   fontWeight: 700,
-                  background: "var(--gold)",
-                  color: "#fff",
+                  background: "#fff",
+                  color: "var(--gold-dark)",
                   border: "1.5px solid var(--gold-dark)",
                   borderRadius: 8,
                   textDecoration: "none",
                   letterSpacing: "-0.005em",
                   whiteSpace: "nowrap",
                 }}
-                title="HDFC RBI bulk-payment file — 28 columns. Auto-picks N/R/I per row (I = HDFC-to-HDFC internal, R = ≥₹2L, N = NEFT below that). Testing mode now outputs .xlsx with header row; production mode will switch to .001 CSV without header once you confirm a successful upload."
+                title="HDFC preview file — all currently confirmed payments, including ones already in flight. With header row. Use this to verify columns and amounts before downloading the real CSV. Doesn't lock anything."
               >
-                📥 Download HDFC payment file
+                👁 Preview (Excel)
+              </a>
+              <a
+                href={
+                  hdfcDownloadableCount > 0
+                    ? "/api/accounts/hdfc-export?format=csv"
+                    : "#"
+                }
+                onClick={(e) => {
+                  if (hdfcDownloadableCount === 0) {
+                    e.preventDefault();
+                    return;
+                  }
+                  // Soft confirm — accountant clicks once, file
+                  // downloads, lock fires. No way back without dev
+                  // intervention, so the dialog is worth the friction.
+                  const ok = window.confirm(
+                    `Download ${hdfcDownloadableCount} payment${
+                      hdfcDownloadableCount === 1 ? "" : "s"
+                    } as HDFC CSV?\n\nThese rows will be LOCKED — they won't appear in any future CSV download. To re-issue you'll need a developer.\n\nProceed only if you're about to upload this file to HDFC.`,
+                  );
+                  if (!ok) e.preventDefault();
+                }}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "8px 16px",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  background:
+                    hdfcDownloadableCount > 0 ? "var(--gold)" : "var(--border)",
+                  color:
+                    hdfcDownloadableCount > 0 ? "#fff" : "var(--muted)",
+                  border:
+                    hdfcDownloadableCount > 0
+                      ? "1.5px solid var(--gold-dark)"
+                      : "1.5px solid var(--border)",
+                  borderRadius: 8,
+                  textDecoration: "none",
+                  letterSpacing: "-0.005em",
+                  whiteSpace: "nowrap",
+                  opacity: hdfcDownloadableCount > 0 ? 1 : 0.55,
+                  cursor: hdfcDownloadableCount > 0 ? "pointer" : "not-allowed",
+                }}
+                title={
+                  hdfcDownloadableCount > 0
+                    ? `Generate the final HDFC CSV for ${hdfcDownloadableCount} payment${hdfcDownloadableCount === 1 ? "" : "s"}. Locks each row — no second download possible.`
+                    : "All currently confirmed payments are already in a previous CSV download."
+                }
+                aria-disabled={hdfcDownloadableCount === 0}
+              >
+                📥 Download CSV ({hdfcDownloadableCount})
               </a>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -703,6 +790,28 @@ function ConfirmedRow({
               {row.billToken}
             </code>
             <PaymentStatusPill status={row.status} />
+            {/* Mig 048 — HDFC CSV download lock indicator. When this
+                row was already included in a downloaded HDFC CSV, it
+                shows up here so the accountant knows it's "in flight"
+                at the bank and shouldn't be re-issued. */}
+            {row.hdfcCsvDownloaded && (
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  padding: "2px 7px",
+                  borderRadius: 4,
+                  background: "rgba(168,85,247,0.12)",
+                  color: "#7c3aed",
+                  border: "1px solid rgba(168,85,247,0.35)",
+                  letterSpacing: "0.04em",
+                  textTransform: "uppercase",
+                }}
+                title="This payment is in a downloaded HDFC CSV. It won't appear in the next CSV download. After HDFC processes it, mark it paid here."
+              >
+                🔒 In HDFC file
+              </span>
+            )}
           </div>
           <p style={{ margin: "0 0 4px", fontSize: 12, color: "var(--muted)" }}>
             Bill <code style={{ fontFamily: "ui-monospace, monospace" }}>{row.vendorBillNo}</code>

@@ -54,6 +54,15 @@ export async function GET(req: NextRequest) {
   const formatParam = (sp.get("format") || "xlsx").toLowerCase();
   const wantsCsv = formatParam === "csv" || formatParam === "001";
 
+  // Mig 048 download-lock semantics:
+  //   xlsx (preview) → returns every CONFIRMED payment in scope,
+  //                    including ones already downloaded. Doesn't
+  //                    write to the lock columns. Idempotent.
+  //   csv  (final)   → returns only CONFIRMED + NOT-yet-downloaded.
+  //                    After the file is built, marks each included
+  //                    payment with hdfc_csv_downloaded_at + _by so
+  //                    a second click can't re-issue the same rows.
+
   let paymentIds: string[] = [];
   if (paymentIdsParam) {
     try {
@@ -75,7 +84,7 @@ export async function GET(req: NextRequest) {
   let q = admin
     .from("bill_payments")
     .select(
-      "id, status, proposed_amount, proposed_batch_id, bill_id, " +
+      "id, status, proposed_amount, proposed_batch_id, bill_id, hdfc_csv_downloaded_at, " +
         "bills!inner(id, token, description, cost_head, partial_rejection_amount, amount_payable_to_vendor, amount_outstanding, " +
         "bill_vendors!inner(id, name, hdfc_bene_name, bank_account, ifsc, bank_name, email))",
     )
@@ -85,6 +94,13 @@ export async function GET(req: NextRequest) {
     q = q.eq("proposed_batch_id", batchId);
   } else if (paymentIds.length > 0) {
     q = q.in("id", paymentIds);
+  }
+
+  // CSV mode: filter to rows that haven't been included in a prior
+  // CSV download. Excel mode skips this filter on purpose (it's the
+  // preview / verification view).
+  if (wantsCsv) {
+    q = q.is("hdfc_csv_downloaded_at", null);
   }
   // If neither filter is set, exports ALL currently-confirmed
   // payments — which is what Daksh wants when he clicks the
@@ -96,7 +112,11 @@ export async function GET(req: NextRequest) {
   }
   if (!rawRows || rawRows.length === 0) {
     return NextResponse.json(
-      { error: "No confirmed payments to export. Confirm at least one proposal first." },
+      {
+        error: wantsCsv
+          ? "Nothing new to download — every currently-confirmed payment has already been included in a previous CSV. Wait for new confirmations, or ask a developer to unlock specific rows."
+          : "No confirmed payments to export. Confirm at least one proposal first.",
+      },
       { status: 404 },
     );
   }
@@ -127,6 +147,7 @@ export async function GET(req: NextRequest) {
     proposed_amount: number;
     proposed_batch_id: string | null;
     bill_id: string;
+    hdfc_csv_downloaded_at: string | null;
     bills: Bill | Bill[] | null;
   };
   const rows = rawRows as unknown as Row[];
@@ -255,6 +276,34 @@ export async function GET(req: NextRequest) {
 
   // ── Return file ──────────────────────────────────────────────────
   if (wantsCsv) {
+    // Mig 048 — lock every payment row included in this CSV so a
+    // second click can't re-issue the same rows. Done BEFORE
+    // streaming the file back so a network-cut response can't
+    // leave the lock unset. Idempotent: the UPDATE is gated by
+    // hdfc_csv_downloaded_at IS NULL, so concurrent requests for
+    // the same set race-safely with each other.
+    const lockNow = new Date().toISOString();
+    const lockIds = validRows.map((r) => r.payment.id);
+    const { error: lockErr } = await admin
+      .from("bill_payments")
+      .update({
+        hdfc_csv_downloaded_at: lockNow,
+        hdfc_csv_downloaded_by: profile.id,
+        updated_at: lockNow,
+      })
+      .in("id", lockIds)
+      .is("hdfc_csv_downloaded_at", null);
+    if (lockErr) {
+      console.warn("[hdfc-export] lock update failed", lockErr);
+      return NextResponse.json(
+        {
+          error:
+            "Couldn't lock the payments after generating the file. Try again — if it keeps failing, contact a developer.",
+        },
+        { status: 500 },
+      );
+    }
+
     const csv = buildHdfcCsvFile(exportRows);
     return new NextResponse(csv, {
       status: 200,

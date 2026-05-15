@@ -37,7 +37,7 @@ export default async function PayTodayPage() {
   const { data: openRowsRaw } = await supabase
     .from("bill_payments")
     .select(
-      "id, bill_id, status, proposed_amount, proposed_by, proposed_at, confirmed_by, confirmed_at, proposal_batch_id, bills(id, token, vendor_bill_no, bill_date, amount_outstanding, amount_total, bill_vendor_id, bill_vendors(id, name, payment_terms_days))",
+      "id, bill_id, status, proposed_amount, proposed_by, proposed_at, confirmed_by, confirmed_at, proposal_batch_id, hdfc_csv_downloaded_at, bills(id, token, vendor_bill_no, bill_date, amount_outstanding, amount_total, bill_vendor_id, bill_vendors(id, name, payment_terms_days))",
     )
     .in("status", ["proposed", "confirmed"])
     .order("proposed_at", { ascending: false });
@@ -70,6 +70,10 @@ export default async function PayTodayPage() {
     confirmed_by: string | null;
     confirmed_at: string | null;
     proposal_batch_id: string | null;
+    // Mig 048 — set when this payment was included in a downloaded
+    // HDFC CSV. Excludes the row from the next CSV download +
+    // renders a 🔒 badge on the Pay Today card.
+    hdfc_csv_downloaded_at: string | null;
     bills:
       | {
           id: string;
@@ -122,6 +126,7 @@ export default async function PayTodayPage() {
       daysSinceBill: d,
       paymentTermsDays: terms,
       prematureForPayment: terms > 0 && d !== null && d < terms,
+      hdfcCsvDownloaded: r.hdfc_csv_downloaded_at != null,
     };
   }
 
