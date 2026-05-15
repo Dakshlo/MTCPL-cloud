@@ -1898,3 +1898,255 @@ export async function clearVendorPrivateNoteAction(
   });
   return { ok: true };
 }
+
+// ──────────────────────────────────────────────────────────────────
+// Vendor royalty entries (mig 051) — non-monetary unit tracking
+// ──────────────────────────────────────────────────────────────────
+// Per-vendor list of "received" / "given" entries with numeric
+// amounts. Net balance computed on demand from sum of non-cancelled
+// entries. Same passphrase gate as text notes — one auth, two
+// features.
+//
+// AUDITABLE: every add / cancel writes value + vendor + actor to
+// audit_logs. No hard delete from the UI; soft-cancel only.
+// RECOVERABLE: backups + cancelled rows mean values are never
+// truly lost.
+
+type RoyaltyEntryRow = {
+  id: string;
+  bill_vendor_id: string;
+  amount: number;
+  entry_type: "received" | "given";
+  description: string | null;
+  created_at: string;
+  created_by: string | null;
+  cancelled_at: string | null;
+  cancelled_by: string | null;
+  cancel_reason: string | null;
+};
+
+export async function getVendorRoyaltyEntriesAction(
+  formData: FormData,
+): Promise<
+  | {
+      ok: true;
+      entries: Array<{
+        id: string;
+        amount: number;
+        entryType: "received" | "given";
+        description: string | null;
+        createdAt: string;
+        createdByName: string | null;
+        cancelledAt: string | null;
+        cancelReason: string | null;
+      }>;
+      netBalance: number;
+      receivedTotal: number;
+      givenTotal: number;
+    }
+  | { ok: false; error: string }
+> {
+  const { profile } = await requireAuth();
+  if (!canAccessPrivateNotes(profile)) {
+    return { ok: false, error: "Not authorised." };
+  }
+  const vendorId = String(formData.get("vendor_id") || "").trim();
+  const plain = String(formData.get("passphrase") || "");
+  if (!vendorId) return { ok: false, error: "Missing vendor_id." };
+
+  const row = await readPassphraseRow();
+  if (!row || row.hash === null) {
+    return { ok: false, error: "Passphrase has not been set yet." };
+  }
+  const { verifyPassphrase } = await import("@/lib/private-notes");
+  if (!verifyPassphrase(plain, row.salt, row.hash)) {
+    return { ok: false, error: "Incorrect passphrase." };
+  }
+
+  const admin = createAdminSupabaseClient();
+  const { data, error } = await admin
+    .from("vendor_royalty_entries")
+    .select("*")
+    .eq("bill_vendor_id", vendorId)
+    .order("created_at", { ascending: false })
+    .limit(500);
+  if (error) return { ok: false, error: error.message };
+
+  const rows = (data ?? []) as RoyaltyEntryRow[];
+
+  // Resolve creator names in one round-trip
+  const creatorIds = new Set<string>();
+  for (const r of rows) {
+    if (r.created_by) creatorIds.add(r.created_by);
+  }
+  const profilesMap = new Map<string, string>();
+  if (creatorIds.size > 0) {
+    const { data: profs } = await admin
+      .from("profiles")
+      .select("id, full_name")
+      .in("id", Array.from(creatorIds));
+    for (const p of (profs ?? []) as Array<{ id: string; full_name: string | null }>) {
+      if (p.full_name) profilesMap.set(p.id, p.full_name);
+    }
+  }
+
+  let receivedTotal = 0;
+  let givenTotal = 0;
+  for (const r of rows) {
+    if (r.cancelled_at) continue;
+    const v = Number(r.amount);
+    if (r.entry_type === "received") receivedTotal += v;
+    else if (r.entry_type === "given") givenTotal += v;
+  }
+  const netBalance = receivedTotal - givenTotal;
+
+  void logAudit(
+    profile.id,
+    "vendor_royalty_entries_viewed",
+    "bill_vendor",
+    vendorId,
+    { row_count: rows.length, net_balance: netBalance },
+  );
+
+  return {
+    ok: true,
+    entries: rows.map((r) => ({
+      id: r.id,
+      amount: Number(r.amount),
+      entryType: r.entry_type,
+      description: r.description,
+      createdAt: r.created_at,
+      createdByName: r.created_by ? profilesMap.get(r.created_by) ?? null : null,
+      cancelledAt: r.cancelled_at,
+      cancelReason: r.cancel_reason,
+    })),
+    netBalance,
+    receivedTotal,
+    givenTotal,
+  };
+}
+
+export async function addVendorRoyaltyEntryAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canAccessPrivateNotes(profile)) {
+    return { ok: false, error: "Not authorised." };
+  }
+  const vendorId = String(formData.get("vendor_id") || "").trim();
+  const entryType = String(formData.get("entry_type") || "").trim();
+  const amountRaw = String(formData.get("amount") || "").trim();
+  const description = String(formData.get("description") || "").trim() || null;
+  const plain = String(formData.get("passphrase") || "");
+
+  if (!vendorId) return { ok: false, error: "Missing vendor_id." };
+  if (entryType !== "received" && entryType !== "given") {
+    return { ok: false, error: "Entry type must be 'received' or 'given'." };
+  }
+  const amount = Number(amountRaw);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { ok: false, error: "Amount must be a positive number." };
+  }
+  if (amount > 9_999_999_999.99) {
+    return { ok: false, error: "Amount too large." };
+  }
+  if (description && description.length > 500) {
+    return { ok: false, error: "Description too long (max 500 chars)." };
+  }
+
+  const row = await readPassphraseRow();
+  if (!row || row.hash === null) {
+    return { ok: false, error: "Passphrase has not been set yet." };
+  }
+  const { verifyPassphrase } = await import("@/lib/private-notes");
+  if (!verifyPassphrase(plain, row.salt, row.hash)) {
+    return { ok: false, error: "Incorrect passphrase." };
+  }
+
+  const admin = createAdminSupabaseClient();
+  const { data, error } = await admin
+    .from("vendor_royalty_entries")
+    .insert({
+      bill_vendor_id: vendorId,
+      amount,
+      entry_type: entryType,
+      description,
+      created_by: profile.id,
+    })
+    .select("id")
+    .single();
+  if (error) return { ok: false, error: error.message };
+
+  void logAudit(
+    profile.id,
+    "vendor_royalty_entry_added",
+    "bill_vendor",
+    vendorId,
+    {
+      entry_id: (data as { id: string }).id,
+      amount,
+      entry_type: entryType,
+      description,
+    },
+  );
+  return { ok: true };
+}
+
+export async function cancelVendorRoyaltyEntryAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canAccessPrivateNotes(profile)) {
+    return { ok: false, error: "Not authorised." };
+  }
+  const entryId = String(formData.get("entry_id") || "").trim();
+  const reason = String(formData.get("cancel_reason") || "").trim() || null;
+  const plain = String(formData.get("passphrase") || "");
+  if (!entryId) return { ok: false, error: "Missing entry_id." };
+
+  const row = await readPassphraseRow();
+  if (!row || row.hash === null) {
+    return { ok: false, error: "Passphrase has not been set yet." };
+  }
+  const { verifyPassphrase } = await import("@/lib/private-notes");
+  if (!verifyPassphrase(plain, row.salt, row.hash)) {
+    return { ok: false, error: "Incorrect passphrase." };
+  }
+
+  const admin = createAdminSupabaseClient();
+  // Fetch prior values for the audit row before cancelling.
+  const { data: prior } = await admin
+    .from("vendor_royalty_entries")
+    .select("bill_vendor_id, amount, entry_type, cancelled_at")
+    .eq("id", entryId)
+    .maybeSingle();
+  if (!prior) return { ok: false, error: "Entry not found." };
+  if ((prior as { cancelled_at?: string | null }).cancelled_at) {
+    return { ok: false, error: "Entry is already cancelled." };
+  }
+
+  const now = new Date().toISOString();
+  const { error } = await admin
+    .from("vendor_royalty_entries")
+    .update({
+      cancelled_at: now,
+      cancelled_by: profile.id,
+      cancel_reason: reason,
+    })
+    .eq("id", entryId);
+  if (error) return { ok: false, error: error.message };
+
+  void logAudit(
+    profile.id,
+    "vendor_royalty_entry_cancelled",
+    "bill_vendor",
+    (prior as { bill_vendor_id: string }).bill_vendor_id,
+    {
+      entry_id: entryId,
+      amount: Number((prior as { amount: number }).amount),
+      entry_type: (prior as { entry_type: string }).entry_type,
+      reason,
+    },
+  );
+  return { ok: true };
+}

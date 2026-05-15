@@ -28,6 +28,9 @@ import {
   getVendorPrivateNoteAction,
   saveVendorPrivateNoteAction,
   clearVendorPrivateNoteAction,
+  getVendorRoyaltyEntriesAction,
+  addVendorRoyaltyEntryAction,
+  cancelVendorRoyaltyEntryAction,
 } from "../../actions";
 
 // Mig 050 follow-on (Daksh, May 2026): session-scoped unlock removed
@@ -42,6 +45,18 @@ import {
 // always re-verify against the server on every action regardless.
 
 type Mode = "closed" | "loading" | "set" | "unlock" | "edit";
+type Tab = "notes" | "royalty";
+
+type RoyaltyEntry = {
+  id: string;
+  amount: number;
+  entryType: "received" | "given";
+  description: string | null;
+  createdAt: string;
+  createdByName: string | null;
+  cancelledAt: string | null;
+  cancelReason: string | null;
+};
 
 export function PrivateNotesModal({
   vendorId,
@@ -52,6 +67,7 @@ export function PrivateNotesModal({
 }) {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("closed");
+  const [tab, setTab] = useState<Tab>("notes");
   const [content, setContent] = useState<string>("");
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [updatedByName, setUpdatedByName] = useState<string | null>(null);
@@ -60,6 +76,16 @@ export function PrivateNotesModal({
   const [error, setError] = useState<string | null>(null);
   const [savedFlash, setSavedFlash] = useState<boolean>(false);
   const [pending, startTransition] = useTransition();
+
+  // Royalty tab state
+  const [royaltyEntries, setRoyaltyEntries] = useState<RoyaltyEntry[]>([]);
+  const [royaltyNet, setRoyaltyNet] = useState<number>(0);
+  const [royaltyReceived, setRoyaltyReceived] = useState<number>(0);
+  const [royaltyGiven, setRoyaltyGiven] = useState<number>(0);
+  // New-entry form state
+  const [newEntryType, setNewEntryType] = useState<"received" | "given">("received");
+  const [newEntryAmount, setNewEntryAmount] = useState<string>("");
+  const [newEntryDescription, setNewEntryDescription] = useState<string>("");
 
   if (!canShow) return null;
 
@@ -97,14 +123,88 @@ export function PrivateNotesModal({
     setUpdatedByName(result.updatedByName);
     setPassphrase(plain);
     setMode("edit");
+    // Load royalty entries in the background so switching tabs is
+    // instant. Errors here don't block notes display.
+    void loadRoyalty(plain);
+  }
+
+  async function loadRoyalty(plain: string) {
+    const fd = new FormData();
+    fd.set("vendor_id", vendorId);
+    fd.set("passphrase", plain);
+    const result = await getVendorRoyaltyEntriesAction(fd);
+    if (!result.ok) {
+      // Soft fail — keep current entries, surface error if user is
+      // on the royalty tab.
+      console.warn("[private-notes-modal] royalty load failed", result.error);
+      return;
+    }
+    setRoyaltyEntries(result.entries);
+    setRoyaltyNet(result.netBalance);
+    setRoyaltyReceived(result.receivedTotal);
+    setRoyaltyGiven(result.givenTotal);
+  }
+
+  async function handleAddRoyaltyEntry() {
+    setError(null);
+    const amount = Number(newEntryAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setError("Amount must be a positive number.");
+      return;
+    }
+    startTransition(async () => {
+      const fd = new FormData();
+      fd.set("vendor_id", vendorId);
+      fd.set("entry_type", newEntryType);
+      fd.set("amount", String(amount));
+      if (newEntryDescription.trim()) fd.set("description", newEntryDescription.trim());
+      fd.set("passphrase", passphrase);
+      const r = await addVendorRoyaltyEntryAction(fd);
+      if (!r.ok) {
+        setError(r.error);
+        return;
+      }
+      setNewEntryAmount("");
+      setNewEntryDescription("");
+      await loadRoyalty(passphrase);
+    });
+  }
+
+  async function handleCancelRoyaltyEntry(entryId: string, amount: number) {
+    setError(null);
+    const reason = window.prompt(
+      `Cancel this entry (${amount})?\n\nOptional reason (e.g. 'duplicate', 'wrong vendor'):`,
+      "",
+    );
+    if (reason === null) return; // cancelled the prompt
+    startTransition(async () => {
+      const fd = new FormData();
+      fd.set("entry_id", entryId);
+      fd.set("cancel_reason", reason || "");
+      fd.set("passphrase", passphrase);
+      const r = await cancelVendorRoyaltyEntryAction(fd);
+      if (!r.ok) {
+        setError(r.error);
+        return;
+      }
+      await loadRoyalty(passphrase);
+    });
   }
 
   function close() {
     setMode("closed");
+    setTab("notes");
     setContent("");
     setPassphrase("");
     setPassphrase2("");
     setError(null);
+    setRoyaltyEntries([]);
+    setRoyaltyNet(0);
+    setRoyaltyReceived(0);
+    setRoyaltyGiven(0);
+    setNewEntryType("received");
+    setNewEntryAmount("");
+    setNewEntryDescription("");
   }
 
   function handleSetSubmit(e: React.FormEvent) {
@@ -256,7 +356,7 @@ export function PrivateNotesModal({
         <div
           style={{
             width: "100%",
-            maxWidth: 560,
+            maxWidth: mode === "edit" ? 880 : 560,
             background: "var(--surface, #fff)",
             border: "1px solid var(--border)",
             borderRadius: 14,
@@ -281,7 +381,7 @@ export function PrivateNotesModal({
               <strong style={{ fontSize: 14 }}>
                 {mode === "set" && "Set notes passphrase"}
                 {mode === "unlock" && "Unlock private notes"}
-                {mode === "edit" && "Private notes"}
+                {mode === "edit" && "Private vendor data"}
                 {mode === "loading" && "Loading…"}
               </strong>
             </div>
@@ -374,73 +474,204 @@ export function PrivateNotesModal({
             </form>
           )}
 
-          {/* EDIT mode */}
+          {/* EDIT mode — tabbed: Notes + Royalty Points (mig 051) */}
           {mode === "edit" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <p style={{ margin: 0, fontSize: 11, color: "var(--muted)" }}>
-                Text only. Max 10,000 characters. Edits are recorded in the audit log (length only, not content).
-                {updatedAt && (
-                  <>
-                    {" · Last edit "}
-                    {new Date(updatedAt).toLocaleString("en-IN", {
-                      timeZone: "Asia/Kolkata",
-                      day: "numeric",
-                      month: "short",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                    {updatedByName ? ` by ${updatedByName}` : ""}
-                  </>
-                )}
-              </p>
-              <textarea
-                value={content}
-                onChange={(e) => setContent(e.target.value.slice(0, 10000))}
-                placeholder="Notes about this vendor…"
-                rows={12}
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {/* Tab bar */}
+              <div
                 style={{
-                  ...INPUT_STYLE,
-                  fontFamily: "inherit",
-                  resize: "vertical",
-                  minHeight: 180,
+                  display: "flex",
+                  gap: 0,
+                  borderBottom: "1px solid var(--border)",
+                  marginBottom: 4,
                 }}
-              />
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, fontSize: 11, color: "var(--muted)" }}>
-                <span>{content.length} / 10,000 chars</span>
-                {savedFlash && (
-                  <span style={{ color: "#15803d", fontWeight: 700 }}>✓ Saved</span>
-                )}
+              >
+                <TabButton active={tab === "notes"} onClick={() => setTab("notes")}>
+                  📝 Notes
+                </TabButton>
+                <TabButton active={tab === "royalty"} onClick={() => setTab("royalty")}>
+                  📊 Royalty points
+                </TabButton>
               </div>
-              {error && <ErrorBox text={error} />}
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button
-                  type="button"
-                  onClick={handleSave}
-                  disabled={pending}
-                  style={PRIMARY_BUTTON_STYLE}
-                >
-                  {pending ? "Saving…" : "Save"}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleClear}
-                  disabled={pending || content.length === 0}
-                  style={{
-                    ...SECONDARY_BUTTON_STYLE,
-                    color: "#b91c1c",
-                    borderColor: "#b91c1c",
-                  }}
-                >
-                  🗑 Clear
-                </button>
-                <button
-                  type="button"
-                  onClick={close}
-                  style={SECONDARY_BUTTON_STYLE}
-                >
-                  Close
-                </button>
-              </div>
+
+              {/* NOTES TAB */}
+              {tab === "notes" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <p style={{ margin: 0, fontSize: 11, color: "var(--muted)" }}>
+                    Text only. Max 10,000 characters. Edits are recorded in the audit log (length only, not content).
+                    {updatedAt && (
+                      <>
+                        {" · Last edit "}
+                        {new Date(updatedAt).toLocaleString("en-IN", {
+                          timeZone: "Asia/Kolkata",
+                          day: "numeric",
+                          month: "short",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                        {updatedByName ? ` by ${updatedByName}` : ""}
+                      </>
+                    )}
+                  </p>
+                  <textarea
+                    value={content}
+                    onChange={(e) => setContent(e.target.value.slice(0, 10000))}
+                    placeholder="Notes about this vendor…"
+                    rows={12}
+                    style={{
+                      ...INPUT_STYLE,
+                      fontFamily: "inherit",
+                      resize: "vertical",
+                      minHeight: 180,
+                    }}
+                  />
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, fontSize: 11, color: "var(--muted)" }}>
+                    <span>{content.length} / 10,000 chars</span>
+                    {savedFlash && (
+                      <span style={{ color: "#15803d", fontWeight: 700 }}>✓ Saved</span>
+                    )}
+                  </div>
+                  {error && <ErrorBox text={error} />}
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button type="button" onClick={handleSave} disabled={pending} style={PRIMARY_BUTTON_STYLE}>
+                      {pending ? "Saving…" : "Save"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleClear}
+                      disabled={pending || content.length === 0}
+                      style={{ ...SECONDARY_BUTTON_STYLE, color: "#b91c1c", borderColor: "#b91c1c" }}
+                    >
+                      🗑 Clear
+                    </button>
+                    <button type="button" onClick={close} style={SECONDARY_BUTTON_STYLE}>
+                      Close
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* ROYALTY POINTS TAB — non-monetary unit tracking */}
+              {tab === "royalty" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  <p style={{ margin: 0, fontSize: 11, color: "var(--muted)", lineHeight: 1.5 }}>
+                    Numeric units — NOT money. Every add / cancel is recorded in the audit log with the value, the vendor, and who did it. Soft-cancel only; no hard delete.
+                  </p>
+
+                  {/* Net balance summary */}
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr 1fr",
+                      gap: 8,
+                      padding: 12,
+                      background: "var(--surface-alt, #f9fafb)",
+                      border: "1px solid var(--border)",
+                      borderRadius: 8,
+                    }}
+                  >
+                    <SummaryStat
+                      label="Received (−)"
+                      value={royaltyReceived}
+                      color="#b91c1c"
+                    />
+                    <SummaryStat
+                      label="Given (+)"
+                      value={royaltyGiven}
+                      color="#15803d"
+                    />
+                    <SummaryStat
+                      label="Net balance"
+                      value={royaltyNet}
+                      color={royaltyNet >= 0 ? "#15803d" : "#b91c1c"}
+                      sign={royaltyNet >= 0 ? "+" : "−"}
+                      bold
+                    />
+                  </div>
+
+                  {/* Add-entry row */}
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "auto 130px 1fr auto",
+                      gap: 8,
+                      padding: 10,
+                      background: "#fff",
+                      border: "1px dashed var(--border)",
+                      borderRadius: 8,
+                      alignItems: "center",
+                    }}
+                  >
+                    <select
+                      value={newEntryType}
+                      onChange={(e) => setNewEntryType(e.target.value as "received" | "given")}
+                      style={{ ...INPUT_STYLE, fontFamily: "inherit", padding: "7px 10px" }}
+                    >
+                      <option value="received">Received (−)</option>
+                      <option value="given">Given (+)</option>
+                    </select>
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={newEntryAmount}
+                      onChange={(e) => setNewEntryAmount(e.target.value)}
+                      placeholder="Amount"
+                      style={{ ...INPUT_STYLE, fontFamily: "ui-monospace, monospace", padding: "7px 10px" }}
+                    />
+                    <input
+                      type="text"
+                      value={newEntryDescription}
+                      onChange={(e) => setNewEntryDescription(e.target.value.slice(0, 500))}
+                      placeholder="Description (optional)"
+                      style={{ ...INPUT_STYLE, fontFamily: "inherit", padding: "7px 10px" }}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddRoyaltyEntry}
+                      disabled={pending || !newEntryAmount}
+                      style={{ ...PRIMARY_BUTTON_STYLE, padding: "8px 14px", fontSize: 12 }}
+                    >
+                      {pending ? "Adding…" : "+ Add"}
+                    </button>
+                  </div>
+
+                  {error && <ErrorBox text={error} />}
+
+                  {/* Entries list — two columns (received | given) so
+                      Daksh's left/right requirement is met visually. */}
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr",
+                      gap: 12,
+                    }}
+                  >
+                    <RoyaltyColumn
+                      title="RECEIVED  (−)"
+                      color="#b91c1c"
+                      bg="rgba(220, 38, 38, 0.06)"
+                      border="rgba(220, 38, 38, 0.30)"
+                      entries={royaltyEntries.filter((e) => e.entryType === "received")}
+                      onCancel={handleCancelRoyaltyEntry}
+                    />
+                    <RoyaltyColumn
+                      title="GIVEN  (+)"
+                      color="#15803d"
+                      bg="rgba(34, 197, 94, 0.06)"
+                      border="rgba(34, 197, 94, 0.30)"
+                      entries={royaltyEntries.filter((e) => e.entryType === "given")}
+                      onCancel={handleCancelRoyaltyEntry}
+                    />
+                  </div>
+
+                  <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                    <button type="button" onClick={close} style={SECONDARY_BUTTON_STYLE}>
+                      Close
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -498,3 +729,221 @@ const SECONDARY_BUTTON_STYLE: React.CSSProperties = {
   borderRadius: 8,
   cursor: "pointer",
 };
+
+// ── Royalty tab helpers ──────────────────────────────────────────
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        padding: "8px 16px",
+        fontSize: 13,
+        fontWeight: 700,
+        background: "transparent",
+        color: active ? "var(--text)" : "var(--muted)",
+        border: "none",
+        borderBottom: active
+          ? "2px solid var(--gold-dark)"
+          : "2px solid transparent",
+        cursor: "pointer",
+        marginBottom: -1,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** Plain numeric formatter — no rupee sign, no INR-style grouping.
+ *  Decimal places kept only when present. Per Daksh's "numbers, not
+ *  money" framing. */
+function fmtNum(n: number): string {
+  if (!Number.isFinite(n)) return "0";
+  // Don't show trailing zeros: 1000 → "1000", 1000.5 → "1000.5"
+  return n.toString();
+}
+
+function SummaryStat({
+  label,
+  value,
+  color,
+  sign,
+  bold,
+}: {
+  label: string;
+  value: number;
+  color: string;
+  sign?: string;
+  bold?: boolean;
+}) {
+  const abs = Math.abs(value);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <span
+        style={{
+          fontSize: 10,
+          fontWeight: 700,
+          color: "var(--muted)",
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+        }}
+      >
+        {label}
+      </span>
+      <span
+        style={{
+          fontSize: bold ? 18 : 15,
+          fontWeight: 700,
+          color,
+          fontFamily: "ui-monospace, monospace",
+        }}
+      >
+        {sign}
+        {fmtNum(abs)}
+      </span>
+    </div>
+  );
+}
+
+function RoyaltyColumn({
+  title,
+  color,
+  bg,
+  border,
+  entries,
+  onCancel,
+}: {
+  title: string;
+  color: string;
+  bg: string;
+  border: string;
+  entries: RoyaltyEntry[];
+  onCancel: (entryId: string, amount: number) => void;
+}) {
+  const liveEntries = entries.filter((e) => !e.cancelledAt);
+  const sum = liveEntries.reduce((s, e) => s + e.amount, 0);
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+        padding: 10,
+        background: bg,
+        border: `1px solid ${border}`,
+        borderRadius: 8,
+        minHeight: 200,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 4,
+        }}
+      >
+        <span
+          style={{
+            fontSize: 10,
+            fontWeight: 800,
+            color,
+            letterSpacing: "0.06em",
+          }}
+        >
+          {title}
+        </span>
+        <span
+          style={{
+            fontSize: 13,
+            fontWeight: 800,
+            color,
+            fontFamily: "ui-monospace, monospace",
+          }}
+        >
+          {fmtNum(sum)}
+        </span>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        {liveEntries.length === 0 && (
+          <span
+            style={{
+              fontSize: 11,
+              color: "var(--muted)",
+              fontStyle: "italic",
+            }}
+          >
+            No entries yet.
+          </span>
+        )}
+        {liveEntries.map((e) => (
+          <div
+            key={e.id}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 2,
+              padding: "6px 8px",
+              background: "#fff",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              fontSize: 12,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+              <span
+                style={{
+                  fontFamily: "ui-monospace, monospace",
+                  fontWeight: 700,
+                  color,
+                }}
+              >
+                {fmtNum(e.amount)}
+              </span>
+              <button
+                type="button"
+                onClick={() => onCancel(e.id, e.amount)}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: "var(--muted)",
+                  fontSize: 11,
+                  cursor: "pointer",
+                  padding: 2,
+                }}
+                title="Cancel this entry (logged)"
+              >
+                ✕
+              </button>
+            </div>
+            {e.description && (
+              <span style={{ fontSize: 11, color: "var(--text)" }}>
+                {e.description}
+              </span>
+            )}
+            <span style={{ fontSize: 10, color: "var(--muted)" }}>
+              {new Date(e.createdAt).toLocaleString("en-IN", {
+                timeZone: "Asia/Kolkata",
+                day: "numeric",
+                month: "short",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+              {e.createdByName ? ` · ${e.createdByName}` : ""}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
