@@ -63,11 +63,34 @@ function sanitiseEmail(input: string | null | undefined): string {
   return input.toString().trim().toUpperCase().slice(0, 80);
 }
 
-/** DD/MM/YYYY — HDFC's expected date format. */
+/** IST = UTC + 5:30. Returns DD / MM / YYYY components computed in
+ *  Indian Standard Time regardless of where the server runs. Vercel
+ *  runtime is UTC; without this offset the filename + Cheque Date
+ *  would shift to yesterday whenever IST is past midnight but UTC
+ *  is still on the previous day. */
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+function istParts(d: Date): {
+  dd: string;
+  mm: string;
+  yyyy: string;
+  monthShort: string;
+} {
+  // Shift the timestamp INTO IST, then read the UTC accessors —
+  // those now reflect IST values. Cleaner than building a TZ-aware
+  // Date.
+  const ist = new Date(d.getTime() + IST_OFFSET_MS);
+  const MONTHS_SHORT = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+  return {
+    dd: String(ist.getUTCDate()).padStart(2, "0"),
+    mm: String(ist.getUTCMonth() + 1).padStart(2, "0"),
+    yyyy: String(ist.getUTCFullYear()),
+    monthShort: MONTHS_SHORT[ist.getUTCMonth()],
+  };
+}
+
+/** DD/MM/YYYY in IST — HDFC's expected date format. */
 export function formatHdfcDate(d: Date): string {
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const yyyy = String(d.getFullYear());
+  const { dd, mm, yyyy } = istParts(d);
   return `${dd}/${mm}/${yyyy}`;
 }
 
@@ -111,13 +134,12 @@ export function buildReferenceNumber(beneName: string, valueDate: Date): string 
   const firstWord = (beneName.split(/\s+/)[0] || "VENDOR")
     .toUpperCase()
     .replace(/[^A-Z0-9]/g, "");
-  const month = valueDate
-    .toLocaleString("en-US", { month: "short" })
-    .toUpperCase();
-  const year = String(valueDate.getFullYear());
+  // Use IST parts so a download at 1 AM IST May 1 reads "MAY2026",
+  // not "APR2026" (which is what UTC server time would say).
+  const { monthShort, yyyy } = istParts(valueDate);
   // Reserve 7 chars for MMMYYYY (e.g. MAY2026), so vendor portion
   // is at most 13 chars. Total ≤20.
-  return (firstWord.slice(0, 13) + month + year).slice(0, 20);
+  return (firstWord.slice(0, 13) + monthShort + yyyy).slice(0, 20);
 }
 
 /** Fallback email used when a vendor row has no email of its own.
@@ -139,8 +161,10 @@ export function buildHdfcFilename(
   daySequence: number,
   extension: "001" | "002" | "xlsx" = "001",
 ): string {
-  const dd = String(when.getDate()).padStart(2, "0");
-  const mm = String(when.getMonth() + 1).padStart(2, "0");
+  // IST parts — see istParts() above. Without this, a download at
+  // 2 AM IST May 15 would name the file 56041405.001 (May 14 UTC)
+  // instead of 56041505.001 (May 15 IST).
+  const { dd, mm } = istParts(when);
   const seq = String(daySequence).padStart(3, "0");
   if (extension === "xlsx") {
     return `${HDFC_CLIENT_CODE}${dd}${mm}-${seq}.xlsx`;
