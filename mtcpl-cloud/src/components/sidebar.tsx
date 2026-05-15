@@ -206,16 +206,6 @@ const navEntries: NavEntry[] = [
     department: "finance",
   },
   {
-    // Mig 053 — Final Audit queue. UTR cross-check against bank
-    // statement. Final auditor's primary page; owner sees it for
-    // visibility into flagged payments.
-    href: "/accounts/final-audit",
-    label: "Final Audit",
-    icon: "🧾",
-    roles: ["developer", "owner", "final_auditor"],
-    department: "finance",
-  },
-  {
     href: "/accounts/payments",
     label: "Payment History",
     icon: "🗂️",
@@ -227,6 +217,21 @@ const navEntries: NavEntry[] = [
     label: "Vendor Account",
     icon: "🏢",
     roles: ["developer", "owner", "accountant", "final_auditor"],
+    department: "finance",
+  },
+  {
+    // Mig 053 — Final Audit queue. UTR cross-check against bank
+    // statement. Final auditor's primary page; owner sees it for
+    // visibility into flagged payments.
+    //
+    // Daksh placed this LAST in the Accounts section because it's
+    // the post-payment step — Bills → Due → Pay Today → Payment
+    // History → Vendor Account → Final Audit reads as the natural
+    // lifecycle order in the sidebar.
+    href: "/accounts/final-audit",
+    label: "Final Audit",
+    icon: "🧾",
+    roles: ["developer", "owner", "final_auditor"],
     department: "finance",
   },
   // ── INVOICING section (Migration 038 — outgoing customer invoices) ──
