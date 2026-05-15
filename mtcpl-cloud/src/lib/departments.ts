@@ -125,6 +125,8 @@ export function lockedDepartmentForRole(role: AppRole): Department | null {
     case "biller":
     case "accountant":
     case "crosscheck":
+    // Mig 053 — final_auditor is a finance role (UTR recheck).
+    case "final_auditor":
       return "finance";
     case "storekeeper":
       return "inventory";

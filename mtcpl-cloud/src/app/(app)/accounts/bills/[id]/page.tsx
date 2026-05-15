@@ -78,7 +78,10 @@ export default async function BillDetailPage({
       // Mig 052 follow-on: pull bank-rejection metadata so the
       // timeline below can render the 🏦 entry. previous_payment_id
       // lets us hint "retry of <earlier id>" on the retry row.
-      "id, status, proposed_amount, proposed_by, proposed_at, confirmed_by, confirmed_at, paid_amount, payment_method, payment_reference, payment_note, paid_by, paid_at, cancelled_by, cancelled_at, cancel_reason, bank_rejected_at, bank_rejected_by, bank_rejection_reason, previous_payment_id",
+      // Mig 053 follow-on: pull final-audit metadata so the bill
+      // header can show the PAID + VERIFIED tag once all paid
+      // payments are verified.
+      "id, status, proposed_amount, proposed_by, proposed_at, confirmed_by, confirmed_at, paid_amount, payment_method, payment_reference, payment_note, paid_by, paid_at, cancelled_by, cancelled_at, cancel_reason, bank_rejected_at, bank_rejected_by, bank_rejection_reason, previous_payment_id, final_audit_status, final_audit_at, final_audit_by, final_audit_flag_reason, final_audit_flag_note",
     )
     .eq("bill_id", id)
     .order("proposed_at", { ascending: false });
@@ -103,7 +106,28 @@ export default async function BillDetailPage({
     bank_rejected_by: string | null;
     bank_rejection_reason: string | null;
     previous_payment_id: string | null;
+    final_audit_status: string | null;
+    final_audit_at: string | null;
+    final_audit_by: string | null;
+    final_audit_flag_reason: string | null;
+    final_audit_flag_note: string | null;
   }>;
+
+  // Mig 053 — bill-level "PAID + VERIFIED" derivation.
+  // Compute audit-rollup over all paid payments on this bill:
+  //   • If at least one paid payment is flagged → 'flagged'
+  //   • Else if all paid payments are verified → 'verified'
+  //   • Else if any paid payment is pending     → 'pending'
+  //   • No paid payments yet                     → null (no tag)
+  const paidPayments = payments.filter((p) => p.status === "paid");
+  const billAuditRollup: "verified" | "flagged" | "pending" | null =
+    paidPayments.length === 0
+      ? null
+      : paidPayments.some((p) => p.final_audit_status === "flagged")
+        ? "flagged"
+        : paidPayments.every((p) => p.final_audit_status === "verified")
+          ? "verified"
+          : "pending";
 
   // Mig 052 — bank_rejected counts as an "open / in-flight" state
   // for the purposes of preventing the bill from being edited from
@@ -210,6 +234,25 @@ export default async function BillDetailPage({
         at: p.bank_rejected_at,
         label: `🏦 Bank rejected${p.bank_rejection_reason ? ` · ${p.bank_rejection_reason}` : ""}`,
         by: p.bank_rejected_by ? profilesMap[p.bank_rejected_by] ?? null : null,
+        tone: ACCOUNTS_TOKENS.danger,
+      });
+    }
+    // Mig 053 — final-audit event (verified or flagged). Verified
+    // shows quiet green; flagged shows prominent red with reason
+    // inline. Skipped for legacy backfill rows (at IS NULL).
+    if (p.final_audit_at && p.final_audit_status === "verified") {
+      timeline.push({
+        at: p.final_audit_at,
+        label: "✓ Final audit verified",
+        by: p.final_audit_by ? profilesMap[p.final_audit_by] ?? null : null,
+        tone: ACCOUNTS_TOKENS.success,
+      });
+    }
+    if (p.final_audit_at && p.final_audit_status === "flagged") {
+      timeline.push({
+        at: p.final_audit_at,
+        label: `🚩 Final audit flagged${p.final_audit_flag_reason ? ` · ${p.final_audit_flag_reason}` : ""}${p.final_audit_flag_note ? ` (${p.final_audit_flag_note})` : ""}`,
+        by: p.final_audit_by ? profilesMap[p.final_audit_by] ?? null : null,
         tone: ACCOUNTS_TOKENS.danger,
       });
     }
@@ -361,6 +404,64 @@ export default async function BillDetailPage({
                 {bill.token}
               </code>
               <BillStatusPill status={bill.status} />
+              {/* Mig 053 — final-audit rollup tag.
+                  - verified: every paid payment is verified → green
+                  - flagged: at least one paid payment flagged → red
+                  - pending: paid but awaiting final audit  → amber */}
+              {billAuditRollup === "verified" && (
+                <span
+                  title="Every payment on this bill has been verified against the bank statement by the final auditor."
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 800,
+                    padding: "3px 9px",
+                    borderRadius: 999,
+                    background: "rgba(21, 128, 61, 0.12)",
+                    color: "#15803d",
+                    border: "1px solid rgba(21, 128, 61, 0.3)",
+                    letterSpacing: "0.05em",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  ✓ Verified
+                </span>
+              )}
+              {billAuditRollup === "flagged" && (
+                <span
+                  title="One or more payments on this bill have been flagged by the final auditor. See the timeline below."
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 800,
+                    padding: "3px 9px",
+                    borderRadius: 999,
+                    background: "rgba(185, 28, 28, 0.12)",
+                    color: "#b91c1c",
+                    border: "1px solid rgba(185, 28, 28, 0.3)",
+                    letterSpacing: "0.05em",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  🚩 Flagged
+                </span>
+              )}
+              {billAuditRollup === "pending" && (
+                <span
+                  title="Paid but awaiting final audit (UTR cross-check against bank statement)."
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 800,
+                    padding: "3px 9px",
+                    borderRadius: 999,
+                    background: "rgba(180, 83, 9, 0.12)",
+                    color: "#b45309",
+                    border: "1px solid rgba(180, 83, 9, 0.3)",
+                    letterSpacing: "0.05em",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  ⏳ Pending final audit
+                </span>
+              )}
             </div>
             <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: "var(--text)", letterSpacing: "-0.02em" }}>
               {vendor?.name ?? "Unknown vendor"}

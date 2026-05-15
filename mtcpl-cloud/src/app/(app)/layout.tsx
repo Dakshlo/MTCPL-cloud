@@ -15,7 +15,11 @@ import { Heartbeat } from "@/components/heartbeat";
 import { LoginLocationProbe } from "@/components/login-location-probe";
 import { requireAuth } from "@/lib/auth";
 import { canApproveCuts } from "@/lib/cutting-permissions";
-import { canApproveBills, canConfirmPayments } from "@/lib/accounts-permissions";
+import {
+  canApproveBills,
+  canConfirmPayments,
+  canFinalAudit,
+} from "@/lib/accounts-permissions";
 import { canApproveInventoryMovements } from "@/lib/inventory-permissions";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getEffectiveStatus, getDepartmentStatus } from "@/lib/system-status";
@@ -155,6 +159,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   let billsAuditBadge: number | null = null;
   let payTodayBadge: number | null = null;
   let inventoryAuditBadge: number | null = null;
+  // Mig 053 — Final Audit queue count (paid + awaiting UTR
+  // verification). Final auditor + owner + dev see it.
+  let finalAuditBadge: number | null = null;
   const supabase = createAdminSupabaseClient();
   if (canApproveCuts(profile)) {
     const { count } = await supabase
@@ -203,6 +210,22 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         (pendingBatches ?? []).map((r) => r.batch_id as string),
       );
       inventoryAuditBadge = uniqueBatches.size;
+    }
+  }
+  // Mig 053 — Final Audit queue. Counts paid payments awaiting UTR
+  // recheck. Indexed by bill_payments_final_audit_pending_idx so the
+  // partial-index COUNT is essentially free.
+  if (canFinalAudit(profile)) {
+    const { count, error: finalAuditErr } = await supabase
+      .from("bill_payments")
+      .select("*", { count: "exact", head: true })
+      .eq("status", "paid")
+      .eq("final_audit_status", "pending");
+    if (finalAuditErr) {
+      // Migration 053 not yet run → hide the badge silently.
+      finalAuditBadge = null;
+    } else {
+      finalAuditBadge = count ?? 0;
     }
   }
 
@@ -319,7 +342,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                 dept === "finance" &&
                 (role === "developer" ||
                   role === "owner" ||
-                  role === "accountant");
+                  role === "accountant" ||
+                  // Mig 053 — final auditor has full finance access.
+                  role === "final_auditor");
               const showInventory =
                 dept === "inventory" &&
                 (role === "developer" || role === "owner");
@@ -348,6 +373,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               billsAuditBadge,
               payTodayBadge,
               inventoryAuditBadge,
+              finalAuditBadge,
             })} />
 
             <span className="role-pill" style={
@@ -366,6 +392,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                 cutting_operator: "CUTTING OPERATOR",
                 biller: "BILLER",
                 accountant: "ACCOUNTANT",
+                final_auditor: "FINAL AUDITOR",
               } as Record<string, string>)[profile.role] ?? profile.role.replace(/_/g, " ").toUpperCase()}
             </span>
             {NOTIFICATION_ROLES.includes(profile.role) && (
@@ -418,6 +445,7 @@ function buildTopbarTaskItems(counts: {
   billsAuditBadge: number | null;
   payTodayBadge: number | null;
   inventoryAuditBadge: number | null;
+  finalAuditBadge: number | null;
 }): TopbarTask[] {
   const items: TopbarTask[] = [];
   if (counts.approvalsBadge !== null) {
@@ -450,6 +478,17 @@ function buildTopbarTaskItems(counts: {
       description: "Proposed + confirmed payments in flight",
       count: counts.payTodayBadge,
       icon: "💸",
+      department: "finance",
+    });
+  }
+  if (counts.finalAuditBadge !== null) {
+    items.push({
+      id: "final-audit",
+      href: "/accounts/final-audit",
+      label: "Final Audit",
+      description: "Paid payments awaiting UTR recheck",
+      count: counts.finalAuditBadge,
+      icon: "🧾",
       department: "finance",
     });
   }

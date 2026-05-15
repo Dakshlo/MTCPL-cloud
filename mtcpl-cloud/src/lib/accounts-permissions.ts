@@ -48,6 +48,9 @@ export function canApproveBills(
   if (p.role === "developer") return true;
   if (p.role === "owner") return true;
   if (p.role === "crosscheck") return true;
+  // Mig 053 — final_auditor stands in for the owner when dad isn't
+  // available. Full owner backup includes bill approval.
+  if (p.role === "final_auditor") return true;
   if (p.can_approve_bills === true) return true;
   return false;
 }
@@ -63,6 +66,10 @@ export function canConfirmPayments(
 ): boolean {
   if (p.role === "developer") return true;
   if (p.role === "owner") return true;
+  // Mig 053 — final_auditor confirms proposed payments as owner
+  // backup. Daksh: "approve proposed bills to go to ready to pay
+  // like owner (if owner is not available)."
+  if (p.role === "final_auditor") return true;
   if (p.can_approve_bills === true) return true;
   return false;
 }
@@ -74,6 +81,8 @@ export function canManageAccounts(p: Pick<Profile, "role">): boolean {
   if (p.role === "developer") return true;
   if (p.role === "owner") return true;
   if (p.role === "accountant") return true;
+  // Mig 053 — final_auditor has full accountant access.
+  if (p.role === "final_auditor") return true;
   return false;
 }
 
@@ -95,6 +104,8 @@ export function canMarkPaid(p: Pick<Profile, "role">): boolean {
   if (p.role === "developer") return true;
   if (p.role === "owner") return true;
   if (p.role === "accountant") return true;
+  // Mig 053 — final_auditor has full accountant access.
+  if (p.role === "final_auditor") return true;
   return false;
 }
 
@@ -104,6 +115,20 @@ export function canManageBillVendors(p: Pick<Profile, "role">): boolean {
   if (p.role === "developer") return true;
   if (p.role === "owner") return true;
   if (p.role === "accountant") return true;
+  // Mig 053 — final_auditor has full accountant access (CRUD on
+  // vendors included).
+  if (p.role === "final_auditor") return true;
+  return false;
+}
+
+/** Mig 053 — Final Audit gate. Verifies / flags PAID payments
+ *  against the bank statement. Not an approval — the money has
+ *  already moved; this is a recheck step. Flag captures a reason
+ *  surfaced to the owner without reversing anything. */
+export function canFinalAudit(p: Pick<Profile, "role">): boolean {
+  if (p.role === "developer") return true;
+  if (p.role === "owner") return true;
+  if (p.role === "final_auditor") return true;
   return false;
 }
 

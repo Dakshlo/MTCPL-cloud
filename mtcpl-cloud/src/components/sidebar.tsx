@@ -166,7 +166,7 @@ const navEntries: NavEntry[] = [
   {
     type: "divider",
     label: "ACCOUNTS",
-    roles: ["developer", "owner", "accountant", "crosscheck"],
+    roles: ["developer", "owner", "accountant", "crosscheck", "final_auditor"],
     department: "finance",
   },
   {
@@ -176,45 +176,57 @@ const navEntries: NavEntry[] = [
     href: "/accounts/bills",
     label: "All Bills",
     icon: "📑",
-    roles: ["developer", "owner", "accountant", "crosscheck"],
+    roles: ["developer", "owner", "accountant", "crosscheck", "final_auditor"],
     department: "finance",
   },
   {
     // Crosscheck queue — the dedicated audit page that lists every
     // bill at status='pending_approval' waiting for verification.
     // Reusing the existing /accounts/approvals route from mig 028.
+    // Mig 053: final_auditor sees the queue too (owner backup for
+    // bill approval).
     href: "/accounts/approvals",
     label: "Crosscheck Queue",
     icon: "✅",
-    roles: ["crosscheck"],
+    roles: ["crosscheck", "final_auditor"],
     department: "finance",
   },
   {
     href: "/accounts",
     label: "Due Bills",
     icon: "💰",
-    roles: ["developer", "owner", "accountant"],
+    roles: ["developer", "owner", "accountant", "final_auditor"],
     department: "finance",
   },
   {
     href: "/accounts/pay-today",
     label: "Pay Today",
     icon: "💸",
-    roles: ["accountant"],
+    roles: ["accountant", "final_auditor"],
+    department: "finance",
+  },
+  {
+    // Mig 053 — Final Audit queue. UTR cross-check against bank
+    // statement. Final auditor's primary page; owner sees it for
+    // visibility into flagged payments.
+    href: "/accounts/final-audit",
+    label: "Final Audit",
+    icon: "🧾",
+    roles: ["developer", "owner", "final_auditor"],
     department: "finance",
   },
   {
     href: "/accounts/payments",
     label: "Payment History",
     icon: "🗂️",
-    roles: ["developer", "owner", "accountant"],
+    roles: ["developer", "owner", "accountant", "final_auditor"],
     department: "finance",
   },
   {
     href: "/accounts/vendors",
     label: "Vendor Account",
     icon: "🏢",
-    roles: ["developer", "owner", "accountant"],
+    roles: ["developer", "owner", "accountant", "final_auditor"],
     department: "finance",
   },
   // ── INVOICING section (Migration 038 — outgoing customer invoices) ──
@@ -293,6 +305,7 @@ function roleLabel(role: AppRole): string {
     accountant: "ACCOUNTANT",
     crosscheck: "CROSSCHECK",
     storekeeper: "STOREKEEPER",
+    final_auditor: "FINAL AUDITOR",
   };
   return labels[role] ?? role.replace(/_/g, " ").toUpperCase();
 }

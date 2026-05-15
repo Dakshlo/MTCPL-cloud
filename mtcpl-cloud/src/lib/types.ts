@@ -38,7 +38,17 @@ export type AppRole =
   //   Locked to the Inventory department. Crosscheck (Mafat) +
   //   owner approve their submissions; the storekeeper cannot
   //   approve their own work (segregation of duties).
-  | "storekeeper";
+  | "storekeeper"
+  // Migration 053 — Finance final audit role.
+  //
+  // final_auditor — after a payment is marked paid, this role
+  //   cross-checks the UTR/reference recorded in MTCPL against the
+  //   actual bank statement. Two outcomes per row: verified (all
+  //   good) or flagged (reason captured for owner's attention). The
+  //   role has full accountant powers and also acts as owner backup
+  //   for confirming proposed payments + approving submitted bills
+  //   when dad isn't available.
+  | "final_auditor";
 
 export type StoneType = "PinkStone" | "WhiteStone";
 

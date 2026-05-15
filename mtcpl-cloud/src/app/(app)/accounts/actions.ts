@@ -21,6 +21,7 @@ import {
   canAddBillVendors,
   canApproveBills,
   canConfirmPayments,
+  canFinalAudit,
   canManageAccounts,
   canManageBillVendors,
   canMarkPaid,
@@ -1545,6 +1546,155 @@ export async function retryBankRejectedPaymentAction(
     proposed_amount: retryAmount,
     previous_payment_id: rejected.id,
   });
+  await refreshAccountsPaths();
+  return { ok: true };
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Mig 053 — Final Audit (UTR / bank-statement recheck)
+// ──────────────────────────────────────────────────────────────────
+// After a payment is marked paid, the final auditor cross-checks
+// the recorded UTR/reference against the actual bank statement.
+// Two terminal actions: verify (all good) or flag (capture reason
+// for owner attention; money already moved, so no reversal).
+// ──────────────────────────────────────────────────────────────────
+
+export async function verifyFinalAuditAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canFinalAudit(profile)) {
+    return {
+      ok: false,
+      error: "Only the final auditor, owner, or developer can verify payments.",
+    };
+  }
+  const supabase = createAdminSupabaseClient();
+
+  const paymentId = String(formData.get("payment_id") || "").trim();
+  if (!paymentId) return { ok: false, error: "Missing payment_id." };
+
+  const { data: payment, error: loadErr } = await supabase
+    .from("bill_payments")
+    .select("id, status, bill_id, final_audit_status, paid_amount, payment_reference")
+    .eq("id", paymentId)
+    .maybeSingle();
+  if (loadErr) return { ok: false, error: loadErr.message };
+  if (!payment) return { ok: false, error: "Payment row not found." };
+  if (payment.status !== "paid") {
+    return {
+      ok: false,
+      error: `Only paid payments can be verified (current: ${payment.status}).`,
+    };
+  }
+  if (payment.final_audit_status !== "pending") {
+    return {
+      ok: false,
+      error: `Payment is already ${payment.final_audit_status} — re-verification not supported.`,
+    };
+  }
+
+  const now = new Date().toISOString();
+  const { error: updErr } = await supabase
+    .from("bill_payments")
+    .update({
+      final_audit_status: "verified",
+      final_audit_at: now,
+      final_audit_by: profile.id,
+      updated_at: now,
+    })
+    .eq("id", paymentId);
+
+  if (updErr) return { ok: false, error: updErr.message };
+
+  void logAudit(
+    profile.id,
+    "payment_final_audit_verified",
+    "bill_payment",
+    paymentId,
+    {
+      bill_id: payment.bill_id,
+      paid_amount: Number(payment.paid_amount ?? 0),
+      payment_reference: payment.payment_reference,
+    },
+  );
+  await refreshAccountsPaths();
+  return { ok: true };
+}
+
+export async function flagFinalAuditAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canFinalAudit(profile)) {
+    return {
+      ok: false,
+      error: "Only the final auditor, owner, or developer can flag payments.",
+    };
+  }
+  const supabase = createAdminSupabaseClient();
+
+  const paymentId = String(formData.get("payment_id") || "").trim();
+  const reason = String(formData.get("flag_reason") || "").trim();
+  const note = String(formData.get("flag_note") || "").trim() || null;
+
+  if (!paymentId) return { ok: false, error: "Missing payment_id." };
+  if (reason.length < 3) {
+    return {
+      ok: false,
+      error:
+        "Flag reason required (min 3 chars). Tell us what you spotted — UTR mismatch, wrong amount, wrong vendor, etc.",
+    };
+  }
+
+  const { data: payment, error: loadErr } = await supabase
+    .from("bill_payments")
+    .select("id, status, bill_id, final_audit_status, paid_amount, payment_reference")
+    .eq("id", paymentId)
+    .maybeSingle();
+  if (loadErr) return { ok: false, error: loadErr.message };
+  if (!payment) return { ok: false, error: "Payment row not found." };
+  if (payment.status !== "paid") {
+    return {
+      ok: false,
+      error: `Only paid payments can be flagged (current: ${payment.status}).`,
+    };
+  }
+  if (payment.final_audit_status !== "pending") {
+    return {
+      ok: false,
+      error: `Payment is already ${payment.final_audit_status} — re-audit not supported.`,
+    };
+  }
+
+  const now = new Date().toISOString();
+  const { error: updErr } = await supabase
+    .from("bill_payments")
+    .update({
+      final_audit_status: "flagged",
+      final_audit_at: now,
+      final_audit_by: profile.id,
+      final_audit_flag_reason: reason,
+      final_audit_flag_note: note,
+      updated_at: now,
+    })
+    .eq("id", paymentId);
+
+  if (updErr) return { ok: false, error: updErr.message };
+
+  void logAudit(
+    profile.id,
+    "payment_final_audit_flagged",
+    "bill_payment",
+    paymentId,
+    {
+      bill_id: payment.bill_id,
+      paid_amount: Number(payment.paid_amount ?? 0),
+      payment_reference: payment.payment_reference,
+      reason,
+      note,
+    },
+  );
   await refreshAccountsPaths();
   return { ok: true };
 }
