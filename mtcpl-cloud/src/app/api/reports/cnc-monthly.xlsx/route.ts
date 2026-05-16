@@ -6,8 +6,11 @@
  * close to the paper sheet the office uses today:
  *
  *   • Operator (vendor) names span across each operator's machines.
- *   • Each non-lathe machine has SQFT + CFT columns; lathes only
+ *   • Each non-lathe machine has SFT + CFT columns; lathes only
  *     have a single CFT column.
+ *   • Each value is either SFT (slab thickness ≤ 1 ft) OR CFT
+ *     (thickness > 1 ft) — mutually exclusive. The unused side of
+ *     every cell renders as "—" (mig 053 follow-on, Daksh).
  *   • Daily rows for the whole month, then GRAND TOTAL / AVG /
  *     TOTAL-AVG / per-machine avg footer rows.
  */
@@ -27,7 +30,10 @@ function pad2(n: number): string {
 }
 
 function fmtCell(n: number): number | string {
-  if (!isFinite(n) || n === 0) return "";
+  // Mig 053 follow-on (Daksh): empty cells render as "—" instead of
+  // blank. Matches the on-screen report and makes "no work / not the
+  // right unit for this slab" visually clear in the Excel grid.
+  if (!isFinite(n) || n === 0) return "—";
   // Two-decimal numeric value — Excel will render as 4.37 etc.
   return Number(n.toFixed(2));
 }
@@ -112,11 +118,14 @@ function buildSheet(report: CncMonthlyReport): (string | number)[][] {
   }
   rows.push(machineRow);
 
-  // Unit row (SQFT / CFT)
+  // Unit row (SFT / CFT). Mig 053 follow-on (Daksh): renamed
+  // "SQFT" to "SFT" in the Excel header to match the on-screen
+  // report. Each cell value is either SFT or CFT (mutually
+  // exclusive based on slab thickness — see cnc-monthly-report.ts).
   const unitRow: (string | number)[] = [""];
   for (const m of report.machines) {
     if (m.showSqft) {
-      unitRow.push("SQFT");
+      unitRow.push("SFT");
       unitRow.push("CFT");
     } else {
       unitRow.push("CFT");
@@ -175,12 +184,12 @@ function buildSheet(report: CncMonthlyReport): (string | number)[][] {
   // beneath the per-machine numeric grid.
   rows.push([
     `TOTAL · ${report.workingDaysAcrossFleet} working day${report.workingDaysAcrossFleet !== 1 ? "s" : ""}`,
-    "SQFT", fmtCell(report.grandTotalSqft),
+    "SFT", fmtCell(report.grandTotalSqft),
     "CFT", fmtCell(report.grandTotalCft),
   ]);
   rows.push([
     "MTCPL · per-machine avg",
-    "SQFT", fmtCell(report.perMachineAvgSqft),
+    "SFT", fmtCell(report.perMachineAvgSqft),
     "CFT", fmtCell(report.perMachineAvgCft),
   ]);
 

@@ -264,13 +264,18 @@ function ReportTable({ report }: { report: CncMonthlyReport }) {
               )),
             )}
           </tr>
-          {/* Unit row (SQFT / CFT) */}
+          {/* Unit row (SFT / CFT). Mig 053 follow-on (Daksh):
+              renamed "SQFT" to "SFT" everywhere in the report header.
+              Each (slab, machine, day) cell is mutually exclusive —
+              a slab is EITHER measured in SFT (thickness ≤ 1 ft) OR
+              in CFT (thickness > 1 ft), so the unused side of every
+              cell renders as "—". */}
           <tr>
             <th style={thLeft()}></th>
             {report.machines.flatMap((m) =>
               m.showSqft
                 ? [
-                    <th key={`${m.id}-sqft`} style={thNum()}>SQFT</th>,
+                    <th key={`${m.id}-sqft`} style={thNum()}>SFT</th>,
                     <th key={`${m.id}-cft`} style={thNum()}>CFT</th>,
                   ]
                 : [<th key={`${m.id}-cft`} style={thNum()}>CFT</th>],
@@ -288,15 +293,15 @@ function ReportTable({ report }: { report: CncMonthlyReport }) {
                 return m.showSqft
                   ? [
                       <td key={`${m.id}-sqft`} style={tdNum(sqft > 0)}>
-                        {sqft > 0 ? fmt(sqft) : ""}
+                        {sqft > 0 ? fmt(sqft) : "—"}
                       </td>,
                       <td key={`${m.id}-cft`} style={tdNum(cft > 0)}>
-                        {cft > 0 ? fmt(cft) : ""}
+                        {cft > 0 ? fmt(cft) : "—"}
                       </td>,
                     ]
                   : [
                       <td key={`${m.id}-cft`} style={tdNum(cft > 0)}>
-                        {cft > 0 ? fmt(cft) : ""}
+                        {cft > 0 ? fmt(cft) : "—"}
                       </td>,
                     ];
               })}
@@ -336,14 +341,14 @@ function ReportTable({ report }: { report: CncMonthlyReport }) {
               TOTAL · {report.workingDaysAcrossFleet} working day{report.workingDaysAcrossFleet !== 1 ? "s" : ""}
             </td>
             <td colSpan={report.machines.reduce((n, m) => n + (m.showSqft ? 2 : 1), 0)} style={{ ...tdNum(true), color: "#fff", borderColor: "#333", textAlign: "left", paddingLeft: 14 }}>
-              <span style={{ marginRight: 24 }}>SQFT: <strong>{fmt(report.grandTotalSqft)}</strong></span>
+              <span style={{ marginRight: 24 }}>SFT: <strong>{fmt(report.grandTotalSqft)}</strong></span>
               <span>CFT: <strong>{fmt(report.grandTotalCft)}</strong></span>
             </td>
           </tr>
           <tr style={{ background: "var(--surface-alt)", fontWeight: 700 }}>
             <td style={tdDate()}>MTCPL · per-machine AVG</td>
             <td colSpan={report.machines.reduce((n, m) => n + (m.showSqft ? 2 : 1), 0)} style={{ ...tdNum(true), textAlign: "left", paddingLeft: 14 }}>
-              <span style={{ marginRight: 24 }}>SQFT: <strong>{fmt(report.perMachineAvgSqft)}</strong></span>
+              <span style={{ marginRight: 24 }}>SFT: <strong>{fmt(report.perMachineAvgSqft)}</strong></span>
               <span>CFT: <strong>{fmt(report.perMachineAvgCft)}</strong></span>
             </td>
           </tr>

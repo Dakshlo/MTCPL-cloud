@@ -10,8 +10,15 @@
  * The numbers come from carving_items joined to slab_requirements:
  *   • A row counts toward (machine, day) if completed_at falls on
  *     that day in IST and cnc_machine_id is set.
- *   • SQFT = (length_in × width_in) / 144
- *   • CFT  = (length_in × width_in × thickness_in) / 1728
+ *   • Thin slab (thickness ≤ 12") → SFT = (length × width) / 144
+ *   • Thick slab (thickness > 12") → CFT = (length × width × thickness) / 1728
+ *
+ * Mig 053 follow-on (Daksh, May 2026): the SFT vs CFT choice is
+ * now mutually exclusive per slab. Earlier the report showed both
+ * for every entry, which was confusing — thin slabs are sold by
+ * area, thick blocks by volume, so each piece belongs in exactly
+ * one column. The display column header reads "SFT" (renamed from
+ * "SQFT") and the empty side of each cell renders as "—".
  */
 
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
@@ -193,6 +200,22 @@ export async function buildCncMonthlyReport(year: number, month: number): Promis
   const rowByDate = new Map<string, DailyRow>();
   for (const r of rows) rowByDate.set(r.date, r);
 
+  // Mig 053 follow-on (Daksh, May 2026): "SFT vs CFT" is now a
+  // mutually-exclusive classification PER SLAB based on thickness:
+  //
+  //   • thickness ≤ 1 ft  (i.e. ≤ 12 inches stored)  → SFT only
+  //   • thickness >  1 ft                            → CFT only
+  //
+  // Rationale: thin slabs are sold/tracked by surface area; thick
+  // pieces by volume. Mixing both for every slab made the report
+  // ambiguous. Note the column is named `thickness_ft` but the
+  // value is actually stored in INCHES — same as length / width
+  // throughout this codebase (the /1728 conversion in the legacy
+  // CFT formula confirms this).
+  //
+  // Display layer renders "—" for whichever number is zero in a
+  // given cell, so the visual is "this work was measured in SFT"
+  // or "in CFT" but never both for the same slab.
   for (const it of (items ?? []) as Array<{
     cnc_machine_id: string | null; completed_at: string; slab_requirement_id: string;
   }>) {
@@ -205,8 +228,13 @@ export async function buildCncMonthlyReport(year: number, month: number): Promis
     const row = rowByDate.get(dateKey);
     if (!row) continue;
     const cell = row.values[it.cnc_machine_id] ?? { sqft: 0, cft: 0 };
-    cell.sqft = (cell.sqft ?? 0) + sqft;
-    cell.cft = cell.cft + cft;
+    if (dim.t <= 12) {
+      // Thin slab → contribute to SFT only.
+      cell.sqft = (cell.sqft ?? 0) + sqft;
+    } else {
+      // Thick slab → contribute to CFT only.
+      cell.cft = cell.cft + cft;
+    }
     row.values[it.cnc_machine_id] = cell;
   }
 
