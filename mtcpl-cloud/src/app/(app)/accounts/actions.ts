@@ -1148,12 +1148,31 @@ async function sendVendorPaymentEmail(
   actorId: string,
 ): Promise<void> {
   try {
+    // Mig 053 follow-on (Daksh, May 2026): beacon entry log so we can
+    // SEE the function ran at all, even if everything else inside
+    // silently dies. Plus all the audit logAudits below switched from
+    // `void` (fire-and-forget) to `await` — on Vercel serverless the
+    // `void` pattern silently dropped the audit rows the moment the
+    // outer Promise.all resolved, leaving us blind to why no email
+    // was firing. Now every code path records WHY.
+    await logAudit(
+      actorId,
+      "vendor_payment_email_attempt",
+      "bill_payment",
+      paymentId,
+      {
+        bill_id: billId,
+        has_resend_key: Boolean(process.env.RESEND_API_KEY),
+        has_email_from: Boolean(process.env.EMAIL_FROM),
+      },
+    );
+
     // Early-return when the email provider isn't configured. Saves
     // ~100ms of pointless PDF generation per Mark Paid. The audit
     // entry still gets written so you can see how many emails
     // would have gone out once the API key lands.
     if (!process.env.RESEND_API_KEY) {
-      void logAudit(
+      await logAudit(
         actorId,
         "vendor_payment_email_skipped",
         "bill_payment",
@@ -1214,7 +1233,7 @@ async function sendVendorPaymentEmail(
 
     if (!vendor || !vendor.email) {
       // Vendor has no email — nothing to send. Quiet skip.
-      void logAudit(actorId, "vendor_payment_email_skipped", "bill_payment", paymentId, {
+      await logAudit(actorId, "vendor_payment_email_skipped", "bill_payment", paymentId, {
         reason: vendor ? "vendor has no email on record" : "vendor row missing",
       });
       return;
@@ -1326,7 +1345,7 @@ async function sendVendorPaymentEmail(
       ],
     });
 
-    void logAudit(
+    await logAudit(
       actorId,
       result.ok
         ? "vendor_payment_email_sent"
@@ -1344,8 +1363,28 @@ async function sendVendorPaymentEmail(
     );
   } catch (e) {
     // Catch-all so the markPaymentPaidAction outer Promise.all
-    // never sees an unhandled rejection.
+    // never sees an unhandled rejection. Also capture the failure
+    // as an audit row so we can see WHY the email didn't go —
+    // previously this just console.warn'd into Vercel logs that
+    // most users can't see.
     console.warn("[sendVendorPaymentEmail] failed", e);
+    try {
+      await logAudit(
+        actorId,
+        "vendor_payment_email_failed",
+        "bill_payment",
+        paymentId,
+        {
+          error: e instanceof Error ? e.message : String(e),
+          stack:
+            e instanceof Error
+              ? e.stack?.split("\n").slice(0, 5).join("\n")
+              : undefined,
+        },
+      );
+    } catch {
+      // logAudit itself can fail — final swallow.
+    }
   }
 }
 
