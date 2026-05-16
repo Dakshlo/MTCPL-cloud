@@ -144,6 +144,27 @@ function Header({
   );
 }
 
+// Mig 053 follow-on (Daksh): per-CNC-operator tint palette. Each
+// vendor gets one of these soft pastels, applied as a background
+// to ALL their machine columns (both SFT and CFT) so the table is
+// easy to scan visually — "these 3 columns belong to Operator A,
+// these 2 to Operator B". Cycles through the palette by vendor
+// index in vendorGroups order (alphabetical, so deterministic).
+//
+// Two tints per slot — `data` is for daily cells (subtle), `header`
+// is for the machine code header row (a bit stronger so the column
+// grouping is unmistakable). Values use rgba with low alpha so the
+// numeric content stays readable in both light + dark themes.
+const VENDOR_TINTS: Array<{ data: string; header: string }> = [
+  { data: "rgba(201, 161, 74, 0.08)", header: "rgba(201, 161, 74, 0.20)" },  // gold
+  { data: "rgba(34, 197, 94, 0.08)",  header: "rgba(34, 197, 94, 0.18)"  },  // green
+  { data: "rgba(59, 130, 246, 0.08)", header: "rgba(59, 130, 246, 0.18)" },  // blue
+  { data: "rgba(168, 85, 247, 0.08)", header: "rgba(168, 85, 247, 0.18)" },  // purple
+  { data: "rgba(249, 115, 22, 0.08)", header: "rgba(249, 115, 22, 0.18)" },  // orange
+  { data: "rgba(20, 184, 166, 0.08)", header: "rgba(20, 184, 166, 0.18)" },  // teal
+  { data: "rgba(236, 72, 153, 0.08)", header: "rgba(236, 72, 153, 0.18)" },  // pink
+];
+
 function ReportTable({ report }: { report: CncMonthlyReport }) {
   if (report.machines.length === 0) {
     return (
@@ -160,6 +181,18 @@ function ReportTable({ report }: { report: CncMonthlyReport }) {
       </div>
     );
   }
+
+  // Map machine.id → tint pair, derived from vendor index.
+  const machineTints = new Map<string, { data: string; header: string }>();
+  report.vendorGroups.forEach((g, idx) => {
+    const tint = VENDOR_TINTS[idx % VENDOR_TINTS.length];
+    for (const m of g.machines) machineTints.set(m.id, tint);
+  });
+  // Also for the per-operator total row's row-wide background.
+  const vendorTints = new Map<string, { data: string; header: string }>();
+  report.vendorGroups.forEach((g, idx) => {
+    vendorTints.set(g.vendor_id, VENDOR_TINTS[idx % VENDOR_TINTS.length]);
+  });
 
   return (
     <div
@@ -187,7 +220,10 @@ function ReportTable({ report }: { report: CncMonthlyReport }) {
         }}
       >
         <thead>
-          {/* Operator (vendor) row — colspan over each vendor's machines */}
+          {/* Operator (vendor) row — colspan over each vendor's
+              machines. Kept on dark background for prominence, but
+              with a small accent border-bottom in the operator's
+              tint so the column-group link is unmistakable. */}
           <tr>
             <th style={thLeft()}>DATE</th>
             {report.vendorGroups.map((g) => {
@@ -195,6 +231,7 @@ function ReportTable({ report }: { report: CncMonthlyReport }) {
                 (n, m) => n + (m.showSqft ? 2 : 1),
                 0,
               );
+              const tint = vendorTints.get(g.vendor_id);
               return (
                 <th
                   key={g.vendor_id}
@@ -204,7 +241,10 @@ function ReportTable({ report }: { report: CncMonthlyReport }) {
                     textAlign: "center",
                     background: "#1a1a1a",
                     color: "#fff",
-                    borderBottom: "2px solid #1a1a1a",
+                    // Stronger 3px accent strip in the operator's
+                    // tint, so the column group reads as connected
+                    // from the dark banner down through the data.
+                    borderBottom: `3px solid ${tint?.header ?? "#1a1a1a"}`,
                   }}
                 >
                   👷 {g.vendor_name.toUpperCase()}
@@ -223,7 +263,11 @@ function ReportTable({ report }: { report: CncMonthlyReport }) {
                   style={{
                     ...thBase(),
                     textAlign: "center",
-                    background: "var(--surface-alt)",
+                    // Mig 053 follow-on — per-vendor tint on the
+                    // machine code header so the column grouping
+                    // (operator A | operator B | …) is unmistakable.
+                    background:
+                      machineTints.get(m.id)?.header ?? "var(--surface-alt)",
                     fontWeight: 700,
                   }}
                 >
@@ -272,14 +316,19 @@ function ReportTable({ report }: { report: CncMonthlyReport }) {
               cell renders as "—". */}
           <tr>
             <th style={thLeft()}></th>
-            {report.machines.flatMap((m) =>
-              m.showSqft
+            {report.machines.flatMap((m) => {
+              const tint = machineTints.get(m.id);
+              const thWithTint: React.CSSProperties = {
+                ...thNum(),
+                background: tint?.header ?? thNum().background,
+              };
+              return m.showSqft
                 ? [
-                    <th key={`${m.id}-sqft`} style={thNum()}>SFT</th>,
-                    <th key={`${m.id}-cft`} style={thNum()}>CFT</th>,
+                    <th key={`${m.id}-sqft`} style={thWithTint}>SFT</th>,
+                    <th key={`${m.id}-cft`} style={thWithTint}>CFT</th>,
                   ]
-                : [<th key={`${m.id}-cft`} style={thNum()}>CFT</th>],
-            )}
+                : [<th key={`${m.id}-cft`} style={thWithTint}>CFT</th>];
+            })}
           </tr>
         </thead>
         <tbody>
@@ -290,17 +339,25 @@ function ReportTable({ report }: { report: CncMonthlyReport }) {
                 const v = row.values[m.id];
                 const sqft = v?.sqft ?? 0;
                 const cft = v?.cft ?? 0;
+                // Mig 053 follow-on — subtle per-operator tint
+                // applied to every data cell so the columns are
+                // visually grouped by vendor as you scan rows.
+                const tint = machineTints.get(m.id)?.data;
+                const cellStyle = (strong: boolean): React.CSSProperties => ({
+                  ...tdNum(strong),
+                  background: tint,
+                });
                 return m.showSqft
                   ? [
-                      <td key={`${m.id}-sqft`} style={tdNum(sqft > 0)}>
+                      <td key={`${m.id}-sqft`} style={cellStyle(sqft > 0)}>
                         {sqft > 0 ? fmt(sqft) : "—"}
                       </td>,
-                      <td key={`${m.id}-cft`} style={tdNum(cft > 0)}>
+                      <td key={`${m.id}-cft`} style={cellStyle(cft > 0)}>
                         {cft > 0 ? fmt(cft) : "—"}
                       </td>,
                     ]
                   : [
-                      <td key={`${m.id}-cft`} style={tdNum(cft > 0)}>
+                      <td key={`${m.id}-cft`} style={cellStyle(cft > 0)}>
                         {cft > 0 ? fmt(cft) : "—"}
                       </td>,
                     ];
@@ -309,30 +366,43 @@ function ReportTable({ report }: { report: CncMonthlyReport }) {
           ))}
         </tbody>
         <tfoot>
-          {/* GRAND TOTAL row */}
-          <tr style={{ background: "var(--surface-alt)", fontWeight: 700 }}>
-            <td style={tdDate()}>GRAND TOTAL</td>
+          {/* GRAND TOTAL row — per-machine cells pick up their
+              operator tint (stronger header version) so the columns
+              still read as one block when scanning. */}
+          <tr style={{ fontWeight: 700 }}>
+            <td style={{ ...tdDate(), background: "var(--surface-alt)" }}>GRAND TOTAL</td>
             {report.machines.flatMap((m) => {
               const p = report.perMachine[m.id]!;
+              const tint = machineTints.get(m.id)?.header;
+              const totalCell: React.CSSProperties = {
+                ...tdNum(true),
+                background: tint,
+              };
               return m.showSqft
                 ? [
-                    <td key={`${m.id}-sqft`} style={tdNum(true)}>{fmt(p.sqftTotal)}</td>,
-                    <td key={`${m.id}-cft`} style={tdNum(true)}>{fmt(p.cftTotal)}</td>,
+                    <td key={`${m.id}-sqft`} style={totalCell}>{fmt(p.sqftTotal)}</td>,
+                    <td key={`${m.id}-cft`} style={totalCell}>{fmt(p.cftTotal)}</td>,
                   ]
-                : [<td key={`${m.id}-cft`} style={tdNum(true)}>{fmt(p.cftTotal)}</td>];
+                : [<td key={`${m.id}-cft`} style={totalCell}>{fmt(p.cftTotal)}</td>];
             })}
           </tr>
-          {/* AVG row */}
-          <tr style={{ background: "var(--surface-alt)" }}>
-            <td style={tdDate()}>AVG.</td>
+          {/* AVG row — same tint treatment as GRAND TOTAL but
+              slightly lighter to read as a derived stat. */}
+          <tr>
+            <td style={{ ...tdDate(), background: "var(--surface-alt)" }}>AVG.</td>
             {report.machines.flatMap((m) => {
               const p = report.perMachine[m.id]!;
+              const tint = machineTints.get(m.id)?.data;
+              const avgCell: React.CSSProperties = {
+                ...tdNum(true),
+                background: tint,
+              };
               return m.showSqft
                 ? [
-                    <td key={`${m.id}-sqft`} style={tdNum(true)}>{fmt(p.sqftAvg)}</td>,
-                    <td key={`${m.id}-cft`} style={tdNum(true)}>{fmt(p.cftAvg)}</td>,
+                    <td key={`${m.id}-sqft`} style={avgCell}>{fmt(p.sqftAvg)}</td>,
+                    <td key={`${m.id}-cft`} style={avgCell}>{fmt(p.cftAvg)}</td>,
                   ]
-                : [<td key={`${m.id}-cft`} style={tdNum(true)}>{fmt(p.cftAvg)}</td>];
+                : [<td key={`${m.id}-cft`} style={avgCell}>{fmt(p.cftAvg)}</td>];
             })}
           </tr>
           {/* Mig 053 follow-on (Daksh): per-CNC-operator total rows.
@@ -343,9 +413,15 @@ function ReportTable({ report }: { report: CncMonthlyReport }) {
           {report.vendorGroups.map((grp) => {
             const v = report.perVendor[grp.vendor_id];
             if (!v) return null;
+            // Each operator row picks up its own assigned tint so
+            // the column tints + row tint match (visual link).
+            const tint = vendorTints.get(grp.vendor_id);
             return (
-              <tr key={`vendor-${grp.vendor_id}`} style={{ background: "rgba(201,161,74,0.10)", fontWeight: 700 }}>
-                <td style={{ ...tdDate(), fontStyle: "italic" }}>
+              <tr
+                key={`vendor-${grp.vendor_id}`}
+                style={{ background: tint?.header ?? "rgba(201,161,74,0.10)", fontWeight: 700 }}
+              >
+                <td style={{ ...tdDate(), background: tint?.header, fontStyle: "italic" }}>
                   ↳ {grp.vendor_name}
                   <span style={{ fontSize: 10, color: "var(--muted)", marginLeft: 6, fontWeight: 500 }}>
                     {v.machineCount} machine{v.machineCount !== 1 ? "s" : ""} · {v.workingDays} working day{v.workingDays !== 1 ? "s" : ""}
