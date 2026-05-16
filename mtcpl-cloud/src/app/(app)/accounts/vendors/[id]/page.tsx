@@ -49,6 +49,39 @@ export default async function BillVendorDetailPage({
     .eq("bill_vendor_id", id)
     .order("bill_date", { ascending: false })
     .limit(200);
+
+  // Mig 053 follow-on (Daksh): tiny "Net: ..." line above Bill
+  // history that shows the royalty-points net balance. Visible
+  // only to roles that can see the private vendor data modal
+  // (dev / owner / accountant). One bounded query — at most a
+  // few hundred entries per vendor, summed in-app.
+  const canSeeRoyaltyNet =
+    profile.role === "developer" ||
+    profile.role === "owner" ||
+    profile.role === "accountant";
+  let royaltyNet: number | null = null;
+  if (canSeeRoyaltyNet) {
+    const { data: royaltyRows, error: royaltyErr } = await supabase
+      .from("vendor_royalty_entries")
+      .select("amount, entry_type, cancelled_at")
+      .eq("bill_vendor_id", id);
+    if (!royaltyErr && royaltyRows) {
+      let received = 0;
+      let paid = 0;
+      for (const r of royaltyRows as Array<{
+        amount: number;
+        entry_type: string;
+        cancelled_at: string | null;
+      }>) {
+        if (r.cancelled_at) continue; // skip cancelled entries
+        const v = Number(r.amount ?? 0);
+        if (r.entry_type === "received") received += v;
+        else if (r.entry_type === "given") paid += v;
+      }
+      // Same formula as the modal (mig 053 fix): paid − received.
+      royaltyNet = paid - received;
+    }
+  }
   const bills = (billsRaw ?? []) as Array<{
     id: string;
     token: string;
@@ -287,6 +320,37 @@ export default async function BillVendorDetailPage({
       </details>
 
       <div>
+          {/* Mig 053 follow-on — tiny royalty net balance line.
+              Daksh: "show net balance on vendor profile just above
+              the bill history, don't use big font". Only renders
+              when the role can see the private royalty data AND a
+              non-zero net exists (a zero net is the boring case;
+              hiding it keeps the row clean for vendors without
+              royalty activity). */}
+          {canSeeRoyaltyNet && royaltyNet !== null && royaltyNet !== 0 && (
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                color: "var(--muted)",
+                marginBottom: 6,
+                fontFamily: "ui-monospace, monospace",
+                letterSpacing: "0.02em",
+              }}
+              title="Royalty points net balance · Paid − Received. Positive means you've paid more than you've received."
+            >
+              Net:{" "}
+              <span
+                style={{
+                  color: royaltyNet > 0 ? "#15803d" : "#b91c1c",
+                  fontWeight: 800,
+                }}
+              >
+                {royaltyNet > 0 ? "+" : "−"}
+                {Math.abs(royaltyNet).toLocaleString("en-IN")}
+              </span>
+            </div>
+          )}
           <div
             style={{
               display: "flex",
