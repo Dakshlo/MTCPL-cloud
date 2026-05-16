@@ -24,6 +24,11 @@ type NavItem = {
    *  current active_department in addition to the existing role
    *  check. */
   department?: Department;
+  /** Migration 055 — set true to bypass the department filter so
+   *  the entry shows regardless of which dept the user is currently
+   *  viewing. Used for cross-cutting items like the Personal Ledger
+   *  (a developer/owner-only tool that isn't part of any room). */
+  crossDepartment?: boolean;
 };
 
 type NavDivider = {
@@ -91,6 +96,19 @@ function hexToAlpha(hex: string, alpha: number): string {
 // who can switch (developer + owner); for everyone else the role
 // filter alone is sufficient since their role implicitly limits them.
 const navEntries: NavEntry[] = [
+  // Migration 055 — Personal Ledger. Developer + owner only. Lives
+  // at the top of the sidebar above every department's content
+  // because the data is owner-scoped and explicitly NOT part of any
+  // company department. `crossDepartment: true` lets the entry
+  // survive the active-department filter that gates the rest of the
+  // sidebar for dev/owner users.
+  {
+    href: "/personal-ledger",
+    label: "Personal Ledger",
+    icon: "📓",
+    roles: ["developer", "owner"],
+    crossDepartment: true,
+  },
   {
     href: "/dashboard",
     label: "Dashboard",
@@ -395,9 +413,16 @@ export function Sidebar({
   // set — their role already narrowed them to one department's worth
   // of entries.
   if (switchable) {
-    visibleEntries = visibleEntries.filter(
-      (entry) => (entry.department ?? "production") === currentDept,
-    );
+    visibleEntries = visibleEntries.filter((entry) => {
+      // Mig 055 — cross-department items (e.g. Personal Ledger) bypass
+      // the active-dept filter and render regardless of which room
+      // the user is currently in.
+      if (entry.type !== "divider" && entry.type !== "group") {
+        const item = entry as NavItem;
+        if (item.crossDepartment) return true;
+      }
+      return (entry.department ?? "production") === currentDept;
+    });
   }
 
   // ── Name-based overrides ───────────────────────────────────────────
