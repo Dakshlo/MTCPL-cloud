@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useEffect, useState, useTransition } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import type { AppRole } from "@/lib/types";
 import {
   DEPARTMENTS,
@@ -12,6 +12,7 @@ import {
 } from "@/lib/departments";
 import { setActiveDepartmentAction } from "@/app/(app)/department-actions";
 import { ThemeToggle } from "./theme-toggle";
+import { FinanceLoadingOverlay } from "./finance-loading-overlay";
 
 type NavItem = {
   type?: "item";
@@ -382,7 +383,35 @@ export function Sidebar({
   activeDepartment?: Department | null;
 }) {
   const pathname = usePathname();
-  const [switching, startSwitchTransition] = useTransition();
+  const router = useRouter();
+  // Daksh: department switching used to use useTransition with an
+  // empty callback — the transition resolved instantly so the
+  // overlay (and the disabled state on the tiles) flashed off
+  // before the server action even finished. Switched to a plain
+  // useState so we can hold `switching` true for the FULL duration
+  // of the action + the router.refresh() that follows.
+  const [switching, setSwitching] = useState(false);
+  const [switchingTo, setSwitchingTo] = useState<Department | null>(null);
+
+  async function handleSwitchDepartment(dept: Department) {
+    if (switching) return;
+    setSwitching(true);
+    setSwitchingTo(dept);
+    try {
+      const fd = new FormData();
+      fd.set("department", dept);
+      await setActiveDepartmentAction(fd);
+      router.refresh();
+      // Small settle so the new sidebar HTML actually paints before
+      // we drop the overlay. Without this the overlay disappears at
+      // the instant React acks the refresh, but the page hasn't
+      // re-rendered yet — feels like a flicker back to the old room.
+      await new Promise((r) => setTimeout(r, 150));
+    } finally {
+      setSwitching(false);
+      setSwitchingTo(null);
+    }
+  }
 
   const switchable = canSwitchDepartment(role);
   const currentDept = effectiveDepartment(role, activeDepartment ?? null);
@@ -575,17 +604,10 @@ export function Sidebar({
               // Inactive tile — dark base with the dept accent
               // creeping in via a top border + hover background tint.
               return (
-                <form
-                  key={d.id}
-                  action={setActiveDepartmentAction}
-                  onSubmit={() => {
-                    startSwitchTransition(() => {});
-                  }}
-                  style={{ margin: 0 }}
-                >
-                  <input type="hidden" name="department" value={d.id} />
+                <div key={d.id} style={{ margin: 0 }}>
                   <button
-                    type="submit"
+                    type="button"
+                    onClick={() => handleSwitchDepartment(d.id)}
                     title={d.tooltip}
                     disabled={switching}
                     style={{
@@ -630,11 +652,24 @@ export function Sidebar({
                       {d.label}
                     </span>
                   </button>
-                </form>
+                </div>
               );
             })}
           </div>
         </div>
+      )}
+
+      {/* Daksh — branded spinner overlay during department switch.
+          Held until the server action completes + router.refresh()
+          settles, so the user gets unambiguous feedback for the
+          full duration instead of a flash. */}
+      {switchable && switchingTo && (
+        <FinanceLoadingOverlay
+          show={switching}
+          label={`Switching to ${
+            DEPARTMENTS.find((x) => x.id === switchingTo)?.label ?? "department"
+          }…`}
+        />
       )}
 
       {/* User */}
