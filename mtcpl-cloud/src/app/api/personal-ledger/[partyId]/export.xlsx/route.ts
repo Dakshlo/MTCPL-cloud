@@ -130,6 +130,21 @@ function invoiceUnitOf(items: InvoiceItem[]): string {
   return "MIX";
 }
 
+// Mig 056 follow-on (Daksh: "show SFT and CFT quantities too").
+// Roll up an invoice's items to a per-unit quantity total.
+function invoiceUnitTotalsOf(items: InvoiceItem[]): { sft: number; cft: number } {
+  let sft = 0;
+  let cft = 0;
+  for (const it of items) {
+    const unit = String(it.unit ?? "").toLowerCase();
+    const qty = Number(it.quantity ?? 0);
+    if (!Number.isFinite(qty)) continue;
+    if (unit === "sft") sft += qty;
+    else if (unit === "cft") cft += qty;
+  }
+  return { sft, cft };
+}
+
 // ── Style helpers ────────────────────────────────────────────────
 function fill(argb: string): ExcelJS.FillPattern {
   return { type: "pattern", pattern: "solid", fgColor: { argb } };
@@ -359,20 +374,24 @@ function buildSummarySheet(
     views: [{ showGridLines: false }],
   });
 
-  // Column widths — table needs 6 cols max (Invoices: Date · # · Unit · Net · Tax · Total)
+  // Mig 056 follow-on — bumped from 6 to 7 cols so Invoices section
+  // can show separate SFT and CFT quantity columns alongside
+  // Net / Tax / Total.
   ws.columns = [
-    { width: 16 }, // A
-    { width: 24 }, // B
-    { width: 12 }, // C
-    { width: 16 }, // D
-    { width: 14 }, // E
-    { width: 18 }, // F
+    { width: 14 }, // A · Date
+    { width: 22 }, // B · Invoice # / Bucket
+    { width: 11 }, // C · SFT
+    { width: 11 }, // D · CFT
+    { width: 16 }, // E · Net
+    { width: 14 }, // F · Tax
+    { width: 18 }, // G · Total / Amount
   ];
 
+  const COLS = 7;
   let r = 1;
 
   // ── Title band ────────────────────────────────────────────────
-  ws.mergeCells(r, 1, r, 6);
+  ws.mergeCells(r, 1, r, COLS);
   const title = ws.getCell(r, 1);
   title.value = `📓  ${d.partyName} · Personal Ledger`;
   title.font = { name: "Calibri", size: 18, bold: true, color: { argb: COLOR.white } };
@@ -382,7 +401,7 @@ function buildSummarySheet(
   r++;
 
   // Sub-title strip
-  ws.mergeCells(r, 1, r, 6);
+  ws.mergeCells(r, 1, r, COLS);
   const sub = ws.getCell(r, 1);
   sub.value = `Exported ${todayIso()} (IST) · NOT company books`;
   sub.font = { name: "Calibri", size: 11, italic: true, color: { argb: COLOR.white } };
@@ -394,11 +413,11 @@ function buildSummarySheet(
   r++; // gap
 
   // ── INVOICES section ──────────────────────────────────────────
-  r = drawSectionHeader(ws, r, "INVOICES", "📄", COLOR.accent, COLOR.accentTint);
+  r = drawSectionHeader(ws, r, COLS, "INVOICES", "📄", COLOR.accent);
 
-  // Column headers
+  // Column headers: Date · Invoice # · SFT · CFT · Net · Tax · Total
   const invHeader = ws.getRow(r);
-  invHeader.values = ["Date", "Invoice #", "Unit", "Net (₹)", "Tax (₹)", "Total (₹)"];
+  invHeader.values = ["Date", "Invoice #", "SFT", "CFT", "Net (₹)", "Tax (₹)", "Total (₹)"];
   setRowStyle(invHeader, {
     bold: true,
     size: 10,
@@ -407,15 +426,14 @@ function buildSummarySheet(
     border: COLOR.border,
   });
   invHeader.alignment = { vertical: "middle" };
-  ws.getCell(r, 3).alignment = { horizontal: "center", vertical: "middle" };
-  ws.getCell(r, 4).alignment = { horizontal: "right", vertical: "middle" };
-  ws.getCell(r, 5).alignment = { horizontal: "right", vertical: "middle" };
-  ws.getCell(r, 6).alignment = { horizontal: "right", vertical: "middle" };
+  for (const c of [3, 4, 5, 6, 7]) {
+    ws.getCell(r, c).alignment = { horizontal: "right", vertical: "middle" };
+  }
   r++;
 
   // Invoice rows (one per invoice — like the portal Summary, not the line items)
   if (d.invoices.length === 0) {
-    ws.mergeCells(r, 1, r, 6);
+    ws.mergeCells(r, 1, r, COLS);
     const empty = ws.getCell(r, 1);
     empty.value = "No invoices.";
     empty.font = { italic: true, color: { argb: COLOR.textMuted } };
@@ -423,68 +441,88 @@ function buildSummarySheet(
     setRowStyle(ws.getRow(r), { border: COLOR.border });
     r++;
   } else {
+    let totalSft = 0;
+    let totalCft = 0;
     for (const inv of d.invoices) {
       const items = Array.isArray(inv.items_json) ? (inv.items_json as InvoiceItem[]) : [];
-      const unit = invoiceUnitOf(items);
+      const { sft, cft } = invoiceUnitTotalsOf(items);
+      totalSft += sft;
+      totalCft += cft;
       const row = ws.getRow(r);
       row.values = [
         inv.invoice_date,
         inv.invoice_no,
-        unit,
+        sft > 0 ? sft : "—",
+        cft > 0 ? cft : "—",
         Number(inv.subtotal ?? 0),
         Number(inv.gst_amount ?? 0),
         Number(inv.total ?? 0),
       ];
       setRowStyle(row, { size: 11, border: COLOR.border });
       ws.getCell(r, 2).font = { ...ws.getCell(r, 2).font, bold: true };
-      // Unit chip — coloured pill effect via fill
-      ws.getCell(r, 3).alignment = { horizontal: "center", vertical: "middle" };
-      ws.getCell(r, 3).fill = fill(unit === "MIX" ? COLOR.warningLight : COLOR.accentLight);
-      ws.getCell(r, 3).font = {
-        ...ws.getCell(r, 3).font,
-        bold: true,
-        color: { argb: unit === "MIX" ? COLOR.warning : COLOR.accent },
-      };
-      // Numbers
-      ws.getCell(r, 4).numFmt = '"₹"#,##0.00';
-      ws.getCell(r, 5).numFmt = '"₹"#,##0.00';
-      ws.getCell(r, 6).numFmt = '"₹"#,##0.00';
+      // SFT cell
+      ws.getCell(r, 3).alignment = { horizontal: "right", vertical: "middle" };
+      if (sft > 0) {
+        ws.getCell(r, 3).numFmt = "#,##0.##";
+      } else {
+        ws.getCell(r, 3).font = { ...ws.getCell(r, 3).font, color: { argb: COLOR.textMuted } };
+      }
+      // CFT cell
       ws.getCell(r, 4).alignment = { horizontal: "right", vertical: "middle" };
-      ws.getCell(r, 5).alignment = { horizontal: "right", vertical: "middle" };
-      ws.getCell(r, 6).alignment = { horizontal: "right", vertical: "middle" };
-      ws.getCell(r, 6).font = {
-        ...ws.getCell(r, 6).font,
+      if (cft > 0) {
+        ws.getCell(r, 4).numFmt = "#,##0.##";
+      } else {
+        ws.getCell(r, 4).font = { ...ws.getCell(r, 4).font, color: { argb: COLOR.textMuted } };
+      }
+      // Amount cols
+      for (const c of [5, 6, 7]) {
+        ws.getCell(r, c).numFmt = '"₹"#,##0.00';
+        ws.getCell(r, c).alignment = { horizontal: "right", vertical: "middle" };
+      }
+      ws.getCell(r, 7).font = {
+        ...ws.getCell(r, 7).font,
         bold: true,
         color: { argb: COLOR.accent },
       };
       r++;
     }
-    // Footer subtotal row
+    // Footer subtotal row — SFT/CFT quantity totals + Net/Tax/Total
     const ft = ws.getRow(r);
-    ft.values = ["", "", "Subtotals", d.invoicedSubtotal, d.invoicedTax, d.invoicedTotal];
+    ft.values = [
+      "",
+      "Subtotals",
+      totalSft > 0 ? totalSft : "—",
+      totalCft > 0 ? totalCft : "—",
+      d.invoicedSubtotal,
+      d.invoicedTax,
+      d.invoicedTotal,
+    ];
     setRowStyle(ft, { bold: true, fillColor: COLOR.accentTint, border: COLOR.accent, size: 11 });
-    ws.getCell(r, 3).alignment = { horizontal: "center", vertical: "middle" };
-    ws.getCell(r, 3).font = { ...ws.getCell(r, 3).font, color: { argb: COLOR.accent } };
-    ws.getCell(r, 4).numFmt = '"₹"#,##0.00';
-    ws.getCell(r, 5).numFmt = '"₹"#,##0.00';
-    ws.getCell(r, 6).numFmt = '"₹"#,##0.00';
-    ws.getCell(r, 4).alignment = { horizontal: "right", vertical: "middle" };
-    ws.getCell(r, 5).alignment = { horizontal: "right", vertical: "middle" };
-    ws.getCell(r, 6).alignment = { horizontal: "right", vertical: "middle" };
-    ws.getCell(r, 6).font = {
-      ...ws.getCell(r, 6).font,
+    ws.getCell(r, 2).alignment = { horizontal: "left", vertical: "middle" };
+    ws.getCell(r, 2).font = { ...ws.getCell(r, 2).font, color: { argb: COLOR.accent }, bold: true };
+    for (const c of [3, 4]) {
+      ws.getCell(r, c).alignment = { horizontal: "right", vertical: "middle" };
+      ws.getCell(r, c).numFmt = "#,##0.##";
+      ws.getCell(r, c).font = { ...ws.getCell(r, c).font, color: { argb: COLOR.accent }, bold: true };
+    }
+    for (const c of [5, 6, 7]) {
+      ws.getCell(r, c).numFmt = '"₹"#,##0.00';
+      ws.getCell(r, c).alignment = { horizontal: "right", vertical: "middle" };
+    }
+    ws.getCell(r, 7).font = {
+      ...ws.getCell(r, 7).font,
       color: { argb: COLOR.accent },
       size: 12,
     };
     r++;
     // Total invoiced (highlight band)
     const tot = ws.getRow(r);
-    tot.values = ["", "", "", "", "TOTAL INVOICED", d.invoicedTotal];
+    tot.values = ["", "", "", "", "", "TOTAL INVOICED", d.invoicedTotal];
     setRowStyle(tot, { bold: true, fillColor: COLOR.accent, fontColor: COLOR.white, size: 12 });
-    ws.getCell(r, 5).alignment = { horizontal: "right", vertical: "middle" };
-    ws.getCell(r, 6).numFmt = '"₹"#,##0.00';
     ws.getCell(r, 6).alignment = { horizontal: "right", vertical: "middle" };
-    ws.getCell(r, 6).font = { ...ws.getCell(r, 6).font, size: 14 };
+    ws.getCell(r, 7).numFmt = '"₹"#,##0.00';
+    ws.getCell(r, 7).alignment = { horizontal: "right", vertical: "middle" };
+    ws.getCell(r, 7).font = { ...ws.getCell(r, 7).font, size: 14 };
     ws.getRow(r).height = 24;
     r++;
   }
@@ -492,10 +530,11 @@ function buildSummarySheet(
   r += 2; // gap
 
   // ── RECEIPTS section ──────────────────────────────────────────
-  r = drawSectionHeader(ws, r, "RECEIPTS", "💵", COLOR.success, COLOR.successTint);
+  r = drawSectionHeader(ws, r, COLS, "RECEIPTS", "💵", COLOR.success);
 
+  // Header: Date · Bucket · Note (spans C-F) · Amount (G)
   const rcvHeader = ws.getRow(r);
-  rcvHeader.values = ["Date", "Bucket", "Note", "", "", "Amount (₹)"];
+  rcvHeader.values = ["Date", "Bucket", "Note", "", "", "", "Amount (₹)"];
   setRowStyle(rcvHeader, {
     bold: true,
     size: 10,
@@ -504,12 +543,12 @@ function buildSummarySheet(
     border: COLOR.border,
   });
   rcvHeader.alignment = { vertical: "middle" };
-  ws.mergeCells(r, 3, r, 5); // Note spans C-E
-  ws.getCell(r, 6).alignment = { horizontal: "right", vertical: "middle" };
+  ws.mergeCells(r, 3, r, 6); // Note spans C-F
+  ws.getCell(r, 7).alignment = { horizontal: "right", vertical: "middle" };
   r++;
 
   if (d.receipts.length === 0) {
-    ws.mergeCells(r, 1, r, 6);
+    ws.mergeCells(r, 1, r, COLS);
     const empty = ws.getCell(r, 1);
     empty.value = "No receipts.";
     empty.font = { italic: true, color: { argb: COLOR.textMuted } };
@@ -521,9 +560,9 @@ function buildSummarySheet(
       const label = d.bucketLabelById.get(rec.bucket_id) ?? "—";
       const pal = bucketColors(label);
       const row = ws.getRow(r);
-      row.values = [rec.receipt_date, label, rec.note ?? "—", "", "", Number(rec.amount ?? 0)];
+      row.values = [rec.receipt_date, label, rec.note ?? "—", "", "", "", Number(rec.amount ?? 0)];
       setRowStyle(row, { size: 11, border: COLOR.border });
-      ws.mergeCells(r, 3, r, 5);
+      ws.mergeCells(r, 3, r, 6);
       ws.getCell(r, 2).fill = fill(pal.bg);
       ws.getCell(r, 2).font = {
         ...ws.getCell(r, 2).font,
@@ -532,10 +571,10 @@ function buildSummarySheet(
       };
       ws.getCell(r, 2).alignment = { horizontal: "center", vertical: "middle" };
       ws.getCell(r, 3).font = { ...ws.getCell(r, 3).font, color: { argb: COLOR.textMuted } };
-      ws.getCell(r, 6).numFmt = '"₹"#,##0.00';
-      ws.getCell(r, 6).alignment = { horizontal: "right", vertical: "middle" };
-      ws.getCell(r, 6).font = {
-        ...ws.getCell(r, 6).font,
+      ws.getCell(r, 7).numFmt = '"₹"#,##0.00';
+      ws.getCell(r, 7).alignment = { horizontal: "right", vertical: "middle" };
+      ws.getCell(r, 7).font = {
+        ...ws.getCell(r, 7).font,
         bold: true,
         color: { argb: COLOR.success },
       };
@@ -544,7 +583,7 @@ function buildSummarySheet(
     // Per-bucket subtotal rows
     const sectionBar = ws.getRow(r);
     sectionBar.values = ["", "", "RECEIVED · SPLIT BY BUCKET"];
-    ws.mergeCells(r, 3, r, 5);
+    ws.mergeCells(r, 3, r, 6);
     setRowStyle(sectionBar, {
       bold: true,
       size: 10,
@@ -558,26 +597,26 @@ function buildSummarySheet(
     for (const [label, total] of sorted) {
       const pal = bucketColors(label);
       const row = ws.getRow(r);
-      row.values = ["", "Subtotal", label, "", "", total];
-      ws.mergeCells(r, 3, r, 5);
+      row.values = ["", "Subtotal", label, "", "", "", total];
+      ws.mergeCells(r, 3, r, 6);
       setRowStyle(row, { fillColor: COLOR.surfaceMuted, border: COLOR.border, size: 11 });
       ws.getCell(r, 2).font = { ...ws.getCell(r, 2).font, italic: true, color: { argb: COLOR.textMuted } };
       ws.getCell(r, 3).fill = fill(pal.bg);
       ws.getCell(r, 3).font = { ...ws.getCell(r, 3).font, bold: true, color: { argb: pal.fg } };
       ws.getCell(r, 3).alignment = { horizontal: "center", vertical: "middle" };
-      ws.getCell(r, 6).numFmt = '"₹"#,##0.00';
-      ws.getCell(r, 6).alignment = { horizontal: "right", vertical: "middle" };
-      ws.getCell(r, 6).font = { ...ws.getCell(r, 6).font, bold: true, color: { argb: pal.fg } };
+      ws.getCell(r, 7).numFmt = '"₹"#,##0.00';
+      ws.getCell(r, 7).alignment = { horizontal: "right", vertical: "middle" };
+      ws.getCell(r, 7).font = { ...ws.getCell(r, 7).font, bold: true, color: { argb: pal.fg } };
       r++;
     }
     // Total received (highlight band)
     const tot = ws.getRow(r);
-    tot.values = ["", "", "", "", "TOTAL RECEIVED", d.receivedTotal];
+    tot.values = ["", "", "", "", "", "TOTAL RECEIVED", d.receivedTotal];
     setRowStyle(tot, { bold: true, fillColor: COLOR.success, fontColor: COLOR.white, size: 12 });
-    ws.getCell(r, 5).alignment = { horizontal: "right", vertical: "middle" };
-    ws.getCell(r, 6).numFmt = '"₹"#,##0.00';
     ws.getCell(r, 6).alignment = { horizontal: "right", vertical: "middle" };
-    ws.getCell(r, 6).font = { ...ws.getCell(r, 6).font, size: 14 };
+    ws.getCell(r, 7).numFmt = '"₹"#,##0.00';
+    ws.getCell(r, 7).alignment = { horizontal: "right", vertical: "middle" };
+    ws.getCell(r, 7).font = { ...ws.getCell(r, 7).font, size: 14 };
     ws.getRow(r).height = 24;
     r++;
   }
@@ -589,7 +628,7 @@ function buildSummarySheet(
   const calloutColor = cleared ? COLOR.success : COLOR.warning;
   const calloutTint = cleared ? COLOR.successTint : COLOR.warningTint;
 
-  ws.mergeCells(r, 1, r, 6);
+  ws.mergeCells(r, 1, r, COLS);
   const calloutLabel = ws.getCell(r, 1);
   calloutLabel.value = cleared ? "STATUS · CLEARED" : "OUTSTANDING";
   calloutLabel.font = { bold: true, size: 11, color: { argb: COLOR.white } };
@@ -599,7 +638,7 @@ function buildSummarySheet(
   r++;
 
   // Arithmetic line: invoiced − received = outstanding
-  ws.mergeCells(r, 1, r, 6);
+  ws.mergeCells(r, 1, r, COLS);
   const arith = ws.getCell(r, 1);
   arith.value = `₹${formatInr(d.invoicedTotal)}  −  ₹${formatInr(d.receivedTotal)}  =  ₹${formatInr(cleared ? 0 : d.outstanding)}`;
   arith.font = {
@@ -615,7 +654,7 @@ function buildSummarySheet(
   r++;
 
   // Footnote
-  ws.mergeCells(r, 1, r, 6);
+  ws.mergeCells(r, 1, r, COLS);
   const foot = ws.getCell(r, 1);
   foot.value =
     "Outstanding = Total invoiced − Total received (across all buckets combined). Cancelled entries are excluded but kept in the audit trail.";
@@ -628,12 +667,12 @@ function buildSummarySheet(
 function drawSectionHeader(
   ws: ExcelJS.Worksheet,
   r: number,
+  cols: number,
   label: string,
   icon: string,
   bandColor: string,
-  tintColor: string,
 ): number {
-  ws.mergeCells(r, 1, r, 6);
+  ws.mergeCells(r, 1, r, cols);
   const cell = ws.getCell(r, 1);
   cell.value = `  ${icon}   ${label}`;
   cell.font = {
@@ -645,10 +684,6 @@ function drawSectionHeader(
   cell.alignment = { horizontal: "left", vertical: "middle" };
   cell.fill = fill(bandColor);
   ws.getRow(r).height = 24;
-  // Faint tinted strip below for visual continuity (the table that
-  // follows will sit inside this implied "box").
-  // Just rely on the band + the table cells' own light fill.
-  void tintColor;
   return r + 1;
 }
 
