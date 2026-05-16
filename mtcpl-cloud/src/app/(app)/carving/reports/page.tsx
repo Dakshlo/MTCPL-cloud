@@ -9,10 +9,21 @@
 
 import Link from "next/link";
 import { requireAuth } from "@/lib/auth";
-import { buildCncMonthlyReport, type CncMonthlyReport } from "@/lib/cnc-monthly-report";
+import {
+  buildCncReport,
+  cncPeriodFromSearch,
+  type CncMonthlyReport,
+  type CncReportPeriod,
+} from "@/lib/cnc-monthly-report";
 import { PrintButton } from "@/components/print-button";
 
-type Search = Promise<{ year?: string; month?: string }>;
+type Search = Promise<{
+  view?: string;
+  date?: string;
+  start?: string;
+  year?: string;
+  month?: string;
+}>;
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
@@ -28,13 +39,23 @@ function fmt(n: number, digits = 2): string {
 export default async function CncMonthlyReportPage({ searchParams }: { searchParams: Search }) {
   await requireAuth(["developer", "owner", "carving_head"]);
   const params = await searchParams;
-  const today = new Date();
-  const year = Number(params.year) || today.getFullYear();
-  const month = Math.min(12, Math.max(1, Number(params.month) || today.getMonth() + 1));
+  // Mig 053 follow-on (Daksh) — derive period from query params,
+  // supporting daily / weekly / monthly views. Default = current month.
+  const period = cncPeriodFromSearch(params);
+  const report = await buildCncReport(period);
 
-  const report = await buildCncMonthlyReport(year, month);
-
-  const xlsxHref = `/api/reports/cnc-monthly.xlsx?year=${year}&month=${month}`;
+  // Build the Excel download URL preserving the active view.
+  const xlsxParams = new URLSearchParams();
+  xlsxParams.set("view", period.kind);
+  if (period.kind === "monthly") {
+    xlsxParams.set("year", String(period.year));
+    xlsxParams.set("month", String(period.month));
+  } else if (period.kind === "weekly") {
+    xlsxParams.set("start", period.startDate);
+  } else {
+    xlsxParams.set("date", period.startDate);
+  }
+  const xlsxHref = `/api/reports/cnc-monthly.xlsx?${xlsxParams.toString()}`;
 
   return (
     <div style={{ paddingBottom: 32 }}>
@@ -53,25 +74,31 @@ export default async function CncMonthlyReportPage({ searchParams }: { searchPar
           padding-right: 16px !important;
         }
       `}</style>
-      <Header report={report} year={year} month={month} xlsxHref={xlsxHref} />
+      <Header period={period} xlsxHref={xlsxHref} />
       <ReportTable report={report} />
     </div>
   );
 }
 
 function Header({
-  year,
-  month,
+  period,
   xlsxHref,
 }: {
-  report: CncMonthlyReport;
-  year: number;
-  month: number;
+  period: CncReportPeriod;
   xlsxHref: string;
 }) {
-  // Year + month picker that reloads the page via simple GET nav.
-  // Keeps the page server-rendered and bookmarkable.
-  const years = [year - 1, year, year + 1];
+  // Mig 053 follow-on (Daksh): view toggle + period-aware picker.
+  //   Daily   → single date picker
+  //   Weekly  → "Week starting Mon" date picker (defaults to the
+  //             Monday of the current IST week)
+  //   Monthly → existing month + year selects
+  // All three submit a GET form so the page stays server-rendered
+  // and the URL is bookmarkable.
+  const today = new Date();
+  const todayYear = today.getFullYear();
+  const monthYear = period.year ?? todayYear;
+  const years = [monthYear - 1, monthYear, monthYear + 1];
+
   return (
     <div
       style={{
@@ -88,61 +115,126 @@ function Header({
     >
       <div>
         <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>
-          CNC & LATHE Monthly Report
+          CNC & LATHE Report ·{" "}
+          {period.kind === "daily" ? "Daily" : period.kind === "weekly" ? "Weekly" : "Monthly"}
         </div>
         <div style={{ fontSize: 18, fontWeight: 700, color: "var(--text)" }}>
-          {MONTH_NAMES[month - 1]} {year}
+          {period.label}
         </div>
       </div>
-      <form
-        method="get"
-        action="/carving/reports"
-        style={{ display: "flex", gap: 8, alignItems: "center" }}
-      >
-        <select
-          name="month"
-          defaultValue={month}
-          style={{
-            fontSize: 13,
-            padding: "6px 10px",
-            border: "1px solid var(--border)",
-            borderRadius: 6,
-            background: "var(--bg)",
-            color: "var(--text)",
-          }}
+
+      {/* View toggle — three pills. Selected one is filled gold,
+          others are outlined. Clicking switches the URL ?view= and
+          resets the per-view date param to a sensible default. */}
+      <div style={{ display: "flex", gap: 4, padding: 3, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 999 }}>
+        <ViewPill href="/carving/reports?view=daily" label="Daily" active={period.kind === "daily"} />
+        <ViewPill href="/carving/reports?view=weekly" label="Weekly" active={period.kind === "weekly"} />
+        <ViewPill href="/carving/reports?view=monthly" label="Monthly" active={period.kind === "monthly"} />
+      </div>
+
+      {/* Per-view picker form */}
+      {period.kind === "daily" && (
+        <form
+          method="get"
+          action="/carving/reports"
+          style={{ display: "flex", gap: 8, alignItems: "center" }}
         >
-          {MONTH_NAMES.map((m, i) => (
-            <option key={i + 1} value={i + 1}>
-              {m}
-            </option>
-          ))}
-        </select>
-        <select
-          name="year"
-          defaultValue={year}
-          style={{
-            fontSize: 13,
-            padding: "6px 10px",
-            border: "1px solid var(--border)",
-            borderRadius: 6,
-            background: "var(--bg)",
-            color: "var(--text)",
-          }}
+          <input type="hidden" name="view" value="daily" />
+          <input
+            type="date"
+            name="date"
+            defaultValue={period.startDate}
+            style={{
+              fontSize: 13,
+              padding: "6px 10px",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              background: "var(--bg)",
+              color: "var(--text)",
+            }}
+          />
+          <button type="submit" className="ghost-button" style={{ fontSize: 12, padding: "6px 14px" }}>
+            View
+          </button>
+        </form>
+      )}
+
+      {period.kind === "weekly" && (
+        <form
+          method="get"
+          action="/carving/reports"
+          style={{ display: "flex", gap: 8, alignItems: "center" }}
         >
-          {years.map((y) => (
-            <option key={y} value={y}>
-              {y}
-            </option>
-          ))}
-        </select>
-        <button
-          type="submit"
-          className="ghost-button"
-          style={{ fontSize: 12, padding: "6px 14px" }}
+          <input type="hidden" name="view" value="weekly" />
+          <label style={{ fontSize: 11, color: "var(--muted)" }}>Week starting Mon</label>
+          <input
+            type="date"
+            name="start"
+            defaultValue={period.startDate}
+            style={{
+              fontSize: 13,
+              padding: "6px 10px",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              background: "var(--bg)",
+              color: "var(--text)",
+            }}
+          />
+          <button type="submit" className="ghost-button" style={{ fontSize: 12, padding: "6px 14px" }}>
+            View
+          </button>
+        </form>
+      )}
+
+      {period.kind === "monthly" && (
+        <form
+          method="get"
+          action="/carving/reports"
+          style={{ display: "flex", gap: 8, alignItems: "center" }}
         >
-          View
-        </button>
-      </form>
+          <input type="hidden" name="view" value="monthly" />
+          <select
+            name="month"
+            defaultValue={period.month ?? today.getMonth() + 1}
+            style={{
+              fontSize: 13,
+              padding: "6px 10px",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              background: "var(--bg)",
+              color: "var(--text)",
+            }}
+          >
+            {MONTH_NAMES.map((m, i) => (
+              <option key={i + 1} value={i + 1}>
+                {m}
+              </option>
+            ))}
+          </select>
+          <select
+            name="year"
+            defaultValue={monthYear}
+            style={{
+              fontSize: 13,
+              padding: "6px 10px",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              background: "var(--bg)",
+              color: "var(--text)",
+            }}
+          >
+            {years.map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
+          </select>
+          <button type="submit" className="ghost-button" style={{ fontSize: 12, padding: "6px 14px" }}>
+            View
+          </button>
+        </form>
+      )}
+
       <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
         <Link
           href={xlsxHref}
@@ -156,6 +248,28 @@ function Header({
         </PrintButton>
       </div>
     </div>
+  );
+}
+
+function ViewPill({ href, label, active }: { href: string; label: string; active: boolean }) {
+  return (
+    <Link
+      href={href}
+      style={{
+        display: "inline-block",
+        padding: "6px 14px",
+        fontSize: 12,
+        fontWeight: 700,
+        borderRadius: 999,
+        textDecoration: "none",
+        background: active ? "var(--gold)" : "transparent",
+        color: active ? "#fff" : "var(--text)",
+        letterSpacing: "0.02em",
+        transition: "background 0.12s ease",
+      }}
+    >
+      {label}
+    </Link>
   );
 }
 

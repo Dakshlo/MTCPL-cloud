@@ -49,9 +49,16 @@ export type VendorGroup = {
 };
 
 export type CncMonthlyReport = {
-  /** YYYY value of the report. */
+  /** Mig 053 follow-on (Daksh): the report now supports daily,
+   *  weekly, and monthly views. `period` captures which view + the
+   *  exact date range — page header reads `period.label` for the
+   *  human-friendly string, Excel route reads it for the filename. */
+  period: CncReportPeriod;
+  /** Anchor YYYY (= period.year for monthly, year of start for
+   *  daily/weekly). Kept so the existing year/month picker keeps
+   *  working in monthly view. */
   year: number;
-  /** 1-12 month value. */
+  /** Anchor 1-12 month value. Same back-compat purpose as year. */
   month: number;
   /** Machines as flat list — used by Excel export header. */
   machines: MachineCol[];
@@ -123,16 +130,154 @@ function istDateKey(iso: string): string {
   return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
 }
 
-export async function buildCncMonthlyReport(year: number, month: number): Promise<CncMonthlyReport> {
+// ── Mig 053 follow-on (Daksh): generalized period selection ──────
+// The report builder used to be hardcoded monthly. Now it accepts
+// a CncReportPeriod with kind = daily | weekly | monthly so the
+// same code path produces all three views.
+
+export type CncReportPeriod = {
+  kind: "daily" | "weekly" | "monthly";
+  /** YYYY-MM-DD inclusive. */
+  startDate: string;
+  /** YYYY-MM-DD inclusive. */
+  endDate: string;
+  /** Human-friendly label for the page header + Excel filename. */
+  label: string;
+  /** Only set when kind === "monthly", for the year/month picker. */
+  year?: number;
+  month?: number;
+};
+
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** Pure helper — derive a CncReportPeriod from query-string params.
+ *  Used by both the page server component and the Excel route so
+ *  they stay in sync. Falls back to "current month" when no params
+ *  given (keeps the old default). */
+export function cncPeriodFromSearch(sp: Record<string, string | string[] | undefined>): CncReportPeriod {
+  const view = (typeof sp.view === "string" ? sp.view : "monthly") as
+    | "daily"
+    | "weekly"
+    | "monthly";
+
+  if (view === "daily") {
+    const dateStr = typeof sp.date === "string" ? sp.date : istTodayKey();
+    const d = parseDateKey(dateStr);
+    return {
+      kind: "daily",
+      startDate: dateStr,
+      endDate: dateStr,
+      label: `${pad2(d.day)} ${MONTH_SHORT[d.month - 1]} ${d.year}`,
+    };
+  }
+
+  if (view === "weekly") {
+    // Default to the Monday of the current ISO week (Mon–Sun).
+    const startStr = typeof sp.start === "string" ? sp.start : istWeekStartKey();
+    const start = parseDateKey(startStr);
+    const startMs = isoUtcMidnight(start);
+    const endMs = startMs + 6 * 86_400_000;
+    const end = parseDateKeyMs(endMs);
+    const label =
+      start.month === end.month
+        ? `${pad2(start.day)}–${pad2(end.day)} ${MONTH_SHORT[start.month - 1]} ${start.year}`
+        : `${pad2(start.day)} ${MONTH_SHORT[start.month - 1]} – ${pad2(end.day)} ${MONTH_SHORT[end.month - 1]} ${start.year}`;
+    return {
+      kind: "weekly",
+      startDate: startStr,
+      endDate: formatDateKey(end),
+      label: `Week of ${label}`,
+    };
+  }
+
+  // Monthly (default)
+  const today = istTodayParts();
+  const year = Number(sp.year) || today.year;
+  const month = Math.min(12, Math.max(1, Number(sp.month) || today.month));
+  const lastDay = daysInMonth(year, month);
+  return {
+    kind: "monthly",
+    startDate: `${year}-${pad2(month)}-01`,
+    endDate: `${year}-${pad2(month)}-${pad2(lastDay)}`,
+    label: `${MONTH_NAMES[month - 1]} ${year}`,
+    year,
+    month,
+  };
+}
+
+function parseDateKey(s: string): { year: number; month: number; day: number } {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (!m) {
+    const t = istTodayParts();
+    return t;
+  }
+  return { year: Number(m[1]), month: Number(m[2]), day: Number(m[3]) };
+}
+
+function parseDateKeyMs(ms: number): { year: number; month: number; day: number } {
+  const d = new Date(ms);
+  return {
+    year: d.getUTCFullYear(),
+    month: d.getUTCMonth() + 1,
+    day: d.getUTCDate(),
+  };
+}
+
+function isoUtcMidnight(p: { year: number; month: number; day: number }): number {
+  return Date.UTC(p.year, p.month - 1, p.day, 0, 0, 0, 0);
+}
+
+function formatDateKey(p: { year: number; month: number; day: number }): string {
+  return `${p.year}-${pad2(p.month)}-${pad2(p.day)}`;
+}
+
+function istTodayParts(): { year: number; month: number; day: number } {
+  const t = Date.now() + 5.5 * 60 * 60 * 1000;
+  const d = new Date(t);
+  return {
+    year: d.getUTCFullYear(),
+    month: d.getUTCMonth() + 1,
+    day: d.getUTCDate(),
+  };
+}
+
+function istTodayKey(): string {
+  return formatDateKey(istTodayParts());
+}
+
+/** Returns the Monday of the IST week that contains today. */
+function istWeekStartKey(): string {
+  const t = Date.now() + 5.5 * 60 * 60 * 1000;
+  const d = new Date(t);
+  // UTC day-of-week: 0 = Sun, 1 = Mon, ..., 6 = Sat. We want Monday-
+  // anchored, so shift: daysBack = (weekday + 6) % 7.
+  const weekday = d.getUTCDay();
+  const daysBack = (weekday + 6) % 7;
+  const monMs = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - daysBack * 86_400_000;
+  return formatDateKey(parseDateKeyMs(monMs));
+}
+
+/** Mig 053 follow-on (Daksh): generalized to accept any date range
+ *  via CncReportPeriod. Daily / Weekly / Monthly views all flow
+ *  through this same function — the page + Excel route compute the
+ *  period from query-string params and pass it in. */
+export async function buildCncReport(period: CncReportPeriod): Promise<CncMonthlyReport> {
   const admin = createAdminSupabaseClient();
 
-  // Month bounds in IST. We over-fetch by one day on each side to
-  // catch edge-rollover rows; istDateKey filters to the right day.
-  const startIst = new Date(`${year}-${pad2(month)}-01T00:00:00+05:30`);
-  const endIst = new Date(year, month, 1); // exclusive end (UTC, but used for ISO compare)
-  endIst.setHours(0, 0, 0, 0);
+  // Period bounds in IST. startDate is inclusive, endDate is
+  // inclusive; the Postgres lt query needs one-past-end-day in ISO.
+  const startIst = new Date(`${period.startDate}T00:00:00+05:30`);
+  // endDate is inclusive Y-M-D; add one day in IST to get exclusive
+  // upper bound for the query.
+  const endParts = parseDateKey(period.endDate);
+  const exclusiveEndMs =
+    isoUtcMidnight(endParts) + 86_400_000 - 5.5 * 60 * 60 * 1000;
   const startIso = startIst.toISOString();
-  const endIso = new Date(endIst.getTime()).toISOString();
+  const endIso = new Date(exclusiveEndMs).toISOString();
 
   // Pull every CNC machine + its vendor in one go.
   const [{ data: vendors }, { data: machines }] = await Promise.all([
@@ -214,11 +359,15 @@ export async function buildCncMonthlyReport(year: number, month: number): Promis
     }
   }
 
-  // Build the (machine, day) → { sqft, cft } accumulator.
-  const days = daysInMonth(year, month);
+  // Build the (machine, day) → { sqft, cft } accumulator. One row
+  // per day in the requested period (daily=1, weekly=7, monthly≈30).
   const rows: DailyRow[] = [];
-  for (let d = 1; d <= days; d++) {
-    rows.push({ date: `${year}-${pad2(month)}-${pad2(d)}`, values: {} });
+  const startParts = parseDateKey(period.startDate);
+  const endPartsForLoop = parseDateKey(period.endDate);
+  const startMs = isoUtcMidnight(startParts);
+  const endMs = isoUtcMidnight(endPartsForLoop);
+  for (let ms = startMs; ms <= endMs; ms += 86_400_000) {
+    rows.push({ date: formatDateKey(parseDateKeyMs(ms)), values: {} });
   }
   const rowByDate = new Map<string, DailyRow>();
   for (const r of rows) rowByDate.set(r.date, r);
@@ -324,8 +473,12 @@ export async function buildCncMonthlyReport(year: number, month: number): Promis
   }
 
   return {
-    year,
-    month,
+    period,
+    // Legacy aliases for the monthly view — kept so existing
+    // consumers (Header picker) don't break. Daily/weekly views
+    // set these to the period's anchor.
+    year: period.year ?? parseDateKey(period.startDate).year,
+    month: period.month ?? parseDateKey(period.startDate).month,
     machines: machineCols,
     vendorGroups,
     rows,
@@ -338,4 +491,18 @@ export async function buildCncMonthlyReport(year: number, month: number): Promis
     perMachineAvgCft: machineCols.length > 0 ? grandTotalCft / machineCols.length : 0,
     perVendor,
   };
+}
+
+/** Backward-compatible wrapper — internal call sites that still
+ *  use buildCncMonthlyReport(year, month) keep working. New code
+ *  should use buildCncReport(period) directly. */
+export async function buildCncMonthlyReport(year: number, month: number): Promise<CncMonthlyReport> {
+  return buildCncReport({
+    kind: "monthly",
+    startDate: `${year}-${pad2(month)}-01`,
+    endDate: `${year}-${pad2(month)}-${pad2(daysInMonth(year, month))}`,
+    label: `${MONTH_NAMES[month - 1]} ${year}`,
+    year,
+    month,
+  });
 }
