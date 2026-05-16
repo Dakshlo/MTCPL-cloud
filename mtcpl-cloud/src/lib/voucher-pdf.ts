@@ -96,7 +96,41 @@ function fmtINR(n: number): string {
   } else {
     formatted = s;
   }
-  return `₹${formatted}.${decPart}`;
+  // Mig 053 follow-on (Daksh, May 2026): use "Rs." instead of the ₹
+  // glyph because pdf-lib's StandardFonts.Helvetica uses WinAnsi
+  // encoding, and ₹ (U+20B9) is outside Windows-1252 — so the PDF
+  // build threw a "WinAnsi cannot encode" error and the email
+  // never sent. Rs. is universally understood on Indian payment
+  // vouchers anyway. The HTML email body keeps ₹ (no encoding
+  // limits there).
+  return `Rs. ${formatted}.${decPart}`;
+}
+
+/** Strip any character that WinAnsi (Windows-1252) can't represent.
+ *  pdf-lib's Standard fonts only support code points 0-255 of the
+ *  Windows-1252 mapping. Anything else throws at drawText time.
+ *
+ *  Substitutions:
+ *    ₹ (U+20B9)  → "Rs."
+ *    — (U+2014)  → "-"   (em dash IS in Win-1252 0x97, but safer)
+ *    – (U+2013)  → "-"
+ *    ' '         → "'"   (smart quotes → ASCII)
+ *    " "         → '"'
+ *    …           → "..."
+ *  Everything else outside 0-255 is replaced with "?". The "?"
+ *  fallback is intentional — silent stripping could mangle vendor
+ *  names invisibly. */
+function sanitizeForWinAnsi(input: string | null | undefined): string {
+  if (!input) return "";
+  let s = input;
+  s = s.replace(/₹/g, "Rs.");
+  s = s.replace(/[–—]/g, "-");
+  s = s.replace(/[‘’]/g, "'");
+  s = s.replace(/[“”]/g, '"');
+  s = s.replace(/…/g, "...");
+  // Replace any remaining high-code-point char with "?".
+  s = s.replace(/[^\x00-\xFF]/g, "?");
+  return s;
 }
 
 function fmtDateIST(iso: string | null, format: "short" | "long" = "short"): string {
@@ -179,7 +213,59 @@ async function loadLogoBytes(): Promise<Uint8Array | null> {
   }
 }
 
-export async function buildVoucherPdf(input: VoucherPdfInput): Promise<Uint8Array> {
+export async function buildVoucherPdf(rawInput: VoucherPdfInput): Promise<Uint8Array> {
+  // Mig 053 follow-on (Daksh, May 2026): pre-sanitize EVERY text
+  // value in the input so downstream pdf-lib drawText /
+  // widthOfTextAtSize calls never see a non-WinAnsi character.
+  // The previous code blew up on the ₹ symbol baked into fmtINR;
+  // this guard also covers any future vendor name with Devanagari,
+  // accented punctuation, smart quotes from a pasted invoice, etc.
+  const input: VoucherPdfInput = {
+    company: {
+      name: sanitizeForWinAnsi(rawInput.company.name),
+      addressLines: rawInput.company.addressLines.map(sanitizeForWinAnsi),
+    },
+    vendor: {
+      name: sanitizeForWinAnsi(rawInput.vendor.name),
+      address: rawInput.vendor.address ? sanitizeForWinAnsi(rawInput.vendor.address) : null,
+      gstin: rawInput.vendor.gstin ? sanitizeForWinAnsi(rawInput.vendor.gstin) : null,
+      pan: rawInput.vendor.pan ? sanitizeForWinAnsi(rawInput.vendor.pan) : null,
+      bankAccount: rawInput.vendor.bankAccount
+        ? sanitizeForWinAnsi(rawInput.vendor.bankAccount)
+        : null,
+      ifsc: rawInput.vendor.ifsc ? sanitizeForWinAnsi(rawInput.vendor.ifsc) : null,
+    },
+    bill: {
+      token: sanitizeForWinAnsi(rawInput.bill.token),
+      vendorBillNo: sanitizeForWinAnsi(rawInput.bill.vendorBillNo),
+      billDate: rawInput.bill.billDate,
+      description: rawInput.bill.description
+        ? sanitizeForWinAnsi(rawInput.bill.description)
+        : "",
+      costHead: rawInput.bill.costHead
+        ? sanitizeForWinAnsi(rawInput.bill.costHead)
+        : null,
+    },
+    payment: {
+      paymentId: rawInput.payment.paymentId,
+      paidAmount: rawInput.payment.paidAmount,
+      paymentMethod: rawInput.payment.paymentMethod
+        ? sanitizeForWinAnsi(rawInput.payment.paymentMethod)
+        : null,
+      paymentReference: rawInput.payment.paymentReference
+        ? sanitizeForWinAnsi(rawInput.payment.paymentReference)
+        : null,
+      paymentNote: rawInput.payment.paymentNote
+        ? sanitizeForWinAnsi(rawInput.payment.paymentNote)
+        : null,
+      paidAt: rawInput.payment.paidAt,
+      paidByName: rawInput.payment.paidByName
+        ? sanitizeForWinAnsi(rawInput.payment.paidByName)
+        : null,
+    },
+    amountInWords: sanitizeForWinAnsi(rawInput.amountInWords),
+  };
+
   const doc = await PDFDocument.create();
   doc.setTitle(`Payment voucher ${input.bill.token}`);
   doc.setAuthor(input.company.name);
