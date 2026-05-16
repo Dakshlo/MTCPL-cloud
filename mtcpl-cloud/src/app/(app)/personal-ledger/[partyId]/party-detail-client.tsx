@@ -960,19 +960,13 @@ function ReceivedCard({
               {inr(total)}
             </strong>
           </span>
-          <Link
-            href="/personal-ledger/buckets"
-            style={{ ...BUTTON_STYLES.ghost, marginLeft: "auto", textDecoration: "none", fontSize: 12 }}
-          >
-            ⚙ Buckets
-          </Link>
           <button
             type="button"
             onClick={() => {
               setError(null);
               setShowForm(true);
             }}
-            style={{ ...BUTTON_STYLES.primary, marginLeft: 8 }}
+            style={{ ...BUTTON_STYLES.primary, marginLeft: "auto" }}
           >
             + Add receipt
           </button>

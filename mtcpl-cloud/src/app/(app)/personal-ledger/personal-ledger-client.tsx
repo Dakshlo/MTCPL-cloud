@@ -14,7 +14,6 @@
  *     Correct PIN → session cookie set + navigate to detail.
  */
 
-import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
@@ -138,11 +137,9 @@ export function PersonalLedgerClient({
           onClick={() => setAddOpen(true)}
           style={{
             ...BUTTON_STYLES.primary,
-            padding: "14px 22px",
-            fontSize: 14,
-            fontWeight: 800,
-            alignSelf: "stretch",
-            minHeight: 60,
+            padding: "9px 18px",
+            fontSize: 13,
+            alignSelf: "center",
           }}
         >
           + Add party
@@ -194,21 +191,9 @@ export function PersonalLedgerClient({
         </div>
       )}
 
-      {/* Bottom utility link — buckets management still exists but
-          isn't a primary action on this surface anymore. */}
-      <div style={{ marginTop: 18, textAlign: "right" }}>
-        <Link
-          href="/personal-ledger/buckets"
-          style={{
-            fontSize: 11,
-            color: "var(--muted)",
-            textDecoration: "none",
-            fontWeight: 600,
-          }}
-        >
-          ⚙ Manage buckets
-        </Link>
-      </div>
+      {/* Mig 056 follow-on (Daksh): manage-buckets shortcut removed
+          from the list page. Buckets are still reachable at the
+          direct URL /personal-ledger/buckets if needed. */}
 
       {/* Add-party modal */}
       <CenterModal
