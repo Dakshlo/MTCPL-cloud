@@ -630,6 +630,11 @@ function ProposedBatch({
     .reduce((s, r) => s + r.proposedAmount, 0);
 
   return (
+    <>
+      {/* Mig 053 follow-on — branded overlay while the batch
+          confirm runs. Owner sees the spinning MTCPL logo so they
+          know the click registered + the action is committing. */}
+      <FinanceLoadingOverlay show={pending} label="Confirming batch…" />
     <div
       style={{
         marginBottom: 14,
@@ -791,6 +796,7 @@ function ProposedBatch({
         </div>
       )}
     </div>
+    </>
   );
 }
 
@@ -1463,6 +1469,16 @@ function MarkPaidForm({
         return;
       }
       router.refresh();
+      // Mig 053 follow-on (Daksh): the FinanceLoadingOverlay was
+      // disappearing the moment the await above resolved — but
+      // router.refresh() kicks off an async RSC re-render that the
+      // useTransition pending state doesn't track perfectly, and the
+      // top-bar NavigationProgress kept spinning AFTER our branded
+      // overlay had already vanished. Holding here for 700ms before
+      // calling onSuccess keeps the form (and its overlay) mounted
+      // long enough to cover the refresh, so the user sees ONE
+      // continuous loading state from click to settled UI.
+      await new Promise<void>((resolve) => setTimeout(resolve, 700));
       onSuccess();
     });
   }
@@ -1732,6 +1748,10 @@ function BankRejectForm({
         return;
       }
       router.refresh();
+      // Mig 053 follow-on — same overlay-stays-mounted pattern as
+      // MarkPaidForm. Keeps the spinning logo visible until the
+      // refreshed UI is on screen.
+      await new Promise<void>((resolve) => setTimeout(resolve, 700));
       onSuccess();
     });
   }

@@ -145,13 +145,16 @@ export function AddVendorButton({
         setError(r.error);
         return;
       }
-      setOpen(false);
-      reset();
-      // Refresh the server component so the new vendor lands in the
-      // dropdown. We also pass the id via URL so the form can auto-
-      // select it.
+      // Mig 053 follow-on (Daksh): kick off the refresh BEFORE
+      // closing the modal, then hold for 700ms so the overlay
+      // covers the refresh window. Without this, the modal animated
+      // away before the new vendor populated the dropdown and the
+      // user saw a brief "empty" state.
       router.replace(`/accounts/bills/new?picked=${r.vendorId}`);
       router.refresh();
+      await new Promise<void>((resolve) => setTimeout(resolve, 700));
+      setOpen(false);
+      reset();
     });
   }
 

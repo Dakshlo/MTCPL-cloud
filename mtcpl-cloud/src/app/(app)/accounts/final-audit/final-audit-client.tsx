@@ -790,6 +790,8 @@ function FlagForm({
         return;
       }
       router.refresh();
+      // Mig 053 follow-on — keep overlay alive through the refresh.
+      await new Promise<void>((resolve) => setTimeout(resolve, 700));
       onSuccess();
     });
   }
