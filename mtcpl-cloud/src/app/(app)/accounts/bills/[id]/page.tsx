@@ -17,6 +17,7 @@ import {
 } from "../../actions";
 import { RejectBillForm } from "./reject-bill-form";
 import { ApproveBillButton } from "./approve-bill-button";
+import { BillBackLink } from "./bill-back-link";
 import { PartialRejectionForm } from "./partial-rejection-form";
 import {
   ACCOUNTS_TOKENS,
@@ -263,17 +264,13 @@ export default async function BillDetailPage({
   return (
     <section className="page-card">
       <div style={{ marginBottom: 14 }}>
-        <Link
-          href="/accounts/bills"
-          style={{
-            color: "var(--muted)",
-            textDecoration: "none",
-            fontSize: 13,
-            fontWeight: 600,
-          }}
-        >
-          ← All bills
-        </Link>
+        {/* Mig 053 follow-on — back link reads document.referrer
+            client-side and re-labels based on where the user came
+            from (Due Bills, Pay Today, Crosscheck Queue, Final
+            Audit, Vendor profile, etc.). Preserves query string so
+            filters stay intact on return. Falls back to "All bills"
+            on direct visits or external referrers. */}
+        <BillBackLink />
       </div>
 
       {sp.saved && (
