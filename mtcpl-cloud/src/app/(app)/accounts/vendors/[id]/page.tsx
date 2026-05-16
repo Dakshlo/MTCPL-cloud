@@ -58,7 +58,11 @@ export default async function BillVendorDetailPage({
   const canSeeRoyaltyNet =
     profile.role === "developer" ||
     profile.role === "owner" ||
-    profile.role === "accountant";
+    profile.role === "accountant" ||
+    // Mig 053 follow-on — final_auditor sees the royalty net + can
+    // open the private-notes modal, matching the canAccessPrivateNotes
+    // server gate.
+    profile.role === "final_auditor";
   let royaltyNet: number | null = null;
   if (canSeeRoyaltyNet) {
     const { data: royaltyRows, error: royaltyErr } = await supabase
@@ -283,11 +287,7 @@ export default async function BillVendorDetailPage({
               <summary> so clicking the lock doesn't toggle <details>. */}
           <PrivateNotesModal
             vendorId={id}
-            canShow={
-              profile.role === "developer" ||
-              profile.role === "owner" ||
-              profile.role === "accountant"
-            }
+            canShow={canSeeRoyaltyNet}
           />
         </summary>
         <div style={{ marginTop: 14 }}>

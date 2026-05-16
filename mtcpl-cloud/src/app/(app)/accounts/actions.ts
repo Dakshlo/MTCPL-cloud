@@ -1924,10 +1924,13 @@ type Profile = Awaited<ReturnType<typeof requireAuth>>["profile"];
 function canAccessPrivateNotes(p: Profile): boolean {
   // Daksh (May 2026): accountant added — they manage vendors day-to-day
   // and need parity with owner/dev access for private notes.
+  // Mig 053 follow-on: final_auditor has full accountant powers and
+  // also needs the private-notes / royalty view to do their job.
   return (
     p.role === "developer" ||
     p.role === "owner" ||
-    p.role === "accountant"
+    p.role === "accountant" ||
+    p.role === "final_auditor"
   );
 }
 
