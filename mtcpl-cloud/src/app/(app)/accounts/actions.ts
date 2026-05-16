@@ -1090,34 +1090,45 @@ export async function markPaymentPaidAction(formData: FormData): Promise<ActionR
     .eq("status", "confirmed");
   if (updErr) return { ok: false, error: updErr.message };
 
-  void Promise.all([
-    logAudit(profile.id, "payment_paid", "bill_payment", paymentId, {
-      bill_id: payment.bill_id,
-      paid_amount: paidAmount,
-      method: methodRaw,
-      reference,
-      token: billRow?.token ?? null,
-    }),
-    notify(
-      "payment_paid",
-      `Payment recorded — ₹${paidAmount.toLocaleString("en-IN")}`,
-      {
-        message: billRow?.token
-          ? `Against bill ${billRow.token}. Method: ${methodRaw.toUpperCase()}.`
-          : `Method: ${methodRaw.toUpperCase()}.`,
-        entityType: "bill_payment",
-        entityId: paymentId,
-        actorId: profile.id,
-        targetRoles: ["owner", "developer"],
-      },
-    ),
-    // Mig 050 follow-on (Daksh, May 2026): send the vendor an
-    // email with the payment voucher attached as PDF. Fire-and-
-    // forget — if email fails, payment is still successfully
-    // marked paid. Helper silently no-ops if RESEND_API_KEY is
-    // missing, so the system works without the email config too.
-    sendVendorPaymentEmail(paymentId, payment.bill_id as string, profile.id),
-  ]).catch((e) => console.warn("[markPaymentPaidAction] cleanup failed", e));
+  // Mig 053 follow-on (Daksh, May 2026): the original `void
+  // Promise.all([...])` fire-and-forget pattern silently killed the
+  // email + audit on Vercel — serverless functions terminate the
+  // request handler as soon as `return` fires, and any unawaited
+  // promise dies with it. Now we AWAIT the cleanup work so logs +
+  // emails actually run to completion. Adds ~300–800ms to Mark Paid
+  // (PDF gen + Resend HTTP) but guarantees the audit row + the
+  // vendor email both happen, and any failure is observable.
+  try {
+    await Promise.all([
+      logAudit(profile.id, "payment_paid", "bill_payment", paymentId, {
+        bill_id: payment.bill_id,
+        paid_amount: paidAmount,
+        method: methodRaw,
+        reference,
+        token: billRow?.token ?? null,
+      }),
+      notify(
+        "payment_paid",
+        `Payment recorded — ₹${paidAmount.toLocaleString("en-IN")}`,
+        {
+          message: billRow?.token
+            ? `Against bill ${billRow.token}. Method: ${methodRaw.toUpperCase()}.`
+            : `Method: ${methodRaw.toUpperCase()}.`,
+          entityType: "bill_payment",
+          entityId: paymentId,
+          actorId: profile.id,
+          targetRoles: ["owner", "developer"],
+        },
+      ),
+      sendVendorPaymentEmail(paymentId, payment.bill_id as string, profile.id),
+    ]);
+  } catch (e) {
+    // Cleanup failures must NOT bubble up — the payment is already
+    // marked paid in the DB. Log + move on. The audit + email helpers
+    // both internally catch their own errors; this catch is a final
+    // safety net for the Promise.all wrapper itself.
+    console.warn("[markPaymentPaidAction] cleanup failed", e);
+  }
 
   await refreshAccountsPaths();
   return { ok: true };
