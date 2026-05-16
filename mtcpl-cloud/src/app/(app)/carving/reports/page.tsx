@@ -38,6 +38,21 @@ export default async function CncMonthlyReportPage({ searchParams }: { searchPar
 
   return (
     <div style={{ paddingBottom: 32 }}>
+      {/* Mig 053 follow-on (Daksh): this report has a lot of
+          columns (one per CNC machine, sometimes split into SFT +
+          CFT pairs). The global .page-content cap of 1400px was
+          leaving empty space on the right on wider monitors.
+          Override the cap just for this page — the JSX <style>
+          element unmounts with the component, so it's effectively
+          scoped to this route without polluting the rest of the
+          app. */}
+      <style>{`
+        .page-content {
+          max-width: none !important;
+          padding-left: 16px !important;
+          padding-right: 16px !important;
+        }
+      `}</style>
       <Header report={report} year={year} month={month} xlsxHref={xlsxHref} />
       <ReportTable report={report} />
     </div>
