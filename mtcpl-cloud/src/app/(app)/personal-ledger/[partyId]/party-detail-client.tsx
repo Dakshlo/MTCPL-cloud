@@ -1491,38 +1491,91 @@ function SummaryCard({
                 })}
               </tbody>
               <tfoot>
+                {/* Mig 056 follow-on (Daksh: "subtotal rows look
+                    confusing with the totals"). Tinted footer
+                    background visually separates the per-bucket
+                    breakdown from the data rows above, and the
+                    grand-total row gets a fully solid green band
+                    so it stands apart from the subtotal block. */}
+                <tr>
+                  <td
+                    colSpan={4}
+                    style={{
+                      padding: "10px 12px 4px",
+                      fontSize: 10,
+                      fontWeight: 800,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.1em",
+                      color: "var(--muted)",
+                      borderTop: `2px solid ${ACCOUNTS_TOKENS.border}`,
+                      background: ACCOUNTS_TOKENS.surfaceMuted,
+                    }}
+                  >
+                    Received · split by bucket
+                  </td>
+                </tr>
                 {byBucket.map((b) => {
                   const pal = bucketPalette(b.label);
                   return (
-                    <tr key={`subtotal-${b.label}`} style={{ borderTop: `1px dashed ${ACCOUNTS_TOKENS.border}` }}>
-                      <td colSpan={3} style={{ ...ledgerTdStyle, color: "var(--muted)", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                        Subtotal ·{" "}
+                    <tr
+                      key={`subtotal-${b.label}`}
+                      style={{ background: ACCOUNTS_TOKENS.surfaceMuted }}
+                    >
+                      <td style={{ ...ledgerTdStyle, color: "var(--muted)", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                        Subtotal
+                      </td>
+                      <td style={ledgerTdStyle}>
                         <span
                           style={{
-                            display: "inline-block",
-                            marginLeft: 4,
-                            padding: "1px 8px",
+                            fontSize: 10,
+                            fontWeight: 800,
+                            padding: "2px 10px",
                             background: pal.bg,
                             color: pal.fg,
                             borderRadius: 999,
                             fontFamily: "ui-monospace, monospace",
-                            fontWeight: 800,
+                            letterSpacing: "0.04em",
                           }}
                         >
                           {b.label}
                         </span>
                       </td>
-                      <td style={{ ...ledgerTdStyle, textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 700, color: pal.fg }}>
+                      <td style={ledgerTdStyle}></td>
+                      <td style={{ ...ledgerTdStyle, textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800, color: pal.fg, fontSize: 13 }}>
                         {inr(b.total)}
                       </td>
                     </tr>
                   );
                 })}
-                <tr style={{ borderTop: `2px solid ${ACCOUNTS_TOKENS.success}` }}>
-                  <td colSpan={3} style={{ ...ledgerTdStyle, fontWeight: 800, color: ACCOUNTS_TOKENS.success, textTransform: "uppercase", letterSpacing: "0.06em", fontSize: 11 }}>
+                <tr
+                  style={{
+                    background: ACCOUNTS_TOKENS.success,
+                    color: "#fff",
+                  }}
+                >
+                  <td
+                    colSpan={3}
+                    style={{
+                      padding: "12px 12px",
+                      fontWeight: 900,
+                      color: "#fff",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                      fontSize: 12,
+                    }}
+                  >
                     Total received
                   </td>
-                  <td style={{ ...ledgerTdStyle, textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 900, color: ACCOUNTS_TOKENS.success, fontSize: 14 }}>
+                  <td
+                    style={{
+                      padding: "12px 12px",
+                      textAlign: "right",
+                      fontFamily: "ui-monospace, monospace",
+                      fontWeight: 900,
+                      color: "#fff",
+                      fontSize: 16,
+                    }}
+                  >
                     {inr(receivedTotal)}
                   </td>
                 </tr>
