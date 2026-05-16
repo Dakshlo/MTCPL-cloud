@@ -14,12 +14,12 @@ import { notFound, redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUsePersonalLedger } from "@/lib/personal-ledger-permissions";
+import { ensureDefaultBucketsForOwner } from "@/lib/personal-ledger-seed";
 import {
   addInvoiceAction,
   addReceiptAction,
   cancelInvoiceAction,
   cancelReceiptAction,
-  ensureDefaultBucketsAction,
 } from "../actions";
 import {
   PartyDetailClient,
@@ -40,8 +40,11 @@ export default async function PartyDetailPage({
   const supabase = createAdminSupabaseClient();
 
   // Auto-seed default buckets (B / C) on first visit if the user
-  // has none. The action is idempotent — no-op when already seeded.
-  await ensureDefaultBucketsAction();
+  // has none. Plain lib helper — safe to call during render. The
+  // earlier server-action variant called revalidatePath() which is
+  // not allowed inside a Server Component render path and was
+  // throwing on every party-detail load.
+  await ensureDefaultBucketsForOwner(profile.id);
 
   const [
     { data: party },
@@ -55,11 +58,13 @@ export default async function PartyDetailPage({
       .eq("id", partyId)
       .eq("owner_profile_id", profile.id)
       .maybeSingle(),
+    // Pull ALL buckets (live + archived) so historical receipts can
+    // still resolve their bucket label even if the bucket was later
+    // archived. The receipt-form picker filters down to live only.
     supabase
       .from("personal_ledger_buckets")
-      .select("id, label, sort_order")
+      .select("id, label, sort_order, archived_at")
       .eq("owner_profile_id", profile.id)
-      .is("archived_at", null)
       .order("sort_order"),
     supabase
       .from("personal_ledger_invoices")
@@ -67,9 +72,13 @@ export default async function PartyDetailPage({
       .eq("party_id", partyId)
       .eq("owner_profile_id", profile.id)
       .order("invoice_date", { ascending: false }),
+    // No PostgREST embed for the bucket relationship — we'd hit the
+    // schema-cache race ("Could not find a relationship between …")
+    // when PostgREST hasn't reloaded after migration 055 yet. Resolve
+    // labels in JS using the buckets list above.
     supabase
       .from("personal_ledger_receipts")
-      .select("id, bucket_id, amount, receipt_date, note, created_at, cancelled_at, personal_ledger_buckets(label)")
+      .select("id, bucket_id, amount, receipt_date, note, created_at, cancelled_at")
       .eq("party_id", partyId)
       .eq("owner_profile_id", profile.id)
       .order("receipt_date", { ascending: false }),
@@ -77,10 +86,18 @@ export default async function PartyDetailPage({
 
   if (!party) notFound();
 
-  const bucketOptions: BucketOption[] = ((buckets ?? []) as Array<{
+  type BucketDbRow = {
     id: string;
     label: string;
-  }>).map((b) => ({ id: b.id, label: b.label }));
+    sort_order: number;
+    archived_at: string | null;
+  };
+  const allBuckets = ((buckets ?? []) as BucketDbRow[]);
+  const bucketOptions: BucketOption[] = allBuckets
+    .filter((b) => !b.archived_at)
+    .map((b) => ({ id: b.id, label: b.label }));
+  const bucketLabelById = new Map<string, string>();
+  for (const b of allBuckets) bucketLabelById.set(b.id, b.label);
 
   // Filter cancelled rows out for the visible lists + totals.
   type InvRaw = {
@@ -117,27 +134,18 @@ export default async function PartyDetailPage({
     note: string | null;
     created_at: string;
     cancelled_at: string | null;
-    personal_ledger_buckets: { label: string } | { label: string }[] | null;
   };
   const receipts: ReceiptRow[] = ((receiptsRaw ?? []) as RcvRaw[])
     .filter((r) => !r.cancelled_at)
-    .map((r) => {
-      const embedded = r.personal_ledger_buckets;
-      const bucketLabel = embedded
-        ? Array.isArray(embedded)
-          ? embedded[0]?.label ?? "—"
-          : embedded.label
-        : "—";
-      return {
-        id: r.id,
-        bucketId: r.bucket_id,
-        bucketLabel,
-        amount: Number(r.amount ?? 0),
-        receiptDate: r.receipt_date,
-        note: r.note,
-        createdAt: r.created_at,
-      };
-    });
+    .map((r) => ({
+      id: r.id,
+      bucketId: r.bucket_id,
+      bucketLabel: bucketLabelById.get(r.bucket_id) ?? "—",
+      amount: Number(r.amount ?? 0),
+      receiptDate: r.receipt_date,
+      note: r.note,
+      createdAt: r.created_at,
+    }));
 
   return (
     <PartyDetailClient

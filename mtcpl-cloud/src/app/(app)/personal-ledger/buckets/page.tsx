@@ -15,10 +15,10 @@ import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUsePersonalLedger } from "@/lib/personal-ledger-permissions";
+import { ensureDefaultBucketsForOwner } from "@/lib/personal-ledger-seed";
 import {
   addBucketAction,
   archiveBucketAction,
-  ensureDefaultBucketsAction,
   renameBucketAction,
 } from "../actions";
 import { BucketsClient, type BucketRow } from "./buckets-client";
@@ -27,9 +27,11 @@ export default async function BucketsPage() {
   const { profile } = await requireAuth();
   if (!canUsePersonalLedger(profile)) redirect("/");
 
-  // Auto-seed defaults ("B" + "C") on first visit. Idempotent — no
-  // op once the user has any buckets at all.
-  await ensureDefaultBucketsAction();
+  // Auto-seed defaults ("B" + "C") on first visit. Plain lib helper
+  // (not the server action) — calling a "use server" action from a
+  // Server Component triggers Next.js's revalidate machinery during
+  // render and throws.
+  await ensureDefaultBucketsForOwner(profile.id);
 
   const supabase = createAdminSupabaseClient();
   const { data: rows } = await supabase

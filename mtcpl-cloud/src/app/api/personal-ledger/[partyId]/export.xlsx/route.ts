@@ -57,7 +57,6 @@ type ReceiptRowDb = {
   note: string | null;
   created_at: string;
   bucket_id: string;
-  personal_ledger_buckets: { label: string } | { label: string }[] | null;
 };
 
 function todayIso(): string {
@@ -108,30 +107,40 @@ async function handleExport(_req: NextRequest, ctx: RouteContext) {
 
   const supabase = createAdminSupabaseClient();
 
-  // Confirm party belongs to caller, then pull invoices + receipts.
-  const [{ data: party }, { data: invoicesRaw }, { data: receiptsRaw }] =
-    await Promise.all([
-      supabase
-        .from("personal_ledger_parties")
-        .select("id, name")
-        .eq("id", partyId)
-        .eq("owner_profile_id", profile.id)
-        .maybeSingle(),
-      supabase
-        .from("personal_ledger_invoices")
-        .select("id, invoice_no, invoice_date, items_json, subtotal, gst_amount, total, notes, created_at")
-        .eq("party_id", partyId)
-        .eq("owner_profile_id", profile.id)
-        .is("cancelled_at", null)
-        .order("invoice_date", { ascending: true }),
-      supabase
-        .from("personal_ledger_receipts")
-        .select("id, amount, receipt_date, note, created_at, bucket_id, personal_ledger_buckets(label)")
-        .eq("party_id", partyId)
-        .eq("owner_profile_id", profile.id)
-        .is("cancelled_at", null)
-        .order("receipt_date", { ascending: true }),
-    ]);
+  // Confirm party belongs to caller, then pull invoices + receipts
+  // + buckets (separate query so we don't depend on PostgREST's
+  // relational-embed schema cache for the new mig-055 FK).
+  const [
+    { data: party },
+    { data: bucketsRaw },
+    { data: invoicesRaw },
+    { data: receiptsRaw },
+  ] = await Promise.all([
+    supabase
+      .from("personal_ledger_parties")
+      .select("id, name")
+      .eq("id", partyId)
+      .eq("owner_profile_id", profile.id)
+      .maybeSingle(),
+    supabase
+      .from("personal_ledger_buckets")
+      .select("id, label")
+      .eq("owner_profile_id", profile.id),
+    supabase
+      .from("personal_ledger_invoices")
+      .select("id, invoice_no, invoice_date, items_json, subtotal, gst_amount, total, notes, created_at")
+      .eq("party_id", partyId)
+      .eq("owner_profile_id", profile.id)
+      .is("cancelled_at", null)
+      .order("invoice_date", { ascending: true }),
+    supabase
+      .from("personal_ledger_receipts")
+      .select("id, amount, receipt_date, note, created_at, bucket_id")
+      .eq("party_id", partyId)
+      .eq("owner_profile_id", profile.id)
+      .is("cancelled_at", null)
+      .order("receipt_date", { ascending: true }),
+  ]);
 
   if (!party) {
     return NextResponse.json(
@@ -143,6 +152,10 @@ async function handleExport(_req: NextRequest, ctx: RouteContext) {
   const partyName = (party as { name: string }).name;
   const invoices = (invoicesRaw ?? []) as InvoiceRowDb[];
   const receipts = (receiptsRaw ?? []) as ReceiptRowDb[];
+  const bucketLabelById = new Map<string, string>();
+  for (const b of (bucketsRaw ?? []) as Array<{ id: string; label: string }>) {
+    bucketLabelById.set(b.id, b.label);
+  }
 
   // ── Sheet 1: Invoices ─────────────────────────────────────────────
   //
@@ -224,20 +237,12 @@ async function handleExport(_req: NextRequest, ctx: RouteContext) {
   // ── Sheet 2: Receipts ─────────────────────────────────────────────
   const receivedTotal = receipts.reduce((s, r) => s + Number(r.amount ?? 0), 0);
   const receiptRows: Array<Record<string, string | number>> = receipts.map(
-    (r) => {
-      const embedded = r.personal_ledger_buckets;
-      const bucketLabel = embedded
-        ? Array.isArray(embedded)
-          ? embedded[0]?.label ?? "—"
-          : embedded.label
-        : "—";
-      return {
-        "Date": r.receipt_date,
-        "Bucket": bucketLabel,
-        "Amount (₹)": Number(r.amount ?? 0),
-        "Note": r.note ?? "",
-      };
-    },
+    (r) => ({
+      "Date": r.receipt_date,
+      "Bucket": bucketLabelById.get(r.bucket_id) ?? "—",
+      "Amount (₹)": Number(r.amount ?? 0),
+      "Note": r.note ?? "",
+    }),
   );
   if (receiptRows.length === 0) {
     receiptRows.push({
@@ -261,12 +266,7 @@ async function handleExport(_req: NextRequest, ctx: RouteContext) {
   // Cash: ₹3,000" breakdown alongside the combined total + outstanding.
   const byBucket = new Map<string, number>();
   for (const r of receipts) {
-    const embedded = r.personal_ledger_buckets;
-    const label = embedded
-      ? Array.isArray(embedded)
-        ? embedded[0]?.label ?? "—"
-        : embedded.label
-      : "—";
+    const label = bucketLabelById.get(r.bucket_id) ?? "—";
     byBucket.set(label, (byBucket.get(label) ?? 0) + Number(r.amount ?? 0));
   }
   const summaryRows: Array<Record<string, string | number>> = [
