@@ -597,7 +597,7 @@ export function PrivateNotesModal({
                       color="#b91c1c"
                     />
                     <SummaryStat
-                      label="Given (+)"
+                      label="Paid (+)"
                       value={royaltyGiven}
                       color="#15803d"
                     />
@@ -629,7 +629,7 @@ export function PrivateNotesModal({
                       style={{ ...INPUT_STYLE, fontFamily: "inherit", padding: "7px 10px" }}
                     >
                       <option value="received">Received (−)</option>
-                      <option value="given">Given (+)</option>
+                      <option value="given">Paid (+)</option>
                     </select>
                     <input
                       type="number"
@@ -677,7 +677,7 @@ export function PrivateNotesModal({
                       onCancel={handleCancelRoyaltyEntry}
                     />
                     <RoyaltyColumn
-                      title="GIVEN  (+)"
+                      title="PAID  (+)"
                       color="#15803d"
                       bg="rgba(34, 197, 94, 0.06)"
                       border="rgba(34, 197, 94, 0.30)"

@@ -2316,7 +2316,13 @@ export async function getVendorRoyaltyEntriesAction(
     if (r.entry_type === "received") receivedTotal += v;
     else if (r.entry_type === "given") givenTotal += v;
   }
-  const netBalance = receivedTotal - givenTotal;
+  // Mig 053 follow-on (Daksh, May 2026): the parens-labels read
+  //   Received (−)  ·  Paid (+)
+  // so the net balance MUST be paid − received to match what the
+  // sign on each row says. The earlier formula (received − paid)
+  // inverted the convention — when you'd paid 10 and received 0
+  // it showed -10 instead of +10.
+  const netBalance = givenTotal - receivedTotal;
 
   void logAudit(
     profile.id,
