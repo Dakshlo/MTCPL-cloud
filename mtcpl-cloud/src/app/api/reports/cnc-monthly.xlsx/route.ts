@@ -69,74 +69,98 @@ function fmtCell(n: number): number | string {
 }
 
 export async function GET(req: NextRequest) {
-  await requireAuth(["developer", "owner", "carving_head"]);
+  // Mig 054 follow-on (Daksh): wrap the whole handler in a try/catch
+  // so any failure surfaces a readable text error instead of the
+  // bare Next.js "Internal Server Error" page. Vercel logs were
+  // hiding the actual stack trace; this echoes it back to the
+  // caller (HTTP 500 with text body) so we can diagnose without
+  // digging through the Vercel dashboard.
+  try {
+    await requireAuth(["developer", "owner", "carving_head"]);
 
-  const { searchParams } = new URL(req.url);
-  // Mig 053 follow-on (Daksh): generalized to daily / weekly /
-  // monthly via the shared cncPeriodFromSearch helper. Builds the
-  // same params bag the page server component reads from.
-  const paramsBag: Record<string, string> = {};
-  for (const [k, v] of searchParams.entries()) paramsBag[k] = v;
-  const period = cncPeriodFromSearch(paramsBag);
-  const report = await buildCncReport(period);
+    const { searchParams } = new URL(req.url);
+    // Mig 053 follow-on (Daksh): generalized to daily / weekly /
+    // monthly via the shared cncPeriodFromSearch helper. Builds the
+    // same params bag the page server component reads from.
+    const paramsBag: Record<string, string> = {};
+    for (const [k, v] of searchParams.entries()) paramsBag[k] = v;
+    const period = cncPeriodFromSearch(paramsBag);
+    const report = await buildCncReport(period);
 
-  const { aoa, layout } = buildSheet(report);
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const { aoa, layout } = buildSheet(report);
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
 
-  // Column widths — date column wide, numeric columns mid.
-  ws["!cols"] = [
-    { wch: 14 },
-    ...report.machines.flatMap((m) =>
-      m.showSqft ? [{ wch: 9 }, { wch: 9 }] : [{ wch: 9 }],
-    ),
-  ];
+    // Column widths — date column wide, numeric columns mid.
+    ws["!cols"] = [
+      { wch: 14 },
+      ...report.machines.flatMap((m) =>
+        m.showSqft ? [{ wch: 9 }, { wch: 9 }] : [{ wch: 9 }],
+      ),
+    ];
 
-  // Set a slightly taller header row for the operator + machine rows
-  // (so the colour banding is easy to spot).
-  ws["!rows"] = [];
-  for (let r = 0; r < aoa.length; r++) {
-    if (r === 0) ws["!rows"][r] = { hpx: 28 }; // title
-    else if (r === layout.operatorRow) ws["!rows"][r] = { hpx: 22 };
-    else if (r === layout.machineRow) ws["!rows"][r] = { hpx: 22 };
-    else if (r === layout.unitRow) ws["!rows"][r] = { hpx: 18 };
-    else ws["!rows"][r] = { hpx: 16 };
+    // Set a slightly taller header row for the operator + machine
+    // rows (so the colour banding is easy to spot).
+    ws["!rows"] = [];
+    for (let r = 0; r < aoa.length; r++) {
+      if (r === 0) ws["!rows"][r] = { hpx: 28 }; // title
+      else if (r === layout.operatorRow) ws["!rows"][r] = { hpx: 22 };
+      else if (r === layout.machineRow) ws["!rows"][r] = { hpx: 22 };
+      else if (r === layout.unitRow) ws["!rows"][r] = { hpx: 18 };
+      else ws["!rows"][r] = { hpx: 16 };
+    }
+
+    // Merge ranges for the operator + machine header rows.
+    ws["!merges"] = buildMerges(report, layout);
+
+    // Mig 053 follow-on (Daksh) — apply per-cell styling so the
+    // Excel download matches the on-screen visual identity.
+    applyStyles(ws, report, layout);
+
+    const wb = XLSX.utils.book_new();
+    // Excel sheet names are capped at 31 chars + can't include
+    // certain glyphs. Use a short period code that's always safe.
+    const sheetName = sheetNameForPeriod(period);
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+
+    // Mig 054 follow-on — xlsx-js-style returns either a Buffer or
+    // Uint8Array depending on the runtime. Normalise to Uint8Array
+    // so the Response constructor (Node 20 / undici) doesn't choke
+    // on a NodeJS Buffer in some serverless environments.
+    const writeOut = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as
+      | ArrayBuffer
+      | Uint8Array;
+    const body =
+      writeOut instanceof Uint8Array ? writeOut : new Uint8Array(writeOut);
+
+    const filename = `MTCPL_CNC_${filenameSlugForPeriod(period)}.xlsx`;
+    // Cast through BodyInit — Uint8Array is a valid BodyInit at
+    // runtime but TS's lib.dom types narrow to a subset that misses
+    // it on some Node versions.
+    return new Response(body as unknown as BodyInit, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Cache-Control": "no-store",
+      },
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const stack =
+      e instanceof Error && e.stack
+        ? e.stack.split("\n").slice(0, 6).join("\n")
+        : "";
+    // Log to Vercel runtime logs AND surface to the caller — so
+    // debugging the next 500 doesn't require dashboard access.
+    console.error("[cnc-monthly.xlsx] failed:", msg, "\n", stack);
+    return new Response(
+      `CNC monthly Excel generation failed.\n\n${msg}\n\n${stack}`,
+      {
+        status: 500,
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
+      },
+    );
   }
-
-  // Merge ranges for the operator + machine header rows.
-  ws["!merges"] = buildMerges(report, layout);
-
-  // Mig 053 follow-on (Daksh) — apply per-cell styling so the Excel
-  // download matches the on-screen visual identity.
-  applyStyles(ws, report, layout);
-
-  const wb = XLSX.utils.book_new();
-  // Excel sheet names are capped at 31 chars + can't include certain
-  // glyphs. Use a short period code that's always safe.
-  const sheetName = sheetNameForPeriod(period);
-  XLSX.utils.book_append_sheet(wb, ws, sheetName);
-
-  // Mig 054 follow-on — xlsx-js-style returns either a Buffer or
-  // Uint8Array depending on the runtime. Normalise to Uint8Array
-  // so the Response constructor (Node 20 / undici) doesn't choke
-  // on a NodeJS Buffer in some serverless environments.
-  const writeOut = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as
-    | ArrayBuffer
-    | Uint8Array;
-  const body =
-    writeOut instanceof Uint8Array ? writeOut : new Uint8Array(writeOut);
-
-  const filename = `MTCPL_CNC_${filenameSlugForPeriod(period)}.xlsx`;
-  // Cast through BodyInit — Uint8Array is a valid BodyInit at
-  // runtime but TS's lib.dom types narrow to a subset that misses
-  // it on some Node versions.
-  return new Response(body as unknown as BodyInit, {
-    status: 200,
-    headers: {
-      "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "Content-Disposition": `attachment; filename="${filename}"`,
-      "Cache-Control": "no-store",
-    },
-  });
 }
 
 function sheetNameForPeriod(p: { kind: string; label: string }): string {

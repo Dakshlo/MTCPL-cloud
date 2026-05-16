@@ -8,6 +8,14 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "5mb",
     },
   },
+  // Mig 054 follow-on (Daksh): xlsx-js-style + xlsx use Node-only
+  // APIs (Buffer, fs guards, dynamic requires) that Next's bundler
+  // can't reliably package into serverless functions on Vercel.
+  // Marking them external tells Next to require() them from
+  // node_modules at request time — same approach Next docs
+  // recommend for `xlsx`, `puppeteer`, `sharp`, etc. Fixes the
+  // 500 on /api/reports/cnc-monthly.xlsx in production.
+  serverExternalPackages: ["xlsx-js-style", "xlsx"],
 };
 
 /**
