@@ -10,11 +10,16 @@
  * query. Hard "PERSONAL — NOT COMPANY BOOKS" banner.
  */
 
+import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUsePersonalLedger } from "@/lib/personal-ledger-permissions";
 import { ensureDefaultBucketsForOwner } from "@/lib/personal-ledger-seed";
+import {
+  unlockCookieName,
+  verifyUnlockToken,
+} from "@/lib/personal-ledger-party-auth";
 import {
   addInvoiceAction,
   addReceiptAction,
@@ -38,6 +43,28 @@ export default async function PartyDetailPage({
 
   const { partyId } = await params;
   const supabase = createAdminSupabaseClient();
+
+  // Mig 056 — gate on the unlock cookie BEFORE we fetch any party
+  // data. If the party has a PIN and the caller doesn't have a
+  // valid unlock cookie, redirect back to the list (which renders
+  // the unlock modal). Parties without a PIN are also redirected
+  // so the user is forced to set one through the list-page modal.
+  const { data: gateRow } = await supabase
+    .from("personal_ledger_parties")
+    .select("id, entry_pin_hash")
+    .eq("id", partyId)
+    .eq("owner_profile_id", profile.id)
+    .maybeSingle();
+  if (!gateRow) notFound();
+  const cookieStore = await cookies();
+  const unlockToken = cookieStore.get(unlockCookieName(partyId))?.value;
+  const unlocked = verifyUnlockToken(unlockToken, profile.id, partyId);
+  if (!unlocked) {
+    // Redirect to list — list shows the unlock modal automatically
+    // when the user clicks the locked party. We pass ?unlock=<id>
+    // so the client can pop the modal directly on landing.
+    redirect(`/personal-ledger?unlock=${partyId}`);
+  }
 
   // Auto-seed default buckets (B / C) on first visit if the user
   // has none. Plain lib helper — safe to call during render. The

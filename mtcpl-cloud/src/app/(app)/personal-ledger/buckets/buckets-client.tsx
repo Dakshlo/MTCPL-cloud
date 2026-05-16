@@ -80,30 +80,8 @@ export function BucketsClient({
     <section className="page-card">
       <FinanceLoadingOverlay show={pending} label="Saving bucket…" />
 
-      {/* PERSONAL banner */}
-      <div
-        style={{
-          marginBottom: 16,
-          padding: "10px 14px",
-          background: "linear-gradient(135deg, #fef3c7 0%, #fce7f3 100%)",
-          border: "2px solid #d97706",
-          borderRadius: 10,
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          fontSize: 12,
-          fontWeight: 700,
-          color: "#7c2d12",
-          letterSpacing: "0.04em",
-          textTransform: "uppercase",
-        }}
-      >
-        <span style={{ fontSize: 16 }}>📓</span>
-        <span>Personal ledger · NOT company books</span>
-        <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 600, textTransform: "none", color: "#92400e" }}>
-          Buckets · audit-logged
-        </span>
-      </div>
+      {/* Mig 056 — PERSONAL banner removed per Daksh (banner pass
+          across the whole personal-ledger surface). */}
 
       {/* Header */}
       <header

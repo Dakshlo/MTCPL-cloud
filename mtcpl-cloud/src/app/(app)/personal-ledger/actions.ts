@@ -8,13 +8,25 @@
  *   2. DB writes scoped to owner_profile_id = profile.id (insert
  *      sets it; every UPDATE / DELETE includes it in WHERE)
  *   3. audit_logs entry prefixed `personal_ledger_*`
+ *
+ * Mig 056 follow-on — per-party 4-digit PIN: addPartyAction now
+ * accepts a `pin` field (required for new parties), setPartyPinAction
+ * lets users set / change a party's PIN, and verifyPartyPinAction
+ * checks the PIN and issues a session unlock cookie.
  */
 
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
 import { canUsePersonalLedger } from "@/lib/personal-ledger-permissions";
+import {
+  buildUnlockToken,
+  hashPin,
+  unlockCookieName,
+  verifyPin,
+} from "@/lib/personal-ledger-party-auth";
 
 type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -43,13 +55,23 @@ export async function addPartyAction(formData: FormData): Promise<ActionResult> 
     return { ok: false, error: "Personal ledger access denied." };
   }
   const name = txt(formData, "name");
+  const pin = txt(formData, "pin");
   if (!name) return { ok: false, error: "Party name required." };
   if (name.length > 200) return { ok: false, error: "Name too long (max 200)." };
+  // Mig 056 — PIN required on every new party. 4 digits only.
+  if (!/^\d{4}$/.test(pin)) {
+    return { ok: false, error: "Enter a 4-digit PIN." };
+  }
 
+  const pinHash = await hashPin(pin);
   const supabase = createAdminSupabaseClient();
   const { data: row, error } = await supabase
     .from("personal_ledger_parties")
-    .insert({ owner_profile_id: profile.id, name })
+    .insert({
+      owner_profile_id: profile.id,
+      name,
+      entry_pin_hash: pinHash,
+    })
     .select("id")
     .single();
   if (error) return { ok: false, error: error.message };
@@ -59,9 +81,123 @@ export async function addPartyAction(formData: FormData): Promise<ActionResult> 
     "personal_ledger_party_added",
     "personal_ledger_party",
     row.id,
-    { name },
+    // Never log the PIN. Only log that a PIN was set at creation.
+    { name, pin_set: true },
   );
   refreshLedgerPaths(row.id);
+  return { ok: true };
+}
+
+/** Mig 056 — set or replace the PIN for an existing party. Used
+ *  for the legacy "BN" party that pre-dates the PIN requirement,
+ *  and for any future "change my PIN" UI. */
+export async function setPartyPinAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canUsePersonalLedger(profile)) {
+    return { ok: false, error: "Personal ledger access denied." };
+  }
+  const id = txt(formData, "id");
+  const pin = txt(formData, "pin");
+  if (!id) return { ok: false, error: "Missing party id." };
+  if (!/^\d{4}$/.test(pin)) {
+    return { ok: false, error: "Enter a 4-digit PIN." };
+  }
+
+  const pinHash = await hashPin(pin);
+  const supabase = createAdminSupabaseClient();
+  const { data: updated, error } = await supabase
+    .from("personal_ledger_parties")
+    .update({ entry_pin_hash: pinHash })
+    .eq("id", id)
+    .eq("owner_profile_id", profile.id)
+    .select("id")
+    .maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!updated) return { ok: false, error: "Party not found or not yours." };
+
+  // Immediately issue an unlock cookie so the user doesn't have to
+  // re-type the PIN they JUST set.
+  const cookieStore = await cookies();
+  cookieStore.set({
+    name: unlockCookieName(id),
+    value: buildUnlockToken(profile.id, id),
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    // No maxAge / expires → session cookie → clears on browser close.
+  });
+
+  void logAudit(
+    profile.id,
+    "personal_ledger_party_pin_set",
+    "personal_ledger_party",
+    id,
+    { pin_set: true },
+  );
+  refreshLedgerPaths(id);
+  return { ok: true };
+}
+
+/** Mig 056 — verify a party PIN. On success, sets a session
+ *  unlock cookie scoped to (profile, party). */
+export async function verifyPartyPinAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canUsePersonalLedger(profile)) {
+    return { ok: false, error: "Personal ledger access denied." };
+  }
+  const id = txt(formData, "id");
+  const pin = txt(formData, "pin");
+  if (!id) return { ok: false, error: "Missing party id." };
+  if (!/^\d{4}$/.test(pin)) {
+    return { ok: false, error: "Enter a 4-digit PIN." };
+  }
+
+  const supabase = createAdminSupabaseClient();
+  const { data: row, error } = await supabase
+    .from("personal_ledger_parties")
+    .select("id, entry_pin_hash")
+    .eq("id", id)
+    .eq("owner_profile_id", profile.id)
+    .maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!row) return { ok: false, error: "Party not found or not yours." };
+
+  const stored = (row as { entry_pin_hash: string | null }).entry_pin_hash;
+  if (!stored) {
+    return { ok: false, error: "This party has no PIN set yet." };
+  }
+  const ok = await verifyPin(pin, stored);
+  if (!ok) {
+    void logAudit(
+      profile.id,
+      "personal_ledger_party_pin_failed",
+      "personal_ledger_party",
+      id,
+      {},
+    );
+    return { ok: false, error: "PIN doesn't match." };
+  }
+
+  const cookieStore = await cookies();
+  cookieStore.set({
+    name: unlockCookieName(id),
+    value: buildUnlockToken(profile.id, id),
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+  });
+
+  void logAudit(
+    profile.id,
+    "personal_ledger_party_unlocked",
+    "personal_ledger_party",
+    id,
+    {},
+  );
   return { ok: true };
 }
 

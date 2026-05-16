@@ -23,6 +23,7 @@ import {
   Money,
   VendorAvatar,
 } from "../../accounts/_ui/components";
+import { CenterModal } from "../_ui/center-modal";
 
 export type BucketOption = { id: string; label: string };
 
@@ -153,30 +154,10 @@ export function PartyDetailClient({
 
   return (
     <section className="page-card">
-      {/* PERSONAL banner */}
-      <div
-        style={{
-          marginBottom: 16,
-          padding: "10px 14px",
-          background: "linear-gradient(135deg, #fef3c7 0%, #fce7f3 100%)",
-          border: "2px solid #d97706",
-          borderRadius: 10,
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          fontSize: 12,
-          fontWeight: 700,
-          color: "#7c2d12",
-          letterSpacing: "0.04em",
-          textTransform: "uppercase",
-        }}
-      >
-        <span style={{ fontSize: 16 }}>📓</span>
-        <span>Personal ledger · NOT company books</span>
-        <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 600, textTransform: "none", color: "#92400e" }}>
-          Owner-scoped · audit-logged
-        </span>
-      </div>
+      {/* Mig 056 — PERSONAL banner removed per Daksh. Surface is
+          already PIN-gated and the sidebar entry-point labels this
+          as "Personal — not company books"; the in-page banner was
+          redundant. */}
 
       {/* Header */}
       <header
@@ -369,20 +350,29 @@ function InvoicesCard({
         </span>
         <button
           type="button"
-          onClick={() => setShowForm((s) => !s)}
+          onClick={() => setShowForm(true)}
           style={{ ...BUTTON_STYLES.primary, marginLeft: "auto" }}
         >
-          {showForm ? "Close" : "+ New invoice"}
+          + New invoice
         </button>
       </div>
 
-      {showForm && (
+      {/* Mig 056 — new-invoice form lives inside a center-peek
+          modal now (Daksh: "do same like center peek"). Backdrop
+          + Esc close. */}
+      <CenterModal
+        open={showForm}
+        onClose={() => setShowForm(false)}
+        title="New invoice"
+        icon="📄"
+        maxWidth={760}
+      >
         <NewInvoiceForm
           partyId={partyId}
           addAction={addAction}
           onClose={() => setShowForm(false)}
         />
-      )}
+      </CenterModal>
 
       {invoices.length === 0 ? (
         <div
@@ -897,6 +887,7 @@ function ReceivedCard({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
+  const [showForm, setShowForm] = useState(false);
   const [bucketId, setBucketId] = useState(buckets[0]?.id ?? "");
   const [amount, setAmount] = useState("");
   const [receiptDate, setReceiptDate] = useState(todayKeyIst());
@@ -924,6 +915,7 @@ function ReceivedCard({
       }
       setAmount("");
       setNote("");
+      setShowForm(false);
       router.refresh();
     });
   }
@@ -974,83 +966,115 @@ function ReceivedCard({
           >
             ⚙ Buckets
           </Link>
+          <button
+            type="button"
+            onClick={() => {
+              setError(null);
+              setShowForm(true);
+            }}
+            style={{ ...BUTTON_STYLES.primary, marginLeft: 8 }}
+          >
+            + Add receipt
+          </button>
         </div>
 
-        {/* Inline add form */}
-        <form
-          onSubmit={handleAdd}
-          style={{
-            display: "grid",
-            gridTemplateColumns: "minmax(140px, 1fr) minmax(120px, 130px) minmax(140px, 150px) 1fr auto",
-            gap: 8,
-            padding: 10,
-            background: ACCOUNTS_TOKENS.surfaceMuted,
-            border: `1px dashed ${ACCOUNTS_TOKENS.borderStrong}`,
-            borderRadius: 8,
-            alignItems: "center",
-            marginBottom: 12,
-          }}
+        {/* Mig 056 — receipt-add form moved into a center-peek
+            modal (Daksh: "lazy to add received, do same like center
+            peek"). The form below is the modal body. */}
+        <CenterModal
+          open={showForm}
+          onClose={() => setShowForm(false)}
+          title="Log a payment received"
+          icon="💵"
+          maxWidth={560}
         >
-          <select
-            value={bucketId}
-            onChange={(e) => setBucketId(e.target.value)}
-            style={INPUT_STYLE}
+          <form
+            onSubmit={handleAdd}
+            style={{ display: "flex", flexDirection: "column", gap: 12 }}
           >
-            {buckets.length === 0 ? (
-              <option value="">(add a bucket first)</option>
-            ) : (
-              buckets.map((b) => (
-                <option key={b.id} value={b.id}>{b.label}</option>
-              ))
+            <div>
+              <label style={fieldLabelStyle()}>Bucket</label>
+              <select
+                value={bucketId}
+                onChange={(e) => setBucketId(e.target.value)}
+                style={{ ...INPUT_STYLE, fontWeight: 700 }}
+              >
+                {buckets.length === 0 ? (
+                  <option value="">(add a bucket first)</option>
+                ) : (
+                  buckets.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.label}
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div>
+                <label style={fieldLabelStyle()}>Amount (₹)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  placeholder="0.00"
+                  autoFocus
+                  style={{
+                    ...INPUT_STYLE,
+                    fontFamily: "ui-monospace, monospace",
+                    fontSize: 16,
+                    fontWeight: 800,
+                    textAlign: "right",
+                  }}
+                />
+              </div>
+              <div>
+                <label style={fieldLabelStyle()}>Date</label>
+                <input
+                  type="date"
+                  value={receiptDate}
+                  onChange={(e) => setReceiptDate(e.target.value)}
+                  style={{ ...INPUT_STYLE, fontFamily: "ui-monospace, monospace" }}
+                />
+              </div>
+            </div>
+            <div>
+              <label style={fieldLabelStyle()}>Note (optional)</label>
+              <input
+                type="text"
+                value={note}
+                onChange={(e) => setNote(e.target.value.slice(0, 500))}
+                placeholder="e.g. cleared via UPI"
+                style={INPUT_STYLE}
+              />
+            </div>
+            {error && (
+              <div
+                role="alert"
+                style={{
+                  padding: "8px 12px",
+                  background: ACCOUNTS_TOKENS.dangerLight,
+                  border: `1px solid ${ACCOUNTS_TOKENS.danger}`,
+                  color: ACCOUNTS_TOKENS.danger,
+                  borderRadius: 7,
+                  fontSize: 12,
+                  fontWeight: 600,
+                }}
+              >
+                {error}
+              </div>
             )}
-          </select>
-          <input
-            type="number"
-            step="0.01"
-            min="0"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            placeholder="Amount ₹"
-            style={{ ...INPUT_STYLE, fontFamily: "ui-monospace, monospace", textAlign: "right" }}
-          />
-          <input
-            type="date"
-            value={receiptDate}
-            onChange={(e) => setReceiptDate(e.target.value)}
-            style={{ ...INPUT_STYLE, fontFamily: "ui-monospace, monospace" }}
-          />
-          <input
-            type="text"
-            value={note}
-            onChange={(e) => setNote(e.target.value.slice(0, 500))}
-            placeholder="Note (optional)"
-            style={INPUT_STYLE}
-          />
-          <button
-            type="submit"
-            disabled={pending || !buckets.length || !amount}
-            style={BUTTON_STYLES.primary}
-          >
-            + Add
-          </button>
-        </form>
-
-        {error && (
-          <div
-            role="alert"
-            style={{
-              padding: "8px 12px",
-              background: ACCOUNTS_TOKENS.dangerLight,
-              border: `1px solid ${ACCOUNTS_TOKENS.danger}`,
-              color: ACCOUNTS_TOKENS.danger,
-              borderRadius: 7,
-              fontSize: 12,
-              marginBottom: 10,
-            }}
-          >
-            {error}
-          </div>
-        )}
+            <button
+              type="submit"
+              disabled={pending || !buckets.length || !amount}
+              style={{ ...BUTTON_STYLES.primary, padding: "12px 22px", fontSize: 14 }}
+            >
+              + Add receipt
+            </button>
+          </form>
+        </CenterModal>
 
         {receipts.length === 0 ? (
           <div
@@ -1064,7 +1088,7 @@ function ReceivedCard({
               fontSize: 13,
             }}
           >
-            No receipts yet. Use the form above to log incoming payments.
+            No receipts yet. Click <strong>+ Add receipt</strong> to log a payment.
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>

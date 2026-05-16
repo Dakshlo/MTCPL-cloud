@@ -2,20 +2,21 @@
 
 /**
  * Migration 055 — party list client UI.
- *
- * Same Finance-department visual language as the rest of the app
- * (ACCOUNTS_TOKENS palette, BUTTON_STYLES, INPUT_STYLE,
- * FinanceLoadingOverlay) — Daksh asked for UI parity with Accounts.
- *
- * The page-wide "PERSONAL — NOT COMPANY BOOKS" banner is the only
- * thing that visually separates this from a real Finance page. The
- * banner is intentionally non-dismissable so the surface is never
- * confused mid-session.
+ * Migration 056 follow-on:
+ *   • Banner + "1 party" header + description removed (Daksh).
+ *   • Add-party form is no longer always-visible; it's behind a
+ *     "+ Add party" button that opens a center-peek modal.
+ *   • Every party requires a 4-digit PIN. Legacy parties without
+ *     a PIN show a "Set PIN" modal on first entry.
+ *   • Per-party row amounts are blurred so the list view never
+ *     leaks numbers at a glance.
+ *   • Clicking a party row opens an Unlock modal (PIN prompt).
+ *     Correct PIN → session cookie set + navigate to detail.
  */
 
 import Link from "next/link";
-import { useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState, useTransition } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 import {
   ACCOUNTS_TOKENS,
@@ -23,6 +24,7 @@ import {
   INPUT_STYLE,
   VendorAvatar,
 } from "../accounts/_ui/components";
+import { CenterModal } from "./_ui/center-modal";
 
 export type PartySummary = {
   id: string;
@@ -31,6 +33,10 @@ export type PartySummary = {
   invoiced: number;
   received: number;
   outstanding: number;
+  /** True if this party already has a PIN set (Mig 056). */
+  hasPin: boolean;
+  /** True if the caller has an active unlock cookie for this party. */
+  unlocked: boolean;
 };
 
 type ActionResult = { ok: true } | { ok: false; error: string };
@@ -38,15 +44,35 @@ type ActionResult = { ok: true } | { ok: false; error: string };
 export function PersonalLedgerClient({
   parties,
   addAction,
+  setPinAction,
+  verifyPinAction,
 }: {
   parties: PartySummary[];
   addAction: (formData: FormData) => Promise<ActionResult>;
+  setPinAction: (formData: FormData) => Promise<ActionResult>;
+  verifyPinAction: (formData: FormData) => Promise<ActionResult>;
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [pending, startTransition] = useTransition();
-  const [error, setError] = useState<string | null>(null);
-  const [name, setName] = useState("");
   const [quickFilter, setQuickFilter] = useState("");
+
+  const [addOpen, setAddOpen] = useState(false);
+  const [pinModal, setPinModal] = useState<{
+    party: PartySummary;
+  } | null>(null);
+
+  // Mig 056 — if the user just got bounced back here by the detail
+  // page's unlock gate (?unlock=<partyId>), pop the unlock modal
+  // for that party automatically so they don't have to re-click.
+  useEffect(() => {
+    const id = searchParams.get("unlock");
+    if (!id) return;
+    const party = parties.find((p) => p.id === id);
+    if (party) setPinModal({ party });
+    // Strip the query param so refreshes don't keep popping the modal.
+    router.replace("/personal-ledger");
+  }, [searchParams, parties, router]);
 
   const totals = useMemo(() => {
     let invoiced = 0;
@@ -64,151 +90,64 @@ export function PersonalLedgerClient({
     return parties.filter((p) => p.name.toLowerCase().includes(q));
   }, [parties, quickFilter]);
 
-  function handleAdd(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setError(null);
-    const trimmed = name.trim();
-    if (!trimmed) return setError("Enter a party name.");
-    startTransition(async () => {
-      const fd = new FormData();
-      fd.set("name", trimmed);
-      const r = await addAction(fd);
-      if (!r.ok) {
-        setError(r.error);
-        return;
-      }
-      setName("");
-      router.refresh();
-    });
+  function onPartyClick(p: PartySummary) {
+    // Always prompt via modal — never deep-link. The modal handles
+    // both "unlock with existing PIN" and "set first-time PIN" for
+    // legacy parties.
+    if (p.unlocked) {
+      router.push(`/personal-ledger/${p.id}`);
+      return;
+    }
+    setPinModal({ party: p });
   }
 
   return (
     <section className="page-card">
-      <FinanceLoadingOverlay show={pending} label="Saving party…" />
+      <FinanceLoadingOverlay show={pending} label="Working…" />
 
-      {/* PERSONAL banner — non-dismissable, prominent amber so the
-          surface is unmistakably NOT a company-finance page. Daksh
-          (Mig 055 follow-on): bumped weight + size for more
-          presence on first scan. */}
+      {/* Mig 056 — banner / header / description all removed per
+          Daksh. Sidebar entry-point (in Settings) labels this
+          surface as "Personal — not company books"; the in-page
+          banner was redundant. Top KPI strip stays as the primary
+          summary; per-party amounts on the row tiles are blurred. */}
+
+      {/* Top-line totals + Add-party CTA */}
       <div
-        style={{
-          marginBottom: 18,
-          padding: "14px 18px",
-          background: "linear-gradient(135deg, #fef3c7 0%, #fce7f3 100%)",
-          border: "2px solid #d97706",
-          borderRadius: 12,
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          fontSize: 13,
-          fontWeight: 800,
-          color: "#7c2d12",
-          letterSpacing: "0.05em",
-          textTransform: "uppercase",
-          boxShadow: "0 2px 8px rgba(217, 119, 6, 0.12)",
-        }}
-      >
-        <span style={{ fontSize: 22, lineHeight: 1 }}>📓</span>
-        <span>Personal ledger · NOT company books</span>
-        <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, textTransform: "none", color: "#92400e" }}>
-          Owner-scoped · all entries audit-logged
-        </span>
-      </div>
-
-      <header
         style={{
           display: "flex",
           flexWrap: "wrap",
-          alignItems: "flex-end",
           gap: 14,
-          marginBottom: 22,
-          paddingBottom: 16,
-          borderBottom: `1px solid ${ACCOUNTS_TOKENS.border}`,
+          alignItems: "stretch",
+          marginBottom: 18,
         }}
       >
-        <div style={{ flex: 1, minWidth: 220 }}>
-          <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
-            My Parties
-          </div>
-          <h1
-            style={{
-              margin: "4px 0 0",
-              fontSize: 32,
-              fontWeight: 900,
-              color: "var(--text)",
-              letterSpacing: "-0.02em",
-              lineHeight: 1.1,
-            }}
-          >
-            {parties.length}{" "}
-            <span style={{ fontSize: 18, fontWeight: 700, color: "var(--muted)", letterSpacing: "-0.01em" }}>
-              {parties.length === 1 ? "party" : "parties"}
-            </span>
-          </h1>
-          <p style={{ margin: "6px 0 0", fontSize: 13, color: "var(--muted)", fontWeight: 500 }}>
-            Invoices + receipts + balance, per party. Excel-exportable.
-          </p>
-        </div>
-      </header>
-
-      {/* Top-line totals */}
-      {parties.length > 0 && (
         <div
           style={{
+            flex: "1 1 540px",
             display: "grid",
-            gridTemplateColumns: "repeat(3, minmax(180px, 1fr))",
+            gridTemplateColumns: "repeat(3, minmax(140px, 1fr))",
             gap: 12,
-            marginBottom: 18,
           }}
         >
           <TopStat label="Total invoiced" amount={totals.invoiced} tone="accent" />
           <TopStat label="Total received" amount={totals.received} tone="success" />
           <TopStat label="Outstanding" amount={totals.outstanding} tone="warning" />
         </div>
-      )}
-
-      {/* Add-party form — bumped to match the new KPI-tile weight
-          above. Solid surface, thicker border, taller input. */}
-      <form
-        onSubmit={handleAdd}
-        style={{
-          display: "flex",
-          gap: 10,
-          alignItems: "center",
-          padding: 14,
-          background: "#fff",
-          border: `1.5px solid ${ACCOUNTS_TOKENS.borderStrong}`,
-          borderRadius: 12,
-          marginBottom: 16,
-          boxShadow: ACCOUNTS_TOKENS.shadow,
-        }}
-      >
-        <input
-          type="text"
-          value={name}
-          onChange={(e) => setName(e.target.value.slice(0, 200))}
-          placeholder="New party name (e.g. Cousin Ramesh, Acme Side Project)"
-          style={{
-            ...INPUT_STYLE,
-            flex: 1,
-            minWidth: 0,
-            padding: "11px 14px",
-            fontSize: 14,
-            fontWeight: 600,
-          }}
-        />
         <button
-          type="submit"
-          disabled={pending || !name.trim()}
+          type="button"
+          onClick={() => setAddOpen(true)}
           style={{
             ...BUTTON_STYLES.primary,
-            padding: "11px 22px",
+            padding: "14px 22px",
             fontSize: 14,
+            fontWeight: 800,
+            alignSelf: "stretch",
+            minHeight: 60,
           }}
         >
           + Add party
         </button>
-      </form>
+      </div>
 
       {/* Quick filter */}
       {parties.length > 6 && (
@@ -219,23 +158,6 @@ export function PersonalLedgerClient({
           placeholder="🔍 Filter parties by name…"
           style={{ ...INPUT_STYLE, marginBottom: 12 }}
         />
-      )}
-
-      {error && (
-        <div
-          role="alert"
-          style={{
-            padding: "10px 14px",
-            background: ACCOUNTS_TOKENS.dangerLight,
-            border: `1px solid ${ACCOUNTS_TOKENS.danger}`,
-            color: ACCOUNTS_TOKENS.danger,
-            borderRadius: 8,
-            marginBottom: 12,
-            fontSize: 13,
-          }}
-        >
-          {error}
-        </div>
       )}
 
       {/* Parties list */}
@@ -250,7 +172,7 @@ export function PersonalLedgerClient({
             color: "var(--muted)",
           }}
         >
-          No parties yet. Add one above to start tracking invoices and receipts.
+          No parties yet. Click <strong>+ Add party</strong> to create one.
         </div>
       ) : filtered.length === 0 ? (
         <div
@@ -267,13 +189,347 @@ export function PersonalLedgerClient({
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {filtered.map((p) => (
-            <PartyRow key={p.id} party={p} />
+            <PartyRow key={p.id} party={p} onClick={() => onPartyClick(p)} />
           ))}
         </div>
+      )}
+
+      {/* Bottom utility link — buckets management still exists but
+          isn't a primary action on this surface anymore. */}
+      <div style={{ marginTop: 18, textAlign: "right" }}>
+        <Link
+          href="/personal-ledger/buckets"
+          style={{
+            fontSize: 11,
+            color: "var(--muted)",
+            textDecoration: "none",
+            fontWeight: 600,
+          }}
+        >
+          ⚙ Manage buckets
+        </Link>
+      </div>
+
+      {/* Add-party modal */}
+      <CenterModal
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        title="Add a new party"
+        icon="📓"
+        subtitle="Set a 4-digit PIN to lock entry. You'll need it every browser session."
+      >
+        <AddPartyForm
+          addAction={addAction}
+          onDone={() => {
+            setAddOpen(false);
+            router.refresh();
+          }}
+          pending={pending}
+          startTransition={startTransition}
+        />
+      </CenterModal>
+
+      {/* PIN modal — set-mode for legacy parties, unlock-mode for
+          everyone else. */}
+      {pinModal && (
+        <CenterModal
+          open={true}
+          onClose={() => setPinModal(null)}
+          title={pinModal.party.hasPin ? "Enter PIN" : "Set entry PIN"}
+          icon={pinModal.party.hasPin ? "🔒" : "🔑"}
+          subtitle={
+            pinModal.party.hasPin
+              ? `Unlock "${pinModal.party.name}" for this browser session.`
+              : `Set a 4-digit PIN to lock "${pinModal.party.name}".`
+          }
+          maxWidth={420}
+        >
+          <PinForm
+            party={pinModal.party}
+            verifyAction={verifyPinAction}
+            setAction={setPinAction}
+            onUnlocked={() => {
+              const partyId = pinModal.party.id;
+              setPinModal(null);
+              router.push(`/personal-ledger/${partyId}`);
+            }}
+            pending={pending}
+            startTransition={startTransition}
+          />
+        </CenterModal>
       )}
     </section>
   );
 }
+
+// ────────────────────────────────────────────────────────────────
+// Add-party form (lives inside the modal)
+// ────────────────────────────────────────────────────────────────
+
+function AddPartyForm({
+  addAction,
+  onDone,
+  pending,
+  startTransition,
+}: {
+  addAction: (formData: FormData) => Promise<ActionResult>;
+  onDone: () => void;
+  pending: boolean;
+  startTransition: React.TransitionStartFunction;
+}) {
+  const [name, setName] = useState("");
+  const [pin, setPin] = useState("");
+  const [pinConfirm, setPinConfirm] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  function submit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError(null);
+    const trimmed = name.trim();
+    if (!trimmed) return setError("Enter a party name.");
+    if (!/^\d{4}$/.test(pin)) return setError("PIN must be exactly 4 digits.");
+    if (pin !== pinConfirm) return setError("PINs don't match.");
+    startTransition(async () => {
+      const fd = new FormData();
+      fd.set("name", trimmed);
+      fd.set("pin", pin);
+      const r = await addAction(fd);
+      if (!r.ok) {
+        setError(r.error);
+        return;
+      }
+      onDone();
+    });
+  }
+
+  return (
+    <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <label style={fieldLabelStyle()}>Party name</label>
+      <input
+        type="text"
+        value={name}
+        onChange={(e) => setName(e.target.value.slice(0, 200))}
+        placeholder="e.g. Cousin Ramesh, Acme Side Project"
+        autoFocus
+        style={{ ...INPUT_STYLE, fontWeight: 600 }}
+      />
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <div>
+          <label style={fieldLabelStyle()}>4-digit PIN</label>
+          <input
+            type="password"
+            inputMode="numeric"
+            pattern="\d{4}"
+            maxLength={4}
+            value={pin}
+            onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+            placeholder="••••"
+            style={{
+              ...INPUT_STYLE,
+              fontFamily: "ui-monospace, monospace",
+              fontSize: 18,
+              fontWeight: 800,
+              letterSpacing: "0.4em",
+              textAlign: "center",
+            }}
+          />
+        </div>
+        <div>
+          <label style={fieldLabelStyle()}>Confirm PIN</label>
+          <input
+            type="password"
+            inputMode="numeric"
+            pattern="\d{4}"
+            maxLength={4}
+            value={pinConfirm}
+            onChange={(e) =>
+              setPinConfirm(e.target.value.replace(/\D/g, "").slice(0, 4))
+            }
+            placeholder="••••"
+            style={{
+              ...INPUT_STYLE,
+              fontFamily: "ui-monospace, monospace",
+              fontSize: 18,
+              fontWeight: 800,
+              letterSpacing: "0.4em",
+              textAlign: "center",
+            }}
+          />
+        </div>
+      </div>
+
+      {error && (
+        <div
+          role="alert"
+          style={{
+            padding: "8px 12px",
+            background: ACCOUNTS_TOKENS.dangerLight,
+            border: `1px solid ${ACCOUNTS_TOKENS.danger}`,
+            color: ACCOUNTS_TOKENS.danger,
+            borderRadius: 8,
+            fontSize: 12,
+            fontWeight: 600,
+          }}
+        >
+          {error}
+        </div>
+      )}
+
+      <button
+        type="submit"
+        disabled={pending || !name.trim() || !pin || !pinConfirm}
+        style={{ ...BUTTON_STYLES.primary, padding: "12px 22px", fontSize: 14 }}
+      >
+        + Add party
+      </button>
+      <p style={{ margin: 0, fontSize: 11, color: "var(--muted)", lineHeight: 1.5 }}>
+        Forgot a PIN? There's no recovery — you'd need a dev to reset it in the
+        database. Pick one you'll remember.
+      </p>
+    </form>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────
+// Unlock / Set-PIN form (lives inside the modal)
+// ────────────────────────────────────────────────────────────────
+
+function PinForm({
+  party,
+  verifyAction,
+  setAction,
+  onUnlocked,
+  pending,
+  startTransition,
+}: {
+  party: PartySummary;
+  verifyAction: (formData: FormData) => Promise<ActionResult>;
+  setAction: (formData: FormData) => Promise<ActionResult>;
+  onUnlocked: () => void;
+  pending: boolean;
+  startTransition: React.TransitionStartFunction;
+}) {
+  const [pin, setPin] = useState("");
+  const [pinConfirm, setPinConfirm] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const setMode = !party.hasPin;
+
+  function submit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError(null);
+    if (!/^\d{4}$/.test(pin)) return setError("PIN must be exactly 4 digits.");
+    if (setMode && pin !== pinConfirm) return setError("PINs don't match.");
+    startTransition(async () => {
+      const fd = new FormData();
+      fd.set("id", party.id);
+      fd.set("pin", pin);
+      const r = setMode ? await setAction(fd) : await verifyAction(fd);
+      if (!r.ok) {
+        setError(r.error);
+        setPin("");
+        if (setMode) setPinConfirm("");
+        return;
+      }
+      onUnlocked();
+    });
+  }
+
+  return (
+    <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div>
+        <label style={fieldLabelStyle()}>
+          {setMode ? "Choose 4-digit PIN" : "PIN"}
+        </label>
+        <input
+          type="password"
+          inputMode="numeric"
+          pattern="\d{4}"
+          maxLength={4}
+          value={pin}
+          onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+          placeholder="••••"
+          autoFocus
+          style={{
+            ...INPUT_STYLE,
+            fontFamily: "ui-monospace, monospace",
+            fontSize: 26,
+            fontWeight: 800,
+            letterSpacing: "0.5em",
+            textAlign: "center",
+            padding: "14px 14px",
+          }}
+        />
+      </div>
+      {setMode && (
+        <div>
+          <label style={fieldLabelStyle()}>Confirm PIN</label>
+          <input
+            type="password"
+            inputMode="numeric"
+            pattern="\d{4}"
+            maxLength={4}
+            value={pinConfirm}
+            onChange={(e) =>
+              setPinConfirm(e.target.value.replace(/\D/g, "").slice(0, 4))
+            }
+            placeholder="••••"
+            style={{
+              ...INPUT_STYLE,
+              fontFamily: "ui-monospace, monospace",
+              fontSize: 26,
+              fontWeight: 800,
+              letterSpacing: "0.5em",
+              textAlign: "center",
+              padding: "14px 14px",
+            }}
+          />
+        </div>
+      )}
+
+      {error && (
+        <div
+          role="alert"
+          style={{
+            padding: "8px 12px",
+            background: ACCOUNTS_TOKENS.dangerLight,
+            border: `1px solid ${ACCOUNTS_TOKENS.danger}`,
+            color: ACCOUNTS_TOKENS.danger,
+            borderRadius: 8,
+            fontSize: 12,
+            fontWeight: 600,
+          }}
+        >
+          {error}
+        </div>
+      )}
+
+      <button
+        type="submit"
+        disabled={pending || !pin || (setMode && !pinConfirm)}
+        style={{ ...BUTTON_STYLES.primary, padding: "12px 22px", fontSize: 14 }}
+      >
+        {setMode ? "Set PIN & enter" : "Unlock"}
+      </button>
+    </form>
+  );
+}
+
+function fieldLabelStyle(): React.CSSProperties {
+  return {
+    display: "block",
+    fontSize: 11,
+    fontWeight: 800,
+    color: "var(--muted)",
+    textTransform: "uppercase",
+    letterSpacing: "0.08em",
+    marginBottom: 6,
+  };
+}
+
+// ────────────────────────────────────────────────────────────────
+// Top KPI tile
+// ────────────────────────────────────────────────────────────────
 
 function TopStat({
   label,
@@ -284,10 +540,6 @@ function TopStat({
   amount: number;
   tone: "accent" | "success" | "warning";
 }) {
-  // Mig 055 follow-on (Daksh: "more bold and all") — these are the
-  // page's hero numbers; they should read like real KPI tiles, not
-  // muted strip-cards. Tinted background, beefier left bar, big
-  // number, and a thin top-of-card colour line.
   const accentColor =
     tone === "success"
       ? ACCOUNTS_TOKENS.success
@@ -303,7 +555,6 @@ function TopStat({
   return (
     <div
       style={{
-        position: "relative",
         padding: "18px 20px 16px",
         background: `linear-gradient(180deg, ${tintBg} 0%, #fff 100%)`,
         border: `1.5px solid ${accentColor}33`,
@@ -341,20 +592,36 @@ function TopStat({
   );
 }
 
-function PartyRow({ party }: { party: PartySummary }) {
-  // Mig 055 follow-on (Daksh: "more bold and all") — row tiles
-  // upgraded: 52px avatar, bigger name, three-line info hierarchy
-  // (name → invoiced/received → outstanding), heavier left status
-  // bar, larger arrow.
+// ────────────────────────────────────────────────────────────────
+// Party row tile — amounts blurred until unlocked + clicked-through
+// ────────────────────────────────────────────────────────────────
+
+function PartyRow({
+  party,
+  onClick,
+}: {
+  party: PartySummary;
+  onClick: () => void;
+}) {
   const cleared = party.outstanding === 0 && party.invoiced > 0;
   const statusColor = cleared
     ? ACCOUNTS_TOKENS.success
     : party.outstanding > 0
     ? ACCOUNTS_TOKENS.warning
     : ACCOUNTS_TOKENS.neutral;
+  // Mig 056 — blur EVERY party row amount unconditionally. The
+  // list view shouldn't reveal balances at a glance, even for an
+  // already-unlocked party (user can still see the real numbers
+  // inside the detail page).
+  const blurStyle: React.CSSProperties = {
+    filter: "blur(7px)",
+    userSelect: "none",
+  };
+
   return (
-    <Link
-      href={`/personal-ledger/${party.id}`}
+    <button
+      type="button"
+      onClick={onClick}
       style={{
         background: "#fff",
         border: `1.5px solid ${ACCOUNTS_TOKENS.border}`,
@@ -367,13 +634,21 @@ function PartyRow({ party }: { party: PartySummary }) {
         gap: 14,
         textDecoration: "none",
         color: "var(--text)",
-        transition: "transform 0.1s ease, box-shadow 0.15s ease, border-color 0.15s ease",
+        transition:
+          "transform 0.1s ease, box-shadow 0.15s ease, border-color 0.15s ease",
+        width: "100%",
+        textAlign: "left",
+        cursor: "pointer",
+        fontFamily: "inherit",
       }}
     >
       <VendorAvatar name={party.name} size={52} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div
           style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
             fontSize: 17,
             fontWeight: 800,
             color: "var(--text)",
@@ -381,7 +656,31 @@ function PartyRow({ party }: { party: PartySummary }) {
             lineHeight: 1.2,
           }}
         >
-          {party.name}
+          <span>{party.name}</span>
+          {/* Lock indicator — small chip to the right of the name */}
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 800,
+              padding: "2px 8px",
+              background: party.hasPin
+                ? ACCOUNTS_TOKENS.accentLight
+                : ACCOUNTS_TOKENS.warningLight,
+              color: party.hasPin
+                ? ACCOUNTS_TOKENS.accent
+                : ACCOUNTS_TOKENS.warning,
+              borderRadius: 999,
+              border: `1px solid ${
+                party.hasPin
+                  ? ACCOUNTS_TOKENS.accentBorder
+                  : ACCOUNTS_TOKENS.warning + "55"
+              }`,
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+            }}
+          >
+            {party.hasPin ? "🔒 Locked" : "⚠ Set PIN"}
+          </span>
         </div>
         <div
           style={{
@@ -396,10 +695,13 @@ function PartyRow({ party }: { party: PartySummary }) {
             Invoiced{" "}
             <strong
               style={{
+                ...blurStyle,
+                display: "inline-block",
                 fontFamily: "ui-monospace, monospace",
                 color: ACCOUNTS_TOKENS.accent,
                 fontWeight: 800,
                 fontSize: 13,
+                verticalAlign: "middle",
               }}
             >
               ₹{party.invoiced.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
@@ -409,10 +711,13 @@ function PartyRow({ party }: { party: PartySummary }) {
             Received{" "}
             <strong
               style={{
+                ...blurStyle,
+                display: "inline-block",
                 fontFamily: "ui-monospace, monospace",
                 color: ACCOUNTS_TOKENS.success,
                 fontWeight: 800,
                 fontSize: 13,
+                verticalAlign: "middle",
               }}
             >
               ₹{party.received.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
@@ -435,6 +740,8 @@ function PartyRow({ party }: { party: PartySummary }) {
         <div style={{ marginTop: 4 }}>
           <span
             style={{
+              ...blurStyle,
+              display: "inline-block",
               fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
               fontSize: 22,
               fontWeight: 900,
@@ -460,6 +767,6 @@ function PartyRow({ party }: { party: PartySummary }) {
       >
         →
       </span>
-    </Link>
+    </button>
   );
 }
