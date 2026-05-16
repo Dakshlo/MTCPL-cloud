@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import type { AppRole } from "@/lib/types";
 import {
   DEPARTMENTS,
@@ -35,7 +35,31 @@ type NavDivider = {
   department?: Department;
 };
 
-type NavEntry = NavItem | NavDivider;
+/** Mig 054 follow-on (Daksh) — collapsible group of nav items.
+ *
+ *  Daksh: "for developer, in production the My Jobs / Slab Transfer
+ *  / CNC Expenses pages are functionally important but not directly
+ *  used — fold them into a single sidebar entry that expands to
+ *  show the three options. Like the topbar's Tasks / Find ID
+ *  pattern."
+ *
+ *  Render behaviour:
+ *    • 0 visible children for current role → group skipped entirely
+ *    • 1 visible child  → renders as a flat NavItem (no group wrapper)
+ *    • 2+ visible children → renders as collapsible group; auto-
+ *      expands when the current pathname matches any child. */
+type NavGroup = {
+  type: "group";
+  label: string;
+  icon: string;
+  /** Union of all children's roles — sidebar uses this for the
+   *  same role-include filter as flat items. */
+  roles: AppRole[];
+  department?: Department;
+  children: NavItem[];
+};
+
+type NavEntry = NavItem | NavDivider | NavGroup;
 
 // Mig 044 follow-on — per-department accent colour for the
 // department switcher tiles in the sidebar. Each tile wears its
@@ -153,29 +177,39 @@ const navEntries: NavEntry[] = [
     department: "production",
   },
   {
-    href: "/vendor",
-    label: "My Jobs",
-    icon: "👤",
-    roles: ["developer", "vendor"],
+    // Mig 054 follow-on (Daksh): consolidate three "specialist-role"
+    // pages into one collapsible group for users (mainly developer
+    // + owner) who can see all of them. Single-role users for whom
+    // only ONE child resolves see it as a flat link automatically
+    // (the renderer's 1-visible-child path).
+    type: "group",
+    label: "More",
+    icon: "⋯",
     department: "production",
-  },
-  {
-    href: "/carving/transfer",
-    label: "Slab Transfer",
-    icon: "🚧",
-    roles: ["developer", "slab_transfer"],
-    department: "production",
-  },
-  {
-    // Mig 054 — CNC operational expense entry. Primary surface for
-    // the cnc_expense_entry role (their entire workspace). Owner /
-    // dev see it too for oversight; carving_head can review what
-    // the entry person added.
-    href: "/carving/expenses",
-    label: "CNC Expenses",
-    icon: "💸",
-    roles: ["developer", "owner", "carving_head", "cnc_expense_entry"],
-    department: "production",
+    roles: ["developer", "owner", "vendor", "slab_transfer", "carving_head", "cnc_expense_entry"],
+    children: [
+      {
+        href: "/vendor",
+        label: "My Jobs",
+        icon: "👤",
+        roles: ["developer", "vendor"],
+        department: "production",
+      },
+      {
+        href: "/carving/transfer",
+        label: "Slab Transfer",
+        icon: "🚧",
+        roles: ["developer", "slab_transfer"],
+        department: "production",
+      },
+      {
+        href: "/carving/expenses",
+        label: "CNC Expenses",
+        icon: "💸",
+        roles: ["developer", "owner", "carving_head", "cnc_expense_entry"],
+        department: "production",
+      },
+    ],
   },
   // ── ACCOUNTS section (Finance department, mig 028 + 037 crosscheck) ──
   {
@@ -369,9 +403,9 @@ export function Sidebar({
   // ── Name-based overrides ───────────────────────────────────────────
   const upperName = (displayName ?? "").toUpperCase();
   const isNamedTrustedUser = upperName.includes("RAJESH") || upperName.includes("NARESH");
-  if (isNamedTrustedUser && !visibleEntries.some((e) => e.type !== "divider" && e.href === "/dashboard")) {
+  if (isNamedTrustedUser && !visibleEntries.some((e) => e.type !== "divider" && e.type !== "group" && (e as NavItem).href === "/dashboard")) {
     const dashboardEntry = navEntries.find(
-      (e) => e.type !== "divider" && (e as NavItem).href === "/dashboard",
+      (e) => e.type !== "divider" && e.type !== "group" && (e as NavItem).href === "/dashboard",
     );
     if (dashboardEntry) {
       visibleEntries = [dashboardEntry, ...visibleEntries];
@@ -402,6 +436,8 @@ export function Sidebar({
     if (href === "/carving/floor") return pathname.startsWith("/carving/floor");
     if (href === "/carving/reports") return pathname.startsWith("/carving/reports");
     if (href === "/carving/transfer") return pathname.startsWith("/carving/transfer");
+    // Mig 054 — /carving/expenses lit only when actually on that page.
+    if (href === "/carving/expenses") return pathname.startsWith("/carving/expenses");
     // /accounts is the Due Bills landing — exact match only so it
     // doesn't light up while the user is on any /accounts/* sub-route
     // (e.g. /accounts/bills, /accounts/payments, etc.). Otherwise the
@@ -627,6 +663,39 @@ export function Sidebar({
             );
           }
 
+          // Mig 054 follow-on — collapsible group rendering.
+          if (entry.type === "group") {
+            const visibleChildren = entry.children.filter((c) =>
+              c.roles.includes(role),
+            );
+            if (visibleChildren.length === 0) return null;
+            // Single child → render as flat item (no group chrome).
+            if (visibleChildren.length === 1) {
+              const item = visibleChildren[0];
+              const active = isActive(item.href);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`nav-link${active ? " nav-link-active" : ""}`}
+                >
+                  <span className="nav-icon">{item.icon}</span>
+                  {item.label}
+                  {active && <span className="nav-active-dot" />}
+                </Link>
+              );
+            }
+            return (
+              <CollapsibleNavGroup
+                key={`group-${i}`}
+                label={entry.label}
+                icon={entry.icon}
+                items={visibleChildren}
+                isActive={isActive}
+              />
+            );
+          }
+
           const item = entry as NavItem;
           const active = isActive(item.href);
 
@@ -654,5 +723,122 @@ export function Sidebar({
         </form>
       </div>
     </aside>
+  );
+}
+
+/** Mig 054 follow-on — collapsible sidebar group.
+ *
+ *  Renders a "More" row that expands on click (or hover) to reveal
+ *  N child links. Behaviour:
+ *    • Auto-expands on mount if any child's href matches the
+ *      current pathname (so the user lands on a sub-page → sees
+ *      where they are without clicking).
+ *    • Click the header → toggles open/closed.
+ *    • Hover the row → also opens (mouse-leave doesn't auto-close
+ *      so users don't lose their place mid-click).
+ *    • Active child still renders the gold active-dot, same as
+ *      flat items, so the user knows which sub-page they're on.
+ */
+function CollapsibleNavGroup({
+  label,
+  icon,
+  items,
+  isActive,
+}: {
+  label: string;
+  icon: string;
+  items: NavItem[];
+  isActive: (href: string) => boolean;
+}) {
+  const containsActive = items.some((it) => isActive(it.href));
+  const [open, setOpen] = useState(containsActive);
+
+  // If the pathname changes to one of our children, auto-open.
+  useEffect(() => {
+    if (containsActive) setOpen(true);
+  }, [containsActive]);
+
+  return (
+    <div
+      onMouseEnter={() => setOpen(true)}
+      style={{ display: "flex", flexDirection: "column" }}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className={`nav-link${containsActive ? " nav-link-active" : ""}`}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          background: "transparent",
+          border: "none",
+          cursor: "pointer",
+          textAlign: "left",
+          width: "100%",
+          // Match the rest of the nav-link rows. The .nav-link class
+          // handles padding / color; we just add a tiny chevron on
+          // the right + a small badge with child count.
+        }}
+      >
+        <span className="nav-icon">{icon}</span>
+        <span style={{ flex: 1 }}>{label}</span>
+        <span
+          style={{
+            fontSize: 10,
+            fontWeight: 700,
+            padding: "1px 7px",
+            borderRadius: 999,
+            background: "rgba(0,0,0,0.08)",
+            color: "var(--muted)",
+            fontFamily: "ui-monospace, monospace",
+          }}
+        >
+          {items.length}
+        </span>
+        <span
+          aria-hidden
+          style={{
+            fontSize: 10,
+            color: "var(--muted)",
+            transition: "transform 0.18s ease",
+            transform: open ? "rotate(180deg)" : "rotate(0deg)",
+            display: "inline-block",
+          }}
+        >
+          ▾
+        </span>
+      </button>
+      {open && (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            paddingLeft: 14,
+            marginTop: 2,
+            marginBottom: 4,
+            borderLeft: "1px dashed var(--border)",
+            marginLeft: 18,
+          }}
+        >
+          {items.map((it) => {
+            const active = isActive(it.href);
+            return (
+              <Link
+                key={it.href}
+                href={it.href}
+                className={`nav-link${active ? " nav-link-active" : ""}`}
+                style={{ fontSize: 13 }}
+              >
+                <span className="nav-icon">{it.icon}</span>
+                {it.label}
+                {active && <span className="nav-active-dot" />}
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
