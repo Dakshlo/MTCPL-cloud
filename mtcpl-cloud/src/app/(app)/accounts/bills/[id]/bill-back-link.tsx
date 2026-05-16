@@ -4,24 +4,29 @@
  * Migration 053 follow-on — context-aware back link for the bill
  * detail page.
  *
- * Daksh: "in finance when I open a bill card, the back button is
- * always 'All bills'. If I came from Due Bills, it should go back
- * to Due Bills."
+ * Daksh: "no matter which page I opened the bill from, the back
+ * button only says one fixed page."
  *
- * Approach: read document.referrer on mount, match it against the
- * known finance routes, and render the appropriate label + href.
- * Falls back to "All bills" when:
- *   - Referrer is empty (direct URL visit, opened in new tab, etc.)
- *   - Referrer is from a different origin (e.g. Gmail link)
- *   - Referrer doesn't match any known finance route
+ * Root cause: the earlier version read `document.referrer`, which
+ * does NOT update on Next.js client-side Link navigation — only on
+ * real document reloads. So after one Pay Today visit, every
+ * subsequent bill-detail open showed "← Pay Today" forever.
  *
- * The href reuses the FULL referrer URL (pathname + search) so the
- * user lands back on the exact page they left, with all their
- * filters / sort / pagination state intact.
+ * Fix: read sessionStorage key written by <RouteTracker /> in the
+ * app layout. RouteTracker subscribes to usePathname +
+ * useSearchParams and updates the entry on every SPA navigation,
+ * so the "previous route" is always the actual immediately-prior
+ * page, with its full query string intact.
+ *
+ * Falls back to:
+ *   1. document.referrer (for hard refreshes / external entry)
+ *   2. /accounts/bills "All bills" — safe default
  */
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+
+const PREV_ROUTE_KEY = "mtcpl-prev-route";
 
 type KnownPage = {
   /** Tested against url.pathname. Order matters — first match wins,
@@ -56,27 +61,52 @@ export function BillBackLink({
   const [label, setLabel] = useState(fallbackLabel);
 
   useEffect(() => {
-    const referrer = document.referrer;
-    if (!referrer) return;
+    // 1. Try sessionStorage (written by RouteTracker on every SPA
+    //    navigation). This is the reliable path for in-app clicks.
+    let prevRoute: string | null = null;
     try {
-      const url = new URL(referrer);
-      // Only honour same-origin referrers — external clicks (Gmail,
-      // WhatsApp, etc.) shouldn't shape our in-app back nav.
-      if (url.origin !== window.location.origin) return;
-      // Skip if the referrer was the bill detail page itself
-      // (e.g. user navigated bill → bill via the topbar lookup).
-      // Sending them "back" to a sibling bill detail is confusing.
-      if (/^\/accounts\/bills\/[^/]+\/?$/.test(url.pathname)) return;
-
-      const match = KNOWN_FINANCE_PAGES.find((p) => p.pathRegex.test(url.pathname));
-      if (match) {
-        setLabel(match.label);
-        // Preserve query string so the user lands on the EXACT page
-        // they left — including any filters / vendor / date range.
-        setHref(url.pathname + url.search);
-      }
+      prevRoute = sessionStorage.getItem(PREV_ROUTE_KEY);
     } catch {
-      // Bad URL — keep the fallback.
+      // sessionStorage unavailable
+    }
+
+    // 2. Fallback to document.referrer for hard-refresh / external
+    //    entry points. Only honour same-origin.
+    if (!prevRoute && typeof document !== "undefined" && document.referrer) {
+      try {
+        const url = new URL(document.referrer);
+        if (url.origin === window.location.origin) {
+          prevRoute = url.pathname + url.search;
+        }
+      } catch {
+        // Bad URL — skip
+      }
+    }
+
+    if (!prevRoute) return;
+
+    // Parse the route into pathname + search for the match below.
+    let urlPath: string;
+    let urlSearch: string;
+    try {
+      const u = new URL(prevRoute, window.location.origin);
+      urlPath = u.pathname;
+      urlSearch = u.search;
+    } catch {
+      return;
+    }
+
+    // Don't allow back-link to point at another bill detail page —
+    // going from one bill to its sibling and tapping back to ANOTHER
+    // sibling is confusing.
+    if (/^\/accounts\/bills\/[^/]+\/?$/.test(urlPath)) return;
+
+    const match = KNOWN_FINANCE_PAGES.find((p) => p.pathRegex.test(urlPath));
+    if (match) {
+      setLabel(match.label);
+      // Preserve query string so the user lands on the EXACT page
+      // they left — filters / sort / pagination intact.
+      setHref(urlPath + urlSearch);
     }
   }, []);
 

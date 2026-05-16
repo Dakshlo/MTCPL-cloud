@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Suspense } from "react";
 import Link from "next/link";
 import { headers, cookies } from "next/headers";
 
@@ -7,6 +8,7 @@ import { MobileNav } from "@/components/mobile-nav";
 import { NotificationBell } from "@/components/notification-bell";
 import { NavigationProgress } from "@/components/navigation-progress";
 import { RealtimeRefresh } from "@/components/realtime-refresh";
+import { RouteTracker } from "@/components/route-tracker";
 import { Sidebar } from "@/components/sidebar";
 import { TopbarTasksBadge, type TopbarTask } from "@/components/topbar-tasks-badge";
 import { TopbarIdLookup } from "@/components/topbar-id-lookup";
@@ -233,6 +235,15 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     <div className="app-shell">
       <NavigationProgress />
       <RealtimeRefresh />
+      {/* Mig 053 follow-on — SPA route tracker. Captures every Next
+          client-side navigation into sessionStorage so the bill
+          detail page's back link can show "← {wherever you came
+          from}" with the exact URL preserved (filters intact).
+          Wrapped in Suspense because useSearchParams() requires it
+          when not statically prerendered. */}
+      <Suspense fallback={null}>
+        <RouteTracker />
+      </Suspense>
       <Heartbeat />
       {/* Mig 046 — one-shot login-location probe. Captures IP + city
           server-side, and tries browser GPS once per session. Fully
