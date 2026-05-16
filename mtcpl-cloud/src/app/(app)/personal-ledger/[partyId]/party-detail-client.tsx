@@ -82,6 +82,28 @@ function todayKeyIst(): string {
   return `${y}-${m}-${dd}`;
 }
 
+// Mig 055 follow-on (Daksh: "give B blue color and C grey color").
+// Per-bucket pill / card palette. Special-cased for the default
+// bucket labels Daksh actually uses; everything else falls through
+// to the prior emerald tint so renamed / additional buckets stay
+// readable without us having to mint a colour per label.
+function bucketPalette(label: string): {
+  bg: string;
+  fg: string;
+  bar: string;
+} {
+  const trimmed = label.trim().toUpperCase();
+  if (trimmed === "B") {
+    return { bg: "#dbeafe", fg: "#1d4ed8", bar: "#1d4ed8" }; // blue
+  }
+  if (trimmed === "C") {
+    return { bg: "#e2e8f0", fg: "#475569", bar: "#64748b" }; // slate / grey
+  }
+  // Default — keep the original emerald look for any other bucket
+  // (e.g. ICICI, Cash) so existing data doesn't visually break.
+  return { bg: "#dcfce7", fg: "#15803d", bar: "#15803d" };
+}
+
 export function PartyDetailClient({
   partyId,
   partyName,
@@ -1058,20 +1080,26 @@ function ReceivedCard({
                   alignItems: "center",
                 }}
               >
-                <span
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    padding: "3px 8px",
-                    background: `${ACCOUNTS_TOKENS.success}22`,
-                    color: ACCOUNTS_TOKENS.success,
-                    borderRadius: 999,
-                    textAlign: "center",
-                    fontFamily: "ui-monospace, monospace",
-                  }}
-                >
-                  {r.bucketLabel}
-                </span>
+                {(() => {
+                  const pal = bucketPalette(r.bucketLabel);
+                  return (
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 800,
+                        padding: "3px 10px",
+                        background: pal.bg,
+                        color: pal.fg,
+                        borderRadius: 999,
+                        textAlign: "center",
+                        fontFamily: "ui-monospace, monospace",
+                        letterSpacing: "0.02em",
+                      }}
+                    >
+                      {r.bucketLabel}
+                    </span>
+                  );
+                })()}
                 <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 14, color: ACCOUNTS_TOKENS.success }}>
                   {inr(r.amount)}
                 </span>
@@ -1177,29 +1205,45 @@ function SummaryCard({
             Received · split by bucket
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {byBucket.map((b) => (
-              <div
-                key={b.label}
-                style={{
-                  padding: "8px 14px",
-                  background: "#fff",
-                  border: `1px solid ${ACCOUNTS_TOKENS.border}`,
-                  borderLeft: `4px solid ${ACCOUNTS_TOKENS.success}`,
-                  borderRadius: 7,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 2,
-                  minWidth: 140,
-                }}
-              >
-                <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em", fontFamily: "ui-monospace, monospace" }}>
-                  {b.label}
-                </span>
-                <span style={{ fontSize: 16, fontWeight: 800, color: ACCOUNTS_TOKENS.success, fontFamily: "ui-monospace, monospace" }}>
-                  {inr(b.total)}
-                </span>
-              </div>
-            ))}
+            {byBucket.map((b) => {
+              const pal = bucketPalette(b.label);
+              return (
+                <div
+                  key={b.label}
+                  style={{
+                    padding: "10px 14px",
+                    background: "#fff",
+                    border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+                    borderLeft: `4px solid ${pal.bar}`,
+                    borderRadius: 7,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 4,
+                    minWidth: 140,
+                  }}
+                >
+                  <span
+                    style={{
+                      alignSelf: "flex-start",
+                      fontSize: 10,
+                      fontWeight: 800,
+                      padding: "2px 8px",
+                      background: pal.bg,
+                      color: pal.fg,
+                      borderRadius: 999,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                      fontFamily: "ui-monospace, monospace",
+                    }}
+                  >
+                    {b.label}
+                  </span>
+                  <span style={{ fontSize: 16, fontWeight: 800, color: pal.fg, fontFamily: "ui-monospace, monospace" }}>
+                    {inr(b.total)}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
