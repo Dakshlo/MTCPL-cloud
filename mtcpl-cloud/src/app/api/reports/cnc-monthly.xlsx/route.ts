@@ -16,16 +16,20 @@
  */
 
 import { NextRequest } from "next/server";
-// Mig 053 follow-on (Daksh): use xlsx-js-style (community fork of
-// SheetJS) so we can emit per-cell font / fill / border / alignment
-// styling. The base xlsx package strips all `s` properties on
-// write, which is why the earlier Excel downloads were unstyled.
-import * as XLSX from "xlsx-js-style";
+// Mig 054 follow-on (Daksh, May 2026): reverted from xlsx-js-style
+// back to the stock xlsx package. The styled fork was producing a
+// `ReferenceError: r is not defined` in Vercel's Turbopack bundle
+// — a known bundling quirk with the fork's dynamic-require
+// internals. Stock xlsx is the proven, working path. Loses the
+// gold-tint cell colours on the per-operator block (Daksh's data is
+// all there, just unstyled). A future fix can re-introduce styling
+// via a different library (e.g. exceljs) without the bundling
+// trap.
+import * as XLSX from "xlsx";
 
-// Mig 054 follow-on — force Node runtime + dynamic. xlsx-js-style
-// uses Node-only APIs internally (Buffer / fs guards) that crash
-// when Vercel infers Edge runtime. force-dynamic also ensures the
-// route isn't cached during build.
+// Force Node runtime + dynamic. xlsx uses Node-only APIs (Buffer /
+// fs guards) that crash when Vercel infers Edge runtime.
+// force-dynamic also ensures the route isn't cached during build.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 import { requireAuth } from "@/lib/auth";
@@ -35,20 +39,11 @@ import {
   type CncMonthlyReport,
 } from "@/lib/cnc-monthly-report";
 
-// ── Per-operator tint palette (Excel-side mirror of the on-screen
-// palette). xlsx fills use solid hex (no alpha), so each on-screen
-// tint is pre-flattened against white to a single solid color.
-// `data` = subtle background for data cells; `header` = stronger
-// background for header / total rows.
-const PALETTE: Array<{ data: string; header: string; accent: string }> = [
-  { data: "FAF3DF", header: "F1E0B8", accent: "C9A14A" }, // gold
-  { data: "EAF8EF", header: "C6EDD3", accent: "22C55E" }, // green
-  { data: "E8F0FB", header: "C6DBF6", accent: "3B82F6" }, // blue
-  { data: "F2EBFB", header: "DDC4F2", accent: "A855F7" }, // purple
-  { data: "FBEAD8", header: "F7C99A", accent: "F97316" }, // orange
-  { data: "E1F6F3", header: "B0E1DA", accent: "14B6A6" }, // teal
-  { data: "FCE8F2", header: "F4B7D2", accent: "EC4899" }, // pink
-];
+// Mig 054 follow-on (Daksh): per-operator tint palette removed
+// from this file along with the styled-fork dependency. The data
+// + structure of the Excel is preserved; rich styling can be
+// reintroduced via a different lib (e.g. exceljs) once the bundler
+// quirk that broke xlsx-js-style is sorted.
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
@@ -112,9 +107,12 @@ export async function GET(req: NextRequest) {
     // Merge ranges for the operator + machine header rows.
     ws["!merges"] = buildMerges(report, layout);
 
-    // Mig 053 follow-on (Daksh) — apply per-cell styling so the
-    // Excel download matches the on-screen visual identity.
-    applyStyles(ws, report, layout);
+    // Mig 054 follow-on — applyStyles() temporarily disabled. The
+    // styled-xlsx fork (xlsx-js-style) tripped a Turbopack bundling
+    // bug on Vercel ("r is not defined"). Stock xlsx strips cell
+    // styles on write anyway, so calling applyStyles here would be
+    // a no-op. Data + layout intact; visuals can come back later
+    // via a different lib.
 
     const wb = XLSX.utils.book_new();
     // Excel sheet names are capped at 31 chars + can't include
@@ -443,271 +441,3 @@ function buildMerges(report: CncMonthlyReport, layout: SheetLayout): XLSX.Range[
   return merges;
 }
 
-// ── Per-cell styling pass (Mig 053 follow-on, Daksh) ─────────────
-// Walks the assembled worksheet and writes a `s` style object on
-// every cell to match the on-screen visual identity:
-//   • Title — dark band, bold white text, large
-//   • Operator row — dark band per vendor with a strong accent
-//     border-bottom in the vendor's tint
-//   • Machine row — header tint per vendor
-//   • Unit row (SFT/CFT) — header tint per vendor
-//   • Daily data — subtle vendor tint, right-aligned mono
-//   • GRAND TOTAL / per-operator rows — header tint, bold
-//   • AVG / fleet TOTAL / per-machine AVG — accents
-function applyStyles(
-  ws: XLSX.WorkSheet,
-  report: CncMonthlyReport,
-  layout: SheetLayout,
-): void {
-  const vendorPalette = new Map<string, (typeof PALETTE)[number]>();
-  report.vendorGroups.forEach((g, i) => {
-    vendorPalette.set(g.vendor_id, PALETTE[i % PALETTE.length]);
-  });
-
-  const ensureCell = (r: number, c: number) => {
-    const addr = XLSX.utils.encode_cell({ r, c });
-    if (!ws[addr]) {
-      ws[addr] = { v: "", t: "s" };
-    }
-    return ws[addr];
-  };
-
-  const setStyle = (r: number, c: number, style: XLSX.CellStyle) => {
-    const cell = ensureCell(r, c);
-    cell.s = { ...(cell.s ?? {}), ...style };
-  };
-
-  const borderThin = (rgb = "D4D4D4") => ({
-    top:    { style: "thin" as const, color: { rgb } },
-    bottom: { style: "thin" as const, color: { rgb } },
-    left:   { style: "thin" as const, color: { rgb } },
-    right:  { style: "thin" as const, color: { rgb } },
-  });
-
-  // 1. Title row (row 0) — dark gold banner, white bold text.
-  for (let c = 0; c <= layout.totalNumCols; c++) {
-    setStyle(layout.titleRow, c, {
-      font: { bold: true, color: { rgb: "FFFFFF" }, sz: 14 },
-      fill: { fgColor: { rgb: "1A1A1A" }, patternType: "solid" },
-      alignment: { horizontal: "center", vertical: "center" },
-    });
-  }
-
-  // 2. Operator row — dark bg, white text, accent border-bottom in
-  //    the vendor's tint so the column-group reads as connected.
-  let opCol = 1;
-  for (const g of report.vendorGroups) {
-    const tint = vendorPalette.get(g.vendor_id)!;
-    const cols = g.machines.reduce((n, m) => n + (m.showSqft ? 2 : 1), 0);
-    for (let c = opCol; c < opCol + cols; c++) {
-      setStyle(layout.operatorRow, c, {
-        font: { bold: true, color: { rgb: "FFFFFF" }, sz: 11 },
-        fill: { fgColor: { rgb: "1A1A1A" }, patternType: "solid" },
-        alignment: { horizontal: "center", vertical: "center" },
-        border: {
-          ...borderThin("333333"),
-          bottom: { style: "medium" as const, color: { rgb: tint.accent } },
-        },
-      });
-    }
-    opCol += cols;
-  }
-  // "DATE" cell on operator row — surface bg.
-  setStyle(layout.operatorRow, 0, {
-    font: { bold: true, color: { rgb: "333333" }, sz: 11 },
-    fill: { fgColor: { rgb: "F4F1EA" }, patternType: "solid" },
-    alignment: { horizontal: "left", vertical: "center" },
-    border: borderThin(),
-  });
-
-  // 3. Machine row — per-vendor header tint.
-  for (let c = 1; c <= layout.totalNumCols; c++) {
-    const vid = layout.colToVendor[c];
-    const tint = vid ? vendorPalette.get(vid) : null;
-    setStyle(layout.machineRow, c, {
-      font: { bold: true, color: { rgb: "1F2937" }, sz: 11 },
-      fill: { fgColor: { rgb: tint?.header ?? "F4F1EA" }, patternType: "solid" },
-      alignment: { horizontal: "center", vertical: "center" },
-      border: borderThin(),
-    });
-  }
-  setStyle(layout.machineRow, 0, {
-    fill: { fgColor: { rgb: "F4F1EA" }, patternType: "solid" },
-    border: borderThin(),
-  });
-
-  // 4. Unit row (SFT / CFT) — same header tint, slightly lighter
-  //    font weight.
-  for (let c = 1; c <= layout.totalNumCols; c++) {
-    const vid = layout.colToVendor[c];
-    const tint = vid ? vendorPalette.get(vid) : null;
-    setStyle(layout.unitRow, c, {
-      font: { bold: true, color: { rgb: "374151" }, sz: 10 },
-      fill: { fgColor: { rgb: tint?.header ?? "F4F1EA" }, patternType: "solid" },
-      alignment: { horizontal: "center", vertical: "center" },
-      border: borderThin(),
-    });
-  }
-  setStyle(layout.unitRow, 0, {
-    fill: { fgColor: { rgb: "F4F1EA" }, patternType: "solid" },
-    border: borderThin(),
-  });
-
-  // 5. Daily data cells — subtle vendor tint, right-aligned mono.
-  for (let r = layout.dailyRowsStart; r <= layout.dailyRowsEnd; r++) {
-    // Date column
-    setStyle(r, 0, {
-      font: { color: { rgb: "525252" }, sz: 10 },
-      fill: { fgColor: { rgb: "FAFAF9" }, patternType: "solid" },
-      alignment: { horizontal: "left", vertical: "center" },
-      border: borderThin(),
-    });
-    for (let c = 1; c <= layout.totalNumCols; c++) {
-      const vid = layout.colToVendor[c];
-      const tint = vid ? vendorPalette.get(vid) : null;
-      setStyle(r, c, {
-        font: { color: { rgb: "1F2937" }, sz: 10 },
-        fill: { fgColor: { rgb: tint?.data ?? "FFFFFF" }, patternType: "solid" },
-        alignment: { horizontal: "right", vertical: "center" },
-        border: borderThin("E5E7EB"),
-      });
-    }
-  }
-
-  // 6. GRAND TOTAL row — bold, header tint per vendor.
-  setStyle(layout.grandTotalRow, 0, {
-    font: { bold: true, color: { rgb: "1F2937" }, sz: 11 },
-    fill: { fgColor: { rgb: "E5E7EB" }, patternType: "solid" },
-    alignment: { horizontal: "left", vertical: "center" },
-    border: borderThin(),
-  });
-  for (let c = 1; c <= layout.totalNumCols; c++) {
-    const vid = layout.colToVendor[c];
-    const tint = vid ? vendorPalette.get(vid) : null;
-    setStyle(layout.grandTotalRow, c, {
-      font: { bold: true, color: { rgb: "1F2937" }, sz: 11 },
-      fill: { fgColor: { rgb: tint?.header ?? "E5E7EB" }, patternType: "solid" },
-      alignment: { horizontal: "right", vertical: "center" },
-      border: borderThin(),
-    });
-  }
-
-  // 7. AVG row — subtle vendor tint.
-  setStyle(layout.avgRow, 0, {
-    font: { color: { rgb: "525252" }, sz: 11 },
-    fill: { fgColor: { rgb: "F4F1EA" }, patternType: "solid" },
-    alignment: { horizontal: "left", vertical: "center" },
-    border: borderThin(),
-  });
-  for (let c = 1; c <= layout.totalNumCols; c++) {
-    const vid = layout.colToVendor[c];
-    const tint = vid ? vendorPalette.get(vid) : null;
-    setStyle(layout.avgRow, c, {
-      font: { color: { rgb: "374151" }, sz: 10 },
-      fill: { fgColor: { rgb: tint?.data ?? "F4F1EA" }, patternType: "solid" },
-      alignment: { horizontal: "right", vertical: "center" },
-      border: borderThin(),
-    });
-  }
-
-  // 8. PER OPERATOR TOTALS header. Mig 054: extended from 6 to 12
-  //    columns to include OPERATIONAL / DEPRECIATION / TOTAL COST
-  //    + ₹/SFT / ₹/CFT / ₹/UNIT. Cost columns 6-11 use a gold
-  //    accent on the dark band so the eye splits "production
-  //    volume" from "money" visually.
-  for (let c = 0; c <= 11; c++) {
-    setStyle(layout.perOperatorHeaderRow, c, {
-      font: { bold: true, color: { rgb: c >= 6 ? "FACC15" : "FFFFFF" }, sz: 11 },
-      fill: { fgColor: { rgb: "1A1A1A" }, patternType: "solid" },
-      alignment: { horizontal: c === 0 ? "left" : "center", vertical: "center" },
-      border: borderThin(),
-    });
-  }
-
-  // 9. Per-operator rows — each row uses that operator's header tint
-  //    as background so the row pops in the vendor's signature
-  //    colour. Cost columns (6-11) get a gold accent tint so the
-  //    money columns stand apart from production volume.
-  for (let i = 0; i < report.vendorGroups.length; i++) {
-    const g = report.vendorGroups[i];
-    const tint = vendorPalette.get(g.vendor_id)!;
-    const r = layout.perOperatorRowsStart + i;
-    setStyle(r, 0, {
-      font: { bold: true, italic: true, color: { rgb: "1F2937" }, sz: 11 },
-      fill: { fgColor: { rgb: tint.header }, patternType: "solid" },
-      alignment: { horizontal: "left", vertical: "center" },
-      border: borderThin(),
-    });
-    // Production columns 1-5: operator-tint background.
-    for (let c = 1; c <= 5; c++) {
-      setStyle(r, c, {
-        font: { bold: c >= 3, color: { rgb: "1F2937" }, sz: 11 },
-        fill: { fgColor: { rgb: tint.header }, patternType: "solid" },
-        alignment: { horizontal: c <= 2 ? "center" : "right", vertical: "center" },
-        border: borderThin(),
-      });
-    }
-    // Cost columns 6-11: gold-accent background. Distinguishes
-    // "money" from "production volume" in the wide row.
-    for (let c = 6; c <= 11; c++) {
-      setStyle(r, c, {
-        font: { bold: c === 8 || c === 11, color: { rgb: "7C2D12" }, sz: 11 },
-        fill: { fgColor: { rgb: "F1E0B8" }, patternType: "solid" },
-        alignment: { horizontal: "right", vertical: "center" },
-        border: borderThin(),
-      });
-    }
-  }
-
-  // 10. Fleet TOTAL — dark band, gold combined total accent.
-  //     Mig 054: extends from 6 to 12 columns adding OPERATIONAL /
-  //     DEPRECIATION / TOTAL COST cells. Cost columns also yellow
-  //     for visual link with the per-operator block above.
-  setStyle(layout.fleetTotalRow, 0, {
-    font: { bold: true, color: { rgb: "FFFFFF" }, sz: 12 },
-    fill: { fgColor: { rgb: "1A1A1A" }, patternType: "solid" },
-    alignment: { horizontal: "left", vertical: "center" },
-    border: borderThin("333333"),
-  });
-  // c 1-5 = production half (same yellow-on-dark as before for the
-  //          combined total).
-  // c 6-11 = cost half (gold/yellow on dark — money is yellow).
-  for (let c = 1; c <= 11; c++) {
-    const isCombinedTotal = c === 5;
-    const isCostLabel = c === 6 || c === 8 || c === 10;
-    const isCostValue = c === 7 || c === 9 || c === 11;
-    setStyle(layout.fleetTotalRow, c, {
-      font: {
-        bold: true,
-        color: {
-          rgb:
-            isCombinedTotal || isCostValue
-              ? "FACC15"
-              : isCostLabel
-                ? "F1E0B8"
-                : "FFFFFF",
-        },
-        sz: 11,
-      },
-      fill: { fgColor: { rgb: "1A1A1A" }, patternType: "solid" },
-      alignment: { horizontal: c % 2 === 1 ? "right" : "left", vertical: "center" },
-      border: borderThin("333333"),
-    });
-  }
-
-  // 11. Fleet AVG (MTCPL · per-machine avg) — gold-tinted accent row.
-  setStyle(layout.fleetAvgRow, 0, {
-    font: { bold: true, color: { rgb: "1F2937" }, sz: 11 },
-    fill: { fgColor: { rgb: "F1E0B8" }, patternType: "solid" },
-    alignment: { horizontal: "left", vertical: "center" },
-    border: borderThin(),
-  });
-  for (let c = 1; c <= 4; c++) {
-    setStyle(layout.fleetAvgRow, c, {
-      font: { bold: c % 2 === 0, color: { rgb: "1F2937" }, sz: 11 },
-      fill: { fgColor: { rgb: "F1E0B8" }, patternType: "solid" },
-      alignment: { horizontal: c % 2 === 1 ? "right" : "left", vertical: "center" },
-      border: borderThin(),
-    });
-  }
-}
