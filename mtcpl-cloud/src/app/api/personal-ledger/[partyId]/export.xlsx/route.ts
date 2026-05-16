@@ -319,7 +319,6 @@ async function handleExport(_req: NextRequest, ctx: RouteContext) {
     bucketLabelById,
     byBucket,
     receivedTotal,
-    outstanding,
   });
 
   const buf = await wb.xlsx.writeBuffer();
@@ -388,29 +387,10 @@ function buildSummarySheet(
   ];
 
   const COLS = 7;
+  // Mig 056 follow-on (Daksh): dropped the "BN · Personal Ledger"
+  // title band and the "Exported … · NOT company books" subtitle
+  // strip. Start straight at the INVOICES section.
   let r = 1;
-
-  // ── Title band ────────────────────────────────────────────────
-  ws.mergeCells(r, 1, r, COLS);
-  const title = ws.getCell(r, 1);
-  title.value = `📓  ${d.partyName} · Personal Ledger`;
-  title.font = { name: "Calibri", size: 18, bold: true, color: { argb: COLOR.white } };
-  title.alignment = { vertical: "middle", horizontal: "left", indent: 1 };
-  title.fill = fill(COLOR.accent);
-  ws.getRow(r).height = 36;
-  r++;
-
-  // Sub-title strip
-  ws.mergeCells(r, 1, r, COLS);
-  const sub = ws.getCell(r, 1);
-  sub.value = `Exported ${todayIso()} (IST) · NOT company books`;
-  sub.font = { name: "Calibri", size: 11, italic: true, color: { argb: COLOR.white } };
-  sub.alignment = { vertical: "middle", horizontal: "left", indent: 1 };
-  sub.fill = fill("FF6366F1"); // slightly lighter indigo
-  ws.getRow(r).height = 22;
-  r++;
-
-  r++; // gap
 
   // ── INVOICES section ──────────────────────────────────────────
   r = drawSectionHeader(ws, r, COLS, "INVOICES", "📄", COLOR.accent);
@@ -637,30 +617,43 @@ function buildSummarySheet(
   ws.getRow(r).height = 22;
   r++;
 
-  // Arithmetic line: invoiced − received = outstanding
+  // Arithmetic line: invoiced − received = outstanding. Daksh: each
+  // amount in its own colour — Invoiced indigo (matches the
+  // Invoices section), Received emerald (matches Receipts),
+  // Outstanding plain black so it reads as "the bottom line".
+  // Implemented via Excel rich-text runs in a single cell.
   ws.mergeCells(r, 1, r, COLS);
   const arith = ws.getCell(r, 1);
-  arith.value = `₹${formatInr(d.invoicedTotal)}  −  ₹${formatInr(d.receivedTotal)}  =  ₹${formatInr(cleared ? 0 : d.outstanding)}`;
-  arith.font = {
-    name: "Consolas",
-    size: 16,
-    bold: true,
-    color: { argb: calloutColor },
+  const outstandingValue = cleared ? 0 : d.outstanding;
+  const monoFont = { name: "Consolas", size: 16, bold: true } as const;
+  arith.value = {
+    richText: [
+      {
+        text: `₹${formatInr(d.invoicedTotal)}`,
+        font: { ...monoFont, color: { argb: COLOR.accent } },
+      },
+      {
+        text: "   −   ",
+        font: { ...monoFont, color: { argb: COLOR.textMuted } },
+      },
+      {
+        text: `₹${formatInr(d.receivedTotal)}`,
+        font: { ...monoFont, color: { argb: COLOR.success } },
+      },
+      {
+        text: "   =   ",
+        font: { ...monoFont, color: { argb: COLOR.textMuted } },
+      },
+      {
+        text: `₹${formatInr(outstandingValue)}`,
+        font: { ...monoFont, color: { argb: COLOR.text } },
+      },
+    ],
   };
   arith.alignment = { horizontal: "center", vertical: "middle" };
   arith.fill = fill(calloutTint);
   arith.border = thinBorder(calloutColor);
   ws.getRow(r).height = 36;
-  r++;
-
-  // Footnote
-  ws.mergeCells(r, 1, r, COLS);
-  const foot = ws.getCell(r, 1);
-  foot.value =
-    "Outstanding = Total invoiced − Total received (across all buckets combined). Cancelled entries are excluded but kept in the audit trail.";
-  foot.font = { italic: true, size: 9, color: { argb: COLOR.textMuted } };
-  foot.alignment = { horizontal: "left", vertical: "top", wrapText: true };
-  ws.getRow(r).height = 28;
   r++;
 }
 
@@ -859,7 +852,6 @@ function buildReceiptsSheet(
     bucketLabelById: Map<string, string>;
     byBucket: Map<string, number>;
     receivedTotal: number;
-    outstanding: number;
   },
 ) {
   const ws = wb.addWorksheet("Receipts", {
@@ -944,28 +936,13 @@ function buildReceiptsSheet(
       ws.getCell(r, 3).font = { ...ws.getCell(r, 3).font, bold: true, color: { argb: pal.fg } };
       r++;
     }
-    // Total received band
+    // Total received band — final row on the Receipts sheet.
+    // Mig 056 follow-on (Daksh): outstanding callout removed from
+    // this sheet — it's already in the Summary sheet's callout
+    // band, duplicating it here was noisy.
     const tot = ws.getRow(r);
     tot.values = ["TOTAL RECEIVED", "", d.receivedTotal, ""];
     setRowStyle(tot, { bold: true, fillColor: COLOR.success, fontColor: COLOR.white, size: 12 });
-    ws.mergeCells(r, 1, r, 2);
-    ws.getCell(r, 1).alignment = { horizontal: "left", vertical: "middle", indent: 1 };
-    ws.getCell(r, 3).numFmt = '"₹"#,##0.00';
-    ws.getCell(r, 3).alignment = { horizontal: "right", vertical: "middle" };
-    ws.getCell(r, 3).font = { ...ws.getCell(r, 3).font, size: 14 };
-    ws.getRow(r).height = 24;
-    r++;
-    // Outstanding callout row
-    r++;
-    const cleared = d.outstanding === 0;
-    const oc = ws.getRow(r);
-    oc.values = [cleared ? "STATUS · CLEARED" : "OUTSTANDING", "", cleared ? 0 : d.outstanding, "Invoiced − Received"];
-    setRowStyle(oc, {
-      bold: true,
-      fillColor: cleared ? COLOR.success : COLOR.warning,
-      fontColor: COLOR.white,
-      size: 12,
-    });
     ws.mergeCells(r, 1, r, 2);
     ws.getCell(r, 1).alignment = { horizontal: "left", vertical: "middle", indent: 1 };
     ws.getCell(r, 3).numFmt = '"₹"#,##0.00';
