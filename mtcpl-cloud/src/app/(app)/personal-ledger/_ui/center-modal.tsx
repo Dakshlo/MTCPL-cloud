@@ -40,8 +40,22 @@ export function CenterModal({
   closeOnBackdrop?: boolean;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  // Mig 056 follow-on (Daksh: "when I type in amount, focus jumps
+  // to the cross button"). Bug was: `onClose` is an inline arrow
+  // on the call site, so its reference changed on every parent
+  // re-render. With `onClose` in the effect deps, the effect re-
+  // fired on every keystroke and re-focused the first focusable
+  // element in the dialog — which is the × button in the header.
+  // Fix: capture onClose in a ref so the keydown handler always
+  // calls the latest version, but the focus-and-lock effect only
+  // runs when `open` changes.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
-  // Esc-to-close + body-scroll lock + initial focus.
+  // Esc-to-close + body-scroll lock + initial focus. Runs ONCE
+  // per open→true transition.
   useEffect(() => {
     if (!open) return;
 
@@ -51,15 +65,21 @@ export function CenterModal({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        onClose();
+        onCloseRef.current();
       }
     };
     window.addEventListener("keydown", onKey);
 
-    // Focus the first focusable element so keyboard users land
-    // inside the dialog immediately.
+    // Focus the first focusable FORM control — explicitly skip the
+    // header × close button (it's the very first focusable in DOM
+    // order otherwise, which is the bug we just fixed).
     const first = dialogRef.current?.querySelector<HTMLElement>(
-      "input, select, textarea, button, [tabindex]:not([tabindex='-1'])",
+      [
+        "form input:not([type='hidden'])",
+        "form select",
+        "form textarea",
+        "form button[type='submit']",
+      ].join(", "),
     );
     first?.focus();
 
@@ -67,7 +87,8 @@ export function CenterModal({
       window.removeEventListener("keydown", onKey);
       document.body.style.overflow = prevOverflow;
     };
-  }, [open, onClose]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   if (!open) return null;
 

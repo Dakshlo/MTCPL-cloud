@@ -83,6 +83,39 @@ function todayKeyIst(): string {
   return `${y}-${m}-${dd}`;
 }
 
+// Mig 055 follow-on (Daksh: "show CFT or SFT, and if both exist
+// decide accordingly"). Derive a single unit label for the
+// invoice from its line items. If every item shares the same
+// unit → "SFT" or "CFT". If two units are mixed → "MIX".
+function invoiceUnit(items: InvoiceItem[]): string {
+  if (items.length === 0) return "—";
+  const seen = new Set(items.map((it) => (it.unit ?? "").toUpperCase()));
+  seen.delete("");
+  if (seen.size === 0) return "—";
+  if (seen.size === 1) return Array.from(seen)[0];
+  return "MIX";
+}
+
+function UnitChip({ unit }: { unit: string }) {
+  const isMix = unit === "MIX";
+  return (
+    <span
+      style={{
+        fontSize: 10,
+        fontWeight: 800,
+        padding: "2px 8px",
+        background: isMix ? "#fef3c7" : "#e0e7ff",
+        color: isMix ? "#92400e" : "#4338ca",
+        borderRadius: 999,
+        fontFamily: "ui-monospace, monospace",
+        letterSpacing: "0.05em",
+      }}
+    >
+      {unit}
+    </span>
+  );
+}
+
 // Mig 055 follow-on (Daksh: "give B blue color and C grey color").
 // Per-bucket pill / card palette. Special-cased for the default
 // bucket labels Daksh actually uses; everything else falls through
@@ -1272,17 +1305,15 @@ function SummaryCard({
         </div>
       )}
 
-      {/* Inline Excel-like ledger view (Daksh, Mig 055 follow-on:
-          "on summary give full excel like table view to show all
-          invoices and received amount, to get outstanding"). Two
-          tables side-by-side on wide screens, stacked on narrow.
-          Each ends with its own footer total; an arithmetic line
-          below the pair spells out the subtraction → outstanding. */}
+      {/* Inline Excel-like ledger view. Stacked full-width (was
+          side-by-side) since the invoices ledger grew to 6 columns
+          per Daksh (Date / Invoice # / Unit / Net / Tax / Total)
+          and crowding it next to receipts hurt readability. */}
       <div
         style={{
           marginTop: 16,
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
+          display: "flex",
+          flexDirection: "column",
           gap: 14,
         }}
       >
@@ -1318,40 +1349,75 @@ function SummaryCard({
               No invoices.
             </div>
           ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-              <thead>
-                <tr style={{ background: ACCOUNTS_TOKENS.surfaceMuted }}>
-                  <th style={ledgerThStyle}>Date</th>
-                  <th style={ledgerThStyle}>Invoice #</th>
-                  <th style={{ ...ledgerThStyle, textAlign: "right" }}>Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                {invoices.map((inv) => (
-                  <tr key={inv.id} style={{ borderTop: `1px solid ${ACCOUNTS_TOKENS.border}` }}>
-                    <td style={ledgerTdStyle}>{inv.invoiceDate}</td>
-                    <td style={{ ...ledgerTdStyle, fontWeight: 700 }}>{inv.invoiceNo}</td>
-                    <td style={{ ...ledgerTdStyle, textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800, color: ACCOUNTS_TOKENS.accent }}>
-                      {inr(inv.total)}
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 620 }}>
+                <thead>
+                  <tr style={{ background: ACCOUNTS_TOKENS.surfaceMuted }}>
+                    <th style={ledgerThStyle}>Date</th>
+                    <th style={ledgerThStyle}>Invoice #</th>
+                    <th style={{ ...ledgerThStyle, textAlign: "center" }}>Unit</th>
+                    <th style={{ ...ledgerThStyle, textAlign: "right" }}>Net</th>
+                    <th style={{ ...ledgerThStyle, textAlign: "right" }}>Tax</th>
+                    <th style={{ ...ledgerThStyle, textAlign: "right" }}>Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {invoices.map((inv) => {
+                    const unit = invoiceUnit(inv.items);
+                    return (
+                      <tr key={inv.id} style={{ borderTop: `1px solid ${ACCOUNTS_TOKENS.border}` }}>
+                        <td style={ledgerTdStyle}>{inv.invoiceDate}</td>
+                        <td style={{ ...ledgerTdStyle, fontWeight: 700 }}>{inv.invoiceNo}</td>
+                        <td style={{ ...ledgerTdStyle, textAlign: "center" }}>
+                          <UnitChip unit={unit} />
+                        </td>
+                        <td style={{ ...ledgerTdStyle, textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 600 }}>
+                          {inr(inv.subtotal)}
+                        </td>
+                        <td style={{ ...ledgerTdStyle, textAlign: "right", fontFamily: "ui-monospace, monospace", color: "var(--muted)" }}>
+                          {inv.gstAmount > 0 ? inr(inv.gstAmount) : "—"}
+                        </td>
+                        <td style={{ ...ledgerTdStyle, textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800, color: ACCOUNTS_TOKENS.accent }}>
+                          {inr(inv.total)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  {/* Footer subtotals: net / tax / total stacked
+                      vertically so each column lines up with its body. */}
+                  <tr style={{ borderTop: `2px solid ${ACCOUNTS_TOKENS.accent}` }}>
+                    <td colSpan={3} style={{ ...ledgerTdStyle, fontWeight: 800, color: ACCOUNTS_TOKENS.accent, textTransform: "uppercase", letterSpacing: "0.06em", fontSize: 11 }}>
+                      Subtotals
+                    </td>
+                    <td style={{ ...ledgerTdStyle, textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>
+                      {inr(invoices.reduce((s, i) => s + i.subtotal, 0))}
+                    </td>
+                    <td style={{ ...ledgerTdStyle, textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 700, color: "var(--muted)" }}>
+                      {inr(invoices.reduce((s, i) => s + i.gstAmount, 0))}
+                    </td>
+                    <td style={{ ...ledgerTdStyle, textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 900, color: ACCOUNTS_TOKENS.accent, fontSize: 14 }}>
+                      {inr(invoicedTotal)}
                     </td>
                   </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr style={{ borderTop: `2px solid ${ACCOUNTS_TOKENS.accent}` }}>
-                  <td colSpan={2} style={{ ...ledgerTdStyle, fontWeight: 800, color: ACCOUNTS_TOKENS.accent, textTransform: "uppercase", letterSpacing: "0.06em", fontSize: 11 }}>
-                    Total invoiced
-                  </td>
-                  <td style={{ ...ledgerTdStyle, textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 900, color: ACCOUNTS_TOKENS.accent, fontSize: 14 }}>
-                    {inr(invoicedTotal)}
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
+                  <tr>
+                    <td colSpan={5} style={{ ...ledgerTdStyle, fontWeight: 800, color: ACCOUNTS_TOKENS.accent, textTransform: "uppercase", letterSpacing: "0.06em", fontSize: 11 }}>
+                      Total invoiced (Net + Tax)
+                    </td>
+                    <td style={{ ...ledgerTdStyle, textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 900, color: ACCOUNTS_TOKENS.accent, fontSize: 15 }}>
+                      {inr(invoicedTotal)}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
           )}
         </div>
 
-        {/* Receipts ledger */}
+        {/* Receipts ledger — now with per-bucket subtotal rows in
+            the tfoot per Daksh ("show how much received by C and
+            how much received by B"). */}
         <div
           style={{
             background: "#fff",
@@ -1388,6 +1454,7 @@ function SummaryCard({
                 <tr style={{ background: ACCOUNTS_TOKENS.surfaceMuted }}>
                   <th style={ledgerThStyle}>Date</th>
                   <th style={ledgerThStyle}>Bucket</th>
+                  <th style={ledgerThStyle}>Note</th>
                   <th style={{ ...ledgerThStyle, textAlign: "right" }}>Amount</th>
                 </tr>
               </thead>
@@ -1413,6 +1480,9 @@ function SummaryCard({
                           {r.bucketLabel}
                         </span>
                       </td>
+                      <td style={{ ...ledgerTdStyle, color: "var(--muted)" }}>
+                        {r.note ?? "—"}
+                      </td>
                       <td style={{ ...ledgerTdStyle, textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800, color: ACCOUNTS_TOKENS.success }}>
                         {inr(r.amount)}
                       </td>
@@ -1421,8 +1491,35 @@ function SummaryCard({
                 })}
               </tbody>
               <tfoot>
+                {byBucket.map((b) => {
+                  const pal = bucketPalette(b.label);
+                  return (
+                    <tr key={`subtotal-${b.label}`} style={{ borderTop: `1px dashed ${ACCOUNTS_TOKENS.border}` }}>
+                      <td colSpan={3} style={{ ...ledgerTdStyle, color: "var(--muted)", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                        Subtotal ·{" "}
+                        <span
+                          style={{
+                            display: "inline-block",
+                            marginLeft: 4,
+                            padding: "1px 8px",
+                            background: pal.bg,
+                            color: pal.fg,
+                            borderRadius: 999,
+                            fontFamily: "ui-monospace, monospace",
+                            fontWeight: 800,
+                          }}
+                        >
+                          {b.label}
+                        </span>
+                      </td>
+                      <td style={{ ...ledgerTdStyle, textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 700, color: pal.fg }}>
+                        {inr(b.total)}
+                      </td>
+                    </tr>
+                  );
+                })}
                 <tr style={{ borderTop: `2px solid ${ACCOUNTS_TOKENS.success}` }}>
-                  <td colSpan={2} style={{ ...ledgerTdStyle, fontWeight: 800, color: ACCOUNTS_TOKENS.success, textTransform: "uppercase", letterSpacing: "0.06em", fontSize: 11 }}>
+                  <td colSpan={3} style={{ ...ledgerTdStyle, fontWeight: 800, color: ACCOUNTS_TOKENS.success, textTransform: "uppercase", letterSpacing: "0.06em", fontSize: 11 }}>
                     Total received
                   </td>
                   <td style={{ ...ledgerTdStyle, textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 900, color: ACCOUNTS_TOKENS.success, fontSize: 14 }}>
