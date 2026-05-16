@@ -77,6 +77,13 @@ CREATE INDEX IF NOT EXISTS cnc_vendor_expenses_recent_idx
   ON public.cnc_vendor_expenses (entered_at DESC)
   WHERE cancelled_at IS NULL;
 
+-- Defense-in-depth: enable RLS with no policies. All app access
+-- goes through createAdminSupabaseClient (service_role) which
+-- bypasses RLS — so server actions + the report builder keep
+-- working. Anon / authenticated keys can't touch this table.
+-- Same pattern as vendor_private_notes (mig 050) and others.
+ALTER TABLE public.cnc_vendor_expenses ENABLE ROW LEVEL SECURITY;
+
 -- ── Machine depreciation columns on cnc_machines ──────────────────
 -- Five new columns + one sensible default.
 ALTER TABLE public.cnc_machines
