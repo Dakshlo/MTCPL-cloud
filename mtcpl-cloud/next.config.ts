@@ -14,7 +14,11 @@ const nextConfig: NextConfig = {
   // external tells Next to require() it from node_modules at
   // request time — same approach Next docs recommend for `xlsx`,
   // `puppeteer`, `sharp`, etc.
-  serverExternalPackages: ["xlsx"],
+  // Mig 056 follow-on: exceljs added for styled-Excel support
+  // (personal-ledger export). Same Node-API caveats as xlsx — keep
+  // it external so Turbopack doesn't try to bundle it into the
+  // edge / serverless artifact.
+  serverExternalPackages: ["xlsx", "exceljs"],
 };
 
 /**
