@@ -335,14 +335,42 @@ function ReportTable({ report }: { report: CncMonthlyReport }) {
                 : [<td key={`${m.id}-cft`} style={tdNum(true)}>{fmt(p.cftAvg)}</td>];
             })}
           </tr>
-          {/* TOTAL-AVG fleet row + MTCPL per-machine avg, two consolidated rows */}
+          {/* Mig 053 follow-on (Daksh): per-CNC-operator total rows.
+              Each row sums every machine belonging to that vendor.
+              Inserted between AVG and TOTAL so the report reads:
+              machine totals → machine avg → operator totals →
+              fleet total → MTCPL per-machine avg. */}
+          {report.vendorGroups.map((grp) => {
+            const v = report.perVendor[grp.vendor_id];
+            if (!v) return null;
+            return (
+              <tr key={`vendor-${grp.vendor_id}`} style={{ background: "rgba(201,161,74,0.10)", fontWeight: 700 }}>
+                <td style={{ ...tdDate(), fontStyle: "italic" }}>
+                  ↳ {grp.vendor_name}
+                  <span style={{ fontSize: 10, color: "var(--muted)", marginLeft: 6, fontWeight: 500 }}>
+                    {v.machineCount} machine{v.machineCount !== 1 ? "s" : ""} · {v.workingDays} working day{v.workingDays !== 1 ? "s" : ""}
+                  </span>
+                </td>
+                <td colSpan={report.machines.reduce((n, m) => n + (m.showSqft ? 2 : 1), 0)} style={{ ...tdNum(true), textAlign: "left", paddingLeft: 14 }}>
+                  <span style={{ marginRight: 18 }}>SFT: <strong>{fmt(v.sqftTotal)}</strong></span>
+                  <span style={{ marginRight: 18 }}>CFT: <strong>{fmt(v.cftTotal)}</strong></span>
+                  <span style={{ color: "var(--gold-dark)" }}>TOTAL: <strong>{fmt(v.combinedTotal)}</strong></span>
+                </td>
+              </tr>
+            );
+          })}
+          {/* TOTAL-AVG fleet row + MTCPL per-machine avg, two consolidated rows.
+              Mig 053 follow-on: added combined SFT+CFT total to the
+              fleet TOTAL line — single number Daksh can quote when
+              comparing months. */}
           <tr style={{ background: "#1a1a1a", color: "#fff", fontWeight: 700 }}>
             <td style={{ ...tdDate(), color: "#fff", borderColor: "#333" }}>
               TOTAL · {report.workingDaysAcrossFleet} working day{report.workingDaysAcrossFleet !== 1 ? "s" : ""}
             </td>
             <td colSpan={report.machines.reduce((n, m) => n + (m.showSqft ? 2 : 1), 0)} style={{ ...tdNum(true), color: "#fff", borderColor: "#333", textAlign: "left", paddingLeft: 14 }}>
-              <span style={{ marginRight: 24 }}>SFT: <strong>{fmt(report.grandTotalSqft)}</strong></span>
-              <span>CFT: <strong>{fmt(report.grandTotalCft)}</strong></span>
+              <span style={{ marginRight: 18 }}>SFT: <strong>{fmt(report.grandTotalSqft)}</strong></span>
+              <span style={{ marginRight: 18 }}>CFT: <strong>{fmt(report.grandTotalCft)}</strong></span>
+              <span style={{ color: "#facc15" }}>TOTAL: <strong>{fmt(report.grandTotalCombined)}</strong></span>
             </td>
           </tr>
           <tr style={{ background: "var(--surface-alt)", fontWeight: 700 }}>

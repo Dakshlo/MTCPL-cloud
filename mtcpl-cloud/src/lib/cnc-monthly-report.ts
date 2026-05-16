@@ -74,12 +74,35 @@ export type CncMonthlyReport = {
   /** Sum across every machine. */
   grandTotalSqft: number;
   grandTotalCft: number;
+  /** Mig 053 follow-on (Daksh): single "total work units" proxy
+   *  metric — SFT + CFT added together. Not physically meaningful
+   *  (mixing area + volume) but useful as a single number on the
+   *  summary panel + Excel footer to compare months at a glance. */
+  grandTotalCombined: number;
   /** Aggregate working days = max across machines (a day is counted
    *  if any machine logged anything on it). */
   workingDaysAcrossFleet: number;
   /** "MTCPL per machine average" — grand total / number of machines. */
   perMachineAvgSqft: number;
   perMachineAvgCft: number;
+  /** Mig 053 follow-on (Daksh): per-CNC-operator (vendor) totals.
+   *  Each vendor's row sums every machine that belongs to them.
+   *  Useful for the operator-level KPI Daksh asked for ("total
+   *  production from per CNC operator whole"). */
+  perVendor: Record<
+    string,
+    {
+      vendor_id: string;
+      vendor_name: string;
+      sqftTotal: number;
+      cftTotal: number;
+      combinedTotal: number;
+      machineCount: number;
+      /** Working days across this operator's fleet (any machine
+       *  active = counted). */
+      workingDays: number;
+    }
+  >;
 };
 
 function daysInMonth(year: number, month1Indexed: number): number {
@@ -266,6 +289,39 @@ export async function buildCncMonthlyReport(year: number, month: number): Promis
   }
   const grandTotalSqft = Object.values(perMachine).reduce((acc, p) => acc + p.sqftTotal, 0);
   const grandTotalCft = Object.values(perMachine).reduce((acc, p) => acc + p.cftTotal, 0);
+  const grandTotalCombined = grandTotalSqft + grandTotalCft;
+
+  // Per-vendor (CNC operator) aggregation. Walk vendorGroups so the
+  // order matches the on-screen header grouping.
+  const perVendor: CncMonthlyReport["perVendor"] = {};
+  for (const grp of vendorGroups) {
+    let sqftTotal = 0;
+    let cftTotal = 0;
+    const operatorWorkingDays = new Set<string>();
+    for (const m of grp.machines) {
+      const p = perMachine[m.id];
+      if (!p) continue;
+      sqftTotal += p.sqftTotal;
+      cftTotal += p.cftTotal;
+      // Walk daily rows to collect working days for this operator.
+      for (const row of rows) {
+        const v = row.values[m.id];
+        if (!v) continue;
+        if ((v.sqft ?? 0) > 0 || v.cft > 0) {
+          operatorWorkingDays.add(row.date);
+        }
+      }
+    }
+    perVendor[grp.vendor_id] = {
+      vendor_id: grp.vendor_id,
+      vendor_name: grp.vendor_name,
+      sqftTotal,
+      cftTotal,
+      combinedTotal: sqftTotal + cftTotal,
+      machineCount: grp.machines.length,
+      workingDays: operatorWorkingDays.size,
+    };
+  }
 
   return {
     year,
@@ -276,8 +332,10 @@ export async function buildCncMonthlyReport(year: number, month: number): Promis
     perMachine,
     grandTotalSqft,
     grandTotalCft,
+    grandTotalCombined,
     workingDaysAcrossFleet: fleetWorkingDays.size,
     perMachineAvgSqft: machineCols.length > 0 ? grandTotalSqft / machineCols.length : 0,
     perMachineAvgCft: machineCols.length > 0 ? grandTotalCft / machineCols.length : 0,
+    perVendor,
   };
 }

@@ -180,12 +180,35 @@ function buildSheet(report: CncMonthlyReport): (string | number)[][] {
 
   rows.push([]); // spacer
 
+  // Mig 053 follow-on (Daksh): per-CNC-operator total block.
+  // One row per vendor, summed across the machines they own.
+  rows.push([
+    "PER OPERATOR TOTALS",
+    "MACHINES", "WORKING DAYS", "SFT", "CFT", "TOTAL (SFT+CFT)",
+  ]);
+  for (const grp of report.vendorGroups) {
+    const v = report.perVendor[grp.vendor_id];
+    if (!v) continue;
+    rows.push([
+      `↳ ${grp.vendor_name}`,
+      v.machineCount,
+      v.workingDays,
+      fmtCell(v.sqftTotal),
+      fmtCell(v.cftTotal),
+      fmtCell(v.combinedTotal),
+    ]);
+  }
+
+  rows.push([]); // spacer
+
   // Fleet total + per-machine avg as two summary rows that sit
-  // beneath the per-machine numeric grid.
+  // beneath the per-machine numeric grid. Mig 053 follow-on: added
+  // combined SFT+CFT total to the fleet row.
   rows.push([
     `TOTAL · ${report.workingDaysAcrossFleet} working day${report.workingDaysAcrossFleet !== 1 ? "s" : ""}`,
     "SFT", fmtCell(report.grandTotalSqft),
     "CFT", fmtCell(report.grandTotalCft),
+    "TOTAL (SFT+CFT)", fmtCell(report.grandTotalCombined),
   ]);
   rows.push([
     "MTCPL · per-machine avg",
