@@ -21,7 +21,6 @@ import {
   ACCOUNTS_TOKENS,
   BUTTON_STYLES,
   INPUT_STYLE,
-  Money,
   VendorAvatar,
 } from "../accounts/_ui/components";
 
@@ -87,28 +86,31 @@ export function PersonalLedgerClient({
     <section className="page-card">
       <FinanceLoadingOverlay show={pending} label="Saving party…" />
 
-      {/* PERSONAL banner — non-dismissable, prominent red/amber so
-          the surface is unmistakably NOT a company-finance page. */}
+      {/* PERSONAL banner — non-dismissable, prominent amber so the
+          surface is unmistakably NOT a company-finance page. Daksh
+          (Mig 055 follow-on): bumped weight + size for more
+          presence on first scan. */}
       <div
         style={{
-          marginBottom: 16,
-          padding: "10px 14px",
+          marginBottom: 18,
+          padding: "14px 18px",
           background: "linear-gradient(135deg, #fef3c7 0%, #fce7f3 100%)",
           border: "2px solid #d97706",
-          borderRadius: 10,
+          borderRadius: 12,
           display: "flex",
           alignItems: "center",
-          gap: 10,
-          fontSize: 12,
-          fontWeight: 700,
+          gap: 12,
+          fontSize: 13,
+          fontWeight: 800,
           color: "#7c2d12",
-          letterSpacing: "0.04em",
+          letterSpacing: "0.05em",
           textTransform: "uppercase",
+          boxShadow: "0 2px 8px rgba(217, 119, 6, 0.12)",
         }}
       >
-        <span style={{ fontSize: 16 }}>📓</span>
+        <span style={{ fontSize: 22, lineHeight: 1 }}>📓</span>
         <span>Personal ledger · NOT company books</span>
-        <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 600, textTransform: "none", color: "#92400e" }}>
+        <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, textTransform: "none", color: "#92400e" }}>
           Owner-scoped · all entries audit-logged
         </span>
       </div>
@@ -119,28 +121,34 @@ export function PersonalLedgerClient({
           flexWrap: "wrap",
           alignItems: "flex-end",
           gap: 14,
-          marginBottom: 18,
-          paddingBottom: 12,
+          marginBottom: 22,
+          paddingBottom: 16,
           borderBottom: `1px solid ${ACCOUNTS_TOKENS.border}`,
         }}
       >
         <div style={{ flex: 1, minWidth: 220 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>
+          <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
             My Parties
           </div>
-          <h1 style={{ margin: "2px 0 0", fontSize: 22, fontWeight: 800, color: "var(--text)", letterSpacing: "-0.01em" }}>
-            {parties.length} {parties.length === 1 ? "party" : "parties"}
+          <h1
+            style={{
+              margin: "4px 0 0",
+              fontSize: 32,
+              fontWeight: 900,
+              color: "var(--text)",
+              letterSpacing: "-0.02em",
+              lineHeight: 1.1,
+            }}
+          >
+            {parties.length}{" "}
+            <span style={{ fontSize: 18, fontWeight: 700, color: "var(--muted)", letterSpacing: "-0.01em" }}>
+              {parties.length === 1 ? "party" : "parties"}
+            </span>
           </h1>
-          <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--muted)" }}>
+          <p style={{ margin: "6px 0 0", fontSize: 13, color: "var(--muted)", fontWeight: 500 }}>
             Invoices + receipts + balance, per party. Excel-exportable.
           </p>
         </div>
-        <Link
-          href="/personal-ledger/buckets"
-          style={{ ...BUTTON_STYLES.secondary, textDecoration: "none" }}
-        >
-          ⚙ Buckets
-        </Link>
       </header>
 
       {/* Top-line totals */}
@@ -159,18 +167,20 @@ export function PersonalLedgerClient({
         </div>
       )}
 
-      {/* Add-party form */}
+      {/* Add-party form — bumped to match the new KPI-tile weight
+          above. Solid surface, thicker border, taller input. */}
       <form
         onSubmit={handleAdd}
         style={{
           display: "flex",
-          gap: 8,
+          gap: 10,
           alignItems: "center",
-          padding: 12,
-          background: ACCOUNTS_TOKENS.surfaceMuted,
-          border: `1px dashed ${ACCOUNTS_TOKENS.borderStrong}`,
-          borderRadius: 10,
-          marginBottom: 14,
+          padding: 14,
+          background: "#fff",
+          border: `1.5px solid ${ACCOUNTS_TOKENS.borderStrong}`,
+          borderRadius: 12,
+          marginBottom: 16,
+          boxShadow: ACCOUNTS_TOKENS.shadow,
         }}
       >
         <input
@@ -178,9 +188,24 @@ export function PersonalLedgerClient({
           value={name}
           onChange={(e) => setName(e.target.value.slice(0, 200))}
           placeholder="New party name (e.g. Cousin Ramesh, Acme Side Project)"
-          style={{ ...INPUT_STYLE, flex: 1, minWidth: 0 }}
+          style={{
+            ...INPUT_STYLE,
+            flex: 1,
+            minWidth: 0,
+            padding: "11px 14px",
+            fontSize: 14,
+            fontWeight: 600,
+          }}
         />
-        <button type="submit" disabled={pending || !name.trim()} style={BUTTON_STYLES.primary}>
+        <button
+          type="submit"
+          disabled={pending || !name.trim()}
+          style={{
+            ...BUTTON_STYLES.primary,
+            padding: "11px 22px",
+            fontSize: 14,
+          }}
+        >
           + Add party
         </button>
       </form>
@@ -259,78 +284,182 @@ function TopStat({
   amount: number;
   tone: "accent" | "success" | "warning";
 }) {
+  // Mig 055 follow-on (Daksh: "more bold and all") — these are the
+  // page's hero numbers; they should read like real KPI tiles, not
+  // muted strip-cards. Tinted background, beefier left bar, big
+  // number, and a thin top-of-card colour line.
+  const accentColor =
+    tone === "success"
+      ? ACCOUNTS_TOKENS.success
+      : tone === "warning"
+      ? ACCOUNTS_TOKENS.warning
+      : ACCOUNTS_TOKENS.accent;
+  const tintBg =
+    tone === "success"
+      ? ACCOUNTS_TOKENS.successLight
+      : tone === "warning"
+      ? ACCOUNTS_TOKENS.warningLight
+      : ACCOUNTS_TOKENS.accentLight;
   return (
     <div
       style={{
-        padding: "12px 14px",
-        background: "#fff",
-        border: `1px solid ${ACCOUNTS_TOKENS.border}`,
-        borderLeft: `4px solid ${tone === "success" ? ACCOUNTS_TOKENS.success : tone === "warning" ? ACCOUNTS_TOKENS.warning : ACCOUNTS_TOKENS.accent}`,
-        borderRadius: 8,
-        boxShadow: ACCOUNTS_TOKENS.shadow,
+        position: "relative",
+        padding: "18px 20px 16px",
+        background: `linear-gradient(180deg, ${tintBg} 0%, #fff 100%)`,
+        border: `1.5px solid ${accentColor}33`,
+        borderLeft: `5px solid ${accentColor}`,
+        borderRadius: 12,
+        boxShadow: ACCOUNTS_TOKENS.shadowLarge,
+        overflow: "hidden",
       }}
     >
-      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+      <div
+        style={{
+          fontSize: 11,
+          fontWeight: 800,
+          color: accentColor,
+          textTransform: "uppercase",
+          letterSpacing: "0.1em",
+        }}
+      >
         {label}
       </div>
-      <div style={{ marginTop: 4 }}>
-        <Money value={amount} size="large" tone={tone} />
+      <div style={{ marginTop: 8 }}>
+        <span
+          style={{
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+            fontSize: 26,
+            fontWeight: 900,
+            color: accentColor,
+            letterSpacing: "-0.02em",
+          }}
+        >
+          ₹{amount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+        </span>
       </div>
     </div>
   );
 }
 
 function PartyRow({ party }: { party: PartySummary }) {
+  // Mig 055 follow-on (Daksh: "more bold and all") — row tiles
+  // upgraded: 52px avatar, bigger name, three-line info hierarchy
+  // (name → invoiced/received → outstanding), heavier left status
+  // bar, larger arrow.
   const cleared = party.outstanding === 0 && party.invoiced > 0;
+  const statusColor = cleared
+    ? ACCOUNTS_TOKENS.success
+    : party.outstanding > 0
+    ? ACCOUNTS_TOKENS.warning
+    : ACCOUNTS_TOKENS.neutral;
   return (
     <Link
       href={`/personal-ledger/${party.id}`}
       style={{
         background: "#fff",
-        border: `1px solid ${ACCOUNTS_TOKENS.border}`,
-        borderLeft: `4px solid ${cleared ? ACCOUNTS_TOKENS.success : party.outstanding > 0 ? ACCOUNTS_TOKENS.warning : ACCOUNTS_TOKENS.border}`,
-        borderRadius: 10,
-        padding: "14px 16px",
-        boxShadow: ACCOUNTS_TOKENS.shadow,
+        border: `1.5px solid ${ACCOUNTS_TOKENS.border}`,
+        borderLeft: `6px solid ${statusColor}`,
+        borderRadius: 12,
+        padding: "16px 18px",
+        boxShadow: ACCOUNTS_TOKENS.shadowLarge,
         display: "flex",
         alignItems: "center",
-        gap: 12,
+        gap: 14,
         textDecoration: "none",
         color: "var(--text)",
-        transition: "transform 0.08s ease, box-shadow 0.12s ease",
+        transition: "transform 0.1s ease, box-shadow 0.15s ease, border-color 0.15s ease",
       }}
     >
-      <VendorAvatar name={party.name} size={42} />
+      <VendorAvatar name={party.name} size={52} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}>
+        <div
+          style={{
+            fontSize: 17,
+            fontWeight: 800,
+            color: "var(--text)",
+            letterSpacing: "-0.01em",
+            lineHeight: 1.2,
+          }}
+        >
           {party.name}
         </div>
-        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
-          Invoiced{" "}
-          <strong style={{ fontFamily: "ui-monospace, monospace", color: "var(--text)" }}>
-            ₹{party.invoiced.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
-          </strong>
-          {" · Received "}
-          <strong style={{ fontFamily: "ui-monospace, monospace", color: ACCOUNTS_TOKENS.success }}>
-            ₹{party.received.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
-          </strong>
+        <div
+          style={{
+            display: "flex",
+            gap: 14,
+            flexWrap: "wrap",
+            marginTop: 6,
+            fontSize: 12,
+          }}
+        >
+          <span style={{ color: "var(--muted)", fontWeight: 600 }}>
+            Invoiced{" "}
+            <strong
+              style={{
+                fontFamily: "ui-monospace, monospace",
+                color: ACCOUNTS_TOKENS.accent,
+                fontWeight: 800,
+                fontSize: 13,
+              }}
+            >
+              ₹{party.invoiced.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+            </strong>
+          </span>
+          <span style={{ color: "var(--muted)", fontWeight: 600 }}>
+            Received{" "}
+            <strong
+              style={{
+                fontFamily: "ui-monospace, monospace",
+                color: ACCOUNTS_TOKENS.success,
+                fontWeight: 800,
+                fontSize: 13,
+              }}
+            >
+              ₹{party.received.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+            </strong>
+          </span>
         </div>
       </div>
-      <div style={{ textAlign: "right", minWidth: 120 }}>
-        <div style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-          {cleared ? "Cleared" : "Outstanding"}
+      <div style={{ textAlign: "right", minWidth: 140 }}>
+        <div
+          style={{
+            fontSize: 10,
+            fontWeight: 800,
+            color: statusColor,
+            textTransform: "uppercase",
+            letterSpacing: "0.1em",
+          }}
+        >
+          {cleared ? "✓ Cleared" : "Outstanding"}
         </div>
-        <div style={{ marginTop: 2 }}>
-          {cleared ? (
-            <span style={{ fontSize: 16, fontWeight: 800, color: ACCOUNTS_TOKENS.success, fontFamily: "ui-monospace, monospace" }}>
-              ₹0
-            </span>
-          ) : (
-            <Money value={party.outstanding} size="large" tone={party.outstanding > 0 ? "warning" : "muted"} />
-          )}
+        <div style={{ marginTop: 4 }}>
+          <span
+            style={{
+              fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+              fontSize: 22,
+              fontWeight: 900,
+              color: statusColor,
+              letterSpacing: "-0.02em",
+            }}
+          >
+            ₹
+            {(cleared ? 0 : party.outstanding).toLocaleString("en-IN", {
+              maximumFractionDigits: 2,
+            })}
+          </span>
         </div>
       </div>
-      <span style={{ fontSize: 14, color: "var(--muted)", marginLeft: 4 }}>→</span>
+      <span
+        style={{
+          fontSize: 22,
+          color: statusColor,
+          marginLeft: 4,
+          fontWeight: 800,
+          opacity: 0.75,
+        }}
+      >
+        →
+      </span>
     </Link>
   );
 }
