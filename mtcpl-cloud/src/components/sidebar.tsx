@@ -24,11 +24,6 @@ type NavItem = {
    *  current active_department in addition to the existing role
    *  check. */
   department?: Department;
-  /** Migration 055 — set true to bypass the department filter so
-   *  the entry shows regardless of which dept the user is currently
-   *  viewing. Used for cross-cutting items like the Personal Ledger
-   *  (a developer/owner-only tool that isn't part of any room). */
-  crossDepartment?: boolean;
 };
 
 type NavDivider = {
@@ -96,13 +91,6 @@ function hexToAlpha(hex: string, alpha: number): string {
 // who can switch (developer + owner); for everyone else the role
 // filter alone is sufficient since their role implicitly limits them.
 const navEntries: NavEntry[] = [
-  // Migration 055 follow-on (Daksh): Personal Ledger was originally
-  // pinned at the top of the sidebar via `crossDepartment: true`.
-  // Daksh asked to move it off the daily-use rail and tuck it into
-  // /settings instead — it's a personal tool, not a daily nav target.
-  // The `crossDepartment` field on NavItem stays in place as a clean
-  // mechanism for future cross-cutting entries; no nav item uses it
-  // right now.
   {
     href: "/dashboard",
     label: "Dashboard",
@@ -407,16 +395,9 @@ export function Sidebar({
   // set — their role already narrowed them to one department's worth
   // of entries.
   if (switchable) {
-    visibleEntries = visibleEntries.filter((entry) => {
-      // Mig 055 — cross-department items (e.g. Personal Ledger) bypass
-      // the active-dept filter and render regardless of which room
-      // the user is currently in.
-      if (entry.type !== "divider" && entry.type !== "group") {
-        const item = entry as NavItem;
-        if (item.crossDepartment) return true;
-      }
-      return (entry.department ?? "production") === currentDept;
-    });
+    visibleEntries = visibleEntries.filter(
+      (entry) => (entry.department ?? "production") === currentDept,
+    );
   }
 
   // ── Name-based overrides ───────────────────────────────────────────

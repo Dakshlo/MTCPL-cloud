@@ -303,72 +303,9 @@ export default async function SettingsPage() {
         </div>
       </div>
 
-      {/* Migration 055 follow-on (Daksh): Personal Ledger entry point
-          lives here instead of in the sidebar. It's a personal-money
-          scratchpad — owner-scoped, audit-logged, NOT company books —
-          so we tuck it into Settings where rarely-used dev/owner
-          tools belong, rather than pinning it to the daily-use rail.
-          Visible only to developer + owner; the route itself does
-          its own auth check via canUsePersonalLedger. */}
-      {(currentUser.role === "developer" || currentUser.role === "owner") && (
-        <a
-          href="/personal-ledger"
-          className="settings-section"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 14,
-            padding: "14px 16px",
-            background: "linear-gradient(135deg, #fef3c7 0%, #fce7f3 100%)",
-            border: "1.5px solid #d97706",
-            borderRadius: 10,
-            textDecoration: "none",
-            color: "#7c2d12",
-            marginBottom: 14,
-          }}
-        >
-          <span style={{ fontSize: 28, lineHeight: 1 }} aria-hidden>
-            📓
-          </span>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div
-              style={{
-                fontSize: 11,
-                fontWeight: 800,
-                letterSpacing: "0.07em",
-                textTransform: "uppercase",
-                color: "#92400e",
-              }}
-            >
-              Personal — not company books
-            </div>
-            <div
-              style={{
-                fontSize: 15,
-                fontWeight: 800,
-                marginTop: 2,
-                color: "#7c2d12",
-                letterSpacing: "-0.01em",
-              }}
-            >
-              Personal Ledger
-            </div>
-            <div
-              style={{
-                fontSize: 12,
-                marginTop: 2,
-                color: "#92400e",
-                fontWeight: 500,
-              }}
-            >
-              Your private invoice + receipt tracker. Owner-scoped, audit-logged, separate from company finances.
-            </div>
-          </div>
-          <span style={{ fontSize: 18, color: "#92400e", fontWeight: 700 }}>
-            →
-          </span>
-        </a>
-      )}
+      {/* Mig 057 — Personal Ledger card removed. The module was
+          extracted to a standalone app (its own Supabase + Vercel)
+          and the in-MTCPL copy is no longer in use. */}
 
       {/* System Status cards are now tucked into a collapsible at the
           BOTTOM of the page (after Full System Backup). Migrating
