@@ -21,6 +21,13 @@ import { NextRequest } from "next/server";
 // styling. The base xlsx package strips all `s` properties on
 // write, which is why the earlier Excel downloads were unstyled.
 import * as XLSX from "xlsx-js-style";
+
+// Mig 054 follow-on — force Node runtime + dynamic. xlsx-js-style
+// uses Node-only APIs internally (Buffer / fs guards) that crash
+// when Vercel infers Edge runtime. force-dynamic also ensures the
+// route isn't cached during build.
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 import { requireAuth } from "@/lib/auth";
 import {
   buildCncReport,
@@ -108,10 +115,18 @@ export async function GET(req: NextRequest) {
   const sheetName = sheetNameForPeriod(period);
   XLSX.utils.book_append_sheet(wb, ws, sheetName);
 
-  const buf: ArrayBuffer = XLSX.write(wb, { type: "array", bookType: "xlsx" });
+  // Mig 054 follow-on — xlsx-js-style returns either a Buffer or
+  // Uint8Array depending on the runtime. Normalise to Uint8Array
+  // so the Response constructor (Node 20 / undici) doesn't choke
+  // on a NodeJS Buffer in some serverless environments.
+  const writeOut = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as
+    | ArrayBuffer
+    | Uint8Array;
+  const body =
+    writeOut instanceof Uint8Array ? writeOut : new Uint8Array(writeOut);
 
   const filename = `MTCPL_CNC_${filenameSlugForPeriod(period)}.xlsx`;
-  return new Response(buf, {
+  return new Response(body, {
     status: 200,
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

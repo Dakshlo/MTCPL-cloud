@@ -222,12 +222,19 @@ export function CncExpensesClient({
         })}
       </div>
 
-      {/* Sticky grand-total footer with prev/next month nav. */}
+      {/* Sticky grand-total footer with prev/next month nav.
+          Mig 054 follow-on (Daksh): the bar was originally
+          position: fixed; left: 0 — that overlapped the 240px
+          sidebar. Now it uses `left: var(--content-left)` so the
+          bar starts where the content area starts (the same
+          variable the topbar + main-shell use). At <900px (mobile)
+          the sidebar collapses and the variable resolves to 0,
+          letting the bar span the full width again. */}
       <div
         style={{
           position: "fixed",
           bottom: 0,
-          left: 0,
+          left: "var(--content-left, 240px)",
           right: 0,
           background: "rgba(26, 26, 26, 0.94)",
           backdropFilter: "blur(8px)",
