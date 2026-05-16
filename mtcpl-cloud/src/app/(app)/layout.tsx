@@ -403,7 +403,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                 cutting_operator: "CUTTING OPERATOR",
                 biller: "BILLER",
                 accountant: "ACCOUNTANT",
-                final_auditor: "FINAL AUDITOR",
+                final_auditor: "ACCOUNTANT ★",
                 cnc_expense_entry: "CNC EXPENSES",
               } as Record<string, string>)[profile.role] ?? profile.role.replace(/_/g, " ").toUpperCase()}
             </span>

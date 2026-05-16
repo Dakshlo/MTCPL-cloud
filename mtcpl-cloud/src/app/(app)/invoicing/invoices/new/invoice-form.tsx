@@ -1,13 +1,22 @@
 "use client";
 
-// Invoice creation form (Migration 038).
+// Invoice creation form (Migration 038 — extended in Mig 058 with
+// a party picker fed by the new invoice_parties table).
 //
 // Single form for customer block + dynamic line items + GST/notes.
 // The items array is JSON-encoded into a hidden field and parsed by
 // the server action — same pattern used by the bill-entry form for
 // consistency.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+
+export type PartyOption = {
+  id: string;
+  name: string;
+  gstin: string | null;
+  address: string | null;
+  phone: string | null;
+};
 
 type Item = {
   description: string;
@@ -60,21 +69,49 @@ function RequiredPill() {
 
 export function InvoiceForm({
   action,
+  parties = [],
+  initialPartyId = null,
+  initialChallanId = null,
 }: {
   action: (formData: FormData) => Promise<void> | void;
+  parties?: PartyOption[];
+  initialPartyId?: string | null;
+  initialChallanId?: string | null;
 }) {
   const today = new Date().toISOString().slice(0, 10);
 
-  const [customerName, setCustomerName] = useState("");
-  const [customerAddress, setCustomerAddress] = useState("");
-  const [customerGstin, setCustomerGstin] = useState("");
-  const [customerPhone, setCustomerPhone] = useState("");
+  // Mig 058 — when a party is picked from the dropdown, auto-fill
+  // the customer block from the party row. User can still edit any
+  // field after auto-fill (the customer_* columns on the invoice
+  // are the source of truth for what gets printed).
+  const [partyId, setPartyId] = useState<string>(initialPartyId ?? "");
+  const initialParty = initialPartyId
+    ? parties.find((p) => p.id === initialPartyId) ?? null
+    : null;
+
+  const [customerName, setCustomerName] = useState(initialParty?.name ?? "");
+  const [customerAddress, setCustomerAddress] = useState(initialParty?.address ?? "");
+  const [customerGstin, setCustomerGstin] = useState(initialParty?.gstin ?? "");
+  const [customerPhone, setCustomerPhone] = useState(initialParty?.phone ?? "");
   const [invoiceDate, setInvoiceDate] = useState(today);
   const [items, setItems] = useState<Item[]>([
     { description: "", quantity: "1", rate: "0" },
   ]);
   const [gstPercent, setGstPercent] = useState<string>("18");
   const [notes, setNotes] = useState("");
+
+  // Whenever the party picker changes, refill the customer block.
+  // We intentionally clobber existing customer_* fields — picking a
+  // party is a deliberate "use this party's details" action.
+  useEffect(() => {
+    if (!partyId) return;
+    const p = parties.find((x) => x.id === partyId);
+    if (!p) return;
+    setCustomerName(p.name);
+    setCustomerAddress(p.address ?? "");
+    setCustomerGstin(p.gstin ?? "");
+    setCustomerPhone(p.phone ?? "");
+  }, [partyId, parties]);
 
   function updateItem(idx: number, patch: Partial<Item>) {
     setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
@@ -112,6 +149,29 @@ export function InvoiceForm({
     <form action={action} style={{ marginTop: 18, display: "flex", flexDirection: "column", gap: 18 }}>
       {/* Customer block */}
       <Section title="Customer">
+        {/* Mig 058 — party picker. Pick a saved party to auto-fill
+            the rest of the customer block. Optional — leave blank
+            to type customer details inline (legacy behaviour). */}
+        {parties.length > 0 && (
+          <div style={{ marginBottom: 10 }}>
+            <label>
+              <span style={LABEL_STYLE}>Party (saved customer)</span>
+              <select
+                value={partyId}
+                onChange={(e) => setPartyId(e.target.value)}
+                style={INPUT_STYLE}
+              >
+                <option value="">— Pick a saved party to auto-fill (optional) —</option>
+                {parties.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                    {p.gstin ? ` · ${p.gstin}` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        )}
         <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
           <label>
             <span style={LABEL_STYLE}>
@@ -352,6 +412,8 @@ export function InvoiceForm({
       </Section>
 
       <input type="hidden" name="items_json" value={itemsJson} />
+      <input type="hidden" name="invoice_party_id" value={partyId} />
+      <input type="hidden" name="source_challan_id" value={initialChallanId ?? ""} />
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
         <button

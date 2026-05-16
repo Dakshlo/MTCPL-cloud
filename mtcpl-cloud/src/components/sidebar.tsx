@@ -284,27 +284,41 @@ const navEntries: NavEntry[] = [
     roles: ["developer", "owner", "final_auditor"],
     department: "finance",
   },
-  // ── INVOICING section (Migration 038 — outgoing customer invoices) ──
-  // Locked to developer + owner for v1. Add a dedicated invoicer role
-  // later if Daksh wants to delegate the daily generation work.
+  // ── INVOICING section (Mig 038 → Mig 058 — party → challan →
+  // invoice restructure). Widened from dev/owner-only to also
+  // include final_auditor (the starred accountant — Govind today).
   {
     type: "divider",
     label: "INVOICING",
-    roles: ["developer", "owner"],
+    roles: ["developer", "owner", "final_auditor"],
     department: "invoicing",
   },
   {
     href: "/invoicing",
-    label: "All Invoices",
-    icon: "🧾",
-    roles: ["developer", "owner"],
+    label: "Dashboard",
+    icon: "📊",
+    roles: ["developer", "owner", "final_auditor"],
     department: "invoicing",
   },
   {
-    href: "/invoicing/new",
-    label: "New Invoice",
-    icon: "✚",
-    roles: ["developer", "owner"],
+    href: "/invoicing/parties",
+    label: "Parties",
+    icon: "👤",
+    roles: ["developer", "owner", "final_auditor"],
+    department: "invoicing",
+  },
+  {
+    href: "/invoicing/challans",
+    label: "Challans",
+    icon: "📋",
+    roles: ["developer", "owner", "final_auditor"],
+    department: "invoicing",
+  },
+  {
+    href: "/invoicing/invoices",
+    label: "Invoices",
+    icon: "🧾",
+    roles: ["developer", "owner", "final_auditor"],
     department: "invoicing",
   },
   // ── INVENTORY section (Migration 041 — Scaffolding v1) ──────────
@@ -360,7 +374,10 @@ function roleLabel(role: AppRole): string {
     accountant: "ACCOUNTANT",
     crosscheck: "CROSSCHECK",
     storekeeper: "STOREKEEPER",
-    final_auditor: "FINAL AUDITOR",
+    // Mig 058 — Daksh: "change to accountant with star — we have
+    // 2 accountants and don't want to bias one as senior." Display
+    // label only; DB enum stays `final_auditor`.
+    final_auditor: "ACCOUNTANT ★",
     cnc_expense_entry: "CNC EXPENSE ENTRY",
   };
   return labels[role] ?? role.replace(/_/g, " ").toUpperCase();
@@ -473,6 +490,17 @@ export function Sidebar({
     // sidebar shows three menu items highlighted at once for any
     // accounts page, which is what Daksh flagged.
     if (href === "/accounts") return pathname === "/accounts";
+    // Mig 058 — /invoicing is the dashboard; /invoicing/parties,
+    // /invoicing/challans, /invoicing/invoices are siblings. Exact
+    // match keeps the dashboard chip from lighting up alongside
+    // whichever sub-route the user is on.
+    if (href === "/invoicing") return pathname === "/invoicing";
+    if (href === "/invoicing/invoices")
+      return pathname === "/invoicing/invoices" || pathname.startsWith("/invoicing/invoices/");
+    if (href === "/invoicing/challans")
+      return pathname === "/invoicing/challans" || pathname.startsWith("/invoicing/challans/");
+    if (href === "/invoicing/parties")
+      return pathname === "/invoicing/parties" || pathname.startsWith("/invoicing/parties/");
     return pathname === href || pathname.startsWith(href + "/");
   }
 

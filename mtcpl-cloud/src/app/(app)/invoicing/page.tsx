@@ -1,160 +1,303 @@
+/**
+ * Mig 058 — Invoicing dashboard.
+ *
+ * Replaces the old "all invoices" list at this URL (that list moved
+ * to /invoicing/invoices). Now the landing is a hero + 3 KPI cards
+ * (Parties · Open Challans · Invoices ₹total) + a recent-activity
+ * strip linking into the sub-sections.
+ *
+ * Mirrors the Finance dept dashboard pattern from
+ * src/app/(app)/accounts/page.tsx (AccountsHero + KPI grid).
+ */
+
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { canUseInvoicing } from "@/lib/invoicing-permissions";
+import {
+  ACCOUNTS_TOKENS,
+  AccountsHero,
+  BUTTON_STYLES,
+  EmptyState,
+  KpiCard,
+  Money,
+  SectionHeader,
+  VendorIdentity,
+} from "../accounts/_ui/components";
+import { ChallanStatusPill } from "./_ui/challan-status-pill";
 
-// Invoicing department landing — list of past invoices + "+ New" CTA.
-// Migration 038. Open to developer + owner for v1.
-//
-// The list is intentionally minimal — invoice number, customer, date,
-// total, "View" button. Clicking View opens /invoicing/[id] which
-// shows the printable preview + a print button.
-export default async function InvoicingListPage() {
-  await requireAuth(["developer", "owner"]);
+export default async function InvoicingDashboardPage() {
+  const { profile } = await requireAuth();
+  if (!canUseInvoicing(profile)) redirect("/");
+
   const supabase = createAdminSupabaseClient();
 
-  const { data, error } = await supabase
-    .from("invoices")
-    .select("id, invoice_number, invoice_date, customer_name, total, created_at")
-    .order("created_at", { ascending: false })
-    .limit(200);
-  if (error) throw new Error(error.message);
+  const [
+    { count: partyCount },
+    { count: openChallanCount },
+    { count: convertedChallanCount },
+    invoicesQ,
+    recentChallansQ,
+    recentInvoicesQ,
+  ] = await Promise.all([
+    supabase
+      .from("invoice_parties")
+      .select("id", { count: "exact", head: true })
+      .eq("is_active", true),
+    supabase
+      .from("challans")
+      .select("id", { count: "exact", head: true })
+      .is("cancelled_at", null)
+      .is("converted_invoice_id", null),
+    supabase
+      .from("challans")
+      .select("id", { count: "exact", head: true })
+      .is("cancelled_at", null)
+      .not("converted_invoice_id", "is", null),
+    supabase
+      .from("invoices")
+      .select("id, total"),
+    supabase
+      .from("challans")
+      .select("id, challan_number, challan_date, invoice_party_id, cancelled_at, converted_invoice_id, invoice_parties(name)")
+      .order("created_at", { ascending: false })
+      .limit(6),
+    supabase
+      .from("invoices")
+      .select("id, invoice_number, invoice_date, customer_name, total")
+      .order("created_at", { ascending: false })
+      .limit(6),
+  ]);
 
-  const rows = (data ?? []) as Array<{
+  const invoiceRows = (invoicesQ.data ?? []) as Array<{ id: string; total: number | string }>;
+  const invoiceCount = invoiceRows.length;
+  const invoiceTotal = invoiceRows.reduce((s, r) => s + Number(r.total ?? 0), 0);
+
+  type RecentChallan = {
+    id: string;
+    challan_number: string;
+    challan_date: string;
+    invoice_party_id: string;
+    cancelled_at: string | null;
+    converted_invoice_id: string | null;
+    invoice_parties: { name: string } | { name: string }[] | null;
+  };
+  const recentChallans = (recentChallansQ.data ?? []) as RecentChallan[];
+
+  type RecentInvoice = {
     id: string;
     invoice_number: string;
     invoice_date: string;
     customer_name: string;
-    total: number;
-    created_at: string;
-  }>;
+    total: number | string;
+  };
+  const recentInvoices = (recentInvoicesQ.data ?? []) as RecentInvoice[];
 
   return (
     <section className="page-card">
+      <AccountsHero
+        title="Invoicing"
+        description="Customer parties · delivery challans · invoices. The starred-accountant workflow."
+        actions={
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <Link href="/invoicing/challans/new" style={BUTTON_STYLES.primary}>
+              📋 + New challan
+            </Link>
+            <Link href="/invoicing/invoices/new" style={BUTTON_STYLES.secondary}>
+              🧾 + New invoice
+            </Link>
+          </div>
+        }
+      />
+
+      {/* KPI strip */}
       <div
-        className="page-header"
-        style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+          gap: 12,
+          marginTop: 18,
+          marginBottom: 20,
+        }}
       >
-        <div>
-          <h1>Invoicing</h1>
-          <p className="muted">
-            Outgoing customer invoices. Generate, print, and archive. Different
-            from Finance — Finance handles incoming supplier bills, this
-            handles invoices you issue to clients.
-          </p>
-        </div>
-        <Link
-          href="/invoicing/new"
-          style={{
-            textDecoration: "none",
-            fontSize: 13,
-            padding: "10px 18px",
-            background: "var(--gold)",
-            color: "#fff",
-            border: "1px solid var(--gold-dark)",
-            borderRadius: 8,
-            fontWeight: 700,
-            whiteSpace: "nowrap",
-          }}
-        >
-          🧾 + New invoice
-        </Link>
+        <KpiCard
+          label="Parties"
+          value={
+            <span style={{ fontSize: 30, fontWeight: 800, color: ACCOUNTS_TOKENS.accent }}>
+              {partyCount ?? 0}
+            </span>
+          }
+          sublabel="Active customer parties"
+          tone="accent"
+          icon="👤"
+          href="/invoicing/parties"
+        />
+        <KpiCard
+          label="Open challans"
+          value={
+            <span style={{ fontSize: 30, fontWeight: 800, color: ACCOUNTS_TOKENS.warning }}>
+              {openChallanCount ?? 0}
+            </span>
+          }
+          sublabel={`${convertedChallanCount ?? 0} converted to invoices`}
+          tone="warning"
+          icon="📋"
+          href="/invoicing/challans"
+        />
+        <KpiCard
+          label="Invoices"
+          value={
+            <Money value={invoiceTotal} size="hero" tone="success" />
+          }
+          sublabel={`${invoiceCount} invoice${invoiceCount === 1 ? "" : "s"} all-time`}
+          tone="success"
+          icon="🧾"
+          href="/invoicing/invoices"
+        />
       </div>
 
-      <div style={{ marginTop: 18 }}>
-        {rows.length === 0 ? (
-          <div
-            style={{
-              background: "var(--surface)",
-              border: "1px dashed var(--border)",
-              borderRadius: 12,
-              padding: "32px 24px",
-              textAlign: "center",
-              color: "var(--muted)",
-            }}
-          >
-            No invoices yet. Click <strong>+ New invoice</strong> to generate
-            the first one.
-          </div>
+      {/* Recent challans */}
+      <div style={{ marginBottom: 24 }}>
+        <SectionHeader
+          title="Recent challans"
+          count={recentChallans.length}
+          action={
+            <Link href="/invoicing/challans" style={{ ...BUTTON_STYLES.ghost, fontSize: 12 }}>
+              View all →
+            </Link>
+          }
+        />
+        {recentChallans.length === 0 ? (
+          <EmptyState
+            icon="📋"
+            title="No challans yet"
+            description="Challans are delivery notes — items + quantity, no money. Create one to start tracking deliveries to a party."
+            action={
+              <Link href="/invoicing/challans/new" style={BUTTON_STYLES.primary}>
+                + New challan
+              </Link>
+            }
+          />
         ) : (
           <div
             style={{
-              background: "var(--surface)",
-              border: "1px solid var(--border)",
-              borderRadius: 12,
-              overflow: "hidden",
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
             }}
           >
-            <table
-              style={{
-                width: "100%",
-                borderCollapse: "collapse",
-                fontSize: 13,
-              }}
-            >
-              <thead>
-                <tr style={{ background: "var(--bg)" }}>
-                  <th style={th}>Invoice #</th>
-                  <th style={th}>Date</th>
-                  <th style={th}>Customer</th>
-                  <th style={{ ...th, textAlign: "right" }}>Total (₹)</th>
-                  <th style={{ ...th, width: 100 }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => (
-                  <tr key={r.id} style={{ borderTop: "1px solid var(--border-light)" }}>
-                    <td style={{ ...td, fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>
-                      {r.invoice_number}
-                    </td>
-                    <td style={td}>
-                      {new Date(r.invoice_date).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata",
-                        day: "numeric",
-                        month: "short",
-                        year: "numeric",
-                      })}
-                    </td>
-                    <td style={td}>{r.customer_name}</td>
-                    <td style={{ ...td, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>
-                      {Number(r.total).toLocaleString("en-IN", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
-                    </td>
-                    <td style={td}>
-                      <Link
-                        href={`/invoicing/${r.id}`}
-                        style={{
-                          fontSize: 12,
-                          fontWeight: 700,
-                          color: "var(--gold-dark)",
-                          textDecoration: "none",
-                        }}
-                      >
-                        View →
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            {recentChallans.map((c) => {
+              const partyName = c.invoice_parties
+                ? Array.isArray(c.invoice_parties)
+                  ? c.invoice_parties[0]?.name ?? "—"
+                  : c.invoice_parties.name
+                : "—";
+              const status: "open" | "converted" | "cancelled" = c.cancelled_at
+                ? "cancelled"
+                : c.converted_invoice_id
+                ? "converted"
+                : "open";
+              return (
+                <Link
+                  key={c.id}
+                  href={`/invoicing/challans/${c.id}`}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    padding: "10px 14px",
+                    background: "var(--surface, #fff)",
+                    border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+                    borderRadius: 10,
+                    textDecoration: "none",
+                    color: "var(--text)",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontFamily: "ui-monospace, monospace",
+                      fontWeight: 700,
+                      fontSize: 13,
+                      color: ACCOUNTS_TOKENS.accent,
+                      minWidth: 110,
+                    }}
+                  >
+                    {c.challan_number}
+                  </span>
+                  <VendorIdentity name={partyName} size={28} />
+                  <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontSize: 12, color: "var(--muted)" }}>{c.challan_date}</span>
+                    <ChallanStatusPill status={status} />
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Recent invoices */}
+      <div>
+        <SectionHeader
+          title="Recent invoices"
+          count={recentInvoices.length}
+          action={
+            <Link href="/invoicing/invoices" style={{ ...BUTTON_STYLES.ghost, fontSize: 12 }}>
+              View all →
+            </Link>
+          }
+        />
+        {recentInvoices.length === 0 ? (
+          <EmptyState
+            icon="🧾"
+            title="No invoices yet"
+            description="Create one directly, or convert an existing challan into an invoice."
+            action={
+              <Link href="/invoicing/invoices/new" style={BUTTON_STYLES.primary}>
+                + New invoice
+              </Link>
+            }
+          />
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {recentInvoices.map((inv) => (
+              <Link
+                key={inv.id}
+                href={`/invoicing/invoices/${inv.id}`}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  padding: "10px 14px",
+                  background: "var(--surface, #fff)",
+                  border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+                  borderRadius: 10,
+                  textDecoration: "none",
+                  color: "var(--text)",
+                }}
+              >
+                <span
+                  style={{
+                    fontFamily: "ui-monospace, monospace",
+                    fontWeight: 700,
+                    fontSize: 13,
+                    color: ACCOUNTS_TOKENS.success,
+                    minWidth: 120,
+                  }}
+                >
+                  {inv.invoice_number}
+                </span>
+                <VendorIdentity name={inv.customer_name} size={28} />
+                <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontSize: 12, color: "var(--muted)" }}>{inv.invoice_date}</span>
+                  <Money value={Number(inv.total ?? 0)} size="normal" tone="success" />
+                </span>
+              </Link>
+            ))}
           </div>
         )}
       </div>
     </section>
   );
 }
-
-const th: React.CSSProperties = {
-  textAlign: "left",
-  padding: "10px 12px",
-  fontSize: 11,
-  fontWeight: 700,
-  color: "var(--muted)",
-  textTransform: "uppercase",
-  letterSpacing: "0.05em",
-};
-
-const td: React.CSSProperties = {
-  padding: "10px 12px",
-  verticalAlign: "middle",
-};

@@ -39,7 +39,8 @@ const UI_ROLES_ALL = [
   // Mig 053 — Final Audit role. Has full accountant powers PLUS
   // owner backup for confirming proposed payments + approving bills.
   // Primary daily duty is the /accounts/final-audit page.
-  { value: "final_auditor",    label: "FINAL AUDITOR" },
+  // Mig 058 — display as "ACCOUNTANT ★". DB enum stays `final_auditor`.
+  { value: "final_auditor",    label: "ACCOUNTANT ★" },
   // Mig 054 — CNC operational expense entry. Single-page portal at
   // /carving/expenses. No other surface in the app.
   { value: "cnc_expense_entry", label: "CNC EXPENSE ENTRY" },
