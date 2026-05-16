@@ -16,6 +16,7 @@ import {
   clearPartialRejectionFormAction,
 } from "../../actions";
 import { RejectBillForm } from "./reject-bill-form";
+import { ApproveBillButton } from "./approve-bill-button";
 import { PartialRejectionForm } from "./partial-rejection-form";
 import {
   ACCOUNTS_TOKENS,
@@ -857,12 +858,13 @@ export default async function BillDetailPage({
               <span style={{ fontSize: 13, color: ACCOUNTS_TOKENS.accent, fontWeight: 600, flex: 1, minWidth: 200 }}>
                 ⏱ This bill is waiting for your audit. Review the entry against the physical bill.
               </span>
-              <form action={approveBillFormAction} style={{ display: "inline" }}>
-                <input type="hidden" name="bill_id" value={bill.id} />
-                <button type="submit" style={BUTTON_STYLES.primary}>
-                  ✓ Approve bill
-                </button>
-              </form>
+              {/* Mig 053 follow-on — branded overlay during approve.
+                  Same server action, just a client wrapper that drives
+                  the spinning logo via useFormStatus(). */}
+              <ApproveBillButton
+                billId={bill.id}
+                action={approveBillFormAction}
+              />
               <RejectBillForm billId={bill.id} />
             </div>
           )}

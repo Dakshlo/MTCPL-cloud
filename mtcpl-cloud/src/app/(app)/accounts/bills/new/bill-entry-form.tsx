@@ -14,6 +14,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 import {
   ACCOUNTS_TOKENS,
   BUTTON_STYLES,
@@ -277,6 +278,14 @@ export function BillEntryForm({
 
   return (
     <>
+    {/* Mig 053 follow-on — branded overlay while Submit for audit
+        runs. Bill creation does a few DB writes + a notification fan-
+        out, so the user benefits from a clear "the system is working"
+        signal. */}
+    <FinanceLoadingOverlay
+      show={pending}
+      label={mode === "edit" ? "Saving bill…" : "Submitting for audit…"}
+    />
     <form
       onSubmit={handleSubmit}
       style={{

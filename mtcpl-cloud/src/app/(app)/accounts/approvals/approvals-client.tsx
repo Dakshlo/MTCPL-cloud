@@ -11,6 +11,7 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 import {
   ACCOUNTS_TOKENS,
   BUTTON_STYLES,
@@ -204,6 +205,14 @@ function BillAuditCard({
   const gst = row.amountTotal - row.amountSubtotal;
 
   return (
+    <>
+      {/* Mig 053 follow-on — branded overlay while approve / reject
+          runs. The action label flips so the user knows which one
+          they triggered. */}
+      <FinanceLoadingOverlay
+        show={pending}
+        label={showReject ? "Sending back for changes…" : "Approving bill…"}
+      />
     <div
       style={{
         background: "#fff",
@@ -440,5 +449,6 @@ function BillAuditCard({
         </div>
       )}
     </div>
+    </>
   );
 }
