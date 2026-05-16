@@ -247,6 +247,38 @@ export default async function BillVendorDetailPage({
         </div>
       )}
 
+      {/* Mig 053 follow-on (Daksh, May 2026): tiny royalty net
+          balance line. Sits just above the "Edit vendor details"
+          card so it reads as part of the vendor's identity block
+          (right under the lifetime totals, above the edit /
+          history rows). Mono font, 11px, color-coded green for
+          positive, red for negative. Hidden when zero or when
+          the role can't see private data. */}
+      {canSeeRoyaltyNet && royaltyNet !== null && royaltyNet !== 0 && (
+        <div
+          style={{
+            fontSize: 11,
+            fontWeight: 600,
+            color: "var(--muted)",
+            marginBottom: 6,
+            fontFamily: "ui-monospace, monospace",
+            letterSpacing: "0.02em",
+          }}
+          title="Royalty points net balance · Paid − Received. Positive means you've paid more than you've received."
+        >
+          Net:{" "}
+          <span
+            style={{
+              color: royaltyNet > 0 ? "#15803d" : "#b91c1c",
+              fontWeight: 800,
+            }}
+          >
+            {royaltyNet > 0 ? "+" : "−"}
+            {Math.abs(royaltyNet).toLocaleString("en-IN")}
+          </span>
+        </div>
+      )}
+
       {/* Bill history is now the primary content. Edit-vendor lives
           inside a <details> collapsible above it so the long
           vertical form doesn't dominate the page. Click "Edit
@@ -320,37 +352,6 @@ export default async function BillVendorDetailPage({
       </details>
 
       <div>
-          {/* Mig 053 follow-on — tiny royalty net balance line.
-              Daksh: "show net balance on vendor profile just above
-              the bill history, don't use big font". Only renders
-              when the role can see the private royalty data AND a
-              non-zero net exists (a zero net is the boring case;
-              hiding it keeps the row clean for vendors without
-              royalty activity). */}
-          {canSeeRoyaltyNet && royaltyNet !== null && royaltyNet !== 0 && (
-            <div
-              style={{
-                fontSize: 11,
-                fontWeight: 600,
-                color: "var(--muted)",
-                marginBottom: 6,
-                fontFamily: "ui-monospace, monospace",
-                letterSpacing: "0.02em",
-              }}
-              title="Royalty points net balance · Paid − Received. Positive means you've paid more than you've received."
-            >
-              Net:{" "}
-              <span
-                style={{
-                  color: royaltyNet > 0 ? "#15803d" : "#b91c1c",
-                  fontWeight: 800,
-                }}
-              >
-                {royaltyNet > 0 ? "+" : "−"}
-                {Math.abs(royaltyNet).toLocaleString("en-IN")}
-              </span>
-            </div>
-          )}
           <div
             style={{
               display: "flex",
