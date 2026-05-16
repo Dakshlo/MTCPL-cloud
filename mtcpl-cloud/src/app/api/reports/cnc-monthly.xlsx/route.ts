@@ -126,7 +126,10 @@ export async function GET(req: NextRequest) {
     writeOut instanceof Uint8Array ? writeOut : new Uint8Array(writeOut);
 
   const filename = `MTCPL_CNC_${filenameSlugForPeriod(period)}.xlsx`;
-  return new Response(body, {
+  // Cast through BodyInit — Uint8Array is a valid BodyInit at
+  // runtime but TS's lib.dom types narrow to a subset that misses
+  // it on some Node versions.
+  return new Response(body as unknown as BodyInit, {
     status: 200,
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
