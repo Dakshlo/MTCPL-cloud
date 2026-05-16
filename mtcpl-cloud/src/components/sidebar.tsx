@@ -96,19 +96,13 @@ function hexToAlpha(hex: string, alpha: number): string {
 // who can switch (developer + owner); for everyone else the role
 // filter alone is sufficient since their role implicitly limits them.
 const navEntries: NavEntry[] = [
-  // Migration 055 — Personal Ledger. Developer + owner only. Lives
-  // at the top of the sidebar above every department's content
-  // because the data is owner-scoped and explicitly NOT part of any
-  // company department. `crossDepartment: true` lets the entry
-  // survive the active-department filter that gates the rest of the
-  // sidebar for dev/owner users.
-  {
-    href: "/personal-ledger",
-    label: "Personal Ledger",
-    icon: "📓",
-    roles: ["developer", "owner"],
-    crossDepartment: true,
-  },
+  // Migration 055 follow-on (Daksh): Personal Ledger was originally
+  // pinned at the top of the sidebar via `crossDepartment: true`.
+  // Daksh asked to move it off the daily-use rail and tuck it into
+  // /settings instead — it's a personal tool, not a daily nav target.
+  // The `crossDepartment` field on NavItem stays in place as a clean
+  // mechanism for future cross-cutting entries; no nav item uses it
+  // right now.
   {
     href: "/dashboard",
     label: "Dashboard",
