@@ -12,6 +12,7 @@
 import { useEffect, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
+import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 import {
   ACCOUNTS_TOKENS,
   BUTTON_STYLES,
@@ -417,6 +418,9 @@ export function AddVendorButton({
         + Add new vendor
       </button>
       {modal}
+      {/* Mig 053 follow-on — HDFC-style branded overlay while the
+          server action is in flight. Renders above the modal. */}
+      <FinanceLoadingOverlay show={pending} label="Saving vendor…" />
     </>
   );
 }

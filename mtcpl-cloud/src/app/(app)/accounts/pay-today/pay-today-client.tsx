@@ -18,6 +18,7 @@
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 import {
   ACCOUNTS_TOKENS,
   SECTION_COLORS,
@@ -1467,6 +1468,12 @@ function MarkPaidForm({
   }
 
   return (
+    <>
+      {/* Mig 053 follow-on — HDFC-style spinning logo overlay while
+          Mark Paid runs. This is the slowest finance action (PDF +
+          email + audit), so it benefits most from a clear loading
+          state. */}
+      <FinanceLoadingOverlay show={pending} label="Marking paid · sending voucher…" />
     <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {/* Quick summary */}
       <div
@@ -1645,6 +1652,7 @@ function MarkPaidForm({
         </button>
       </div>
     </form>
+    </>
   );
 }
 

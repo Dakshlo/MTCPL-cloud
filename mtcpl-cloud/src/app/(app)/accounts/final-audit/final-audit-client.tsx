@@ -18,6 +18,7 @@
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 import {
   ACCOUNTS_TOKENS,
   BUTTON_STYLES,
@@ -282,6 +283,9 @@ function PendingCard({
   const isCash = row.paymentMethod === "cash";
 
   return (
+    <>
+      {/* Mig 053 follow-on — branded overlay while verify runs. */}
+      <FinanceLoadingOverlay show={pending} label="Verifying payment…" />
     <div
       style={{
         background: "#fff",
@@ -505,6 +509,7 @@ function PendingCard({
         </button>
       </div>
     </div>
+    </>
   );
 }
 
@@ -790,6 +795,8 @@ function FlagForm({
   }
 
   return (
+    <>
+      <FinanceLoadingOverlay show={pending} label="Flagging payment…" />
     <form
       onSubmit={handleSubmit}
       style={{ display: "flex", flexDirection: "column", gap: 16 }}
@@ -908,6 +915,7 @@ function FlagForm({
         </button>
       </div>
     </form>
+    </>
   );
 }
 

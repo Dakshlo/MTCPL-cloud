@@ -89,11 +89,30 @@ export default async function BillsListPage({
   if (restrictToOwn) query = query.eq("submitted_by", profile.id);
   if (statusFilter && ALL_STATUSES.includes(statusFilter)) query = query.eq("status", statusFilter);
   if (vendorFilter) query = query.eq("bill_vendor_id", vendorFilter);
-  // Token + vendor's-bill-no search. PostgREST `or` filter does an
-  // OR across both columns with case-insensitive prefix match.
+  // Token + vendor's-bill-no + VENDOR NAME search. PostgREST can't
+  // OR across an embedded relation column directly, so we first
+  // resolve vendor IDs whose name matches, then merge those into
+  // the OR clause with bill_vendor_id.in.(...).
   if (searchQuery) {
     const safe = searchQuery.replace(/[%,]/g, " ");
-    query = query.or(`token.ilike.%${safe}%,vendor_bill_no.ilike.%${safe}%`);
+    // Resolve matching vendor IDs (case-insensitive substring).
+    const { data: matchingVendorRows } = await supabase
+      .from("bill_vendors")
+      .select("id")
+      .ilike("name", `%${safe}%`)
+      .limit(200);
+    const vendorIds = (matchingVendorRows ?? []).map((r) => r.id as string);
+    const orParts = [
+      `token.ilike.%${safe}%`,
+      `vendor_bill_no.ilike.%${safe}%`,
+    ];
+    if (vendorIds.length > 0) {
+      // PostgREST IN syntax requires comma-separated values inside
+      // parens. UUIDs are safe (no special chars) — no escaping
+      // needed.
+      orParts.push(`bill_vendor_id.in.(${vendorIds.join(",")})`);
+    }
+    query = query.or(orParts.join(","));
   }
 
   const { data: billsRaw, error } = await query;
@@ -166,7 +185,7 @@ export default async function BillsListPage({
               type="search"
               name="q"
               defaultValue={searchQuery}
-              placeholder="Token (T-2026-1) or bill no…"
+              placeholder="Token, vendor name, or bill no…"
               style={{
                 padding: "6px 12px",
                 fontSize: 13,

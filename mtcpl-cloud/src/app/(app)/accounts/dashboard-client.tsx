@@ -12,6 +12,7 @@
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 import {
   ACCOUNTS_TOKENS,
   BUTTON_STYLES,
@@ -89,6 +90,22 @@ export function DueBillsClient({
   const [success, setSuccess] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [amountOverrides, setAmountOverrides] = useState<Record<string, string>>({});
+  // Mig 053 follow-on (Daksh, May 2026): live quick-filter that
+  // matches token / vendor name / vendor bill no on every keystroke
+  // — no Apply button. Filters client-side over what the server
+  // already loaded, so it's instant.
+  const [quickFilter, setQuickFilter] = useState("");
+
+  const filteredRows = useMemo(() => {
+    const q = quickFilter.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter(
+      (r) =>
+        r.token.toLowerCase().includes(q) ||
+        r.vendorName.toLowerCase().includes(q) ||
+        r.vendorBillNo.toLowerCase().includes(q),
+    );
+  }, [rows, quickFilter]);
 
   const selectedRows = useMemo(
     () => rows.filter((r) => selected.has(r.id)),
@@ -113,8 +130,11 @@ export function DueBillsClient({
   }
 
   function selectAllVisible() {
+    // Mig 053 follow-on — respect the quick-filter. Selecting all
+    // should only pick rows currently visible after the filter, not
+    // every row in memory.
     const next = new Set(selected);
-    for (const r of rows) if (!r.hasOpenPayment) next.add(r.id);
+    for (const r of filteredRows) if (!r.hasOpenPayment) next.add(r.id);
     setSelected(next);
   }
 
@@ -158,6 +178,10 @@ export function DueBillsClient({
 
   return (
     <div style={{ position: "relative" }}>
+      {/* Mig 053 follow-on — branded overlay while the propose-
+          payments action runs. Visible across the whole page so the
+          accountant knows the click registered. */}
+      <FinanceLoadingOverlay show={pending} label="Proposing payments…" />
       {error && (
         <div
           role="alert"
@@ -202,6 +226,44 @@ export function DueBillsClient({
         </div>
       )}
 
+      {/* Mig 053 follow-on — Daksh: "user can search vendor, bill,
+          and no need to apply filter — even one letter filters live."
+          Client-side filter on already-loaded rows. Searches across
+          token, vendor name, and vendor bill no. Server-side filters
+          (vendor dropdown, date range) still narrow the source set;
+          this is for the fast in-page lookup. */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
+        <input
+          type="search"
+          value={quickFilter}
+          onChange={(e) => setQuickFilter(e.target.value)}
+          placeholder="🔍 Quick search — vendor, token, or bill no…"
+          aria-label="Quick search due bills"
+          style={{
+            flex: 1,
+            padding: "8px 12px",
+            fontSize: 13,
+            background: "#fff",
+            border: `1px solid ${ACCOUNTS_TOKENS.borderStrong}`,
+            borderRadius: 8,
+            color: "var(--text)",
+            minWidth: 0,
+          }}
+        />
+        {quickFilter && (
+          <span
+            style={{
+              fontSize: 11,
+              color: "var(--muted)",
+              fontFamily: "ui-monospace, monospace",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {filteredRows.length} of {rows.length}
+          </span>
+        )}
+      </div>
+
       <div style={TABLE_STYLES.tableWrap}>
         <div style={{ overflowX: "auto" }}>
           <table style={TABLE_STYLES.table}>
@@ -212,8 +274,8 @@ export function DueBillsClient({
                     <input
                       type="checkbox"
                       checked={
-                        rows.length > 0 &&
-                        rows.every((r) => r.hasOpenPayment || selected.has(r.id))
+                        filteredRows.length > 0 &&
+                        filteredRows.every((r) => r.hasOpenPayment || selected.has(r.id))
                       }
                       onChange={(e) =>
                         e.currentTarget.checked ? selectAllVisible() : clearAll()
@@ -237,7 +299,22 @@ export function DueBillsClient({
               </tr>
             </thead>
             <tbody>
-              {rows.map((r, idx) => {
+              {filteredRows.length === 0 && quickFilter.trim() !== "" && (
+                <tr>
+                  <td
+                    colSpan={canPropose ? 11 : 10}
+                    style={{
+                      padding: "20px",
+                      textAlign: "center",
+                      color: "var(--muted)",
+                      fontSize: 13,
+                    }}
+                  >
+                    No bills match <strong>{quickFilter}</strong>.
+                  </td>
+                </tr>
+              )}
+              {filteredRows.map((r, idx) => {
                 const isSelected = selected.has(r.id);
                 const display =
                   amountOverrides[r.id] != null
