@@ -40,6 +40,9 @@ const UI_ROLES_ALL = [
   // owner backup for confirming proposed payments + approving bills.
   // Primary daily duty is the /accounts/final-audit page.
   { value: "final_auditor",    label: "FINAL AUDITOR" },
+  // Mig 054 — CNC operational expense entry. Single-page portal at
+  // /carving/expenses. No other surface in the app.
+  { value: "cnc_expense_entry", label: "CNC EXPENSE ENTRY" },
 ];
 
 // Roles owner/team-head can assign — cannot promote to owner or developer
@@ -72,6 +75,9 @@ const ROLE_ACCESS: Record<string, string[]> = {
   slab_transfer:    ["Slab Transfer"],
   // Mig 053 — final auditor sees the full finance toolbox.
   final_auditor:    ["All Bills", "Crosscheck Queue", "Due Bills", "Pay Today", "Final Audit", "Payment History", "Vendor Account"],
+  // Mig 054 — CNC expense entry role. Single-page portal — only
+  // sees the CNC Expenses entry page under the Carving section.
+  cnc_expense_entry: ["CNC Expenses"],
 };
 
 function roleLabel(role: string): string {

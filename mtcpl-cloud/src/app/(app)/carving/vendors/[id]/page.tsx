@@ -5,6 +5,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { VendorForm } from "../vendor-form";
 import { ConfirmButton } from "@/components/confirm-button";
 import { deactivateVendorAction } from "../../actions";
+import { updateMachineAssetFormAction } from "../../expenses/actions";
 
 export default async function VendorDetailPage({ params }: { params: Promise<{ id: string }> }) {
   await requireAuth(["developer", "owner"]);
@@ -13,7 +14,7 @@ export default async function VendorDetailPage({ params }: { params: Promise<{ i
 
   const [{ data: vendor }, { data: machines }, { data: jobs }] = await Promise.all([
     admin.from("vendors").select("id, name, vendor_type, is_active, dropoff_location").eq("id", id).single(),
-    admin.from("cnc_machines").select("id, machine_code, operator_name, is_active, machine_type, max_length_in, max_width_in, max_thickness_in").eq("vendor_id", id).order("machine_code"),
+    admin.from("cnc_machines").select("id, machine_code, operator_name, is_active, machine_type, max_length_in, max_width_in, max_thickness_in, purchase_price, purchase_date, current_book_value, book_value_as_of, depreciation_rate_pct, salvage_value").eq("vendor_id", id).order("machine_code"),
     admin.from("carving_items").select("id, status, assigned_at, due_at, slab_requirement_id").eq("vendor_id", id).order("assigned_at", { ascending: false }).limit(50),
   ]);
 
@@ -107,6 +108,166 @@ export default async function VendorDetailPage({ params }: { params: Promise<{ i
           </div>
         )}
       </section>
+
+      {vendor.vendor_type === "CNC" && (machines ?? []).length > 0 && (
+        <section className="page-card">
+          {/* Mig 054 — Machine asset values & depreciation editor.
+              One row per machine. Two entry paths supported:
+                1. Purchase price + date — for new purchases the system
+                   has full history of.
+                2. Current book value + as-of date — for legacy
+                   machines whose original purchase isn't recorded.
+              The report builder prefers (1) when both are present.
+              Depreciation rate defaults to 15% WDV (Income Tax Act
+              §32 for general plant + machinery). Salvage = floor
+              below which the book value never depreciates. */}
+          <h2 style={{ margin: "0 0 6px", fontSize: 15 }}>Machine asset values & depreciation</h2>
+          <p className="muted" style={{ margin: "0 0 14px", fontSize: 12 }}>
+            Used to compute per-machine depreciation cost in the carving monthly report.
+            Either fill <strong>purchase price + date</strong> (for new machines), OR
+            <strong> current book value + as-of date</strong> (for legacy machines).
+            Default rate is 15% per year (WDV, Income Tax Act §32 plant & machinery).
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {(machines ?? []).map((m) => {
+              const machineRow = m as {
+                id: string;
+                machine_code: string;
+                machine_type: string | null;
+                purchase_price: number | string | null;
+                purchase_date: string | null;
+                current_book_value: number | string | null;
+                book_value_as_of: string | null;
+                depreciation_rate_pct: number | string | null;
+                salvage_value: number | string | null;
+              };
+              const typeLabel =
+                machineRow.machine_type === "lathe"
+                  ? "LATHE"
+                  : machineRow.machine_type === "multi_head_2"
+                    ? "2× HEAD"
+                    : "SINGLE HEAD";
+              return (
+                <form
+                  key={machineRow.id}
+                  action={updateMachineAssetFormAction}
+                  style={{
+                    padding: 14,
+                    background: "var(--surface-alt)",
+                    borderRadius: 8,
+                    border: "1px solid var(--border)",
+                    display: "grid",
+                    gridTemplateColumns: "120px repeat(2, minmax(160px, 1fr)) repeat(2, minmax(100px, 120px)) auto",
+                    gap: 10,
+                    alignItems: "end",
+                  }}
+                >
+                  <input type="hidden" name="machine_id" value={machineRow.id} />
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                      Machine
+                    </div>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>
+                      {machineRow.machine_code}
+                    </div>
+                    <div style={{ fontSize: 10, color: "var(--muted)", fontWeight: 600 }}>
+                      {typeLabel}
+                    </div>
+                  </div>
+
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                      Purchase price (₹)
+                    </span>
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      name="purchase_price"
+                      defaultValue={machineRow.purchase_price != null ? String(machineRow.purchase_price) : ""}
+                      placeholder="e.g. 1200000"
+                      style={{ padding: "7px 10px", fontSize: 13, fontFamily: "ui-monospace, monospace", border: "1px solid var(--border)", borderRadius: 6, background: "#fff" }}
+                    />
+                    <input
+                      type="date"
+                      name="purchase_date"
+                      defaultValue={machineRow.purchase_date ?? ""}
+                      style={{ padding: "6px 10px", fontSize: 12, fontFamily: "ui-monospace, monospace", border: "1px solid var(--border)", borderRadius: 6, background: "#fff" }}
+                    />
+                  </label>
+
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                      OR · Current book value (₹)
+                    </span>
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      name="current_book_value"
+                      defaultValue={machineRow.current_book_value != null ? String(machineRow.current_book_value) : ""}
+                      placeholder="e.g. 850000"
+                      style={{ padding: "7px 10px", fontSize: 13, fontFamily: "ui-monospace, monospace", border: "1px solid var(--border)", borderRadius: 6, background: "#fff" }}
+                    />
+                    <input
+                      type="date"
+                      name="book_value_as_of"
+                      defaultValue={machineRow.book_value_as_of ?? ""}
+                      style={{ padding: "6px 10px", fontSize: 12, fontFamily: "ui-monospace, monospace", border: "1px solid var(--border)", borderRadius: 6, background: "#fff" }}
+                    />
+                  </label>
+
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                      Rate (%/yr)
+                    </span>
+                    <input
+                      type="number"
+                      step="0.5"
+                      min="0"
+                      max="100"
+                      name="depreciation_rate_pct"
+                      defaultValue={machineRow.depreciation_rate_pct != null ? String(machineRow.depreciation_rate_pct) : "15"}
+                      style={{ padding: "7px 10px", fontSize: 13, fontFamily: "ui-monospace, monospace", border: "1px solid var(--border)", borderRadius: 6, background: "#fff" }}
+                    />
+                  </label>
+
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                      Salvage (₹)
+                    </span>
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      name="salvage_value"
+                      defaultValue={machineRow.salvage_value != null ? String(machineRow.salvage_value) : "0"}
+                      style={{ padding: "7px 10px", fontSize: 13, fontFamily: "ui-monospace, monospace", border: "1px solid var(--border)", borderRadius: 6, background: "#fff" }}
+                    />
+                  </label>
+
+                  <button
+                    type="submit"
+                    style={{
+                      padding: "8px 16px",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      background: "var(--gold)",
+                      color: "#fff",
+                      border: "1px solid var(--gold-dark)",
+                      borderRadius: 7,
+                      cursor: "pointer",
+                      height: "fit-content",
+                    }}
+                  >
+                    Save
+                  </button>
+                </form>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       <section className="page-card">
         <h3 style={{ margin: "0 0 10px", fontSize: 13, color: "#991b1b" }}>Danger zone</h3>

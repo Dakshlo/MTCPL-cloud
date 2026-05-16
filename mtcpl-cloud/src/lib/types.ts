@@ -48,7 +48,16 @@ export type AppRole =
   //   role has full accountant powers and also acts as owner backup
   //   for confirming proposed payments + approving submitted bills
   //   when dad isn't available.
-  | "final_auditor";
+  | "final_auditor"
+  // Migration 054 — CNC operational expense entry.
+  //
+  // cnc_expense_entry — single-page portal at /carving/expenses.
+  //   Adds / edits / cancels operational expense line items per
+  //   CNC vendor per month (tools, electricity, labor, office,
+  //   maintenance, other). No other surface in the app is visible.
+  //   Data flows automatically into the carving monthly report's
+  //   cost-per-CFT analysis.
+  | "cnc_expense_entry";
 
 export type StoneType = "PinkStone" | "WhiteStone";
 

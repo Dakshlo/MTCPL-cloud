@@ -128,6 +128,12 @@ export function lockedDepartmentForRole(role: AppRole): Department | null {
     // Mig 053 — final_auditor is a finance role (UTR recheck).
     case "final_auditor":
       return "finance";
+    // Mig 054 — cnc_expense_entry is a production-cost role.
+    // CNC machines are part of production; their operating
+    // expenses (tools, electricity, labor) are tracked here so
+    // the carving cost analysis stays in one department.
+    case "cnc_expense_entry":
+      return "production";
     case "storekeeper":
       return "inventory";
     default:

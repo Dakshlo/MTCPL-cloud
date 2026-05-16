@@ -124,7 +124,11 @@ const navEntries: NavEntry[] = [
   {
     type: "divider",
     label: "CARVING",
-    roles: ["developer", "owner", "vendor", "carving_head"],
+    // Mig 054 — cnc_expense_entry sees the CARVING section header
+    // so its single nav item ("CNC Expenses") renders under the
+    // right banner. No other carving entries are visible to that
+    // role (they're each role-gated independently).
+    roles: ["developer", "owner", "vendor", "carving_head", "cnc_expense_entry"],
     department: "production",
   },
   {
@@ -160,6 +164,17 @@ const navEntries: NavEntry[] = [
     label: "Slab Transfer",
     icon: "🚧",
     roles: ["developer", "slab_transfer"],
+    department: "production",
+  },
+  {
+    // Mig 054 — CNC operational expense entry. Primary surface for
+    // the cnc_expense_entry role (their entire workspace). Owner /
+    // dev see it too for oversight; carving_head can review what
+    // the entry person added.
+    href: "/carving/expenses",
+    label: "CNC Expenses",
+    icon: "💸",
+    roles: ["developer", "owner", "carving_head", "cnc_expense_entry"],
     department: "production",
   },
   // ── ACCOUNTS section (Finance department, mig 028 + 037 crosscheck) ──
@@ -311,6 +326,7 @@ function roleLabel(role: AppRole): string {
     crosscheck: "CROSSCHECK",
     storekeeper: "STOREKEEPER",
     final_auditor: "FINAL AUDITOR",
+    cnc_expense_entry: "CNC EXPENSE ENTRY",
   };
   return labels[role] ?? role.replace(/_/g, " ").toUpperCase();
 }

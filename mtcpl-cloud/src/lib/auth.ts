@@ -59,6 +59,11 @@ export function getDefaultRouteForRole(role?: AppRole | null) {
       // Mig 053 — UTR / bank-statement recheck. Lands on the
       // dedicated Final Audit queue.
       return "/accounts/final-audit";
+    case "cnc_expense_entry":
+      // Mig 054 — single-page portal for CNC operational expense
+      // entry. The role has no other surface in the app; this is
+      // their entire workspace.
+      return "/carving/expenses";
     case "storekeeper":
       // Mig 041 — yard employee. The scaffolding board is the
       // primary workspace; everything else (issue/return forms,

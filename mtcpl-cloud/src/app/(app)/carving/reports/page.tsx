@@ -36,6 +36,21 @@ function fmt(n: number, digits = 2): string {
   return n.toFixed(digits);
 }
 
+// Mig 054 — INR formatter for cost columns. Uses Indian numbering
+// (lakhs / crores groupings). Returns "—" for NaN / Infinity (zero-
+// production divisions) and for true zero so the row visually
+// admits "no expense entered for this period yet".
+function inr(n: number): string {
+  if (!isFinite(n)) return "—";
+  if (n === 0) return "—";
+  return `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+}
+function inrPrecise(n: number): string {
+  if (!isFinite(n)) return "—";
+  if (n === 0) return "—";
+  return `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+}
+
 export default async function CncMonthlyReportPage({ searchParams }: { searchParams: Search }) {
   await requireAuth(["developer", "owner", "carving_head"]);
   const params = await searchParams;
@@ -539,13 +554,15 @@ function ReportTable({ report }: { report: CncMonthlyReport }) {
               Inserted between AVG and TOTAL so the report reads:
               machine totals → machine avg → operator totals →
               fleet total → MTCPL per-machine avg. */}
-          {report.vendorGroups.map((grp) => {
+          {report.vendorGroups.flatMap((grp) => {
             const v = report.perVendor[grp.vendor_id];
-            if (!v) return null;
+            if (!v) return [];
             // Each operator row picks up its own assigned tint so
             // the column tints + row tint match (visual link).
             const tint = vendorTints.get(grp.vendor_id);
-            return (
+            const machineColCount = report.machines.reduce((n, m) => n + (m.showSqft ? 2 : 1), 0);
+            const hasCost = v.operationalForPeriod > 0 || v.depreciationForPeriod > 0;
+            return [
               <tr
                 key={`vendor-${grp.vendor_id}`}
                 style={{ background: tint?.header ?? "rgba(201,161,74,0.10)", fontWeight: 700 }}
@@ -556,13 +573,36 @@ function ReportTable({ report }: { report: CncMonthlyReport }) {
                     {v.machineCount} machine{v.machineCount !== 1 ? "s" : ""} · {v.workingDays} working day{v.workingDays !== 1 ? "s" : ""}
                   </span>
                 </td>
-                <td colSpan={report.machines.reduce((n, m) => n + (m.showSqft ? 2 : 1), 0)} style={{ ...tdNum(true), textAlign: "left", paddingLeft: 14 }}>
+                <td colSpan={machineColCount} style={{ ...tdNum(true), textAlign: "left", paddingLeft: 14 }}>
                   <span style={{ marginRight: 18 }}>SFT: <strong>{fmt(v.sqftTotal)}</strong></span>
                   <span style={{ marginRight: 18 }}>CFT: <strong>{fmt(v.cftTotal)}</strong></span>
                   <span style={{ color: "var(--gold-dark)" }}>TOTAL: <strong>{fmt(v.combinedTotal)}</strong></span>
                 </td>
-              </tr>
-            );
+              </tr>,
+              // Mig 054 — cost sub-row per operator. Only renders
+              // when there's something to show (operational > 0 OR
+              // depreciation > 0), so vendors without asset/expense
+              // data don't clutter the report.
+              hasCost ? (
+                <tr
+                  key={`vendor-cost-${grp.vendor_id}`}
+                  style={{ background: tint?.data ?? "rgba(201,161,74,0.05)" }}
+                >
+                  <td style={{ ...tdDate(), background: tint?.data, fontSize: 10, color: "var(--muted)" }}>
+                    &nbsp;&nbsp;💰 COST
+                  </td>
+                  <td colSpan={machineColCount} style={{ ...tdNum(false), textAlign: "left", paddingLeft: 14, fontSize: 11 }}>
+                    <span style={{ marginRight: 14 }}>💸 Operational: <strong>{inr(v.operationalForPeriod)}</strong></span>
+                    <span style={{ marginRight: 14 }}>📉 Depreciation: <strong>{inr(v.depreciationForPeriod)}</strong></span>
+                    <span style={{ marginRight: 18, color: "var(--gold-dark)" }}>TOTAL: <strong>{inr(v.totalCostForPeriod)}</strong></span>
+                    <span style={{ marginRight: 10 }}>·</span>
+                    <span style={{ marginRight: 12 }}>₹/SFT: <strong>{inrPrecise(v.costPerSft)}</strong></span>
+                    <span style={{ marginRight: 12 }}>₹/CFT: <strong>{inrPrecise(v.costPerCft)}</strong></span>
+                    <span>₹/UNIT: <strong>{inrPrecise(v.costPerCombined)}</strong></span>
+                  </td>
+                </tr>
+              ) : null,
+            ].filter(Boolean) as React.ReactNode[];
           })}
           {/* TOTAL-AVG fleet row + MTCPL per-machine avg, two consolidated rows.
               Mig 053 follow-on: added combined SFT+CFT total to the
@@ -578,6 +618,22 @@ function ReportTable({ report }: { report: CncMonthlyReport }) {
               <span style={{ color: "#facc15" }}>TOTAL: <strong>{fmt(report.grandTotalCombined)}</strong></span>
             </td>
           </tr>
+          {/* Mig 054 — fleet-wide cost row. Sits inside the dark
+              fleet-total banner so the headline cost number is
+              visible alongside production volume. Yellow accent on
+              TOTAL COST mirrors the production row's accent. */}
+          {(report.grandTotalOperational > 0 || report.grandTotalDepreciation > 0) && (
+            <tr style={{ background: "#1a1a1a", color: "#fff" }}>
+              <td style={{ ...tdDate(), color: "#facc15", borderColor: "#333", fontSize: 10 }}>
+                &nbsp;&nbsp;💰 FLEET COST
+              </td>
+              <td colSpan={report.machines.reduce((n, m) => n + (m.showSqft ? 2 : 1), 0)} style={{ ...tdNum(true), color: "#fff", borderColor: "#333", textAlign: "left", paddingLeft: 14, fontSize: 11 }}>
+                <span style={{ marginRight: 14 }}>💸 Operational: <strong>{inr(report.grandTotalOperational)}</strong></span>
+                <span style={{ marginRight: 14 }}>📉 Depreciation: <strong>{inr(report.grandTotalDepreciation)}</strong></span>
+                <span style={{ color: "#facc15" }}>TOTAL COST: <strong>{inr(report.grandTotalCost)}</strong></span>
+              </td>
+            </tr>
+          )}
           <tr style={{ background: "var(--surface-alt)", fontWeight: 700 }}>
             <td style={tdDate()}>MTCPL · per-machine AVG</td>
             <td colSpan={report.machines.reduce((n, m) => n + (m.showSqft ? 2 : 1), 0)} style={{ ...tdNum(true), textAlign: "left", paddingLeft: 14 }}>

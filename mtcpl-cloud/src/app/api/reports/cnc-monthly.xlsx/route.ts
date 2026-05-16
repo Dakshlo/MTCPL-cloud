@@ -278,10 +278,13 @@ function buildSheet(report: CncMonthlyReport): {
 
   // Mig 053 follow-on (Daksh): per-CNC-operator total block.
   // One row per vendor, summed across the machines they own.
+  // Mig 054: cost columns appended on the right.
   layout.perOperatorHeaderRow = rows.length;
   rows.push([
     "PER OPERATOR TOTALS",
     "MACHINES", "WORKING DAYS", "SFT", "CFT", "TOTAL (SFT+CFT)",
+    "OPERATIONAL (Rs.)", "DEPRECIATION (Rs.)", "TOTAL COST (Rs.)",
+    "Rs./SFT", "Rs./CFT", "Rs./UNIT",
   ]);
   layout.perOperatorRowsStart = rows.length;
   for (const grp of report.vendorGroups) {
@@ -294,6 +297,12 @@ function buildSheet(report: CncMonthlyReport): {
       fmtCell(v.sqftTotal),
       fmtCell(v.cftTotal),
       fmtCell(v.combinedTotal),
+      fmtCell(v.operationalForPeriod),
+      fmtCell(v.depreciationForPeriod),
+      fmtCell(v.totalCostForPeriod),
+      fmtCell(v.costPerSft),
+      fmtCell(v.costPerCft),
+      fmtCell(v.costPerCombined),
     ]);
   }
   layout.perOperatorRowsEnd = rows.length - 1;
@@ -302,13 +311,17 @@ function buildSheet(report: CncMonthlyReport): {
 
   // Fleet total + per-machine avg as two summary rows that sit
   // beneath the per-machine numeric grid. Mig 053 follow-on: added
-  // combined SFT+CFT total to the fleet row.
+  // combined SFT+CFT total. Mig 054: added cost totals at the
+  // right of the same row.
   layout.fleetTotalRow = rows.length;
   rows.push([
     `TOTAL · ${report.workingDaysAcrossFleet} working day${report.workingDaysAcrossFleet !== 1 ? "s" : ""}`,
     "SFT", fmtCell(report.grandTotalSqft),
     "CFT", fmtCell(report.grandTotalCft),
     "TOTAL (SFT+CFT)", fmtCell(report.grandTotalCombined),
+    "OPERATIONAL", fmtCell(report.grandTotalOperational),
+    "DEPRECIATION", fmtCell(report.grandTotalDepreciation),
+    "TOTAL COST", fmtCell(report.grandTotalCost),
   ]);
   layout.fleetAvgRow = rows.length;
   rows.push([
@@ -555,10 +568,14 @@ function applyStyles(
     });
   }
 
-  // 8. PER OPERATOR TOTALS header.
-  for (let c = 0; c <= 5; c++) {
+  // 8. PER OPERATOR TOTALS header. Mig 054: extended from 6 to 12
+  //    columns to include OPERATIONAL / DEPRECIATION / TOTAL COST
+  //    + ₹/SFT / ₹/CFT / ₹/UNIT. Cost columns 6-11 use a gold
+  //    accent on the dark band so the eye splits "production
+  //    volume" from "money" visually.
+  for (let c = 0; c <= 11; c++) {
     setStyle(layout.perOperatorHeaderRow, c, {
-      font: { bold: true, color: { rgb: "FFFFFF" }, sz: 11 },
+      font: { bold: true, color: { rgb: c >= 6 ? "FACC15" : "FFFFFF" }, sz: 11 },
       fill: { fgColor: { rgb: "1A1A1A" }, patternType: "solid" },
       alignment: { horizontal: c === 0 ? "left" : "center", vertical: "center" },
       border: borderThin(),
@@ -566,7 +583,9 @@ function applyStyles(
   }
 
   // 9. Per-operator rows — each row uses that operator's header tint
-  //    as background so the row pops in the vendor's signature colour.
+  //    as background so the row pops in the vendor's signature
+  //    colour. Cost columns (6-11) get a gold accent tint so the
+  //    money columns stand apart from production volume.
   for (let i = 0; i < report.vendorGroups.length; i++) {
     const g = report.vendorGroups[i];
     const tint = vendorPalette.get(g.vendor_id)!;
@@ -577,6 +596,7 @@ function applyStyles(
       alignment: { horizontal: "left", vertical: "center" },
       border: borderThin(),
     });
+    // Production columns 1-5: operator-tint background.
     for (let c = 1; c <= 5; c++) {
       setStyle(r, c, {
         font: { bold: c >= 3, color: { rgb: "1F2937" }, sz: 11 },
@@ -585,18 +605,48 @@ function applyStyles(
         border: borderThin(),
       });
     }
+    // Cost columns 6-11: gold-accent background. Distinguishes
+    // "money" from "production volume" in the wide row.
+    for (let c = 6; c <= 11; c++) {
+      setStyle(r, c, {
+        font: { bold: c === 8 || c === 11, color: { rgb: "7C2D12" }, sz: 11 },
+        fill: { fgColor: { rgb: "F1E0B8" }, patternType: "solid" },
+        alignment: { horizontal: "right", vertical: "center" },
+        border: borderThin(),
+      });
+    }
   }
 
   // 10. Fleet TOTAL — dark band, gold combined total accent.
+  //     Mig 054: extends from 6 to 12 columns adding OPERATIONAL /
+  //     DEPRECIATION / TOTAL COST cells. Cost columns also yellow
+  //     for visual link with the per-operator block above.
   setStyle(layout.fleetTotalRow, 0, {
     font: { bold: true, color: { rgb: "FFFFFF" }, sz: 12 },
     fill: { fgColor: { rgb: "1A1A1A" }, patternType: "solid" },
     alignment: { horizontal: "left", vertical: "center" },
     border: borderThin("333333"),
   });
-  for (let c = 1; c <= 5; c++) {
+  // c 1-5 = production half (same yellow-on-dark as before for the
+  //          combined total).
+  // c 6-11 = cost half (gold/yellow on dark — money is yellow).
+  for (let c = 1; c <= 11; c++) {
+    const isCombinedTotal = c === 5;
+    const isCostLabel = c === 6 || c === 8 || c === 10;
+    const isCostValue = c === 7 || c === 9 || c === 11;
     setStyle(layout.fleetTotalRow, c, {
-      font: { bold: true, color: { rgb: c === 5 ? "FACC15" : "FFFFFF" }, sz: 11 },
+      font: {
+        bold: true,
+        color: {
+          rgb:
+            isCombinedTotal || isCostValue
+              ? "FACC15"
+              : isCostLabel
+                ? "F1E0B8"
+                : "FFFFFF",
+        },
+        sz: 11,
+      },
       fill: { fgColor: { rgb: "1A1A1A" }, patternType: "solid" },
       alignment: { horizontal: c % 2 === 1 ? "right" : "left", vertical: "center" },
       border: borderThin("333333"),

@@ -81,6 +81,15 @@ export type CncMonthlyReport = {
   /** Sum across every machine. */
   grandTotalSqft: number;
   grandTotalCft: number;
+  /** Mig 054 — fleet-wide cost totals (prorated to the period).
+   *  Operational = sum of cnc_vendor_expenses rows for the
+   *  vendor/month combos in this report's range.
+   *  Depreciation = sum of monthlyDepreciationFor() across every
+   *  machine for the period.
+   *  Total      = sum of the two. */
+  grandTotalOperational: number;
+  grandTotalDepreciation: number;
+  grandTotalCost: number;
   /** Mig 053 follow-on (Daksh): single "total work units" proxy
    *  metric — SFT + CFT added together. Not physically meaningful
    *  (mixing area + volume) but useful as a single number on the
@@ -108,6 +117,21 @@ export type CncMonthlyReport = {
       /** Working days across this operator's fleet (any machine
        *  active = counted). */
       workingDays: number;
+      /** Mig 054 — operational expense for the period (prorated).
+       *  Sum of cnc_vendor_expenses across days in range,
+       *  weighting each by 1/daysInMonth for its calendar month. */
+      operationalForPeriod: number;
+      /** Mig 054 — depreciation cost for the period (prorated).
+       *  Sum across machines: monthlyDepreciation / daysInMonth ×
+       *  days that machine's month overlaps the report period. */
+      depreciationForPeriod: number;
+      /** Operational + Depreciation. */
+      totalCostForPeriod: number;
+      /** Cost-per-unit. NaN / Infinity (zero production) handled
+       *  by the display layer ("—"). */
+      costPerSft: number;
+      costPerCft: number;
+      costPerCombined: number;
     }
   >;
 };
@@ -261,6 +285,72 @@ function istWeekStartKey(): string {
   return formatDateKey(parseDateKeyMs(monMs));
 }
 
+// ── Mig 054 — depreciation source data + math ────────────────────
+// Each CNC machine carries a snapshot of its asset value (either
+// purchase_price + purchase_date OR current_book_value +
+// book_value_as_of) plus a depreciation rate and salvage floor.
+// monthlyDepreciationFor() computes the WDV monthly share for any
+// (machine, year, month).
+
+type MachineAsset = {
+  id: string;
+  vendor_id: string;
+  purchase_price: number | null;
+  purchase_date: string | null;
+  current_book_value: number | null;
+  book_value_as_of: string | null;
+  depreciation_rate_pct: number;
+  salvage_value: number;
+};
+
+/** Returns the depreciation cost (₹) for one machine for one
+ *  calendar month, using Written Down Value (WDV) method:
+ *
+ *    current_value = base × (1 - rate)^years_elapsed   (floored at salvage)
+ *    monthly_share = current_value × rate / 12
+ *
+ *  Returns 0 when the machine has no asset data configured yet
+ *  (graceful no-op so the report doesn't crash on partial setup). */
+function monthlyDepreciationFor(
+  machine: MachineAsset,
+  forYear: number,
+  forMonth: number,
+): number {
+  // Pick the base value + base date. Prefer purchase_price (more
+  // accurate history) if both are present.
+  let baseValue: number;
+  let baseDate: Date;
+  if (machine.purchase_price != null && machine.purchase_date) {
+    baseValue = machine.purchase_price;
+    baseDate = new Date(machine.purchase_date);
+  } else if (machine.current_book_value != null && machine.book_value_as_of) {
+    baseValue = machine.current_book_value;
+    baseDate = new Date(machine.book_value_as_of);
+  } else {
+    return 0;
+  }
+  if (!Number.isFinite(baseDate.getTime())) return 0;
+
+  const rate = Math.max(0, Math.min(1, machine.depreciation_rate_pct / 100));
+  const salvage = Math.max(0, machine.salvage_value);
+
+  // Years elapsed from base-date to the *middle* of the report
+  // period (15th of the report's month — close enough for monthly
+  // resolution).
+  const reportMidMs = Date.UTC(forYear, forMonth - 1, 15);
+  const yearsElapsed = Math.max(
+    0,
+    (reportMidMs - baseDate.getTime()) / (365.25 * 86_400_000),
+  );
+
+  const currentValue = Math.max(
+    salvage,
+    baseValue * Math.pow(1 - rate, yearsElapsed),
+  );
+
+  return (currentValue * rate) / 12;
+}
+
 /** Mig 053 follow-on (Daksh): generalized to accept any date range
  *  via CncReportPeriod. Daily / Weekly / Monthly views all flow
  *  through this same function — the page + Excel route compute the
@@ -288,7 +378,13 @@ export async function buildCncReport(period: CncReportPeriod): Promise<CncMonthl
       .order("name"),
     admin
       .from("cnc_machines")
-      .select("id, vendor_id, machine_code, machine_type")
+      // Mig 054 — pull the asset-register columns too so the
+      // depreciation calc has everything it needs in one round-trip.
+      .select(
+        "id, vendor_id, machine_code, machine_type, " +
+        "purchase_price, purchase_date, current_book_value, " +
+        "book_value_as_of, depreciation_rate_pct, salvage_value",
+      )
       .order("machine_code"),
   ]);
 
@@ -297,24 +393,52 @@ export async function buildCncReport(period: CncReportPeriod): Promise<CncMonthl
     vendorById.set(v.id, v);
   }
 
-  const machineCols: MachineCol[] = ((machines ?? []) as Array<{
-    id: string; vendor_id: string; machine_code: string; machine_type: string | null;
-  }>)
-    .filter((m) => vendorById.has(m.vendor_id))
-    .map((m) => {
-      const t = m.machine_type === "multi_head_2" || m.machine_type === "lathe"
-        ? (m.machine_type as "multi_head_2" | "lathe")
-        : "single_head";
-      const v = vendorById.get(m.vendor_id)!;
-      return {
-        id: m.id,
-        code: m.machine_code,
-        vendor_id: v.id,
-        vendor_name: v.name,
-        type: t,
-        showSqft: t !== "lathe",
-      };
+  // Mig 054 — keep the raw row so we can read the depreciation
+  // columns later. machineCols is the trimmed public shape; the
+  // raw asset register lives in `machineAssets`.
+  type MachineRaw = {
+    id: string;
+    vendor_id: string;
+    machine_code: string;
+    machine_type: string | null;
+    purchase_price: number | string | null;
+    purchase_date: string | null;
+    current_book_value: number | string | null;
+    book_value_as_of: string | null;
+    depreciation_rate_pct: number | string | null;
+    salvage_value: number | string | null;
+  };
+  const machinesRaw = ((machines ?? []) as unknown as MachineRaw[]).filter((m) =>
+    vendorById.has(m.vendor_id),
+  );
+  const machineAssets = new Map<string, MachineAsset>();
+  for (const m of machinesRaw) {
+    machineAssets.set(m.id, {
+      id: m.id,
+      vendor_id: m.vendor_id,
+      purchase_price: m.purchase_price != null ? Number(m.purchase_price) : null,
+      purchase_date: m.purchase_date,
+      current_book_value: m.current_book_value != null ? Number(m.current_book_value) : null,
+      book_value_as_of: m.book_value_as_of,
+      depreciation_rate_pct: m.depreciation_rate_pct != null ? Number(m.depreciation_rate_pct) : 15,
+      salvage_value: m.salvage_value != null ? Number(m.salvage_value) : 0,
     });
+  }
+
+  const machineCols: MachineCol[] = machinesRaw.map((m) => {
+    const t = m.machine_type === "multi_head_2" || m.machine_type === "lathe"
+      ? (m.machine_type as "multi_head_2" | "lathe")
+      : "single_head";
+    const v = vendorById.get(m.vendor_id)!;
+    return {
+      id: m.id,
+      code: m.machine_code,
+      vendor_id: v.id,
+      vendor_name: v.name,
+      type: t,
+      showSqft: t !== "lathe",
+    };
+  });
 
   // Group machines under their vendor for the HTML view.
   const groupMap = new Map<string, VendorGroup>();
@@ -410,6 +534,49 @@ export async function buildCncReport(period: CncReportPeriod): Promise<CncMonthl
     row.values[it.cnc_machine_id] = cell;
   }
 
+  // ── Mig 054 — fetch operational expenses for every (vendor, year,
+  // month) that the report's date range touches. Single round-trip
+  // — keyed by vendor/year/month in-memory. Soft-cancelled rows
+  // excluded by partial-index condition on the query.
+  //
+  // Build the unique set of (year, month) pairs the period spans.
+  const yearMonthPairs = new Set<string>();
+  for (let ms = startMs; ms <= endMs; ms += 86_400_000) {
+    const p = parseDateKeyMs(ms);
+    yearMonthPairs.add(`${p.year}|${p.month}`);
+  }
+  const expenseByVendorMonth = new Map<string, number>(); // key = vendor|year|month
+  if (yearMonthPairs.size > 0 && machineCols.length > 0) {
+    const distinctVendorIds = [...new Set(machineCols.map((m) => m.vendor_id))];
+    const yearList = [...new Set([...yearMonthPairs].map((k) => Number(k.split("|")[0])))];
+    const monthList = [...new Set([...yearMonthPairs].map((k) => Number(k.split("|")[1])))];
+
+    // Over-fetch by (years × months) and filter in-memory — the
+    // (year, month) grid is at most 2×12 = 24 cells, and the
+    // table is small, so this is cheap.
+    const { data: expensesRaw, error: expensesErr } = await admin
+      .from("cnc_vendor_expenses")
+      .select("vendor_id, year, month, amount")
+      .in("vendor_id", distinctVendorIds)
+      .in("year", yearList)
+      .in("month", monthList)
+      .is("cancelled_at", null);
+    if (expensesErr) {
+      // Migration 054 not yet applied on this environment → silently
+      // proceed with zero expenses so the production-side report
+      // still renders.
+      console.warn("[cnc-monthly-report] expenses fetch failed", expensesErr);
+    } else {
+      for (const r of (expensesRaw ?? []) as Array<{
+        vendor_id: string; year: number; month: number; amount: number | string;
+      }>) {
+        const key = `${r.vendor_id}|${r.year}|${r.month}`;
+        const prev = expenseByVendorMonth.get(key) ?? 0;
+        expenseByVendorMonth.set(key, prev + Number(r.amount ?? 0));
+      }
+    }
+  }
+
   // Per-machine totals + averages over days that had ANY work.
   const perMachine: CncMonthlyReport["perMachine"] = {};
   const fleetWorkingDays = new Set<string>();
@@ -442,6 +609,14 @@ export async function buildCncReport(period: CncReportPeriod): Promise<CncMonthl
 
   // Per-vendor (CNC operator) aggregation. Walk vendorGroups so the
   // order matches the on-screen header grouping.
+  //
+  // Mig 054 — also computes:
+  //   • operationalForPeriod: sum of (monthExpense / daysInMonth)
+  //     across every day in the report range, per vendor. Exact for
+  //     monthly view; approximate for week-spanning-month-boundary.
+  //   • depreciationForPeriod: same prorating but driven by
+  //     monthlyDepreciationFor() across each vendor's machines.
+  //   • totalCostForPeriod, costPerSft / Cft / Combined.
   const perVendor: CncMonthlyReport["perVendor"] = {};
   for (const grp of vendorGroups) {
     let sqftTotal = 0;
@@ -461,16 +636,57 @@ export async function buildCncReport(period: CncReportPeriod): Promise<CncMonthl
         }
       }
     }
+
+    // ── Cost computation (mig 054) ──────────────────────────────
+    let operationalForPeriod = 0;
+    let depreciationForPeriod = 0;
+    for (let ms = startMs; ms <= endMs; ms += 86_400_000) {
+      const p = parseDateKeyMs(ms);
+      const dim = daysInMonth(p.year, p.month);
+      // Operational: vendor's monthly expense total × (1 / daysInMonth)
+      const monthlyOp = expenseByVendorMonth.get(`${grp.vendor_id}|${p.year}|${p.month}`) ?? 0;
+      operationalForPeriod += monthlyOp / dim;
+      // Depreciation: sum across this vendor's machines.
+      for (const m of grp.machines) {
+        const asset = machineAssets.get(m.id);
+        if (!asset) continue;
+        const monthlyDep = monthlyDepreciationFor(asset, p.year, p.month);
+        depreciationForPeriod += monthlyDep / dim;
+      }
+    }
+    const totalCostForPeriod = operationalForPeriod + depreciationForPeriod;
+    const costPerSft = sqftTotal > 0 ? totalCostForPeriod / sqftTotal : NaN;
+    const costPerCft = cftTotal > 0 ? totalCostForPeriod / cftTotal : NaN;
+    const combined = sqftTotal + cftTotal;
+    const costPerCombined = combined > 0 ? totalCostForPeriod / combined : NaN;
+
     perVendor[grp.vendor_id] = {
       vendor_id: grp.vendor_id,
       vendor_name: grp.vendor_name,
       sqftTotal,
       cftTotal,
-      combinedTotal: sqftTotal + cftTotal,
+      combinedTotal: combined,
       machineCount: grp.machines.length,
       workingDays: operatorWorkingDays.size,
+      operationalForPeriod,
+      depreciationForPeriod,
+      totalCostForPeriod,
+      costPerSft,
+      costPerCft,
+      costPerCombined,
     };
   }
+
+  // Fleet-wide cost totals (mig 054).
+  const grandTotalOperational = Object.values(perVendor).reduce(
+    (acc, v) => acc + v.operationalForPeriod,
+    0,
+  );
+  const grandTotalDepreciation = Object.values(perVendor).reduce(
+    (acc, v) => acc + v.depreciationForPeriod,
+    0,
+  );
+  const grandTotalCost = grandTotalOperational + grandTotalDepreciation;
 
   return {
     period,
@@ -486,6 +702,9 @@ export async function buildCncReport(period: CncReportPeriod): Promise<CncMonthl
     grandTotalSqft,
     grandTotalCft,
     grandTotalCombined,
+    grandTotalOperational,
+    grandTotalDepreciation,
+    grandTotalCost,
     workingDaysAcrossFleet: fleetWorkingDays.size,
     perMachineAvgSqft: machineCols.length > 0 ? grandTotalSqft / machineCols.length : 0,
     perMachineAvgCft: machineCols.length > 0 ? grandTotalCft / machineCols.length : 0,
