@@ -21,6 +21,7 @@ import {
   canApproveBills,
   canConfirmPayments,
   canFinalAudit,
+  canSubmitBills,
 } from "@/lib/accounts-permissions";
 import { canApproveInventoryMovements } from "@/lib/inventory-permissions";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
@@ -38,13 +39,14 @@ import { DEV_BYPASS_COOKIE } from "@/lib/dev-bypass";
 import { disableDevMaintenanceBypassAction } from "@/app/(app)/settings/system-status-actions";
 
 const SETTINGS_ROLES = ["developer", "owner", "team_head"];
-// Mig 058 follow-on (Daksh): widened so accountants see the
-// notification bell. Daksh's pain point — when a bill gets sent
-// back at crosscheck, the accountant had no surface alert and was
-// scrolling All Bills looking for it. Owner sees the bell too
-// for general operational visibility. ACCOUNTANT★ (final_auditor)
-// inherits since they work across both Finance and Invoicing.
-const NOTIFICATION_ROLES = ["developer", "owner", "accountant", "final_auditor"];
+// Mig 058 follow-on (Daksh, second pass): the generic notification
+// bell was too cluttered for the accountant context. Reverted to
+// developer-only — the bell stays an internal-debugging surface.
+// The rejected-bill alert lives in the Tasks pill instead (see
+// rejectedBillsBadge below) where it shares the same visual
+// rhythm as Crosscheck / Pay Today / Final Audit counters and
+// stays out of the way when there's nothing to act on.
+const NOTIFICATION_ROLES = ["developer"];
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const { profile } = await requireAuth();
@@ -170,6 +172,14 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   // Mig 053 — Final Audit queue count (paid + awaiting UTR
   // verification). Final auditor + owner + dev see it.
   let finalAuditBadge: number | null = null;
+  // Mig 058 follow-on (Daksh): "rejected bills" counter — for any
+  // user who can submit bills, count THEIR submissions currently
+  // in 'rejected' status. Shows up in the Tasks pill so the
+  // accountant doesn't have to scroll All Bills to find what
+  // crosscheck sent back. Per-user (submitted_by = profile.id),
+  // not org-wide, so different accountants only see their own
+  // pile.
+  let rejectedBillsBadge: number | null = null;
   const supabase = createAdminSupabaseClient();
   if (canApproveCuts(profile)) {
     const { count } = await supabase
@@ -219,6 +229,21 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       );
       inventoryAuditBadge = uniqueBatches.size;
     }
+  }
+  // Mig 058 follow-on — per-user rejected-bills count. Scoped to
+  // submissions THIS user made; if a bill they submitted got sent
+  // back at crosscheck, it lands here. Anyone who can submit bills
+  // (accountant / biller / final_auditor / dev / owner) is
+  // eligible — for users with 0 rejections the item is omitted
+  // from the dropdown (see buildTopbarTaskItems) so it doesn't
+  // clutter the "All clear" state.
+  if (canSubmitBills(profile)) {
+    const { count } = await supabase
+      .from("bills")
+      .select("*", { count: "exact", head: true })
+      .eq("submitted_by", profile.id)
+      .eq("status", "rejected");
+    rejectedBillsBadge = count ?? 0;
   }
   // Mig 053 — Final Audit queue. Counts paid payments awaiting UTR
   // recheck. Indexed by bill_payments_final_audit_pending_idx so the
@@ -389,6 +414,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               approvalsBadge,
               billsAuditBadge,
               payTodayBadge,
+              rejectedBillsBadge,
               inventoryAuditBadge,
               finalAuditBadge,
             })} />
@@ -462,10 +488,28 @@ function buildTopbarTaskItems(counts: {
   approvalsBadge: number | null;
   billsAuditBadge: number | null;
   payTodayBadge: number | null;
+  rejectedBillsBadge: number | null;
   inventoryAuditBadge: number | null;
   finalAuditBadge: number | null;
 }): TopbarTask[] {
   const items: TopbarTask[] = [];
+  // Mig 058 follow-on (Daksh) — per-user rejected-bills item.
+  // Pushed FIRST when count > 0 so the accountant sees their own
+  // action items at the top of the dropdown, ahead of org-wide
+  // queues like Crosscheck / Pay Today. Hidden entirely when zero
+  // (it'd be noise otherwise — accountants without rejections
+  // shouldn't see "Rejected bills: 0" on every hover).
+  if (counts.rejectedBillsBadge !== null && counts.rejectedBillsBadge > 0) {
+    items.push({
+      id: "rejected-bills",
+      href: "/accounts/bills?status=rejected",
+      label: "Rejected bills",
+      description: "Your submissions sent back at crosscheck — edit and resubmit",
+      count: counts.rejectedBillsBadge,
+      icon: "↺",
+      department: "finance",
+    });
+  }
   if (counts.approvalsBadge !== null) {
     items.push({
       id: "cutting-audit",
