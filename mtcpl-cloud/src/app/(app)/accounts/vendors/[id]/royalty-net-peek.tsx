@@ -44,78 +44,75 @@ export function RoyaltyNetPeek({
 
   if (netValue === 0) return null;
 
-  const color = netValue > 0 ? "#15803d" : "#b91c1c";
+  // Revealed colour stays semantic (green = paid more, red = owed).
+  // Dormant dot is plain black — Daksh: "small and black color"
+  // so it reads as a neutral marker, not an indicator of state.
+  const revealedColor = netValue > 0 ? "#15803d" : "#b91c1c";
+
+  if (revealed) {
+    return (
+      <div
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+          marginBottom: 6,
+          fontSize: 11,
+          fontWeight: 600,
+          color: "var(--muted)",
+          fontFamily: "ui-monospace, monospace",
+          letterSpacing: "0.02em",
+        }}
+      >
+        Net:{" "}
+        <span style={{ color: revealedColor, fontWeight: 800 }}>
+          {netValue > 0 ? "+" : "−"}
+          {Math.abs(netValue).toLocaleString("en-IN")}
+        </span>
+        <span
+          style={{
+            marginLeft: 2,
+            fontSize: 10,
+            color: "var(--muted)",
+            fontWeight: 600,
+          }}
+        >
+          ({remaining}s)
+        </span>
+      </div>
+    );
+  }
 
   return (
-    <div
+    <button
+      type="button"
+      onClick={() => setRevealed(true)}
+      aria-label="Reveal royalty net balance for 10 seconds"
+      title="Royalty net — click to reveal for 10s"
       style={{
         display: "inline-flex",
         alignItems: "center",
-        gap: 8,
+        justifyContent: "center",
+        width: 10,
+        height: 10,
+        border: "none",
+        background: "transparent",
+        borderRadius: "50%",
+        cursor: "pointer",
+        padding: 0,
         marginBottom: 6,
-        fontSize: 11,
-        fontWeight: 600,
-        color: "var(--muted)",
-        fontFamily: "ui-monospace, monospace",
-        letterSpacing: "0.02em",
       }}
-      title="Royalty points net balance — click the dot to reveal for 10s"
     >
-      Net:{" "}
-      {revealed ? (
-        <span
-          style={{
-            color,
-            fontWeight: 800,
-            transition: "opacity 0.15s ease",
-          }}
-        >
-          {netValue > 0 ? "+" : "−"}
-          {Math.abs(netValue).toLocaleString("en-IN")}
-          <span
-            style={{
-              marginLeft: 6,
-              fontSize: 10,
-              color: "var(--muted)",
-              fontWeight: 600,
-              fontFamily: "inherit",
-            }}
-          >
-            ({remaining}s)
-          </span>
-        </span>
-      ) : (
-        <button
-          type="button"
-          onClick={() => setRevealed(true)}
-          aria-label="Reveal royalty net balance for 10 seconds"
-          title="Click to reveal for 10 seconds"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            width: 14,
-            height: 14,
-            border: "none",
-            background: "transparent",
-            borderRadius: "50%",
-            cursor: "pointer",
-            padding: 0,
-          }}
-        >
-          <span
-            aria-hidden
-            style={{
-              display: "inline-block",
-              width: 6,
-              height: 6,
-              borderRadius: "50%",
-              background: color,
-              opacity: 0.6,
-            }}
-          />
-        </button>
-      )}
-    </div>
+      <span
+        aria-hidden
+        style={{
+          display: "inline-block",
+          width: 4,
+          height: 4,
+          borderRadius: "50%",
+          background: "#000",
+        }}
+      />
+    </button>
   );
 }
