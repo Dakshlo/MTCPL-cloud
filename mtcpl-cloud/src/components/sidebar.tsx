@@ -12,7 +12,6 @@ import {
 } from "@/lib/departments";
 import { setActiveDepartmentAction } from "@/app/(app)/department-actions";
 import { ThemeToggle } from "./theme-toggle";
-import { FinanceLoadingOverlay } from "./finance-loading-overlay";
 
 type NavItem = {
   type?: "item";
@@ -401,17 +400,16 @@ export function Sidebar({
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  // Daksh (Mig 058 follow-on): dept switch needs two layers of
-  // feedback —
-  //   1. The FinanceLoadingOverlay (spinning company logo).
-  //   2. A thin gold progress bar pinned to the very top of the
-  //      viewport (independent of the existing NavigationProgress —
-  //      that one only fires for <a> / <form> events; ours fires
-  //      from a plain button click).
-  // Both stay visible until we detect the activeDepartment prop has
-  // actually changed (server action + router.refresh + RSC
-  // reconciliation all completed). Safety net: 12s hard timeout so
-  // we never hang forever if something goes wrong server-side.
+  // Daksh (Mig 058 follow-on): dept-switch feedback is a thin gold
+  // progress bar pinned to the very top of the viewport (the
+  // earlier FinanceLoadingOverlay variant felt too heavy and was
+  // removed). Independent of the existing NavigationProgress
+  // component — that one only fires for <a> / <form> events;
+  // ours fires from a plain button click. Stays visible until we
+  // detect the activeDepartment prop has actually changed (server
+  // action + router.refresh + RSC reconciliation all completed).
+  // Safety net: 12s hard timeout so we never hang forever if
+  // something goes wrong server-side.
   const [switching, setSwitching] = useState(false);
   const [switchingTo, setSwitchingTo] = useState<Department | null>(null);
   const prevActiveDeptRef = useRef<Department | null>(activeDepartment ?? null);
@@ -715,22 +713,13 @@ export function Sidebar({
         </div>
       )}
 
-      {/* Daksh — TWO feedback channels during department switch.
-          Both stay on until the activeDepartment prop actually
-          flips (server action → router.refresh → RSC reconciled).
-          So even if one feels like it disappears early visually,
-          the other carries on until the new room is on screen. */}
-      {switchable && switchingTo && (
-        <>
-          <FinanceLoadingOverlay
-            show={switching}
-            label={`Switching to ${
-              DEPARTMENTS.find((x) => x.id === switchingTo)?.label ?? "department"
-            }…`}
-          />
-          {switching && <DeptSwitchTopBar />}
-        </>
-      )}
+      {/* Daksh — dept-switch feedback. The FinanceLoadingOverlay
+          variant felt too heavy; keep only the thin top progress
+          bar. It stays visible until the activeDepartment prop
+          actually flips (server action → router.refresh → RSC
+          reconciled), so the bar covers the full visible-transition
+          window — no flash. */}
+      {switchable && switching && <DeptSwitchTopBar />}
 
       {/* User */}
       <div className="sidebar-user">
@@ -939,11 +928,9 @@ function CollapsibleNavGroup({
 }
 
 /** Mig 058 follow-on — top-of-viewport progress bar shown during
- *  the department switch. Lives alongside FinanceLoadingOverlay so
- *  there's still visible feedback if the overlay drops a beat before
- *  the page actually paints. Matches the visual language of
- *  NavigationProgress (gold gradient + glow) so the two indicators
- *  feel like the same primitive. */
+ *  the department switch. Matches the visual language of
+ *  NavigationProgress (gold gradient + glow). Lives at z-index
+ *  10000 so it sits above app chrome. */
 function DeptSwitchTopBar() {
   return (
     <>
