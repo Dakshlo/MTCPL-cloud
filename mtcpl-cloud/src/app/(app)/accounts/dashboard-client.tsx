@@ -95,17 +95,34 @@ export function DueBillsClient({
   // — no Apply button. Filters client-side over what the server
   // already loaded, so it's instant.
   const [quickFilter, setQuickFilter] = useState("");
+  // Mig 058 follow-on (Daksh): sort direction toggle. Default is
+  // "oldest" — oldest bill at the top, newest at the bottom. So
+  // the accountant works through the queue in age order (oldest
+  // = most overdue = highest priority). Toggle flips to "newest"
+  // if they want recent-first. Aging analysis row above the table
+  // is computed from the data, NOT from the sort, so it stays
+  // intact either way.
+  const [sortDir, setSortDir] = useState<"oldest" | "newest">("oldest");
 
   const filteredRows = useMemo(() => {
     const q = quickFilter.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter(
-      (r) =>
-        r.token.toLowerCase().includes(q) ||
-        r.vendorName.toLowerCase().includes(q) ||
-        r.vendorBillNo.toLowerCase().includes(q),
-    );
-  }, [rows, quickFilter]);
+    const base = q
+      ? rows.filter(
+          (r) =>
+            r.token.toLowerCase().includes(q) ||
+            r.vendorName.toLowerCase().includes(q) ||
+            r.vendorBillNo.toLowerCase().includes(q),
+        )
+      : rows;
+    // Sort a copy so we don't mutate the prop. Compare on
+    // billDate (ISO YYYY-MM-DD string sorts correctly).
+    const sorted = [...base].sort((a, b) => {
+      if (a.billDate === b.billDate) return 0;
+      const cmp = a.billDate < b.billDate ? -1 : 1;
+      return sortDir === "oldest" ? cmp : -cmp;
+    });
+    return sorted;
+  }, [rows, quickFilter, sortDir]);
 
   const selectedRows = useMemo(
     () => rows.filter((r) => selected.has(r.id)),
@@ -232,7 +249,7 @@ export function DueBillsClient({
           token, vendor name, and vendor bill no. Server-side filters
           (vendor dropdown, date range) still narrow the source set;
           this is for the fast in-page lookup. */}
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
         <input
           type="search"
           value={quickFilter}
@@ -247,9 +264,61 @@ export function DueBillsClient({
             border: `1px solid ${ACCOUNTS_TOKENS.borderStrong}`,
             borderRadius: 8,
             color: "var(--text)",
-            minWidth: 0,
+            minWidth: 240,
           }}
         />
+        {/* Mig 058 follow-on (Daksh): sort toggle. Default is
+            "oldest first" so the most overdue bills bubble to
+            the top of the queue (natural payment-priority order). */}
+        <div
+          style={{
+            display: "inline-flex",
+            background: ACCOUNTS_TOKENS.surfaceMuted,
+            border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+            borderRadius: 8,
+            padding: 3,
+            gap: 2,
+          }}
+          role="group"
+          aria-label="Sort by bill date"
+        >
+          <button
+            type="button"
+            onClick={() => setSortDir("oldest")}
+            style={{
+              padding: "5px 12px",
+              fontSize: 12,
+              fontWeight: 700,
+              border: "none",
+              borderRadius: 5,
+              cursor: "pointer",
+              background: sortDir === "oldest" ? "#fff" : "transparent",
+              color: sortDir === "oldest" ? ACCOUNTS_TOKENS.accent : "var(--muted)",
+              boxShadow: sortDir === "oldest" ? ACCOUNTS_TOKENS.shadow : "none",
+            }}
+            title="Oldest bill date first (most overdue at top)"
+          >
+            ↑ Oldest first
+          </button>
+          <button
+            type="button"
+            onClick={() => setSortDir("newest")}
+            style={{
+              padding: "5px 12px",
+              fontSize: 12,
+              fontWeight: 700,
+              border: "none",
+              borderRadius: 5,
+              cursor: "pointer",
+              background: sortDir === "newest" ? "#fff" : "transparent",
+              color: sortDir === "newest" ? ACCOUNTS_TOKENS.accent : "var(--muted)",
+              boxShadow: sortDir === "newest" ? ACCOUNTS_TOKENS.shadow : "none",
+            }}
+            title="Newest bill date first"
+          >
+            ↓ Newest first
+          </button>
+        </div>
         {quickFilter && (
           <span
             style={{

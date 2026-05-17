@@ -232,15 +232,18 @@ function BillAuditCard({
               <strong style={{ fontSize: 15, color: "var(--text)", letterSpacing: "-0.005em" }}>
                 {row.vendorName}
               </strong>
+              {/* Mig 058 follow-on (Daksh): bumped token from 11→15
+                  so the crosschecker can spot it at a glance. */}
               <code
                 style={{
-                  fontSize: 11,
+                  fontSize: 15,
                   fontFamily: "ui-monospace, monospace",
-                  padding: "2px 8px",
+                  padding: "4px 12px",
                   background: ACCOUNTS_TOKENS.accentLight,
                   color: ACCOUNTS_TOKENS.accent,
-                  borderRadius: 4,
-                  fontWeight: 700,
+                  borderRadius: 6,
+                  fontWeight: 800,
+                  letterSpacing: "-0.01em",
                 }}
               >
                 {row.token}
@@ -251,15 +254,34 @@ function BillAuditCard({
                 </span>
               )}
             </div>
-            <p style={{ margin: "0 0 6px", fontSize: 12, color: "var(--muted)" }}>
+            {/* Mig 058 follow-on (Daksh): vendor-bill-no + date
+                bumped from 12→14, monospace bill no. now 14/800
+                so the three cross-check fields (token above + these
+                two) are all big enough to verify quickly without
+                squinting. */}
+            <p style={{ margin: "0 0 6px", fontSize: 14, color: "var(--muted)", lineHeight: 1.5 }}>
               Vendor bill{" "}
-              <code style={{ fontFamily: "ui-monospace, monospace", color: "var(--text)" }}>{row.vendorBillNo}</code>
+              <code
+                style={{
+                  fontFamily: "ui-monospace, monospace",
+                  color: "var(--text)",
+                  fontSize: 14,
+                  fontWeight: 800,
+                  padding: "1px 6px",
+                  background: ACCOUNTS_TOKENS.surfaceMuted,
+                  borderRadius: 4,
+                }}
+              >
+                {row.vendorBillNo}
+              </code>
               {" · "}
-              {new Date(row.billDate).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata",
-                day: "numeric",
-                month: "short",
-                year: "numeric",
-              })}
+              <strong style={{ color: "var(--text)", fontWeight: 700 }}>
+                {new Date(row.billDate).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata",
+                  day: "numeric",
+                  month: "short",
+                  year: "numeric",
+                })}
+              </strong>
               {row.costHead && (
                 <>
                   {" · "}

@@ -316,7 +316,12 @@ export async function rejectBillAction(formData: FormData): Promise<ActionResult
         entityType: "bill",
         entityId: billId,
         actorId: profile.id,
-        targetRoles: ["biller", "developer"],
+        // Mig 058 follow-on (Daksh): added accountant + final_auditor
+        // so the originating submitter (now the accountant under the
+        // mig 037 model — biller stays for legacy compat) gets the
+        // notification bell ping. They previously had to scroll
+        // All Bills to find a rejected one.
+        targetRoles: ["biller", "developer", "accountant", "final_auditor"],
       },
     ),
   ]).catch((e) => console.warn("[rejectBillAction] cleanup failed", e));

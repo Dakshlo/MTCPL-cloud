@@ -38,7 +38,13 @@ import { DEV_BYPASS_COOKIE } from "@/lib/dev-bypass";
 import { disableDevMaintenanceBypassAction } from "@/app/(app)/settings/system-status-actions";
 
 const SETTINGS_ROLES = ["developer", "owner", "team_head"];
-const NOTIFICATION_ROLES = ["developer"]; // flip to include "team_head" at rollout
+// Mig 058 follow-on (Daksh): widened so accountants see the
+// notification bell. Daksh's pain point — when a bill gets sent
+// back at crosscheck, the accountant had no surface alert and was
+// scrolling All Bills looking for it. Owner sees the bell too
+// for general operational visibility. ACCOUNTANT★ (final_auditor)
+// inherits since they work across both Finance and Invoicing.
+const NOTIFICATION_ROLES = ["developer", "owner", "accountant", "final_auditor"];
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const { profile } = await requireAuth();
