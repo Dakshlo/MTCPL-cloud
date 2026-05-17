@@ -22,7 +22,7 @@ import {
   upsertInvoicePartyAction,
   archiveInvoicePartyAction,
 } from "../actions";
-import { PartiesClient, type PartyRow } from "./parties-client";
+import { AddPartyTrigger, PartiesList, type PartyRow } from "./parties-client";
 
 export default async function PartiesListPage() {
   const { profile } = await requireAuth();
@@ -98,7 +98,7 @@ export default async function PartiesListPage() {
           title="All parties"
           count={parties.length}
           action={
-            <PartiesClient.AddTrigger
+            <AddPartyTrigger
               upsertAction={upsertInvoicePartyAction}
               archiveAction={archiveInvoicePartyAction}
             />
@@ -111,7 +111,7 @@ export default async function PartiesListPage() {
             title="No parties yet"
             description="Add a party (customer) to start creating challans and invoices against them."
             action={
-              <PartiesClient.AddTrigger
+              <AddPartyTrigger
                 upsertAction={upsertInvoicePartyAction}
                 archiveAction={archiveInvoicePartyAction}
                 buttonLabel="+ Add your first party"
@@ -128,7 +128,7 @@ export default async function PartiesListPage() {
               boxShadow: ACCOUNTS_TOKENS.shadow,
             }}
           >
-            <PartiesClient.List
+            <PartiesList
               parties={parties}
               upsertAction={upsertInvoicePartyAction}
               archiveAction={archiveInvoicePartyAction}

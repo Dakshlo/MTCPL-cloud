@@ -45,10 +45,12 @@ type UpsertAction = (formData: FormData) => Promise<ActionResult>;
 type ArchiveAction = (formData: FormData) => Promise<ActionResult>;
 
 // ────────────────────────────────────────────────────────────────
-// AddTrigger — button + SidePanel for creating a new party
+// AddPartyTrigger — button + SidePanel for creating a new party.
+// Exported as a top-level named function (not an object property)
+// so Next.js's RSC client-boundary detection picks it up cleanly.
 // ────────────────────────────────────────────────────────────────
 
-function AddTrigger({
+export function AddPartyTrigger({
   upsertAction,
   archiveAction: _archiveAction,
   buttonLabel = "+ Add party",
@@ -84,10 +86,10 @@ function AddTrigger({
 }
 
 // ────────────────────────────────────────────────────────────────
-// List — the parties table + per-row Edit/Archive
+// PartiesList — table + per-row Edit/Archive
 // ────────────────────────────────────────────────────────────────
 
-function List({
+export function PartiesList({
   parties,
   upsertAction,
   archiveAction,
@@ -412,7 +414,3 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-export const PartiesClient = {
-  AddTrigger,
-  List,
-};
