@@ -406,7 +406,11 @@ function roleLabel(role: AppRole): string {
     // 2 accountants and don't want to bias one as senior." Display
     // label only; DB enum stays `final_auditor`.
     final_auditor: "ACCOUNTANT ★",
-    cnc_expense_entry: "CNC EXPENSE ENTRY",
+    // Mig 060 — was "CNC EXPENSE ENTRY". Renamed to "EXPENSES
+    // ENTRY" because the same role now handles BOTH cutter +
+    // CNC expenses. Display label only; DB enum stays
+    // `cnc_expense_entry`.
+    cnc_expense_entry: "EXPENSES ENTRY",
   };
   return labels[role] ?? role.replace(/_/g, " ").toUpperCase();
 }

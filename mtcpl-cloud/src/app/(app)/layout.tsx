@@ -436,7 +436,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                 biller: "BILLER",
                 accountant: "ACCOUNTANT",
                 final_auditor: "ACCOUNTANT ★",
-                cnc_expense_entry: "CNC EXPENSES",
+                cnc_expense_entry: "EXPENSES ENTRY",
               } as Record<string, string>)[profile.role] ?? profile.role.replace(/_/g, " ").toUpperCase()}
             </span>
             {NOTIFICATION_ROLES.includes(profile.role) && (

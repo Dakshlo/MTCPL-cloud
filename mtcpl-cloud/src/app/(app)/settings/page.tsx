@@ -41,9 +41,10 @@ const UI_ROLES_ALL = [
   // Primary daily duty is the /accounts/final-audit page.
   // Mig 058 — display as "ACCOUNTANT ★". DB enum stays `final_auditor`.
   { value: "final_auditor",    label: "ACCOUNTANT ★" },
-  // Mig 054 — CNC operational expense entry. Single-page portal at
-  // /carving/expenses. No other surface in the app.
-  { value: "cnc_expense_entry", label: "CNC EXPENSE ENTRY" },
+  // Mig 054 — CNC operational expense entry. Mig 060 widened to
+  // cutter expenses too, so the display label is just "EXPENSES
+  // ENTRY" now (DB enum stays `cnc_expense_entry`).
+  { value: "cnc_expense_entry", label: "EXPENSES ENTRY" },
 ];
 
 // Roles owner/team-head can assign — cannot promote to owner or developer
