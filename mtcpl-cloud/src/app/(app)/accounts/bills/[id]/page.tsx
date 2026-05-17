@@ -12,13 +12,14 @@ import {
 } from "@/lib/accounts-permissions";
 import {
   approveBillFormAction,
-  cancelBillFormAction,
+  cancelBillAction,
   clearPartialRejectionFormAction,
 } from "../../actions";
 import { RejectBillForm } from "./reject-bill-form";
 import { ApproveBillButton } from "./approve-bill-button";
 import { BillBackLink } from "./bill-back-link";
 import { PartialRejectionForm } from "./partial-rejection-form";
+import { CancelBillButton } from "./cancel-bill-button";
 import {
   ACCOUNTS_TOKENS,
   BillStatusPill,
@@ -1049,20 +1050,20 @@ export default async function BillDetailPage({
               {/* Mig 058 follow-on (Daksh) — accountant + biller
                   can now cancel their own pending/rejected bills
                   (the documented escape hatch for changing date /
-                  vendor invoice no). cancelBillAction enforces the
-                  same widened gate server-side. Owner / dev still
-                  see this for any non-paid/approved bill. */}
+                  vendor invoice no). Two-step confirmation is built
+                  into CancelBillButton — Daksh accidentally cancelled
+                  a real bill with the unconfirmed single-click
+                  form-action variant. */}
               {!isLocked &&
                 (bill.status === "pending_approval" || bill.status === "rejected") &&
                 (profile.role === "developer" ||
                   profile.role === "owner" ||
                   canSubmitBills(profile)) && (
-                  <form action={cancelBillFormAction}>
-                    <input type="hidden" name="bill_id" value={bill.id} />
-                    <button type="submit" style={{ ...BUTTON_STYLES.ghost, width: "100%" }}>
-                      Cancel this bill
-                    </button>
-                  </form>
+                  <CancelBillButton
+                    billId={bill.id}
+                    billToken={bill.token}
+                    cancelAction={cancelBillAction}
+                  />
                 )}
             </div>
           )}
