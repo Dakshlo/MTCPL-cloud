@@ -76,6 +76,10 @@ const ROLE_ACCESS: Record<string, string[]> = {
   dispatch:         ["Dashboard"],
   vendor:           ["My Jobs"],
   slab_transfer:    ["Slab Transfer"],
+  // Mig 037 — crosscheck verifies pending bills. Mig 061 follow-on
+  // (Daksh): also gets read-access to Vendor Account so they can
+  // verify a vendor's GSTIN / bank / address while reviewing a bill.
+  crosscheck:       ["All Bills", "Crosscheck Queue", "Vendor Account"],
   // Mig 053 — accountant_star (the starred accountant, was
   // `final_auditor` until mig 061 renamed) sees the full finance
   // toolbox.

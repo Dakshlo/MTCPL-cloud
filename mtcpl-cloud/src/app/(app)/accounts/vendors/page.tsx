@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { canManageBillVendors } from "@/lib/accounts-permissions";
+import { canManageBillVendors, canViewBillVendors } from "@/lib/accounts-permissions";
 import { upsertBillVendorAction } from "../actions";
 import { VendorForm } from "./vendor-form";
 import {
@@ -14,9 +14,10 @@ import { VendorsTable, type VendorRow } from "./vendors-table";
 
 export default async function BillVendorsPage() {
   const { profile } = await requireAuth();
-  if (!canManageBillVendors(profile)) {
+  if (!canViewBillVendors(profile)) {
     redirect("/accounts");
   }
+  const canEdit = canManageBillVendors(profile);
   const supabase = createAdminSupabaseClient();
   const { data: vendorsRaw } = await supabase
     .from("bill_vendors")
@@ -70,7 +71,7 @@ export default async function BillVendorsPage() {
             {activeCount} active · {archivedCount} archived
           </span>
         }
-        actions={<VendorForm action={upsertBillVendorAction} mode="create" />}
+        actions={canEdit ? <VendorForm action={upsertBillVendorAction} mode="create" /> : null}
       />
 
       {vendors.length === 0 ? (
@@ -78,7 +79,7 @@ export default async function BillVendorsPage() {
           icon="🏢"
           title="No bill vendors yet"
           description="Add your suppliers (cement / steel / scaffolding / tools / etc) here so they show up in the bill-entry form."
-          action={<VendorForm action={upsertBillVendorAction} mode="create" />}
+          action={canEdit ? <VendorForm action={upsertBillVendorAction} mode="create" /> : undefined}
         />
       ) : (
         <VendorsTable
@@ -94,6 +95,7 @@ export default async function BillVendorsPage() {
             }))
           }
           outstandingByVendor={Object.fromEntries(outstandingByVendor)}
+          canEdit={canEdit}
         />
       )}
 

@@ -5,6 +5,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import {
   canManageBillVendors,
   canRenameBillVendor,
+  canViewBillVendors,
 } from "@/lib/accounts-permissions";
 import { upsertBillVendorAction } from "../../actions";
 import { VendorForm } from "../vendor-form";
@@ -28,9 +29,10 @@ export default async function BillVendorDetailPage({
   params: Params;
 }) {
   const { profile } = await requireAuth();
-  if (!canManageBillVendors(profile)) {
+  if (!canViewBillVendors(profile)) {
     redirect("/accounts");
   }
+  const canEdit = canManageBillVendors(profile);
   const { id } = await params;
   const supabase = createAdminSupabaseClient();
 
@@ -283,7 +285,9 @@ export default async function BillVendorDetailPage({
           inside a <details> collapsible above it so the long
           vertical form doesn't dominate the page. Click "Edit
           vendor" to expand; the form is identical to the side-rail
-          variant otherwise. */}
+          variant otherwise.
+          Crosscheck (read-only) doesn't see this block at all. */}
+      {canEdit && (
       <details
         style={{
           marginBottom: 16,
@@ -350,6 +354,7 @@ export default async function BillVendorDetailPage({
           />
         </div>
       </details>
+      )}
 
       <div>
           <div

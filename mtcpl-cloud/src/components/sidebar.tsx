@@ -314,7 +314,11 @@ const navEntries: NavEntry[] = [
     href: "/accounts/vendors",
     label: "Vendor Account",
     icon: "🏢",
-    roles: ["developer", "owner", "accountant", "accountant_star"],
+    // Mig 061 follow-on (Daksh): crosscheck added — they need
+    // read-access to vendor profiles (GSTIN / bank / address)
+    // while reviewing a bill. Edit / archive still gated to
+    // canManageBillVendors so they can only view.
+    roles: ["developer", "owner", "accountant", "accountant_star", "crosscheck"],
     department: "finance",
   },
   {

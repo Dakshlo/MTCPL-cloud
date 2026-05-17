@@ -109,15 +109,28 @@ export function canMarkPaid(p: Pick<Profile, "role">): boolean {
   return false;
 }
 
-/** Full bill_vendors CRUD — list, create, edit, archive. Powers the
- *  /accounts/vendors page in its entirety. */
+/** Full bill_vendors CRUD — list, create, edit, archive. Used by
+ *  the server actions that mutate vendor rows. Page-level read
+ *  access uses canViewBillVendors below (broader). */
 export function canManageBillVendors(p: Pick<Profile, "role">): boolean {
   if (p.role === "developer") return true;
   if (p.role === "owner") return true;
   if (p.role === "accountant") return true;
-  // Mig 053 — final_auditor has full accountant access (CRUD on
-  // vendors included).
+  // Mig 053 — final_auditor (now accountant_star) has full
+  // accountant access including vendor CRUD.
   if (p.role === "accountant_star") return true;
+  return false;
+}
+
+/** Read-only access to /accounts/vendors + per-vendor detail. Daksh:
+ *  crosscheck should be able to open vendor accounts to verify
+ *  private data (GSTIN, bank, address, ledger) while reviewing a
+ *  bill — but NOT edit/archive vendor rows. So we widen the page
+ *  guard via this helper and keep the action guards on
+ *  canManageBillVendors. */
+export function canViewBillVendors(p: Pick<Profile, "role">): boolean {
+  if (canManageBillVendors(p)) return true;
+  if (p.role === "crosscheck") return true;
   return false;
 }
 

@@ -32,9 +32,13 @@ export type VendorRow = {
 export function VendorsTable({
   vendors,
   outstandingByVendor,
+  canEdit = true,
 }: {
   vendors: VendorRow[];
   outstandingByVendor: Record<string, number>;
+  /** When false, hides Archive/Reactivate buttons. Read-only roles
+   *  like crosscheck get the table without the mutating controls. */
+  canEdit?: boolean;
 }) {
   const [query, setQuery] = useState("");
 
@@ -185,16 +189,18 @@ export function VendorsTable({
                           >
                             View
                           </Link>
-                          <form action={archiveBillVendorFormAction}>
-                            <input type="hidden" name="id" value={v.id} />
-                            <input type="hidden" name="reactivate" value={v.isActive ? "" : "1"} />
-                            <button
-                              type="submit"
-                              style={{ ...BUTTON_STYLES.ghost, padding: "5px 10px" }}
-                            >
-                              {v.isActive ? "Archive" : "Reactivate"}
-                            </button>
-                          </form>
+                          {canEdit && (
+                            <form action={archiveBillVendorFormAction}>
+                              <input type="hidden" name="id" value={v.id} />
+                              <input type="hidden" name="reactivate" value={v.isActive ? "" : "1"} />
+                              <button
+                                type="submit"
+                                style={{ ...BUTTON_STYLES.ghost, padding: "5px 10px" }}
+                              >
+                                {v.isActive ? "Archive" : "Reactivate"}
+                              </button>
+                            </form>
+                          )}
                         </div>
                       </td>
                     </tr>
