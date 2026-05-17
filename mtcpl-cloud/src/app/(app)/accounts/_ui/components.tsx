@@ -65,7 +65,13 @@ export function Money({
   prefix?: string;
 }) {
   const sizes: Record<string, { fontSize: number; fontWeight: number }> = {
-    hero: { fontSize: 30, fontWeight: 800 },
+    // Mig 058 follow-on (Daksh): hero was 30 — too big once the
+    // total crossed 1 crore (₹1,18,43,563.96 wrapped to 2 lines on
+    // the Due Bills KPI tile, with .96 jumping below the integer
+    // part). Dropped to 22, still meaningfully larger than the
+    // rest of the page; whiteSpace: nowrap below keeps the number
+    // on one line regardless of width.
+    hero: { fontSize: 22, fontWeight: 800 },
     large: { fontSize: 20, fontWeight: 800 },
     normal: { fontSize: 14, fontWeight: 700 },
     small: { fontSize: 12, fontWeight: 600 },
@@ -83,6 +89,7 @@ export function Money({
         fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
         color: tone ? tones[tone] : "var(--text)",
         letterSpacing: "-0.01em",
+        whiteSpace: "nowrap",
         ...sizes[size],
       }}
     >

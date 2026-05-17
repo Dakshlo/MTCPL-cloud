@@ -1,19 +1,16 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canManageBillVendors } from "@/lib/accounts-permissions";
-import { upsertBillVendorAction, archiveBillVendorFormAction } from "../actions";
+import { upsertBillVendorAction } from "../actions";
 import { VendorForm } from "./vendor-form";
 import {
   AccountsHero,
   ACCOUNTS_TOKENS,
-  BUTTON_STYLES,
   EmptyState,
   Money,
-  TABLE_STYLES,
-  VendorIdentity,
 } from "../_ui/components";
+import { VendorsTable, type VendorRow } from "./vendors-table";
 
 export default async function BillVendorsPage() {
   const { profile } = await requireAuth();
@@ -84,118 +81,20 @@ export default async function BillVendorsPage() {
           action={<VendorForm action={upsertBillVendorAction} mode="create" />}
         />
       ) : (
-        <div style={TABLE_STYLES.tableWrap}>
-          <div style={{ overflowX: "auto" }}>
-            <table style={TABLE_STYLES.table}>
-              <thead style={TABLE_STYLES.thead}>
-                <tr>
-                  <th style={TABLE_STYLES.th}>Vendor</th>
-                  <th style={TABLE_STYLES.th}>Category</th>
-                  <th style={TABLE_STYLES.th}>GSTIN</th>
-                  <th style={TABLE_STYLES.th}>Contact</th>
-                  <th style={TABLE_STYLES.thRight}>Outstanding</th>
-                  <th style={TABLE_STYLES.th}>Status</th>
-                  <th style={TABLE_STYLES.th}>&nbsp;</th>
-                </tr>
-              </thead>
-              <tbody>
-                {vendors.map((v, idx) => {
-                  const outstanding = outstandingByVendor.get(v.id) ?? 0;
-                  return (
-                    <tr
-                      key={v.id}
-                      style={{
-                        background: idx % 2 === 0 ? "#fff" : ACCOUNTS_TOKENS.surfaceMuted,
-                        opacity: v.is_active ? 1 : 0.6,
-                      }}
-                    >
-                      <td style={TABLE_STYLES.td}>
-                        <VendorIdentity
-                          name={v.name}
-                          subLabel={v.email ?? undefined}
-                          size={36}
-                          href={`/accounts/vendors/${v.id}`}
-                        />
-                      </td>
-                      <td style={TABLE_STYLES.td}>
-                        {v.category ? (
-                          <span
-                            style={{
-                              fontSize: 11,
-                              padding: "2px 10px",
-                              borderRadius: 999,
-                              background: ACCOUNTS_TOKENS.surfaceMuted,
-                              color: ACCOUNTS_TOKENS.neutral,
-                              fontWeight: 600,
-                              border: `1px solid ${ACCOUNTS_TOKENS.border}`,
-                            }}
-                          >
-                            {v.category}
-                          </span>
-                        ) : (
-                          <span style={{ fontSize: 11, color: "var(--muted)" }}>—</span>
-                        )}
-                      </td>
-                      <td style={TABLE_STYLES.td}>
-                        {v.gstin ? (
-                          <code style={{ fontSize: 12, fontFamily: "ui-monospace, monospace" }}>
-                            {v.gstin}
-                          </code>
-                        ) : (
-                          <span style={{ fontSize: 11, color: "var(--muted)" }}>—</span>
-                        )}
-                      </td>
-                      <td style={{ ...TABLE_STYLES.td, fontSize: 12, color: "var(--muted)" }}>
-                        {v.phone ?? "—"}
-                      </td>
-                      <td style={TABLE_STYLES.tdRight}>
-                        {outstanding > 0 ? (
-                          <Money value={outstanding} tone="warning" />
-                        ) : (
-                          <span style={{ fontSize: 11, color: "var(--muted)" }}>—</span>
-                        )}
-                      </td>
-                      <td style={TABLE_STYLES.td}>
-                        <span
-                          style={{
-                            fontSize: 11,
-                            fontWeight: 700,
-                            padding: "2px 10px",
-                            borderRadius: 999,
-                            background: v.is_active ? ACCOUNTS_TOKENS.successLight : ACCOUNTS_TOKENS.surfaceMuted,
-                            color: v.is_active ? ACCOUNTS_TOKENS.success : "var(--muted)",
-                          }}
-                        >
-                          {v.is_active ? "● Active" : "○ Archived"}
-                        </span>
-                      </td>
-                      <td style={TABLE_STYLES.td}>
-                        <div style={{ display: "flex", gap: 6 }}>
-                          <Link
-                            href={`/accounts/vendors/${v.id}`}
-                            style={{ ...BUTTON_STYLES.secondary, padding: "5px 12px", fontSize: 11 }}
-                          >
-                            View
-                          </Link>
-                          <form action={archiveBillVendorFormAction}>
-                            <input type="hidden" name="id" value={v.id} />
-                            <input type="hidden" name="reactivate" value={v.is_active ? "" : "1"} />
-                            <button
-                              type="submit"
-                              style={{ ...BUTTON_STYLES.ghost, padding: "5px 10px" }}
-                            >
-                              {v.is_active ? "Archive" : "Reactivate"}
-                            </button>
-                          </form>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <VendorsTable
+          vendors={
+            vendors.map<VendorRow>((v) => ({
+              id: v.id,
+              name: v.name,
+              category: v.category,
+              gstin: v.gstin,
+              phone: v.phone,
+              email: v.email,
+              isActive: v.is_active,
+            }))
+          }
+          outstandingByVendor={Object.fromEntries(outstandingByVendor)}
+        />
       )}
 
       {totalOutstandingAcrossVendors > 0 && (
