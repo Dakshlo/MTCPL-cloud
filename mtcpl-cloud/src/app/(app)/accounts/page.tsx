@@ -27,6 +27,10 @@ import {
   PeekProvider,
   PeekValue,
 } from "./_ui/sensitive-peek";
+import {
+  BILL_VENDOR_CATEGORIES,
+  billVendorCategoryDisplay,
+} from "@/lib/bill-vendor-categories";
 
 type SearchParams = Promise<{
   vendor?: string;
@@ -36,6 +40,9 @@ type SearchParams = Promise<{
   token?: string;
   date_from?: string;
   date_to?: string;
+  // Mig 061 follow-on (Daksh): category filter so dad can see
+  // outstanding sliced by raw material / equipment / jobwork / etc.
+  category?: string;
 }>;
 
 export default async function AccountsHomePage({
@@ -61,6 +68,7 @@ export default async function AccountsHomePage({
   const tokenFilter = (sp.token ?? "").trim();
   const dateFromFilter = (sp.date_from ?? "").trim();
   const dateToFilter = (sp.date_to ?? "").trim();
+  const categoryFilter = (sp.category ?? "").trim();
 
   const supabase = createAdminSupabaseClient();
 
@@ -74,7 +82,7 @@ export default async function AccountsHomePage({
   let dueQuery = supabase
     .from("bills")
     .select(
-      "id, token, vendor_bill_no, bill_date, description, cost_head, amount_total, amount_gst, amount_tds, amount_tcs, amount_payable_to_vendor, amount_paid, amount_outstanding, status, approved_at, bill_vendor_id, bill_vendors(id, name, payment_terms_days)",
+      "id, token, vendor_bill_no, bill_date, description, cost_head, amount_total, amount_gst, amount_tds, amount_tcs, amount_payable_to_vendor, amount_paid, amount_outstanding, status, approved_at, bill_vendor_id, bill_vendors(id, name, payment_terms_days, category)",
     )
     .eq("status", "approved")
     .gt("amount_outstanding", 0)
@@ -150,8 +158,8 @@ export default async function AccountsHomePage({
     approved_at: string | null;
     bill_vendor_id: string;
     bill_vendors:
-      | { id: string; name: string; payment_terms_days: number | null }
-      | { id: string; name: string; payment_terms_days: number | null }[]
+      | { id: string; name: string; payment_terms_days: number | null; category: string | null }
+      | { id: string; name: string; payment_terms_days: number | null; category: string | null }[]
       | null;
   };
   const dueRows = ((dueRaw ?? []) as unknown) as DbRow[];
@@ -188,6 +196,7 @@ export default async function AccountsHomePage({
       token: r.token,
       vendorId: r.bill_vendor_id,
       vendorName: v?.name ?? "—",
+      vendorCategory: v?.category ?? null,
       vendorBillNo: r.vendor_bill_no,
       billDate: r.bill_date,
       description: r.description,
@@ -212,9 +221,17 @@ export default async function AccountsHomePage({
     };
   });
 
-  const filteredDue = ageFilter
-    ? allDue.filter((b) => b.ageBucket === ageFilter)
+  // Mig 061 follow-on (Daksh) — category filter applies BEFORE the
+  // age-bucket filter so the bucket totals shown in the aging strip
+  // reflect the selected category only. (When a user picks "Repair
+  // & Maintenance" they want every aging tile to scope to that
+  // category too.)
+  const categoryFilteredDue = categoryFilter
+    ? allDue.filter((b) => b.vendorCategory === categoryFilter)
     : allDue;
+  const filteredDue = ageFilter
+    ? categoryFilteredDue.filter((b) => b.ageBucket === ageFilter)
+    : categoryFilteredDue;
 
   const totalOutstanding = filteredDue.reduce((s, b) => s + b.amountOutstanding, 0);
   const billsCount = filteredDue.length;
@@ -241,19 +258,21 @@ export default async function AccountsHomePage({
     return top;
   })();
 
+  // Bucket counts/totals respect the category filter so the aging
+  // strip stays meaningful when a category is selected (mig 061).
   const bucketCounts = {
-    "0_30": allDue.filter((b) => b.ageBucket === "0_30").length,
-    "31_60": allDue.filter((b) => b.ageBucket === "31_60").length,
-    "61_90": allDue.filter((b) => b.ageBucket === "61_90").length,
-    "90_plus": allDue.filter((b) => b.ageBucket === "90_plus").length,
+    "0_30": categoryFilteredDue.filter((b) => b.ageBucket === "0_30").length,
+    "31_60": categoryFilteredDue.filter((b) => b.ageBucket === "31_60").length,
+    "61_90": categoryFilteredDue.filter((b) => b.ageBucket === "61_90").length,
+    "90_plus": categoryFilteredDue.filter((b) => b.ageBucket === "90_plus").length,
   };
   const bucketTotals = {
-    "0_30": allDue.filter((b) => b.ageBucket === "0_30").reduce((s, b) => s + b.amountOutstanding, 0),
-    "31_60": allDue.filter((b) => b.ageBucket === "31_60").reduce((s, b) => s + b.amountOutstanding, 0),
-    "61_90": allDue.filter((b) => b.ageBucket === "61_90").reduce((s, b) => s + b.amountOutstanding, 0),
-    "90_plus": allDue.filter((b) => b.ageBucket === "90_plus").reduce((s, b) => s + b.amountOutstanding, 0),
+    "0_30": categoryFilteredDue.filter((b) => b.ageBucket === "0_30").reduce((s, b) => s + b.amountOutstanding, 0),
+    "31_60": categoryFilteredDue.filter((b) => b.ageBucket === "31_60").reduce((s, b) => s + b.amountOutstanding, 0),
+    "61_90": categoryFilteredDue.filter((b) => b.ageBucket === "61_90").reduce((s, b) => s + b.amountOutstanding, 0),
+    "90_plus": categoryFilteredDue.filter((b) => b.ageBucket === "90_plus").reduce((s, b) => s + b.amountOutstanding, 0),
   };
-  const grandTotal = allDue.reduce((s, b) => s + b.amountOutstanding, 0) || 1;
+  const grandTotal = categoryFilteredDue.reduce((s, b) => s + b.amountOutstanding, 0) || 1;
 
   const isApprover = canApproveBills(profile);
   const isAccountManager = canManageAccounts(profile);
@@ -507,7 +526,7 @@ export default async function AccountsHomePage({
         method="GET"
         style={{
           display: "grid",
-          gridTemplateColumns: "minmax(140px, 1.4fr) minmax(160px, 1.6fr) minmax(140px, 1fr) minmax(140px, 1fr) auto",
+          gridTemplateColumns: "minmax(140px, 1.4fr) minmax(160px, 1.6fr) minmax(160px, 1.6fr) minmax(140px, 1fr) minmax(140px, 1fr) auto",
           alignItems: "end",
           columnGap: 10,
           rowGap: 4,
@@ -562,6 +581,34 @@ export default async function AccountsHomePage({
           </select>
         </FilterField>
 
+        <FilterField label="Category">
+          {/* Mig 061 follow-on (Daksh): category filter. Flat list
+              for the filter dropdown — the optgroup-in-form pattern
+              is too narrow here. billVendorCategoryDisplay prepends
+              "Block Purchase — " to the stone sub-types so they're
+              unambiguous. */}
+          <select
+            name="category"
+            defaultValue={categoryFilter}
+            style={{
+              padding: "6px 10px",
+              fontSize: 13,
+              background: "#fff",
+              border: `1px solid ${ACCOUNTS_TOKENS.borderStrong}`,
+              borderRadius: 8,
+              color: "var(--text)",
+              width: "100%",
+            }}
+          >
+            <option value="">All categories</option>
+            {BILL_VENDOR_CATEGORIES.map((c) => (
+              <option key={c.value} value={c.value}>
+                {billVendorCategoryDisplay(c.value)}
+              </option>
+            ))}
+          </select>
+        </FilterField>
+
         <FilterField label="Bill date — from">
           <input
             type="date"
@@ -602,7 +649,7 @@ export default async function AccountsHomePage({
           <button type="submit" style={BUTTON_STYLES.secondary}>
             Apply filters
           </button>
-          {(vendorFilter || ageFilter || tokenFilter || dateFromFilter || dateToFilter) && (
+          {(vendorFilter || ageFilter || tokenFilter || dateFromFilter || dateToFilter || categoryFilter) && (
             <Link
               href="/accounts"
               style={{

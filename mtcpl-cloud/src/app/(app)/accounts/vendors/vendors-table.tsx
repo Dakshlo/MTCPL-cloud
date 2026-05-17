@@ -18,6 +18,7 @@ import {
   VendorIdentity,
 } from "../_ui/components";
 import { archiveBillVendorFormAction } from "../actions";
+import { getBillVendorCategory } from "@/lib/bill-vendor-categories";
 
 export type VendorRow = {
   id: string;
@@ -48,6 +49,9 @@ export function VendorsTable({
     return vendors.filter((v) => {
       if (v.name.toLowerCase().includes(q)) return true;
       if (v.category?.toLowerCase().includes(q)) return true;
+      // Mig 061 — also search against the resolved category LABEL
+      // so "marble" finds "block_purchase_marble" vendors etc.
+      if (getBillVendorCategory(v.category).label.toLowerCase().includes(q)) return true;
       if (v.gstin?.toLowerCase().includes(q)) return true;
       if (v.phone?.toLowerCase().includes(q)) return true;
       if (v.email?.toLowerCase().includes(q)) return true;
@@ -130,21 +134,28 @@ export function VendorsTable({
                         />
                       </td>
                       <td style={TABLE_STYLES.td}>
-                        {v.category ? (
-                          <span
-                            style={{
-                              fontSize: 11,
-                              padding: "2px 10px",
-                              borderRadius: 999,
-                              background: ACCOUNTS_TOKENS.surfaceMuted,
-                              color: ACCOUNTS_TOKENS.neutral,
-                              fontWeight: 600,
-                              border: `1px solid ${ACCOUNTS_TOKENS.border}`,
-                            }}
-                          >
-                            {v.category}
-                          </span>
-                        ) : (
+                        {/* Mig 061 — coloured category pill driven by
+                            the canonical category enum. Legacy free-
+                            text values render in the muted fallback
+                            colours (still visible, just neutral). */}
+                        {v.category ? (() => {
+                          const cat = getBillVendorCategory(v.category);
+                          return (
+                            <span
+                              style={{
+                                fontSize: 11,
+                                padding: "2px 10px",
+                                borderRadius: 999,
+                                background: cat.pill.bg,
+                                color: cat.pill.fg,
+                                fontWeight: 700,
+                                letterSpacing: "0.02em",
+                              }}
+                            >
+                              {cat.label}
+                            </span>
+                          );
+                        })() : (
                           <span style={{ fontSize: 11, color: "var(--muted)" }}>—</span>
                         )}
                       </td>

@@ -20,12 +20,16 @@ import {
   TABLE_STYLES,
   VendorIdentity,
 } from "./_ui/components";
+import { getBillVendorCategory } from "@/lib/bill-vendor-categories";
 
 export type DueBillRow = {
   id: string;
   token: string;
   vendorId: string;
   vendorName: string;
+  /** Mig 061 — bill_vendors.category (canonical enum value). Drives
+   *  the category filter dropdown above + the pill chip on each row. */
+  vendorCategory: string | null;
   vendorBillNo: string;
   billDate: string;
   description: string;
@@ -428,6 +432,30 @@ export function DueBillsClient({
                           size={32}
                         />
                       </Link>
+                      {/* Mig 061 — category pill below the vendor
+                          identity. Uncategorised renders muted so
+                          legacy vendors don't shout for attention. */}
+                      {(() => {
+                        const cat = getBillVendorCategory(r.vendorCategory);
+                        return (
+                          <div style={{ marginTop: 4 }}>
+                            <span
+                              style={{
+                                display: "inline-block",
+                                fontSize: 10,
+                                fontWeight: 700,
+                                padding: "2px 8px",
+                                background: cat.pill.bg,
+                                color: cat.pill.fg,
+                                borderRadius: 999,
+                                letterSpacing: "0.03em",
+                              }}
+                            >
+                              {cat.label}
+                            </span>
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td style={TABLE_STYLES.td}>
                       <code style={{ fontSize: 12, fontFamily: "ui-monospace, monospace" }}>

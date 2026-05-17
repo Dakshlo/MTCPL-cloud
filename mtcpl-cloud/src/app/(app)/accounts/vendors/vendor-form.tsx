@@ -8,6 +8,7 @@ import {
   INPUT_STYLE,
   SidePanel,
 } from "../_ui/components";
+import { BILL_VENDOR_CATEGORIES } from "@/lib/bill-vendor-categories";
 
 type UpsertResult =
   | { ok: true; vendorId: string }
@@ -188,12 +189,59 @@ export function VendorForm({
       </Field>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         <Field label="Category">
-          <input
+          {/* Mig 061 follow-on (Daksh): replaced free-text input
+              with a canonical select so Due Bills can filter by
+              category. Block Purchase sub-types stay grouped under
+              an <optgroup> so the stone-buy picks are visually
+              cohesive in the dropdown. */}
+          <select
             value={form.category}
             onChange={(e) => setForm({ ...form, category: e.target.value })}
-            placeholder="cement / steel / tools / etc"
             style={INPUT_STYLE}
-          />
+          >
+            <option value="">— Pick a category —</option>
+            {(() => {
+              const groups = new Map<string, typeof BILL_VENDOR_CATEGORIES[number][]>();
+              const flat: typeof BILL_VENDOR_CATEGORIES[number][] = [];
+              for (const c of BILL_VENDOR_CATEGORIES) {
+                if (c.group) {
+                  const list = groups.get(c.group) ?? [];
+                  list.push(c);
+                  groups.set(c.group, list);
+                } else {
+                  flat.push(c);
+                }
+              }
+              return (
+                <>
+                  {[...groups.entries()].map(([groupName, items]) => (
+                    <optgroup key={groupName} label={groupName}>
+                      {items.map((c) => (
+                        <option key={c.value} value={c.value}>
+                          {c.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                  {flat.map((c) => (
+                    <option key={c.value} value={c.value}>
+                      {c.label}
+                    </option>
+                  ))}
+                </>
+              );
+            })()}
+            {/* Preserve legacy free-text values on existing rows
+                so the form doesn't silently null them on first
+                save. They render as one extra option at the bottom
+                until the user picks a canonical replacement. */}
+            {form.category &&
+              !BILL_VENDOR_CATEGORIES.some((c) => c.value === form.category) && (
+                <option value={form.category}>
+                  Legacy: {form.category}
+                </option>
+              )}
+          </select>
         </Field>
         <Field label="GSTIN">
           <input
