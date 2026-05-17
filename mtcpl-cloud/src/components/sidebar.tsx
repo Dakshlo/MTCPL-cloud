@@ -163,12 +163,15 @@ const navEntries: NavEntry[] = [
   },
   {
     // Mig 060 — Various Costing report (CNC + Cutter cost per CFT).
-    // team_head + cnc_expense_entry need a sidebar shortcut because
-    // they don't see the dashboard hero card.
+    // team_head + carving_head get a sidebar shortcut because they
+    // don't see the dashboard hero card. Daksh: the
+    // cnc_expense_entry user ONLY does data entry (Cutter Expenses
+    // + CNC Expenses) — they don't need the cost-report surface, so
+    // it's omitted from their sidebar to keep their nav focused.
     href: "/reports/various-costing",
     label: "Various Costing",
     icon: "📊",
-    roles: ["developer", "owner", "team_head", "carving_head", "cnc_expense_entry"],
+    roles: ["developer", "owner", "team_head", "carving_head"],
     department: "production",
   },
   {
