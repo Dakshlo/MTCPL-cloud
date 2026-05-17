@@ -770,54 +770,12 @@ export function CarvingDashboardClient({
 
       {tab === "done" && (
         <>
-          {/* CNC Report quick-link — used to live in the sidebar.
-              Carving Done is its natural home: this tab IS the
-              shipped-output for the month, the report is the
-              numeric summary of that. */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 12,
-              padding: "10px 14px",
-              marginBottom: 14,
-              background: "var(--surface)",
-              border: "1px solid var(--border)",
-              borderRadius: 10,
-              flexWrap: "wrap",
-            }}
-          >
-            <div>
-              <div
-                style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  color: "var(--muted)",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.07em",
-                }}
-              >
-                Monthly numbers
-              </div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text)", marginTop: 2 }}>
-                CNC &amp; Lathe summary — daily SQFT + CFT per machine
-              </div>
-            </div>
-            <Link
-              href="/carving/reports"
-              className="primary-button"
-              style={{
-                fontSize: 13,
-                padding: "8px 16px",
-                fontWeight: 700,
-                textDecoration: "none",
-                whiteSpace: "nowrap",
-              }}
-            >
-              📊 Open CNC Report
-            </Link>
-          </div>
+          {/* Mig 060 — the CNC report quick-link lived here, but
+              now the report is reachable via Dashboard → Various
+              Costing → CNC Costing. /carving/reports still works
+              as a direct URL for bookmarks. Removing the strip
+              keeps the Done tab focused on the shipped-output
+              table itself. */}
           <JobsByTemple
             jobs={filteredDone}
             machineCodeById={machineCodeById}

@@ -124,7 +124,10 @@ const navEntries: NavEntry[] = [
   {
     type: "divider",
     label: "WORKSHOP",
-    roles: ["developer", "owner", "team_head", "cutting_operator"],
+    // Mig 060 — cnc_expense_entry sees the WORKSHOP banner so its
+    // "Cutter Expenses" item renders under the right header (same
+    // person handles CNC + cutter expense entry per Daksh's spec).
+    roles: ["developer", "owner", "team_head", "cutting_operator", "cnc_expense_entry"],
     department: "production",
   },
   {
@@ -144,6 +147,28 @@ const navEntries: NavEntry[] = [
     label: "Total Ready Sizes",
     icon: "✦",
     roles: ["developer", "owner", "team_head", "block_slab_entry"],
+    department: "production",
+  },
+  {
+    // Mig 060 — Cutter Expenses entry surface. Same role list as
+    // /carving/expenses (CNC Expenses) per Daksh: one person handles
+    // both departments' opex data entry. team_head also sees it so
+    // the cutting-side manager can sanity-check what the entry user
+    // has logged.
+    href: "/cutting/expenses",
+    label: "Cutter Expenses",
+    icon: "💸",
+    roles: ["developer", "owner", "team_head", "cnc_expense_entry"],
+    department: "production",
+  },
+  {
+    // Mig 060 — Various Costing report (CNC + Cutter cost per CFT).
+    // team_head + cnc_expense_entry need a sidebar shortcut because
+    // they don't see the dashboard hero card.
+    href: "/reports/various-costing",
+    label: "Various Costing",
+    icon: "📊",
+    roles: ["developer", "owner", "team_head", "carving_head", "cnc_expense_entry"],
     department: "production",
   },
   {
@@ -516,6 +541,14 @@ export function Sidebar({
     if (href === "/carving/transfer") return pathname.startsWith("/carving/transfer");
     // Mig 054 — /carving/expenses lit only when actually on that page.
     if (href === "/carving/expenses") return pathname.startsWith("/carving/expenses");
+    // Mig 060 — /cutting/expenses lit only on that page; /cutting
+    // sibling matches only the cutting jobs root (not the expenses
+    // sub-route), so the two entries stay disambiguated.
+    if (href === "/cutting/expenses") return pathname.startsWith("/cutting/expenses");
+    if (href === "/cutting") return pathname === "/cutting" || (pathname.startsWith("/cutting/") && !pathname.startsWith("/cutting/expenses"));
+    // Mig 060 — Various Costing report tree lights when on landing
+    // or any of its sub-routes (CNC / Cutter).
+    if (href === "/reports/various-costing") return pathname.startsWith("/reports/various-costing");
     // /accounts is the Due Bills landing — exact match only so it
     // doesn't light up while the user is on any /accounts/* sub-route
     // (e.g. /accounts/bills, /accounts/payments, etc.). Otherwise the

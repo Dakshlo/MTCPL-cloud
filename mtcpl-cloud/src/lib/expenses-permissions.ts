@@ -45,3 +45,44 @@ export function canViewCncCosts(p: Pick<Profile, "role">): boolean {
   if (p.role === "carving_head") return true;
   return false;
 }
+
+// ──────────────────────────────────────────────────────────────────
+// Mig 060 — Cutter Costing (parallel surface to CNC Costing)
+// ──────────────────────────────────────────────────────────────────
+
+/** Enter / edit / soft-cancel cutter operational expenses
+ *  (electricity / manpower / repair_maintenance / other). Same
+ *  person who does CNC expense entry handles cutter too — Daksh's
+ *  spec — so this mirrors canEnterCncExpenses exactly. */
+export function canEnterCutterExpenses(p: Pick<Profile, "role">): boolean {
+  if (p.role === "developer") return true;
+  if (p.role === "owner") return true;
+  if (p.role === "cnc_expense_entry") return true;
+  return false;
+}
+
+/** Edit the cutter machines' book value (drives depreciation in
+ *  every cost calc). Sensitive — dev / owner only, NOT delegated
+ *  to cnc_expense_entry. Matches canEditMachineAssetValue's stance
+ *  for CNC. */
+export function canEditCutterBookValue(p: Pick<Profile, "role">): boolean {
+  if (p.role === "developer") return true;
+  if (p.role === "owner") return true;
+  return false;
+}
+
+/** Read the cutter cost report. Mirror canViewCncCosts —
+ *  whoever enters expenses can see the resulting cost-per-CFT,
+ *  plus team_head (cutting-side manager, the cutter analogue
+ *  of carving_head). */
+export function canViewCutterCosts(p: Pick<Profile, "role">): boolean {
+  if (canEnterCutterExpenses(p)) return true;
+  if (p.role === "team_head") return true;
+  return false;
+}
+
+/** Read the Various Costing landing — visible to anyone who can
+ *  view either sub-report (CNC or cutter). */
+export function canViewVariousCosting(p: Pick<Profile, "role">): boolean {
+  return canViewCncCosts(p) || canViewCutterCosts(p);
+}
