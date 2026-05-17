@@ -3,6 +3,34 @@
 import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
 
+/** Mig follow-on (Daksh, May 2026) — derive the Month dropdown's
+ *  current value from the Cut From / Cut To range. Returns the
+ *  month (1-12) when the range exactly matches a current-year
+ *  calendar month (or the current month clamped to today),
+ *  otherwise "". Same logic as the Block Report's helper — kept
+ *  local to this file so each report stays self-contained. */
+function monthFromRange(from: string, to: string): string {
+  if (!from || !to) return "";
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(from);
+  const n = /^(\d{4})-(\d{2})-(\d{2})$/.exec(to);
+  if (!m || !n) return "";
+  const yr = Number(m[1]);
+  const fromMonth = Number(m[2]);
+  const fromDay = Number(m[3]);
+  const toYear = Number(n[1]);
+  const toMonth = Number(n[2]);
+  const toDay = Number(n[3]);
+  const now = new Date();
+  if (yr !== now.getFullYear() || toYear !== yr) return "";
+  if (fromMonth !== toMonth) return "";
+  if (fromDay !== 1) return "";
+  const lastDayOfMonth = new Date(yr, fromMonth, 0).getDate();
+  const isCurrentMonth = fromMonth === now.getMonth() + 1;
+  const expectedToDay = isCurrentMonth ? now.getDate() : lastDayOfMonth;
+  if (toDay !== expectedToDay) return "";
+  return String(fromMonth);
+}
+
 type Slab = {
   id: string;
   label: string;
@@ -410,6 +438,50 @@ export function ReadySlabsClient({
               onChange={e => setSearch(e.target.value)}
               placeholder="Code, label, temple, stone, block…"
             />
+          </label>
+
+          {/* Month picker (Daksh, May 2026) — quick way to scope the
+              report to a single month of the current year. Picking
+              "May" while today is 17 May → from = 2026-05-01,
+              to = 2026-05-17 (current month clamped to today). Past
+              months use the full calendar month. Same pattern as
+              the Block Report. */}
+          <label className="stack" style={{ flex: "0 0 auto" }}>
+            <span>Month</span>
+            <select
+              value={monthFromRange(dateFrom, dateTo)}
+              onChange={(e) => {
+                const m = e.target.value;
+                if (m === "") {
+                  setDateFrom("");
+                  setDateTo("");
+                  return;
+                }
+                const mIdx = Number(m);
+                const now = new Date();
+                const yr = now.getFullYear();
+                const firstDay = new Date(yr, mIdx - 1, 1);
+                const lastDayOfMonth = new Date(yr, mIdx, 0);
+                const upper = lastDayOfMonth.getTime() > now.getTime()
+                  ? now
+                  : lastDayOfMonth;
+                const fmt = (d: Date) =>
+                  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+                setDateFrom(fmt(firstDay));
+                setDateTo(fmt(upper));
+              }}
+              style={{ width: 150 }}
+            >
+              <option value="">All months</option>
+              {[
+                "January", "February", "March", "April", "May", "June",
+                "July", "August", "September", "October", "November", "December",
+              ].map((name, i) => (
+                <option key={name} value={i + 1}>
+                  {name}
+                </option>
+              ))}
+            </select>
           </label>
 
           {/* Date range (cut done date) */}
