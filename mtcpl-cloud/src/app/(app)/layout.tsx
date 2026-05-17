@@ -494,12 +494,15 @@ function buildTopbarTaskItems(counts: {
 }): TopbarTask[] {
   const items: TopbarTask[] = [];
   // Mig 058 follow-on (Daksh) — per-user rejected-bills item.
-  // Pushed FIRST when count > 0 so the accountant sees their own
-  // action items at the top of the dropdown, ahead of org-wide
-  // queues like Crosscheck / Pay Today. Hidden entirely when zero
-  // (it'd be noise otherwise — accountants without rejections
-  // shouldn't see "Rejected bills: 0" on every hover).
-  if (counts.rejectedBillsBadge !== null && counts.rejectedBillsBadge > 0) {
+  // Pushed FIRST so the accountant sees their own action items at
+  // the top of the dropdown, ahead of org-wide queues like
+  // Crosscheck / Pay Today. Pushed EVEN WHEN count is 0 — Daksh
+  // wants the Tasks pill always visible for accountants so they
+  // know the surface exists (TopbarTasksBadge hides itself when
+  // items.length === 0; one zero-count row keeps the pill alive
+  // and shows "All clear" most of the time, "Tasks N" when a
+  // rejection lands).
+  if (counts.rejectedBillsBadge !== null) {
     items.push({
       id: "rejected-bills",
       href: "/accounts/bills?status=rejected",
