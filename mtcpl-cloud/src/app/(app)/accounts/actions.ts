@@ -1301,15 +1301,22 @@ async function sendVendorPaymentEmail(
     });
     const pdfBase64 = Buffer.from(pdfBytes).toString("base64");
 
-    // Build the absolute URL for the logo image (emails can't read
-    // local public/ files). Prefer NEXT_PUBLIC_APP_URL; fall back to
-    // Vercel's auto-injected VERCEL_URL. If neither is set the
-    // email skips the logo (it renders the first letter in a
-    // rounded square instead — graceful degradation).
-    const appUrl =
-      process.env.NEXT_PUBLIC_APP_URL ||
-      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
-    const logoUrl = appUrl ? `${appUrl.replace(/\/$/, "")}/logo-dark.png` : undefined;
+    // Daksh — the previous remote-URL approach (NEXT_PUBLIC_APP_URL +
+    // /logo-dark.png) didn't render in mobile Gmail; the email
+    // showed a broken-image placeholder. Switched to CID inline:
+    // read the logo bytes from public/ here, attach as inline
+    // content with content_id "mtcpl-logo", reference in the HTML
+    // as <img src="cid:mtcpl-logo">. Works in every email client.
+    let logoBase64: string | null = null;
+    try {
+      const { readFile } = await import("node:fs/promises");
+      const { join } = await import("node:path");
+      const bytes = await readFile(join(process.cwd(), "public", "logo-dark.png"));
+      logoBase64 = Buffer.from(bytes).toString("base64");
+    } catch (e) {
+      console.warn("[vendor-email] logo not loaded, email will show first-letter chip", e);
+    }
+    const logoCid = logoBase64 ? "mtcpl-logo" : undefined;
 
     // ── Send ────────────────────────────────────────────────────
     const html = buildVoucherEmailHtml({
@@ -1326,7 +1333,7 @@ async function sendVendorPaymentEmail(
         (paymentRow as { paid_at?: string | null }).paid_at ?? null,
       companyName: company.name,
       companyAddressLines: company.addressLines,
-      logoUrl,
+      logoCid,
     });
     const text = buildVoucherEmailText({
       vendorName: vendor.name,
@@ -1353,6 +1360,18 @@ async function sendVendorPaymentEmail(
           filename: `voucher-${billRowAny.token}.pdf`,
           content: pdfBase64,
         },
+        // Inline logo (CID-referenced from the email HTML). Omitted
+        // when the public/logo-dark.png file couldn't be read — the
+        // body falls back to a first-letter chip in that case.
+        ...(logoBase64
+          ? [
+              {
+                filename: "mtcpl-logo.png",
+                content: logoBase64,
+                contentId: "mtcpl-logo",
+              },
+            ]
+          : []),
       ],
     });
 

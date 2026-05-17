@@ -27,6 +27,12 @@ export type EmailAttachment = {
   filename: string;
   /** Base64 content. For pdf-lib Uint8Array, call Buffer.from(...).toString('base64'). */
   content: string;
+  /** Optional Content-ID for inline references. When set, the email
+   *  body can reference this attachment via <img src="cid:<id>"> —
+   *  reliable across Gmail / Outlook / Apple Mail (remote <img src>
+   *  URLs often get blocked or 404 on mobile, which is what
+   *  happened in the first cut). */
+  contentId?: string;
 };
 
 export type EmailPayload = {
@@ -76,10 +82,18 @@ export async function sendEmail(payload: EmailPayload): Promise<EmailResult> {
     if (payload.text) body.text = payload.text;
     if (payload.replyTo) body.reply_to = payload.replyTo;
     if (payload.attachments && payload.attachments.length > 0) {
-      body.attachments = payload.attachments.map((a) => ({
-        filename: a.filename,
-        content: a.content,
-      }));
+      body.attachments = payload.attachments.map((a) => {
+        const out: Record<string, unknown> = {
+          filename: a.filename,
+          content: a.content,
+        };
+        // Resend uses snake_case content_id for inline attachments.
+        // When set, an <img src="cid:<id>"> in the HTML body
+        // resolves to this attachment without ever fetching a
+        // remote URL — bulletproof across email clients.
+        if (a.contentId) out.content_id = a.contentId;
+        return out;
+      });
     }
 
     const r = await fetch(RESEND_ENDPOINT, {
@@ -113,9 +127,12 @@ export async function sendEmail(payload: EmailPayload): Promise<EmailResult> {
  *  with logo, big hero amount block, highlight on key reference IDs
  *  (bill token + vendor bill no), cleaner footer.
  *
- *  Logo: pass an absolute URL via `logoUrl`. The PUBLIC_APP_URL env
- *  var in actions.ts is the natural source; if absent, the email
- *  renders the company name in big text instead.
+ *  Logo: pass a `logoCid` (the Content-ID of an inline attachment).
+ *  The body references it as `<img src="cid:<id>">`. The earlier
+ *  remote-URL variant was unreliable — mobile Gmail blocked /
+ *  failed to load `https://…/logo-dark.png`. CID-embedded inline
+ *  attachments always render. If `logoCid` is omitted, the email
+ *  falls back to a first-letter chip (graceful degradation).
  */
 export function buildVoucherEmailHtml(input: {
   vendorName: string;
@@ -128,8 +145,8 @@ export function buildVoucherEmailHtml(input: {
   paidAtIso: string | null;
   companyName: string;
   companyAddressLines: string[];
-  /** Absolute URL to the company logo (PNG/JPG). Optional. */
-  logoUrl?: string;
+  /** Content-ID of the logo attachment, referenced as cid:<id>. */
+  logoCid?: string;
 }): string {
   const paidAtIst = input.paidAtIso
     ? new Date(
@@ -148,8 +165,8 @@ export function buildVoucherEmailHtml(input: {
   const amountStr = `INR ${amountFmt}`;
   const inrInline = `&#8377; ${amountFmt}`; // ₹ entity for HTML
 
-  const logoBlock = input.logoUrl
-    ? `<img src="${input.logoUrl}" alt="${escapeHtml(input.companyName)}" width="42" height="42" style="display:block;border-radius:8px;background:#ffffff;padding:6px;">`
+  const logoBlock = input.logoCid
+    ? `<img src="cid:${escapeHtml(input.logoCid)}" alt="${escapeHtml(input.companyName)}" width="42" height="42" style="display:block;border-radius:8px;background:#ffffff;padding:6px;">`
     : `<div style="width:42px;height:42px;border-radius:8px;background:#ffffff;color:#0f172a;display:inline-block;line-height:42px;text-align:center;font-weight:800;font-size:18px;">${escapeHtml(input.companyName.slice(0, 1))}</div>`;
 
   return `<!DOCTYPE html>
