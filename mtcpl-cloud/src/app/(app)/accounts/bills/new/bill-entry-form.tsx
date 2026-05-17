@@ -50,6 +50,17 @@ type SubmitResult =
 // via a toggle.
 const GST_QUICK_PICKS = [0, 5, 12, 18, 28] as const;
 
+// Mig 058 follow-on — visual cue for fields that are locked while
+// the bill is in pending_approval (bill_date + vendor_bill_no).
+// Slightly muted background + dashed border so the user reads
+// "this is intentional, not broken".
+const lockedInputOverlay: React.CSSProperties = {
+  background: "#f1f5f9",
+  borderStyle: "dashed",
+  color: "#475569",
+  cursor: "not-allowed",
+};
+
 export function BillEntryForm({
   vendors,
   initialValues,
@@ -57,6 +68,7 @@ export function BillEntryForm({
   mode = "new",
   billId,
   preSelectedVendorId,
+  lockedFields,
 }: {
   vendors: BillVendorOption[];
   initialValues?: {
@@ -76,6 +88,13 @@ export function BillEntryForm({
   submitAction: (formData: FormData) => Promise<SubmitResult>;
   mode?: "new" | "edit";
   billId?: string;
+  /** Mig 058 follow-on (Daksh): on a pending-approval edit, the
+   *  bill_date + vendor_bill_no fields are locked because they feed
+   *  the token (T-YYYY-N) and the natural-key unique constraint.
+   *  Pass a list of field names to render those inputs disabled
+   *  + show a callout explaining "cancel + recreate" is the way
+   *  to change them. */
+  lockedFields?: Array<"bill_date" | "vendor_bill_no">;
   /** When the user adds a vendor from the page-header button, the
    *  add-vendor flow redirects to `?picked=<id>` and we auto-select
    *  that vendor here. */
@@ -84,6 +103,10 @@ export function BillEntryForm({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const locked = new Set(lockedFields ?? []);
+  const billDateLocked = locked.has("bill_date");
+  const vendorBillNoLocked = locked.has("vendor_bill_no");
+  const anyTokenFieldLocked = billDateLocked || vendorBillNoLocked;
   // Mig 042 follow-on (Daksh) — duplicate-bill errors get their own
   // small centered modal. Captures the conflicting bill no + vendor
   // name + financial year so the popup can show "Invoice X with
@@ -297,6 +320,45 @@ export function BillEntryForm({
     >
       {/* LEFT — grouped sections */}
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        {/* Mig 058 follow-on (Daksh) — callout when bill_date +
+            vendor_bill_no are locked (pending-approval edit). */}
+        {anyTokenFieldLocked && (
+          <div
+            role="note"
+            style={{
+              padding: "12px 14px",
+              background: ACCOUNTS_TOKENS.warningLight,
+              border: `1.5px solid ${ACCOUNTS_TOKENS.warning}`,
+              borderRadius: 10,
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 12,
+              fontSize: 13,
+              color: "#7c2d12",
+            }}
+          >
+            <span style={{ fontSize: 18, lineHeight: 1 }} aria-hidden>
+              🔒
+            </span>
+            <div>
+              <div style={{ fontWeight: 800, marginBottom: 3 }}>
+                {billDateLocked && vendorBillNoLocked
+                  ? "Bill date and vendor invoice number are locked"
+                  : billDateLocked
+                  ? "Bill date is locked"
+                  : "Vendor invoice number is locked"}
+              </div>
+              <div style={{ color: "#92400e", fontSize: 12, lineHeight: 1.55 }}>
+                Both feed the token (T-YYYY-N) and the bill's unique
+                identity. They can&apos;t be edited once the bill is in
+                audit. To use a different date or vendor invoice number,
+                <strong> cancel this bill from the detail page and create
+                a new one</strong> — the new bill gets a fresh token.
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Beneficiary */}
         <FormSection
           title="Beneficiary"
@@ -362,25 +424,41 @@ export function BillEntryForm({
           disabled={fieldsDisabled}
         >
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <FormField label="Bill date" required>
+            <FormField
+              label="Bill date"
+              required
+              hint={billDateLocked ? "Locked — part of the token. Cancel + recreate to change." : undefined}
+            >
               <input
                 type="date"
                 value={billDate}
                 onChange={(e) => setBillDate(e.target.value)}
-                style={INPUT_STYLE}
+                style={{
+                  ...INPUT_STYLE,
+                  ...(billDateLocked ? lockedInputOverlay : {}),
+                }}
                 required
-                disabled={fieldsDisabled}
+                disabled={fieldsDisabled || billDateLocked}
+                readOnly={billDateLocked}
               />
             </FormField>
-            <FormField label="Vendor's bill number" required>
+            <FormField
+              label="Vendor's bill number"
+              required
+              hint={vendorBillNoLocked ? "Locked — part of the bill's identity. Cancel + recreate to change." : undefined}
+            >
               <input
                 type="text"
                 value={vendorBillNo}
                 onChange={(e) => setVendorBillNo(e.target.value)}
 
-                style={INPUT_STYLE}
+                style={{
+                  ...INPUT_STYLE,
+                  ...(vendorBillNoLocked ? lockedInputOverlay : {}),
+                }}
                 required
-                disabled={fieldsDisabled}
+                disabled={fieldsDisabled || vendorBillNoLocked}
+                readOnly={vendorBillNoLocked}
               />
             </FormField>
           </div>

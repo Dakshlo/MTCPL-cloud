@@ -362,7 +362,7 @@ export async function editBillAction(
 
   const { data: bill, error: loadErr } = await supabase
     .from("bills")
-    .select("id, token, status, submitted_by")
+    .select("id, token, status, submitted_by, bill_date, vendor_bill_no")
     .eq("id", billId)
     .maybeSingle();
   if (loadErr) return { ok: false, error: loadErr.message };
@@ -378,11 +378,42 @@ export async function editBillAction(
 
   let nextStatus: "pending_approval" | undefined;
   if (bill.status === "pending_approval") {
-    if (!isApprover) {
+    // Daksh (Mig 058 follow-on): widened so the accountant /
+    // submitter can fix a typo while the bill is still in audit —
+    // the owner shouldn't have to reject + re-edit for every
+    // small correction.
+    //
+    // BUT: bill_date and vendor_bill_no are locked. The token
+    // (T-YYYY-N) embeds the bill_date year, and the natural-key
+    // UNIQUE constraint includes vendor_bill_no — both fields
+    // define the bill's identity. If the accountant needs to
+    // change either, they cancel + recreate so the token regenerates
+    // cleanly (a new sequence number, the right year).
+    if (!isApprover && !isSubmitter && !isBillerLike) {
       return {
         ok: false,
         error:
-          "Bill is already with the approver. You can only edit it once they send it back for edit.",
+          "You don't have permission to edit this bill while it's pending approval.",
+      };
+    }
+    const newDateRaw = String(formData.get("bill_date") || "").trim();
+    const newVendorBillNoRaw = String(formData.get("vendor_bill_no") || "").trim();
+    const currentDateStr = bill.bill_date ? String(bill.bill_date) : "";
+    const currentVendorNo = bill.vendor_bill_no ? String(bill.vendor_bill_no) : "";
+    if (newDateRaw && newDateRaw !== currentDateStr) {
+      return {
+        ok: false,
+        error:
+          "Bill date is locked while pending approval — it's part of the token (" +
+          (bill.token || "T-?") +
+          "). To use a different date, cancel this bill and create a new one.",
+      };
+    }
+    if (newVendorBillNoRaw && newVendorBillNoRaw !== currentVendorNo) {
+      return {
+        ok: false,
+        error:
+          "Vendor invoice number is locked while pending approval. To change it, cancel this bill and create a new one.",
       };
     }
     nextStatus = undefined; // stays in pending_approval
@@ -528,8 +559,15 @@ export async function editBillAction(
 
 export async function cancelBillAction(formData: FormData): Promise<ActionResult> {
   const { profile } = await requireAuth();
-  if (profile.role !== "developer" && profile.role !== "owner") {
-    return { ok: false, error: "Only the owner or a developer can cancel a bill." };
+  // Daksh (Mig 058 follow-on): widened so accountants / billers
+  // can cancel their own pending/rejected bills. Use case: typo'd
+  // the bill date → token has wrong year. Cancel + recreate is
+  // the documented workaround for date/vendor_bill_no changes.
+  // Owner / dev keep full reach (any status not already paid).
+  const isPrivileged =
+    profile.role === "developer" || profile.role === "owner";
+  if (!isPrivileged && !canSubmitBills(profile)) {
+    return { ok: false, error: "You don't have permission to cancel bills." };
   }
   const supabase = createAdminSupabaseClient();
   const billId = String(formData.get("bill_id") || "").trim();
@@ -545,6 +583,19 @@ export async function cancelBillAction(formData: FormData): Promise<ActionResult
     return {
       ok: false,
       error: "Cannot cancel an approved or paid bill. Contact a developer.",
+    };
+  }
+  // Non-privileged users can only cancel pending / rejected bills.
+  // Privileged users (owner / dev) can cancel anything not paid /
+  // approved (covered by the check above).
+  if (
+    !isPrivileged &&
+    bill.status !== "pending_approval" &&
+    bill.status !== "rejected"
+  ) {
+    return {
+      ok: false,
+      error: `Bills in '${bill.status}' state can only be cancelled by an owner or developer.`,
     };
   }
 

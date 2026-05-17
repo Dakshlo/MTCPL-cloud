@@ -42,13 +42,24 @@ export default async function EditBillPage({ params }: { params: Params }) {
   // no payments have started yet. The actions.ts editBillAction
   // enforces the same gate server-side.
   const isOwnerLike = canConfirmPayments(profile);
+  // Mig 058 follow-on (Daksh) — accountant / submitter can also
+  // edit a pending bill (to fix typos before the owner sees it),
+  // BUT the bill_date + vendor_bill_no fields are locked because
+  // they feed the token. The form renders those inputs disabled
+  // and the server-side editBillAction refuses to update them.
   const canEditNow =
-    (bill.status === "pending_approval" && isApprover) ||
+    (bill.status === "pending_approval" && (isApprover || isSubmitter || isBillerLike)) ||
     (bill.status === "rejected" && (isApprover || isSubmitter || isBillerLike)) ||
     (bill.status === "approved" && isOwnerLike);
   if (!canEditNow) {
     redirect(`/accounts/bills/${id}`);
   }
+
+  // While pending approval, lock the two fields that feed the
+  // token. The user is told to cancel + recreate if they need to
+  // change either.
+  const lockedFields: Array<"bill_date" | "vendor_bill_no"> =
+    bill.status === "pending_approval" ? ["bill_date", "vendor_bill_no"] : [];
 
   const { count: lockedPayments } = await supabase
     .from("bill_payments")
@@ -93,7 +104,7 @@ export default async function EditBillPage({ params }: { params: Params }) {
             ? "This bill was sent back for edit. Fix the entry and resave — it goes back to the audit queue."
             : bill.status === "approved"
               ? "Owner-only edit. The bill stays in 'approved' (due) status; only the entry details change. Locked once any payment is proposed."
-              : "You're editing a bill while it's still in audit. The status stays the same after save."
+              : "You're editing a bill while it's still in audit. Status stays the same after save. Bill date and vendor invoice number are locked — they feed the token; cancel + recreate to change either."
         }
         actions={
           <>
@@ -110,6 +121,7 @@ export default async function EditBillPage({ params }: { params: Params }) {
         submitAction={editAndReturn}
         mode="edit"
         billId={id}
+        lockedFields={lockedFields}
         initialValues={{
           bill_vendor_id: bill.bill_vendor_id,
           vendor_bill_no: bill.vendor_bill_no,
