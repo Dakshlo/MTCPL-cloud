@@ -21,6 +21,7 @@
  */
 
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { POST_CUT_STATUSES } from "@/lib/slab-statuses";
 
 export type CutterPeriodKind = "daily" | "weekly" | "monthly" | "yearly";
 
@@ -39,13 +40,38 @@ export type CutterExpenseBreakdownRow = {
   amount: number;
 };
 
+/** Mig 063 follow-on (Daksh) — each slab that contributed to the
+ *  period's CFT total. Used by the click-through peek modal on the
+ *  report page so the user can audit "which 2,588 CFT exactly are
+ *  we counting?". Shape mirrors the columns shown in the Ready
+ *  Sizes Report so the modal reads as a familiar mini-table. */
+export type CutterContributingSlab = {
+  id: string;
+  label: string | null;
+  temple: string | null;
+  stone: string | null;
+  quality: string | null;
+  sourceBlockId: string | null;
+  lengthIn: number;
+  widthIn: number;
+  thicknessIn: number;
+  cft: number;
+  updatedAt: string;
+};
+
 export type CutterCostReport = {
   period: CutterReportPeriod;
-  /** Sum of block CFT cut in the period (status = 'done',
-   *  approved_at within window). */
+  /** Sum of slab CFT produced in the period. Mig 063 follow-on:
+   *  switched from block-CFT (cut_session_blocks) to slab-CFT
+   *  (slab_requirements with POST_CUT_STATUSES + updated_at in
+   *  window) so this number lines up with what the Ready Sizes
+   *  Report shows for the same date range. */
   totalCft: number;
-  /** Count of cut_session_blocks that contributed. */
-  blocksCut: number;
+  /** Count of slabs that contributed (post-cut, updated_at in window). */
+  slabsCount: number;
+  /** Every slab that contributed — feeds the click-through peek
+   *  modal on the CFT tile. */
+  contributingSlabs: CutterContributingSlab[];
   /** Operational expense pool for the period, prorated from any
    *  months touched. */
   operationalForPeriod: number;
@@ -204,9 +230,11 @@ export function cutterPeriodFromSearch(
   };
 }
 
-/** Compute CFT for a block from its (inch-stored) dimensions. */
-function blockCft(l: number, w: number, h: number): number {
-  return (l * w * h) / 1728;
+/** Slab CFT — same /1728 conversion as Total Ready Sizes. The
+ *  "_ft" suffix on these columns is historical; values are stored
+ *  in inches across the codebase. */
+function slabCft(l: number, w: number, t: number): number {
+  return (l * w * t) / 1728;
 }
 
 export async function buildCutterCostReport(
@@ -223,38 +251,72 @@ export async function buildCutterCostReport(
   const startIso = startIst.toISOString();
   const endIso = new Date(exclusiveEndMs).toISOString();
 
-  // ── 1. Fetch approved cut_session_blocks in the period + their
-  //       block dimensions in a single round-trip via a nested join.
-  const { data: cutsRaw, error: cutsErr } = await admin
-    .from("cut_session_blocks")
-    .select("id, block_id, blocks!inner(length_ft, width_ft, height_ft)")
-    .eq("status", "done")
-    .gte("approved_at", startIso)
-    .lt("approved_at", endIso)
-    .not("approved_at", "is", null);
-  if (cutsErr) throw new Error(`cut_session_blocks: ${cutsErr.message}`);
+  // ── 1. Fetch slab_requirements that contributed in the period.
+  //
+  // Mig 063 follow-on (Daksh): we used to count block CFT from
+  // cut_session_blocks. But the Ready Sizes Report (the cutting
+  // team's verification view) counts slab CFT from slab_requirements
+  // — those numbers should match. Daksh wants "produced this week"
+  // on cutter cost to be the same denominator they already trust
+  // on Ready Sizes. So:
+  //   • source = slab_requirements
+  //   • filter = status IN POST_CUT_STATUSES (any post-cut state)
+  //              AND updated_at within period  (same filter Ready
+  //              Sizes uses for its "Cut From / Cut To" inputs)
+  //   • CFT per slab = length × width × thickness / 1728
+  //
+  // PostgREST caps single .select() at 1000; if there are weeks
+  // with > 1000 slabs we'll need pagination. For now slabs/week
+  // sits well under that ceiling.
+  const { data: slabsRaw, error: slabsErr } = await admin
+    .from("slab_requirements")
+    .select(
+      "id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, updated_at, source_block_id",
+    )
+    .in("status", POST_CUT_STATUSES as unknown as string[])
+    .gte("updated_at", startIso)
+    .lt("updated_at", endIso)
+    .order("updated_at", { ascending: false });
+  if (slabsErr) throw new Error(`slab_requirements: ${slabsErr.message}`);
 
-  type CutRow = {
+  type SlabRow = {
     id: string;
-    block_id: string;
-    blocks: {
-      length_ft: number | string;
-      width_ft: number | string;
-      height_ft: number | string;
-    } | null;
+    label: string | null;
+    temple: string | null;
+    stone: string | null;
+    quality: string | null;
+    length_ft: number | string;
+    width_ft: number | string;
+    thickness_ft: number | string;
+    status: string;
+    updated_at: string;
+    source_block_id: string | null;
   };
 
+  const contributingSlabs: CutterContributingSlab[] = [];
   let totalCft = 0;
-  let blocksCut = 0;
-  for (const r of (cutsRaw ?? []) as unknown as CutRow[]) {
-    if (!r.blocks) continue;
-    const l = Number(r.blocks.length_ft) || 0;
-    const w = Number(r.blocks.width_ft) || 0;
-    const h = Number(r.blocks.height_ft) || 0;
-    if (l <= 0 || w <= 0 || h <= 0) continue;
-    totalCft += blockCft(l, w, h);
-    blocksCut++;
+  for (const r of (slabsRaw ?? []) as SlabRow[]) {
+    const l = Number(r.length_ft) || 0;
+    const w = Number(r.width_ft) || 0;
+    const t = Number(r.thickness_ft) || 0;
+    if (l <= 0 || w <= 0 || t <= 0) continue;
+    const cft = slabCft(l, w, t);
+    totalCft += cft;
+    contributingSlabs.push({
+      id: r.id,
+      label: r.label,
+      temple: r.temple,
+      stone: r.stone,
+      quality: r.quality,
+      sourceBlockId: r.source_block_id,
+      lengthIn: l,
+      widthIn: w,
+      thicknessIn: t,
+      cft,
+      updatedAt: r.updated_at,
+    });
   }
+  const slabsCount = contributingSlabs.length;
 
   // ── 2. Operational expenses — sum cutter_expenses across every
   //       month the period touches. For shorter views we prorate by
@@ -415,7 +477,8 @@ export async function buildCutterCostReport(
   return {
     period,
     totalCft,
-    blocksCut,
+    slabsCount,
+    contributingSlabs,
     operationalForPeriod,
     depreciationForPeriod,
     totalCost,

@@ -19,6 +19,7 @@ import {
   cutterPeriodFromSearch,
   type CutterPeriodKind,
 } from "@/lib/cutter-cost-report";
+import { CftPeekTile } from "./cft-peek-tile";
 
 type Search = Promise<Record<string, string | string[] | undefined>>;
 
@@ -222,14 +223,17 @@ export default async function CutterCostReportPage({ searchParams }: { searchPar
         <KpiTile
           label="Cost per CFT"
           value={fmtINR(report.costPerCft)}
-          hint={`${fmtNum(report.totalCft)} CFT cut · ${fmtINR(report.totalCost)} total cost`}
+          hint={`${fmtNum(report.totalCft)} CFT (${report.slabsCount} slabs) · ${fmtINR(report.totalCost)} total cost`}
           tone="accent"
         />
-        <KpiTile
-          label="CFT Cut"
-          value={fmtNum(report.totalCft)}
-          hint={`${report.blocksCut} blocks completed`}
-          tone="success"
+        {/* Mig 063 follow-on — clickable CFT tile. Opens a peek
+            modal listing every slab that contributed to the
+            total so the user can audit the number. */}
+        <CftPeekTile
+          totalCft={report.totalCft}
+          slabsCount={report.slabsCount}
+          contributingSlabs={report.contributingSlabs}
+          periodLabel={report.period.label}
         />
         <KpiTile
           label="Total Cost"
