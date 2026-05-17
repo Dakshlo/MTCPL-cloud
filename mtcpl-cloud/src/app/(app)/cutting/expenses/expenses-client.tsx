@@ -44,6 +44,10 @@ export type CutterBookValueRow = {
   id: string;
   bookValue: number;
   usefulLifeYears: number;
+  /** Mig 063 — annual WDV depreciation rate (e.g. 15 for 15%). */
+  depreciationRatePct: number;
+  /** Floor — current value never depreciates below this. */
+  salvageValue: number;
   effectiveFrom: string;
   note: string | null;
   enteredByName: string | null;
@@ -117,7 +121,27 @@ export function CutterExpensesClient({
   }
 
   const latestBv = bookValues[0] ?? null;
-  const monthlyDep = latestBv ? latestBv.bookValue / (latestBv.usefulLifeYears * 12) : 0;
+  // Mig 063 — WDV depreciated value at today's date.
+  //   yearsElapsed     = floor((today - effective_from) / 365.25d)
+  //   currentValue     = max(salvage, book × (1 - rate)^yearsElapsed)
+  //   monthlyDep       = currentValue × rate / 12
+  // Matches the math the cost report runs server-side.
+  const wdv = (() => {
+    if (!latestBv) {
+      return { yearsElapsed: 0, currentValue: 0, monthlyDep: 0 };
+    }
+    const rate = Math.max(0, Math.min(1, latestBv.depreciationRatePct / 100));
+    const salvage = Math.max(0, latestBv.salvageValue);
+    const eff = new Date(latestBv.effectiveFrom + "T00:00:00");
+    const ageDays = (Date.now() - eff.getTime()) / 86_400_000;
+    const yearsElapsed = Math.max(0, Math.floor(ageDays / 365.25));
+    const currentValue = Math.max(
+      salvage,
+      latestBv.bookValue * Math.pow(1 - rate, yearsElapsed),
+    );
+    const monthlyDep = (currentValue * rate) / 12;
+    return { yearsElapsed, currentValue, monthlyDep };
+  })();
 
   return (
     <section style={{ paddingBottom: 96 }}>
@@ -189,7 +213,7 @@ export function CutterExpensesClient({
       <BookValuePanel
         latest={latestBv}
         history={bookValues}
-        monthlyDep={monthlyDep}
+        wdv={wdv}
         canEdit={canEditBookValue}
         setAction={setBookValueAction}
         cancelAction={cancelBookValueAction}
@@ -309,14 +333,16 @@ export function CutterExpensesClient({
 function BookValuePanel({
   latest,
   history,
-  monthlyDep,
+  wdv,
   canEdit,
   setAction,
   cancelAction,
 }: {
   latest: CutterBookValueRow | null;
   history: CutterBookValueRow[];
-  monthlyDep: number;
+  /** Mig 063 — WDV-derived numbers at today's date. Passed in
+   *  from the parent so server & client agree on the year boundary. */
+  wdv: { yearsElapsed: number; currentValue: number; monthlyDep: number };
   canEdit: boolean;
   setAction: (formData: FormData) => Promise<ActionResult>;
   cancelAction: (formData: FormData) => Promise<ActionResult>;
@@ -340,13 +366,28 @@ function BookValuePanel({
             Cutter Machines · Book Value
           </div>
           {latest ? (
-            <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginTop: 2, flexWrap: "wrap" }}>
-              <div style={{ fontFamily: "ui-monospace, monospace", fontSize: 22, fontWeight: 800 }}>
-                {fmtINR(latest.bookValue)}
+            <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+                <div style={{ fontFamily: "ui-monospace, monospace", fontSize: 22, fontWeight: 800 }}>
+                  {fmtINR(wdv.currentValue)}
+                </div>
+                <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                  current depreciated value
+                  {wdv.yearsElapsed > 0 && (
+                    <span> · year {wdv.yearsElapsed + 1} of {latest.usefulLifeYears}</span>
+                  )}
+                </div>
               </div>
+              {/* Mig 063 — extra context line so the user can see what
+                  the original entry was vs. what we're depreciating
+                  on now, plus the rate driving the WDV math. */}
               <div style={{ fontSize: 12, color: "var(--muted)" }}>
-                Useful life {latest.usefulLifeYears}y · monthly dep{" "}
-                <strong style={{ fontFamily: "ui-monospace, monospace", color: "var(--text)" }}>{fmtINR(monthlyDep)}</strong>
+                Original ₹{latest.bookValue.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                {" · "}
+                {latest.depreciationRatePct}% / year (declining)
+                {" · "}
+                this year monthly dep{" "}
+                <strong style={{ fontFamily: "ui-monospace, monospace", color: "var(--text)" }}>{fmtINR(wdv.monthlyDep)}</strong>
                 {" · effective " + latest.effectiveFrom}
               </div>
             </div>
@@ -417,6 +458,7 @@ function BookValuePanel({
                 >
                   <span style={{ minWidth: 100, color: "var(--muted)" }}>{h.effectiveFrom}</span>
                   <strong style={{ fontFamily: "ui-monospace, monospace", minWidth: 120 }}>{fmtINR(h.bookValue)}</strong>
+                  <span style={{ color: "var(--muted)" }}>{h.depreciationRatePct}% / year</span>
                   <span style={{ color: "var(--muted)" }}>{h.usefulLifeYears}y life</span>
                   {h.note && <span style={{ color: "var(--muted)", fontStyle: "italic" }}>· {h.note}</span>}
                   {canEdit && (
@@ -479,7 +521,7 @@ function SetBookValueForm({
         style={{
           marginTop: 14,
           display: "grid",
-          gridTemplateColumns: "180px 160px 180px 1fr auto",
+          gridTemplateColumns: "180px 140px 140px 160px 1fr auto",
           gap: 10,
           alignItems: "end",
           padding: 14,
@@ -496,6 +538,20 @@ function SetBookValueForm({
             step="0.01"
             required
             placeholder="e.g. 4500000"
+            style={inputStyle()}
+          />
+        </Field>
+        <Field label="Dep. rate (% / year)">
+          {/* Mig 063 — annual WDV rate. 15% is the same default the
+              CNC report uses; matches the Indian tax convention. */}
+          <input
+            type="number"
+            name="depreciation_rate_pct"
+            min={0}
+            max={100}
+            step="0.01"
+            defaultValue={15}
+            required
             style={inputStyle()}
           />
         </Field>

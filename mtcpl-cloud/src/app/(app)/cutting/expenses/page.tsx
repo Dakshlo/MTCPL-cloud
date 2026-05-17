@@ -107,9 +107,11 @@ export default async function CutterExpensesPage({ searchParams }: { searchParam
   }));
 
   // ── Book value history (latest first) ─────────────────────────
+  // Mig 063 — pull depreciation_rate_pct + salvage_value too. Live
+  // panel computes the current WDV-depreciated value off these.
   const { data: bvRaw } = await supabase
     .from("cutter_book_values")
-    .select("id, book_value, useful_life_years, effective_from, note, entered_by, entered_at, cancelled_at")
+    .select("id, book_value, useful_life_years, depreciation_rate_pct, salvage_value, effective_from, note, entered_by, entered_at, cancelled_at")
     .is("cancelled_at", null)
     .order("effective_from", { ascending: false })
     .limit(10);
@@ -117,6 +119,8 @@ export default async function CutterExpensesPage({ searchParams }: { searchParam
     id: string;
     book_value: number | string;
     useful_life_years: number;
+    depreciation_rate_pct: number | string | null;
+    salvage_value: number | string | null;
     effective_from: string;
     note: string | null;
     entered_by: string | null;
@@ -126,6 +130,10 @@ export default async function CutterExpensesPage({ searchParams }: { searchParam
     id: b.id,
     bookValue: Number(b.book_value ?? 0),
     usefulLifeYears: Number(b.useful_life_years ?? 10),
+    depreciationRatePct: b.depreciation_rate_pct != null
+      ? Number(b.depreciation_rate_pct)
+      : 15,
+    salvageValue: Number(b.salvage_value ?? 0),
     effectiveFrom: b.effective_from,
     note: b.note,
     enteredByName: b.entered_by ? profilesMap[b.entered_by] ?? "Unknown" : null,

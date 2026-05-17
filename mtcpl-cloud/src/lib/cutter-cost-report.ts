@@ -59,12 +59,27 @@ export type CutterCostReport = {
    *  monthly view this is the month's totals; for week/day it's
    *  prorated across touched months too). */
   expenseBreakdown: CutterExpenseBreakdownRow[];
-  /** Current book value snapshot in effect on period.endDate, plus
-   *  derived monthly depreciation rate. Shown on the report so the
-   *  user can sanity-check the dep math. */
+  /** Current book value snapshot in effect on period.endDate. Mig 063
+   *  switched cutter depreciation from straight-line to declining
+   *  balance (WDV), so the snapshot now exposes both the original
+   *  book value AND the current depreciated value plus the years
+   *  elapsed since effective_from. The report panel shows both so
+   *  the user can see "you bought it at ₹X, after Y years it's
+   *  written down to ₹Z, this year's monthly dep is ₹W". */
   bookValueSnapshot: {
+    /** Original book value entered on the snapshot. */
     bookValue: number;
+    /** Current depreciated value at the period's end date — base
+     *  × (1 - rate)^years_elapsed, floored at salvage_value. This
+     *  is what the monthly_dep calc uses. */
+    currentValue: number;
     usefulLifeYears: number;
+    depreciationRatePct: number;
+    salvageValue: number;
+    /** Whole years elapsed from effective_from to period end. Used
+     *  for display ("Year 3 of life · 10y assumed"). */
+    yearsElapsed: number;
+    /** Monthly depreciation in this year (current_value × rate / 12). */
     monthlyDepreciation: number;
     effectiveFrom: string | null;
   } | null;
@@ -299,12 +314,26 @@ export async function buildCutterCostReport(
 
   // ── 3. Book value snapshot in effect at period.endDate, then
   //       compute monthly depreciation share, prorated to the period.
+  //
+  // Mig 063 — switched from straight-line to Written Down Value
+  // (declining balance). Each year, the value drops by (1 - rate)
+  // and the next year's depreciation is calculated against the new
+  // (smaller) base. Within a year the monthly amount stays constant
+  // — matches Indian tax practice and Daksh's mental model:
+  //   year 1: book × rate
+  //   year 2: book × (1-rate) × rate
+  //   year 3: book × (1-rate)^2 × rate
+  // Per-month dep = current_value × rate / 12. Period dep adds up
+  // each month the period touches (which may straddle a year
+  // boundary, in which case the per-month value changes mid-period).
   let bookValueSnapshot: CutterCostReport["bookValueSnapshot"] = null;
   let depreciationForPeriod = 0;
   {
     const { data: bvRaw, error: bvErr } = await admin
       .from("cutter_book_values")
-      .select("book_value, useful_life_years, effective_from")
+      .select(
+        "book_value, useful_life_years, effective_from, depreciation_rate_pct, salvage_value",
+      )
       .lte("effective_from", period.endDate)
       .is("cancelled_at", null)
       .order("effective_from", { ascending: false })
@@ -316,23 +345,66 @@ export async function buildCutterCostReport(
         book_value: number | string;
         useful_life_years: number;
         effective_from: string;
+        depreciation_rate_pct: number | string | null;
+        salvage_value: number | string | null;
       };
       const book = Number(bv.book_value) || 0;
       const life = Math.max(1, Number(bv.useful_life_years) || 10);
-      const monthlyDep = book / (life * 12);
+      const ratePct = bv.depreciation_rate_pct != null
+        ? Number(bv.depreciation_rate_pct)
+        : 15;
+      const rate = Math.max(0, Math.min(1, ratePct / 100));
+      const salvage = Math.max(0, Number(bv.salvage_value ?? 0));
+      const effectiveFromDate = bv.effective_from
+        ? parseDateKey(bv.effective_from)
+        : null;
+
+      /** Years elapsed (integer count of completed years) from
+       *  effective_from to a given month. Floored, never negative. */
+      function yearsElapsedAt(yr: number, mo: number): number {
+        if (!effectiveFromDate) return 0;
+        const monthsElapsed =
+          (yr - effectiveFromDate.year) * 12 + (mo - effectiveFromDate.month);
+        return Math.max(0, Math.floor(monthsElapsed / 12));
+      }
+
+      function currentValueAt(yr: number, mo: number): number {
+        const y = yearsElapsedAt(yr, mo);
+        return Math.max(salvage, book * Math.pow(1 - rate, y));
+      }
+
+      function monthlyDepAt(yr: number, mo: number): number {
+        return (currentValueAt(yr, mo) * rate) / 12;
+      }
+
+      // Snapshot uses the period's end date as the reference point.
+      const endParts = parseDateKey(period.endDate);
+      const yearsElapsedAtEnd = yearsElapsedAt(endParts.year, endParts.month);
+      const currentValueAtEnd = currentValueAt(endParts.year, endParts.month);
+      const monthlyDepAtEnd = monthlyDepAt(endParts.year, endParts.month);
+
       bookValueSnapshot = {
         bookValue: book,
+        currentValue: currentValueAtEnd,
         usefulLifeYears: life,
-        monthlyDepreciation: monthlyDep,
+        depreciationRatePct: ratePct,
+        salvageValue: salvage,
+        yearsElapsed: yearsElapsedAtEnd,
+        monthlyDepreciation: monthlyDepAtEnd,
         effectiveFrom: bv.effective_from ?? null,
       };
-      // Sum depreciation: monthlyDep × (daysInPeriod / daysInMonth)
-      // across every month the period touches. For a full month
-      // that's exactly one monthlyDep; for a partial week it's a
-      // fraction.
+
+      // Period depreciation — walk each month the period touches.
+      // For a full month, that's exactly one monthly amount; for a
+      // partial week, prorate by (days_in_period / days_in_month).
+      // Critical: monthlyDepAt() may return a different number when
+      // the period straddles a year boundary (e.g. weekly view that
+      // crosses March 31 → April 1 in a year-elapsed switch), so we
+      // recompute per month rather than multiplying once.
       for (const w of monthWeights.values()) {
         const dim = daysInMonth(w.year, w.month);
-        depreciationForPeriod += monthlyDep * (w.daysInPeriod / dim);
+        const md = monthlyDepAt(w.year, w.month);
+        depreciationForPeriod += md * (w.daysInPeriod / dim);
       }
     }
   }

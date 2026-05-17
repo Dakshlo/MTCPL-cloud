@@ -233,6 +233,11 @@ export async function setCutterBookValueAction(
   const lifeYears = intOrNaN(formData, "useful_life_years");
   const effectiveFrom = txt(formData, "effective_from");
   const note = txt(formData, "note") || null;
+  // Mig 063 — WDV depreciation rate + optional salvage floor.
+  const rawRate = txt(formData, "depreciation_rate_pct");
+  const ratePct = rawRate === "" ? 15 : Number(rawRate);
+  const rawSalvage = txt(formData, "salvage_value");
+  const salvageValue = rawSalvage === "" ? 0 : Number(rawSalvage);
 
   if (!Number.isFinite(bookValue) || bookValue < 0) {
     return { ok: false, error: "Book value must be a positive number." };
@@ -240,11 +245,19 @@ export async function setCutterBookValueAction(
   if (!Number.isFinite(lifeYears) || lifeYears < 1 || lifeYears > 50) {
     return { ok: false, error: "Useful life must be between 1 and 50 years." };
   }
+  if (!Number.isFinite(ratePct) || ratePct < 0 || ratePct > 100) {
+    return { ok: false, error: "Depreciation rate must be between 0 and 100." };
+  }
+  if (!Number.isFinite(salvageValue) || salvageValue < 0) {
+    return { ok: false, error: "Salvage value must be zero or positive." };
+  }
   // effective_from optional — DB defaults to today if empty.
 
   const insertPayload: Record<string, unknown> = {
     book_value: bookValue,
     useful_life_years: lifeYears,
+    depreciation_rate_pct: ratePct,
+    salvage_value: salvageValue,
     note,
     entered_by: profile.id,
   };
@@ -265,6 +278,8 @@ export async function setCutterBookValueAction(
     {
       book_value: bookValue,
       useful_life_years: lifeYears,
+      depreciation_rate_pct: ratePct,
+      salvage_value: salvageValue,
       effective_from: (inserted as { effective_from?: string }).effective_from,
     },
   );

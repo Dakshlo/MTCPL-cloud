@@ -313,15 +313,39 @@ export default async function CutterCostReportPage({ searchParams }: { searchPar
         <Panel title="Depreciation source">
           {report.bookValueSnapshot ? (
             <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
-              <Row label="Book value" value={fmtINR(report.bookValueSnapshot.bookValue)} mono bold />
-              <Row label="Useful life" value={`${report.bookValueSnapshot.usefulLifeYears} years`} />
-              <Row label="Monthly depreciation" value={fmtINR(report.bookValueSnapshot.monthlyDepreciation)} mono />
+              {/* Mig 063 — WDV (declining balance). Show both the
+                  original entry AND the current depreciated value
+                  so the user sees how much has been written down. */}
+              <Row label="Original book value" value={fmtINR(report.bookValueSnapshot.bookValue)} mono />
+              <Row
+                label="Current depreciated value"
+                value={fmtINR(report.bookValueSnapshot.currentValue)}
+                mono
+                bold
+              />
+              <Row
+                label="Depreciation rate"
+                value={`${report.bookValueSnapshot.depreciationRatePct}% / year (declining)`}
+              />
+              <Row
+                label="Year of life"
+                value={
+                  `Year ${report.bookValueSnapshot.yearsElapsed + 1}` +
+                  ` of ${report.bookValueSnapshot.usefulLifeYears}`
+                }
+              />
+              <Row
+                label="This year monthly dep"
+                value={fmtINR(report.bookValueSnapshot.monthlyDepreciation)}
+                mono
+              />
               <Row label="Effective from" value={report.bookValueSnapshot.effectiveFrom ?? "—"} />
               <div style={{ marginTop: 8, paddingTop: 10, borderTop: "1px dashed var(--border)", fontSize: 11, color: "var(--muted)" }}>
                 Period share: <strong style={{ fontFamily: "ui-monospace, monospace", color: "var(--text)" }}>
                   {fmtINR(report.depreciationForPeriod)}
                 </strong>
-                {" "}× (days in period ÷ days in month)
+                {" "}× (days in period ÷ days in month). Next year the
+                monthly amount drops as the depreciated value shrinks.
               </div>
             </div>
           ) : (
