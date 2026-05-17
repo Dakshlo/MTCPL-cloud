@@ -108,8 +108,15 @@ export async function sendEmail(payload: EmailPayload): Promise<EmailResult> {
   }
 }
 
-/** Renders a simple HTML email body for the payment voucher. Kept
- *  inline + small so it works without external image hosts. */
+/** Renders the HTML email body for a payment voucher. Daksh (Mig 058
+ *  follow-on) asked for a less-boring layout: branded dark header
+ *  with logo, big hero amount block, highlight on key reference IDs
+ *  (bill token + vendor bill no), cleaner footer.
+ *
+ *  Logo: pass an absolute URL via `logoUrl`. The PUBLIC_APP_URL env
+ *  var in actions.ts is the natural source; if absent, the email
+ *  renders the company name in big text instead.
+ */
 export function buildVoucherEmailHtml(input: {
   vendorName: string;
   billToken: string;
@@ -121,6 +128,8 @@ export function buildVoucherEmailHtml(input: {
   paidAtIso: string | null;
   companyName: string;
   companyAddressLines: string[];
+  /** Absolute URL to the company logo (PNG/JPG). Optional. */
+  logoUrl?: string;
 }): string {
   const paidAtIst = input.paidAtIso
     ? new Date(
@@ -132,74 +141,92 @@ export function buildVoucherEmailHtml(input: {
         .reverse()
         .join("/")
     : "—";
-  const amountStr = `INR ${input.paidAmount.toLocaleString("en-IN", {
+  const amountFmt = input.paidAmount.toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  })}`;
+  });
+  const amountStr = `INR ${amountFmt}`;
+  const inrInline = `&#8377; ${amountFmt}`; // ₹ entity for HTML
+
+  const logoBlock = input.logoUrl
+    ? `<img src="${input.logoUrl}" alt="${escapeHtml(input.companyName)}" width="42" height="42" style="display:block;border-radius:8px;background:#ffffff;padding:6px;">`
+    : `<div style="width:42px;height:42px;border-radius:8px;background:#ffffff;color:#0f172a;display:inline-block;line-height:42px;text-align:center;font-weight:800;font-size:18px;">${escapeHtml(input.companyName.slice(0, 1))}</div>`;
 
   return `<!DOCTYPE html>
 <html>
-<body style="margin:0;padding:0;font-family:Arial,Helvetica,sans-serif;color:#1f2937;background:#f9fafb;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;padding:32px 16px;">
+<body style="margin:0;padding:0;font-family:Arial,Helvetica,sans-serif;color:#1f2937;background:#f1f5f9;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:32px 16px;">
     <tr>
       <td align="center">
-        <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;">
-          <tr>
-            <td style="padding:24px 28px;border-bottom:1px solid #e5e7eb;background:#fffbeb;">
-              <div style="font-size:18px;font-weight:700;color:#92400e;">${escapeHtml(input.companyName)}</div>
-              <div style="font-size:12px;color:#78350f;margin-top:4px;">${input.companyAddressLines.map(escapeHtml).join(", ")}</div>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:28px;">
-              <div style="font-size:11px;font-weight:700;color:#9ca3af;letter-spacing:0.06em;text-transform:uppercase;">Payment Voucher</div>
-              <h1 style="margin:6px 0 18px;font-size:22px;color:#111827;">Dear ${escapeHtml(input.vendorName)},</h1>
-              <p style="font-size:14px;line-height:1.6;color:#374151;margin:0 0 18px;">
-                We have transferred <strong>${amountStr}</strong> against your bill
-                <code style="background:#f3f4f6;padding:2px 6px;border-radius:4px;font-family:monospace;">${escapeHtml(input.vendorBillNo)}</code>
-                on ${paidAtIst}.
-              </p>
+        <table width="640" cellpadding="0" cellspacing="0" style="max-width:640px;background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 4px 16px rgba(15,23,42,0.06);">
 
-              <table cellpadding="6" cellspacing="0" style="width:100%;font-size:13px;margin-bottom:18px;">
+          <!-- Dark header band: logo + company -->
+          <tr>
+            <td style="padding:22px 28px;background:#0f172a;color:#ffffff;">
+              <table cellpadding="0" cellspacing="0" style="width:100%;">
                 <tr>
-                  <td style="color:#6b7280;width:200px;">Amount paid</td>
-                  <td style="font-weight:700;color:#111827;">${amountStr}</td>
-                </tr>
-                <tr>
-                  <td style="color:#6b7280;">Payment method</td>
-                  <td style="font-weight:600;color:#111827;">${escapeHtml((input.paymentMethod ?? "—").toUpperCase())}</td>
-                </tr>
-                <tr>
-                  <td style="color:#6b7280;">UTR / Reference</td>
-                  <td style="font-weight:600;color:#111827;font-family:monospace;">${escapeHtml(input.paymentReference ?? "—")}</td>
-                </tr>
-                <tr>
-                  <td style="color:#6b7280;">Bill token (our ref)</td>
-                  <td style="font-weight:600;color:#111827;font-family:monospace;">${escapeHtml(input.billToken)}</td>
-                </tr>
-                <tr>
-                  <td style="color:#6b7280;">Payment date</td>
-                  <td style="font-weight:600;color:#111827;">${paidAtIst}</td>
+                  <td style="vertical-align:middle;width:54px;">${logoBlock}</td>
+                  <td style="vertical-align:middle;padding-left:14px;">
+                    <div style="font-size:15px;font-weight:800;color:#ffffff;letter-spacing:-0.005em;">${escapeHtml(input.companyName)}</div>
+                    <div style="font-size:11px;color:#94a3b8;margin-top:3px;">${input.companyAddressLines.map(escapeHtml).join(" · ")}</div>
+                  </td>
+                  <td style="vertical-align:middle;text-align:right;font-size:10px;font-weight:700;color:#fbbf24;letter-spacing:0.1em;text-transform:uppercase;">
+                    Payment<br/>Notification
+                  </td>
                 </tr>
               </table>
-
-              <div style="padding:12px 14px;background:#fef3c7;border-left:4px solid #d97706;border-radius:6px;margin-bottom:18px;">
-                <div style="font-size:11px;font-weight:700;color:#78350f;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Amount in words</div>
-                <div style="font-size:13px;color:#451a03;font-style:italic;">${escapeHtml(input.amountInWords)}</div>
-              </div>
-
-              <p style="font-size:13px;line-height:1.6;color:#4b5563;margin:0 0 4px;">
-                A formal payment voucher PDF is attached for your records.
-              </p>
-              <p style="font-size:13px;line-height:1.6;color:#4b5563;margin:0;">
-                If you spot any discrepancy, please reply to this email and we'll
-                reconcile.
-              </p>
             </td>
           </tr>
+
+          <!-- HERO amount band -->
           <tr>
-            <td style="padding:18px 28px;background:#f9fafb;border-top:1px solid #e5e7eb;font-size:11px;color:#9ca3af;">
-              ${escapeHtml(input.companyName)} · account@mtcpl.co<br/>
-              This is an automated payment notification.
+            <td style="padding:28px 28px 18px;background:linear-gradient(180deg,#fffbeb 0%,#ffffff 100%);border-bottom:1px solid #f1f5f9;">
+              <div style="font-size:11px;font-weight:800;color:#92400e;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:6px;">Amount transferred</div>
+              <div style="font-family:'Courier New',monospace;font-size:38px;font-weight:800;color:#0f172a;letter-spacing:-0.02em;line-height:1.1;">
+                ${inrInline}
+              </div>
+              <div style="font-size:12px;color:#78350f;font-style:italic;margin-top:6px;">
+                ${escapeHtml(input.amountInWords)}
+              </div>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:24px 28px 4px;">
+              <h1 style="margin:0 0 12px;font-size:18px;color:#0f172a;font-weight:700;">Dear ${escapeHtml(input.vendorName)},</h1>
+              <p style="font-size:14px;line-height:1.65;color:#334155;margin:0 0 22px;">
+                We have transferred <strong style="color:#0f172a;">${amountStr}</strong> against your bill
+                <code style="background:#fef3c7;color:#78350f;padding:2px 8px;border-radius:5px;font-family:'Courier New',monospace;font-weight:700;">${escapeHtml(input.vendorBillNo)}</code>
+                on <strong style="color:#0f172a;">${paidAtIst}</strong>.
+              </p>
+
+              <!-- Details -->
+              <table cellpadding="0" cellspacing="0" style="width:100%;font-size:13px;margin-bottom:22px;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;">
+                ${detailRow("Amount paid", `<strong style="font-family:'Courier New',monospace;color:#0f172a;">${escapeHtml(amountStr)}</strong>`, true)}
+                ${detailRow("Payment method", `<span style="font-weight:700;color:#0f172a;">${escapeHtml((input.paymentMethod ?? "—").toUpperCase())}</span>`)}
+                ${detailRow("UTR / Reference", `<span style="background:#fef3c7;color:#78350f;padding:2px 8px;border-radius:5px;font-family:'Courier New',monospace;font-weight:700;">${escapeHtml(input.paymentReference ?? "—")}</span>`, true)}
+                ${detailRow("Bill token (our ref)", `<span style="background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:5px;font-family:'Courier New',monospace;font-weight:700;">${escapeHtml(input.billToken)}</span>`)}
+                ${detailRow("Vendor bill no.", `<span style="background:#fef3c7;color:#78350f;padding:2px 8px;border-radius:5px;font-family:'Courier New',monospace;font-weight:700;">${escapeHtml(input.vendorBillNo)}</span>`, true)}
+                ${detailRow("Payment date", `<strong style="color:#0f172a;">${paidAtIst}</strong>`)}
+              </table>
+
+              <!-- Reassurance -->
+              <div style="padding:14px 16px;background:#f1f5f9;border-left:3px solid #4f46e5;border-radius:6px;margin-bottom:8px;">
+                <div style="font-size:13px;line-height:1.6;color:#334155;">
+                  A formal payment voucher PDF is attached for your records. If you spot any discrepancy,
+                  reply to this email and we'll reconcile.
+                </div>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding:18px 28px;background:#0f172a;color:#94a3b8;font-size:11px;line-height:1.6;">
+              <strong style="color:#ffffff;">${escapeHtml(input.companyName)}</strong><br/>
+              ${input.companyAddressLines.map(escapeHtml).join(", ")}<br/>
+              <a href="mailto:account@mtcpl.co" style="color:#fbbf24;text-decoration:none;">account@mtcpl.co</a> · automated payment notification
             </td>
           </tr>
         </table>
@@ -208,6 +235,14 @@ export function buildVoucherEmailHtml(input: {
   </table>
 </body>
 </html>`;
+}
+
+function detailRow(label: string, valueHtml: string, alt = false): string {
+  const bg = alt ? "#f8fafc" : "#ffffff";
+  return `<tr>
+    <td style="padding:10px 14px;color:#64748b;width:200px;background:${bg};font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;">${escapeHtml(label)}</td>
+    <td style="padding:10px 14px;background:${bg};">${valueHtml}</td>
+  </tr>`;
 }
 
 /** Plain-text fallback body — short and to the point. */
@@ -228,12 +263,13 @@ export function buildVoucherEmailText(input: {
     ``,
     `We have transferred ${amount} against your bill ${input.vendorBillNo}.`,
     ``,
-    `Amount paid:   ${amount}`,
-    `In words:      ${input.amountInWords}`,
-    `Method:        ${input.paymentMethod ?? "—"}`,
-    `UTR / Ref:     ${input.paymentReference ?? "—"}`,
-    `Bill token:    ${input.billToken}`,
-    `Payment date:  ${input.paidAtIso ? input.paidAtIso.slice(0, 10) : "—"}`,
+    `Amount paid:     ${amount}`,
+    `In words:        ${input.amountInWords}`,
+    `Method:          ${input.paymentMethod ?? "—"}`,
+    `UTR / Ref:       ${input.paymentReference ?? "—"}`,
+    `Bill token:      ${input.billToken}`,
+    `Vendor bill no.: ${input.vendorBillNo}`,
+    `Payment date:    ${input.paidAtIso ? input.paidAtIso.slice(0, 10) : "—"}`,
     ``,
     `Voucher PDF attached. Reply to this email if anything looks off.`,
     ``,

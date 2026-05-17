@@ -1257,9 +1257,9 @@ async function sendVendorPaymentEmail(
     const company = {
       name: "MATESHWARI TEMPLE CONSTRUCTION PVT LTD",
       addressLines: [
-        "C-109, RIICO Industrial Area 1/A",
-        "Sirohi Road, Pindwara",
-        "Rajasthan — 307022",
+        "Opposite Ajari Fatak",
+        "Pindwara, Sirohi",
+        "Rajasthan",
       ],
     };
 
@@ -1301,6 +1301,16 @@ async function sendVendorPaymentEmail(
     });
     const pdfBase64 = Buffer.from(pdfBytes).toString("base64");
 
+    // Build the absolute URL for the logo image (emails can't read
+    // local public/ files). Prefer NEXT_PUBLIC_APP_URL; fall back to
+    // Vercel's auto-injected VERCEL_URL. If neither is set the
+    // email skips the logo (it renders the first letter in a
+    // rounded square instead — graceful degradation).
+    const appUrl =
+      process.env.NEXT_PUBLIC_APP_URL ||
+      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
+    const logoUrl = appUrl ? `${appUrl.replace(/\/$/, "")}/logo-dark.png` : undefined;
+
     // ── Send ────────────────────────────────────────────────────
     const html = buildVoucherEmailHtml({
       vendorName: vendor.name,
@@ -1316,6 +1326,7 @@ async function sendVendorPaymentEmail(
         (paymentRow as { paid_at?: string | null }).paid_at ?? null,
       companyName: company.name,
       companyAddressLines: company.addressLines,
+      logoUrl,
     });
     const text = buildVoucherEmailText({
       vendorName: vendor.name,

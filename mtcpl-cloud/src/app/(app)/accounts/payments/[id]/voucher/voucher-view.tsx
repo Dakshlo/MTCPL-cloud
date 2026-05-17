@@ -17,12 +17,13 @@ import { numberToIndianWords } from "./number-to-words";
 
 const COMPANY = {
   name: "MATESHWARI TEMPLE CONSTRUCTION PVT LTD",
-  // Pulled from the HDFC Payment Advice header in the screenshot
-  // Daksh shared. If the registered office moves, edit here.
+  // Daksh — registered office. Keep in sync with the same const in
+  // src/app/(app)/accounts/actions.ts (the email + PDF voucher
+  // builder reads from there).
   addressLines: [
-    "C-109, RIICO Industrial Area 1/A",
-    "Sirohi Road, Pindwara",
-    "Rajasthan — 307022",
+    "Opposite Ajari Fatak",
+    "Pindwara, Sirohi",
+    "Rajasthan",
   ],
 } as const;
 

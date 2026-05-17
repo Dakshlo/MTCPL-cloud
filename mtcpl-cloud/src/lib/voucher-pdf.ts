@@ -199,11 +199,15 @@ let logoLoadAttempted = false;
 async function loadLogoBytes(): Promise<Uint8Array | null> {
   if (logoLoadAttempted) return cachedLogoBytes;
   logoLoadAttempted = true;
+  // Daksh — swapped to the dark/black-font variant per his Mig 058
+  // follow-on (the previous colour logo felt washed out on the
+  // printed voucher's white background; the dark variant reads
+  // crisper in greyscale + print).
   try {
     const logoPath = path.join(
       process.cwd(),
       "public",
-      "MTCPL-Final-logo-2 copy 2.png",
+      "logo-dark.png",
     );
     cachedLogoBytes = await readFile(logoPath);
     return cachedLogoBytes;
@@ -422,7 +426,10 @@ export async function buildVoucherPdf(rawInput: VoucherPdfInput): Promise<Uint8A
 
   drawRow("Bill Token", input.bill.token, { mono: true, highlight: true });
 
-  drawRow("Vendor's Bill No", input.bill.vendorBillNo, { mono: true });
+  // Daksh — also highlight the vendor's bill number (alongside Bill
+  // Token + UTR + Amount) so the three "things the vendor needs to
+  // cross-check on their end" all wear the same yellow tint.
+  drawRow("Vendor's Bill No", input.bill.vendorBillNo, { mono: true, highlight: true });
   drawRow("Bill Date", fmtDateIST(input.bill.billDate));
   if (input.bill.costHead) drawRow("Cost Head", input.bill.costHead);
   drawRow(
