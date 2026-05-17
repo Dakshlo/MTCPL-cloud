@@ -2062,11 +2062,16 @@ function canAccessPrivateNotes(p: Profile): boolean {
   // and need parity with owner/dev access for private notes.
   // Mig 053 follow-on: final_auditor has full accountant powers and
   // also needs the private-notes / royalty view to do their job.
+  // Mig 061 follow-on (Daksh): crosscheck added — they verify
+  // pending bills and need to see vendor private notes + edit the
+  // royalty program (royalty points received / paid). Same access
+  // as accountant for this surface.
   return (
     p.role === "developer" ||
     p.role === "owner" ||
     p.role === "accountant" ||
-    p.role === "accountant_star"
+    p.role === "accountant_star" ||
+    p.role === "crosscheck"
   );
 }
 

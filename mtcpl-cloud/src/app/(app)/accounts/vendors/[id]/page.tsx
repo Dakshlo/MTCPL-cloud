@@ -64,7 +64,11 @@ export default async function BillVendorDetailPage({
     // Mig 053 follow-on — final_auditor sees the royalty net + can
     // open the private-notes modal, matching the canAccessPrivateNotes
     // server gate.
-    profile.role === "accountant_star";
+    profile.role === "accountant_star" ||
+    // Mig 061 follow-on (Daksh): crosscheck also gets the royalty
+    // net + private-notes modal — they need to add/cancel royalty
+    // entries while reviewing bills.
+    profile.role === "crosscheck";
   let royaltyNet: number | null = null;
   if (canSeeRoyaltyNet) {
     const { data: royaltyRows, error: royaltyErr } = await supabase
@@ -281,6 +285,24 @@ export default async function BillVendorDetailPage({
         </div>
       )}
 
+      {/* Mig 061 follow-on (Daksh): the 🔒 private-notes/royalty
+          modal trigger used to live inside the "Edit vendor details"
+          <summary> row. Crosscheck has private-notes + royalty
+          access but NOT vendor-edit access, so we had to lift the
+          button out into its own strip — otherwise crosscheck never
+          saw it (parent block hidden via canEdit gate below). */}
+      {canSeeRoyaltyNet && (
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            marginBottom: 12,
+          }}
+        >
+          <PrivateNotesModal vendorId={id} canShow={canSeeRoyaltyNet} />
+        </div>
+      )}
+
       {/* Bill history is now the primary content. Edit-vendor lives
           inside a <details> collapsible above it so the long
           vertical form doesn't dominate the page. Click "Edit
@@ -317,14 +339,6 @@ export default async function BillVendorDetailPage({
               (bank info · GSTIN · payment terms · TDS / TCS flags)
             </span>
           </span>
-          {/* Mig 050 — tiny low-visibility 🔒 button for vendor
-              private notes. The modal client component handles its
-              own click event + stops propagation to the parent
-              <summary> so clicking the lock doesn't toggle <details>. */}
-          <PrivateNotesModal
-            vendorId={id}
-            canShow={canSeeRoyaltyNet}
-          />
         </summary>
         <div style={{ marginTop: 14 }}>
           <VendorForm
