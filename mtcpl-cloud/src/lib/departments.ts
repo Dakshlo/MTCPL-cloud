@@ -136,13 +136,19 @@ export function allowedDepartmentsForRole(role: AppRole): Department[] {
     case "owner":
       return ["production", "finance", "invoicing", "inventory"];
     // Mig 058 follow-on (Daksh): ACCOUNTANT★ gets a 2-tile
-    // Finance / Invoicing switcher. Plain accountant / biller /
-    // crosscheck stay locked to Finance only.
+    // Finance / Invoicing switcher.
     case "accountant_star":
       return ["finance", "invoicing"];
+    // Mig 061 follow-on (Daksh): crosscheck audits both bills
+    // (Finance) and inventory movements (mig 041 audit queue), so
+    // they get a 2-tile Finance / Inventory switcher. Without it
+    // both depts' pages cram into a single sidebar — the switcher
+    // gives the same per-room pattern owner / dev / ACCOUNTANT★
+    // already use.
+    case "crosscheck":
+      return ["finance", "inventory"];
     case "biller":
     case "accountant":
-    case "crosscheck":
       return ["finance"];
     // Mig 054 — cnc_expense_entry is a production-cost role.
     // CNC machines are part of production; their operating
