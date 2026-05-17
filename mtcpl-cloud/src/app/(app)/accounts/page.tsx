@@ -22,6 +22,11 @@ import {
   KpiCard,
   Money,
 } from "./_ui/components";
+import {
+  PeekButton,
+  PeekProvider,
+  PeekValue,
+} from "./_ui/sensitive-peek";
 
 type SearchParams = Promise<{
   vendor?: string;
@@ -255,6 +260,13 @@ export default async function AccountsHomePage({
 
   return (
     <section className="page-card">
+      {/* Mig 058 follow-on (Daksh) — Due Bills KPIs reveal a lot:
+          total outstanding + top vendor outstanding combined are
+          enough to read the company's cash position at a glance.
+          Wrapped in PeekProvider so both sensitive amounts blur by
+          default. A "👁 Peek for 5s" button sits in the hero
+          actions; one click unblurs both for 5 seconds. */}
+      <PeekProvider>
       <AccountsHero
         title={profile.role === "accountant" ? "Due Bills" : "Accounts"}
         description={
@@ -263,12 +275,12 @@ export default async function AccountsHomePage({
             : "Finance overview. Audit fresh bills and queue today's payment batch."
         }
         actions={
-          // Bills Audit + Payment History dropped (already in
-          // sidebar). Pay Today kept here — it's the one daily-use
-          // CTA the accountant launches from this page.
-          <Link href="/accounts/pay-today" style={BUTTON_STYLES.secondary}>
-            💸 Pay Today
-          </Link>
+          <>
+            <PeekButton />
+            <Link href="/accounts/pay-today" style={BUTTON_STYLES.secondary}>
+              💸 Pay Today
+            </Link>
+          </>
         }
       />
 
@@ -283,7 +295,11 @@ export default async function AccountsHomePage({
       >
         <KpiCard
           label="Total outstanding"
-          value={<Money value={totalOutstanding} size="hero" tone={totalOutstanding > 0 ? "danger" : "muted"} />}
+          value={
+            <PeekValue>
+              <Money value={totalOutstanding} size="hero" tone={totalOutstanding > 0 ? "danger" : "muted"} />
+            </PeekValue>
+          }
           sublabel={`across ${billsCount} bill${billsCount === 1 ? "" : "s"}`}
           tone="danger"
           icon="💰"
@@ -323,12 +339,14 @@ export default async function AccountsHomePage({
           label="Top vendor by outstanding"
           value={
             topVendor ? (
-              <div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text)", marginBottom: 4, lineHeight: 1.2, wordBreak: "break-word" }}>
-                  {topVendor.name}
+              <PeekValue>
+                <div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text)", marginBottom: 4, lineHeight: 1.2, wordBreak: "break-word" }}>
+                    {topVendor.name}
+                  </div>
+                  <Money value={topVendor.total} size="large" tone="warning" />
                 </div>
-                <Money value={topVendor.total} size="large" tone="warning" />
-              </div>
+              </PeekValue>
             ) : (
               <span style={{ fontSize: 18, color: "var(--muted)", fontWeight: 600 }}>—</span>
             )
@@ -337,6 +355,7 @@ export default async function AccountsHomePage({
           icon="🏢"
         />
       </div>
+      </PeekProvider>
 
       {/* Aging analysis — proportional bar + bucket tiles */}
       {allDue.length > 0 && (
