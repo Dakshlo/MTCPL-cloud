@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AppRole } from "@/lib/types";
 import {
   DEPARTMENTS,
@@ -401,32 +401,60 @@ export function Sidebar({
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  // Daksh: department switching used to use useTransition with an
-  // empty callback — the transition resolved instantly so the
-  // overlay (and the disabled state on the tiles) flashed off
-  // before the server action even finished. Switched to a plain
-  // useState so we can hold `switching` true for the FULL duration
-  // of the action + the router.refresh() that follows.
+  // Daksh (Mig 058 follow-on): dept switch needs two layers of
+  // feedback —
+  //   1. The FinanceLoadingOverlay (spinning company logo).
+  //   2. A thin gold progress bar pinned to the very top of the
+  //      viewport (independent of the existing NavigationProgress —
+  //      that one only fires for <a> / <form> events; ours fires
+  //      from a plain button click).
+  // Both stay visible until we detect the activeDepartment prop has
+  // actually changed (server action + router.refresh + RSC
+  // reconciliation all completed). Safety net: 12s hard timeout so
+  // we never hang forever if something goes wrong server-side.
   const [switching, setSwitching] = useState(false);
   const [switchingTo, setSwitchingTo] = useState<Department | null>(null);
+  const prevActiveDeptRef = useRef<Department | null>(activeDepartment ?? null);
+
+  // Detect activeDepartment prop change — fires once the new
+  // sidebar HTML lands. Drop the overlay + bar at that moment.
+  useEffect(() => {
+    const incoming = activeDepartment ?? null;
+    if (switching && prevActiveDeptRef.current !== incoming) {
+      setSwitching(false);
+      setSwitchingTo(null);
+    }
+    prevActiveDeptRef.current = incoming;
+  }, [activeDepartment, switching]);
 
   async function handleSwitchDepartment(dept: Department) {
     if (switching) return;
     setSwitching(true);
     setSwitchingTo(dept);
+
+    // 12s safety net — if for any reason the activeDepartment prop
+    // never changes (server action errored silently, network
+    // hung, etc.), still drop the overlay so the UI isn't stuck.
+    const safetyTimer = setTimeout(() => {
+      setSwitching(false);
+      setSwitchingTo(null);
+    }, 12_000);
+
     try {
       const fd = new FormData();
       fd.set("department", dept);
       await setActiveDepartmentAction(fd);
       router.refresh();
-      // Small settle so the new sidebar HTML actually paints before
-      // we drop the overlay. Without this the overlay disappears at
-      // the instant React acks the refresh, but the page hasn't
-      // re-rendered yet — feels like a flicker back to the old room.
-      await new Promise((r) => setTimeout(r, 150));
-    } finally {
+      // Don't drop `switching` here — the useEffect above watches
+      // for the activeDepartment prop change and drops it then,
+      // so the overlay covers the full visible-transition window
+      // (not just the action's promise resolution).
+    } catch (err) {
+      // On error, drop immediately + clear safety timer.
+      clearTimeout(safetyTimer);
       setSwitching(false);
       setSwitchingTo(null);
+      console.error("[sidebar] dept switch failed", err);
     }
   }
 
@@ -687,17 +715,21 @@ export function Sidebar({
         </div>
       )}
 
-      {/* Daksh — branded spinner overlay during department switch.
-          Held until the server action completes + router.refresh()
-          settles, so the user gets unambiguous feedback for the
-          full duration instead of a flash. */}
+      {/* Daksh — TWO feedback channels during department switch.
+          Both stay on until the activeDepartment prop actually
+          flips (server action → router.refresh → RSC reconciled).
+          So even if one feels like it disappears early visually,
+          the other carries on until the new room is on screen. */}
       {switchable && switchingTo && (
-        <FinanceLoadingOverlay
-          show={switching}
-          label={`Switching to ${
-            DEPARTMENTS.find((x) => x.id === switchingTo)?.label ?? "department"
-          }…`}
-        />
+        <>
+          <FinanceLoadingOverlay
+            show={switching}
+            label={`Switching to ${
+              DEPARTMENTS.find((x) => x.id === switchingTo)?.label ?? "department"
+            }…`}
+          />
+          {switching && <DeptSwitchTopBar />}
+        </>
       )}
 
       {/* User */}
@@ -903,5 +935,58 @@ function CollapsibleNavGroup({
         </div>
       )}
     </div>
+  );
+}
+
+/** Mig 058 follow-on — top-of-viewport progress bar shown during
+ *  the department switch. Lives alongside FinanceLoadingOverlay so
+ *  there's still visible feedback if the overlay drops a beat before
+ *  the page actually paints. Matches the visual language of
+ *  NavigationProgress (gold gradient + glow) so the two indicators
+ *  feel like the same primitive. */
+function DeptSwitchTopBar() {
+  return (
+    <>
+      <style>{`
+        @keyframes mtcpl-deptbar-progress {
+          0%   { transform: translateX(-100%); }
+          55%  { transform: translateX(40%); }
+          100% { transform: translateX(220%); }
+        }
+        @keyframes mtcpl-deptbar-glow {
+          0%, 100% { opacity: 0.9; }
+          50%      { opacity: 1; }
+        }
+      `}</style>
+      <div
+        role="progressbar"
+        aria-label="Switching department"
+        style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 5,
+          background: "rgba(201, 161, 74, 0.18)",
+          zIndex: 10000,
+          overflow: "hidden",
+          pointerEvents: "none",
+          animation: "mtcpl-deptbar-glow 1.8s ease-in-out infinite",
+          boxShadow: "0 0 14px rgba(201, 161, 74, 0.55)",
+        }}
+      >
+        <div
+          style={{
+            height: "100%",
+            width: "45%",
+            background:
+              "linear-gradient(90deg, rgba(201,161,74,0) 0%, #d4ad58 25%, #c9a14a 50%, #a4823a 75%, rgba(164,130,58,0) 100%)",
+            animation: "mtcpl-deptbar-progress 1.1s ease-in-out infinite",
+            boxShadow:
+              "0 0 18px rgba(201, 161, 74, 0.95), 0 1px 4px rgba(164,130,58,0.6)",
+          }}
+        />
+      </div>
+    </>
   );
 }
