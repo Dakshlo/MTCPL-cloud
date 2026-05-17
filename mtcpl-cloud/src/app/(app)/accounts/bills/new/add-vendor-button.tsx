@@ -18,7 +18,7 @@ import {
   BUTTON_STYLES,
   INPUT_STYLE,
 } from "../../_ui/components";
-import { BILL_VENDOR_CATEGORIES } from "@/lib/bill-vendor-categories";
+import { CategoryPicker } from "../../vendors/category-picker";
 
 type UpsertResult =
   | { ok: true; vendorId: string }
@@ -228,49 +228,11 @@ export function AddVendorButton({
             />
           </Field>
           <Field label="Category">
-            {/* Mig 061 follow-on (Daksh): canonical category select
-                (mirrors the full vendor form). Block Purchase sub-
-                types grouped under <optgroup>. Picking a Block
-                Purchase category here flips on the CFT field on the
+            {/* Mig 061 follow-on (Daksh, 2nd pass): custom CategoryPicker
+                that matches the Finance form chrome. Picking a Block
+                Purchase sub-type here flips on the CFT field on the
                 bill form the moment this vendor is selected. */}
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              style={INPUT_STYLE}
-            >
-              <option value="">— Pick a category —</option>
-              {(() => {
-                const groups = new Map<string, typeof BILL_VENDOR_CATEGORIES[number][]>();
-                const flat: typeof BILL_VENDOR_CATEGORIES[number][] = [];
-                for (const c of BILL_VENDOR_CATEGORIES) {
-                  if (c.group) {
-                    const list = groups.get(c.group) ?? [];
-                    list.push(c);
-                    groups.set(c.group, list);
-                  } else {
-                    flat.push(c);
-                  }
-                }
-                return (
-                  <>
-                    {[...groups.entries()].map(([groupName, items]) => (
-                      <optgroup key={groupName} label={groupName}>
-                        {items.map((c) => (
-                          <option key={c.value} value={c.value}>
-                            {c.label}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ))}
-                    {flat.map((c) => (
-                      <option key={c.value} value={c.value}>
-                        {c.label}
-                      </option>
-                    ))}
-                  </>
-                );
-              })()}
-            </select>
+            <CategoryPicker value={category} onChange={setCategory} />
           </Field>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <Field label="GSTIN">
