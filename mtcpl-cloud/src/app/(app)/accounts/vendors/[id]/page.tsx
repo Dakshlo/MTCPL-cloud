@@ -254,17 +254,14 @@ export default async function BillVendorDetailPage({
         </div>
       )}
 
-      {/* Mig 061 follow-on (Daksh, 2nd pass): the net peek dot is
-          now dev / owner ONLY — accountant / accountant_star /
-          crosscheck can still open the Private Notes modal (see
-          dot trigger below) and read the per-entry breakdown
-          there, but the at-a-glance "net" number doesn't sit on
-          the vendor page for them. The dot itself is plain black
-          + small enough to read as a neutral marker until pressed,
-          then "Net: +/-X (10s)" appears inline. */}
-      {(profile.role === "developer" || profile.role === "owner") &&
-        royaltyNet !== null &&
-        royaltyNet !== 0 && <RoyaltyNetPeek netValue={royaltyNet} />}
+      {/* Mig 061 follow-on (Daksh): net peek dot — small black
+          marker by default, click reveals "Net: +/-X (10s)" inline.
+          Visible to anyone who can see royalty data (dev / owner /
+          accountant / accountant_star / crosscheck) — same gate as
+          the Private Notes modal below. */}
+      {canSeeRoyaltyNet && royaltyNet !== null && royaltyNet !== 0 && (
+        <RoyaltyNetPeek netValue={royaltyNet} />
+      )}
 
       {/* Mig 061 follow-on (Daksh): the 🔒 private-notes/royalty
           modal trigger used to live inside the "Edit vendor details"
