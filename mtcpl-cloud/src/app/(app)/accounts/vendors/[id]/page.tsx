@@ -254,29 +254,29 @@ export default async function BillVendorDetailPage({
         </div>
       )}
 
-      {/* Mig 061 follow-on (Daksh): net peek dot — small black
-          marker by default, click reveals "Net: +/-X (10s)" inline.
-          Visible to anyone who can see royalty data (dev / owner /
-          accountant / accountant_star / crosscheck) — same gate as
-          the Private Notes modal below. */}
-      {canSeeRoyaltyNet && royaltyNet !== null && royaltyNet !== 0 && (
-        <RoyaltyNetPeek netValue={royaltyNet} />
-      )}
-
-      {/* Mig 061 follow-on (Daksh): the 🔒 private-notes/royalty
-          modal trigger used to live inside the "Edit vendor details"
-          <summary> row. Crosscheck has private-notes + royalty
-          access but NOT vendor-edit access, so we had to lift the
-          button out into its own strip — otherwise crosscheck never
-          saw it (parent block hidden via canEdit gate below). */}
+      {/* Mig 061 follow-on (Daksh): both private-data dots live in
+          one row directly above the Edit vendor details panel so
+          they sit on the same vertical baseline. Left = net peek
+          (collapsed dot, click reveals "Net: +/-X (10s)" inline).
+          Right = Private Notes / Royalty modal trigger (collapsed
+          dot, click opens the passphrase-gated modal). Net dot
+          collapses to empty placeholder when balance is 0 so the
+          modal dot stays right-aligned regardless. */}
       {canSeeRoyaltyNet && (
         <div
           style={{
             display: "flex",
-            justifyContent: "flex-end",
-            marginBottom: 12,
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 8,
+            minHeight: 14,
           }}
         >
+          <div>
+            {royaltyNet !== null && royaltyNet !== 0 && (
+              <RoyaltyNetPeek netValue={royaltyNet} />
+            )}
+          </div>
           <PrivateNotesModal
             vendorId={id}
             canShow={canSeeRoyaltyNet}

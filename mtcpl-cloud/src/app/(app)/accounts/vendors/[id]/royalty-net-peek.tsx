@@ -56,7 +56,6 @@ export function RoyaltyNetPeek({
           display: "inline-flex",
           alignItems: "center",
           gap: 6,
-          marginBottom: 6,
           fontSize: 11,
           fontWeight: 600,
           color: "var(--muted)",
@@ -100,7 +99,6 @@ export function RoyaltyNetPeek({
         borderRadius: "50%",
         cursor: "pointer",
         padding: 0,
-        marginBottom: 6,
       }}
     >
       <span
