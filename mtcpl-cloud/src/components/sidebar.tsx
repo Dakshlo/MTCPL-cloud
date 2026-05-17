@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import type { AppRole } from "@/lib/types";
 import {
   DEPARTMENTS,
+  allowedDepartmentsForRole,
   canSwitchDepartment,
   effectiveDepartment,
   type Department,
@@ -458,6 +459,11 @@ export function Sidebar({
 
   const switchable = canSwitchDepartment(role);
   const currentDept = effectiveDepartment(role, activeDepartment ?? null);
+  // Mig 058 follow-on (Daksh) — switcher tiles are filtered to the
+  // role's allowed list. ACCOUNTANT★ (final_auditor) sees only
+  // Finance + Invoicing; dev/owner still see all 4.
+  const allowedDepts = allowedDepartmentsForRole(role);
+  const visibleDeptTiles = DEPARTMENTS.filter((d) => allowedDepts.includes(d.id));
 
   // Step 1: standard role-based filter (unchanged from migration 028).
   let visibleEntries = navEntries.filter((entry) => entry.roles.includes(role));
@@ -599,7 +605,7 @@ export function Sidebar({
               boxShadow: "inset 0 1px 2px rgba(0,0,0,0.28)",
             }}
           >
-            {DEPARTMENTS.map((d) => {
+            {visibleDeptTiles.map((d) => {
               const isActive = d.id === currentDept;
               const accent = DEPT_ACCENTS[d.id] ?? DEPT_ACCENTS.production;
 

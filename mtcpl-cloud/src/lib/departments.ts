@@ -117,62 +117,85 @@ export function departmentForRoute(pathname: string): Department {
  * badge surfaces on the top bar from any page, so he's never far
  * from either queue.
  */
-export function lockedDepartmentForRole(role: AppRole): Department | null {
+/**
+ * Departments this role can navigate between.
+ *
+ * Single-element list = role is "locked" to that department; the
+ * sidebar dept switcher doesn't render (no point — only one tile).
+ *
+ * Multi-element list = switcher renders ONLY those tiles. The
+ * developer / owner case returns all 4 (full freedom). The
+ * final_auditor (ACCOUNTANT★) case returns just [finance,
+ * invoicing] — Daksh's spec: that role works across both surfaces
+ * (finance bill audit + invoicing customer party / challan
+ * management) but should NOT see Production or Inventory tiles.
+ */
+export function allowedDepartmentsForRole(role: AppRole): Department[] {
   switch (role) {
     case "developer":
     case "owner":
-      return null;
+      return ["production", "finance", "invoicing", "inventory"];
+    // Mig 058 follow-on (Daksh): ACCOUNTANT★ gets a 2-tile
+    // Finance / Invoicing switcher. Plain accountant / biller /
+    // crosscheck stay locked to Finance only.
+    case "final_auditor":
+      return ["finance", "invoicing"];
     case "biller":
     case "accountant":
     case "crosscheck":
-    // Mig 053 — final_auditor is a finance role (UTR recheck).
-    case "final_auditor":
-      return "finance";
+      return ["finance"];
     // Mig 054 — cnc_expense_entry is a production-cost role.
     // CNC machines are part of production; their operating
     // expenses (tools, electricity, labor) are tracked here so
     // the carving cost analysis stays in one department.
     case "cnc_expense_entry":
-      return "production";
+      return ["production"];
     case "storekeeper":
-      return "inventory";
+      return ["inventory"];
     default:
-      return "production";
+      return ["production"];
   }
 }
 
 /**
+ * Legacy "locked dept" helper. Returns the single dept IFF the
+ * role has exactly one allowed dept; null if they can switch.
+ * Kept for back-compat — prefer `allowedDepartmentsForRole`
+ * going forward.
+ */
+export function lockedDepartmentForRole(role: AppRole): Department | null {
+  const allowed = allowedDepartmentsForRole(role);
+  return allowed.length === 1 ? allowed[0] : null;
+}
+
+/**
  * The effective active department for a given (role, stored
- * preference) pair. Honours the role lock if there is one; otherwise
- * returns the stored preference (defaulting to Production for
- * accounts created before Migration 036).
+ * preference) pair.
+ *   • If the stored value is one of the role's allowed depts → use it.
+ *   • Otherwise → fall back to the first allowed dept (deterministic
+ *     default: production for dev/owner, finance for accountant★,
+ *     etc.).
  */
 export function effectiveDepartment(
   role: AppRole,
   stored: Department | null | undefined,
 ): Department {
-  const locked = lockedDepartmentForRole(role);
-  if (locked) return locked;
-  return stored ?? "production";
+  const allowed = allowedDepartmentsForRole(role);
+  if (stored && allowed.includes(stored)) return stored;
+  return allowed[0] ?? "production";
 }
 
-/** Convenience: can this user see the switcher pills? */
+/** Convenience: can this user see the switcher tiles? True iff
+ *  the role has more than one allowed dept. */
 export function canSwitchDepartment(role: AppRole): boolean {
-  return lockedDepartmentForRole(role) === null;
+  return allowedDepartmentsForRole(role).length > 1;
 }
 
 /**
- * Every department this role is permitted to use. For developer +
- * owner that's all three. For a role that's locked to one department,
- * just that one. Used by the lock screen's quick-jump panel — even a
- * locked role (accountant, biller, cutting_operator) deserves a way
- * back to their own department if they somehow land on a route
- * outside it during a maintenance window.
+ * Every department this role is permitted to use. Same as
+ * allowedDepartmentsForRole — kept as a separate name for
+ * back-compat with the lock-screen quick-jump panel.
  */
 export function rolePermittedDepartments(role: AppRole): Department[] {
-  if (canSwitchDepartment(role)) {
-    return ["production", "finance", "invoicing", "inventory"];
-  }
-  const locked = lockedDepartmentForRole(role);
-  return locked ? [locked] : [];
+  return allowedDepartmentsForRole(role);
 }

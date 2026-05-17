@@ -20,6 +20,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
 import {
   DEPARTMENTS,
+  allowedDepartmentsForRole,
   canSwitchDepartment,
   type Department,
 } from "@/lib/departments";
@@ -29,9 +30,9 @@ const VALID_DEPTS: ReadonlyArray<Department> = ["production", "finance", "invent
 export async function setActiveDepartmentAction(formData: FormData) {
   const { profile } = await requireAuth();
 
-  // Only developer + owner can switch. Every other role is locked to a
-  // specific department by their role, so an attempt to switch from
-  // them is a no-op redirect back to their own landing.
+  // Only multi-dept roles can switch. Single-dept roles (cutting
+  // operator, biller, plain accountant, etc.) get redirected to
+  // their landing — no-op.
   if (!canSwitchDepartment(profile.role)) {
     redirect("/dashboard");
   }
@@ -40,6 +41,15 @@ export async function setActiveDepartmentAction(formData: FormData) {
   const dept = (VALID_DEPTS as readonly string[]).includes(raw)
     ? (raw as Department)
     : "production";
+
+  // Mig 058 follow-on (Daksh): even multi-dept roles have a
+  // restricted set (ACCOUNTANT★ can only switch between Finance
+  // and Invoicing — never to Production or Inventory). Defensive
+  // check so a hand-crafted POST can't escape the role's scope.
+  const allowed = allowedDepartmentsForRole(profile.role);
+  if (!allowed.includes(dept)) {
+    redirect("/dashboard");
+  }
 
   const supabase = createAdminSupabaseClient();
   const { error } = await supabase
