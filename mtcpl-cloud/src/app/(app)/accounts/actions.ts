@@ -2564,8 +2564,17 @@ export async function cancelVendorRoyaltyEntryAction(
   formData: FormData,
 ): Promise<ActionResult> {
   const { profile } = await requireAuth();
-  if (!canAccessPrivateNotes(profile)) {
-    return { ok: false, error: "Not authorised." };
+  // Mig 061 follow-on (Daksh): adding a royalty entry is open to
+  // everyone with private-notes access (dev / owner / accountant /
+  // accountant_star / crosscheck) — five hands enter; but DELETING
+  // a posted entry is dev / owner only. Otherwise a careless cancel
+  // erases another person's record. Cancelled rows still sit on the
+  // audit log either way.
+  if (profile.role !== "developer" && profile.role !== "owner") {
+    return {
+      ok: false,
+      error: "Only developer or owner can cancel a royalty entry.",
+    };
   }
   const entryId = String(formData.get("entry_id") || "").trim();
   const reason = String(formData.get("cancel_reason") || "").trim() || null;

@@ -276,7 +276,14 @@ export default async function AccountsHomePage({
         }
         actions={
           <>
-            <PeekButton />
+            {/* Mig 061 follow-on (Daksh): the Peek button reveals
+                the blurred sensitive amounts for 5s. Restricted to
+                owner + developer — accountants see the blur but
+                can't unblur on screen. They can still drill into a
+                specific row if they need the number. */}
+            {(profile.role === "developer" || profile.role === "owner") && (
+              <PeekButton />
+            )}
             <Link href="/accounts/pay-today" style={BUTTON_STYLES.secondary}>
               💸 Pay Today
             </Link>

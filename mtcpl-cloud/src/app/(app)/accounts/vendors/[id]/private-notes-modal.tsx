@@ -62,9 +62,14 @@ type RoyaltyEntry = {
 export function PrivateNotesModal({
   vendorId,
   canShow,
+  canCancelRoyalty = false,
 }: {
   vendorId: string;
   canShow: boolean;
+  /** Mig 061 follow-on (Daksh): adding a royalty entry stays open
+   *  to anyone with private-notes access, but DELETING (cancelling)
+   *  one is dev / owner only. Hides the × on each row when false. */
+  canCancelRoyalty?: boolean;
 }) {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("closed");
@@ -307,10 +312,13 @@ export function PrivateNotesModal({
     };
   }, [mode]);
 
-  // ── The tiny entry button. Renders in-flow, ~22px, muted. ────────
+  // ── The tiny entry button. Mig 061 follow-on (Daksh): was a 🔒
+  // emoji button — too visible. Now a 14px hit-area with a 6px
+  // gray dot inside, so the trigger reads as "neutral marker"
+  // rather than "click me". Same passphrase flow on open. */
   // stopPropagation on click + mousedown so the parent <summary>
   // element on the vendor profile page doesn't toggle <details>
-  // when the user clicks the lock. Same for preventDefault.
+  // when the user clicks the dot. Same for preventDefault.
   const triggerButton = (
     <button
       type="button"
@@ -320,25 +328,31 @@ export function PrivateNotesModal({
         open();
       }}
       onMouseDown={(e) => e.stopPropagation()}
-      title="Private notes"
+      title="Private notes & royalty"
       style={{
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
-        width: 22,
-        height: 22,
-        border: "1px solid rgba(15, 23, 42, 0.10)",
+        width: 14,
+        height: 14,
+        border: "none",
         background: "transparent",
-        borderRadius: 6,
-        color: "rgba(15, 23, 42, 0.30)",
-        fontSize: 11,
-        lineHeight: 1,
+        borderRadius: "50%",
         cursor: "pointer",
         padding: 0,
       }}
-      aria-label="Private notes (developer)"
+      aria-label="Private notes & royalty"
     >
-      🔒
+      <span
+        aria-hidden
+        style={{
+          display: "inline-block",
+          width: 6,
+          height: 6,
+          borderRadius: "50%",
+          background: "rgba(15, 23, 42, 0.35)",
+        }}
+      />
     </button>
   );
 
@@ -675,6 +689,7 @@ export function PrivateNotesModal({
                       border="rgba(220, 38, 38, 0.30)"
                       entries={royaltyEntries.filter((e) => e.entryType === "received")}
                       onCancel={handleCancelRoyaltyEntry}
+                      canCancel={canCancelRoyalty}
                     />
                     <RoyaltyColumn
                       title="PAID  (+)"
@@ -683,6 +698,7 @@ export function PrivateNotesModal({
                       border="rgba(34, 197, 94, 0.30)"
                       entries={royaltyEntries.filter((e) => e.entryType === "given")}
                       onCancel={handleCancelRoyaltyEntry}
+                      canCancel={canCancelRoyalty}
                     />
                   </div>
 
@@ -850,6 +866,7 @@ function RoyaltyColumn({
   border,
   entries,
   onCancel,
+  canCancel,
 }: {
   title: string;
   color: string;
@@ -857,6 +874,7 @@ function RoyaltyColumn({
   border: string;
   entries: RoyaltyEntry[];
   onCancel: (entryId: string, amount: number) => void;
+  canCancel: boolean;
 }) {
   const liveEntries = entries.filter((e) => !e.cancelledAt);
   const sum = liveEntries.reduce((s, e) => s + e.amount, 0);
@@ -938,21 +956,23 @@ function RoyaltyColumn({
               >
                 {fmtNum(e.amount)}
               </span>
-              <button
-                type="button"
-                onClick={() => onCancel(e.id, e.amount)}
-                style={{
-                  background: "transparent",
-                  border: "none",
-                  color: "var(--muted)",
-                  fontSize: 11,
-                  cursor: "pointer",
-                  padding: 2,
-                }}
-                title="Cancel this entry (logged)"
-              >
-                ✕
-              </button>
+              {canCancel && (
+                <button
+                  type="button"
+                  onClick={() => onCancel(e.id, e.amount)}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    color: "var(--muted)",
+                    fontSize: 11,
+                    cursor: "pointer",
+                    padding: 2,
+                  }}
+                  title="Cancel this entry (logged) — developer / owner only"
+                >
+                  ✕
+                </button>
+              )}
             </div>
             {e.description && (
               <span style={{ fontSize: 11, color: "var(--text)" }}>

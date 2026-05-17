@@ -10,6 +10,7 @@ import {
 import { upsertBillVendorAction } from "../../actions";
 import { VendorForm } from "../vendor-form";
 import { PrivateNotesModal } from "./private-notes-modal";
+import { RoyaltyNetPeek } from "./royalty-net-peek";
 import {
   AccountsHero,
   ACCOUNTS_TOKENS,
@@ -253,36 +254,12 @@ export default async function BillVendorDetailPage({
         </div>
       )}
 
-      {/* Mig 053 follow-on (Daksh, May 2026): tiny royalty net
-          balance line. Sits just above the "Edit vendor details"
-          card so it reads as part of the vendor's identity block
-          (right under the lifetime totals, above the edit /
-          history rows). Mono font, 11px, color-coded green for
-          positive, red for negative. Hidden when zero or when
-          the role can't see private data. */}
+      {/* Mig 061 follow-on (Daksh): the always-visible "Net: +/-X"
+          text was too exposed — anyone glancing at the screen
+          could read the royalty balance. Replaced with a tiny
+          dot peek; click → reveal for 10s → auto-collapse. */}
       {canSeeRoyaltyNet && royaltyNet !== null && royaltyNet !== 0 && (
-        <div
-          style={{
-            fontSize: 11,
-            fontWeight: 600,
-            color: "var(--muted)",
-            marginBottom: 6,
-            fontFamily: "ui-monospace, monospace",
-            letterSpacing: "0.02em",
-          }}
-          title="Royalty points net balance · Paid − Received. Positive means you've paid more than you've received."
-        >
-          Net:{" "}
-          <span
-            style={{
-              color: royaltyNet > 0 ? "#15803d" : "#b91c1c",
-              fontWeight: 800,
-            }}
-          >
-            {royaltyNet > 0 ? "+" : "−"}
-            {Math.abs(royaltyNet).toLocaleString("en-IN")}
-          </span>
-        </div>
+        <RoyaltyNetPeek netValue={royaltyNet} />
       )}
 
       {/* Mig 061 follow-on (Daksh): the 🔒 private-notes/royalty
@@ -299,7 +276,13 @@ export default async function BillVendorDetailPage({
             marginBottom: 12,
           }}
         >
-          <PrivateNotesModal vendorId={id} canShow={canSeeRoyaltyNet} />
+          <PrivateNotesModal
+            vendorId={id}
+            canShow={canSeeRoyaltyNet}
+            canCancelRoyalty={
+              profile.role === "developer" || profile.role === "owner"
+            }
+          />
         </div>
       )}
 
