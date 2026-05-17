@@ -150,28 +150,15 @@ const navEntries: NavEntry[] = [
     department: "production",
   },
   {
-    // Mig 060 — Cutter Expenses entry surface. Same role list as
-    // /carving/expenses (CNC Expenses) per Daksh: one person handles
-    // both departments' opex data entry. team_head also sees it so
-    // the cutting-side manager can sanity-check what the entry user
-    // has logged.
+    // Mig 060 follow-on (Daksh): Cutter Expenses is the data-entry
+    // user's primary work surface — only `cnc_expense_entry` sees it
+    // as a top-level sidebar entry. Owner / team_head can reach the
+    // same page via the dashboard's Various Costing card → drill in.
+    // Developer keeps access via the "More" expandable group below.
     href: "/cutting/expenses",
     label: "Cutter Expenses",
     icon: "💸",
-    roles: ["developer", "owner", "team_head", "cnc_expense_entry"],
-    department: "production",
-  },
-  {
-    // Mig 060 — Various Costing report (CNC + Cutter cost per CFT).
-    // team_head + carving_head get a sidebar shortcut because they
-    // don't see the dashboard hero card. Daksh: the
-    // cnc_expense_entry user ONLY does data entry (Cutter Expenses
-    // + CNC Expenses) — they don't need the cost-report surface, so
-    // it's omitted from their sidebar to keep their nav focused.
-    href: "/reports/various-costing",
-    label: "Various Costing",
-    icon: "📊",
-    roles: ["developer", "owner", "team_head", "carving_head"],
+    roles: ["cnc_expense_entry"],
     department: "production",
   },
   {
@@ -206,16 +193,35 @@ const navEntries: NavEntry[] = [
     department: "production",
   },
   {
-    // Mig 054 follow-on (Daksh): consolidate three "specialist-role"
-    // pages into one collapsible group for users (mainly developer
-    // + owner) who can see all of them. Single-role users for whom
-    // only ONE child resolves see it as a flat link automatically
-    // (the renderer's 1-visible-child path).
+    // Mig 060 follow-on (Daksh): CNC Expenses, like Cutter Expenses,
+    // is the data-entry user's work surface only. Owner / carving_head
+    // reach the report via the dashboard's Various Costing card. Dev
+    // keeps access via the "More" expandable group below.
+    href: "/carving/expenses",
+    label: "CNC Expenses",
+    icon: "💸",
+    roles: ["cnc_expense_entry"],
+    department: "production",
+  },
+  {
+    // Mig 054 follow-on (Daksh): collapsible developer-only group
+    // for back-office surfaces the dev needs quick access to but
+    // the rest of the team reaches via dashboard cards / direct
+    // role-gated entries. Single-role users for whom only ONE
+    // child resolves see it as a flat link automatically (the
+    // renderer's 1-visible-child path) — that's how vendor /
+    // slab_transfer get their flat "My Jobs" / "Slab Transfer"
+    // links.
+    //
+    // Mig 060 follow-on (Daksh): owner + carving_head + cnc_expense_entry
+    // removed from outer roles — they no longer have any visible
+    // children here (Cutter / CNC / Various are dev-only inside this
+    // group, and the entry user has direct sidebar entries above).
     type: "group",
     label: "More",
     icon: "⋯",
     department: "production",
-    roles: ["developer", "owner", "vendor", "slab_transfer", "carving_head", "cnc_expense_entry"],
+    roles: ["developer", "vendor", "slab_transfer"],
     children: [
       {
         href: "/vendor",
@@ -235,7 +241,21 @@ const navEntries: NavEntry[] = [
         href: "/carving/expenses",
         label: "CNC Expenses",
         icon: "💸",
-        roles: ["developer", "owner", "carving_head", "cnc_expense_entry"],
+        roles: ["developer"],
+        department: "production",
+      },
+      {
+        href: "/cutting/expenses",
+        label: "Cutter Expenses",
+        icon: "💸",
+        roles: ["developer"],
+        department: "production",
+      },
+      {
+        href: "/reports/various-costing",
+        label: "Various Costing",
+        icon: "📊",
+        roles: ["developer"],
         department: "production",
       },
     ],
@@ -244,7 +264,7 @@ const navEntries: NavEntry[] = [
   {
     type: "divider",
     label: "ACCOUNTS",
-    roles: ["developer", "owner", "accountant", "crosscheck", "final_auditor"],
+    roles: ["developer", "owner", "accountant", "crosscheck", "accountant_star"],
     department: "finance",
   },
   {
@@ -254,7 +274,7 @@ const navEntries: NavEntry[] = [
     href: "/accounts/bills",
     label: "All Bills",
     icon: "📑",
-    roles: ["developer", "owner", "accountant", "crosscheck", "final_auditor"],
+    roles: ["developer", "owner", "accountant", "crosscheck", "accountant_star"],
     department: "finance",
   },
   {
@@ -266,35 +286,35 @@ const navEntries: NavEntry[] = [
     href: "/accounts/approvals",
     label: "Crosscheck Queue",
     icon: "✅",
-    roles: ["crosscheck", "final_auditor"],
+    roles: ["crosscheck", "accountant_star"],
     department: "finance",
   },
   {
     href: "/accounts",
     label: "Due Bills",
     icon: "💰",
-    roles: ["developer", "owner", "accountant", "final_auditor"],
+    roles: ["developer", "owner", "accountant", "accountant_star"],
     department: "finance",
   },
   {
     href: "/accounts/pay-today",
     label: "Pay Today",
     icon: "💸",
-    roles: ["accountant", "final_auditor"],
+    roles: ["accountant", "accountant_star"],
     department: "finance",
   },
   {
     href: "/accounts/payments",
     label: "Payment History",
     icon: "🗂️",
-    roles: ["developer", "owner", "accountant", "final_auditor"],
+    roles: ["developer", "owner", "accountant", "accountant_star"],
     department: "finance",
   },
   {
     href: "/accounts/vendors",
     label: "Vendor Account",
     icon: "🏢",
-    roles: ["developer", "owner", "accountant", "final_auditor"],
+    roles: ["developer", "owner", "accountant", "accountant_star"],
     department: "finance",
   },
   {
@@ -309,7 +329,7 @@ const navEntries: NavEntry[] = [
     href: "/accounts/final-audit",
     label: "Final Audit",
     icon: "🧾",
-    roles: ["developer", "owner", "final_auditor"],
+    roles: ["developer", "owner", "accountant_star"],
     department: "finance",
   },
   // ── INVOICING section (Mig 038 → Mig 058 — party → challan →
@@ -318,35 +338,35 @@ const navEntries: NavEntry[] = [
   {
     type: "divider",
     label: "INVOICING",
-    roles: ["developer", "owner", "final_auditor"],
+    roles: ["developer", "owner", "accountant_star"],
     department: "invoicing",
   },
   {
     href: "/invoicing",
     label: "Dashboard",
     icon: "📊",
-    roles: ["developer", "owner", "final_auditor"],
+    roles: ["developer", "owner", "accountant_star"],
     department: "invoicing",
   },
   {
     href: "/invoicing/parties",
     label: "Parties",
     icon: "👤",
-    roles: ["developer", "owner", "final_auditor"],
+    roles: ["developer", "owner", "accountant_star"],
     department: "invoicing",
   },
   {
     href: "/invoicing/challans",
     label: "Challans",
     icon: "📋",
-    roles: ["developer", "owner", "final_auditor"],
+    roles: ["developer", "owner", "accountant_star"],
     department: "invoicing",
   },
   {
     href: "/invoicing/invoices",
     label: "Invoices",
     icon: "🧾",
-    roles: ["developer", "owner", "final_auditor"],
+    roles: ["developer", "owner", "accountant_star"],
     department: "invoicing",
   },
   // ── INVENTORY section (Migration 041 — Scaffolding v1) ──────────
@@ -403,9 +423,10 @@ function roleLabel(role: AppRole): string {
     crosscheck: "CROSSCHECK",
     storekeeper: "STOREKEEPER",
     // Mig 058 — Daksh: "change to accountant with star — we have
-    // 2 accountants and don't want to bias one as senior." Display
-    // label only; DB enum stays `final_auditor`.
-    final_auditor: "ACCOUNTANT ★",
+    // 2 accountants and don't want to bias one as senior." Mig 061
+    // followed up by renaming the DB enum to match
+    // (`final_auditor` → `accountant_star`).
+    accountant_star: "ACCOUNTANT ★",
     // Mig 060 — was "CNC EXPENSE ENTRY". Renamed to "EXPENSES
     // ENTRY" because the same role now handles BOTH cutter +
     // CNC expenses. Display label only; DB enum stays

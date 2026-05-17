@@ -386,7 +386,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                   role === "owner" ||
                   role === "accountant" ||
                   // Mig 053 — final auditor has full finance access.
-                  role === "final_auditor");
+                  role === "accountant_star");
               const showInventory =
                 dept === "inventory" &&
                 (role === "developer" || role === "owner");
@@ -435,7 +435,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                 cutting_operator: "CUTTING OPERATOR",
                 biller: "BILLER",
                 accountant: "ACCOUNTANT",
-                final_auditor: "ACCOUNTANT ★",
+                accountant_star: "ACCOUNTANT ★",
                 cnc_expense_entry: "EXPENSES ENTRY",
               } as Record<string, string>)[profile.role] ?? profile.role.replace(/_/g, " ").toUpperCase()}
             </span>

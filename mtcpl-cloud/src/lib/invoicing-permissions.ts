@@ -17,6 +17,6 @@ import type { Profile } from "@/lib/types";
 export function canUseInvoicing(p: Pick<Profile, "role">): boolean {
   if (p.role === "developer") return true;
   if (p.role === "owner") return true;
-  if (p.role === "final_auditor") return true;
+  if (p.role === "accountant_star") return true;
   return false;
 }

@@ -321,7 +321,7 @@ export async function rejectBillAction(formData: FormData): Promise<ActionResult
         // mig 037 model — biller stays for legacy compat) gets the
         // notification bell ping. They previously had to scroll
         // All Bills to find a rejected one.
-        targetRoles: ["biller", "developer", "accountant", "final_auditor"],
+        targetRoles: ["biller", "developer", "accountant", "accountant_star"],
       },
     ),
   ]).catch((e) => console.warn("[rejectBillAction] cleanup failed", e));
@@ -2066,7 +2066,7 @@ function canAccessPrivateNotes(p: Profile): boolean {
     p.role === "developer" ||
     p.role === "owner" ||
     p.role === "accountant" ||
-    p.role === "final_auditor"
+    p.role === "accountant_star"
   );
 }
 

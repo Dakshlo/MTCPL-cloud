@@ -48,7 +48,7 @@ export type AppRole =
   //   role has full accountant powers and also acts as owner backup
   //   for confirming proposed payments + approving submitted bills
   //   when dad isn't available.
-  | "final_auditor"
+  | "accountant_star"
   // Migration 054 — CNC operational expense entry.
   //
   // cnc_expense_entry — single-page portal at /carving/expenses.

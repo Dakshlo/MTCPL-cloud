@@ -36,11 +36,12 @@ const UI_ROLES_ALL = [
   { value: "slab_transfer",    label: "SLAB TRANSFER" },
   { value: "accountant",       label: "ACCOUNTANT" },
   { value: "crosscheck",       label: "CROSSCHECK" },
-  // Mig 053 — Final Audit role. Has full accountant powers PLUS
+  // Mig 053 — was `final_auditor`. Has full accountant powers PLUS
   // owner backup for confirming proposed payments + approving bills.
   // Primary daily duty is the /accounts/final-audit page.
-  // Mig 058 — display as "ACCOUNTANT ★". DB enum stays `final_auditor`.
-  { value: "final_auditor",    label: "ACCOUNTANT ★" },
+  // Mig 058 — display as "ACCOUNTANT ★".
+  // Mig 061 — DB enum renamed from `final_auditor` to `accountant_star`.
+  { value: "accountant_star",    label: "ACCOUNTANT ★" },
   // Mig 054 — CNC operational expense entry. Mig 060 widened to
   // cutter expenses too, so the display label is just "EXPENSES
   // ENTRY" now (DB enum stays `cnc_expense_entry`).
@@ -75,8 +76,10 @@ const ROLE_ACCESS: Record<string, string[]> = {
   dispatch:         ["Dashboard"],
   vendor:           ["My Jobs"],
   slab_transfer:    ["Slab Transfer"],
-  // Mig 053 — final auditor sees the full finance toolbox.
-  final_auditor:    ["All Bills", "Crosscheck Queue", "Due Bills", "Pay Today", "Final Audit", "Payment History", "Vendor Account"],
+  // Mig 053 — accountant_star (the starred accountant, was
+  // `final_auditor` until mig 061 renamed) sees the full finance
+  // toolbox.
+  accountant_star:  ["All Bills", "Crosscheck Queue", "Due Bills", "Pay Today", "Final Audit", "Payment History", "Vendor Account"],
   // Mig 054 — CNC expense entry role. Single-page portal — only
   // sees the CNC Expenses entry page under the Carving section.
   cnc_expense_entry: ["CNC Expenses"],

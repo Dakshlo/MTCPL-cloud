@@ -55,7 +55,7 @@ export function getDefaultRouteForRole(role?: AppRole | null) {
       // plate, but the bill queue is still the primary daily duty,
       // so the bill audit stays as the default landing.
       return "/accounts/approvals";
-    case "final_auditor":
+    case "accountant_star":
       // Mig 053 — UTR / bank-statement recheck. Lands on the
       // dedicated Final Audit queue.
       return "/accounts/final-audit";

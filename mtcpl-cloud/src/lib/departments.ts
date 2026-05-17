@@ -138,7 +138,7 @@ export function allowedDepartmentsForRole(role: AppRole): Department[] {
     // Mig 058 follow-on (Daksh): ACCOUNTANT★ gets a 2-tile
     // Finance / Invoicing switcher. Plain accountant / biller /
     // crosscheck stay locked to Finance only.
-    case "final_auditor":
+    case "accountant_star":
       return ["finance", "invoicing"];
     case "biller":
     case "accountant":

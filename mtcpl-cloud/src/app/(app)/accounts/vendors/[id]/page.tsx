@@ -62,7 +62,7 @@ export default async function BillVendorDetailPage({
     // Mig 053 follow-on — final_auditor sees the royalty net + can
     // open the private-notes modal, matching the canAccessPrivateNotes
     // server gate.
-    profile.role === "final_auditor";
+    profile.role === "accountant_star";
   let royaltyNet: number | null = null;
   if (canSeeRoyaltyNet) {
     const { data: royaltyRows, error: royaltyErr } = await supabase
