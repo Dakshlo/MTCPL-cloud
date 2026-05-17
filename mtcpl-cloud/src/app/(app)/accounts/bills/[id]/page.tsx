@@ -148,7 +148,14 @@ export default async function BillDetailPage({
     !isLocked &&
     ((bill.status === "rejected" &&
       (canApproveBills(profile) || isOwnBill || canSubmitBills(profile))) ||
-      (bill.status === "pending_approval" && canApproveBills(profile)) ||
+      // Mig 058 follow-on (Daksh): pending bills are also editable
+      // by the submitter / accountant / biller — they can fix typos
+      // before the owner sees it. The form locks bill_date +
+      // vendor_bill_no in this mode (those feed the token); other
+      // fields stay editable. Server-side gate in editBillAction
+      // matches this widening.
+      (bill.status === "pending_approval" &&
+        (canApproveBills(profile) || isOwnBill || canSubmitBills(profile))) ||
       // Mig 042 follow-on (Daksh): once a bill is in the due-bills
       // list, only the owner can edit. Accountant cannot — they must
       // ask the owner. The button stays hidden for them.
@@ -1039,9 +1046,17 @@ export default async function BillDetailPage({
               <Link href={`/accounts/bills/${bill.id}/edit`} style={BUTTON_STYLES.secondary}>
                 ✏ Edit bill
               </Link>
+              {/* Mig 058 follow-on (Daksh) — accountant + biller
+                  can now cancel their own pending/rejected bills
+                  (the documented escape hatch for changing date /
+                  vendor invoice no). cancelBillAction enforces the
+                  same widened gate server-side. Owner / dev still
+                  see this for any non-paid/approved bill. */}
               {!isLocked &&
                 (bill.status === "pending_approval" || bill.status === "rejected") &&
-                (profile.role === "developer" || profile.role === "owner") && (
+                (profile.role === "developer" ||
+                  profile.role === "owner" ||
+                  canSubmitBills(profile)) && (
                   <form action={cancelBillFormAction}>
                     <input type="hidden" name="bill_id" value={bill.id} />
                     <button type="submit" style={{ ...BUTTON_STYLES.ghost, width: "100%" }}>
