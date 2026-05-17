@@ -333,8 +333,8 @@ export function PrivateNotesModal({
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
-        width: 14,
-        height: 14,
+        width: 12,
+        height: 12,
         border: "none",
         background: "transparent",
         borderRadius: "50%",
@@ -347,10 +347,10 @@ export function PrivateNotesModal({
         aria-hidden
         style={{
           display: "inline-block",
-          width: 6,
-          height: 6,
+          width: 3,
+          height: 3,
           borderRadius: "50%",
-          background: "rgba(15, 23, 42, 0.35)",
+          background: "#000",
         }}
       />
     </button>

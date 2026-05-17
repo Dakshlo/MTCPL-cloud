@@ -93,8 +93,8 @@ export function RoyaltyNetPeek({
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
-        width: 10,
-        height: 10,
+        width: 12,
+        height: 12,
         border: "none",
         background: "transparent",
         borderRadius: "50%",
@@ -107,8 +107,8 @@ export function RoyaltyNetPeek({
         aria-hidden
         style={{
           display: "inline-block",
-          width: 4,
-          height: 4,
+          width: 3,
+          height: 3,
           borderRadius: "50%",
           background: "#000",
         }}
