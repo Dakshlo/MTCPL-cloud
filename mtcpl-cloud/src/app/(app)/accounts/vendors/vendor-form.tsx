@@ -234,6 +234,23 @@ export function VendorForm({
         </Field>
       </div>
 
+      {/* Mig 058 follow-on (Daksh) — email promoted out of the
+          collapsed "Additional details" section. It's how the
+          payment-voucher email reaches the vendor; needs to be
+          a primary field, not buried. */}
+      <Field
+        label="Email"
+        hint="Where the payment voucher is emailed after a bill is paid. Leave blank to skip emails for this vendor."
+      >
+        <input
+          type="email"
+          value={form.email}
+          onChange={(e) => setForm({ ...form, email: e.target.value })}
+          placeholder="vendor@example.com"
+          style={INPUT_STYLE}
+        />
+      </Field>
+
       {/* Mig 047 — HDFC's bulk payment file (.001) requires the bene
           name to EXACTLY MATCH what HDFC has on record. The internal
           vendor name above can differ — this field carries the
@@ -330,7 +347,7 @@ export function VendorForm({
             padding: "6px 0",
           }}
         >
-          + Additional details (PAN · phone · email · address · UPI)
+          + Additional details (PAN · phone · address · UPI)
         </summary>
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -349,14 +366,6 @@ export function VendorForm({
               />
             </Field>
           </div>
-          <Field label="Email">
-            <input
-              type="email"
-              value={form.email}
-              onChange={(e) => setForm({ ...form, email: e.target.value })}
-              style={INPUT_STYLE}
-            />
-          </Field>
           <Field label="Address">
             <textarea
               value={form.address}
