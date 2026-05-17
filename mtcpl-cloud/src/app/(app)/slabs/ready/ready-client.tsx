@@ -473,14 +473,21 @@ export function ReadySlabsClient({
               style={{ width: 150 }}
             >
               <option value="">All months</option>
-              {[
-                "January", "February", "March", "April", "May", "June",
-                "July", "August", "September", "October", "November", "December",
-              ].map((name, i) => (
-                <option key={name} value={i + 1}>
-                  {name}
-                </option>
-              ))}
+              {(() => {
+                const currentMonth = new Date().getMonth() + 1;
+                return [
+                  "January", "February", "March", "April", "May", "June",
+                  "July", "August", "September", "October", "November", "December",
+                ].map((name, i) => {
+                  const m = i + 1;
+                  const label = m === currentMonth ? `${name} ●` : name;
+                  return (
+                    <option key={name} value={m}>
+                      {label}
+                    </option>
+                  );
+                });
+              })()}
             </select>
           </label>
 

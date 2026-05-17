@@ -280,10 +280,13 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
 
       {/* ── REPORT BUTTONS ──
           Both reports open as center-peek iframe modals over /embed
-          routes so the dashboard never goes through a full nav. The
-          inline Link cards used to bounce the user out and force a
-          back-button round-trip — now they stay on the dashboard
-          and just click through. */}
+          routes so the dashboard never goes through a full nav.
+          Mig follow-on (Daksh, May 2026): the two cards used to be
+          plain white tiles next to four saturated gradient hero
+          cards above — felt under-styled. Pumped up the look with
+          a tinted gradient + a thick coloured left border + a
+          soft shadow so they read like first-class entries while
+          keeping the same shape (icon · title · subtitle · Open). */}
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
         <div style={{ flex: "1 1 220px", display: "flex" }}>
           <PeekIframe
@@ -294,11 +297,14 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
             modalTitle="Block Report"
             triggerStyle={{
               flex: 1,
-              padding: "14px 20px",
-              background: "var(--surface)",
-              border: "1px solid var(--border)",
-              borderStyle: "solid",
-              borderRadius: 10,
+              padding: "18px 22px 18px 26px",
+              background:
+                "linear-gradient(135deg, #ffffff 0%, #eef4ff 100%)",
+              border: "1px solid #c7d2fe",
+              borderLeft: "4px solid #4f46e5",
+              borderRadius: 12,
+              boxShadow:
+                "0 1px 2px rgba(15,23,42,0.04), 0 4px 12px rgba(15,23,42,0.06)",
             }}
           />
         </div>
@@ -312,11 +318,14 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
             modalTitle="Ready Sizes Report"
             triggerStyle={{
               flex: 1,
-              padding: "14px 20px",
-              background: "var(--surface)",
-              border: "1px solid var(--border)",
-              borderStyle: "solid",
-              borderRadius: 10,
+              padding: "18px 22px 18px 26px",
+              background:
+                "linear-gradient(135deg, #ffffff 0%, #fff7ec 100%)",
+              border: "1px solid #fde7c1",
+              borderLeft: "4px solid #d97706",
+              borderRadius: 12,
+              boxShadow:
+                "0 1px 2px rgba(15,23,42,0.04), 0 4px 12px rgba(15,23,42,0.06)",
             }}
           />
         </div>
