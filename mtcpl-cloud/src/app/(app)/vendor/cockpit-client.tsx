@@ -401,8 +401,12 @@ export function VendorCockpitClient({
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-              gap: 10,
+              // 240px floor gives the cards more breathing room on
+              // an 11" tablet (typical 1080-1366 wide → 4-5 cols)
+              // and stops the slab-row inside running cards from
+              // wrapping awkwardly. Gap up from 10 → 12 to match.
+              gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))",
+              gap: 12,
             }}
           >
             {machines.map((m) => (
@@ -956,12 +960,14 @@ function MachineCard({
     downtimeLabel = `Down for ${fmtDuration(downMin)}`;
   }
 
-  // Lathe machines get a heavily-rounded pill shape so they're
-  // unmistakable next to the rectangular CNC cards on the cockpit
-  // grid. We can't make the whole card a true circle (way too much
-  // content — header, slab thumb, action buttons), but a 28px
-  // border-radius is round enough to read as "the rounder one =
-  // lathe" at a glance.
+  // Mig follow-on (Daksh, May 2026): lathe cards bumped from the
+  // 28px "kinda round" radius to 60px, which reads as a true
+  // pill on the cockpit grid — unmistakable next to the rectangular
+  // CNC cards. We can't make the whole card a perfect circle (the
+  // running state has slab thumb + countdown + action buttons that
+  // need columnar room), but the pill silhouette + the violet
+  // "chuck mark" decoration in the upper-right corner tells the
+  // operator "this one spins round work" at a glance on a fast scan.
   const isLathe = machine.machine_type === "lathe";
   return (
     <div
@@ -969,7 +975,7 @@ function MachineCard({
         padding: 0,
         background: tint.bg,
         border: `2px solid ${tint.border}`,
-        borderRadius: isLathe ? 28 : 10,
+        borderRadius: isLathe ? 60 : 10,
         display: "flex",
         flexDirection: "column",
         position: "relative",
@@ -983,6 +989,53 @@ function MachineCard({
               : "none",
       }}
     >
+      {/* Mig follow-on (Daksh) — chuck-mark decoration on lathe
+          cards. Three nested rings + a small spinning dot in the
+          top-right corner so a glance instantly reads "lathe =
+          round work". Decorative only — no click, no semantic
+          meaning beyond shape. */}
+      {isLathe && (
+        <div
+          aria-hidden
+          style={{
+            position: "absolute",
+            top: 10,
+            right: 14,
+            width: 22,
+            height: 22,
+            borderRadius: "50%",
+            background:
+              "radial-gradient(circle, rgba(124,58,237,0.35) 0%, rgba(124,58,237,0.10) 60%, rgba(124,58,237,0) 100%)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            pointerEvents: "none",
+          }}
+        >
+          <div
+            style={{
+              width: 12,
+              height: 12,
+              borderRadius: "50%",
+              border: "1.5px solid rgba(124,58,237,0.55)",
+              position: "relative",
+            }}
+          >
+            <div
+              style={{
+                position: "absolute",
+                top: 1,
+                left: "50%",
+                width: 2,
+                height: 2,
+                marginLeft: -1,
+                borderRadius: "50%",
+                background: "#7c3aed",
+              }}
+            />
+          </div>
+        </div>
+      )}
       {/* Top accent bar — colour the entire card edge so cards are
           distinguishable at a glance even when scanning fast.
           Skipped for lathes since the pill-shape would clip the
@@ -1152,7 +1205,31 @@ function MachineCard({
                 }}
               >
                 {slabJob.slab && (
-                  <div style={{ flexShrink: 0 }}>
+                  <div
+                    style={{
+                      flexShrink: 0,
+                      // Mig follow-on (Daksh) — lathe = round work,
+                      // so visually clip the slab thumb into a circle
+                      // for lathe machines. Iso-block SVG inside
+                      // still renders normally; the wrapper masks it
+                      // with overflow: hidden + 50% radius + a soft
+                      // violet ring matching the chuck mark.
+                      ...(isLathe
+                        ? {
+                            width: 56,
+                            height: 56,
+                            borderRadius: "50%",
+                            overflow: "hidden",
+                            boxShadow:
+                              "inset 0 0 0 2px rgba(124,58,237,0.35)",
+                            background: "var(--surface-alt)",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }
+                        : {}),
+                    }}
+                  >
                     <SlabThumb
                       stone={slabJob.slab.stone}
                       l={slabJob.slab.length_in}
