@@ -393,11 +393,16 @@ export function VendorCockpitClient({
         )}
       </Section>
 
-      {/* Machine grid */}
-      <Section title="Machines" subtitle={`${machines.length} CNC${machines.length !== 1 ? "s" : ""}`}>
-        {machines.length === 0 ? (
-          <Empty text="No machines configured for this vendor. Add some in Manage Vendors." />
-        ) : (
+      {/* Machine grid — Mig follow-on (Daksh, May 2026): lathes
+          split into their own section below the CNC grid so they
+          read as a distinct group instead of being mixed into
+          the rectangular CNC cards. Same MachineCard component,
+          same grid template — just two grids stacked. */}
+      {(() => {
+        const cncMachines = machines.filter((m) => m.machine_type !== "lathe");
+        const latheMachines = machines.filter((m) => m.machine_type === "lathe");
+
+        const renderGrid = (list: typeof machines) => (
           <div
             style={{
               display: "grid",
@@ -409,7 +414,7 @@ export function VendorCockpitClient({
               gap: 12,
             }}
           >
-            {machines.map((m) => (
+            {list.map((m) => (
               <MachineCard
                 key={m.id}
                 machine={m}
@@ -424,8 +429,37 @@ export function VendorCockpitClient({
               />
             ))}
           </div>
-        )}
-      </Section>
+        );
+
+        if (machines.length === 0) {
+          return (
+            <Section title="Machines" subtitle="0">
+              <Empty text="No machines configured for this vendor. Add some in Manage Vendors." />
+            </Section>
+          );
+        }
+
+        return (
+          <>
+            {cncMachines.length > 0 && (
+              <Section
+                title="CNC Machines"
+                subtitle={`${cncMachines.length} machine${cncMachines.length !== 1 ? "s" : ""}`}
+              >
+                {renderGrid(cncMachines)}
+              </Section>
+            )}
+            {latheMachines.length > 0 && (
+              <Section
+                title="Lathe Machines"
+                subtitle={`${latheMachines.length} lathe${latheMachines.length !== 1 ? "s" : ""} · round work`}
+              >
+                {renderGrid(latheMachines)}
+              </Section>
+            )}
+          </>
+        );
+      })()}
 
       {/* Recent completed */}
       {recent.length > 0 && (
