@@ -540,12 +540,28 @@ export async function buildCncReport(period: CncReportPeriod): Promise<CncMonthl
   // excluded by partial-index condition on the query.
   //
   // Build the unique set of (year, month) pairs the period spans.
+  // Mig 063 follow-on (Daksh) — electricity bills always lag a
+  // month. For the calc, shift the electricity lookup to the
+  // previous month so a "current month" report (May) uses the
+  // April electricity entry that's already on hand. Other
+  // categories stay on the period's own month.
+  //
+  // We need to fetch every touched month AND its previous month
+  // for electricity lookups. Built the union below + keyed the
+  // result map by category so the day-loop downstream can split.
+  function prevMonthOf(y: number, m: number): { year: number; month: number } {
+    return m === 1 ? { year: y - 1, month: 12 } : { year: y, month: m - 1 };
+  }
   const yearMonthPairs = new Set<string>();
   for (let ms = startMs; ms <= endMs; ms += 86_400_000) {
     const p = parseDateKeyMs(ms);
     yearMonthPairs.add(`${p.year}|${p.month}`);
+    const pm = prevMonthOf(p.year, p.month);
+    yearMonthPairs.add(`${pm.year}|${pm.month}`);
   }
-  const expenseByVendorMonth = new Map<string, number>(); // key = vendor|year|month
+  // Two lookups: non-electricity (same-month) + electricity (shifted).
+  const nonElectricByVendorMonth = new Map<string, number>(); // vendor|year|month
+  const electricByVendorMonth = new Map<string, number>();    // vendor|year|month
   if (yearMonthPairs.size > 0 && machineCols.length > 0) {
     const distinctVendorIds = [...new Set(machineCols.map((m) => m.vendor_id))];
     const yearList = [...new Set([...yearMonthPairs].map((k) => Number(k.split("|")[0])))];
@@ -556,7 +572,7 @@ export async function buildCncReport(period: CncReportPeriod): Promise<CncMonthl
     // table is small, so this is cheap.
     const { data: expensesRaw, error: expensesErr } = await admin
       .from("cnc_vendor_expenses")
-      .select("vendor_id, year, month, amount")
+      .select("vendor_id, year, month, category, amount")
       .in("vendor_id", distinctVendorIds)
       .in("year", yearList)
       .in("month", monthList)
@@ -568,11 +584,15 @@ export async function buildCncReport(period: CncReportPeriod): Promise<CncMonthl
       console.warn("[cnc-monthly-report] expenses fetch failed", expensesErr);
     } else {
       for (const r of (expensesRaw ?? []) as Array<{
-        vendor_id: string; year: number; month: number; amount: number | string;
+        vendor_id: string; year: number; month: number; category: string; amount: number | string;
       }>) {
         const key = `${r.vendor_id}|${r.year}|${r.month}`;
-        const prev = expenseByVendorMonth.get(key) ?? 0;
-        expenseByVendorMonth.set(key, prev + Number(r.amount ?? 0));
+        const amount = Number(r.amount ?? 0);
+        if (r.category === "electricity") {
+          electricByVendorMonth.set(key, (electricByVendorMonth.get(key) ?? 0) + amount);
+        } else {
+          nonElectricByVendorMonth.set(key, (nonElectricByVendorMonth.get(key) ?? 0) + amount);
+        }
       }
     }
   }
@@ -643,8 +663,18 @@ export async function buildCncReport(period: CncReportPeriod): Promise<CncMonthl
     for (let ms = startMs; ms <= endMs; ms += 86_400_000) {
       const p = parseDateKeyMs(ms);
       const dim = daysInMonth(p.year, p.month);
-      // Operational: vendor's monthly expense total × (1 / daysInMonth)
-      const monthlyOp = expenseByVendorMonth.get(`${grp.vendor_id}|${p.year}|${p.month}`) ?? 0;
+      // Mig 063 follow-on (Daksh) — non-electricity stays on the
+      // period's own month; electricity reaches back one month
+      // (bills always arrive late, so the May report uses the
+      // April electricity entry that's actually on file).
+      const nonElectric = nonElectricByVendorMonth.get(
+        `${grp.vendor_id}|${p.year}|${p.month}`,
+      ) ?? 0;
+      const electricMonth = prevMonthOf(p.year, p.month);
+      const electric = electricByVendorMonth.get(
+        `${grp.vendor_id}|${electricMonth.year}|${electricMonth.month}`,
+      ) ?? 0;
+      const monthlyOp = nonElectric + electric;
       operationalForPeriod += monthlyOp / dim;
       // Depreciation: sum across this vendor's machines.
       for (const m of grp.machines) {

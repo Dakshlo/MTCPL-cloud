@@ -91,6 +91,26 @@ export default async function CncMonthlyReportPage({ searchParams }: { searchPar
       `}</style>
       <Header period={period} xlsxHref={xlsxHref} />
       <ReportTable report={report} />
+      {/* Mig 063 follow-on (Daksh) — electricity bills land late
+          (end of month / early next month). The cost calc shifts
+          the electricity lookup one month back so a "current
+          month" view doesn't sit empty waiting for the bill. */}
+      <div
+        style={{
+          marginTop: 10,
+          padding: "8px 12px",
+          fontSize: 11,
+          color: "var(--muted)",
+          background: "var(--surface)",
+          border: "1px dashed var(--border)",
+          borderRadius: 8,
+        }}
+      >
+        ⚡ <strong style={{ color: "var(--text)" }}>Electricity</strong> uses last month's bill —
+        utility bills arrive end-of-month, so the entry you make for
+        May feeds into June's cost calc. Tools / labor / maintenance /
+        office / other stay on the same month.
+      </div>
     </div>
   );
 }

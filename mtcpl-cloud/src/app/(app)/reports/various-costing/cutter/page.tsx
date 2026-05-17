@@ -312,6 +312,22 @@ export default async function CutterCostReportPage({ searchParams }: { searchPar
               </tbody>
             </table>
           )}
+          {/* Mig 063 follow-on (Daksh) — explain the electricity
+              shift so the user doesn't get confused why this month's
+              electricity entry isn't showing up. */}
+          <div
+            style={{
+              padding: "10px 16px",
+              borderTop: "1px dashed var(--border)",
+              fontSize: 11,
+              color: "var(--muted)",
+              background: "var(--bg)",
+            }}
+          >
+            ⚡ Electricity uses last month's bill — utility bills
+            arrive end-of-month, so the entry you make for May feeds
+            into June's report. Other categories stay on the same month.
+          </div>
         </Panel>
 
         <Panel title="Depreciation source">

@@ -336,8 +336,32 @@ export async function buildCutterCostReport(
     }
   }
 
-  const yearList = [...new Set([...monthWeights.values()].map((w) => w.year))];
-  const monthList = [...new Set([...monthWeights.values()].map((w) => w.month))];
+  // Mig 063 follow-on (Daksh) — electricity bills always arrive
+  // late (end of month / early next month), so a "current month"
+  // report has no electricity entry to pull from. Fix: for the
+  // electricity category specifically, shift the lookup one month
+  // back. Period in month M uses the electricity bill entered for
+  // month (M-1). Other categories keep the same-month lookup.
+  //
+  // Applied uniformly to past months too — the rule is consistent:
+  // "electricity entry for month X feeds into month (X+1)'s report"
+  // — so users don't have to remember a "current-month-only"
+  // special case.
+  //
+  // We need to fetch each touched month AND its previous month
+  // (for the electricity shift). Build the union below.
+  function prevMonthOf(y: number, m: number): { year: number; month: number } {
+    return m === 1 ? { year: y - 1, month: 12 } : { year: y, month: m - 1 };
+  }
+
+  const fetchMonths = new Set<string>();
+  for (const w of monthWeights.values()) {
+    fetchMonths.add(`${w.year}|${w.month}`);
+    const pm = prevMonthOf(w.year, w.month);
+    fetchMonths.add(`${pm.year}|${pm.month}`);
+  }
+  const yearList = [...new Set([...fetchMonths].map((k) => Number(k.split("|")[0])))];
+  const monthList = [...new Set([...fetchMonths].map((k) => Number(k.split("|")[1])))];
 
   let operationalForPeriod = 0;
   const breakdownAcc = new Map<CutterExpenseBreakdownRow["category"], number>();
@@ -354,15 +378,34 @@ export async function buildCutterCostReport(
       console.warn("[cutter-cost-report] expenses fetch failed", expErr);
     } else {
       type ExpRow = { year: number; month: number; category: string; amount: number | string };
+      // Build lookup keyed by (year, month, category) so we can
+      // do same-month vs shifted-month lookups during attribution.
+      const expLookup = new Map<string, number>();
       for (const e of (expRaw ?? []) as ExpRow[]) {
-        const key = `${e.year}|${e.month}`;
-        const weight = monthWeights.get(key);
-        if (!weight) continue;
-        const dim = daysInMonth(e.year, e.month);
-        const share = (Number(e.amount) || 0) * (weight.daysInPeriod / dim);
-        operationalForPeriod += share;
-        const cat = e.category as CutterExpenseBreakdownRow["category"];
-        breakdownAcc.set(cat, (breakdownAcc.get(cat) ?? 0) + share);
+        const key = `${e.year}|${e.month}|${e.category}`;
+        expLookup.set(key, (expLookup.get(key) ?? 0) + (Number(e.amount) || 0));
+      }
+      // Walk each month the period touches; for each category attribute
+      // its prorated share into the breakdown + the operational total.
+      const CATS: CutterExpenseBreakdownRow["category"][] = [
+        "electricity", "manpower", "repair_maintenance", "other",
+      ];
+      for (const w of monthWeights.values()) {
+        const dim = daysInMonth(w.year, w.month);
+        const weight = w.daysInPeriod / dim;
+        for (const cat of CATS) {
+          let amount: number;
+          if (cat === "electricity") {
+            const pm = prevMonthOf(w.year, w.month);
+            amount = expLookup.get(`${pm.year}|${pm.month}|electricity`) ?? 0;
+          } else {
+            amount = expLookup.get(`${w.year}|${w.month}|${cat}`) ?? 0;
+          }
+          if (amount === 0) continue;
+          const share = amount * weight;
+          operationalForPeriod += share;
+          breakdownAcc.set(cat, (breakdownAcc.get(cat) ?? 0) + share);
+        }
       }
     }
   }
