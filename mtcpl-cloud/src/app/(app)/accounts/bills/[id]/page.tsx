@@ -49,7 +49,7 @@ export default async function BillDetailPage({
   const { data: bill } = await supabase
     .from("bills")
     .select(
-      "id, token, vendor_bill_no, bill_date, description, cost_head, amount_subtotal, gst_percent, cgst_percent, sgst_percent, igst_percent, tds_percent, tcs_percent, amount_gst, amount_cgst, amount_sgst, amount_igst, amount_tds, amount_tcs, amount_total, amount_payable_to_vendor, amount_paid, amount_outstanding, status, rejection_note, partial_rejection_amount, partial_rejection_note, partial_rejection_at, partial_rejection_by, submitted_by, submitted_at, approved_by, approved_at, rejected_by, rejected_at, cancelled_by, cancelled_at, bill_vendor_id, bill_vendors(id, name, category, gstin, phone, email, address, bank_name, bank_account, ifsc, upi_id, tds_applicable, tcs_applicable)",
+      "id, token, vendor_bill_no, bill_date, description, cost_head, amount_subtotal, gst_percent, cgst_percent, sgst_percent, igst_percent, tds_percent, tcs_percent, amount_gst, amount_cgst, amount_sgst, amount_igst, amount_tds, amount_tcs, amount_total, amount_payable_to_vendor, amount_paid, amount_outstanding, block_cft, status, rejection_note, partial_rejection_amount, partial_rejection_note, partial_rejection_at, partial_rejection_by, submitted_by, submitted_at, approved_by, approved_at, rejected_by, rejected_at, cancelled_by, cancelled_at, bill_vendor_id, bill_vendors(id, name, category, gstin, phone, email, address, bank_name, bank_account, ifsc, upi_id, tds_applicable, tcs_applicable)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -481,6 +481,30 @@ export default async function BillDetailPage({
                 year: "numeric",
               })}
               {bill.cost_head ? <> · <span style={{ color: ACCOUNTS_TOKENS.warning, fontWeight: 600 }}>{bill.cost_head}</span></> : null}
+              {/* Mig 062 — block-purchase bills carry a CFT volume.
+                  Render as an inline chip in the meta row so it's
+                  visible at a glance + show ₹/CFT calc on hover. */}
+              {bill.block_cft != null && Number(bill.block_cft) > 0 && (
+                <>
+                  {" · "}
+                  <span
+                    title={`Stone volume on this bill. Effective ₹${(Number(bill.amount_subtotal) / Number(bill.block_cft)).toLocaleString("en-IN", { maximumFractionDigits: 2 })} per CFT (subtotal basis)`}
+                    style={{
+                      display: "inline-block",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      padding: "2px 8px",
+                      background: "#fce7f3",
+                      color: "#9d174d",
+                      borderRadius: 999,
+                      letterSpacing: "0.02em",
+                      fontFamily: "ui-monospace, monospace",
+                    }}
+                  >
+                    {Number(bill.block_cft).toLocaleString("en-IN", { maximumFractionDigits: 3 })} CFT
+                  </span>
+                </>
+              )}
             </p>
           </div>
         </div>

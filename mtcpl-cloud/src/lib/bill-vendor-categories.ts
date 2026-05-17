@@ -85,3 +85,13 @@ export function billVendorCategoryDisplay(value: string): string {
   if (!c) return value;
   return c.group ? `${c.group} — ${c.label}` : c.label;
 }
+
+/** Mig 062 — is this category one of the Block Purchase sub-types?
+ *  Drives the conditional CFT input on the bill-entry form: only
+ *  raw-stone bills get a CFT field. Mapped by group rather than a
+ *  hardcoded prefix so renaming a value stays safe. */
+export function isBlockPurchaseCategory(value: string | null | undefined): boolean {
+  if (!value) return false;
+  const c = BY_VALUE.get(value);
+  return c?.group === "Block Purchase";
+}

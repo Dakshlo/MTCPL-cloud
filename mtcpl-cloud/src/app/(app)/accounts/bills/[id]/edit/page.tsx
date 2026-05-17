@@ -28,7 +28,7 @@ export default async function EditBillPage({ params }: { params: Params }) {
   const { data: bill } = await supabase
     .from("bills")
     .select(
-      "id, bill_vendor_id, vendor_bill_no, bill_date, description, cost_head, amount_subtotal, gst_percent, cgst_percent, sgst_percent, igst_percent, tds_percent, tcs_percent, status, submitted_by",
+      "id, bill_vendor_id, vendor_bill_no, bill_date, description, cost_head, amount_subtotal, gst_percent, cgst_percent, sgst_percent, igst_percent, tds_percent, tcs_percent, block_cft, status, submitted_by",
     )
     .eq("id", id)
     .maybeSingle();
@@ -135,6 +135,7 @@ export default async function EditBillPage({ params }: { params: Params }) {
           igst_percent: Number(bill.igst_percent ?? 0),
           tds_percent: Number(bill.tds_percent ?? 0),
           tcs_percent: Number(bill.tcs_percent ?? 0),
+          block_cft: bill.block_cft != null ? Number(bill.block_cft) : null,
         }}
       />
     </section>

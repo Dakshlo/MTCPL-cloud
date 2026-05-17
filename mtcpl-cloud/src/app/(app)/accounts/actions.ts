@@ -72,6 +72,17 @@ export async function submitBillAction(
   const costHead = String(formData.get("cost_head") || "").trim() || null;
   const amountSubtotalRaw = String(formData.get("amount_subtotal") || "0");
 
+  // Mig 062 — bills.block_cft. Only meaningful for block-purchase
+  // vendors; ignored otherwise (the form only sends it when the
+  // selected vendor's category lies in the Block Purchase group).
+  // Empty string / 0 means "no CFT recorded" → null in DB.
+  const blockCftRaw = String(formData.get("block_cft") || "").trim();
+  const blockCftNum = blockCftRaw === "" ? null : Number(blockCftRaw);
+  const blockCft =
+    blockCftNum != null && Number.isFinite(blockCftNum) && blockCftNum > 0
+      ? blockCftNum
+      : null;
+
   // Migration 042 — tax breakdown. The form sends CGST/SGST/IGST
   // separately; gst_percent is computed as their sum so the existing
   // amount_gst / amount_total generated columns keep working
@@ -126,6 +137,7 @@ export async function submitBillAction(
         igst_percent: igstPercent,
         tds_percent: tdsPercent,
         tcs_percent: tcsPercent,
+        block_cft: blockCft,
         status: "pending_approval",
         submitted_by: profile.id,
       })
@@ -470,6 +482,14 @@ export async function editBillAction(
   const amountSubtotal = Number(formData.get("amount_subtotal") || 0);
   const billVendorId = String(formData.get("bill_vendor_id") || "").trim();
 
+  // Mig 062 — block CFT (only set for block-purchase bills).
+  const blockCftRawEdit = String(formData.get("block_cft") || "").trim();
+  const blockCftNumEdit = blockCftRawEdit === "" ? null : Number(blockCftRawEdit);
+  const blockCftEdit =
+    blockCftNumEdit != null && Number.isFinite(blockCftNumEdit) && blockCftNumEdit > 0
+      ? blockCftNumEdit
+      : null;
+
   // Mig 042 — tax breakdown
   const cgstPercent = Number(formData.get("cgst_percent") || 0);
   const sgstPercent = Number(formData.get("sgst_percent") || 0);
@@ -512,6 +532,7 @@ export async function editBillAction(
     igst_percent: igstPercent,
     tds_percent: tdsPercent,
     tcs_percent: tcsPercent,
+    block_cft: blockCftEdit,
     updated_at: now,
   };
   if (nextStatus) {

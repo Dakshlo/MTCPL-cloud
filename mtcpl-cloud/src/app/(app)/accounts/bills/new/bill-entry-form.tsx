@@ -23,6 +23,7 @@ import {
   VendorIdentity,
 } from "../../_ui/components";
 import { VendorPicker } from "./vendor-picker";
+import { isBlockPurchaseCategory } from "@/lib/bill-vendor-categories";
 
 export type BillVendorOption = {
   id: string;
@@ -84,6 +85,9 @@ export function BillEntryForm({
     igst_percent?: number;
     tds_percent?: number;
     tcs_percent?: number;
+    /** Mig 062 — block volume in CFT. Only relevant when the
+     *  selected vendor's category lies in Block Purchase. */
+    block_cft?: number | null;
   };
   submitAction: (formData: FormData) => Promise<SubmitResult>;
   mode?: "new" | "edit";
@@ -134,6 +138,11 @@ export function BillEntryForm({
   const [costHead, setCostHead] = useState(initialValues?.cost_head ?? "");
   const [subtotal, setSubtotal] = useState<string>(
     initialValues?.amount_subtotal != null ? String(initialValues.amount_subtotal) : "",
+  );
+  // Mig 062 — block CFT input value. Persisted as numeric on the bill
+  // when the selected vendor is in the Block Purchase category group.
+  const [blockCft, setBlockCft] = useState<string>(
+    initialValues?.block_cft != null ? String(initialValues.block_cft) : "",
   );
 
   // Mig 042 — GST is now split across CGST / SGST / IGST. We store
@@ -205,6 +214,9 @@ export function BillEntryForm({
   const selectedVendor = vendors.find((v) => v.id === vendorId) ?? null;
   const showTds = selectedVendor?.tds_applicable === true;
   const showTcs = selectedVendor?.tcs_applicable === true;
+  // Mig 062 — show the CFT input when this vendor sells raw stone
+  // blocks (any of the Block Purchase sub-types). Hidden otherwise.
+  const showBlockCft = isBlockPurchaseCategory(selectedVendor?.category);
 
   // Gating: every other field stays disabled until a vendor is
   // picked. Daksh's employees were submitting bills with the vendor
@@ -258,6 +270,14 @@ export function BillEntryForm({
     formData.set("gst_percent", String(gstNum));
     formData.set("tds_percent", String(showTds ? tdsNum : 0));
     formData.set("tcs_percent", String(showTcs ? tcsNum : 0));
+    // Mig 062 — only attach block_cft when the selected vendor is a
+    // block-purchase one. Otherwise leave the form key absent so the
+    // action sets the column to NULL (or keeps existing NULL on edit).
+    if (showBlockCft) {
+      formData.set("block_cft", blockCft.trim());
+    } else {
+      formData.set("block_cft", "");
+    }
 
     startTransition(async () => {
       const result = await submitAction(formData);
@@ -554,6 +574,51 @@ export function BillEntryForm({
               </span>
             )}
           </FormField>
+
+          {/* Mig 062 — CFT input for block-purchase bills only. Shows
+              when the selected vendor's category is one of the Block
+              Purchase sub-types (Pink Stone / Marble / Yellow Marble
+              / Red Stone / Other-Block). Lets the accountant capture
+              the stone volume on the bill so the team can later roll
+              up ₹ per CFT per stone type. */}
+          {showBlockCft && (
+            <FormField
+              label="Block CFT (cubic feet of stone)"
+              hint="Total volume across all blocks billed. Used for future ₹/CFT cost analysis."
+            >
+              <input
+                type="number"
+                step="0.001"
+                min="0"
+                value={blockCft}
+                onChange={(e) => setBlockCft(e.target.value)}
+                placeholder="e.g. 125.5"
+                aria-label="Block CFT in cubic feet"
+                style={{
+                  ...INPUT_STYLE,
+                  fontFamily: "ui-monospace, monospace",
+                  fontSize: 14,
+                }}
+                disabled={fieldsDisabled}
+              />
+              {Number(blockCft) > 0 && subtotalNum > 0 && (
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: ACCOUNTS_TOKENS.accent,
+                    fontFamily: "ui-monospace, monospace",
+                    fontWeight: 600,
+                  }}
+                >
+                  = ₹{(subtotalNum / Number(blockCft)).toLocaleString("en-IN", {
+                    maximumFractionDigits: 2,
+                  })}{" "}
+                  <span style={{ color: "var(--muted)", fontWeight: 400 }}>per CFT (subtotal basis)</span>
+                </span>
+              )}
+            </FormField>
+          )}
+
 
           {/* GST mode toggle (intra-state vs inter-state) */}
           <FormField
