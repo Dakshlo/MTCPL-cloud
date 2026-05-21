@@ -57,6 +57,10 @@ type RoyaltyEntry = {
   createdByName: string | null;
   cancelledAt: string | null;
   cancelReason: string | null;
+  // Mig 064 — entries added by non-owner roles land in
+  // pending_approval and only count toward the net balance once
+  // owner approves from the Royalty Approval queue.
+  status: "pending_approval" | "approved" | "rejected";
 };
 
 export function PrivateNotesModal({
@@ -876,8 +880,17 @@ function RoyaltyColumn({
   onCancel: (entryId: string, amount: number) => void;
   canCancel: boolean;
 }) {
+  // Mig 064 — live = anything not soft-cancelled. The cancelled
+  // pile already excluded rejected entries (rejectRoyaltyEntryAction
+  // sets both status='rejected' AND cancelled_at). Pending entries
+  // ARE shown in the column (with a badge) but the column TOTAL
+  // counts only `status='approved'` — matches the net-balance math
+  // the server returns.
   const liveEntries = entries.filter((e) => !e.cancelledAt);
-  const sum = liveEntries.reduce((s, e) => s + e.amount, 0);
+  const sum = liveEntries
+    .filter((e) => e.status === "approved")
+    .reduce((s, e) => s + e.amount, 0);
+  const pendingCount = liveEntries.filter((e) => e.status === "pending_approval").length;
   return (
     <div
       style={{
@@ -905,9 +918,29 @@ function RoyaltyColumn({
             fontWeight: 800,
             color,
             letterSpacing: "0.06em",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
           }}
         >
           {title}
+          {pendingCount > 0 && (
+            <span
+              title={`${pendingCount} pending approval — not counted in the total above`}
+              style={{
+                background: "#fef3c7",
+                color: "#92400e",
+                border: "1px solid #f59e0b",
+                fontSize: 9,
+                fontWeight: 800,
+                padding: "1px 6px",
+                borderRadius: 999,
+                letterSpacing: "0.04em",
+              }}
+            >
+              {pendingCount} PENDING
+            </span>
+          )}
         </span>
         <span
           style={{
@@ -932,55 +965,90 @@ function RoyaltyColumn({
             No entries yet.
           </span>
         )}
-        {liveEntries.map((e) => (
-          <div
-            key={e.id}
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 2,
-              padding: "6px 8px",
-              background: "#fff",
-              border: "1px solid var(--border)",
-              borderRadius: 6,
-              fontSize: 12,
-            }}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-              <span
-                style={{
-                  fontFamily: "ui-monospace, monospace",
-                  fontWeight: 700,
-                  color,
-                }}
-              >
-                {fmtNum(e.amount)}
-              </span>
-              {canCancel && (
-                <button
-                  type="button"
-                  onClick={() => onCancel(e.id, e.amount)}
+        {liveEntries.map((e) => {
+          const isPending = e.status === "pending_approval";
+          return (
+            <div
+              key={e.id}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 2,
+                padding: "6px 8px",
+                background: isPending ? "#fffbeb" : "#fff",
+                border: isPending ? "1px dashed #f59e0b" : "1px solid var(--border)",
+                borderRadius: 6,
+                fontSize: 12,
+                opacity: isPending ? 0.92 : 1,
+              }}
+              title={
+                isPending
+                  ? "Pending owner approval — not counted in the total yet"
+                  : undefined
+              }
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                <span
                   style={{
-                    background: "transparent",
-                    border: "none",
-                    color: "var(--muted)",
-                    fontSize: 11,
-                    cursor: "pointer",
-                    padding: 2,
+                    fontFamily: "ui-monospace, monospace",
+                    fontWeight: 700,
+                    color,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
                   }}
-                  title="Cancel this entry (logged) — developer / owner only"
                 >
-                  ✕
-                </button>
+                  {fmtNum(e.amount)}
+                  {isPending && (
+                    <span
+                      style={{
+                        background: "#fef3c7",
+                        color: "#92400e",
+                        border: "1px solid #d97706",
+                        fontSize: 9,
+                        fontWeight: 800,
+                        padding: "1px 5px",
+                        borderRadius: 999,
+                        letterSpacing: "0.04em",
+                      }}
+                    >
+                      PENDING
+                    </span>
+                  )}
+                </span>
+                {canCancel && (
+                  <button
+                    type="button"
+                    onClick={() => onCancel(e.id, e.amount)}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      color: "var(--muted)",
+                      fontSize: 11,
+                      cursor: "pointer",
+                      padding: 2,
+                    }}
+                    title="Cancel this entry (logged) — developer / owner only"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+              {e.description && (
+                <span style={{ fontSize: 11, color: "var(--text)" }}>
+                  {e.description}
+                </span>
+              )}
+              {/* Mig 064 — every row labels who added it. Helps the
+                  owner approve faster ("oh, this is Govind's entry"). */}
+              {e.createdByName && (
+                <span style={{ fontSize: 10, color: "var(--muted)", fontStyle: "italic" }}>
+                  by {e.createdByName}
+                </span>
               )}
             </div>
-            {e.description && (
-              <span style={{ fontSize: 11, color: "var(--text)" }}>
-                {e.description}
-              </span>
-            )}
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

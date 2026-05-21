@@ -2406,7 +2406,22 @@ type RoyaltyEntryRow = {
   cancelled_at: string | null;
   cancelled_by: string | null;
   cancel_reason: string | null;
+  // Mig 064 — owner approval gate. Owner / developer adds auto-
+  // approve; everyone else (accountant / accountant_star / crosscheck)
+  // lands in pending_approval and must be approved or rejected from
+  // the Tasks-pill queue before counting toward the net balance.
+  status: "pending_approval" | "approved" | "rejected";
+  approved_at: string | null;
+  approved_by: string | null;
+  rejected_at: string | null;
+  rejected_by: string | null;
 };
+
+/** Mig 064 — extra passphrase the owner enters to view the Royalty
+ *  Approval queue. Distinct from the private-notes passphrase
+ *  (which controls notes / royalty *content*) — this one controls
+ *  the *approve / reject* surface. */
+const ROYALTY_APPROVAL_PASSPHRASE = "125500";
 
 export async function getVendorRoyaltyEntriesAction(
   formData: FormData,
@@ -2422,6 +2437,10 @@ export async function getVendorRoyaltyEntriesAction(
         createdByName: string | null;
         cancelledAt: string | null;
         cancelReason: string | null;
+        // Mig 064 — surface the approval state so the modal can
+        // render a "PENDING APPROVAL" / "REJECTED" badge and the
+        // totals can exclude pending/rejected rows.
+        status: "pending_approval" | "approved" | "rejected";
       }>;
       netBalance: number;
       receivedTotal: number;
@@ -2477,6 +2496,10 @@ export async function getVendorRoyaltyEntriesAction(
   let givenTotal = 0;
   for (const r of rows) {
     if (r.cancelled_at) continue;
+    // Mig 064 — only approved entries count toward the running total.
+    // Pending + rejected are visible in the list (with badges) but
+    // never roll into the net balance until the owner approves.
+    if (r.status !== "approved") continue;
     const v = Number(r.amount);
     if (r.entry_type === "received") receivedTotal += v;
     else if (r.entry_type === "given") givenTotal += v;
@@ -2508,6 +2531,7 @@ export async function getVendorRoyaltyEntriesAction(
       createdByName: r.created_by ? profilesMap.get(r.created_by) ?? null : null,
       cancelledAt: r.cancelled_at,
       cancelReason: r.cancel_reason,
+      status: r.status,
     })),
     netBalance,
     receivedTotal,
@@ -2553,6 +2577,14 @@ export async function addVendorRoyaltyEntryAction(
   }
 
   const admin = createAdminSupabaseClient();
+  // Mig 064 — owner / developer auto-approve their own entries
+  // (requiring self-approval would be theatre). Everyone else
+  // (accountant / accountant_star / crosscheck) lands in
+  // pending_approval and shows up on the owner's Tasks-pill
+  // Royalty Approval queue.
+  const isAutoApprove =
+    profile.role === "owner" || profile.role === "developer";
+  const nowIso = new Date().toISOString();
   const { data, error } = await admin
     .from("vendor_royalty_entries")
     .insert({
@@ -2561,6 +2593,9 @@ export async function addVendorRoyaltyEntryAction(
       entry_type: entryType,
       description,
       created_by: profile.id,
+      status: isAutoApprove ? "approved" : "pending_approval",
+      approved_at: isAutoApprove ? nowIso : null,
+      approved_by: isAutoApprove ? profile.id : null,
     })
     .select("id")
     .single();
@@ -2576,6 +2611,7 @@ export async function addVendorRoyaltyEntryAction(
       amount,
       entry_type: entryType,
       description,
+      status: isAutoApprove ? "approved" : "pending_approval",
     },
   );
   return { ok: true };
@@ -2644,6 +2680,261 @@ export async function cancelVendorRoyaltyEntryAction(
       amount: Number((prior as { amount: number }).amount),
       entry_type: (prior as { entry_type: string }).entry_type,
       reason,
+    },
+  );
+  return { ok: true };
+}
+
+// ══════════════════════════════════════════════════════════════════
+// Mig 064 — Royalty owner approval gate
+// ══════════════════════════════════════════════════════════════════
+//
+// Non-owner additions (accountant / accountant_star / crosscheck)
+// land in `status='pending_approval'`. Owner views the queue from
+// the Tasks pill — after entering the ROYALTY_APPROVAL_PASSPHRASE
+// ("125500") — and approves or rejects each entry. Approved =
+// status flips to 'approved' + counts toward net balance. Rejected
+// = soft-cancel with cancel_reason='owner_rejected' so the audit
+// trail records who killed it and when.
+
+/** List every pending royalty entry across all vendors. Owner /
+ *  developer only; passphrase 125500 required. */
+export async function listPendingRoyaltyEntriesAction(
+  formData: FormData,
+): Promise<
+  | {
+      ok: true;
+      entries: Array<{
+        id: string;
+        billVendorId: string;
+        vendorName: string;
+        amount: number;
+        entryType: "received" | "given";
+        description: string | null;
+        createdAt: string;
+        createdByName: string | null;
+      }>;
+    }
+  | { ok: false; error: string }
+> {
+  const { profile } = await requireAuth();
+  if (profile.role !== "owner" && profile.role !== "developer") {
+    return { ok: false, error: "Only owner / developer." };
+  }
+  const passphrase = String(formData.get("passphrase") || "");
+  if (passphrase !== ROYALTY_APPROVAL_PASSPHRASE) {
+    return { ok: false, error: "Incorrect approval passphrase." };
+  }
+
+  const admin = createAdminSupabaseClient();
+  const { data, error } = await admin
+    .from("vendor_royalty_entries")
+    .select(
+      "id, bill_vendor_id, amount, entry_type, description, created_at, created_by, bill_vendors!inner(name)",
+    )
+    .eq("status", "pending_approval")
+    .is("cancelled_at", null)
+    .order("created_at", { ascending: false })
+    .limit(200);
+  if (error) return { ok: false, error: error.message };
+
+  type Row = {
+    id: string;
+    bill_vendor_id: string;
+    amount: number;
+    entry_type: "received" | "given";
+    description: string | null;
+    created_at: string;
+    created_by: string | null;
+    bill_vendors: { name: string } | { name: string }[] | null;
+  };
+  const rows = (data ?? []) as unknown as Row[];
+
+  // Resolve creator names
+  const creatorIds = new Set<string>();
+  for (const r of rows) if (r.created_by) creatorIds.add(r.created_by);
+  const profilesMap = new Map<string, string>();
+  if (creatorIds.size > 0) {
+    const { data: profs } = await admin
+      .from("profiles")
+      .select("id, full_name")
+      .in("id", Array.from(creatorIds));
+    for (const p of (profs ?? []) as Array<{ id: string; full_name: string | null }>) {
+      if (p.full_name) profilesMap.set(p.id, p.full_name);
+    }
+  }
+
+  void logAudit(
+    profile.id,
+    "royalty_approval_queue_viewed",
+    "bill_vendor",
+    // Queue view isn't scoped to a single vendor — use empty string
+    // as a sentinel so the audit row still lands cleanly.
+    "",
+    { row_count: rows.length },
+  );
+
+  return {
+    ok: true,
+    entries: rows.map((r) => {
+      const vendor = Array.isArray(r.bill_vendors)
+        ? r.bill_vendors[0] ?? null
+        : r.bill_vendors;
+      return {
+        id: r.id,
+        billVendorId: r.bill_vendor_id,
+        vendorName: vendor?.name ?? "—",
+        amount: Number(r.amount),
+        entryType: r.entry_type,
+        description: r.description,
+        createdAt: r.created_at,
+        createdByName: r.created_by ? profilesMap.get(r.created_by) ?? null : null,
+      };
+    }),
+  };
+}
+
+/** Count pending royalty approvals — drives the Tasks-pill badge.
+ *  Owner / developer only (returns 0 for everyone else so the
+ *  layout's badge fetch stays silent for the wrong role). */
+export async function countPendingRoyaltyApprovalsAction(): Promise<number> {
+  const { profile } = await requireAuth();
+  if (profile.role !== "owner" && profile.role !== "developer") {
+    return 0;
+  }
+  const admin = createAdminSupabaseClient();
+  const { count } = await admin
+    .from("vendor_royalty_entries")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "pending_approval")
+    .is("cancelled_at", null);
+  return count ?? 0;
+}
+
+/** Approve one pending royalty entry. Owner / developer only. The
+ *  caller is assumed to have already passed the approval passphrase
+ *  gate on the queue page — re-checking it on every approve click
+ *  would be excessive. */
+export async function approveRoyaltyEntryAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (profile.role !== "owner" && profile.role !== "developer") {
+    return { ok: false, error: "Only owner / developer." };
+  }
+  const entryId = String(formData.get("entry_id") || "").trim();
+  if (!entryId) return { ok: false, error: "Missing entry_id." };
+
+  const admin = createAdminSupabaseClient();
+  // Load current row so we can refuse approving something that's
+  // already approved / rejected / cancelled.
+  const { data: prior } = await admin
+    .from("vendor_royalty_entries")
+    .select("id, bill_vendor_id, amount, entry_type, status, cancelled_at")
+    .eq("id", entryId)
+    .maybeSingle();
+  if (!prior) return { ok: false, error: "Entry not found." };
+  const p = prior as {
+    bill_vendor_id: string;
+    amount: number;
+    entry_type: string;
+    status: string;
+    cancelled_at: string | null;
+  };
+  if (p.cancelled_at) return { ok: false, error: "Entry is cancelled." };
+  if (p.status !== "pending_approval") {
+    return { ok: false, error: `Entry is already ${p.status.replace(/_/g, " ")}.` };
+  }
+
+  const now = new Date().toISOString();
+  const { error } = await admin
+    .from("vendor_royalty_entries")
+    .update({
+      status: "approved",
+      approved_at: now,
+      approved_by: profile.id,
+    })
+    .eq("id", entryId)
+    .eq("status", "pending_approval");
+  if (error) return { ok: false, error: error.message };
+
+  void logAudit(
+    profile.id,
+    "vendor_royalty_entry_approved",
+    "bill_vendor",
+    p.bill_vendor_id,
+    {
+      entry_id: entryId,
+      amount: Number(p.amount),
+      entry_type: p.entry_type,
+    },
+  );
+  return { ok: true };
+}
+
+/** Reject one pending royalty entry. Soft-cancels the row with
+ *  cancel_reason='owner_rejected_pending' so the audit log can
+ *  distinguish a rejected pending entry from an ordinary cancel. */
+export async function rejectRoyaltyEntryAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (profile.role !== "owner" && profile.role !== "developer") {
+    return { ok: false, error: "Only owner / developer." };
+  }
+  const entryId = String(formData.get("entry_id") || "").trim();
+  if (!entryId) return { ok: false, error: "Missing entry_id." };
+
+  const admin = createAdminSupabaseClient();
+  const { data: prior } = await admin
+    .from("vendor_royalty_entries")
+    .select("id, bill_vendor_id, amount, entry_type, status, cancelled_at")
+    .eq("id", entryId)
+    .maybeSingle();
+  if (!prior) return { ok: false, error: "Entry not found." };
+  const p = prior as {
+    bill_vendor_id: string;
+    amount: number;
+    entry_type: string;
+    status: string;
+    cancelled_at: string | null;
+  };
+  if (p.cancelled_at) return { ok: false, error: "Entry already cancelled." };
+  if (p.status !== "pending_approval") {
+    return {
+      ok: false,
+      error: `Entry is already ${p.status.replace(/_/g, " ")} — cannot reject.`,
+    };
+  }
+
+  const now = new Date().toISOString();
+  const { error } = await admin
+    .from("vendor_royalty_entries")
+    .update({
+      status: "rejected",
+      rejected_at: now,
+      rejected_by: profile.id,
+      // Daksh: "reject means direct delete" — soft-cancel preserves
+      // the audit trail without leaking the deleted row into the
+      // running totals (status='rejected' + cancelled_at both filter
+      // it out of net-balance math).
+      cancelled_at: now,
+      cancelled_by: profile.id,
+      cancel_reason: "owner_rejected_pending",
+    })
+    .eq("id", entryId)
+    .eq("status", "pending_approval");
+  if (error) return { ok: false, error: error.message };
+
+  void logAudit(
+    profile.id,
+    "vendor_royalty_entry_rejected",
+    "bill_vendor",
+    p.bill_vendor_id,
+    {
+      entry_id: entryId,
+      amount: Number(p.amount),
+      entry_type: p.entry_type,
     },
   );
   return { ok: true };

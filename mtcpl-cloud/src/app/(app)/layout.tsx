@@ -262,6 +262,23 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     }
   }
 
+  // Mig 064 — Royalty Approval queue. Counts pending royalty entries
+  // across all vendors. Owner / developer only. Silently 0 if the
+  // status column doesn't exist yet (mig 064 not applied).
+  let royaltyApprovalBadge: number | null = null;
+  if (profile.role === "owner" || profile.role === "developer") {
+    const { count, error: royaltyErr } = await supabase
+      .from("vendor_royalty_entries")
+      .select("*", { count: "exact", head: true })
+      .eq("status", "pending_approval")
+      .is("cancelled_at", null);
+    if (royaltyErr) {
+      royaltyApprovalBadge = null;
+    } else {
+      royaltyApprovalBadge = count ?? 0;
+    }
+  }
+
   return (
     <div className="app-shell">
       <NavigationProgress />
@@ -417,6 +434,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               rejectedBillsBadge,
               inventoryAuditBadge,
               finalAuditBadge,
+              royaltyApprovalBadge,
             })} />
 
             <span className="role-pill" style={
@@ -491,6 +509,7 @@ function buildTopbarTaskItems(counts: {
   rejectedBillsBadge: number | null;
   inventoryAuditBadge: number | null;
   finalAuditBadge: number | null;
+  royaltyApprovalBadge: number | null;
 }): TopbarTask[] {
   const items: TopbarTask[] = [];
   // Mig 058 follow-on (Daksh) — per-user rejected-bills item.
@@ -566,6 +585,21 @@ function buildTopbarTaskItems(counts: {
       count: counts.inventoryAuditBadge,
       icon: "📦",
       department: "inventory",
+    });
+  }
+  // Mig 064 — Royalty Approval (owner / developer only). Non-owner
+  // royalty entries land here for owner sign-off before counting
+  // toward each vendor's net balance. Gated by an extra passphrase
+  // (125500) on the page itself.
+  if (counts.royaltyApprovalBadge !== null) {
+    items.push({
+      id: "royalty-approval",
+      href: "/accounts/royalty-approvals",
+      label: "Royalty Approval",
+      description: "Pending royalty entries awaiting your sign-off",
+      count: counts.royaltyApprovalBadge,
+      icon: "🏷️",
+      department: "finance",
     });
   }
   return items;
