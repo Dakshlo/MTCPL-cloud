@@ -510,24 +510,24 @@ export function DueBillsClient({
                       <Money value={r.amountOutstanding} tone="warning" />
                     </td>
                     <td style={TABLE_STYLES.td}>
-                      {/* Mig 064 follow-on (Daksh) — royalty net dot
-                          sits to the right of the age pill on each
-                          row. Same 3-px black dot used on the vendor
+                      {/* Mig 064 follow-on (Daksh, 2nd pass) — royalty
+                          net dot sits to the LEFT of the age pill on
+                          each row (outside the pill, not inside).
+                          Same 3-px black dot used on the vendor
                           profile page; click reveals "Net: +/-X (10s)"
-                          inline. Out-of-band from the age card so the
-                          age pill stays clean. Only renders when the
-                          vendor has a non-zero approved net AND the
-                          viewer's role can see royalty data. */}
+                          inline. Only renders when the vendor has a
+                          non-zero approved net AND the viewer's role
+                          can see royalty data. */}
                       <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                        {r.vendorRoyaltyNet !== null && r.vendorRoyaltyNet !== 0 && (
+                          <RoyaltyNetPeek netValue={r.vendorRoyaltyNet} />
+                        )}
                         <AgeBadge
                           bucket={r.ageBucket}
                           days={r.daysSinceBill}
                           premature={r.prematureForPayment}
                           termsDays={r.paymentTermsDays}
                         />
-                        {r.vendorRoyaltyNet !== null && r.vendorRoyaltyNet !== 0 && (
-                          <RoyaltyNetPeek netValue={r.vendorRoyaltyNet} />
-                        )}
                       </div>
                       {r.crosscheckedAt && (
                         <div
