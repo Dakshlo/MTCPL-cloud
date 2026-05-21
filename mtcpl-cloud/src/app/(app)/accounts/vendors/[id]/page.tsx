@@ -72,19 +72,24 @@ export default async function BillVendorDetailPage({
     profile.role === "crosscheck";
   let royaltyNet: number | null = null;
   if (canSeeRoyaltyNet) {
+    // Mig 064 — only `approved` entries count toward the displayed
+    // net. Pending entries (added by accountant/accountant_star/
+    // crosscheck waiting for owner sign-off) and rejected entries
+    // both stay out. Keeps the page net in sync with the modal
+    // total: both show only what the owner has signed off on.
     const { data: royaltyRows, error: royaltyErr } = await supabase
       .from("vendor_royalty_entries")
-      .select("amount, entry_type, cancelled_at")
-      .eq("bill_vendor_id", id);
+      .select("amount, entry_type, cancelled_at, status")
+      .eq("bill_vendor_id", id)
+      .eq("status", "approved")
+      .is("cancelled_at", null);
     if (!royaltyErr && royaltyRows) {
       let received = 0;
       let paid = 0;
       for (const r of royaltyRows as Array<{
         amount: number;
         entry_type: string;
-        cancelled_at: string | null;
       }>) {
-        if (r.cancelled_at) continue; // skip cancelled entries
         const v = Number(r.amount ?? 0);
         if (r.entry_type === "received") received += v;
         else if (r.entry_type === "given") paid += v;

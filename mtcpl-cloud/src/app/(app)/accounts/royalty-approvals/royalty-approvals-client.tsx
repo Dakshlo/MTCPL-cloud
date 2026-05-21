@@ -42,8 +42,11 @@ type ListResult =
 
 type ActionResult = { ok: true } | { ok: false; error: string };
 
-function fmtINR(n: number): string {
-  return `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+// Mig 064 follow-on (Daksh) — royalty entries aren't money, they're
+// abstract "royalty points" tallied between us and the vendor. Drop
+// the ₹ prefix so the queue page doesn't imply rupee amounts.
+function fmtPoints(n: number): string {
+  return n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
 }
 
 function fmtWhen(iso: string): string {
@@ -323,7 +326,7 @@ export function RoyaltyApprovalsClient({
                           marginBottom: 4,
                         }}
                       >
-                        {fmtINR(e.amount)}
+                        {fmtPoints(e.amount)}
                       </div>
                       {e.description && (
                         <div style={{ fontSize: 12, color: "var(--text)", marginBottom: 4 }}>

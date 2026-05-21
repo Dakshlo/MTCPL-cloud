@@ -928,9 +928,9 @@ function RoyaltyColumn({
             <span
               title={`${pendingCount} pending approval — not counted in the total above`}
               style={{
-                background: "#fef3c7",
-                color: "#92400e",
-                border: "1px solid #f59e0b",
+                background: "#e5e7eb",
+                color: "#4b5563",
+                border: "1px solid #9ca3af",
                 fontSize: 9,
                 fontWeight: 800,
                 padding: "1px 6px",
@@ -975,11 +975,16 @@ function RoyaltyColumn({
                 flexDirection: "column",
                 gap: 2,
                 padding: "6px 8px",
-                background: isPending ? "#fffbeb" : "#fff",
-                border: isPending ? "1px dashed #f59e0b" : "1px solid var(--border)",
+                background: isPending ? "#f3f4f6" : "#fff",
+                border: isPending ? "1px dashed #9ca3af" : "1px solid var(--border)",
                 borderRadius: 6,
                 fontSize: 12,
-                opacity: isPending ? 0.92 : 1,
+                // Mig 064 follow-on (Daksh) — pending entries render
+                // grayscale so they read as "not real yet" while
+                // still being visible. Filter desaturates the row's
+                // text + the PENDING pill colour back to greys.
+                filter: isPending ? "grayscale(1)" : undefined,
+                opacity: isPending ? 0.75 : 1,
               }}
               title={
                 isPending
@@ -1002,9 +1007,9 @@ function RoyaltyColumn({
                   {isPending && (
                     <span
                       style={{
-                        background: "#fef3c7",
-                        color: "#92400e",
-                        border: "1px solid #d97706",
+                        background: "#e5e7eb",
+                        color: "#4b5563",
+                        border: "1px solid #9ca3af",
                         fontSize: 9,
                         fontWeight: 800,
                         padding: "1px 5px",
