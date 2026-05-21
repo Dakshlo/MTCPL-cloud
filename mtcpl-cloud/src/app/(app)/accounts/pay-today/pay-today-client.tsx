@@ -593,10 +593,30 @@ function ProposedBatch({
     });
   }
 
+  const isLegacyBatch = batchId === "unbatched";
+
   function runConfirm() {
     setError(null);
-    if (batchId === "unbatched") {
-      setError("This batch is missing a batch_id (legacy data). Contact a developer.");
+    if (isLegacyBatch) {
+      // Mig follow-on (Daksh, May 2026): legacy proposals (rows
+      // from before mig 044 when batches got their own id) can't
+      // be "confirmed" — the server action keys off batch_id and
+      // there isn't one. But the user still needs a way to clear
+      // them. Loop through each row and withdraw it individually.
+      // Same per-row cancelAction the Withdraw button uses elsewhere.
+      startTransition(async () => {
+        for (const r of rows) {
+          const fd = new FormData();
+          fd.set("payment_id", r.id);
+          fd.set("cancel_reason", "accountant_withdrew_legacy_batch");
+          const result = await cancelAction(fd);
+          if (!result.ok) {
+            setError(`Could not withdraw ${r.vendorName} · ${r.billToken}: ${result.error}`);
+            return;
+          }
+        }
+        router.refresh();
+      });
       return;
     }
     startTransition(async () => {
@@ -772,8 +792,8 @@ function ProposedBatch({
         <div
           style={{
             padding: "12px 16px",
-            background: ACCOUNTS_TOKENS.surfaceMuted,
-            borderTop: `1px solid ${ACCOUNTS_TOKENS.border}`,
+            background: isLegacyBatch ? "#fef3c7" : ACCOUNTS_TOKENS.surfaceMuted,
+            borderTop: `1px solid ${isLegacyBatch ? "#d97706" : ACCOUNTS_TOKENS.border}`,
             display: "flex",
             gap: 10,
             justifyContent: "flex-end",
@@ -781,18 +801,43 @@ function ProposedBatch({
             flexWrap: "wrap",
           }}
         >
-          <span style={{ fontSize: 12, color: "var(--muted)" }}>
-            <strong style={{ color: "var(--text)" }}>{confirmedIds.size}</strong>/{rows.length} ticked ·{" "}
-            <Money value={confirmedTotal} size="small" tone="accent" />
-          </span>
-          <button
-            type="button"
-            onClick={runConfirm}
-            disabled={pending}
-            style={BUTTON_STYLES.primary}
-          >
-            {pending ? "Confirming…" : "✓ Confirm this batch"}
-          </button>
+          {isLegacyBatch ? (
+            <>
+              <span style={{ fontSize: 12, color: "#92400e", fontWeight: 600, marginRight: "auto" }}>
+                ⚠ Legacy data — no batch_id. Confirming isn't possible;
+                withdraw to clear, then re-propose from Due Bills.
+              </span>
+              <button
+                type="button"
+                onClick={runConfirm}
+                disabled={pending}
+                style={{
+                  ...BUTTON_STYLES.primary,
+                  background: "#b45309",
+                  borderColor: "#92400e",
+                }}
+              >
+                {pending
+                  ? "Withdrawing…"
+                  : `Withdraw all ${rows.length} bill${rows.length === 1 ? "" : "s"}`}
+              </button>
+            </>
+          ) : (
+            <>
+              <span style={{ fontSize: 12, color: "var(--muted)" }}>
+                <strong style={{ color: "var(--text)" }}>{confirmedIds.size}</strong>/{rows.length} ticked ·{" "}
+                <Money value={confirmedTotal} size="small" tone="accent" />
+              </span>
+              <button
+                type="button"
+                onClick={runConfirm}
+                disabled={pending}
+                style={BUTTON_STYLES.primary}
+              >
+                {pending ? "Confirming…" : "✓ Confirm this batch"}
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>
