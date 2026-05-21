@@ -182,6 +182,51 @@ export default async function AccountsHomePage({
     return Math.floor((todayMs - new Date(dateStr).getTime()) / 86_400_000);
   }
 
+  // Mig 064 follow-on (Daksh) — batch-fetch each vendor's approved
+  // royalty net (paid − received) so the dashboard can render a
+  // peek dot on every row next to the age pill. Only fired for
+  // roles that can see royalty data; everyone else gets null per
+  // row and the dot doesn't render. One round-trip for the whole
+  // page (capped at the vendors actually showing up in dueRows).
+  const canSeeRoyaltyNet =
+    profile.role === "developer" ||
+    profile.role === "owner" ||
+    profile.role === "accountant" ||
+    profile.role === "accountant_star" ||
+    profile.role === "crosscheck";
+  const royaltyNetByVendor = new Map<string, number>();
+  if (canSeeRoyaltyNet) {
+    const vendorIds = [...new Set(dueRows.map((r) => r.bill_vendor_id))];
+    if (vendorIds.length > 0) {
+      const { data: royaltyRows, error: royaltyErr } = await supabase
+        .from("vendor_royalty_entries")
+        .select("bill_vendor_id, amount, entry_type")
+        .in("bill_vendor_id", vendorIds)
+        .eq("status", "approved")
+        .is("cancelled_at", null);
+      if (!royaltyErr && royaltyRows) {
+        // paid − received per vendor; matches the modal's formula.
+        const received = new Map<string, number>();
+        const paid = new Map<string, number>();
+        for (const r of royaltyRows as Array<{
+          bill_vendor_id: string;
+          amount: number;
+          entry_type: string;
+        }>) {
+          const amt = Number(r.amount ?? 0);
+          const m = r.entry_type === "received" ? received : paid;
+          m.set(r.bill_vendor_id, (m.get(r.bill_vendor_id) ?? 0) + amt);
+        }
+        for (const vid of vendorIds) {
+          royaltyNetByVendor.set(
+            vid,
+            (paid.get(vid) ?? 0) - (received.get(vid) ?? 0),
+          );
+        }
+      }
+    }
+  }
+
   const allDue: DueBillRow[] = dueRows.map((r) => {
     const v = Array.isArray(r.bill_vendors) ? r.bill_vendors[0] ?? null : r.bill_vendors;
     const days = daysSince(r.bill_date);
@@ -218,6 +263,9 @@ export default async function AccountsHomePage({
       paymentTermsDays: terms,
       paymentParts: paidPartsByBill.get(r.id) ?? [],
       crosscheckedAt: r.approved_at,
+      vendorRoyaltyNet: canSeeRoyaltyNet
+        ? royaltyNetByVendor.get(r.bill_vendor_id) ?? 0
+        : null,
     };
   });
 

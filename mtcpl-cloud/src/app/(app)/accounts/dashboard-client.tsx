@@ -21,6 +21,7 @@ import {
   VendorIdentity,
 } from "./_ui/components";
 import { getBillVendorCategory } from "@/lib/bill-vendor-categories";
+import { RoyaltyNetPeek } from "./vendors/[id]/royalty-net-peek";
 
 export type DueBillRow = {
   id: string;
@@ -68,6 +69,10 @@ export type DueBillRow = {
     paidAt: string | null;
     method: string | null;
   }>;
+  /** Mig 064 follow-on — per-vendor net royalty balance (paid −
+   *  received, approved entries only). NULL when the role can't
+   *  see royalty data — the dot doesn't render then. */
+  vendorRoyaltyNet: number | null;
 };
 
 /** Legacy global default — kept for back-compat with code paths that
@@ -505,12 +510,25 @@ export function DueBillsClient({
                       <Money value={r.amountOutstanding} tone="warning" />
                     </td>
                     <td style={TABLE_STYLES.td}>
-                      <AgeBadge
-                        bucket={r.ageBucket}
-                        days={r.daysSinceBill}
-                        premature={r.prematureForPayment}
-                        termsDays={r.paymentTermsDays}
-                      />
+                      {/* Mig 064 follow-on (Daksh) — royalty net dot
+                          sits to the right of the age pill on each
+                          row. Same 3-px black dot used on the vendor
+                          profile page; click reveals "Net: +/-X (10s)"
+                          inline. Out-of-band from the age card so the
+                          age pill stays clean. Only renders when the
+                          vendor has a non-zero approved net AND the
+                          viewer's role can see royalty data. */}
+                      <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                        <AgeBadge
+                          bucket={r.ageBucket}
+                          days={r.daysSinceBill}
+                          premature={r.prematureForPayment}
+                          termsDays={r.paymentTermsDays}
+                        />
+                        {r.vendorRoyaltyNet !== null && r.vendorRoyaltyNet !== 0 && (
+                          <RoyaltyNetPeek netValue={r.vendorRoyaltyNet} />
+                        )}
+                      </div>
                       {r.crosscheckedAt && (
                         <div
                           style={{
