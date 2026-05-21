@@ -324,6 +324,12 @@ export default async function AccountsHomePage({
 
   const isApprover = canApproveBills(profile);
   const isAccountManager = canManageAccounts(profile);
+  // Mig 064 follow-on (Daksh): the per-bucket ₹ totals under the
+  // aging strip read like "company cash position by age" at a
+  // glance. Restrict to dev / owner; everyone else sees only the
+  // bill COUNT per bucket (no rupee line).
+  const canSeeBucketTotals =
+    profile.role === "developer" || profile.role === "owner";
 
   return (
     <section className="page-card">
@@ -480,7 +486,11 @@ export default async function AccountsHomePage({
                     background: colors[b],
                     transition: "width 0.2s",
                   }}
-                  title={`${b.replace("_", "–").replace("plus", "+")} days · ₹${bucketTotals[b].toLocaleString("en-IN")}`}
+                  title={
+                    canSeeBucketTotals
+                      ? `${b.replace("_", "–").replace("plus", "+")} days · ₹${bucketTotals[b].toLocaleString("en-IN")}`
+                      : `${b.replace("_", "–").replace("plus", "+")} days`
+                  }
                 />
               );
             })}
@@ -499,7 +509,7 @@ export default async function AccountsHomePage({
               value=""
               current={ageFilter}
               count={allDue.length}
-              total={allDue.reduce((s, b) => s + b.amountOutstanding, 0)}
+              total={canSeeBucketTotals ? allDue.reduce((s, b) => s + b.amountOutstanding, 0) : null}
               accent={ACCOUNTS_TOKENS.accent}
               vendor={vendorFilter}
               token={tokenFilter}
@@ -511,7 +521,7 @@ export default async function AccountsHomePage({
               value="0_30"
               current={ageFilter}
               count={bucketCounts["0_30"]}
-              total={bucketTotals["0_30"]}
+              total={canSeeBucketTotals ? bucketTotals["0_30"] : null}
               accent={ACCOUNTS_TOKENS.success}
               vendor={vendorFilter}
               token={tokenFilter}
@@ -523,7 +533,7 @@ export default async function AccountsHomePage({
               value="31_60"
               current={ageFilter}
               count={bucketCounts["31_60"]}
-              total={bucketTotals["31_60"]}
+              total={canSeeBucketTotals ? bucketTotals["31_60"] : null}
               accent="#f59e0b"
               vendor={vendorFilter}
               token={tokenFilter}
@@ -535,7 +545,7 @@ export default async function AccountsHomePage({
               value="61_90"
               current={ageFilter}
               count={bucketCounts["61_90"]}
-              total={bucketTotals["61_90"]}
+              total={canSeeBucketTotals ? bucketTotals["61_90"] : null}
               accent="#ea580c"
               vendor={vendorFilter}
               token={tokenFilter}
@@ -547,7 +557,7 @@ export default async function AccountsHomePage({
               value="90_plus"
               current={ageFilter}
               count={bucketCounts["90_plus"]}
-              total={bucketTotals["90_plus"]}
+              total={canSeeBucketTotals ? bucketTotals["90_plus"] : null}
               accent={ACCOUNTS_TOKENS.danger}
               vendor={vendorFilter}
               token={tokenFilter}
@@ -802,7 +812,10 @@ function AgeBucket({
   value: string;
   current: string;
   count: number;
-  total: number;
+  /** Mig 064 follow-on (Daksh): hide the per-bucket ₹ total for
+   *  non dev/owner roles. Pass null to skip the rupee line; pass
+   *  a number to render it. */
+  total: number | null;
   accent: string;
   vendor: string;
   // Mig 042 follow-on — bucket links now preserve token + date
@@ -850,15 +863,17 @@ function AgeBucket({
       <span style={{ fontSize: 18, fontWeight: 800, fontFamily: "ui-monospace, monospace", letterSpacing: "-0.01em" }}>
         {count}
       </span>
-      <span
-        style={{
-          fontSize: 11,
-          opacity: isActive ? 0.85 : 0.7,
-          fontFamily: "ui-monospace, monospace",
-        }}
-      >
-        ₹{total.toLocaleString("en-IN")}
-      </span>
+      {total !== null && (
+        <span
+          style={{
+            fontSize: 11,
+            opacity: isActive ? 0.85 : 0.7,
+            fontFamily: "ui-monospace, monospace",
+          }}
+        >
+          ₹{total.toLocaleString("en-IN")}
+        </span>
+      )}
     </Link>
   );
 }

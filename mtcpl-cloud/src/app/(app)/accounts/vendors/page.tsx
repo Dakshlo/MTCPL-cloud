@@ -99,19 +99,25 @@ export default async function BillVendorsPage() {
         />
       )}
 
-      {totalOutstandingAcrossVendors > 0 && (
-        <p
-          style={{
-            margin: "12px 0 0",
-            fontSize: 12,
-            color: "var(--muted)",
-            textAlign: "right",
-          }}
-        >
-          Total outstanding across all vendors:{" "}
-          <Money value={totalOutstandingAcrossVendors} size="small" tone="warning" />
-        </p>
-      )}
+      {/* Mig 064 follow-on (Daksh): hide the grand "Total outstanding
+          across all vendors" line for non dev/owner roles. It reads
+          as company cash position at a glance — accountants /
+          accountant_star / crosscheck don't need it on this list
+          page. */}
+      {totalOutstandingAcrossVendors > 0 &&
+        (profile.role === "developer" || profile.role === "owner") && (
+          <p
+            style={{
+              margin: "12px 0 0",
+              fontSize: 12,
+              color: "var(--muted)",
+              textAlign: "right",
+            }}
+          >
+            Total outstanding across all vendors:{" "}
+            <Money value={totalOutstandingAcrossVendors} size="small" tone="warning" />
+          </p>
+        )}
     </section>
   );
 }
