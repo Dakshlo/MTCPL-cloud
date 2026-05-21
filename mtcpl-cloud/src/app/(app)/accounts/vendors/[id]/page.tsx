@@ -341,6 +341,13 @@ export default async function BillVendorDetailPage({
               bank_name: vendor.bank_name,
               bank_account: vendor.bank_account,
               ifsc: vendor.ifsc,
+              // Bug fix (Daksh, May 2026): hdfc_bene_name was missing
+              // from initialValues, so the form re-loaded with a blank
+              // input even when the DB had a saved value. Every save
+              // then re-submitted "" → server wrote NULL → user thought
+              // their edit didn't persist. Pass the stored value in
+              // so the input round-trips correctly.
+              hdfc_bene_name: vendor.hdfc_bene_name,
               upi_id: vendor.upi_id,
               notes: vendor.notes,
               payment_terms_days: vendor.payment_terms_days ?? null,
