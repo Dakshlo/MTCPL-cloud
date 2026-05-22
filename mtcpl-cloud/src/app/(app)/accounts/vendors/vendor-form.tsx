@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 import {
   ACCOUNTS_TOKENS,
   BUTTON_STYLES,
@@ -75,6 +76,16 @@ export function VendorForm({
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // Mig 066 follow-on (Daksh): explicit "✓ Saved" success flash on
+  // the edit form. Previously the form just spun the button label
+  // → stopped, with no confirmation. Now a green banner appears
+  // above the action row for ~3s after every successful save.
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  useEffect(() => {
+    if (savedAt === null) return;
+    const t = setTimeout(() => setSavedAt(null), 3000);
+    return () => clearTimeout(t);
+  }, [savedAt]);
 
   const initial = {
     name: initialValues?.name ?? "",
@@ -146,6 +157,11 @@ export function VendorForm({
       if (mode === "create") {
         setOpen(false);
         setForm(initial);
+      } else {
+        // Mig 066 follow-on (Daksh): flash a "✓ Saved" banner on
+        // the inline edit form so the user gets explicit
+        // confirmation instead of just watching the spinner stop.
+        setSavedAt(Date.now());
       }
     });
   }
@@ -416,6 +432,12 @@ export function VendorForm({
         />
       </Field>
 
+      {/* Mig 066 follow-on — branded loading overlay during the
+          save round-trip + router refresh. Replaces the silent
+          "spinner appears, spinner disappears" UX with the same
+          gold MTCPL overlay the rest of Finance uses. */}
+      <FinanceLoadingOverlay show={pending} label="Saving vendor…" />
+
       {error && (
         <div
           role="alert"
@@ -429,6 +451,28 @@ export function VendorForm({
           }}
         >
           {error}
+        </div>
+      )}
+
+      {savedAt !== null && (
+        <div
+          role="status"
+          style={{
+            padding: "10px 14px",
+            background: ACCOUNTS_TOKENS.successLight,
+            border: `1px solid ${ACCOUNTS_TOKENS.success}`,
+            borderRadius: 8,
+            color: ACCOUNTS_TOKENS.success,
+            fontSize: 13,
+            fontWeight: 700,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            transition: "opacity 0.18s",
+          }}
+        >
+          <span aria-hidden style={{ fontSize: 14 }}>✓</span>
+          Changes saved
         </div>
       )}
 
