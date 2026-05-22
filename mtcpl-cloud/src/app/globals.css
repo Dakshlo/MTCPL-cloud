@@ -2127,6 +2127,18 @@ details.block-card[open] {
 .toast-visible  { opacity: 1; transform: translateX(-50%) translateY(0); }
 .toast-hidden   { opacity: 0; transform: translateX(-50%) translateY(12px); pointer-events: none; }
 
+/* ── Inventory: optional sidebar hide ──────────────────────────
+ * Daksh — the Inventory department has its own dense sub-nav, so a
+ * toggle inside the inventory shell can hide the global sidebar to
+ * give the storekeeper extra width. Controlled by a `body` class
+ * the SidebarHideToggle client sets/clears + persists in
+ * localStorage. Only active on inventory routes because the toggle
+ * itself only renders there; navigating away (or unmounting the
+ * shell) clears the class automatically. */
+body.inv-hide-sidebar .app-shell { grid-template-columns: 1fr; }
+body.inv-hide-sidebar .sidebar,
+body.inv-hide-sidebar .sidebar-backdrop { display: none !important; }
+
 /* ── Print ──────────────────────────────────────────────────── */
 
 @media print {

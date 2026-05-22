@@ -16,6 +16,10 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { INV_THEME, inventoryPageWrapper } from "./theme";
+import {
+  SidebarHideToggle,
+  SidebarHideHydrationScript,
+} from "./sidebar-hide-toggle";
 
 type SubNavItem = {
   href: string;
@@ -59,6 +63,11 @@ export function InventoryShell({
 }) {
   return (
     <div style={inventoryPageWrapper}>
+      {/* Pre-paint hydration script — reads the saved
+          "hide sidebar" preference and applies the body class before
+          React hydrates so we don't get a flash of "sidebar visible
+          then collapses". */}
+      <SidebarHideHydrationScript />
       <div
         style={{
           maxWidth: 1280,
@@ -68,7 +77,12 @@ export function InventoryShell({
           gap: 18,
         }}
       >
-        {/* Header */}
+        {/* Header — Daksh May 2026 polish pass. Title block on the
+            left (steel icon tile + name/subtitle), action group on
+            the right with the Hide-menu toggle sitting alongside any
+            page-specific actions. The icon tile picked up a subtle
+            gradient + soft shadow so it reads as a tab on top of the
+            cream paper rather than a flat square. */}
         <div
           style={{
             display: "flex",
@@ -82,15 +96,17 @@ export function InventoryShell({
             <span
               aria-hidden="true"
               style={{
-                width: 44,
-                height: 44,
-                borderRadius: 10,
-                background: INV_THEME.steel,
+                width: 46,
+                height: 46,
+                borderRadius: 12,
+                background: `linear-gradient(180deg, ${INV_THEME.steel} 0%, ${INV_THEME.steelDark} 100%)`,
                 color: "#fff",
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
                 fontSize: 22,
+                boxShadow:
+                  "0 1px 0 rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.10), 0 6px 16px rgba(28,52,69,0.18)",
               }}
             >
               📦
@@ -103,6 +119,7 @@ export function InventoryShell({
                   fontWeight: 800,
                   color: INV_THEME.steel,
                   letterSpacing: "0.01em",
+                  lineHeight: 1.1,
                 }}
               >
                 {title}
@@ -110,7 +127,7 @@ export function InventoryShell({
               {subtitle && (
                 <div
                   style={{
-                    marginTop: 2,
+                    marginTop: 4,
                     fontSize: 12,
                     fontWeight: 600,
                     color: INV_THEME.steelLight,
@@ -123,7 +140,33 @@ export function InventoryShell({
               )}
             </div>
           </div>
-          {actions && <div style={{ display: "flex", gap: 8 }}>{actions}</div>}
+          {/* Action area: Hide-menu toggle sits FIRST so the page's
+              own actions stay on the far right where users expect
+              them. A soft divider keeps the two groups visually
+              distinct. */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              flexWrap: "wrap",
+            }}
+          >
+            <SidebarHideToggle />
+            {actions && (
+              <>
+                <span
+                  aria-hidden
+                  style={{
+                    width: 1,
+                    height: 24,
+                    background: INV_THEME.parchment,
+                  }}
+                />
+                <div style={{ display: "flex", gap: 8 }}>{actions}</div>
+              </>
+            )}
+          </div>
         </div>
 
         {/* Sub-nav — polished version (Daksh: "make the total bar UI

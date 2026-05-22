@@ -137,7 +137,10 @@ export default async function ScaffoldingBoardPage({
       }
     >
       {/* KPI strip — only on the plant view because per-site has its
-          own simpler subtitle. */}
+          own simpler subtitle. Daksh May 2026 polish: each card gets
+          a leading icon, a subtle parchment-to-paper gradient, and a
+          coloured left rail so the four KPIs read as a row of indices
+          rather than a row of identical boxes. */}
       {showPlant && (
         <div
           style={{
@@ -147,13 +150,33 @@ export default async function ScaffoldingBoardPage({
             marginBottom: 16,
           }}
         >
-          <KpiCard label="At plant" value={totalAtPlant} unit="pcs total" />
-          <KpiCard label="Out at sites" value={totalOutSomewhere} unit="pcs deployed" />
-          <KpiCard label="Active components" value={typesInPlay} unit={`of ${activeComponents.length}`} />
           <KpiCard
+            icon="🏭"
+            label="At plant"
+            value={totalAtPlant}
+            unit="pcs total"
+            accent={INV_THEME.steel}
+          />
+          <KpiCard
+            icon="🚚"
+            label="Out at sites"
+            value={totalOutSomewhere}
+            unit="pcs deployed"
+            accent={INV_THEME.copper}
+          />
+          <KpiCard
+            icon="📦"
+            label="Active components"
+            value={typesInPlay}
+            unit={`of ${activeComponents.length}`}
+            accent={INV_THEME.stockHealthy}
+          />
+          <KpiCard
+            icon="🏗"
             label="Live sites"
             value={sites.filter((s) => s.is_active && !s.is_plant).length}
             unit="receiving stock"
+            accent={INV_THEME.stockLow}
           />
         </div>
       )}
@@ -286,47 +309,77 @@ export default async function ScaffoldingBoardPage({
 }
 
 function KpiCard({
+  icon,
   label,
   value,
   unit,
+  accent,
 }: {
+  icon: string;
   label: string;
   value: number;
   unit: string;
+  /** Left-rail tint so a row of KPIs distinguishes itself at a
+   *  glance — plant grey, deployed copper, active green, sites
+   *  amber. Purely visual; numbers carry the meaning. */
+  accent: string;
 }) {
   return (
     <div
       style={{
-        background: INV_THEME.paper,
+        position: "relative",
+        background: `linear-gradient(180deg, ${INV_THEME.paper} 0%, ${INV_THEME.cream} 100%)`,
         border: `1px solid ${INV_THEME.parchment}`,
         borderRadius: 10,
-        padding: "10px 14px",
+        padding: "12px 14px 12px 18px",
+        boxShadow: "0 1px 0 rgba(28, 52, 69, 0.04), inset 0 1px 0 rgba(255,255,255,0.7)",
+        overflow: "hidden",
       }}
     >
+      {/* Left rail — coloured strip pinned to the card edge for at-
+          a-glance differentiation across the row. */}
+      <span
+        aria-hidden
+        style={{
+          position: "absolute",
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: 4,
+          background: accent,
+        }}
+      />
       <div
         style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
           fontSize: 10,
-          fontWeight: 700,
+          fontWeight: 800,
           color: INV_THEME.steelLight,
           textTransform: "uppercase",
           letterSpacing: "0.1em",
         }}
       >
-        {label}
+        <span aria-hidden style={{ fontSize: 13, lineHeight: 1 }}>
+          {icon}
+        </span>
+        <span>{label}</span>
       </div>
       <div
         style={{
-          fontSize: 22,
+          fontSize: 24,
           fontWeight: 800,
           color: INV_THEME.steel,
           letterSpacing: "-0.01em",
           fontFeatureSettings: '"tnum"',
-          marginTop: 2,
+          marginTop: 4,
+          lineHeight: 1.1,
         }}
       >
         {value.toLocaleString("en-IN")}
       </div>
-      <div style={{ fontSize: 10, color: INV_THEME.steelLight }}>{unit}</div>
+      <div style={{ fontSize: 10, color: INV_THEME.steelLight, marginTop: 2 }}>{unit}</div>
     </div>
   );
 }
