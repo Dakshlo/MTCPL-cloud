@@ -581,6 +581,101 @@ export async function finishBlockAction(formData: FormData): Promise<FinishBlock
       throw new Error(incomingCheck.error);
     }
 
+    // Daksh May 2026 — double-claim guard on UNPLANNED extras.
+    //
+    // The bug Daksh hit on MT-B-257: a cutter added an inventory slab
+    // (let's call it S1) as an unplanned extra on Block 1, submitted
+    // it for audit, then later also added S1 to Block 2 and submitted
+    // that for audit too. Both blocks landed in the audit queue with
+    // S1 in their extra_slab_ids. Block 2 got approved first → S1
+    // flipped to cut_done with source_block_id=Block 2. When the
+    // approver then tried to approve Block 1, the RPC raised
+    //   "Some unplanned slabs (1 of 3) were already taken …"
+    // and there was no graceful exit — the approver couldn't tell
+    // which slab was stolen, and unselecting in the UI doesn't
+    // mutate the staged payload anyway.
+    //
+    // Catching the conflict here at SUBMIT time (instead of at approve
+    // time) means the second submission gets refused before it can
+    // poison the audit queue. The cutter sees a clear "this slab is
+    // already on Block X — pick a different one" error and fixes the
+    // payload before resubmitting. The audit queue never sees the
+    // conflict.
+    //
+    // Two flavours to check:
+    //   1. ALREADY-CONSUMED — extras whose status is already cut_done,
+    //      owned by some OTHER block (not this one). Means a previous
+    //      audit already committed them.
+    //   2. ALREADY-PENDING — extras (or transferred slabs) sitting in
+    //      ANOTHER awaiting_approval block's pending_approval_payload.
+    //      Both blocks can't claim the same slab — first-mover wins.
+    if (extraSlabIds.length > 0 || transferredSlabIds.length > 0) {
+      const allClaims = [...extraSlabIds, ...transferredSlabIds];
+
+      // 1) Already cut by another block.
+      const { data: doneRows } = await supabase
+        .from("slab_requirements")
+        .select("id, source_block_id, status")
+        .in("id", allClaims)
+        .eq("status", "cut_done");
+      const stolen = ((doneRows ?? []) as Array<{
+        id: string;
+        source_block_id: string | null;
+        status: string;
+      }>).filter((r) => r.source_block_id && r.source_block_id !== blockId);
+      if (stolen.length > 0) {
+        const list = stolen
+          .map((r) => `${r.id} (already cut by ${r.source_block_id})`)
+          .join(", ");
+        throw new Error(
+          `Cannot submit — these slabs were already cut by another block: ${list}. ` +
+            `Refresh the page and remove them from this submission, or pick different inventory slabs.`,
+        );
+      }
+
+      // 2) Already pending in another awaiting-audit block's payload.
+      //    Limit to blocks that are NOT this one and still in
+      //    awaiting_approval (already-approved blocks fall into case 1
+      //    above; rejected blocks have their payload cleared, see
+      //    sendForCutterEditAction).
+      const { data: pendingPeers } = await supabase
+        .from("cut_session_blocks")
+        .select("id, block_id, pending_approval_payload")
+        .eq("status", "awaiting_approval")
+        .neq("id", sessionBlockId);
+      type Peer = {
+        id: string;
+        block_id: string;
+        pending_approval_payload:
+          | (PendingApprovalPayload & Record<string, unknown>)
+          | null;
+      };
+      const conflicts: Array<{ slabId: string; otherBlockId: string }> = [];
+      const claimSet = new Set(allClaims);
+      for (const p of (pendingPeers ?? []) as Peer[]) {
+        const pp = p.pending_approval_payload;
+        if (!pp) continue;
+        const peerClaims = [
+          ...(pp.extra_slab_ids ?? []),
+          ...(pp.transferred_slab_ids ?? []),
+        ];
+        for (const sid of peerClaims) {
+          if (claimSet.has(sid)) {
+            conflicts.push({ slabId: sid, otherBlockId: p.block_id });
+          }
+        }
+      }
+      if (conflicts.length > 0) {
+        const list = conflicts
+          .map((c) => `${c.slabId} (already on block ${c.otherBlockId}'s pending audit)`)
+          .join(", ");
+        throw new Error(
+          `Cannot submit — these slabs are already claimed by another block waiting for audit: ${list}. ` +
+            `Pick different inventory slabs, or wait for the other block to be sent back for edit.`,
+        );
+      }
+    }
+
     // Migration 033 — earmark the donor side BEFORE we stage the
     // payload. This stamps cut_session_slabs.pending_transfer_to_csb_id
     // + flips donor.needs_reprint=TRUE so the donor's operator sees the
@@ -853,6 +948,47 @@ export async function approveCutAction(
         return {
           ok: false,
           error: `Donor block(s) [${blockIds}] are no longer pending — the transfer cannot be committed. Send the block back for edit to remove this transfer, or contact a developer.`,
+        };
+      }
+    }
+
+    // Daksh May 2026 — pre-RPC diagnostic for the double-claim case.
+    //
+    // Symmetric to the guard in finishBlockAction, but at approve
+    // time. If somehow we got here with an extra slab that's ALREADY
+    // been cut_done by another block (e.g. a payload submitted before
+    // the submit-time guard existed, or a sibling block in this audit
+    // queue got approved a moment ago), the finish_block_cut RPC
+    // would raise a generic "% of % were already taken" error with
+    // no slab IDs — the approver couldn't tell what to fix.
+    //
+    // Here we look up the offending slabs ourselves and surface them
+    // by name + by donor block, so the approver knows exactly which
+    // ones to remove via "Send back for edit". MT-B-257 was the
+    // original case that prompted this — Daksh couldn't get past the
+    // generic error and had no idea which slab to deselect.
+    if (payload.extra_slab_ids.length > 0) {
+      const { data: stolenRows } = await supabase
+        .from("slab_requirements")
+        .select("id, source_block_id")
+        .in("id", payload.extra_slab_ids)
+        .eq("status", "cut_done");
+      const stolen = ((stolenRows ?? []) as Array<{
+        id: string;
+        source_block_id: string | null;
+      }>).filter(
+        (r) => r.source_block_id && r.source_block_id !== block.block_id,
+      );
+      if (stolen.length > 0) {
+        const list = stolen
+          .map((r) => `${r.id} → cut from ${r.source_block_id}`)
+          .join(", ");
+        return {
+          ok: false,
+          error:
+            `Cannot approve — these unplanned slabs were already cut by another block ` +
+            `(likely approved just before this one): ${list}. ` +
+            `Click "Allow cutter to edit" and ask the cutter to remove these from this block, then resubmit.`,
         };
       }
     }
