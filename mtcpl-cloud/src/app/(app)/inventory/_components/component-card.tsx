@@ -14,6 +14,7 @@ import { stockLevel } from "./stock";
 export function ComponentCard({
   name,
   componentType,
+  typeLabel,
   sizeSpec,
   unit,
   qty,
@@ -25,6 +26,13 @@ export function ComponentCard({
 }: {
   name: string;
   componentType: ScaffoldingComponentType;
+  /** Daksh May 2026 — short human label for the component type
+   *  (Standards / Ledgers / Transoms / etc). Rendered as a small
+   *  chip in the top-right of the card so the user can still tell
+   *  same-name variants apart at a glance now that we render one
+   *  flat grid instead of per-type sections. Defaults to nothing
+   *  (chip hidden) for callers that don't want it. */
+  typeLabel?: string;
   sizeSpec: string | null;
   unit: string;
   qty: number;
@@ -48,6 +56,7 @@ export function ComponentCard({
   const card = (
     <div
       style={{
+        position: "relative",
         background: INV_THEME.paper,
         border: `1px solid ${INV_THEME.parchment}`,
         borderRadius: 10,
@@ -66,6 +75,31 @@ export function ComponentCard({
         touchAction: "manipulation",
       }}
     >
+      {/* Type chip — top-right. Absolutely positioned so it doesn't
+          push the icon down. Only renders when typeLabel is passed
+          (per-type-grouped views can omit it). */}
+      {typeLabel && (
+        <span
+          style={{
+            position: "absolute",
+            top: 6,
+            right: 6,
+            fontSize: 8,
+            fontWeight: 800,
+            color: INV_THEME.steelLight,
+            background: INV_THEME.cream,
+            border: `1px solid ${INV_THEME.parchment}`,
+            padding: "1px 5px",
+            borderRadius: 3,
+            letterSpacing: "0.06em",
+            textTransform: "uppercase",
+            lineHeight: 1.3,
+            pointerEvents: "none",
+          }}
+        >
+          {typeLabel}
+        </span>
+      )}
       {/* Icon block — shrunk from 88 → 56 to fit 4-per-row on
           portrait tablets and 6-per-row on landscape. */}
       <div

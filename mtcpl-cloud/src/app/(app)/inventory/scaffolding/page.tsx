@@ -190,84 +190,59 @@ export default async function ScaffoldingBoardPage({
         hrefBase="/inventory/scaffolding"
       />
 
-      {/* Component grid grouped by type */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-        {types.map((t) => {
+      {/* Component grid — flat (Daksh May 2026).
+       *
+       *  Previously: one <section> per component_type with its own
+       *  header row + its own internal grid. With most fleets having
+       *  1 variant per type, each section rendered a single card
+       *  followed by empty row → cards looked like they were
+       *  stacked one per row even though the inner grid was 4-wide.
+       *
+       *  Now: one big flat grid of every visible component. Cards
+       *  are sorted by type → display_order so same-type variants
+       *  still cluster next to each other; the type is already
+       *  visible from the component name + icon on each card so no
+       *  section header is needed. */}
+      <ComponentCardGrid>
+        {types.flatMap((t) => {
           const list = byType.get(t)!;
-          // Hide type groups with zero qty AND zero pending AT this site
-          // (keeps Plant view full but trims project-site views to what's
-          // actually there).
-          if (!showPlant) {
-            const anyQty = list.some((c) => {
-              const e = stock.get(stockKey(c.id, activeSite.id));
-              return e && (e.onHand > 0 || e.pendingOut > 0);
-            });
-            if (!anyQty) return null;
-          }
-          return (
-            <section key={t} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "baseline",
-                  gap: 10,
-                  paddingBottom: 6,
-                  borderBottom: `1px solid ${INV_THEME.parchment}`,
-                }}
-              >
-                <h3
-                  style={{
-                    margin: 0,
-                    fontSize: 12,
-                    fontWeight: 800,
-                    color: INV_THEME.steel,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.1em",
-                  }}
-                >
-                  {labelForComponentType(t)}
-                </h3>
-                <span
-                  style={{
-                    fontSize: 10,
-                    color: INV_THEME.steelLight,
-                    letterSpacing: "0.04em",
-                  }}
-                >
-                  {list.length} variant{list.length === 1 ? "" : "s"}
-                </span>
-              </div>
-              <ComponentCardGrid>
-                {list.map((c) => {
-                  const entry = stock.get(stockKey(c.id, activeSite.id));
-                  const qty = entry?.onHand ?? 0;
-                  const pending = entry?.pendingOut ?? 0;
-                  const outAtSites = showPlant
-                    ? totalOutAtSites(c.id, sites, stock)
-                    : 0;
-                  return (
-                    <ComponentCard
-                      key={c.id}
-                      name={c.name}
-                      componentType={c.component_type}
-                      sizeSpec={c.size_spec}
-                      unit={c.unit}
-                      qty={qty}
-                      pendingOut={pending}
-                      imageDataUrl={c.image_data_url}
-                      secondaryLine={
-                        showPlant && outAtSites > 0
-                          ? `+${outAtSites.toLocaleString("en-IN")} out at sites`
-                          : null
-                      }
-                    />
-                  );
-                })}
-              </ComponentCardGrid>
-            </section>
-          );
+          // Filter per-site visibility same as before: at the plant
+          // we show everything; at a project site we only show what's
+          // actually present (qty or pending > 0).
+          const visible = showPlant
+            ? list
+            : list.filter((c) => {
+                const e = stock.get(stockKey(c.id, activeSite.id));
+                return e && (e.onHand > 0 || e.pendingOut > 0);
+              });
+          return visible.map((c) => {
+            const entry = stock.get(stockKey(c.id, activeSite.id));
+            const qty = entry?.onHand ?? 0;
+            const pending = entry?.pendingOut ?? 0;
+            const outAtSites = showPlant
+              ? totalOutAtSites(c.id, sites, stock)
+              : 0;
+            return (
+              <ComponentCard
+                key={c.id}
+                name={c.name}
+                componentType={c.component_type}
+                typeLabel={labelForComponentType(t)}
+                sizeSpec={c.size_spec}
+                unit={c.unit}
+                qty={qty}
+                pendingOut={pending}
+                imageDataUrl={c.image_data_url}
+                secondaryLine={
+                  showPlant && outAtSites > 0
+                    ? `+${outAtSites.toLocaleString("en-IN")} out at sites`
+                    : null
+                }
+              />
+            );
+          });
         })}
-      </div>
+      </ComponentCardGrid>
 
       {/* Empty-fleet hint */}
       {activeComponents.length === 0 && (
