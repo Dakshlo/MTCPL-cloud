@@ -216,6 +216,30 @@ export function VendorCockpitClient({
   // Per-slab "Problem / transfer" modal — opened from a running
   // machine card. Tracks the carving_item the operator is acting on.
   const [problemFor, setProblemFor] = useState<CarvingJobLite | null>(null);
+  // Daksh May 2026 — pending stock / ready to load / recent completed
+  // moved out of inline sections into a centered peek modal. The
+  // header KPI tiles now act as launchers — tap "Pending stock" to
+  // see the in-transit list, tap "Ready to load" to see the
+  // actionable queue (with Load buttons inline), tap "Recently
+  // completed" to see the last 10 with approval status. Single state
+  // covers all three because only one peek is open at a time.
+  const [peekOpen, setPeekOpen] = useState<
+    null | "pending" | "ready" | "recent"
+  >(null);
+
+  // Daksh May 2026 — the vendor role has only this one workspace,
+  // so the global sidebar is dead weight. Tag <body> with
+  // `vendor-cockpit-fullscreen` while this component is mounted;
+  // a CSS rule in globals.css collapses the .app-shell grid + hides
+  // .sidebar. Cleanup on unmount so navigating away (e.g. to /pending
+  // or /profile) restores the sidebar for any role that has one.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.body.classList.add("vendor-cockpit-fullscreen");
+    return () => {
+      document.body.classList.remove("vendor-cockpit-fullscreen");
+    };
+  }, []);
 
   // After a server-action redirects back to /vendor with a
   // success toast (e.g. "Slab loaded", "Both slabs loaded",
@@ -336,62 +360,40 @@ export function VendorCockpitClient({
           <Stat label="Idle" value={totals.idle} fg="#22c55e" />
           <Stat label="Carving" value={totals.carving} fg="#60a5fa" />
           <Stat label="Maintenance" value={totals.maintenance} fg="#f87171" />
-          <Stat label="Pending stock" value={pendingStock.length} fg="#fbbf24" />
-          <Stat label="Ready to load" value={readyToLoad.length} fg="#fbbf24" />
+          {/* Daksh May 2026 — these three tiles are now LAUNCHERS for
+              a centered peek modal. The list views moved out of
+              inline sections (which scrolled the cockpit too far) and
+              into focused popups the operator opens on demand. */}
+          <StatButton
+            label="Pending stock"
+            value={pendingStock.length}
+            fg="#fbbf24"
+            onClick={() => setPeekOpen("pending")}
+            title="Slabs assigned but still being transferred to your shade"
+          />
+          <StatButton
+            label="Ready to load"
+            value={readyToLoad.length}
+            fg="#fbbf24"
+            onClick={() => setPeekOpen("ready")}
+            title="Slabs physically here and ready to load on a CNC"
+            emphasize
+          />
+          <StatButton
+            label="Recently done"
+            value={recent.length}
+            fg="#a3a3a3"
+            onClick={() => setPeekOpen("recent")}
+            title="Last 10 unloaded — awaiting team review unless approved"
+          />
         </div>
       </div>
 
-      {/* Pending stock — slabs assigned but not yet delivered to
-          this vendor's shade. Read-only view; transfer person
-          handles delivery on /carving/transfer. Collapsed by
-          default — vendor doesn't act on these. Migration 023/025. */}
-      <Section
-        title="Pending stock"
-        subtitle={
-          pendingStock.length === 0
-            ? "No slabs awaiting transfer to your shade."
-            : `${pendingStock.length} slab${pendingStock.length !== 1 ? "s" : ""} being transferred from the yard`
-        }
-        collapsible
-        defaultOpen={false}
-      >
-        {pendingStock.length === 0 ? null : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {pendingStock.map((job) => (
-              <PendingStockRow key={job.id} job={job} />
-            ))}
-          </div>
-        )}
-      </Section>
-
-      {/* Ready to load — slabs physically at the shade, ready for a
-          CNC. Collapsible at user's request; defaults to OPEN since
-          this is the actionable list (Load button lives here). */}
-      <Section
-        title="Ready to load"
-        subtitle={`${readyToLoad.length} slab${readyToLoad.length !== 1 ? "s" : ""} ready to load on a CNC`}
-        collapsible
-        defaultOpen
-      >
-        {readyToLoad.length === 0 ? (
-          <Empty text={pendingStock.length > 0 ? "Waiting for the transfer runner to deliver. See Pending stock above." : "Queue is clear. Carving head will assign more as slabs become available."} />
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {readyToLoad.map((job) => (
-              <QueueRow
-                key={job.id}
-                job={job}
-                hasIdleMachine={totals.idle > 0}
-                onLoad={() => {
-                  // Pick first idle machine as the default selection
-                  const firstIdle = machines.find((m) => m.status === "idle");
-                  if (firstIdle) setLoadFor({ machine: firstIdle });
-                }}
-              />
-            ))}
-          </div>
-        )}
-      </Section>
+      {/* Daksh May 2026 — Pending stock / Ready to load lists moved
+          OUT of inline sections and INTO the centered peek modal
+          (launched from the header KPI tiles). The vendor cockpit
+          is now machine-first; the slab lists are one tap away
+          when the operator wants them. */}
 
       {/* Machine grid — Mig follow-on (Daksh, May 2026): lathes
           split into their own section below the CNC grid so they
@@ -461,73 +463,89 @@ export function VendorCockpitClient({
         );
       })()}
 
-      {/* Recent completed */}
-      {recent.length > 0 && (
-        <Section
-          title="Recently completed"
-          subtitle="Last 10 unloaded — awaiting team review unless approved"
-          collapsible
-          defaultOpen={false}
+      {/* Daksh May 2026 — Recently completed list moved into the
+          peek modal (launched from the "Recently done" KPI tile). */}
+
+      {/* ── Peek modal ── one of pending / ready / recent ── */}
+      {peekOpen && (
+        <CenterPeekModal
+          title={
+            peekOpen === "pending"
+              ? "Pending stock"
+              : peekOpen === "ready"
+                ? "Ready to load"
+                : "Recently completed"
+          }
+          subtitle={
+            peekOpen === "pending"
+              ? `${pendingStock.length} slab${pendingStock.length !== 1 ? "s" : ""} in transit to your shade`
+              : peekOpen === "ready"
+                ? `${readyToLoad.length} slab${readyToLoad.length !== 1 ? "s" : ""} physically here, ready to load`
+                : `Last ${recent.length} unloaded — awaiting team review unless approved`
+          }
+          onClose={() => setPeekOpen(null)}
         >
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {recent.map((r) => (
-              <div
-                key={r.id}
-                style={{
-                  padding: "10px 12px",
-                  background: r.review_notes
-                    ? "rgba(220,38,38,0.05)"
-                    : r.review_approved_at
-                      ? "rgba(22,163,74,0.05)"
-                      : "var(--surface)",
-                  border: `1px solid ${r.review_notes ? "rgba(220,38,38,0.2)" : "var(--border)"}`,
-                  borderRadius: 8,
-                  display: "flex",
-                  flexWrap: "wrap",
-                  alignItems: "center",
-                  gap: 10,
-                }}
-              >
-                <div style={{ flex: "1 1 180px", minWidth: 0 }}>
-                  <div style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 13 }}>
-                    {r.slab_id}
-                  </div>
-                  {r.slab && (
-                    <div style={{ fontSize: 11, color: "var(--muted)" }}>
-                      {r.slab.temple} · {dimStr(r.slab)}
-                    </div>
-                  )}
-                  <div style={{ fontSize: 10, color: "var(--muted-light)", marginTop: 2 }}>
-                    📍 {r.temporary_location ?? "—"}
-                  </div>
-                </div>
-                <div style={{ fontSize: 11, color: "var(--muted)", whiteSpace: "nowrap" }}>
-                  {r.review_approved_at ? (
-                    <span style={{ color: "#15803d", fontWeight: 600 }}>✔ approved</span>
-                  ) : r.review_notes ? (
-                    <span style={{ color: "#b91c1c", fontWeight: 600 }}>✗ rejected</span>
-                  ) : (
-                    "in review"
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setEditLocFor({
-                      id: r.id,
-                      slab_id: r.slab_id,
-                      temporary_location: r.temporary_location,
-                    })
-                  }
-                  className="ghost-button"
-                  style={{ fontSize: 11, padding: "4px 10px", flexShrink: 0 }}
-                >
-                  Edit location
-                </button>
+          {peekOpen === "pending" &&
+            (pendingStock.length === 0 ? (
+              <Empty text="No slabs awaiting transfer to your shade." />
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {pendingStock.map((job) => (
+                  <PendingStockRow key={job.id} job={job} />
+                ))}
               </div>
             ))}
-          </div>
-        </Section>
+          {peekOpen === "ready" &&
+            (readyToLoad.length === 0 ? (
+              <Empty
+                text={
+                  pendingStock.length > 0
+                    ? "Waiting for the transfer runner to deliver. Open Pending stock to see what's in transit."
+                    : "Queue is clear. Carving head will assign more as slabs become available."
+                }
+              />
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {readyToLoad.map((job) => (
+                  <QueueRow
+                    key={job.id}
+                    job={job}
+                    hasIdleMachine={totals.idle > 0}
+                    onLoad={() => {
+                      // Pick first idle machine as the default selection.
+                      // Close the peek so the LoadModal isn't stacked on
+                      // top of it.
+                      const firstIdle = machines.find((m) => m.status === "idle");
+                      if (firstIdle) {
+                        setLoadFor({ machine: firstIdle });
+                        setPeekOpen(null);
+                      }
+                    }}
+                  />
+                ))}
+              </div>
+            ))}
+          {peekOpen === "recent" &&
+            (recent.length === 0 ? (
+              <Empty text="Nothing finished yet — completed slabs land here for ~24h." />
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {recent.map((r) => (
+                  <RecentCompletedRow
+                    key={r.id}
+                    row={r}
+                    onEditLocation={() =>
+                      setEditLocFor({
+                        id: r.id,
+                        slab_id: r.slab_id,
+                        temporary_location: r.temporary_location,
+                      })
+                    }
+                  />
+                ))}
+              </div>
+            ))}
+        </CenterPeekModal>
       )}
 
       {/* ── Modals ── */}
@@ -671,6 +689,322 @@ function Stat({ label, value, fg }: { label: string; value: number; fg: string }
       <div style={{ fontSize: 22, fontWeight: 700, color: fg, lineHeight: 1.1, marginTop: 2 }}>
         {value}
       </div>
+    </div>
+  );
+}
+
+// Clickable variant of <Stat> — same visual shape but rendered as a
+// button so the header KPI tiles can open the center-peek modal.
+// `emphasize` is set on the most important launcher (Ready to load)
+// so it pulses subtly when there's a non-zero count.
+function StatButton({
+  label,
+  value,
+  fg,
+  onClick,
+  title,
+  emphasize,
+}: {
+  label: string;
+  value: number;
+  fg: string;
+  onClick: () => void;
+  title?: string;
+  emphasize?: boolean;
+}) {
+  const hot = emphasize && value > 0;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      style={{
+        padding: "8px 14px",
+        background: hot ? "rgba(251, 191, 36, 0.18)" : "rgba(255,255,255,0.08)",
+        border: `1px solid ${hot ? "rgba(251, 191, 36, 0.55)" : "rgba(255,255,255,0.12)"}`,
+        borderRadius: 8,
+        minWidth: 84,
+        textAlign: "left",
+        cursor: "pointer",
+        color: "inherit",
+        transition: "transform 0.12s ease, background 0.12s ease",
+        touchAction: "manipulation",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.transform = "translateY(-1px)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.transform = "translateY(0)";
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          fontSize: 10,
+          color: "rgba(255,255,255,0.6)",
+          textTransform: "uppercase",
+          letterSpacing: "0.07em",
+          fontWeight: 600,
+        }}
+      >
+        {label}
+        <span aria-hidden style={{ fontSize: 10, opacity: 0.8 }}>
+          ▸
+        </span>
+      </div>
+      <div style={{ fontSize: 22, fontWeight: 700, color: fg, lineHeight: 1.1, marginTop: 2 }}>
+        {value}
+      </div>
+    </button>
+  );
+}
+
+// Center-peek modal — the launcher tiles open this. Centred on screen
+// (not a bottom-sheet like ModalShell — the operator on a tablet wants
+// the list at eye-level rather than thumb-level). Escape + click-
+// outside closes. Mirrors ModalShell's behaviour otherwise.
+function CenterPeekModal({
+  title,
+  subtitle,
+  children,
+  onClose,
+}: {
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+  onClose: () => void;
+}) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    // Lock body scroll while the peek is open so the cockpit
+    // doesn't scroll behind the overlay on tablet.
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [onClose]);
+  return (
+    <div
+      onMouseDown={(e) => {
+        if (dialogRef.current && !dialogRef.current.contains(e.target as Node)) {
+          onClose();
+        }
+      }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(15,12,6,0.55)",
+        backdropFilter: "blur(2px)",
+        zIndex: 1000,
+        display: "grid",
+        placeItems: "center",
+        padding: "24px 16px",
+      }}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        style={{
+          background: "var(--surface)",
+          border: "1px solid var(--border)",
+          borderRadius: 14,
+          boxShadow: "0 18px 60px rgba(0,0,0,0.45)",
+          width: "100%",
+          maxWidth: 640,
+          maxHeight: "88vh",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            padding: "14px 18px",
+            borderBottom: "1px solid var(--border)",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            gap: 12,
+          }}
+        >
+          <div>
+            <h2 style={{ margin: 0, fontSize: 17 }}>{title}</h2>
+            {subtitle && (
+              <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>
+                {subtitle}
+              </p>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              fontSize: 18,
+              border: "none",
+              background: "transparent",
+              cursor: "pointer",
+              color: "var(--muted)",
+              padding: 4,
+              touchAction: "manipulation",
+            }}
+          >
+            ✕
+          </button>
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", padding: "14px 16px 18px" }}>
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Recently completed row — Daksh May 2026 visual pass: a chunky
+// left rail + a big status chip make "approved" vs "in review" vs
+// "rejected" readable at arm's length. Previously the only
+// differentiator was a faint tinted background + a tiny right-side
+// label which blended together on the tablet.
+function RecentCompletedRow({
+  row,
+  onEditLocation,
+}: {
+  row: {
+    id: string;
+    slab_id: string;
+    completed_at: string | null;
+    temporary_location: string | null;
+    review_approved_at: string | null;
+    review_notes: string | null;
+    slab: SlabLite | null;
+  };
+  onEditLocation: () => void;
+}) {
+  // Three states. Rejected (review_notes set) wins regardless of
+  // whether an approved_at also exists — that combination means the
+  // approver flagged something for the operator to redo.
+  const state: "approved" | "rejected" | "review" = row.review_notes
+    ? "rejected"
+    : row.review_approved_at
+      ? "approved"
+      : "review";
+  const tone = {
+    approved: {
+      rail: "#16a34a",
+      bg: "rgba(22,163,74,0.07)",
+      border: "rgba(22,163,74,0.35)",
+      chipBg: "rgba(22,163,74,0.18)",
+      chipFg: "#15803d",
+      chipBorder: "rgba(22,163,74,0.5)",
+      label: "✔ APPROVED",
+      sub: "Cleared by carving team",
+    },
+    rejected: {
+      rail: "#dc2626",
+      bg: "rgba(220,38,38,0.08)",
+      border: "rgba(220,38,38,0.4)",
+      chipBg: "rgba(220,38,38,0.18)",
+      chipFg: "#b91c1c",
+      chipBorder: "rgba(220,38,38,0.55)",
+      label: "✗ NEEDS REWORK",
+      sub: row.review_notes ?? "Re-check requested",
+    },
+    review: {
+      rail: "#d97706",
+      bg: "rgba(217,119,6,0.07)",
+      border: "rgba(217,119,6,0.35)",
+      chipBg: "rgba(217,119,6,0.18)",
+      chipFg: "#b45309",
+      chipBorder: "rgba(217,119,6,0.5)",
+      label: "⏳ AWAITING REVIEW",
+      sub: "Pending team sign-off",
+    },
+  }[state];
+  return (
+    <div
+      style={{
+        padding: "12px 14px",
+        background: tone.bg,
+        border: `1px solid ${tone.border}`,
+        borderLeft: `6px solid ${tone.rail}`,
+        borderRadius: 10,
+        display: "flex",
+        flexWrap: "wrap",
+        alignItems: "center",
+        gap: 12,
+      }}
+    >
+      <div style={{ flex: "1 1 200px", minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 2 }}>
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 800,
+              padding: "3px 8px",
+              borderRadius: 999,
+              background: tone.chipBg,
+              color: tone.chipFg,
+              border: `1px solid ${tone.chipBorder}`,
+              letterSpacing: "0.04em",
+            }}
+          >
+            {tone.label}
+          </span>
+          <code
+            style={{
+              fontFamily: "ui-monospace, monospace",
+              fontWeight: 700,
+              fontSize: 13,
+              color: "var(--text)",
+            }}
+          >
+            {row.slab_id}
+          </code>
+        </div>
+        {row.slab && (
+          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+            {row.slab.temple} · {dimStr(row.slab)}
+          </div>
+        )}
+        <div style={{ fontSize: 10, color: "var(--muted-light)", marginTop: 4 }}>
+          📍 {row.temporary_location ?? "—"}
+        </div>
+        {/* Approver note / status detail. For rejected this is the
+            actual review_notes string; for approved/review it's a
+            short caption. */}
+        <div
+          style={{
+            fontSize: 11,
+            color: tone.chipFg,
+            marginTop: 6,
+            fontWeight: state === "rejected" ? 600 : 500,
+            fontStyle: state === "rejected" ? "normal" : "italic",
+          }}
+        >
+          {tone.sub}
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={onEditLocation}
+        className="ghost-button"
+        style={{ fontSize: 11, padding: "6px 12px", flexShrink: 0, touchAction: "manipulation" }}
+      >
+        Edit location
+      </button>
     </div>
   );
 }

@@ -2135,9 +2135,17 @@ details.block-card[open] {
  * localStorage. Only active on inventory routes because the toggle
  * itself only renders there; navigating away (or unmounting the
  * shell) clears the class automatically. */
-body.inv-hide-sidebar .app-shell { grid-template-columns: 1fr; }
+body.inv-hide-sidebar .app-shell,
+body.vendor-cockpit-fullscreen .app-shell { grid-template-columns: 1fr; }
 body.inv-hide-sidebar .sidebar,
-body.inv-hide-sidebar .sidebar-backdrop { display: none !important; }
+body.inv-hide-sidebar .sidebar-backdrop,
+body.vendor-cockpit-fullscreen .sidebar,
+body.vendor-cockpit-fullscreen .sidebar-backdrop { display: none !important; }
+/* Daksh May 2026 — vendor cockpit hides the global sidebar
+ * unconditionally because the role only has one workspace; the
+ * sidebar would just be empty padding. Class is added/removed
+ * by a useEffect inside cockpit-client.tsx so it's scoped to the
+ * page lifecycle (other pages keep the sidebar). */
 
 /* ── Inventory: tablet tap responsiveness ─────────────────────
  * Daksh (May 2026) — tablet users were reporting that 2 out of 3
