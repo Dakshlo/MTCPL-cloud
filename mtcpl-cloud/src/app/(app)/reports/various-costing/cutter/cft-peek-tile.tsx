@@ -403,6 +403,194 @@ function DetailTable({
   );
 }
 
+// ── Grouped detail (stone → temple → slabs) ───────────────────────
+//
+// Daksh — the bucket drill-down stays inside the summary view, so
+// rather than a flat slab list (which the top-level Detail view
+// already does) the expanded strip nests slabs under their stone
+// then their temple. Two reasons:
+//   1. Cutter operators think in stones first ("how much PinkStone
+//      did we cut Tuesday?"), then in temples within each stone.
+//   2. A given day usually has 3-5 stones × 2-4 temples per stone,
+//      so the grouping cuts a 100-row list into ~10 readable
+//      sections without losing any data.
+//
+// Stones sorted by total CFT desc (biggest first); temples within
+// a stone same; slabs within a temple by CFT desc (already sorted
+// upstream in bucketSlabs but we re-sort defensively).
+
+function GroupedDetailTable({ slabs }: { slabs: CutterContributingSlab[] }) {
+  type TempleGroup = {
+    temple: string;
+    rows: CutterContributingSlab[];
+    cft: number;
+  };
+  type StoneGroup = {
+    stone: string;
+    temples: TempleGroup[];
+    rows: number;
+    cft: number;
+  };
+
+  // Bucket: stone → temple → slabs. Nulls coerce to "—" so they
+  // don't disappear; that matches the flat Detail view convention.
+  const byStone = new Map<string, Map<string, CutterContributingSlab[]>>();
+  for (const s of slabs) {
+    const stoneKey = s.stone ?? "—";
+    const templeKey = s.temple ?? "—";
+    let templeMap = byStone.get(stoneKey);
+    if (!templeMap) {
+      templeMap = new Map();
+      byStone.set(stoneKey, templeMap);
+    }
+    const arr = templeMap.get(templeKey);
+    if (arr) arr.push(s);
+    else templeMap.set(templeKey, [s]);
+  }
+
+  const stones: StoneGroup[] = [];
+  for (const [stone, templeMap] of byStone) {
+    const temples: TempleGroup[] = [];
+    for (const [temple, rows] of templeMap) {
+      const sortedRows = [...rows].sort((a, b) => (b.cft || 0) - (a.cft || 0));
+      const cft = sortedRows.reduce((acc, s) => acc + (s.cft || 0), 0);
+      temples.push({ temple, rows: sortedRows, cft });
+    }
+    temples.sort((a, b) => b.cft - a.cft);
+    const rowsCount = temples.reduce((acc, t) => acc + t.rows.length, 0);
+    const cft = temples.reduce((acc, t) => acc + t.cft, 0);
+    stones.push({ stone, temples, rows: rowsCount, cft });
+  }
+  stones.sort((a, b) => b.cft - a.cft);
+
+  return (
+    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+      <thead>
+        <tr style={{ background: "#f1f5f9", borderBottom: "1px solid #cbd5e1" }}>
+          <th style={th()}>Size Code</th>
+          <th style={th()}>From Block</th>
+          <th style={th()}>Label</th>
+          <th style={{ ...th(), textAlign: "right" }}>Dimensions (in)</th>
+          <th style={{ ...th(), textAlign: "right" }}>CFT</th>
+        </tr>
+      </thead>
+      <tbody>
+        {stones.map((stone) => (
+          <Fragment key={`stone:${stone.stone}`}>
+            <tr style={{ background: "#e0f2fe", borderTop: "2px solid #0284c7" }}>
+              <td
+                colSpan={5}
+                style={{
+                  padding: "10px 14px",
+                  fontSize: 12,
+                  fontWeight: 800,
+                  color: "#0c4a6e",
+                  letterSpacing: "0.04em",
+                  textTransform: "uppercase",
+                }}
+              >
+                <span>💎 {stone.stone}</span>
+                <span
+                  style={{
+                    marginLeft: 10,
+                    color: "#0369a1",
+                    fontWeight: 600,
+                    fontSize: 11,
+                    textTransform: "none",
+                    letterSpacing: "0.02em",
+                  }}
+                >
+                  · {stone.rows} slab{stone.rows === 1 ? "" : "s"}
+                </span>
+                <span
+                  style={{
+                    float: "right",
+                    fontSize: 12,
+                    fontFamily: "ui-monospace, monospace",
+                    fontWeight: 800,
+                    color: "#0c4a6e",
+                  }}
+                >
+                  {fmtNum(stone.cft, 2)} CFT
+                </span>
+              </td>
+            </tr>
+            {stone.temples.map((temple) => (
+              <Fragment key={`temple:${stone.stone}:${temple.temple}`}>
+                <tr style={{ background: "#fef3c7" }}>
+                  <td
+                    colSpan={5}
+                    style={{
+                      padding: "6px 14px 6px 28px",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: "#78350f",
+                    }}
+                  >
+                    <span>🏛 {temple.temple}</span>
+                    <span style={{ marginLeft: 8, color: "#92400e", fontWeight: 500 }}>
+                      · {temple.rows.length} slab{temple.rows.length === 1 ? "" : "s"}
+                    </span>
+                    <span
+                      style={{
+                        float: "right",
+                        fontFamily: "ui-monospace, monospace",
+                        fontWeight: 700,
+                        color: "#78350f",
+                      }}
+                    >
+                      {fmtNum(temple.cft, 2)} CFT
+                    </span>
+                  </td>
+                </tr>
+                {temple.rows.map((s) => (
+                  <tr key={s.id} style={{ borderBottom: "1px solid #f1f5f9", background: "#fff" }}>
+                    <td
+                      style={{
+                        ...td(),
+                        fontFamily: "ui-monospace, monospace",
+                        fontWeight: 600,
+                        paddingLeft: 28,
+                      }}
+                    >
+                      {s.id}
+                    </td>
+                    <td style={{ ...td(), fontFamily: "ui-monospace, monospace", color: "#b45309" }}>
+                      {s.sourceBlockId ?? "—"}
+                    </td>
+                    <td style={td()}>{s.label ?? "—"}</td>
+                    <td
+                      style={{
+                        ...td(),
+                        textAlign: "right",
+                        fontFamily: "ui-monospace, monospace",
+                      }}
+                    >
+                      {fmtNum(s.lengthIn, 0)}{"× "}
+                      {fmtNum(s.widthIn, 0)}{"× "}
+                      {fmtNum(s.thicknessIn, 0)}
+                    </td>
+                    <td
+                      style={{
+                        ...td(),
+                        textAlign: "right",
+                        fontFamily: "ui-monospace, monospace",
+                        fontWeight: 700,
+                      }}
+                    >
+                      {fmtNum(s.cft, 2)}
+                    </td>
+                  </tr>
+                ))}
+              </Fragment>
+            ))}
+          </Fragment>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 // ── Summary table — day-bucket or month-bucket rows ───────────────
 
 function SummaryTable({
@@ -500,7 +688,7 @@ function SummaryTable({
                 <tr>
                   <td colSpan={5} style={{ padding: 0, background: "#f8fafc" }}>
                     <div style={{ padding: "8px 16px 16px", background: "#f8fafc" }}>
-                      <DetailTable slabs={b.slabs} totalCft={b.cft} showTotal={false} />
+                      <GroupedDetailTable slabs={b.slabs} />
                     </div>
                   </td>
                 </tr>
