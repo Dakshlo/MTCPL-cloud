@@ -30,6 +30,7 @@ import {
 } from "../actions";
 import { canApproveCuts, canTransferPlannedSlabs } from "@/lib/cutting-permissions";
 import { NeedsReprintBanner } from "@/components/needs-reprint-banner";
+import { ApproveCutConfirmButton } from "./approve-confirm-button";
 
 type Params = Promise<{ id: string }>;
 type SearchParams = Promise<{ edit?: string }>;
@@ -1336,12 +1337,20 @@ export default async function CuttingDetailPage({
             <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
               {isApprover && (
                 <>
-                  <form action={approveCutFormAction}>
-                    <input type="hidden" name="session_block_id" value={block.id} />
-                    <button className="primary-button" type="submit">
-                      ✓ Approve
-                    </button>
-                  </form>
+                  {/* Daksh May 2026 — Approve from the detail view now
+                      runs the same confirmation dialog as the audit-
+                      list page. Bypassing the prompt by clicking
+                      from View was an easy way to commit a cut by
+                      accident; this restores parity. */}
+                  <ApproveCutConfirmButton
+                    action={approveCutFormAction}
+                    sessionBlockId={block.id}
+                    blockId={block.block_id}
+                    cutCount={stagedPayload?.cut_slab_ids?.length ?? 0}
+                    extraCount={stagedPayload?.extra_slab_ids?.length ?? 0}
+                    transferCount={stagedPayload?.transferred_slab_ids?.length ?? 0}
+                    remainderCount={stagedPayload?.remainders?.length ?? 0}
+                  />
                   <Link
                     href={`/cutting/${block.id}?edit=approval`}
                     style={{
