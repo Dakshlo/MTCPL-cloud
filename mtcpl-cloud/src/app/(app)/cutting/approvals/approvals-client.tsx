@@ -155,6 +155,30 @@ function ApprovalCard({
   const cutterCanEdit = !canApprove && unlocked && row.isOwnSubmission;
 
   function runApprove() {
+    // Daksh (May 2026) — guard against the wrong click. An auditor
+    // approving a block locks the cut in production: slabs commit,
+    // remainder blocks generate, the donor block flips to consumed.
+    // Reversing it is a SQL ticket. Confirm dialog spells out the
+    // block id + the slab / remainder counts so the auditor reads
+    // before clicking yes.
+    const slabs = row.payloadSummary?.cutCount ?? 0;
+    const remainders = row.payloadSummary?.remainderCount ?? 0;
+    const extras = row.payloadSummary?.extraCount ?? 0;
+    const transfers = row.payloadSummary?.transferCount ?? 0;
+    const lines = [
+      `Approve cut for block ${row.blockId}?`,
+      "",
+      `This will commit:`,
+      `  • ${slabs} slab(s) marked CUT`,
+      ...(extras > 0 ? [`  • ${extras} extra slab(s)`] : []),
+      ...(transfers > 0 ? [`  • ${transfers} transferred slab(s)`] : []),
+      `  • ${remainders} remainder piece(s) → new restocked block(s)`,
+      "",
+      "Reversing an approval requires a developer SQL fix.",
+      "",
+      "Tap OK ONLY if every slab + remainder above matches what was actually cut.",
+    ];
+    if (!window.confirm(lines.join("\n"))) return;
     setActionError(null);
     startTransition(async () => {
       const fd = new FormData();
