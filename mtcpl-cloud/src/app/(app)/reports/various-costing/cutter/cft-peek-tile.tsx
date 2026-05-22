@@ -38,6 +38,11 @@ const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Se
 const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 type ViewMode = "detail" | "summary";
+/** Daksh — drill-down grouping mode. The user picks ONE level of
+ *  grouping at a time (stone vs temple) instead of seeing both
+ *  nested. Stone-wise is the default since cutter operators think
+ *  stone-first. */
+type GroupMode = "stone" | "temple";
 
 /** A single bucket on the summary view. Period-kind dictates the
  *  shape: weekly/monthly → one bucket per day; yearly → one per month. */
@@ -86,6 +91,9 @@ export function CftPeekTile({
   // Which summary bucket is expanded into an inline detail strip.
   // null = nothing expanded; just the bucket rows are visible.
   const [expandedBucket, setExpandedBucket] = useState<string | null>(null);
+  // Drill-down grouping. Persisted across bucket switches so flipping
+  // Mon → Tue keeps your preferred grouping.
+  const [groupMode, setGroupMode] = useState<GroupMode>("stone");
 
   useEffect(() => setMounted(true), []);
 
@@ -315,6 +323,8 @@ export function CftPeekTile({
                     onToggle={(key) =>
                       setExpandedBucket((prev) => (prev === key ? null : key))
                     }
+                    groupMode={groupMode}
+                    onGroupModeChange={setGroupMode}
                   />
                 )}
               </div>
@@ -403,65 +413,71 @@ function DetailTable({
   );
 }
 
-// ── Grouped detail (stone → temple → slabs) ───────────────────────
+// ── Grouped detail (single level: stone OR temple) ────────────────
 //
-// Daksh — the bucket drill-down stays inside the summary view, so
-// rather than a flat slab list (which the top-level Detail view
-// already does) the expanded strip nests slabs under their stone
-// then their temple. Two reasons:
-//   1. Cutter operators think in stones first ("how much PinkStone
-//      did we cut Tuesday?"), then in temples within each stone.
-//   2. A given day usually has 3-5 stones × 2-4 temples per stone,
-//      so the grouping cuts a 100-row list into ~10 readable
-//      sections without losing any data.
+// Daksh — the bucket drill-down groups slabs by ONE dimension at a
+// time (operator picks via the toggle above the table). Stone-wise
+// answers "what did we cut out of PinkStone Tuesday?"; temple-wise
+// answers "which temple drove Tuesday's CFT?". Showing both
+// nested at once (the previous iteration) was visually noisy;
+// flipping a single toggle is faster than scanning a 2-level tree.
 //
-// Stones sorted by total CFT desc (biggest first); temples within
-// a stone same; slabs within a temple by CFT desc (already sorted
-// upstream in bucketSlabs but we re-sort defensively).
+// Sort: groups by CFT desc (biggest contributor first), slabs
+// within a group by CFT desc.
 
-function GroupedDetailTable({ slabs }: { slabs: CutterContributingSlab[] }) {
-  type TempleGroup = {
-    temple: string;
+function GroupedDetailTable({
+  slabs,
+  groupBy,
+}: {
+  slabs: CutterContributingSlab[];
+  groupBy: GroupMode;
+}) {
+  type Group = {
+    key: string;
     rows: CutterContributingSlab[];
     cft: number;
   };
-  type StoneGroup = {
-    stone: string;
-    temples: TempleGroup[];
-    rows: number;
-    cft: number;
-  };
 
-  // Bucket: stone → temple → slabs. Nulls coerce to "—" so they
-  // don't disappear; that matches the flat Detail view convention.
-  const byStone = new Map<string, Map<string, CutterContributingSlab[]>>();
+  // Bucket by the chosen dimension. Nulls coerce to "—" so they
+  // don't disappear; matches the flat Detail view convention.
+  const byKey = new Map<string, CutterContributingSlab[]>();
   for (const s of slabs) {
-    const stoneKey = s.stone ?? "—";
-    const templeKey = s.temple ?? "—";
-    let templeMap = byStone.get(stoneKey);
-    if (!templeMap) {
-      templeMap = new Map();
-      byStone.set(stoneKey, templeMap);
-    }
-    const arr = templeMap.get(templeKey);
+    const key = (groupBy === "stone" ? s.stone : s.temple) ?? "—";
+    const arr = byKey.get(key);
     if (arr) arr.push(s);
-    else templeMap.set(templeKey, [s]);
+    else byKey.set(key, [s]);
   }
+  const groups: Group[] = [];
+  for (const [key, rows] of byKey) {
+    const sortedRows = [...rows].sort((a, b) => (b.cft || 0) - (a.cft || 0));
+    const cft = sortedRows.reduce((acc, s) => acc + (s.cft || 0), 0);
+    groups.push({ key, rows: sortedRows, cft });
+  }
+  groups.sort((a, b) => b.cft - a.cft);
 
-  const stones: StoneGroup[] = [];
-  for (const [stone, templeMap] of byStone) {
-    const temples: TempleGroup[] = [];
-    for (const [temple, rows] of templeMap) {
-      const sortedRows = [...rows].sort((a, b) => (b.cft || 0) - (a.cft || 0));
-      const cft = sortedRows.reduce((acc, s) => acc + (s.cft || 0), 0);
-      temples.push({ temple, rows: sortedRows, cft });
-    }
-    temples.sort((a, b) => b.cft - a.cft);
-    const rowsCount = temples.reduce((acc, t) => acc + t.rows.length, 0);
-    const cft = temples.reduce((acc, t) => acc + t.cft, 0);
-    stones.push({ stone, temples, rows: rowsCount, cft });
-  }
-  stones.sort((a, b) => b.cft - a.cft);
+  // Style tokens for the group header. Stone-wise gets a sky tint,
+  // temple-wise an amber tint — keeps the visual cue consistent
+  // even after flipping the toggle.
+  const headerStyle = groupBy === "stone"
+    ? {
+        bg: "#e0f2fe",
+        border: "#0284c7",
+        fg: "#0c4a6e",
+        accent: "#0369a1",
+        icon: "💎",
+      }
+    : {
+        bg: "#fef3c7",
+        border: "#d97706",
+        fg: "#78350f",
+        accent: "#92400e",
+        icon: "🏛",
+      };
+
+  // In stone-wise mode the slab row keeps its temple column (so the
+  // user can see "PinkStone → Temple X"); in temple-wise mode the
+  // slab row keeps its stone column instead. Five columns either way.
+  const secondaryHeader = groupBy === "stone" ? "Temple" : "Stone";
 
   return (
     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -469,38 +485,38 @@ function GroupedDetailTable({ slabs }: { slabs: CutterContributingSlab[] }) {
         <tr style={{ background: "#f1f5f9", borderBottom: "1px solid #cbd5e1" }}>
           <th style={th()}>Size Code</th>
           <th style={th()}>From Block</th>
-          <th style={th()}>Label</th>
+          <th style={th()}>{secondaryHeader}</th>
           <th style={{ ...th(), textAlign: "right" }}>Dimensions (in)</th>
           <th style={{ ...th(), textAlign: "right" }}>CFT</th>
         </tr>
       </thead>
       <tbody>
-        {stones.map((stone) => (
-          <Fragment key={`stone:${stone.stone}`}>
-            <tr style={{ background: "#e0f2fe", borderTop: "2px solid #0284c7" }}>
+        {groups.map((g) => (
+          <Fragment key={`${groupBy}:${g.key}`}>
+            <tr style={{ background: headerStyle.bg, borderTop: `2px solid ${headerStyle.border}` }}>
               <td
                 colSpan={5}
                 style={{
                   padding: "10px 14px",
                   fontSize: 12,
                   fontWeight: 800,
-                  color: "#0c4a6e",
+                  color: headerStyle.fg,
                   letterSpacing: "0.04em",
                   textTransform: "uppercase",
                 }}
               >
-                <span>💎 {stone.stone}</span>
+                <span>{headerStyle.icon} {g.key}</span>
                 <span
                   style={{
                     marginLeft: 10,
-                    color: "#0369a1",
+                    color: headerStyle.accent,
                     fontWeight: 600,
                     fontSize: 11,
                     textTransform: "none",
                     letterSpacing: "0.02em",
                   }}
                 >
-                  · {stone.rows} slab{stone.rows === 1 ? "" : "s"}
+                  · {g.rows.length} slab{g.rows.length === 1 ? "" : "s"}
                 </span>
                 <span
                   style={{
@@ -508,81 +524,53 @@ function GroupedDetailTable({ slabs }: { slabs: CutterContributingSlab[] }) {
                     fontSize: 12,
                     fontFamily: "ui-monospace, monospace",
                     fontWeight: 800,
-                    color: "#0c4a6e",
+                    color: headerStyle.fg,
                   }}
                 >
-                  {fmtNum(stone.cft, 2)} CFT
+                  {fmtNum(g.cft, 2)} CFT
                 </span>
               </td>
             </tr>
-            {stone.temples.map((temple) => (
-              <Fragment key={`temple:${stone.stone}:${temple.temple}`}>
-                <tr style={{ background: "#fef3c7" }}>
-                  <td
-                    colSpan={5}
-                    style={{
-                      padding: "6px 14px 6px 28px",
-                      fontSize: 11,
-                      fontWeight: 700,
-                      color: "#78350f",
-                    }}
-                  >
-                    <span>🏛 {temple.temple}</span>
-                    <span style={{ marginLeft: 8, color: "#92400e", fontWeight: 500 }}>
-                      · {temple.rows.length} slab{temple.rows.length === 1 ? "" : "s"}
-                    </span>
-                    <span
-                      style={{
-                        float: "right",
-                        fontFamily: "ui-monospace, monospace",
-                        fontWeight: 700,
-                        color: "#78350f",
-                      }}
-                    >
-                      {fmtNum(temple.cft, 2)} CFT
-                    </span>
-                  </td>
-                </tr>
-                {temple.rows.map((s) => (
-                  <tr key={s.id} style={{ borderBottom: "1px solid #f1f5f9", background: "#fff" }}>
-                    <td
-                      style={{
-                        ...td(),
-                        fontFamily: "ui-monospace, monospace",
-                        fontWeight: 600,
-                        paddingLeft: 28,
-                      }}
-                    >
-                      {s.id}
-                    </td>
-                    <td style={{ ...td(), fontFamily: "ui-monospace, monospace", color: "#b45309" }}>
-                      {s.sourceBlockId ?? "—"}
-                    </td>
-                    <td style={td()}>{s.label ?? "—"}</td>
-                    <td
-                      style={{
-                        ...td(),
-                        textAlign: "right",
-                        fontFamily: "ui-monospace, monospace",
-                      }}
-                    >
-                      {fmtNum(s.lengthIn, 0)}{"× "}
-                      {fmtNum(s.widthIn, 0)}{"× "}
-                      {fmtNum(s.thicknessIn, 0)}
-                    </td>
-                    <td
-                      style={{
-                        ...td(),
-                        textAlign: "right",
-                        fontFamily: "ui-monospace, monospace",
-                        fontWeight: 700,
-                      }}
-                    >
-                      {fmtNum(s.cft, 2)}
-                    </td>
-                  </tr>
-                ))}
-              </Fragment>
+            {g.rows.map((s) => (
+              <tr key={s.id} style={{ borderBottom: "1px solid #f1f5f9", background: "#fff" }}>
+                <td
+                  style={{
+                    ...td(),
+                    fontFamily: "ui-monospace, monospace",
+                    fontWeight: 600,
+                    paddingLeft: 28,
+                  }}
+                >
+                  {s.id}
+                </td>
+                <td style={{ ...td(), fontFamily: "ui-monospace, monospace", color: "#b45309" }}>
+                  {s.sourceBlockId ?? "—"}
+                </td>
+                <td style={{ ...td(), color: groupBy === "stone" ? "#0f172a" : "#64748b" }}>
+                  {(groupBy === "stone" ? s.temple : s.stone) ?? "—"}
+                </td>
+                <td
+                  style={{
+                    ...td(),
+                    textAlign: "right",
+                    fontFamily: "ui-monospace, monospace",
+                  }}
+                >
+                  {fmtNum(s.lengthIn, 0)}{"× "}
+                  {fmtNum(s.widthIn, 0)}{"× "}
+                  {fmtNum(s.thicknessIn, 0)}
+                </td>
+                <td
+                  style={{
+                    ...td(),
+                    textAlign: "right",
+                    fontFamily: "ui-monospace, monospace",
+                    fontWeight: 700,
+                  }}
+                >
+                  {fmtNum(s.cft, 2)}
+                </td>
+              </tr>
             ))}
           </Fragment>
         ))}
@@ -600,6 +588,8 @@ function SummaryTable({
   totalSlabs,
   expandedKey,
   onToggle,
+  groupMode,
+  onGroupModeChange,
 }: {
   buckets: SummaryBucket[];
   periodKind: CutterPeriodKind;
@@ -607,6 +597,8 @@ function SummaryTable({
   totalSlabs: number;
   expandedKey: string | null;
   onToggle: (key: string) => void;
+  groupMode: GroupMode;
+  onGroupModeChange: (mode: GroupMode) => void;
 }) {
   const bucketLabel = periodKind === "yearly" ? "Month" : "Day";
   return (
@@ -687,8 +679,54 @@ function SummaryTable({
               {isOpen && hasSlabs && (
                 <tr>
                   <td colSpan={5} style={{ padding: 0, background: "#f8fafc" }}>
-                    <div style={{ padding: "8px 16px 16px", background: "#f8fafc" }}>
-                      <GroupedDetailTable slabs={b.slabs} />
+                    <div style={{ padding: "10px 16px 16px", background: "#f8fafc" }}>
+                      {/* Daksh — Stone-wise / Temple-wise toggle for
+                          the drill-down. Single level of grouping at a
+                          time; flip to see the other view. */}
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          marginBottom: 10,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 700,
+                            color: "#64748b",
+                            textTransform: "uppercase",
+                            letterSpacing: "0.06em",
+                          }}
+                        >
+                          Group by
+                        </span>
+                        <div
+                          role="tablist"
+                          aria-label="Drill-down grouping"
+                          style={{
+                            display: "inline-flex",
+                            background: "#e2e8f0",
+                            borderRadius: 999,
+                            padding: 3,
+                            gap: 2,
+                          }}
+                        >
+                          <ToggleBtn
+                            active={groupMode === "stone"}
+                            onClick={() => onGroupModeChange("stone")}
+                            label="💎 Stone-wise"
+                          />
+                          <ToggleBtn
+                            active={groupMode === "temple"}
+                            onClick={() => onGroupModeChange("temple")}
+                            label="🏛 Temple-wise"
+                          />
+                        </div>
+                      </div>
+                      <GroupedDetailTable slabs={b.slabs} groupBy={groupMode} />
                     </div>
                   </td>
                 </tr>
