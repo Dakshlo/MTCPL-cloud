@@ -356,36 +356,51 @@ export function VendorCockpitClient({
             </select>
           )}
         </div>
-        <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
-          <Stat label="Idle" value={totals.idle} fg="#22c55e" />
-          <Stat label="Carving" value={totals.carving} fg="#60a5fa" />
-          <Stat label="Maintenance" value={totals.maintenance} fg="#f87171" />
-          {/* Daksh May 2026 — these three tiles are now LAUNCHERS for
-              a centered peek modal. The list views moved out of
-              inline sections (which scrolled the cockpit too far) and
-              into focused popups the operator opens on demand. */}
-          <StatButton
-            label="Pending stock"
-            value={pendingStock.length}
-            fg="#fbbf24"
-            onClick={() => setPeekOpen("pending")}
-            title="Slabs assigned but still being transferred to your shade"
-          />
-          <StatButton
-            label="Ready to load"
-            value={readyToLoad.length}
-            fg="#fbbf24"
-            onClick={() => setPeekOpen("ready")}
-            title="Slabs physically here and ready to load on a CNC"
-            emphasize
-          />
-          <StatButton
-            label="Recently done"
-            value={recent.length}
-            fg="#a3a3a3"
-            onClick={() => setPeekOpen("recent")}
-            title="Last 10 unloaded — awaiting team review unless approved"
-          />
+        {/* Daksh May 2026 — header strip split into two visually
+            distinct groups:
+              GROUP 1: Idle / Carving / Maintenance — read-only status
+                pills (compact <Stat>, no chevron, no border).
+              GROUP 2: Pending stock / Ready to load — clickable
+                launchers (chunky <StatButton>, ▸ chevron, accent
+                border, hover lift). The operator's eye gets pulled
+                to what's actionable; the status totals stay as
+                background info.
+              Recently done moved OUT of this header and lives at the
+              bottom of the page as the "after stage" surface. */}
+        <div style={{ display: "flex", gap: 14, marginTop: 12, flexWrap: "wrap", alignItems: "stretch" }}>
+          {/* Status group */}
+          <div
+            style={{
+              display: "flex",
+              gap: 6,
+              padding: 6,
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              borderRadius: 10,
+            }}
+          >
+            <Stat label="Idle" value={totals.idle} fg="#22c55e" />
+            <Stat label="Carving" value={totals.carving} fg="#60a5fa" />
+            <Stat label="Maintenance" value={totals.maintenance} fg="#f87171" />
+          </div>
+          {/* Launcher group */}
+          <div style={{ display: "flex", gap: 10, flex: "1 1 auto", flexWrap: "wrap" }}>
+            <StatButton
+              label="Pending stock"
+              value={pendingStock.length}
+              fg="#fbbf24"
+              onClick={() => setPeekOpen("pending")}
+              title="Slabs assigned but still being transferred to your shade"
+            />
+            <StatButton
+              label="Ready to load"
+              value={readyToLoad.length}
+              fg="#fbbf24"
+              onClick={() => setPeekOpen("ready")}
+              title="Slabs physically here and ready to load on a CNC"
+              emphasize
+            />
+          </div>
         </div>
       </div>
 
@@ -463,8 +478,147 @@ export function VendorCockpitClient({
         );
       })()}
 
-      {/* Daksh May 2026 — Recently completed list moved into the
-          peek modal (launched from the "Recently done" KPI tile). */}
+      {/* Daksh May 2026 — Recently completed lives at the BOTTOM of
+          the cockpit, after all the machine grids. It's the
+          after-stage surface (slabs already unloaded, awaiting team
+          review or already approved), so the operator should glance
+          at it last, not first. Rendered as a launcher tile + a
+          status breakdown so they see "X approved · Y in review · Z
+          needs rework" at a glance and tap in for the full list. */}
+      {recent.length > 0 && (() => {
+        let approved = 0;
+        let rejected = 0;
+        let inReview = 0;
+        for (const r of recent) {
+          if (r.review_notes) rejected++;
+          else if (r.review_approved_at) approved++;
+          else inReview++;
+        }
+        return (
+          <div style={{ marginTop: 18 }}>
+            <button
+              type="button"
+              onClick={() => setPeekOpen("recent")}
+              title="Open the full list of recently completed slabs"
+              style={{
+                width: "100%",
+                padding: "14px 16px",
+                background: "var(--surface)",
+                border: "1px solid var(--border)",
+                borderRadius: 12,
+                cursor: "pointer",
+                color: "inherit",
+                textAlign: "left",
+                display: "flex",
+                alignItems: "center",
+                gap: 14,
+                flexWrap: "wrap",
+                transition: "transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease",
+                touchAction: "manipulation",
+                boxShadow: "0 1px 0 rgba(0,0,0,0.04)",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = "translateY(-1px)";
+                e.currentTarget.style.boxShadow = "0 4px 14px rgba(0,0,0,0.08)";
+                e.currentTarget.style.borderColor = "rgba(120,120,120,0.55)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = "translateY(0)";
+                e.currentTarget.style.boxShadow = "0 1px 0 rgba(0,0,0,0.04)";
+                e.currentTarget.style.borderColor = "var(--border)";
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "var(--muted)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                    fontWeight: 700,
+                  }}
+                >
+                  Recently completed
+                </div>
+                <div
+                  style={{
+                    fontSize: 22,
+                    fontWeight: 800,
+                    color: "var(--text)",
+                    lineHeight: 1.1,
+                    marginTop: 4,
+                    fontFeatureSettings: '"tnum"',
+                  }}
+                >
+                  {recent.length} slab{recent.length === 1 ? "" : "s"}
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 10,
+                    marginTop: 8,
+                    flexWrap: "wrap",
+                    fontSize: 11,
+                    fontWeight: 700,
+                  }}
+                >
+                  {approved > 0 && (
+                    <span
+                      style={{
+                        padding: "3px 8px",
+                        borderRadius: 999,
+                        background: "rgba(22,163,74,0.15)",
+                        color: "#15803d",
+                        border: "1px solid rgba(22,163,74,0.4)",
+                      }}
+                    >
+                      ✔ {approved} approved
+                    </span>
+                  )}
+                  {inReview > 0 && (
+                    <span
+                      style={{
+                        padding: "3px 8px",
+                        borderRadius: 999,
+                        background: "rgba(217,119,6,0.15)",
+                        color: "#b45309",
+                        border: "1px solid rgba(217,119,6,0.4)",
+                      }}
+                    >
+                      ⏳ {inReview} in review
+                    </span>
+                  )}
+                  {rejected > 0 && (
+                    <span
+                      style={{
+                        padding: "3px 8px",
+                        borderRadius: 999,
+                        background: "rgba(220,38,38,0.15)",
+                        color: "#b91c1c",
+                        border: "1px solid rgba(220,38,38,0.45)",
+                      }}
+                    >
+                      ✗ {rejected} needs rework
+                    </span>
+                  )}
+                </div>
+              </div>
+              <span
+                aria-hidden
+                style={{
+                  fontSize: 24,
+                  fontWeight: 700,
+                  color: "var(--muted)",
+                  flexShrink: 0,
+                  lineHeight: 1,
+                }}
+              >
+                ›
+              </span>
+            </button>
+          </div>
+        );
+      })()}
 
       {/* ── Peek modal ── one of pending / ready / recent ── */}
       {peekOpen && (
@@ -673,30 +827,54 @@ function Empty({ text }: { text: string }) {
   );
 }
 
+// Status pill — Daksh May 2026: re-tuned to read as a passive
+// indicator next to the actionable launcher buttons. Compact,
+// borderless, label-above-number. Three of these live inside a
+// shared "tray" container so they read as one status group rather
+// than three independent cards.
 function Stat({ label, value, fg }: { label: string; value: number; fg: string }) {
   return (
     <div
       style={{
-        padding: "8px 14px",
-        background: "rgba(255,255,255,0.08)",
-        borderRadius: 8,
-        minWidth: 64,
+        padding: "6px 12px",
+        borderRadius: 6,
+        minWidth: 56,
+        display: "flex",
+        flexDirection: "column",
+        gap: 1,
       }}
     >
-      <div style={{ fontSize: 10, color: "rgba(255,255,255,0.55)", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 600 }}>
+      <div
+        style={{
+          fontSize: 9,
+          color: "rgba(255,255,255,0.5)",
+          textTransform: "uppercase",
+          letterSpacing: "0.08em",
+          fontWeight: 700,
+        }}
+      >
         {label}
       </div>
-      <div style={{ fontSize: 22, fontWeight: 700, color: fg, lineHeight: 1.1, marginTop: 2 }}>
+      <div
+        style={{
+          fontSize: 20,
+          fontWeight: 800,
+          color: fg,
+          lineHeight: 1.05,
+          fontFeatureSettings: '"tnum"',
+        }}
+      >
         {value}
       </div>
     </div>
   );
 }
 
-// Clickable variant of <Stat> — same visual shape but rendered as a
-// button so the header KPI tiles can open the center-peek modal.
-// `emphasize` is set on the most important launcher (Ready to load)
-// so it pulses subtly when there's a non-zero count.
+// Launcher button — Daksh May 2026: visually distinct from <Stat>.
+// Bigger, with a gold accent border, a prominent ▸ chevron, and a
+// hover lift so the operator knows "tap this to drill in". When
+// `emphasize` is set + value > 0, the tile glows amber so the most
+// actionable surface pulls the eye.
 function StatButton({
   label,
   value,
@@ -719,16 +897,25 @@ function StatButton({
       onClick={onClick}
       title={title}
       style={{
-        padding: "8px 14px",
-        background: hot ? "rgba(251, 191, 36, 0.18)" : "rgba(255,255,255,0.08)",
-        border: `1px solid ${hot ? "rgba(251, 191, 36, 0.55)" : "rgba(255,255,255,0.12)"}`,
-        borderRadius: 8,
-        minWidth: 84,
+        position: "relative",
+        padding: "10px 16px 10px 14px",
+        background: hot
+          ? "linear-gradient(135deg, rgba(251,191,36,0.22) 0%, rgba(180,128,11,0.28) 100%)"
+          : "rgba(255,255,255,0.06)",
+        border: `1.5px solid ${hot ? "rgba(251, 191, 36, 0.75)" : "rgba(251, 191, 36, 0.35)"}`,
+        borderRadius: 10,
+        minWidth: 130,
         textAlign: "left",
         cursor: "pointer",
         color: "inherit",
-        transition: "transform 0.12s ease, background 0.12s ease",
+        boxShadow: hot
+          ? "0 4px 14px rgba(251,191,36,0.22), inset 0 1px 0 rgba(255,255,255,0.08)"
+          : "0 1px 0 rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.05)",
+        transition: "transform 0.12s ease, background 0.12s ease, border-color 0.12s ease",
         touchAction: "manipulation",
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
       }}
       onMouseEnter={(e) => {
         e.currentTarget.style.transform = "translateY(-1px)";
@@ -737,26 +924,46 @@ function StatButton({
         e.currentTarget.style.transform = "translateY(0)";
       }}
     >
-      <div
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          style={{
+            fontSize: 10,
+            color: "rgba(255,255,255,0.7)",
+            textTransform: "uppercase",
+            letterSpacing: "0.08em",
+            fontWeight: 700,
+          }}
+        >
+          {label}
+        </div>
+        <div
+          style={{
+            fontSize: 26,
+            fontWeight: 800,
+            color: fg,
+            lineHeight: 1.05,
+            marginTop: 2,
+            fontFeatureSettings: '"tnum"',
+            letterSpacing: "-0.02em",
+          }}
+        >
+          {value}
+        </div>
+      </div>
+      {/* Chevron — bigger, off to the right, gives the button a
+          clear "drill in" affordance vs the borderless Stat tiles. */}
+      <span
+        aria-hidden
         style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          fontSize: 10,
-          color: "rgba(255,255,255,0.6)",
-          textTransform: "uppercase",
-          letterSpacing: "0.07em",
-          fontWeight: 600,
+          fontSize: 20,
+          fontWeight: 700,
+          color: hot ? "rgba(251, 191, 36, 1)" : "rgba(251, 191, 36, 0.7)",
+          flexShrink: 0,
+          lineHeight: 1,
         }}
       >
-        {label}
-        <span aria-hidden style={{ fontSize: 10, opacity: 0.8 }}>
-          ▸
-        </span>
-      </div>
-      <div style={{ fontSize: 22, fontWeight: 700, color: fg, lineHeight: 1.1, marginTop: 2 }}>
-        {value}
-      </div>
+        ›
+      </span>
     </button>
   );
 }
