@@ -148,7 +148,47 @@ export default async function CuttingDetailPage({
             all.push(...(data as SlabRow[]));
             if (data.length < PAGE) break;
           }
-          return { data: all };
+          // Daksh May 2026 — exclude slabs already claimed as an
+          // unplanned extra by ANOTHER block sitting in the audit
+          // queue. The slab is still status='open' in the DB
+          // (extras don't flip status until the audit approves), so
+          // a naive .eq("status","open") query happily returns it.
+          // If the cutter on this block can also see it, they can
+          // pick the same slab a second time and now we have two
+          // blocks racing for the same inventory piece (the
+          // MT-B-257 ↔ MT-B-255 case).
+          //
+          // Pull every awaiting_approval block (excluding this one),
+          // collect their pending_approval_payload.extra_slab_ids
+          // into a Set, and filter the open-slab list against it.
+          // Cheap because the audit queue is rarely more than a
+          // handful of blocks. We also pull transferred_slab_ids so
+          // a slab pending transfer to another block doesn't show
+          // up here as if it were free inventory.
+          const { data: pendingPeers } = await supabase
+            .from("cut_session_blocks")
+            .select("id, pending_approval_payload")
+            .eq("status", "awaiting_approval")
+            .neq("id", id);
+          const claimedByPeer = new Set<string>();
+          type PeerRow = {
+            id: string;
+            pending_approval_payload: {
+              extra_slab_ids?: string[];
+              transferred_slab_ids?: string[];
+            } | null;
+          };
+          for (const p of (pendingPeers ?? []) as PeerRow[]) {
+            const pp = p.pending_approval_payload;
+            if (!pp) continue;
+            for (const sid of pp.extra_slab_ids ?? []) claimedByPeer.add(sid);
+            for (const sid of pp.transferred_slab_ids ?? []) claimedByPeer.add(sid);
+          }
+          const filtered =
+            claimedByPeer.size === 0
+              ? all
+              : all.filter((s) => !claimedByPeer.has(s.id));
+          return { data: filtered };
         })()
       : Promise.resolve({ data: [] as SlabRow[] }),
     // Candidate planned slabs from OTHER cutting blocks. Only fetched
