@@ -298,6 +298,28 @@ export function ExtraSizePicker({
           (i): i is TransferableSlabItem & { kind: "planned" } =>
             i.kind === "planned" && selectedTransferIds.has(i.id),
         );
+        // Daksh May 2026 — "orphan" chips for IDs that are selected
+        // but no longer in `items` (the picker only loads OPEN
+        // inventory, so a slab that's since been cut_done by another
+        // block disappears from the list while its id stays in the
+        // selection set). Without a chip the operator can't see what
+        // they selected and can't click × to remove it — exactly the
+        // trap MT-B-257 hit. Render orphans as red "needs removing"
+        // chips so they're impossible to miss.
+        const openItemIds = new Set(
+          items.filter((i) => i.kind === "open").map((i) => i.id),
+        );
+        const plannedItemIds = new Set(
+          items.filter((i) => i.kind === "planned").map((i) => i.id),
+        );
+        const orphanExtraIds: string[] = [];
+        for (const id of selectedExtraIds) {
+          if (!openItemIds.has(id)) orphanExtraIds.push(id);
+        }
+        const orphanTransferIds: string[] = [];
+        for (const id of selectedTransferIds) {
+          if (!plannedItemIds.has(id)) orphanTransferIds.push(id);
+        }
         return (
           <div
             style={{
@@ -410,6 +432,93 @@ export function ExtraSizePicker({
                   </span>
                 );
               })}
+              {/* Daksh May 2026 — orphan chips. ID is in the selection
+                  but the picker doesn't know about it (consumed by
+                  another block since the form opened). Click × to
+                  drop the stale ID from the selection so the
+                  block can be approved. */}
+              {orphanExtraIds.map((id) => (
+                <span
+                  key={`orphan-extra-${id}`}
+                  title="This slab is no longer available (already cut by another block). Click × to remove it from the selection."
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 5,
+                    fontSize: 11,
+                    padding: "3px 8px",
+                    background: "rgba(220,38,38,0.10)",
+                    color: "#b91c1c",
+                    border: "1.5px dashed #b91c1c",
+                    borderRadius: 4,
+                    fontFamily: "ui-monospace, monospace",
+                    fontWeight: 700,
+                  }}
+                >
+                  ⚠ {id}
+                  <span style={{ color: "var(--muted)", fontWeight: 500 }}>
+                    no longer available
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onToggleExtra(id)}
+                    title="Remove this stale slab from the selection"
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      color: "#b91c1c",
+                      cursor: "pointer",
+                      padding: 0,
+                      fontSize: 13,
+                      lineHeight: 1,
+                      marginLeft: 2,
+                    }}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+              {orphanTransferIds.map((id) => (
+                <span
+                  key={`orphan-transfer-${id}`}
+                  title="This transferred slab is no longer claimable. Click × to remove it from the selection."
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 5,
+                    fontSize: 11,
+                    padding: "3px 8px",
+                    background: "rgba(220,38,38,0.10)",
+                    color: "#b91c1c",
+                    border: "1.5px dashed #b91c1c",
+                    borderRadius: 4,
+                    fontFamily: "ui-monospace, monospace",
+                    fontWeight: 700,
+                  }}
+                >
+                  ⚠ {id}
+                  <span style={{ color: "var(--muted)", fontWeight: 500 }}>
+                    no longer claimable
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onToggleTransfer(id)}
+                    title="Remove this stale slab from the selection"
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      color: "#b91c1c",
+                      cursor: "pointer",
+                      padding: 0,
+                      fontSize: 13,
+                      lineHeight: 1,
+                      marginLeft: 2,
+                    }}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
             </div>
           </div>
         );
