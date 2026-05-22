@@ -31,7 +31,9 @@ import {
   claimSlabTransferAction,
   claimSlabTransferBatchAction,
   unclaimSlabTransferAction,
+  unclaimSlabTransferBatchAction,
   acknowledgeReceiptAction,
+  acknowledgeReceiptBatchAction,
 } from "../actions";
 import { SlabThumb } from "@/components/slab-thumb";
 import type { StoneTypeDef } from "@/lib/stone-utils";
@@ -130,6 +132,11 @@ export function TransferDispatchList({
   // checkboxes once you hit the cap.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const CLAIM_BATCH_MAX = 10;
+  // Daksh — per-batch "Deliver all" expanded mode. Holds claim_batch_ids
+  // currently showing the shared dropoff-note input + confirm button.
+  // Multiple batches can be expanded at once (different vendors); the
+  // Set keeps state local to this component without a per-group hook.
+  const [deliverAllOpen, setDeliverAllOpen] = useState<Set<string>>(new Set());
   // Live ticker for the "⏱ claimed Xm ago" timer on Mine cards.
   // 15-second cadence keeps the display feel real without spamming
   // re-renders — slab transfers are minute-to-hour scale, not seconds.
@@ -272,6 +279,7 @@ export function TransferDispatchList({
                         color: "#1d4ed8",
                         textTransform: "uppercase",
                         letterSpacing: "0.06em",
+                        flexWrap: "wrap",
                       }}
                     >
                       <span>🚛 Batch of {g.rows.length}</span>
@@ -286,6 +294,155 @@ export function TransferDispatchList({
                         >
                           #{g.batchId.slice(0, 8)}
                         </code>
+                      )}
+                    </div>
+                  )}
+                  {/* Daksh — batch-level Release All + Deliver All.
+                      Only rendered when the group has more than one
+                      slab AND a claim_batch_id is set (legacy NULL-batch
+                      rows fall back to per-row controls below). Saves
+                      the runner ten clicks when the whole truck-load
+                      lands at the same shade. */}
+                  {g.rows.length > 1 && g.batchId && (
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 8,
+                        flexWrap: "wrap",
+                        padding: "8px 10px",
+                        background: "rgba(29,78,216,0.06)",
+                        border: "1px dashed rgba(29,78,216,0.35)",
+                        borderRadius: 8,
+                      }}
+                    >
+                      {!deliverAllOpen.has(g.batchId) && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDeliverAllOpen((prev) => {
+                                const next = new Set(prev);
+                                next.add(g.batchId!);
+                                return next;
+                              });
+                            }}
+                            style={{
+                              flex: "1 1 180px",
+                              fontSize: 14,
+                              padding: "10px 18px",
+                              fontWeight: 700,
+                              background: "#16a34a",
+                              color: "#fff",
+                              border: "none",
+                              borderRadius: 8,
+                              cursor: "pointer",
+                              minHeight: 44,
+                              boxShadow: "0 2px 8px rgba(22,163,74,0.25)",
+                            }}
+                          >
+                            ✅ Deliver all {g.rows.length}
+                          </button>
+                          <form
+                            action={unclaimSlabTransferBatchAction}
+                            onSubmit={(e) => {
+                              if (
+                                !window.confirm(
+                                  `Release all ${g.rows.length} slabs back to the yard?\n\n` +
+                                    `Another runner can then claim them. Use this if you changed plans or someone else is doing this trip.`,
+                                )
+                              ) {
+                                e.preventDefault();
+                              }
+                            }}
+                          >
+                            <input type="hidden" name="claim_batch_id" value={g.batchId} />
+                            <input type="hidden" name="redirect_to" value="/carving/transfer" />
+                            <button
+                              type="submit"
+                              className="ghost-button danger-ghost"
+                              style={{ fontSize: 13, padding: "10px 16px", minHeight: 44 }}
+                            >
+                              🛑 Release all
+                            </button>
+                          </form>
+                        </>
+                      )}
+                      {deliverAllOpen.has(g.batchId) && (
+                        <form
+                          action={acknowledgeReceiptBatchAction}
+                          onSubmit={(e) => {
+                            if (
+                              !window.confirm(
+                                `Mark all ${g.rows.length} slabs as delivered to ${g.rows[0].vendor_name}?\n\n` +
+                                  `This closes the whole batch in one shot.`,
+                              )
+                            ) {
+                              e.preventDefault();
+                              return;
+                            }
+                            setDeliverAllOpen((prev) => {
+                              const next = new Set(prev);
+                              next.delete(g.batchId!);
+                              return next;
+                            });
+                          }}
+                          style={{
+                            display: "flex",
+                            gap: 6,
+                            alignItems: "stretch",
+                            flex: 1,
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          <input type="hidden" name="claim_batch_id" value={g.batchId} />
+                          <input type="hidden" name="redirect_to" value="/carving/transfer" />
+                          <input
+                            type="text"
+                            name="dropoff_note"
+                            placeholder={`Shared dropoff (empty = ${g.rows[0].vendor_dropoff ?? "standard spot"})`}
+                            style={{
+                              fontSize: 13,
+                              padding: "10px 12px",
+                              border: "1px solid var(--border)",
+                              borderRadius: 8,
+                              background: "var(--bg)",
+                              color: "var(--text)",
+                              flex: "1 1 200px",
+                              minWidth: 160,
+                              minHeight: 44,
+                            }}
+                          />
+                          <button
+                            type="submit"
+                            style={{
+                              fontSize: 14,
+                              padding: "10px 18px",
+                              fontWeight: 700,
+                              background: "#16a34a",
+                              color: "#fff",
+                              border: "none",
+                              borderRadius: 8,
+                              cursor: "pointer",
+                              minHeight: 44,
+                            }}
+                          >
+                            ✅ Deliver all {g.rows.length}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setDeliverAllOpen((prev) => {
+                                const next = new Set(prev);
+                                next.delete(g.batchId!);
+                                return next;
+                              })
+                            }
+                            className="ghost-button"
+                            style={{ fontSize: 12, padding: "10px 14px", minHeight: 44 }}
+                          >
+                            Cancel
+                          </button>
+                        </form>
                       )}
                     </div>
                   )}
@@ -382,7 +539,22 @@ export function TransferDispatchList({
               )}
               <form
                 action={claimSlabTransferBatchAction}
-                onSubmit={() => {
+                onSubmit={(e) => {
+                  // Daksh — confirm the truck-load before submitting.
+                  // Once claimed the runner is locked to this batch
+                  // until they deliver or release, so the dialog
+                  // prevents an accidental Enter-keypress claiming
+                  // the wrong selection.
+                  const n = selectedIds.size;
+                  if (
+                    !window.confirm(
+                      `Claim ${n} slab${n === 1 ? "" : "s"} as one batch?\n\n` +
+                        `You'll need to deliver or release all of them before you can open a new batch.`,
+                    )
+                  ) {
+                    e.preventDefault();
+                    return;
+                  }
                   // Optimistically clear selection — page reload will
                   // re-fetch with the freshly claimed rows in Mine.
                   setSelectedIds(new Set());
@@ -413,39 +585,115 @@ export function TransferDispatchList({
             </div>
           </div>
         )}
-        {availableRows.length > 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {availableRows.map((r) => {
-              const isSelected = selectedIds.has(r.id);
-              const atCap = selectedIds.size >= CLAIM_BATCH_MAX && !isSelected;
-              return (
-                <CompactRow
-                  key={r.id}
-                  row={r}
-                  kind="available"
-                  stoneTypes={stoneTypes}
-                  disabledReason={
-                    hasActiveClaim
-                      ? "Deliver or release your current batch first"
-                      : atCap
-                        ? `Max ${CLAIM_BATCH_MAX} per batch — claim what's selected first`
-                        : null
-                  }
-                  selected={isSelected}
-                  selectDisabled={hasActiveClaim || atCap}
-                  onToggleSelect={() => {
-                    setSelectedIds((prev) => {
-                      const next = new Set(prev);
-                      if (next.has(r.id)) next.delete(r.id);
-                      else if (next.size < CLAIM_BATCH_MAX) next.add(r.id);
-                      return next;
-                    });
-                  }}
-                />
-              );
-            })}
-          </div>
-        )}
+        {/* Mig 065 follow-on (Daksh) — group Available rows by
+            carving vendor. Runners drive to one shade at a time;
+            seeing slabs bucketed by destination makes it obvious
+            which 1-N to pick for the next trip. Vendors are
+            sorted alphabetically; urgent rows still bubble to the
+            top within each vendor section. */}
+        {availableRows.length > 0 && (() => {
+          // Bucket by vendor_name (stable display) but tag with
+          // vendor_id so we can render a small sub-header showing
+          // the dropoff label too.
+          type AvailGroup = {
+            vendorName: string;
+            vendorDropoff: string | null;
+            rows: TransferRow[];
+          };
+          const byVendor = new Map<string, AvailGroup>();
+          for (const r of availableRows) {
+            const key = r.vendor_name;
+            const g = byVendor.get(key);
+            if (g) g.rows.push(r);
+            else byVendor.set(key, {
+              vendorName: r.vendor_name,
+              vendorDropoff: r.vendor_dropoff,
+              rows: [r],
+            });
+          }
+          const groups = [...byVendor.values()].sort((a, b) =>
+            a.vendorName.localeCompare(b.vendorName),
+          );
+          return (
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {groups.map((g) => {
+                const selectedInGroup = g.rows.filter((r) => selectedIds.has(r.id)).length;
+                return (
+                  <div
+                    key={g.vendorName}
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 6,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        padding: "4px 2px",
+                        borderBottom: "1px solid var(--border)",
+                        marginBottom: 2,
+                      }}
+                    >
+                      <span style={{ fontSize: 14 }}>🏭</span>
+                      <strong
+                        style={{
+                          fontSize: 13,
+                          color: "var(--text)",
+                          letterSpacing: "0.01em",
+                        }}
+                      >
+                        {g.vendorName}
+                      </strong>
+                      {g.vendorDropoff && (
+                        <span style={{ fontSize: 11, color: "var(--muted)", fontFamily: "ui-monospace, monospace" }}>
+                          → {g.vendorDropoff}
+                        </span>
+                      )}
+                      <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--muted)", fontWeight: 600 }}>
+                        {g.rows.length} slab{g.rows.length === 1 ? "" : "s"}
+                        {selectedInGroup > 0 && (
+                          <span style={{ color: "#1d4ed8", marginLeft: 6 }}>· {selectedInGroup} selected</span>
+                        )}
+                      </span>
+                    </div>
+                    {g.rows.map((r) => {
+                      const isSelected = selectedIds.has(r.id);
+                      const atCap = selectedIds.size >= CLAIM_BATCH_MAX && !isSelected;
+                      return (
+                        <CompactRow
+                          key={r.id}
+                          row={r}
+                          kind="available"
+                          stoneTypes={stoneTypes}
+                          disabledReason={
+                            hasActiveClaim
+                              ? "Deliver or release your current batch first"
+                              : atCap
+                                ? `Max ${CLAIM_BATCH_MAX} per batch — claim what's selected first`
+                                : null
+                          }
+                          selected={isSelected}
+                          selectDisabled={hasActiveClaim || atCap}
+                          onToggleSelect={() => {
+                            setSelectedIds((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(r.id)) next.delete(r.id);
+                              else if (next.size < CLAIM_BATCH_MAX) next.add(r.id);
+                              return next;
+                            });
+                          }}
+                        />
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
       </SectionShell>
 
       {/* DELIVERED TODAY — success confirmation, collapsed by default. */}

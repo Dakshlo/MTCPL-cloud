@@ -1831,6 +1831,7 @@ export async function acknowledgeReceiptAction(formData: FormData) {
       // Clear the claim so the row drops out of the "claimed by me" list.
       claimed_by: null,
       claimed_at: null,
+      claim_batch_id: null,
       // Only overwrite dropoff_note if the form supplied one — don't
       // wipe a previously-set note.
       ...(dropoffNote ? { dropoff_note: dropoffNote } : {}),
@@ -2119,7 +2120,7 @@ export async function unclaimSlabTransferAction(formData: FormData) {
 
   await admin
     .from("carving_items")
-    .update({ claimed_by: null, claimed_at: null })
+    .update({ claimed_by: null, claimed_at: null, claim_batch_id: null })
     .eq("id", carvingItemId);
 
   await recordEvent(carvingItemId, "transfer_unclaimed", profile.id, "Released claim");
@@ -2127,6 +2128,145 @@ export async function unclaimSlabTransferAction(formData: FormData) {
 
   refreshAll();
   redirect(`${redirectTo}?toast=Claim+released`);
+}
+
+// Mig 065 follow-on — batch unclaim. Releases every undelivered
+// slab in the runner's active claim batch in one shot. Useful when
+// the runner aborts a truck-load (vehicle broke down, lift jammed,
+// etc.) — they can clear the whole 10 at once instead of clicking
+// Release Claim ten times.
+export async function unclaimSlabTransferBatchAction(formData: FormData) {
+  const { profile } = await requireAuth([
+    "developer",
+    "owner",
+    "carving_head",
+    "slab_transfer",
+  ]);
+  const admin = createAdminSupabaseClient();
+
+  const claimBatchId = txt(formData, "claim_batch_id");
+  const redirectTo = txt(formData, "redirect_to") || "/carving/transfer";
+  if (!claimBatchId) redirect(`${redirectTo}?toast=Missing+batch+id`);
+
+  // Load every undelivered carving_item in this batch. Validate the
+  // user owns the batch (slab_transfer can only release their own;
+  // higher roles can release any batch).
+  const { data: items } = await admin
+    .from("carving_items")
+    .select("id, claimed_by, received_at_vendor_at")
+    .eq("claim_batch_id", claimBatchId)
+    .is("received_at_vendor_at", null);
+  const rows = (items ?? []) as Array<{ id: string; claimed_by: string | null; received_at_vendor_at: string | null }>;
+  if (rows.length === 0) {
+    redirect(`${redirectTo}?toast=${encodeURIComponent("Nothing to release in that batch.")}`);
+  }
+  if (profile.role === "slab_transfer") {
+    const anyForeign = rows.some((r) => r.claimed_by && r.claimed_by !== profile.id);
+    if (anyForeign) {
+      redirect(`${redirectTo}?toast=${encodeURIComponent("Not your batch to release.")}`);
+    }
+  }
+
+  const ids = rows.map((r) => r.id);
+  await admin
+    .from("carving_items")
+    .update({ claimed_by: null, claimed_at: null, claim_batch_id: null })
+    .in("id", ids);
+
+  await Promise.all(
+    ids.map((id) =>
+      recordEvent(id, "transfer_unclaimed", profile.id, `Released in batch ${claimBatchId.slice(0, 8)}`),
+    ),
+  );
+  await logAudit(profile.id, "transfer_unclaim_batch", "claim_batch", claimBatchId, {
+    carving_item_ids: ids,
+    count: ids.length,
+  });
+
+  refreshAll();
+  redirect(`${redirectTo}?toast=${encodeURIComponent(`Released ${ids.length} slab(s)`)}`);
+}
+
+// Mig 065 follow-on — batch deliver. Marks every undelivered slab
+// in the runner's claim batch as received-at-vendor in one shot.
+// Optional shared dropoff_note applies to every row. Useful when
+// the runner drops the whole truck-load at the same shade in one
+// trip — no need to click Mark Delivered ten times.
+export async function acknowledgeReceiptBatchAction(formData: FormData) {
+  const { profile } = await requireAuth([
+    "developer",
+    "owner",
+    "carving_head",
+    "slab_transfer",
+  ]);
+  const admin = createAdminSupabaseClient();
+
+  const claimBatchId = txt(formData, "claim_batch_id");
+  const dropoffNote = txt(formData, "dropoff_note") || null;
+  const redirectTo = txt(formData, "redirect_to") || "/carving/transfer";
+  if (!claimBatchId) redirect(`${redirectTo}?toast=Missing+batch+id`);
+
+  const { data: items } = await admin
+    .from("carving_items")
+    .select("id, vendor_id, vendor_type, claimed_by, received_at_vendor_at")
+    .eq("claim_batch_id", claimBatchId)
+    .is("received_at_vendor_at", null);
+  const rows = (items ?? []) as Array<{
+    id: string;
+    vendor_id: string;
+    vendor_type: string;
+    claimed_by: string | null;
+    received_at_vendor_at: string | null;
+  }>;
+  if (rows.length === 0) {
+    redirect(`${redirectTo}?toast=${encodeURIComponent("Nothing to deliver in that batch.")}`);
+  }
+  // Refuse if the batch contains non-CNC slabs (Manual vendors don't
+  // need a receipt step in this app).
+  if (rows.some((r) => r.vendor_type !== "CNC")) {
+    redirect(`${redirectTo}?toast=${encodeURIComponent("Batch contains non-CNC slabs — deliver individually.")}`);
+  }
+  if (profile.role === "slab_transfer") {
+    const anyForeign = rows.some((r) => r.claimed_by && r.claimed_by !== profile.id);
+    if (anyForeign) {
+      redirect(`${redirectTo}?toast=${encodeURIComponent("Not your batch to deliver.")}`);
+    }
+  }
+
+  const now = new Date().toISOString();
+  const ids = rows.map((r) => r.id);
+  await admin
+    .from("carving_items")
+    .update({
+      received_at_vendor_at: now,
+      received_at_vendor_by: profile.id,
+      claimed_by: null,
+      claimed_at: null,
+      claim_batch_id: null,
+      ...(dropoffNote ? { dropoff_note: dropoffNote } : {}),
+    })
+    .in("id", ids)
+    .is("received_at_vendor_at", null);
+
+  const noteSuffix = dropoffNote ? ` · left at ${dropoffNote}` : "";
+  await Promise.all(
+    ids.map((id) =>
+      recordEvent(
+        id,
+        "received_at_vendor",
+        profile.id,
+        `Delivered in batch ${claimBatchId.slice(0, 8)}${noteSuffix}`,
+      ),
+    ),
+  );
+  await logAudit(profile.id, "transfer_deliver_batch", "claim_batch", claimBatchId, {
+    carving_item_ids: ids,
+    count: ids.length,
+    dropoff_note: dropoffNote,
+  });
+
+  refreshAll();
+  redirect(`${redirectTo}?toast=${encodeURIComponent(`Delivered ${ids.length} slab(s)`)}`);
 }
 
 // ── Migration 024: re-tag work-type on an existing job ─────────────
