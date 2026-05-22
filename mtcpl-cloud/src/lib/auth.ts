@@ -32,7 +32,13 @@ export function getDefaultRouteForRole(role?: AppRole | null) {
     case "carving_assigner":
       return "/dashboard";
     case "vendor":
-      return "/cutting";
+      // Daksh May 2026 — was "/cutting" historically, but /cutting's
+      // requireAuth gate doesn't accept the vendor role, so any
+      // vendor user landed in a redirect loop (cutting → vendor's
+      // default → cutting → ...). Their actual workspace is the CNC
+      // cockpit at /vendor (it auto-scopes to profile.vendor_id),
+      // which is what they should see on login anyway.
+      return "/vendor";
     case "slab_transfer":
       // Migration 025 — slab transfer runner. Lands on the transfer
       // dispatch list and works through pickups from there.
