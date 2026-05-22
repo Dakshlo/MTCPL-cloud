@@ -44,6 +44,51 @@ async function refreshAccountsPaths() {
  *  duplicate-bill error instead of leaking the raw constraint name. */
 const PG_UNIQUE_VIOLATION = "23505";
 
+/**
+ * Daksh May 2026 — sanity-check the bill_date before it lands in the
+ * DB. The trigger came from a real incident: an accountant typed "22
+ * Feb 102025" (six-digit year — typo for 2025) into the date input,
+ * the form happily submitted it, and the bill came out tagged
+ * `T-102025-523`. The amount + everything else was right; only the
+ * year was junk, and by then the token was burned in.
+ *
+ * Three guards layered:
+ *   1. Strict YYYY-MM-DD shape. Rejects 6-digit years outright
+ *      (the regex demands exactly 4 digits before the first dash).
+ *   2. Year in [2015, currentYear + 1]. 2015 floors out anything
+ *      truly historic; currentYear+1 ceilings out the "year 102025"
+ *      class of bugs without blocking accountants entering a bill in
+ *      late December for an early-January date.
+ *   3. The whole string must round-trip through Date — catches
+ *      things like 2026-02-30 (no Feb 30th) that pass the regex.
+ *
+ * Returns null on success, or a user-facing error string on failure.
+ */
+function validateBillDate(billDate: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(billDate)) {
+    return "Bill date must be in YYYY-MM-DD format (4-digit year).";
+  }
+  const year = parseInt(billDate.slice(0, 4), 10);
+  const currentYear = new Date().getFullYear();
+  const MIN_YEAR = 2015;
+  const MAX_YEAR = currentYear + 1;
+  if (year < MIN_YEAR || year > MAX_YEAR) {
+    return `Bill date year ${year} looks wrong — use a year between ${MIN_YEAR} and ${MAX_YEAR}.`;
+  }
+  const parsed = new Date(`${billDate}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) {
+    return "Bill date is not a valid calendar date.";
+  }
+  // Re-render the parsed date back to YYYY-MM-DD and compare. Catches
+  // shape-valid but calendar-invalid combos that JS silently rolls
+  // forward (e.g. 2026-02-30 → 2026-03-02).
+  const roundtrip = parsed.toISOString().slice(0, 10);
+  if (roundtrip !== billDate) {
+    return `Bill date ${billDate} isn't a real calendar date (closest valid: ${roundtrip}).`;
+  }
+  return null;
+}
+
 // ──────────────────────────────────────────────────────────────────
 // Bill submission
 // ──────────────────────────────────────────────────────────────────
@@ -104,6 +149,12 @@ export async function submitBillAction(
   if (!billVendorId) return { ok: false, error: "Pick a beneficiary." };
   if (!vendorBillNo) return { ok: false, error: "Vendor's bill number is required." };
   if (!billDate) return { ok: false, error: "Bill date is required." };
+  // Daksh May 2026 — catches the "22 Feb 102025" class of typo
+  // before the token (T-YYYY-N) bakes a 6-digit year into the row.
+  {
+    const dateErr = validateBillDate(billDate);
+    if (dateErr) return { ok: false, error: dateErr };
+  }
   if (!description) return { ok: false, error: "Description is required." };
   if (!Number.isFinite(amountSubtotal) || amountSubtotal <= 0) {
     return { ok: false, error: "Subtotal amount must be greater than zero." };
@@ -504,6 +555,14 @@ export async function editBillAction(
 
   if (!billVendorId || !vendorBillNo || !billDate || !description) {
     return { ok: false, error: "All fields are required to save the edit." };
+  }
+  // Same date sanity-check as the submit path. Edits on rejected
+  // bills typically reuse the original date (which is already valid),
+  // but a biller re-keying the date during a fix could still hit the
+  // 6-digit-year typo — so guard it here too.
+  {
+    const dateErr = validateBillDate(billDate);
+    if (dateErr) return { ok: false, error: dateErr };
   }
   if (!Number.isFinite(amountSubtotal) || amountSubtotal <= 0) {
     return { ok: false, error: "Subtotal must be greater than zero." };

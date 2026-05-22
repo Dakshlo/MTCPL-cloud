@@ -246,6 +246,22 @@ export function BillEntryForm({
     if (!vendorId) return setError("Pick a beneficiary.");
     if (!vendorBillNo.trim()) return setError("Vendor's bill number is required.");
     if (!billDate) return setError("Bill date is required.");
+    // Daksh May 2026 — mirror the server's validateBillDate guard
+    // for instant feedback. <input type=date> on Chrome/iOS will
+    // sometimes accept a 6-digit year typed manually; this catches
+    // it before the action round-trip.
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(billDate)) {
+      return setError("Bill date must use a 4-digit year (YYYY-MM-DD).");
+    }
+    {
+      const y = parseInt(billDate.slice(0, 4), 10);
+      const maxY = new Date().getFullYear() + 1;
+      if (y < 2015 || y > maxY) {
+        return setError(
+          `Bill date year ${y} looks wrong — use a year between 2015 and ${maxY}.`,
+        );
+      }
+    }
     if (!description.trim()) return setError("Description is required.");
     if (!Number.isFinite(subtotalNum) || subtotalNum <= 0)
       return setError("Subtotal must be greater than zero.");
@@ -453,6 +469,16 @@ export function BillEntryForm({
                 type="date"
                 value={billDate}
                 onChange={(e) => setBillDate(e.target.value)}
+                /* Daksh May 2026 — date input min/max so a typo
+                 * like "102025" can't sneak through. <input
+                 * type=date> still allows manual keystrokes outside
+                 * the range on some browsers, so the handleSubmit
+                 * below ALSO validates the year. Min floor 2015
+                 * covers any old back-dated bill; max ceiling is
+                 * "end of next year" so an accountant entering a
+                 * bill on Dec 31 for early January still works. */
+                min="2015-01-01"
+                max={`${new Date().getFullYear() + 1}-12-31`}
                 style={{
                   ...INPUT_STYLE,
                   ...(billDateLocked ? lockedInputOverlay : {}),
