@@ -93,6 +93,15 @@ async function handleHdfcExport(req: NextRequest) {
   //                    After the file is built, marks each included
   //                    payment with hdfc_csv_downloaded_at + _by so
   //                    a second click can't re-issue the same rows.
+  //
+  // Daksh (May 2026): temporarily disabled — flip back to TRUE later.
+  // While LOCK_HDFC_CSV_DOWNLOAD is false, the CSV endpoint behaves
+  // like the XLSX preview (returns every confirmed payment in scope)
+  // and does NOT write hdfc_csv_downloaded_at on the rows it serves.
+  // The client-side "🔒 IN HDFC FILE" badge still renders for rows
+  // with a historical timestamp — purely informational — but doesn't
+  // block re-downloads.
+  const LOCK_HDFC_CSV_DOWNLOAD = false;
 
   let paymentIds: string[] = [];
   if (paymentIdsParam) {
@@ -130,7 +139,7 @@ async function handleHdfcExport(req: NextRequest) {
   // CSV mode: filter to rows that haven't been included in a prior
   // CSV download. Excel mode skips this filter on purpose (it's the
   // preview / verification view).
-  if (wantsCsv) {
+  if (wantsCsv && LOCK_HDFC_CSV_DOWNLOAD) {
     q = q.is("hdfc_csv_downloaded_at", null);
   }
   // If neither filter is set, exports ALL currently-confirmed
@@ -334,26 +343,33 @@ async function handleHdfcExport(req: NextRequest) {
     // leave the lock unset. Idempotent: the UPDATE is gated by
     // hdfc_csv_downloaded_at IS NULL, so concurrent requests for
     // the same set race-safely with each other.
-    const lockNow = new Date().toISOString();
-    const lockIds = validRows.map((r) => r.payment.id);
-    const { error: lockErr } = await admin
-      .from("bill_payments")
-      .update({
-        hdfc_csv_downloaded_at: lockNow,
-        hdfc_csv_downloaded_by: profile.id,
-        updated_at: lockNow,
-      })
-      .in("id", lockIds)
-      .is("hdfc_csv_downloaded_at", null);
-    if (lockErr) {
-      console.warn("[hdfc-export] lock update failed", lockErr);
-      return NextResponse.json(
-        {
-          error:
-            "Couldn't lock the payments after generating the file. Try again — if it keeps failing, contact a developer.",
-        },
-        { status: 500 },
-      );
+    //
+    // Daksh (May 2026): gated behind LOCK_HDFC_CSV_DOWNLOAD — when
+    // false, we serve the CSV but skip the write-back so the same
+    // rows stay re-downloadable. Flip the flag back to true to
+    // restore the one-shot behaviour.
+    if (LOCK_HDFC_CSV_DOWNLOAD) {
+      const lockNow = new Date().toISOString();
+      const lockIds = validRows.map((r) => r.payment.id);
+      const { error: lockErr } = await admin
+        .from("bill_payments")
+        .update({
+          hdfc_csv_downloaded_at: lockNow,
+          hdfc_csv_downloaded_by: profile.id,
+          updated_at: lockNow,
+        })
+        .in("id", lockIds)
+        .is("hdfc_csv_downloaded_at", null);
+      if (lockErr) {
+        console.warn("[hdfc-export] lock update failed", lockErr);
+        return NextResponse.json(
+          {
+            error:
+              "Couldn't lock the payments after generating the file. Try again — if it keeps failing, contact a developer.",
+          },
+          { status: 500 },
+        );
+      }
     }
 
     const csv = buildHdfcCsvFile(exportRows);

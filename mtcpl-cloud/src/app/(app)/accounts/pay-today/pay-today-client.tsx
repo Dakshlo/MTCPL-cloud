@@ -893,9 +893,16 @@ function ConfirmedBatch({
   onBankReject?: (row: PayTodayRow) => void;
 }) {
   const total = rows.reduce((s, r) => s + r.proposedAmount, 0);
-  const downloadableCount = rows.filter((r) => !r.hdfcCsvDownloaded).length;
+  // Daksh (May 2026): HDFC CSV one-shot lock temporarily disabled
+  // (server has the same flag flipped off). downloadableCount now
+  // counts every confirmed row in the batch so the button stays
+  // active and the download URL always re-issues the same set.
+  // The "🔒 IN HDFC FILE" badges below stay (historical signal —
+  // these rows have been included in a CSV before), but they no
+  // longer gate the button.
+  const downloadableCount = rows.length;
   const lockedCount = rows.filter((r) => r.hdfcCsvDownloaded).length;
-  const allLocked = downloadableCount === 0 && rows.length > 0;
+  const allLocked = false;
   const someLocked = lockedCount > 0;
 
   // Mig 048 follow-on (Daksh): pre-flight the export so a missing-
@@ -1102,7 +1109,7 @@ function ConfirmedBatch({
                       downloadableCount === 1 ? "" : "s"
                     }, ₹${totalToPay.toLocaleString(
                       "en-IN",
-                    )}) as HDFC CSV?\n\nThese rows will be LOCKED. To re-issue you'll need a developer.\n\nProceed only if you're about to upload this file to HDFC.`,
+                    )}) as HDFC CSV?\n\nProceed only if you're about to upload this file to HDFC.`,
                   );
                   if (ok) window.location.href = finalUrl;
                   return;
