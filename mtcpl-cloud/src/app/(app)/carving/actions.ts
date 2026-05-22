@@ -1921,11 +1921,15 @@ export async function claimSlabTransferAction(formData: FormData) {
   }
 
   const now = new Date().toISOString();
+  // Mig 065 — stamp a fresh claim_batch_id even for single-slab
+  // claims so the "Claimed by me" UI groups all rows by batch
+  // uniformly. A single-slab claim renders as a group of one.
+  const claimBatchId = crypto.randomUUID();
   // Race-guard: only claim if still unclaimed. Whoever wins the race
   // gets the lock; the loser sees "Already claimed" on the next view.
   const { data: updated } = await admin
     .from("carving_items")
-    .update({ claimed_by: profile.id, claimed_at: now })
+    .update({ claimed_by: profile.id, claimed_at: now, claim_batch_id: claimBatchId })
     .eq("id", carvingItemId)
     .is("claimed_by", null)
     .select("id");
@@ -1939,6 +1943,148 @@ export async function claimSlabTransferAction(formData: FormData) {
 
   refreshAll();
   redirect(`${redirectTo}?toast=Claimed`);
+}
+
+// Mig 065 — Slab Transfer batch claim. The runner now drives a
+// truck and picks up to 10 slabs at once. This action accepts a
+// JSON array of carving_item_ids, validates the cap, applies the
+// same one-active-batch rule (you can't open a new batch while
+// you have any active claims), and stamps every claimed row with
+// a shared claim_batch_id so the "Claimed by me" UI groups them
+// together as one truck-load.
+export async function claimSlabTransferBatchAction(formData: FormData) {
+  const { profile } = await requireAuth([
+    "developer",
+    "owner",
+    "carving_head",
+    "slab_transfer",
+  ]);
+  const admin = createAdminSupabaseClient();
+
+  const redirectTo = txt(formData, "redirect_to") || "/carving/transfer";
+
+  // Parse the ids
+  let ids: string[] = [];
+  const raw = txt(formData, "carving_item_ids");
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) ids = parsed.map((x) => String(x)).filter(Boolean);
+    } catch {
+      redirect(`${redirectTo}?toast=Bad+payload`);
+    }
+  }
+  if (ids.length === 0) {
+    redirect(`${redirectTo}?toast=No+slabs+selected`);
+  }
+  // Hard cap per Daksh's truck-load size.
+  if (ids.length > 10) {
+    redirect(`${redirectTo}?toast=${encodeURIComponent("Max 10 slabs per claim batch.")}`);
+  }
+
+  // One-active-batch rule: the runner can't open a new batch while
+  // they have ANY undelivered claim. They must deliver or release
+  // the current batch first.
+  const { data: existing } = await admin
+    .from("carving_items")
+    .select("id")
+    .eq("claimed_by", profile.id)
+    .is("received_at_vendor_at", null)
+    .limit(1)
+    .maybeSingle();
+  if (existing) {
+    redirect(
+      `${redirectTo}?toast=${encodeURIComponent(
+        "You already have an active claim batch. Deliver or release it first.",
+      )}`,
+    );
+  }
+
+  // Load + validate each carving_item: must be in carving_assigned,
+  // not yet delivered, not claimed by someone else. Cross-vendor
+  // mixing is allowed (a truck can hit multiple shades on one run).
+  const { data: items, error: itemsErr } = await admin
+    .from("carving_items")
+    .select("id, status, received_at_vendor_at, claimed_by")
+    .in("id", ids);
+  if (itemsErr) {
+    redirect(`${redirectTo}?toast=${encodeURIComponent(itemsErr.message)}`);
+  }
+  type Item = {
+    id: string;
+    status: string;
+    received_at_vendor_at: string | null;
+    claimed_by: string | null;
+  };
+  const itemRows = (items ?? []) as Item[];
+  if (itemRows.length !== ids.length) {
+    redirect(
+      `${redirectTo}?toast=${encodeURIComponent("Some selected slabs no longer exist.")}`,
+    );
+  }
+  for (const it of itemRows) {
+    if (it.received_at_vendor_at) {
+      redirect(`${redirectTo}?toast=${encodeURIComponent("One slab is already delivered — refresh and retry.")}`);
+    }
+    if (it.status !== "carving_assigned") {
+      redirect(`${redirectTo}?toast=${encodeURIComponent("One slab is not in the transfer queue — refresh and retry.")}`);
+    }
+    if (it.claimed_by && it.claimed_by !== profile.id) {
+      redirect(`${redirectTo}?toast=${encodeURIComponent("One slab is already claimed — refresh and retry.")}`);
+    }
+  }
+
+  const now = new Date().toISOString();
+  const claimBatchId = crypto.randomUUID();
+  // Race-guard: only claim items still unclaimed. If any one was
+  // grabbed mid-call by another runner, the UPDATE will return
+  // fewer rows than ids.length — bail and show a stale-state toast
+  // so the user can refresh and re-select.
+  const { data: updated, error: updErr } = await admin
+    .from("carving_items")
+    .update({
+      claimed_by: profile.id,
+      claimed_at: now,
+      claim_batch_id: claimBatchId,
+    })
+    .in("id", ids)
+    .is("claimed_by", null)
+    .select("id");
+  if (updErr) {
+    redirect(`${redirectTo}?toast=${encodeURIComponent(updErr.message)}`);
+  }
+  if (!updated || updated.length !== ids.length) {
+    // Partial claim — some slabs got grabbed by another runner mid-
+    // call. Roll back what we did claim so the user can re-select
+    // the whole batch cleanly.
+    const claimedIds = (updated ?? []).map((u) => (u as { id: string }).id);
+    if (claimedIds.length > 0) {
+      await admin
+        .from("carving_items")
+        .update({ claimed_by: null, claimed_at: null, claim_batch_id: null })
+        .in("id", claimedIds);
+    }
+    redirect(
+      `${redirectTo}?toast=${encodeURIComponent(
+        "Some slabs were claimed by another runner — refresh and retry.",
+      )}`,
+    );
+  }
+
+  // Audit one row per slab + one batch-level row so the audit log
+  // can be filtered both ways.
+  await Promise.all(
+    ids.map((id) =>
+      recordEvent(id, "transfer_claimed", profile.id, `Claimed in batch ${claimBatchId.slice(0, 8)}`),
+    ),
+  );
+  await logAudit(profile.id, "transfer_claim_batch", "claim_batch", claimBatchId, {
+    carving_item_ids: ids,
+    count: ids.length,
+  });
+
+  refreshAll();
+  redirect(`${redirectTo}?toast=${encodeURIComponent(`Claimed ${ids.length} slab(s)`)}`);
 }
 
 export async function unclaimSlabTransferAction(formData: FormData) {

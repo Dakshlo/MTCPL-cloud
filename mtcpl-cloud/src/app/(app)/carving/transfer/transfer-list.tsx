@@ -29,6 +29,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   claimSlabTransferAction,
+  claimSlabTransferBatchAction,
   unclaimSlabTransferAction,
   acknowledgeReceiptAction,
 } from "../actions";
@@ -55,6 +56,10 @@ export type TransferRow = {
   claimed_by: string | null;
   claimed_by_name: string | null;
   claimed_at: string | null;
+  /** Mig 065 — runners can claim up to 10 slabs in one click;
+   *  every slab in the same claim shares this id so the "Claimed
+   *  by me" section groups them as one truck-load. */
+  claim_batch_id: string | null;
   is_lathe: boolean;
   /** Migration 026 — shared across slabs assigned together in a
    *  bulk assignment. Drives the coloured left stripe so the
@@ -117,6 +122,14 @@ export function TransferDispatchList({
 }) {
   const router = useRouter();
   const [toastMsg, setToastMsg] = useState<string | null>(toast);
+  // Mig 065 — multi-select state for batch claim. Clearing rules:
+  //   • Initial render → empty Set
+  //   • Toggle a checkbox → add/remove
+  //   • Submit → cleared by full reload (toast triggers nav refresh)
+  // Capped at 10 selections (the batch cap); UI grays out further
+  // checkboxes once you hit the cap.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const CLAIM_BATCH_MAX = 10;
   // Live ticker for the "⏱ claimed Xm ago" timer on Mine cards.
   // 15-second cadence keeps the display feel real without spamming
   // re-renders — slab transfers are minute-to-hour scale, not seconds.
@@ -203,7 +216,11 @@ export function TransferDispatchList({
         </div>
       )}
 
-      {/* CLAIMED BY ME — primary actionable section. */}
+      {/* CLAIMED BY ME — primary actionable section.
+          Mig 065 — when multiple slabs share a claim_batch_id, render
+          them inside a single batch wrapper with a small header so the
+          truck-load reads as one unit. Single-batch claims (or legacy
+          NULL-batch rows from before mig 065) render as a group of 1. */}
       <SectionShell
         kind="mine"
         title="🚧 Claimed by me"
@@ -214,16 +231,76 @@ export function TransferDispatchList({
         }
       >
         {mineRows.length > 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {mineRows.map((r) => (
-              <TransferCard
-                key={r.id}
-                row={r}
-                kind="mine"
-                stoneTypes={stoneTypes}
-                now={now}
-              />
-            ))}
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {(() => {
+              // Group mineRows by claim_batch_id (legacy NULL rows
+              // become their own per-row "batches").
+              type Group = { batchId: string | null; rows: TransferRow[] };
+              const groups: Group[] = [];
+              const indexByKey = new Map<string, number>();
+              for (const r of mineRows) {
+                const key = r.claim_batch_id ?? `legacy::${r.id}`;
+                const idx = indexByKey.get(key);
+                if (idx == null) {
+                  indexByKey.set(key, groups.length);
+                  groups.push({ batchId: r.claim_batch_id, rows: [r] });
+                } else {
+                  groups[idx].rows.push(r);
+                }
+              }
+              return groups.map((g, gIdx) => (
+                <div
+                  key={g.batchId ?? `legacy-${gIdx}`}
+                  style={{
+                    border: g.rows.length > 1 ? "1.5px solid #1d4ed8" : "none",
+                    background: g.rows.length > 1 ? "rgba(29,78,216,0.04)" : "transparent",
+                    borderRadius: g.rows.length > 1 ? 12 : 0,
+                    padding: g.rows.length > 1 ? "10px 10px 12px" : 0,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 10,
+                  }}
+                >
+                  {g.rows.length > 1 && (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        fontSize: 11,
+                        fontWeight: 800,
+                        color: "#1d4ed8",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.06em",
+                      }}
+                    >
+                      <span>🚛 Batch of {g.rows.length}</span>
+                      {g.batchId && (
+                        <code
+                          style={{
+                            fontFamily: "ui-monospace, monospace",
+                            fontSize: 10,
+                            color: "rgba(29,78,216,0.6)",
+                            fontWeight: 600,
+                          }}
+                        >
+                          #{g.batchId.slice(0, 8)}
+                        </code>
+                      )}
+                    </div>
+                  )}
+                  {g.rows.map((r) => (
+                    <TransferCard
+                      key={r.id}
+                      row={r}
+                      kind="mine"
+                      stoneTypes={stoneTypes}
+                      now={now}
+                    />
+                  ))}
+                </div>
+              ));
+            })()}
           </div>
         )}
       </SectionShell>
@@ -264,22 +341,109 @@ export function TransferDispatchList({
           >
             <span style={{ fontSize: 16 }}>🏗️</span>
             <span>
-              Finish your current slab first — <strong>Mark delivered</strong> or
-              <strong> Release claim</strong> above before picking the next one.
+              Finish your current batch first — <strong>Mark delivered</strong> or
+              <strong> Release claim</strong> on each above before opening a new batch.
             </span>
+          </div>
+        )}
+        {/* Mig 065 — batch claim action bar. Shows the running tally
+            of how many are selected, the 10-cap, and the submit
+            button. Disappears when nothing's selected (or when the
+            runner has an active claim). */}
+        {!hasActiveClaim && availableRows.length > 0 && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              padding: "10px 14px",
+              marginBottom: 10,
+              background: selectedIds.size > 0 ? "#dbeafe" : "var(--surface-alt)",
+              border: `1.5px solid ${selectedIds.size > 0 ? "#1d4ed8" : "var(--border)"}`,
+              borderRadius: 10,
+              flexWrap: "wrap",
+            }}
+          >
+            <span style={{ fontSize: 13, fontWeight: 700, color: selectedIds.size > 0 ? "#1d4ed8" : "var(--muted)" }}>
+              {selectedIds.size === 0
+                ? `Select up to ${CLAIM_BATCH_MAX} slabs to claim as one batch`
+                : `${selectedIds.size} / ${CLAIM_BATCH_MAX} selected`}
+            </span>
+            <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {selectedIds.size > 0 && (
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => setSelectedIds(new Set())}
+                  style={{ fontSize: 12, padding: "8px 14px", minHeight: 44 }}
+                >
+                  Clear
+                </button>
+              )}
+              <form
+                action={claimSlabTransferBatchAction}
+                onSubmit={() => {
+                  // Optimistically clear selection — page reload will
+                  // re-fetch with the freshly claimed rows in Mine.
+                  setSelectedIds(new Set());
+                }}
+              >
+                <input
+                  type="hidden"
+                  name="carving_item_ids"
+                  value={JSON.stringify([...selectedIds])}
+                />
+                <input type="hidden" name="redirect_to" value="/carving/transfer" />
+                <button
+                  type="submit"
+                  className="primary-button"
+                  disabled={selectedIds.size === 0}
+                  style={{
+                    fontSize: 14,
+                    padding: "10px 20px",
+                    fontWeight: 700,
+                    minHeight: 44,
+                    opacity: selectedIds.size === 0 ? 0.5 : 1,
+                    cursor: selectedIds.size === 0 ? "not-allowed" : "pointer",
+                  }}
+                >
+                  📦 Claim {selectedIds.size > 0 ? `${selectedIds.size} slab${selectedIds.size === 1 ? "" : "s"}` : "selected"}
+                </button>
+              </form>
+            </div>
           </div>
         )}
         {availableRows.length > 0 && (
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {availableRows.map((r) => (
-              <CompactRow
-                key={r.id}
-                row={r}
-                kind="available"
-                stoneTypes={stoneTypes}
-                disabledReason={hasActiveClaim ? "Deliver or release your current slab first" : null}
-              />
-            ))}
+            {availableRows.map((r) => {
+              const isSelected = selectedIds.has(r.id);
+              const atCap = selectedIds.size >= CLAIM_BATCH_MAX && !isSelected;
+              return (
+                <CompactRow
+                  key={r.id}
+                  row={r}
+                  kind="available"
+                  stoneTypes={stoneTypes}
+                  disabledReason={
+                    hasActiveClaim
+                      ? "Deliver or release your current batch first"
+                      : atCap
+                        ? `Max ${CLAIM_BATCH_MAX} per batch — claim what's selected first`
+                        : null
+                  }
+                  selected={isSelected}
+                  selectDisabled={hasActiveClaim || atCap}
+                  onToggleSelect={() => {
+                    setSelectedIds((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(r.id)) next.delete(r.id);
+                      else if (next.size < CLAIM_BATCH_MAX) next.add(r.id);
+                      return next;
+                    });
+                  }}
+                />
+              );
+            })}
           </div>
         )}
       </SectionShell>
@@ -666,12 +830,23 @@ function CompactRow({
   canUnclaim,
   stoneTypes,
   disabledReason,
+  selected,
+  onToggleSelect,
+  selectDisabled,
 }: {
   row: TransferRow;
   kind: "available" | "others";
   canUnclaim?: boolean;
   stoneTypes: StoneTypeDef[];
   disabledReason?: string | null;
+  /** Mig 065 — for `kind="available"`, the row renders a checkbox
+   *  instead of an inline Claim button. Parent owns the selected-set
+   *  state; the row just toggles entries via this callback. */
+  selected?: boolean;
+  onToggleSelect?: () => void;
+  /** When the user has already hit the batch cap (10) or has an
+   *  active claim, the checkbox is disabled. Tooltip explains. */
+  selectDisabled?: boolean;
 }) {
   const dims = `${row.length_ft}×${row.width_ft}×${row.thickness_ft}″`;
   const isUrgent = row.urgency === "urgent";
@@ -791,30 +966,56 @@ function CompactRow({
         </div>
       </div>
 
-      {/* Right column: action button, locked to the right edge */}
+      {/* Right column — Mig 065: checkbox replaces the per-row
+          Claim button. Selection feeds the batch-claim action bar
+          above (max 10 per batch). When the user has an active
+          claim OR the cap is reached, the checkbox disables with
+          a tooltip explaining. */}
       {kind === "available" && (
-        <form action={claimSlabTransferAction} style={{ flexShrink: 0 }}>
-          <input type="hidden" name="carving_item_id" value={row.id} />
-          <input type="hidden" name="redirect_to" value="/carving/transfer" />
-          <button
-            type="submit"
-            className="primary-button"
-            disabled={!!disabledReason}
-            title={disabledReason ?? undefined}
+        <label
+          style={{
+            flexShrink: 0,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 6,
+            minWidth: 44,
+            minHeight: 44,
+            padding: "0 12px",
+            border: `1.5px solid ${selected ? "#1d4ed8" : "var(--border)"}`,
+            background: selected ? "#dbeafe" : "var(--surface)",
+            borderRadius: 8,
+            cursor: selectDisabled ? "not-allowed" : "pointer",
+            opacity: selectDisabled && !selected ? 0.4 : 1,
+            transition: "background 0.12s, border-color 0.12s",
+          }}
+          title={
+            selectDisabled && !selected
+              ? disabledReason ?? "Cap reached — claim what's selected first"
+              : selected
+                ? "Tap to deselect"
+                : "Tap to add to claim batch"
+          }
+        >
+          <input
+            type="checkbox"
+            checked={!!selected}
+            onChange={onToggleSelect}
+            disabled={!!selectDisabled && !selected}
+            style={{ width: 20, height: 20, cursor: "inherit" }}
+            aria-label={`${selected ? "Deselect" : "Select"} slab ${row.slab_id} for batch claim`}
+          />
+          <span
             style={{
-              fontSize: 13,
-              padding: "10px 18px",
+              fontSize: 12,
               fontWeight: 700,
-              minHeight: 44,
-              minWidth: 110,
-              opacity: disabledReason ? 0.45 : 1,
-              cursor: disabledReason ? "not-allowed" : "pointer",
+              color: selected ? "#1d4ed8" : "var(--muted)",
               whiteSpace: "nowrap",
             }}
           >
-            {disabledReason ? "🏗️ busy" : "📦 Claim"}
-          </button>
-        </form>
+            {selected ? "Selected" : "Select"}
+          </span>
+        </label>
       )}
       {kind === "others" && canUnclaim && (
         <form action={unclaimSlabTransferAction} style={{ flexShrink: 0 }}>

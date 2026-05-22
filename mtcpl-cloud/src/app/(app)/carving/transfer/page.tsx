@@ -56,7 +56,7 @@ export default async function SlabTransferPage({
     admin
       .from("carving_items")
       .select(
-        "id, slab_requirement_id, vendor_id, vendor_name, vendor_type, urgency, status, assigned_at, claimed_by, claimed_at, requires_machine_type, batch_id",
+        "id, slab_requirement_id, vendor_id, vendor_name, vendor_type, urgency, status, assigned_at, claimed_by, claimed_at, claim_batch_id, requires_machine_type, batch_id",
       )
       .eq("status", "carving_assigned")
       .is("received_at_vendor_at", null)
@@ -166,6 +166,7 @@ export default async function SlabTransferPage({
       claimed_by: j.claimed_by ?? null,
       claimed_by_name: j.claimed_by ? claimerNames.get(j.claimed_by) ?? null : null,
       claimed_at: (j as { claimed_at?: string | null }).claimed_at ?? null,
+      claim_batch_id: (j as { claim_batch_id?: string | null }).claim_batch_id ?? null,
       is_lathe: (j as { requires_machine_type?: string | null }).requires_machine_type === "lathe",
       batch_id: (j as { batch_id?: string | null }).batch_id ?? null,
     };
