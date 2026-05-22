@@ -1562,8 +1562,23 @@ details.block-card[open] {
      * replaces it), so 24px bottom is fine. Top bumped to 56px so
      * the fixed hamburger button (12px from top, 40px tall) doesn't
      * sit on top of page headers. */
-    padding: 56px 16px 24px;
+    padding: 56px 12px 24px;
   }
+  /* Topbar on mobile — Daksh: the leftmost content visually started
+   * at ~60px because the fixed hamburger overlaid the topbar's
+   * default 28px left padding, while the right side had only 28px.
+   * Tighten symmetric padding to 12px on both sides AND reserve a
+   * 56px left "gutter" so topbar-left content begins AFTER the
+   * hamburger button, not under it. The right edge keeps the same
+   * 12px breathing room. */
+  .topbar {
+    padding: 0 12px 0 60px;
+    gap: 10px;
+  }
+  /* Topbar items shrink a bit on mobile too — keeps "SIGNED IN AS /
+   * TEST" + the right-side pill cluster from elbowing each other. */
+  .topbar-label { font-size: 10px; }
+  .topbar-name  { font-size: 13px; }
   .planning-two-col {
     grid-template-columns: 1fr;
   }

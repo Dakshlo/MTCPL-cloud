@@ -179,8 +179,15 @@ export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
   return (
     <div
       ref={wrapperRef}
-      onMouseEnter={openNow}
-      onMouseLeave={scheduleClose}
+      /* Daksh May 2026 — same touch fix as TopbarTasksBadge. Hover
+       * handlers gated on pointerType === 'mouse' so a finger tap
+       * doesn't race the click toggle. */
+      onPointerEnter={(e) => {
+        if (e.pointerType === "mouse") openNow();
+      }}
+      onPointerLeave={(e) => {
+        if (e.pointerType === "mouse") scheduleClose();
+      }}
       style={{ position: "relative", display: "inline-block" }}
     >
       {/* Trigger pill */}

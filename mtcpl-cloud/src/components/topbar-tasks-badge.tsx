@@ -144,8 +144,19 @@ export function TopbarTasksBadge({ items }: { items: TopbarTask[] }) {
   return (
     <div
       ref={wrapperRef}
-      onMouseEnter={openNow}
-      onMouseLeave={scheduleClose}
+      /* Daksh May 2026 — onMouseEnter/onMouseLeave fired on TOUCH
+       * devices too (browser synthesises mouse events from touches),
+       * which created a race: tap → synthetic mouseenter opens panel
+       * → click toggle closes it → user thinks tap missed and taps
+       * again. Switching to onPointerEnter/Leave with a pointerType
+       * check makes hover purely a mouse thing; touch users now get
+       * the simple click-to-toggle behaviour on the button. */
+      onPointerEnter={(e) => {
+        if (e.pointerType === "mouse") openNow();
+      }}
+      onPointerLeave={(e) => {
+        if (e.pointerType === "mouse") scheduleClose();
+      }}
       style={{ position: "relative", display: "inline-block" }}
     >
       {/* Trigger pill */}
