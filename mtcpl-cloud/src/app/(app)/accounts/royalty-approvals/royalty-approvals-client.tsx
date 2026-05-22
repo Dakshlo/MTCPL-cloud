@@ -262,6 +262,14 @@ export function RoyaltyApprovalsClient({
               {error}
             </div>
           )}
+          {/* Daksh May 2026 — pending-queue totals tile.
+              Renders a compact summary above the list so dad can see
+              "₹X received from vendors, ₹Y given to vendors, net Z"
+              at a glance before scrolling each entry. Tells him in
+              one number whether this batch tilts heavily one way
+              before he starts approving. Hidden when the queue is
+              empty. */}
+          {entries.length > 0 && <RoyaltyTotalsTile entries={entries} />}
           {entries.length === 0 ? (
             <div
               style={{
@@ -402,5 +410,209 @@ export function RoyaltyApprovalsClient({
         </div>
       )}
     </section>
+  );
+}
+
+// ── Pending-queue totals tile (Daksh, May 2026) ──────────────────
+//
+// One band above the entry list with the three numbers dad cares
+// about while scanning the queue:
+//   • RECEIVED — sum of `received` entries (vendor → us flow).
+//   • GIVEN    — sum of `given` entries (us → vendor flow).
+//   • NET      — received minus given. Tinted green/amber/red so a
+//                lopsided batch jumps out: green when we're net
+//                receivers, red when net givers.
+//
+// "Royalty points" not rupees — see fmtPoints comment up top.
+// Stays in a single horizontal band on tablet (3-col grid), wraps
+// to one-per-row on phones via `auto-fit` + minmax.
+function RoyaltyTotalsTile({
+  entries,
+}: {
+  entries: Array<{ amount: number; entryType: "received" | "given" }>;
+}) {
+  let receivedTotal = 0;
+  let givenTotal = 0;
+  let receivedCount = 0;
+  let givenCount = 0;
+  for (const e of entries) {
+    if (e.entryType === "received") {
+      receivedTotal += e.amount;
+      receivedCount += 1;
+    } else {
+      givenTotal += e.amount;
+      givenCount += 1;
+    }
+  }
+  const net = receivedTotal - givenTotal;
+  // Pick a tint for the Net tile based on which side dominates.
+  // Threshold 0.5 to avoid flicker around exact zero. Green when we
+  // net receivers (positive), red when net givers (negative), grey
+  // when even.
+  const netTone =
+    net > 0.5
+      ? { bg: "#dcfce7", border: "#16a34a", fg: "#15803d", icon: "↗" }
+      : net < -0.5
+        ? { bg: "#fee2e2", border: "#dc2626", fg: "#b91c1c", icon: "↘" }
+        : { bg: "#f1f5f9", border: "#cbd5e1", fg: "#475569", icon: "·" };
+  return (
+    <div
+      style={{
+        marginBottom: 14,
+        padding: "14px 16px",
+        background: "var(--surface)",
+        border: "1px solid var(--border)",
+        borderRadius: 12,
+        boxShadow: "0 1px 0 rgba(15,23,42,0.04)",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "baseline",
+          justifyContent: "space-between",
+          gap: 10,
+          marginBottom: 10,
+          flexWrap: "wrap",
+        }}
+      >
+        <div
+          style={{
+            fontSize: 11,
+            fontWeight: 800,
+            color: "var(--muted)",
+            textTransform: "uppercase",
+            letterSpacing: "0.08em",
+          }}
+        >
+          Queue totals
+        </div>
+        <div style={{ fontSize: 11, color: "var(--muted)" }}>
+          {entries.length} pending entr{entries.length === 1 ? "y" : "ies"}
+        </div>
+      </div>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+          gap: 10,
+        }}
+      >
+        {/* Received side — green tint matches the "received" entry
+            cards below so the colour vocab is consistent. */}
+        <TotalTile
+          label="Received from vendors"
+          count={receivedCount}
+          value={fmtPoints(receivedTotal)}
+          tone={{ bg: "#dcfce7", border: "#16a34a", fg: "#15803d" }}
+          prefix="+"
+        />
+        {/* Given side — amber tint, mirrors the per-row chip below. */}
+        <TotalTile
+          label="Given to vendors"
+          count={givenCount}
+          value={fmtPoints(givenTotal)}
+          tone={{ bg: "#fef3c7", border: "#d97706", fg: "#b45309" }}
+          prefix="−"
+        />
+        {/* Net — most important number. Bigger value, dynamic tint
+            based on sign so dad reads the direction in colour first,
+            magnitude second. */}
+        <div
+          style={{
+            padding: "12px 14px",
+            background: netTone.bg,
+            border: `1.5px solid ${netTone.border}`,
+            borderRadius: 10,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 10,
+              fontWeight: 800,
+              color: netTone.fg,
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+            }}
+          >
+            Net (received − given)
+          </div>
+          <div
+            style={{
+              fontSize: 22,
+              fontWeight: 800,
+              color: netTone.fg,
+              marginTop: 3,
+              fontFamily: "ui-monospace, monospace",
+              fontFeatureSettings: '"tnum"',
+              letterSpacing: "-0.01em",
+            }}
+          >
+            {netTone.icon} {fmtPoints(Math.abs(net))}
+          </div>
+          <div style={{ fontSize: 10, color: netTone.fg, marginTop: 2, fontWeight: 600 }}>
+            {net > 0.5
+              ? "Vendors are paying us net"
+              : net < -0.5
+                ? "We're paying vendors net"
+                : "Even — no net direction"}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TotalTile({
+  label,
+  count,
+  value,
+  tone,
+  prefix,
+}: {
+  label: string;
+  count: number;
+  value: string;
+  tone: { bg: string; border: string; fg: string };
+  prefix?: string;
+}) {
+  return (
+    <div
+      style={{
+        padding: "12px 14px",
+        background: tone.bg,
+        border: `1px solid ${tone.border}`,
+        borderRadius: 10,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          fontWeight: 800,
+          color: tone.fg,
+          textTransform: "uppercase",
+          letterSpacing: "0.08em",
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          fontSize: 20,
+          fontWeight: 800,
+          color: tone.fg,
+          marginTop: 3,
+          fontFamily: "ui-monospace, monospace",
+          fontFeatureSettings: '"tnum"',
+          letterSpacing: "-0.01em",
+        }}
+      >
+        {prefix ?? ""}
+        {value}
+      </div>
+      <div style={{ fontSize: 10, color: tone.fg, marginTop: 2, fontWeight: 600 }}>
+        {count} entr{count === 1 ? "y" : "ies"}
+      </div>
+    </div>
   );
 }
