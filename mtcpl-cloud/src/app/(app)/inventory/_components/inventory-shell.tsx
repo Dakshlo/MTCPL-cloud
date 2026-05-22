@@ -62,7 +62,7 @@ export function InventoryShell({
   actions?: ReactNode;
 }) {
   return (
-    <div style={inventoryPageWrapper}>
+    <div className="inv-shell" style={inventoryPageWrapper}>
       {/* Pre-paint hydration script — reads the saved
           "hide sidebar" preference and applies the body class before
           React hydrates so we don't get a flash of "sidebar visible

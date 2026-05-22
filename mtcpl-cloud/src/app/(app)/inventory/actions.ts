@@ -174,9 +174,21 @@ export async function proposeMovementAction(
   if (componentIds.length !== qtys.length) {
     return { ok: false, error: "Component / qty list mismatch." };
   }
+  // Daksh — scaffolding ships in whole pieces. Reject non-integer
+  // quantities at the API boundary (client filters too, but a curl
+  // call or autofill could still sneak a "25.01" in). Existing
+  // legacy fractional rows in the DB are left alone — only NEW
+  // movements are forced to be integers from here on.
   for (const q of qtys) {
     if (!Number.isFinite(q) || q <= 0) {
       return { ok: false, error: "Every quantity must be greater than zero." };
+    }
+    if (!Number.isInteger(q)) {
+      return {
+        ok: false,
+        error:
+          "Quantities must be whole numbers (scaffolding ships in whole pieces — no decimals).",
+      };
     }
   }
 

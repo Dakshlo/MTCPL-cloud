@@ -2139,6 +2139,26 @@ body.inv-hide-sidebar .app-shell { grid-template-columns: 1fr; }
 body.inv-hide-sidebar .sidebar,
 body.inv-hide-sidebar .sidebar-backdrop { display: none !important; }
 
+/* ── Inventory: tablet tap responsiveness ─────────────────────
+ * Daksh (May 2026) — tablet users were reporting that 2 out of 3
+ * navigation clicks didn't seem to register and pages felt sluggish.
+ * The usual suspect on touch devices is the 300ms tap delay (which
+ * waits to see if the user is double-tapping to zoom) and accidental
+ * double-tap zooms triggering when they tap quickly through cards.
+ *
+ * `touch-action: manipulation` tells the browser "this element is a
+ * tap target, not a zoom region" — gestures still work elsewhere on
+ * the page but tapping these targets is instant and never accidentally
+ * zooms. Applied broadly inside the inventory shell so every link,
+ * button, and card benefits without per-component opt-in. The
+ * .inv-tap utility is also exposed for cards rendered outside the
+ * inventory routes if we need it later. */
+.inv-shell a,
+.inv-shell button,
+.inv-shell label,
+.inv-shell [role="button"],
+.inv-tap { touch-action: manipulation; }
+
 /* ── Print ──────────────────────────────────────────────────── */
 
 @media print {

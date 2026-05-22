@@ -150,9 +150,14 @@ export function MovementForm({
     }
     for (const it of cart) {
       const n = Number(it.qty);
-      if (!Number.isFinite(n) || n <= 0) {
+      // Daksh — scaffolding ships in whole pieces. Reject any
+      // non-integer (and zero/negative). Doubles as a safety net
+      // for paste/autofill that bypasses the input filter.
+      if (!Number.isFinite(n) || n <= 0 || !Number.isInteger(n)) {
         const c = components.find((c) => c.id === it.component_id);
-        setError(`Quantity for ${c?.name ?? "an item"} must be greater than zero.`);
+        setError(
+          `Quantity for ${c?.name ?? "an item"} must be a whole number greater than zero.`,
+        );
         return;
       }
       if (sourceSiteId) {
@@ -528,12 +533,29 @@ export function MovementForm({
                     </button>
                   </div>
                   <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    {/* Daksh — scaffolding components ship as whole
+                        pieces (one clamp is one clamp, not 1.5).
+                        Lock the input to integers: step=1 keeps the
+                        ↑↓ arrows snapping; inputMode=numeric brings
+                        up the digit keypad on tablets; the onChange
+                        strips any non-digit so paste or autofill
+                        can't sneak a "25.01" through. Server-side
+                        also rejects non-integers as a backstop. */}
                     <input
                       type="number"
-                      min="0"
-                      step="0.01"
+                      min="1"
+                      step="1"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
                       value={it.qty}
-                      onChange={(e) => setQty(it.component_id, e.target.value)}
+                      onChange={(e) => {
+                        // Strip everything that isn't a digit (drops
+                        // "." automatically so 25.01 collapses to
+                        // "2501"). Empty stays empty so the field is
+                        // still editable.
+                        const cleaned = e.target.value.replace(/[^0-9]/g, "");
+                        setQty(it.component_id, cleaned);
+                      }}
                       placeholder="qty"
                       style={{
                         width: 90,

@@ -40,37 +40,47 @@ export function ComponentCard({
 }) {
   const level = stockLevel(qty);
   const muted = emphasis === "muted";
+  // Daksh — scaffolding ships in whole pieces. Display Math.round
+  // so legacy fractional values (e.g. 25.01 pcs from before the
+  // integer-only rule landed) show as a clean integer in the UI.
+  // The underlying value is unchanged; this is display-only.
+  const displayQty = Math.round(qty);
   const card = (
     <div
       style={{
         background: INV_THEME.paper,
         border: `1px solid ${INV_THEME.parchment}`,
-        borderRadius: 12,
-        padding: "14px 14px 12px",
+        borderRadius: 10,
+        padding: "10px 10px 9px",
         display: "flex",
         flexDirection: "column",
-        gap: 8,
+        gap: 6,
         boxShadow: "0 1px 0 rgba(28, 52, 69, 0.04)",
-        minHeight: 200,
+        minHeight: 158,
         opacity: muted ? 0.7 : 1,
         transition: "transform 0.15s ease, box-shadow 0.15s ease",
         cursor: href ? "pointer" : "default",
+        // Removes the 300ms tap delay on touch devices and stops
+        // accidental double-tap zooms when the storekeeper is
+        // tapping cards quickly on a tablet.
+        touchAction: "manipulation",
       }}
     >
-      {/* Icon block */}
+      {/* Icon block — shrunk from 88 → 56 to fit 4-per-row on
+          portrait tablets and 6-per-row on landscape. */}
       <div
         style={{
-          flex: "1 1 auto",
+          flex: "0 0 auto",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           color: INV_THEME.steel,
-          minHeight: 80,
+          minHeight: 56,
         }}
       >
         <ComponentIcon
           type={componentType}
-          size={88}
+          size={56}
           imageDataUrl={imageDataUrl ?? undefined}
         />
       </div>
@@ -79,11 +89,12 @@ export function ComponentCard({
       <div style={{ textAlign: "center" }}>
         <div
           style={{
-            fontSize: 11,
+            fontSize: 10,
             fontWeight: 700,
             color: INV_THEME.steel,
             textTransform: "uppercase",
-            letterSpacing: "0.08em",
+            letterSpacing: "0.06em",
+            lineHeight: 1.2,
           }}
         >
           {name}
@@ -91,7 +102,7 @@ export function ComponentCard({
         {sizeSpec && (
           <div
             style={{
-              fontSize: 10,
+              fontSize: 9,
               color: INV_THEME.steelLight,
               marginTop: 1,
               letterSpacing: "0.04em",
@@ -102,19 +113,21 @@ export function ComponentCard({
         )}
       </div>
 
-      {/* Quantity block */}
+      {/* Quantity block — auto-grows so the bottom row pins to the
+          card edge. */}
       <div
         style={{
           background: INV_THEME.cream,
-          borderRadius: 8,
-          padding: "10px 8px",
+          borderRadius: 6,
+          padding: "6px 6px",
           textAlign: "center",
           border: `1px solid ${INV_THEME.parchment}`,
+          marginTop: "auto",
         }}
       >
         <div
           style={{
-            fontSize: 26,
+            fontSize: 22,
             fontWeight: 800,
             color: qty > 0 ? INV_THEME.steel : INV_THEME.stockOut,
             lineHeight: 1,
@@ -122,13 +135,13 @@ export function ComponentCard({
             fontFeatureSettings: '"tnum"',
           }}
         >
-          {qty.toLocaleString("en-IN")}
+          {displayQty.toLocaleString("en-IN")}
         </div>
         <div
           style={{
-            fontSize: 10,
+            fontSize: 9,
             color: INV_THEME.steelLight,
-            marginTop: 2,
+            marginTop: 1,
             letterSpacing: "0.06em",
             textTransform: "uppercase",
           }}
@@ -137,51 +150,50 @@ export function ComponentCard({
         </div>
       </div>
 
-      {/* Status + secondary line */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <StockDots level={level} />
+      {/* Status + secondary line — compact single row */}
+      <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+        <StockDots level={level} />
+        <span
+          style={{
+            fontSize: 9,
+            fontWeight: 700,
+            color: INV_THEME.steelLight,
+            textTransform: "uppercase",
+            letterSpacing: "0.05em",
+          }}
+        >
+          {level === "healthy" ? "in" : level === "low" ? "low" : "empty"}
+        </span>
+        {pendingOut !== undefined && pendingOut > 0 && (
           <span
+            title={`${Math.round(pendingOut)} ${unit} pending approval`}
             style={{
-              fontSize: 10,
+              marginLeft: "auto",
+              fontSize: 9,
               fontWeight: 700,
-              color: INV_THEME.steelLight,
-              textTransform: "uppercase",
-              letterSpacing: "0.06em",
+              color: INV_THEME.pending,
+              background: "rgba(212, 146, 58, 0.12)",
+              padding: "1px 5px",
+              borderRadius: 3,
+              letterSpacing: "0.03em",
             }}
           >
-            {level === "healthy" ? "in stock" : level === "low" ? "low stock" : "empty"}
+            −{Math.round(pendingOut)}
           </span>
-          {pendingOut !== undefined && pendingOut > 0 && (
-            <span
-              title={`${pendingOut} ${unit} pending approval`}
-              style={{
-                marginLeft: "auto",
-                fontSize: 10,
-                fontWeight: 700,
-                color: INV_THEME.pending,
-                background: "rgba(212, 146, 58, 0.12)",
-                padding: "2px 6px",
-                borderRadius: 4,
-                letterSpacing: "0.04em",
-              }}
-            >
-              −{pendingOut} pending
-            </span>
-          )}
-        </div>
-        {secondaryLine && (
-          <div
-            style={{
-              fontSize: 10,
-              color: INV_THEME.steelLight,
-              letterSpacing: "0.02em",
-            }}
-          >
-            {secondaryLine}
-          </div>
         )}
       </div>
+      {secondaryLine && (
+        <div
+          style={{
+            fontSize: 9,
+            color: INV_THEME.steelLight,
+            letterSpacing: "0.02em",
+            lineHeight: 1.3,
+          }}
+        >
+          {secondaryLine}
+        </div>
+      )}
     </div>
   );
 
@@ -218,16 +230,18 @@ function StockDots({ level }: { level: "healthy" | "low" | "out" }) {
   );
 }
 
-/** A "card grid" container — responsive 4-col on wide, 2-col on
- *  tablet, 1-col on phone. Matches the rest of the codebase's grid
- *  feel. */
+/** A "card grid" container — responsive. Daksh May 2026: shrunk
+ *  the minmax floor from 170px → 140px so a portrait tablet
+ *  (~768px wide minus the sidebar) lands on 4 cards per row instead
+ *  of 1. Landscape tablets get 5-6 per row. Phones still collapse
+ *  to 2-3 because the floor is below half-width. */
 export function ComponentCardGrid({ children }: { children: ReactNode }) {
   return (
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))",
-        gap: 14,
+        gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
+        gap: 10,
       }}
     >
       {children}
