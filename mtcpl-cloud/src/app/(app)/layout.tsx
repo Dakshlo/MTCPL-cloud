@@ -165,56 +165,55 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
 
   // Cut-approval queue size — only loaded for approvers (migration 027).
   // Cheap single-COUNT query, indexed by the partial index added in 027.
-  let approvalsBadge: number | null = null;
-  let billsAuditBadge: number | null = null;
-  let payTodayBadge: number | null = null;
-  let inventoryAuditBadge: number | null = null;
-  // Mig 053 — Final Audit queue count (paid + awaiting UTR
-  // verification). Final auditor + owner + dev see it.
-  let finalAuditBadge: number | null = null;
-  // Mig 058 follow-on (Daksh): "rejected bills" counter — for any
-  // user who can submit bills, count THEIR submissions currently
-  // in 'rejected' status. Shows up in the Tasks pill so the
-  // accountant doesn't have to scroll All Bills to find what
-  // crosscheck sent back. Per-user (submitted_by = profile.id),
-  // not org-wide, so different accountants only see their own
-  // pile.
-  let rejectedBillsBadge: number | null = null;
+  //
+  // Daksh May 2026 perf pass — these seven badge queries used to run
+  // sequentially via `if (canX) { await … }`. On a slow tablet
+  // connection that meant 7× round-trips on EVERY page navigation
+  // before the layout could render, easily turning a 200ms page into
+  // a 3-second wait. Now we fire all of them in parallel via
+  // Promise.all so the layout's badge work caps at the slowest
+  // single query, not the sum. Each branch resolves to a `number |
+  // null` to preserve the "hide the chip when role doesn't qualify"
+  // semantics.
   const supabase = createAdminSupabaseClient();
-  if (canApproveCuts(profile)) {
+
+  // Each helper returns the badge count (or null when the role
+  // doesn't qualify / when the table doesn't exist yet).
+  async function fetchApprovalsBadge(): Promise<number | null> {
+    if (!canApproveCuts(profile)) return null;
     const { count } = await supabase
       .from("cut_session_blocks")
       .select("*", { count: "exact", head: true })
       .in("status", ["awaiting_approval", "awaiting_cutter_edit"]);
-    approvalsBadge = count ?? 0;
+    return count ?? 0;
   }
-  // Bills Audit badge — approvers see the count of bills waiting for
-  // approval (migration 028). Mirrors Cutting Audit badge styling.
-  if (canApproveBills(profile)) {
+  async function fetchBillsAuditBadge(): Promise<number | null> {
+    if (!canApproveBills(profile)) return null;
     const { count } = await supabase
       .from("bills")
       .select("*", { count: "exact", head: true })
       .eq("status", "pending_approval");
-    billsAuditBadge = count ?? 0;
+    return count ?? 0;
   }
   // Pay Today badge — owner + developer only. Accountant gets a
   // sidebar entry instead. Crosscheck (mig 037) intentionally
   // EXCLUDED — they only verify bills, never participate in the
   // payment-confirm step. Gate on canConfirmPayments (which omits
   // crosscheck) rather than canApproveBills (which includes them).
-  if (canConfirmPayments(profile)) {
+  async function fetchPayTodayBadge(): Promise<number | null> {
+    if (!canConfirmPayments(profile)) return null;
     const { count } = await supabase
       .from("bill_payments")
       .select("*", { count: "exact", head: true })
       .in("status", ["proposed", "confirmed"]);
-    payTodayBadge = count ?? 0;
+    return count ?? 0;
   }
   // Inventory Audit badge — Mig 041. Crosscheck (Mafat) + owner +
-  // dev see pending storekeeper submissions. Indexed by the partial
-  // inventory_movements_pending_idx so the COUNT is sub-millisecond.
-  // The badge counts BATCHES (distinct batch_id), not rows — a 6-item
-  // issue is one decision, not six.
-  if (canApproveInventoryMovements(profile)) {
+  // dev see pending storekeeper submissions. The badge counts BATCHES
+  // (distinct batch_id), not rows — a 6-item issue is one decision,
+  // not six.
+  async function fetchInventoryAuditBadge(): Promise<number | null> {
+    if (!canApproveInventoryMovements(profile)) return null;
     const { data: pendingBatches, error: pendingBatchesError } = await supabase
       .from("inventory_movements")
       .select("batch_id")
@@ -222,62 +221,63 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     if (pendingBatchesError) {
       // Migration 041 not yet run on this environment → hide the
       // badge entirely. Otherwise it would flash a misleading "0".
-      inventoryAuditBadge = null;
-    } else {
-      const uniqueBatches = new Set(
-        (pendingBatches ?? []).map((r) => r.batch_id as string),
-      );
-      inventoryAuditBadge = uniqueBatches.size;
+      return null;
     }
+    const uniqueBatches = new Set(
+      (pendingBatches ?? []).map((r) => r.batch_id as string),
+    );
+    return uniqueBatches.size;
   }
-  // Mig 058 follow-on — per-user rejected-bills count. Scoped to
-  // submissions THIS user made; if a bill they submitted got sent
-  // back at crosscheck, it lands here. Anyone who can submit bills
-  // (accountant / biller / final_auditor / dev / owner) is
-  // eligible — for users with 0 rejections the item is omitted
-  // from the dropdown (see buildTopbarTaskItems) so it doesn't
-  // clutter the "All clear" state.
-  if (canSubmitBills(profile)) {
+  // Mig 058 follow-on — per-user rejected-bills count.
+  async function fetchRejectedBillsBadge(): Promise<number | null> {
+    if (!canSubmitBills(profile)) return null;
     const { count } = await supabase
       .from("bills")
       .select("*", { count: "exact", head: true })
       .eq("submitted_by", profile.id)
       .eq("status", "rejected");
-    rejectedBillsBadge = count ?? 0;
+    return count ?? 0;
   }
-  // Mig 053 — Final Audit queue. Counts paid payments awaiting UTR
-  // recheck. Indexed by bill_payments_final_audit_pending_idx so the
-  // partial-index COUNT is essentially free.
-  if (canFinalAudit(profile)) {
+  // Mig 053 — Final Audit queue.
+  async function fetchFinalAuditBadge(): Promise<number | null> {
+    if (!canFinalAudit(profile)) return null;
     const { count, error: finalAuditErr } = await supabase
       .from("bill_payments")
       .select("*", { count: "exact", head: true })
       .eq("status", "paid")
       .eq("final_audit_status", "pending");
-    if (finalAuditErr) {
-      // Migration 053 not yet run → hide the badge silently.
-      finalAuditBadge = null;
-    } else {
-      finalAuditBadge = count ?? 0;
-    }
+    if (finalAuditErr) return null;
+    return count ?? 0;
   }
-
-  // Mig 064 — Royalty Approval queue. Counts pending royalty entries
-  // across all vendors. Owner / developer only. Silently 0 if the
-  // status column doesn't exist yet (mig 064 not applied).
-  let royaltyApprovalBadge: number | null = null;
-  if (profile.role === "owner" || profile.role === "developer") {
+  // Mig 064 — Royalty Approval queue. Owner / developer only.
+  async function fetchRoyaltyApprovalBadge(): Promise<number | null> {
+    if (profile.role !== "owner" && profile.role !== "developer") return null;
     const { count, error: royaltyErr } = await supabase
       .from("vendor_royalty_entries")
       .select("*", { count: "exact", head: true })
       .eq("status", "pending_approval")
       .is("cancelled_at", null);
-    if (royaltyErr) {
-      royaltyApprovalBadge = null;
-    } else {
-      royaltyApprovalBadge = count ?? 0;
-    }
+    if (royaltyErr) return null;
+    return count ?? 0;
   }
+
+  const [
+    approvalsBadge,
+    billsAuditBadge,
+    payTodayBadge,
+    inventoryAuditBadge,
+    rejectedBillsBadge,
+    finalAuditBadge,
+    royaltyApprovalBadge,
+  ] = await Promise.all([
+    fetchApprovalsBadge(),
+    fetchBillsAuditBadge(),
+    fetchPayTodayBadge(),
+    fetchInventoryAuditBadge(),
+    fetchRejectedBillsBadge(),
+    fetchFinalAuditBadge(),
+    fetchRoyaltyApprovalBadge(),
+  ]);
 
   return (
     <div className="app-shell">

@@ -221,6 +221,21 @@ export function InventoryShell({
             background: ${INV_THEME.copper};
             border-radius: 1px;
           }
+          /* Daksh May 2026 — instant tap feedback. On a slow tablet
+             connection the navigation takes 1-3s, and without a
+             visual cue the user assumes the tap didn't register and
+             taps again, which queues a second navigation behind the
+             first. The :active pseudo fires the instant the finger
+             lands, before any network request, so the tab visibly
+             "presses in" and stays pressed until the page swaps. */
+          .inv-subnav-tab:active {
+            background: ${INV_THEME.steelDark} !important;
+            color: #fff !important;
+            transform: scale(0.97);
+          }
+          .inv-subnav-tab:active .inv-subnav-icon {
+            opacity: 1 !important;
+          }
         `}</style>
         <nav
           style={{
@@ -247,6 +262,15 @@ export function InventoryShell({
                 key={item.href}
                 href={item.href}
                 title={item.title ?? item.label}
+                /* Daksh May 2026 — prefetch=false on every sub-nav
+                 * link. Next.js default prefetches every visible Link
+                 * on mount, which on a slow tablet connection fires
+                 * 9 background requests + whatever the sidebar's
+                 * prefetching, saturating the wifi so the actual
+                 * click takes seconds to break through. Sub-nav tabs
+                 * are small server-rendered pages that load fast
+                 * enough on-demand. */
+                prefetch={false}
                 className={`inv-subnav-tab${active ? " inv-subnav-tab-active" : ""}`}
               >
                 <span className="inv-subnav-icon" aria-hidden="true">
