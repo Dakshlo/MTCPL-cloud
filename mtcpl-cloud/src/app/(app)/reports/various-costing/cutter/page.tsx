@@ -234,6 +234,9 @@ export default async function CutterCostReportPage({ searchParams }: { searchPar
           slabsCount={report.slabsCount}
           contributingSlabs={report.contributingSlabs}
           periodLabel={report.period.label}
+          periodKind={report.period.kind}
+          periodStartDate={report.period.startDate}
+          periodEndDate={report.period.endDate}
         />
         <KpiTile
           label="Total Cost"
