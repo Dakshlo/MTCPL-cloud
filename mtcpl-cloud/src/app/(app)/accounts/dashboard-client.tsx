@@ -10,7 +10,7 @@
  */
 
 import Link from "next/link";
-import { useMemo, useState, useTransition } from "react";
+import { Fragment, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 import {
@@ -118,27 +118,55 @@ export function DueBillsClient({
 
   const filteredRows = useMemo(() => {
     const q = quickFilter.trim().toLowerCase();
-    const base = q
-      ? rows.filter(
-          (r) =>
-            r.token.toLowerCase().includes(q) ||
-            r.vendorName.toLowerCase().includes(q) ||
-            // Mig 066 — nickname (owner handle) included in the
-            // quick search so multi-firm vendors find each other on
-            // the same query (e.g. type owner's name → all his firms).
-            (r.vendorNickname?.toLowerCase().includes(q) ?? false) ||
-            r.vendorBillNo.toLowerCase().includes(q),
-        )
-      : rows;
-    // Sort a copy so we don't mutate the prop. Compare on
-    // billDate (ISO YYYY-MM-DD string sorts correctly).
-    const sorted = [...base].sort((a, b) => {
+    const matchesFilter = (r: DueBillRow) =>
+      !q ||
+      r.token.toLowerCase().includes(q) ||
+      r.vendorName.toLowerCase().includes(q) ||
+      // Mig 066 — nickname (owner handle) included in the quick
+      // search so multi-firm vendors find each other on the same
+      // query (e.g. type owner's name → all his firms).
+      (r.vendorNickname?.toLowerCase().includes(q) ?? false) ||
+      r.vendorBillNo.toLowerCase().includes(q);
+
+    // Daksh May 2026 — selected bills are ALWAYS visible and pinned
+    // to the top of the list, regardless of whether they match the
+    // current quick-filter. The pain point: accountant ticks 4 bills,
+    // then types in the search to find a 5th, and their 4 prior
+    // picks vanish from view because they don't match the query.
+    // Now they stay pinned at top in a "selected" block, with the
+    // filter-matched rest below them. The selected block still
+    // sorts by billDate per sortDir so multi-select picks are in a
+    // consistent order.
+    const selectedBucket: DueBillRow[] = [];
+    const restBucket: DueBillRow[] = [];
+    for (const r of rows) {
+      if (selected.has(r.id)) {
+        selectedBucket.push(r);
+      } else if (matchesFilter(r)) {
+        restBucket.push(r);
+      }
+    }
+    // Sort a copy of each bucket so we don't mutate the rows prop.
+    // billDate is ISO YYYY-MM-DD which compares correctly as strings.
+    const dateSort = (a: DueBillRow, b: DueBillRow) => {
       if (a.billDate === b.billDate) return 0;
       const cmp = a.billDate < b.billDate ? -1 : 1;
       return sortDir === "oldest" ? cmp : -cmp;
-    });
-    return sorted;
-  }, [rows, quickFilter, sortDir]);
+    };
+    selectedBucket.sort(dateSort);
+    restBucket.sort(dateSort);
+    return [...selectedBucket, ...restBucket];
+  }, [rows, quickFilter, sortDir, selected]);
+
+  // Track the boundary index where the selected (pinned) bucket ends
+  // and the rest starts. Used to render a thin divider row in the
+  // table between the two groups when both are non-empty, so the
+  // accountant can see at a glance "above this line = my picks,
+  // below = the filtered queue".
+  const selectedPinnedCount = useMemo(
+    () => filteredRows.filter((r) => selected.has(r.id)).length,
+    [filteredRows, selected],
+  );
 
   const selectedRows = useMemo(
     () => rows.filter((r) => selected.has(r.id)),
@@ -405,19 +433,53 @@ export function DueBillsClient({
                   amountOverrides[r.id] != null
                     ? amountOverrides[r.id]
                     : String(r.amountOutstanding);
+                // Daksh May 2026 — render a thin divider row at the
+                // boundary between pinned-selected and the rest, but
+                // only when BOTH buckets are non-empty AND we just
+                // crossed the boundary (idx === selectedPinnedCount).
+                // The divider gives the accountant a visual anchor —
+                // "above the line = my picks, below = the filtered
+                // queue" — so a long search that pushes their picks
+                // up to the top doesn't make them feel like the
+                // queue is gone.
+                const showDivider =
+                  selectedPinnedCount > 0 &&
+                  idx === selectedPinnedCount &&
+                  filteredRows.length > selectedPinnedCount;
                 return (
-                  <tr
-                    key={r.id}
-                    style={{
-                      background: isSelected
-                        ? ACCOUNTS_TOKENS.accentLight
-                        : idx % 2 === 0
-                          ? "#fff"
-                          : ACCOUNTS_TOKENS.surfaceMuted,
-                      opacity: r.hasOpenPayment ? 0.55 : 1,
-                      transition: "background 0.1s",
-                    }}
-                  >
+                  <Fragment key={r.id}>
+                    {showDivider && (
+                      <tr aria-hidden style={{ background: "transparent" }}>
+                        <td
+                          colSpan={canPropose ? 11 : 10}
+                          style={{
+                            padding: "6px 14px 4px",
+                            fontSize: 10,
+                            fontWeight: 700,
+                            color: "var(--muted)",
+                            textTransform: "uppercase",
+                            letterSpacing: "0.08em",
+                            borderTop: `2px dashed ${ACCOUNTS_TOKENS.accentLight}`,
+                            background: ACCOUNTS_TOKENS.surfaceMuted,
+                          }}
+                        >
+                          {quickFilter.trim()
+                            ? `Other bills matching "${quickFilter.trim()}"`
+                            : "Other due bills"}
+                        </td>
+                      </tr>
+                    )}
+                    <tr
+                      style={{
+                        background: isSelected
+                          ? ACCOUNTS_TOKENS.accentLight
+                          : idx % 2 === 0
+                            ? "#fff"
+                            : ACCOUNTS_TOKENS.surfaceMuted,
+                        opacity: r.hasOpenPayment ? 0.55 : 1,
+                        transition: "background 0.1s",
+                      }}
+                    >
                     {canPropose && (
                       <td style={TABLE_STYLES.td}>
                         <input
@@ -628,7 +690,8 @@ export function DueBillsClient({
                         )}
                       </td>
                     )}
-                  </tr>
+                    </tr>
+                  </Fragment>
                 );
               })}
             </tbody>
