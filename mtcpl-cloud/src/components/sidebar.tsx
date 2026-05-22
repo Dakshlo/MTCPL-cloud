@@ -92,6 +92,17 @@ function hexToAlpha(hex: string, alpha: number): string {
 // who can switch (developer + owner); for everyone else the role
 // filter alone is sufficient since their role implicitly limits them.
 const navEntries: NavEntry[] = [
+  // Daksh May 2026 — owner-friendly mobile task hub. Same departmental
+  // tag as Dashboard so it sits next to it in the sidebar; the page
+  // itself is mobile-first so dad can bookmark mtcpl.org/tasks on his
+  // phone and act on every approval queue from one screen.
+  {
+    href: "/tasks",
+    label: "My Tasks",
+    icon: "✓",
+    roles: ["developer", "owner"],
+    department: "production",
+  },
   {
     href: "/dashboard",
     label: "Dashboard",

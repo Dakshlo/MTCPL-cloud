@@ -287,6 +287,7 @@ function PendingCard({
       {/* Mig 053 follow-on — branded overlay while verify runs. */}
       <FinanceLoadingOverlay show={pending} label="Verifying payment…" />
     <div
+      className="final-audit-row"
       style={{
         background: "#fff",
         border: `1px solid ${ACCOUNTS_TOKENS.border}`,
@@ -449,6 +450,7 @@ function PendingCard({
       </div>
 
       <div
+        className="final-audit-row-actions"
         style={{
           display: "flex",
           flexDirection: "column",
@@ -457,7 +459,10 @@ function PendingCard({
           minWidth: 160,
         }}
       >
-        <div style={{ textAlign: "right" }}>
+        <div
+          className="final-audit-row-actions-amount"
+          style={{ textAlign: "right" }}
+        >
           <div
             style={{
               fontSize: 10,

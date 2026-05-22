@@ -2141,6 +2141,22 @@ body.inv-hide-sidebar .sidebar,
 body.inv-hide-sidebar .sidebar-backdrop,
 body.vendor-cockpit-fullscreen .sidebar,
 body.vendor-cockpit-fullscreen .sidebar-backdrop { display: none !important; }
+
+/* ── Final Audit row: mobile stack ───────────────────────────
+ * Daksh May 2026 — on the owner's phone the Final Audit cards
+ * crammed the action buttons into a tight right column. Below
+ * 640px wide the card now stacks: info on top, paid-amount +
+ * Verified / Flag buttons below as a full-width row. Buttons
+ * grow to fill the row so they're proper thumb-friendly tap
+ * targets. Inline styles inside the component supply the
+ * desktop layout; these media-query rules override on small
+ * screens via !important. */
+@media (max-width: 640px) {
+  .final-audit-row { grid-template-columns: 1fr !important; }
+  .final-audit-row-actions { flex-direction: row !important; flex-wrap: wrap; min-width: 0 !important; }
+  .final-audit-row-actions-amount { text-align: left !important; flex: 1 1 100%; }
+  .final-audit-row-actions > button { flex: 1 1 140px; min-height: 44px; }
+}
 /* Daksh May 2026 — vendor cockpit hides the global sidebar
  * unconditionally because the role only has one workspace; the
  * sidebar would just be empty padding. Class is added/removed
