@@ -82,7 +82,7 @@ export default async function AccountsHomePage({
   let dueQuery = supabase
     .from("bills")
     .select(
-      "id, token, vendor_bill_no, bill_date, description, cost_head, amount_total, amount_gst, amount_tds, amount_tcs, amount_payable_to_vendor, amount_paid, amount_outstanding, status, approved_at, bill_vendor_id, bill_vendors(id, name, payment_terms_days, category)",
+      "id, token, vendor_bill_no, bill_date, description, cost_head, amount_total, amount_gst, amount_tds, amount_tcs, amount_payable_to_vendor, amount_paid, amount_outstanding, status, approved_at, bill_vendor_id, bill_vendors(id, name, nickname, payment_terms_days, category)",
     )
     .eq("status", "approved")
     .gt("amount_outstanding", 0)
@@ -158,8 +158,8 @@ export default async function AccountsHomePage({
     approved_at: string | null;
     bill_vendor_id: string;
     bill_vendors:
-      | { id: string; name: string; payment_terms_days: number | null; category: string | null }
-      | { id: string; name: string; payment_terms_days: number | null; category: string | null }[]
+      | { id: string; name: string; nickname: string | null; payment_terms_days: number | null; category: string | null }
+      | { id: string; name: string; nickname: string | null; payment_terms_days: number | null; category: string | null }[]
       | null;
   };
   const dueRows = ((dueRaw ?? []) as unknown) as DbRow[];
@@ -241,6 +241,7 @@ export default async function AccountsHomePage({
       token: r.token,
       vendorId: r.bill_vendor_id,
       vendorName: v?.name ?? "—",
+      vendorNickname: v?.nickname ?? null,
       vendorCategory: v?.category ?? null,
       vendorBillNo: r.vendor_bill_no,
       billDate: r.bill_date,

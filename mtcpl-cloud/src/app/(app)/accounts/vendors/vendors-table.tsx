@@ -23,6 +23,9 @@ import { getBillVendorCategory } from "@/lib/bill-vendor-categories";
 export type VendorRow = {
   id: string;
   name: string;
+  /** Mig 066 — owner-name / informal handle. Shown next to the
+   *  vendor name and included in the quick-search index. */
+  nickname: string | null;
   category: string | null;
   gstin: string | null;
   phone: string | null;
@@ -48,6 +51,9 @@ export function VendorsTable({
     if (!q) return vendors;
     return vendors.filter((v) => {
       if (v.name.toLowerCase().includes(q)) return true;
+      // Mig 066 — nickname / owner handle included in quick search
+      // so multi-firm vendors find each other on the same query.
+      if (v.nickname?.toLowerCase().includes(q)) return true;
       if (v.category?.toLowerCase().includes(q)) return true;
       // Mig 061 — also search against the resolved category LABEL
       // so "marble" finds "block_purchase_marble" vendors etc.
@@ -73,7 +79,7 @@ export function VendorsTable({
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="🔍 Search vendor by name, category, GSTIN, phone, or email…"
+          placeholder="🔍 Search vendor by name, nickname, category, GSTIN, phone, or email…"
           style={{ ...INPUT_STYLE, maxWidth: 480 }}
           aria-label="Search vendors"
         />
@@ -126,9 +132,13 @@ export function VendorsTable({
                       }}
                     >
                       <td style={TABLE_STYLES.td}>
+                        {/* Mig 066 — nickname (owner handle) takes
+                            the subLabel slot when set, fallback to
+                            email otherwise. Owner names matter more
+                            for vendor matching than the email. */}
                         <VendorIdentity
                           name={v.name}
-                          subLabel={v.email ?? undefined}
+                          subLabel={v.nickname ?? v.email ?? undefined}
                           size={36}
                           href={`/accounts/vendors/${v.id}`}
                         />

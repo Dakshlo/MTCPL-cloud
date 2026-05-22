@@ -21,12 +21,13 @@ export default async function BillVendorsPage() {
   const supabase = createAdminSupabaseClient();
   const { data: vendorsRaw } = await supabase
     .from("bill_vendors")
-    .select("id, name, category, gstin, phone, email, is_active, created_at")
+    .select("id, name, nickname, category, gstin, phone, email, is_active, created_at")
     .order("is_active", { ascending: false })
     .order("name");
   const vendors = (vendorsRaw ?? []) as Array<{
     id: string;
     name: string;
+    nickname: string | null;
     category: string | null;
     gstin: string | null;
     phone: string | null;
@@ -87,6 +88,7 @@ export default async function BillVendorsPage() {
             vendors.map<VendorRow>((v) => ({
               id: v.id,
               name: v.name,
+              nickname: v.nickname,
               category: v.category,
               gstin: v.gstin,
               phone: v.phone,

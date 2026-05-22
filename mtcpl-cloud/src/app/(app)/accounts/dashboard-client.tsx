@@ -28,6 +28,9 @@ export type DueBillRow = {
   token: string;
   vendorId: string;
   vendorName: string;
+  /** Mig 066 — vendor's owner-handle / nickname. Used by the quick
+   *  search so multi-firm vendors match on the owner's name. */
+  vendorNickname: string | null;
   /** Mig 061 — bill_vendors.category (canonical enum value). Drives
    *  the category filter dropdown above + the pill chip on each row. */
   vendorCategory: string | null;
@@ -120,6 +123,10 @@ export function DueBillsClient({
           (r) =>
             r.token.toLowerCase().includes(q) ||
             r.vendorName.toLowerCase().includes(q) ||
+            // Mig 066 — nickname (owner handle) included in the
+            // quick search so multi-firm vendors find each other on
+            // the same query (e.g. type owner's name → all his firms).
+            (r.vendorNickname?.toLowerCase().includes(q) ?? false) ||
             r.vendorBillNo.toLowerCase().includes(q),
         )
       : rows;
@@ -263,7 +270,7 @@ export function DueBillsClient({
           type="search"
           value={quickFilter}
           onChange={(e) => setQuickFilter(e.target.value)}
-          placeholder="🔍 Quick search — vendor, token, or bill no…"
+          placeholder="🔍 Quick search — vendor, nickname, token, or bill no…"
           aria-label="Quick search due bills"
           style={{
             flex: 1,
@@ -437,6 +444,22 @@ export function DueBillsClient({
                           size={32}
                         />
                       </Link>
+                      {/* Mig 066 — small "owner" line so multi-firm
+                          vendors are easy to spot at a glance. Only
+                          renders when the vendor row has a nickname. */}
+                      {r.vendorNickname && (
+                        <div
+                          style={{
+                            marginTop: 2,
+                            fontSize: 10,
+                            color: "var(--muted)",
+                            fontStyle: "italic",
+                          }}
+                          title="Vendor nickname / owner handle"
+                        >
+                          ✦ {r.vendorNickname}
+                        </div>
+                      )}
                       {/* Mig 061 — category pill below the vendor
                           identity. Uncategorised renders muted so
                           legacy vendors don't shout for attention. */}

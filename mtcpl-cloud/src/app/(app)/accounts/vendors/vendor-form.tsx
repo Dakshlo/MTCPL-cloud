@@ -31,6 +31,9 @@ export function VendorForm({
   mode: "create" | "edit";
   initialValues?: {
     name?: string;
+    /** Mig 066 — short human-friendly handle (usually the owner's
+     *  name) so multi-firm vendors are easy to match across rows. */
+    nickname?: string | null;
     category?: string | null;
     gstin?: string | null;
     pan?: string | null;
@@ -75,6 +78,7 @@ export function VendorForm({
 
   const initial = {
     name: initialValues?.name ?? "",
+    nickname: initialValues?.nickname ?? "",
     category: initialValues?.category ?? "",
     gstin: initialValues?.gstin ?? "",
     pan: initialValues?.pan ?? "",
@@ -186,6 +190,22 @@ export function VendorForm({
             Edit phone, GSTIN, bank, address, etc. freely below.
           </span>
         )}
+      </Field>
+      {/* Mig 066 — nickname / owner handle. Optional. Shown next to
+          the vendor name on lists and bill rows so multi-firm
+          vendors are easy to identify. Searchable in Due Bills. */}
+      <Field label="Nickname / owner">
+        <input
+          value={form.nickname}
+          onChange={(e) => setForm({ ...form, nickname: e.target.value.slice(0, 100) })}
+          placeholder="e.g. owner name, common handle"
+          maxLength={100}
+          style={INPUT_STYLE}
+        />
+        <span style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+          Useful when the same owner runs multiple firms — write the
+          owner&apos;s name here and the bill team can match across them.
+        </span>
       </Field>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         <Field label="Category">

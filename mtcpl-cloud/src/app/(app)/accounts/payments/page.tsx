@@ -215,6 +215,78 @@ export default async function PaymentsHistoryPage({
         )}
       </form>
 
+      {/* Mig 066 follow-on (Daksh) — quick-range presets for Payment
+          History. Today / Yesterday come up most often when the
+          accountant wants to verify what was paid in the last 24h.
+          Each pill is a one-tap Link that swaps from/to + preserves
+          the vendor + method filters. */}
+      {(() => {
+        const istNow = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+        const istToday = istNow.toISOString().slice(0, 10);
+        const istYest = new Date(istNow.getTime() - 86_400_000).toISOString().slice(0, 10);
+        const istLast7 = new Date(istNow.getTime() - 6 * 86_400_000).toISOString().slice(0, 10);
+        const istLast30 = new Date(istNow.getTime() - 29 * 86_400_000).toISOString().slice(0, 10);
+        function hrefFor(from: string, to: string) {
+          const p = new URLSearchParams();
+          p.set("from", from);
+          p.set("to", to);
+          if (vendorFilter) p.set("vendor", vendorFilter);
+          if (methodFilter) p.set("method", methodFilter);
+          return `/accounts/payments?${p.toString()}`;
+        }
+        const presets: Array<{ label: string; from: string; to: string }> = [
+          { label: "Today", from: istToday, to: istToday },
+          { label: "Yesterday", from: istYest, to: istYest },
+          { label: "Last 7 days", from: istLast7, to: istToday },
+          { label: "Last 30 days", from: istLast30, to: istToday },
+        ];
+        return (
+          <div
+            style={{
+              display: "flex",
+              gap: 6,
+              flexWrap: "wrap",
+              alignItems: "center",
+              marginBottom: 16,
+              marginTop: -8,
+            }}
+          >
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: "var(--muted)",
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+              }}
+            >
+              Quick:
+            </span>
+            {presets.map((p) => {
+              const isActive = fromFilter === p.from && toFilter === p.to;
+              return (
+                <Link
+                  key={p.label}
+                  href={hrefFor(p.from, p.to)}
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 700,
+                    padding: "5px 12px",
+                    borderRadius: 999,
+                    textDecoration: "none",
+                    background: isActive ? ACCOUNTS_TOKENS.accent : "var(--surface)",
+                    color: isActive ? "#fff" : "var(--text)",
+                    border: `1px solid ${isActive ? ACCOUNTS_TOKENS.accent : ACCOUNTS_TOKENS.border}`,
+                  }}
+                >
+                  {p.label}
+                </Link>
+              );
+            })}
+          </div>
+        );
+      })()}
+
       {/* Method breakdown */}
       {byMethod.size > 0 && (
         <div

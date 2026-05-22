@@ -36,6 +36,8 @@ export function AddVendorButton({
   const [mounted, setMounted] = useState(false);
 
   const [name, setName] = useState("");
+  // Mig 066 — nickname / owner handle for multi-firm vendors.
+  const [nickname, setNickname] = useState("");
   const [category, setCategory] = useState("");
   const [gstin, setGstin] = useState("");
   const [phone, setPhone] = useState("");
@@ -90,6 +92,7 @@ export function AddVendorButton({
 
   function reset() {
     setName("");
+    setNickname("");
     setCategory("");
     setGstin("");
     setPhone("");
@@ -123,6 +126,7 @@ export function AddVendorButton({
     if (!trimmed) return setError("Vendor name is required.");
     const fd = new FormData();
     fd.set("name", trimmed);
+    fd.set("nickname", nickname.trim().slice(0, 100));
     fd.set("category", category.trim());
     fd.set("gstin", gstin.trim());
     fd.set("phone", phone.trim());
@@ -226,6 +230,20 @@ export function AddVendorButton({
               required
               autoFocus
             />
+          </Field>
+          {/* Mig 066 — nickname / owner handle. Optional. */}
+          <Field label="Nickname / owner">
+            <input
+              value={nickname}
+              onChange={(e) => setNickname(e.target.value.slice(0, 100))}
+              placeholder="e.g. owner name, common handle"
+              maxLength={100}
+              style={INPUT_STYLE}
+            />
+            <span style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.4 }}>
+              Owner name or informal handle — useful when the same person
+              runs multiple firms. Searchable on Due Bills.
+            </span>
           </Field>
           <Field label="Category">
             {/* Mig 061 follow-on (Daksh, 2nd pass): custom CategoryPicker

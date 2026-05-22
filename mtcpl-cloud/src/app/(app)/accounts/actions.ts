@@ -1916,6 +1916,11 @@ export async function upsertBillVendorAction(formData: FormData): Promise<
 
   const payload: Record<string, unknown> = {
     name,
+    // Mig 066 — optional nickname (owner name / informal handle) so
+    // multi-firm vendors are easy to identify. Capped at 100 chars
+    // server-side as a belt-and-braces; the form caps at 100 too.
+    nickname:
+      String(formData.get("nickname") || "").trim().slice(0, 100) || null,
     category: String(formData.get("category") || "").trim() || null,
     gstin: String(formData.get("gstin") || "").trim() || null,
     pan: String(formData.get("pan") || "").trim() || null,

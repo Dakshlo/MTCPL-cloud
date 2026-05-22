@@ -337,6 +337,7 @@ export default async function BillVendorDetailPage({
             nameLocked={!canRenameBillVendor(profile)}
             initialValues={{
               name: vendor.name,
+              nickname: vendor.nickname,
               category: vendor.category,
               gstin: vendor.gstin,
               pan: vendor.pan,
