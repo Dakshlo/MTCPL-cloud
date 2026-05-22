@@ -483,6 +483,30 @@ export function Sidebar({
   const [switchingTo, setSwitchingTo] = useState<Department | null>(null);
   const prevActiveDeptRef = useRef<Department | null>(activeDepartment ?? null);
 
+  // Daksh May 2026 — hamburger / slide-in mobile sidebar. The mobile
+  // viewport hides the static sidebar (`transform: translateX(-100%)`
+  // in globals.css ≤900px) and renders a fixed hamburger button that
+  // toggles `.sidebar-mobile-open` on the aside. A backdrop covers
+  // the rest of the screen so tapping outside the panel closes it.
+  // Auto-closes when the route changes (user navigated → panel
+  // should go away on its own). Bottom-tab MobileNav is now removed
+  // from layout.tsx — hamburger is the only mobile nav surface.
+  const [mobileOpen, setMobileOpen] = useState(false);
+  useEffect(() => {
+    // Close on every route change so a tap-link inside the sidebar
+    // also dismisses the drawer.
+    setMobileOpen(false);
+  }, [pathname]);
+  useEffect(() => {
+    // Esc closes too.
+    if (!mobileOpen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setMobileOpen(false);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mobileOpen]);
+
   // Detect activeDepartment prop change — fires once the new
   // sidebar HTML lands. Drop the overlay + bar at that moment.
   useEffect(() => {
@@ -613,7 +637,30 @@ export function Sidebar({
   }
 
   return (
-    <aside className="sidebar">
+    <>
+      {/* Hamburger trigger — visible only on mobile via the
+          .hamburger-btn @media block in globals.css. Sits fixed
+          top-left over the page content. */}
+      <button
+        type="button"
+        className="hamburger-btn"
+        onClick={() => setMobileOpen((v) => !v)}
+        aria-label="Open menu"
+        aria-expanded={mobileOpen}
+      >
+        {mobileOpen ? "✕" : "☰"}
+      </button>
+      {/* Backdrop — only rendered when the drawer is open. Tap it to
+          close. The .sidebar-backdrop @media block already styles
+          it as a fullscreen dim overlay. */}
+      {mobileOpen && (
+        <div
+          className="sidebar-backdrop"
+          onClick={() => setMobileOpen(false)}
+          aria-hidden
+        />
+      )}
+    <aside className={`sidebar${mobileOpen ? " sidebar-mobile-open" : ""}`}>
       {/* Brand */}
       <div className="sidebar-brand">
         <img
@@ -889,6 +936,7 @@ export function Sidebar({
         </form>
       </div>
     </aside>
+    </>
   );
 }
 

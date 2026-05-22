@@ -4,7 +4,6 @@ import Link from "next/link";
 import { headers, cookies } from "next/headers";
 
 import { LogoutButton } from "@/components/logout-button";
-import { MobileNav } from "@/components/mobile-nav";
 import { NotificationBell } from "@/components/notification-bell";
 import { NavigationProgress } from "@/components/navigation-progress";
 import { RealtimeRefresh } from "@/components/realtime-refresh";
@@ -281,6 +280,23 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="app-shell">
+      {/* Daksh May 2026 — rotate-to-landscape prompt. CSS-only;
+          renders nothing on desktop or in landscape orientation.
+          On a phone in portrait, the .rotate-prompt CSS media
+          query in globals.css turns this into a fullscreen overlay
+          asking the user to rotate. The overlay disappears
+          automatically when the orientation flips to landscape
+          (the @media query stops matching). True orientation lock
+          isn't possible from a regular browser tab — best we can
+          do is firmly suggest it. */}
+      <div className="rotate-prompt" aria-hidden>
+        <div className="rotate-prompt-icon" aria-hidden>📱↻</div>
+        <div className="rotate-prompt-title">Please rotate your phone</div>
+        <div className="rotate-prompt-body">
+          MTCPL works best in landscape on a phone. Turn your device
+          sideways to continue.
+        </div>
+      </div>
       <NavigationProgress />
       <RealtimeRefresh />
       {/* Mig 053 follow-on — SPA route tracker. Captures every Next
@@ -473,7 +489,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           {children}
         </div>
       </main>
-      <MobileNav role={profile.role} displayName={displayName} />
+      {/* Daksh May 2026 — bottom MobileNav removed. The sidebar now
+          renders a hamburger trigger on mobile (sidebar.tsx) so all
+          navigation lives in the slide-in drawer. */}
       <Toast />
     </div>
   );

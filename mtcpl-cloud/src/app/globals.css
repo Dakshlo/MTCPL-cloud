@@ -1557,7 +1557,12 @@ details.block-card[open] {
     grid-template-columns: 1fr;
   }
   .page-content {
-    padding: 16px 16px 90px; /* 90px bottom clears the fixed mobile bottom nav */
+    /* Daksh May 2026 — was 16px 16px 90px (90px-bottom cleared the
+     * old MobileNav). Bottom tab is gone (hamburger drawer
+     * replaces it), so 24px bottom is fine. Top bumped to 56px so
+     * the fixed hamburger button (12px from top, 40px tall) doesn't
+     * sit on top of page headers. */
+    padding: 56px 16px 24px;
   }
   .planning-two-col {
     grid-template-columns: 1fr;
@@ -2141,6 +2146,56 @@ body.inv-hide-sidebar .sidebar,
 body.inv-hide-sidebar .sidebar-backdrop,
 body.vendor-cockpit-fullscreen .sidebar,
 body.vendor-cockpit-fullscreen .sidebar-backdrop { display: none !important; }
+
+/* ── Rotate-to-landscape prompt (phone, portrait) ─────────────
+ * Daksh May 2026 — dad uses MTCPL from his phone when traveling.
+ * Many pages were laid out for landscape; in portrait they wrap
+ * awkwardly. True orientation lock isn't possible from a regular
+ * browser tab (only Fullscreen API / PWA installed apps can call
+ * screen.orientation.lock). Best alternative: a fullscreen overlay
+ * that asks the user to rotate. The @media query auto-dismisses
+ * the overlay the moment they rotate — no JS needed. */
+.rotate-prompt { display: none; }
+@media (orientation: portrait) and (max-width: 900px) {
+  .rotate-prompt {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    position: fixed;
+    inset: 0;
+    z-index: 9000;
+    background: linear-gradient(135deg, #1a1a1a 0%, #2D2410 60%, #6b4f18 100%);
+    color: #fff;
+    padding: 32px 24px;
+    text-align: center;
+  }
+  .rotate-prompt-icon {
+    font-size: 56px;
+    line-height: 1;
+    animation: rotate-prompt-shake 1.6s ease-in-out infinite;
+  }
+  .rotate-prompt-title {
+    font-size: 20px;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+  }
+  .rotate-prompt-body {
+    font-size: 13px;
+    color: rgba(255,255,255,0.7);
+    max-width: 280px;
+    line-height: 1.5;
+  }
+  /* Lock body scroll under the overlay so background content
+   * doesn't peek through if the overlay is briefly translucent. */
+  body { overflow: hidden; }
+}
+@keyframes rotate-prompt-shake {
+  0%, 100% { transform: rotate(0deg); }
+  25%      { transform: rotate(-15deg); }
+  75%      { transform: rotate(15deg); }
+}
 
 /* ── Final Audit row: mobile stack ───────────────────────────
  * Daksh May 2026 — on the owner's phone the Final Audit cards
