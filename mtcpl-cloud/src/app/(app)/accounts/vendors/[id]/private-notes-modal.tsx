@@ -53,6 +53,11 @@ type RoyaltyEntry = {
   amount: number;
   entryType: "received" | "given";
   description: string | null;
+  // Mig 068 — explicit business date the entry represents (when
+  // the money / points actually changed hands). NULL on legacy
+  // rows added before mig 068; the UI falls back to createdAt for
+  // those so the per-vendor history stays readable.
+  entryDate: string | null;
   createdAt: string;
   createdByName: string | null;
   cancelledAt: string | null;
@@ -62,6 +67,38 @@ type RoyaltyEntry = {
   // owner approves from the Royalty Approval queue.
   status: "pending_approval" | "approved" | "rejected";
 };
+
+/** Format an entry's date for display on the per-vendor list.
+ *  Prefers entry_date (mig 068 — the business date) and falls back
+ *  to created_at::date for legacy rows added before the column
+ *  existed. Format is "21 May 2026" — short, locale-clear. */
+function formatEntryDate(entryDate: string | null, createdAt: string): string {
+  const iso = entryDate ?? createdAt.slice(0, 10);
+  // Parse as IST midnight so the day never drifts because of UTC.
+  const d = new Date(`${iso}T00:00:00+05:30`);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+/** Today in IST, YYYY-MM-DD. Default for the new-entry date picker
+ *  so adding an entry "right now" works without manual date input. */
+function todayIstYmd(): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const y = parts.find((p) => p.type === "year")?.value ?? "0000";
+  const m = parts.find((p) => p.type === "month")?.value ?? "01";
+  const d = parts.find((p) => p.type === "day")?.value ?? "01";
+  return `${y}-${m}-${d}`;
+}
 
 export function PrivateNotesModal({
   vendorId,
@@ -96,6 +133,10 @@ export function PrivateNotesModal({
   const [newEntryType, setNewEntryType] = useState<"received" | "given">("received");
   const [newEntryAmount, setNewEntryAmount] = useState<string>("");
   const [newEntryDescription, setNewEntryDescription] = useState<string>("");
+  // Mig 068 — date the entry represents. Pre-filled to today (IST)
+  // so adding "right now" is one less click; the user can adjust if
+  // they're back-filling a past day.
+  const [newEntryDate, setNewEntryDate] = useState<string>(todayIstYmd);
 
   if (!canShow) return null;
 
@@ -162,11 +203,28 @@ export function PrivateNotesModal({
       setError("Amount must be a positive number.");
       return;
     }
+    // Mig 068 — validate the date client-side too. Same shape +
+    // year-range guard as the bill-date validator (validateBillDate
+    // on the server is the authoritative check; this catches typos
+    // before the round-trip).
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(newEntryDate)) {
+      setError("Entry date must use a 4-digit year (YYYY-MM-DD).");
+      return;
+    }
+    {
+      const y = parseInt(newEntryDate.slice(0, 4), 10);
+      const maxY = new Date().getFullYear() + 1;
+      if (y < 2015 || y > maxY) {
+        setError(`Entry date year ${y} looks wrong — use a year between 2015 and ${maxY}.`);
+        return;
+      }
+    }
     startTransition(async () => {
       const fd = new FormData();
       fd.set("vendor_id", vendorId);
       fd.set("entry_type", newEntryType);
       fd.set("amount", String(amount));
+      fd.set("entry_date", newEntryDate);
       if (newEntryDescription.trim()) fd.set("description", newEntryDescription.trim());
       fd.set("passphrase", passphrase);
       const r = await addVendorRoyaltyEntryAction(fd);
@@ -176,6 +234,10 @@ export function PrivateNotesModal({
       }
       setNewEntryAmount("");
       setNewEntryDescription("");
+      // Reset the date back to today so the next entry starts fresh.
+      // (User who's back-filling many old entries can just adjust
+      // the date again per row — most adds are for "today".)
+      setNewEntryDate(todayIstYmd());
       await loadRoyalty(passphrase);
     });
   }
@@ -215,6 +277,7 @@ export function PrivateNotesModal({
     setNewEntryType("received");
     setNewEntryAmount("");
     setNewEntryDescription("");
+    setNewEntryDate(todayIstYmd());
   }
 
   function handleSetSubmit(e: React.FormEvent) {
@@ -628,11 +691,18 @@ export function PrivateNotesModal({
                     />
                   </div>
 
-                  {/* Add-entry row */}
+                  {/* Add-entry row.
+                      Mig 068 — added a date picker so accountants
+                      stop encoding the date inside the description
+                      ("22/05/2026 PAID TO PINTU BHAI", "21/05/2026").
+                      Defaults to today (IST); user can adjust when
+                      back-filling. Sits between Amount and
+                      Description so the natural left→right flow is
+                      Type → Amount → Date → Description → Add. */}
                   <div
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "auto 130px 1fr auto",
+                      gridTemplateColumns: "auto 120px 140px 1fr auto",
                       gap: 8,
                       padding: 10,
                       background: "#fff",
@@ -657,6 +727,22 @@ export function PrivateNotesModal({
                       onChange={(e) => setNewEntryAmount(e.target.value)}
                       placeholder="Amount"
                       style={{ ...INPUT_STYLE, fontFamily: "ui-monospace, monospace", padding: "7px 10px" }}
+                    />
+                    <input
+                      type="date"
+                      value={newEntryDate}
+                      onChange={(e) => setNewEntryDate(e.target.value)}
+                      /* Same min/max guards as bill_date — stops
+                         the 6-digit-year typo class at the picker
+                         level. */
+                      min="2015-01-01"
+                      max={`${new Date().getFullYear() + 1}-12-31`}
+                      title="Date this entry happened (defaults to today)"
+                      style={{
+                        ...INPUT_STYLE,
+                        fontFamily: "ui-monospace, monospace",
+                        padding: "7px 10px",
+                      }}
                     />
                     <input
                       type="text"
@@ -1044,6 +1130,26 @@ function RoyaltyColumn({
                   {e.description}
                 </span>
               )}
+              {/* Mig 068 — show the business date for the entry.
+                  Legacy rows (entryDate NULL) fall back to the row's
+                  createdAt date so they keep reading sensibly without
+                  any backfill. Format is "21 May 2026" — short,
+                  unambiguous. */}
+              <span
+                style={{
+                  fontSize: 10,
+                  color: "var(--muted)",
+                  fontFamily: "ui-monospace, monospace",
+                  fontWeight: 600,
+                }}
+                title={
+                  e.entryDate
+                    ? "Date this entry happened"
+                    : "Date entry was added (legacy — no explicit business date stored)"
+                }
+              >
+                {formatEntryDate(e.entryDate, e.createdAt)}
+              </span>
               {/* Mig 064 — every row labels who added it. Helps the
                   owner approve faster ("oh, this is Govind's entry"). */}
               {e.createdByName && (

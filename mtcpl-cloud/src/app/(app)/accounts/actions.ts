@@ -2465,6 +2465,9 @@ type RoyaltyEntryRow = {
   amount: number;
   entry_type: "received" | "given";
   description: string | null;
+  // Mig 068 — explicit business date. NULL on legacy rows (the UI
+  // falls back to created_at::date for display).
+  entry_date: string | null;
   created_at: string;
   created_by: string | null;
   cancelled_at: string | null;
@@ -2497,6 +2500,9 @@ export async function getVendorRoyaltyEntriesAction(
         amount: number;
         entryType: "received" | "given";
         description: string | null;
+        // Mig 068 — business date. NULL on legacy rows; client uses
+        // createdAt::date as the display fallback.
+        entryDate: string | null;
         createdAt: string;
         createdByName: string | null;
         cancelledAt: string | null;
@@ -2591,6 +2597,7 @@ export async function getVendorRoyaltyEntriesAction(
       amount: Number(r.amount),
       entryType: r.entry_type,
       description: r.description,
+      entryDate: r.entry_date,
       createdAt: r.created_at,
       createdByName: r.created_by ? profilesMap.get(r.created_by) ?? null : null,
       cancelledAt: r.cancelled_at,
@@ -2615,6 +2622,11 @@ export async function addVendorRoyaltyEntryAction(
   const amountRaw = String(formData.get("amount") || "").trim();
   const description = String(formData.get("description") || "").trim() || null;
   const plain = String(formData.get("passphrase") || "");
+  // Daksh May 2026 — mig 068. New first-class entry_date so people
+  // stop encoding the date inside the description string. Empty
+  // string from the form means "use today" (the modal usually
+  // pre-fills today, so this branch mostly catches an explicit clear).
+  const entryDateRaw = String(formData.get("entry_date") || "").trim();
 
   if (!vendorId) return { ok: false, error: "Missing vendor_id." };
   if (entryType !== "received" && entryType !== "given") {
@@ -2629,6 +2641,30 @@ export async function addVendorRoyaltyEntryAction(
   }
   if (description && description.length > 500) {
     return { ok: false, error: "Description too long (max 500 chars)." };
+  }
+  // Validate entry_date when supplied. Reuses the same sanity rules
+  // as bill_date: strict YYYY-MM-DD, 4-digit year, range 2015..now+1,
+  // round-trips through Date so 2026-02-30 doesn't slip through.
+  // Empty string is fine — we fall back to today.
+  let entryDate: string | null = null;
+  if (entryDateRaw) {
+    const dateErr = validateBillDate(entryDateRaw);
+    if (dateErr) return { ok: false, error: dateErr };
+    entryDate = entryDateRaw;
+  } else {
+    // Default to today (IST) in YYYY-MM-DD. Keeps existing form
+    // submissions that don't yet send entry_date working with no
+    // behaviour change.
+    const istParts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date());
+    const y = istParts.find((p) => p.type === "year")?.value ?? "0000";
+    const m = istParts.find((p) => p.type === "month")?.value ?? "01";
+    const d = istParts.find((p) => p.type === "day")?.value ?? "01";
+    entryDate = `${y}-${m}-${d}`;
   }
 
   const row = await readPassphraseRow();
@@ -2656,6 +2692,7 @@ export async function addVendorRoyaltyEntryAction(
       amount,
       entry_type: entryType,
       description,
+      entry_date: entryDate,
       created_by: profile.id,
       status: isAutoApprove ? "approved" : "pending_approval",
       approved_at: isAutoApprove ? nowIso : null,
@@ -2675,6 +2712,7 @@ export async function addVendorRoyaltyEntryAction(
       amount,
       entry_type: entryType,
       description,
+      entry_date: entryDate,
       status: isAutoApprove ? "approved" : "pending_approval",
     },
   );
@@ -2775,6 +2813,9 @@ export async function listPendingRoyaltyEntriesAction(
         amount: number;
         entryType: "received" | "given";
         description: string | null;
+        // Mig 068 — business date the entry represents. NULL on
+        // legacy rows; the queue UI falls back to createdAt for those.
+        entryDate: string | null;
         createdAt: string;
         createdByName: string | null;
       }>;
@@ -2794,7 +2835,7 @@ export async function listPendingRoyaltyEntriesAction(
   const { data, error } = await admin
     .from("vendor_royalty_entries")
     .select(
-      "id, bill_vendor_id, amount, entry_type, description, created_at, created_by, bill_vendors!inner(name)",
+      "id, bill_vendor_id, amount, entry_type, description, entry_date, created_at, created_by, bill_vendors!inner(name)",
     )
     .eq("status", "pending_approval")
     .is("cancelled_at", null)
@@ -2808,6 +2849,9 @@ export async function listPendingRoyaltyEntriesAction(
     amount: number;
     entry_type: "received" | "given";
     description: string | null;
+    // Mig 068 — business date the entry represents. NULL on legacy
+    // rows; the approval-queue UI falls back to created_at for display.
+    entry_date: string | null;
     created_at: string;
     created_by: string | null;
     bill_vendors: { name: string } | { name: string }[] | null;
@@ -2851,6 +2895,7 @@ export async function listPendingRoyaltyEntriesAction(
         amount: Number(r.amount),
         entryType: r.entry_type,
         description: r.description,
+        entryDate: r.entry_date,
         createdAt: r.created_at,
         createdByName: r.created_by ? profilesMap.get(r.created_by) ?? null : null,
       };

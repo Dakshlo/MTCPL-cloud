@@ -34,6 +34,9 @@ type ListResult =
         amount: number;
         entryType: "received" | "given";
         description: string | null;
+        // Mig 068 — business date for the entry. NULL on legacy rows
+        // (the queue UI falls back to createdAt::date for those).
+        entryDate: string | null;
         createdAt: string;
         createdByName: string | null;
       }>;
@@ -56,6 +59,22 @@ function fmtWhen(iso: string): string {
     month: "short",
     hour: "2-digit",
     minute: "2-digit",
+  });
+}
+
+/** Mig 068 — render the business date for an entry. Prefers
+ *  `entryDate` (an ISO YYYY-MM-DD string from the DB DATE column);
+ *  falls back to `createdAt::date` for legacy rows that pre-date the
+ *  column. Format: "21 May 2026" — short and unambiguous. */
+function fmtEntryDate(entryDate: string | null, createdAt: string): string {
+  const iso = entryDate ?? createdAt.slice(0, 10);
+  const d = new Date(`${iso}T00:00:00+05:30`);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
   });
 }
 
@@ -341,6 +360,24 @@ export function RoyaltyApprovalsClient({
                           {e.description}
                         </div>
                       )}
+                      {/* Mig 068 — show the business date prominently
+                          so the owner can see WHEN this entry
+                          actually happened (vs. when it was logged
+                          into the system). For legacy entries the
+                          helper falls back to createdAt::date so the
+                          line still reads sensibly. */}
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: "var(--text)",
+                          fontWeight: 600,
+                          fontFamily: "ui-monospace, monospace",
+                          marginBottom: 4,
+                        }}
+                        title={e.entryDate ? "Date this entry happened" : "Legacy entry — date is when it was added"}
+                      >
+                        📅 {fmtEntryDate(e.entryDate, e.createdAt)}
+                      </div>
                       <div style={{ fontSize: 11, color: "var(--muted)" }}>
                         Added by <strong>{e.createdByName ?? "Unknown"}</strong>
                         {" · "}
