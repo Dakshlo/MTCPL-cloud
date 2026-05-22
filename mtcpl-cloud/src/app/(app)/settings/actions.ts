@@ -212,6 +212,13 @@ export async function updateUserAction(formData: FormData) {
   const requestedRole = text(formData, "role") || "block_slab_entry";
   const full_name = text(formData, "full_name") || null;
   const is_active = formData.get("is_active") === "true";
+  // Daksh May 2026 — carving vendor binding. Form sends an empty
+  // string when the picker is "— none —", which we coerce to NULL.
+  // Only honored when the requested role is "vendor"; otherwise we
+  // force NULL so a role change away from vendor doesn't leave a
+  // stale binding behind.
+  const requestedVendorIdRaw = text(formData, "vendor_id");
+  const requestedVendorId = requestedVendorIdRaw ? requestedVendorIdRaw : null;
 
   if (!id) redirect("/settings?toast=Missing+fields");
   if (id === currentUser.id) redirect("/settings?toast=Cannot+edit+your+own+account");
@@ -224,7 +231,7 @@ export async function updateUserAction(formData: FormData) {
   // - Developer: can assign any role including owner/developer
   // - Owner + Planner: can assign any role EXCEPT owner and developer
   const RESTRICTED_ASSIGNABLE = ["team_head", "block_slab_entry", "slab_entry", "block_entry", "cutting_operator"];
-  let role = requestedRole;
+  const role = requestedRole;
   if (currentUser.role === "owner" || currentUser.role === "team_head") {
     if (!RESTRICTED_ASSIGNABLE.includes(requestedRole)) {
       redirect("/settings?toast=Cannot+assign+that+role");
@@ -232,9 +239,44 @@ export async function updateUserAction(formData: FormData) {
   }
   // developer: no restriction
 
+  // If transitioning to "vendor", require a vendor pick (otherwise the
+  // role is meaningless — the vendor cockpit needs a vendor_id to
+  // scope to). Validate that the picked vendor exists + is a carving
+  // vendor (CNC or Manual) so a typo doesn't bind the user to a
+  // random row.
+  let vendorIdToSave: string | null = null;
+  if (role === "vendor") {
+    if (!requestedVendorId) {
+      redirect("/settings?toast=Pick+a+carving+vendor+for+this+user");
+    }
+    const { data: vendorRow } = await admin
+      .from("vendors")
+      .select("id, vendor_type, is_active")
+      .eq("id", requestedVendorId)
+      .maybeSingle();
+    if (!vendorRow) {
+      redirect("/settings?toast=Vendor+not+found");
+    }
+    if (!vendorRow.is_active) {
+      redirect("/settings?toast=Pick+an+active+vendor");
+    }
+    if (vendorRow.vendor_type !== "CNC" && vendorRow.vendor_type !== "Manual") {
+      redirect("/settings?toast=Not+a+carving+vendor");
+    }
+    vendorIdToSave = vendorRow.id;
+  }
+  // Roles other than "vendor" never carry a vendor_id; null any
+  // stale binding so the JOIN in getAuthContext doesn't pick up
+  // garbage if someone flips vendor → accountant.
+
   const { error } = await admin
     .from("profiles")
-    .update({ role, is_active, ...(full_name !== null ? { full_name } : {}) })
+    .update({
+      role,
+      is_active,
+      vendor_id: vendorIdToSave,
+      ...(full_name !== null ? { full_name } : {}),
+    })
     .eq("id", id);
   if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
 

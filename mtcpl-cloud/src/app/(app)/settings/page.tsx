@@ -13,6 +13,7 @@ import { getSystemStatus, getDepartmentStatus } from "@/lib/system-status";
 import { getProfilesMap } from "@/lib/profiles";
 import { SystemStatusSection } from "./system-status-section";
 import { MaintenanceCollapsible } from "./maintenance-collapsible";
+import { UserRoleVendorPicker } from "./user-role-vendor-picker";
 
 // All assignable roles — only shown to developer.
 //
@@ -162,16 +163,33 @@ export default async function SettingsPage() {
   const todayStart = new Date(`${todayIST}T00:00:00+05:30`).toISOString();
   const todayEnd = new Date(`${todayIST}T23:59:59.999+05:30`).toISOString();
 
-  const [{ data: temples }, { data: users }, { data: stoneTypes }, { data: blockStones }, { data: slabStones }, { data: templeSlabCounts }] = await Promise.all([
+  const [{ data: temples }, { data: users }, { data: stoneTypes }, { data: blockStones }, { data: slabStones }, { data: templeSlabCounts }, { data: vendorRows }] = await Promise.all([
     admin.from("temples").select("*").order("name"),
-    // Admin client needed — RLS on profiles only returns the current user's own row
-    admin.from("profiles").select("id, full_name, phone, role, is_active, created_at").order("full_name"),
+    // Admin client needed — RLS on profiles only returns the current user's own row.
+    // vendor_id pulled so the row's vendor-picker can show the current binding.
+    admin.from("profiles").select("id, full_name, phone, role, is_active, created_at, vendor_id").order("full_name"),
     admin.from("stone_types").select("id, name, color_top, color_front, color_side, is_active, sort_order, stone_category").order("sort_order").order("name"),
     // Usage counts for stone types
     admin.from("blocks").select("stone"),
     admin.from("slab_requirements").select("stone, temple"),
     admin.from("slab_requirements").select("temple"),
+    // Daksh May 2026 — carving vendors for the per-user vendor
+    // picker. Both CNC and Manual qualify (Mohit is CNC; lathe-only
+    // vendors fall under Manual). is_active=true so the dropdown
+    // doesn't list archived rows.
+    admin
+      .from("vendors")
+      .select("id, name, vendor_type, is_active")
+      .eq("is_active", true)
+      .in("vendor_type", ["CNC", "Manual"])
+      .order("name"),
   ]);
+  const vendorList = (vendorRows ?? []) as Array<{
+    id: string;
+    name: string;
+    vendor_type: "CNC" | "Manual";
+    is_active: boolean;
+  }>;
   const stoneList = stoneTypes ?? [];
   const userList = users ?? [];
 
@@ -456,22 +474,35 @@ export default async function SettingsPage() {
                               />
                             </label>
 
-                            <label className="stack" style={{ flex: "1 1 120px" }}>
-                              <span>Role</span>
-                              {currentUser.role === "developer" ? (
-                                <select name="role" defaultValue={role}>
-                                  {UI_ROLES_ALL.map((r) => (
-                                    <option key={r.value} value={r.value}>{r.label}</option>
-                                  ))}
-                                </select>
-                              ) : (
-                                <select name="role" defaultValue={UI_ROLES_PLANNER.some(r => r.value === role) ? role : "block_slab_entry"}>
-                                  {UI_ROLES_PLANNER.map((r) => (
-                                    <option key={r.value} value={r.value}>{r.label}</option>
-                                  ))}
-                                </select>
-                              )}
-                            </label>
+                            {/* Role + carving-vendor picker (Daksh May
+                                2026). When the admin picks role
+                                "vendor" the vendor dropdown appears
+                                inline so they can immediately bind
+                                this profile to Mohit / Vivek / etc.
+                                For owner/team_head the role list is
+                                trimmed so they can still hand out a
+                                vendor role without elevating to
+                                owner/dev. */}
+                            <UserRoleVendorPicker
+                              roleOptions={
+                                currentUser.role === "developer"
+                                  ? UI_ROLES_ALL
+                                  : UI_ROLES_PLANNER
+                              }
+                              vendorOptions={vendorList.map((v) => ({
+                                id: v.id,
+                                name: v.name,
+                                vendor_type: v.vendor_type,
+                              }))}
+                              defaultRole={
+                                currentUser.role === "developer"
+                                  ? role
+                                  : UI_ROLES_PLANNER.some((r) => r.value === role)
+                                    ? role
+                                    : "block_slab_entry"
+                              }
+                              defaultVendorId={user.vendor_id ?? null}
+                            />
 
                             <label className="stack" style={{ flex: "0 0 auto" }}>
                               <span>Status</span>
