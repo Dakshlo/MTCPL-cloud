@@ -13,8 +13,17 @@
 -- the held_from_machine by default, with a picker for any compatible
 -- alternative CNC.
 --
--- carving_items.status is a TEXT column (no CHECK constraint), so
--- we don't need an ALTER TYPE — just start writing the new value.
+-- carving_items.status is actually the `slab_status` enum (not a
+-- plain TEXT column — confirmed by Postgres rejecting 'carving_on_hold'
+-- with 22P02 "invalid input value for enum slab_status" when the
+-- value wasn't pre-registered). So we have to ADD VALUE first.
+--
+-- Postgres rule: ALTER TYPE ADD VALUE must run OUTSIDE a transaction
+-- block — that's why this ALTER lives bare at the top, and the
+-- index that references the new enum value lives inside the BEGIN.
+-- Same shape as migs 025 / 037 / 067.
+
+ALTER TYPE public.slab_status ADD VALUE IF NOT EXISTS 'carving_on_hold';
 
 BEGIN;
 
@@ -40,7 +49,8 @@ COMMENT ON COLUMN public.carving_items.held_from_machine_id IS
 
 -- Partial index: held slabs per vendor. Used by the "On Hold"
 -- launcher count in the cockpit header. Tiny — usually <10 rows
--- per vendor.
+-- per vendor. References the new enum value, which is why the
+-- ALTER TYPE above had to land first.
 CREATE INDEX IF NOT EXISTS carving_items_on_hold_idx
   ON public.carving_items (vendor_id, held_at DESC)
   WHERE status = 'carving_on_hold';
