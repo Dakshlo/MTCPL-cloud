@@ -664,15 +664,35 @@ export async function cancelBillAction(formData: FormData): Promise<ActionResult
     .eq("id", billId)
     .maybeSingle();
   if (!bill) return { ok: false, error: "Bill not found." };
-  if (bill.status === "fully_paid" || bill.status === "approved") {
+  // Paid bills are always off-limits — money moved, cancel is a
+  // book-keeping problem that needs a real correction, not a status
+  // flip. Owner / dev should reverse the payment first.
+  if (bill.status === "fully_paid") {
     return {
       ok: false,
-      error: "Cannot cancel an approved or paid bill. Contact a developer.",
+      error:
+        "This bill is fully paid — cancel is blocked. " +
+        "If the payment was wrong, reverse it from Payment History first, " +
+        "then the bill can be cancelled.",
+    };
+  }
+  // Daksh May 2026 — owner / developer can now cancel APPROVED bills
+  // (the due-bills queue). Use case: a wrong bill landed in the queue
+  // — wrong vendor / wrong amount / wrong token year — and editing
+  // doesn't regenerate the token. They cancel and the accountant
+  // submits a fresh row with correct details. Non-paid bills only;
+  // the payment-row check below blocks cancel when a payment is
+  // in flight.
+  if (bill.status === "approved" && !isPrivileged) {
+    return {
+      ok: false,
+      error:
+        "Only the owner or a developer can cancel a bill once it's in the due-bills queue. " +
+        "Ask them to do it from the bill detail page.",
     };
   }
   // Non-privileged users can only cancel pending / rejected bills.
-  // Privileged users (owner / dev) can cancel anything not paid /
-  // approved (covered by the check above).
+  // Privileged users (owner / dev) also reach approved bills above.
   if (
     !isPrivileged &&
     bill.status !== "pending_approval" &&

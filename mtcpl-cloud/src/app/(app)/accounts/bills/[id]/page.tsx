@@ -1077,9 +1077,20 @@ export default async function BillDetailPage({
                   vendor invoice no). Two-step confirmation is built
                   into CancelBillButton — Daksh accidentally cancelled
                   a real bill with the unconfirmed single-click
-                  form-action variant. */}
+                  form-action variant.
+                  Daksh May 2026 follow-on: owner / developer can also
+                  cancel APPROVED bills (already in the due-bills
+                  queue). Use case: a wrong-year token like T-0206-410
+                  landed in the queue — only way to fix the token is
+                  cancel + recreate. The server action's payment-row
+                  check still blocks cancel if a payment is in flight,
+                  so this can't accidentally orphan money. */}
               {!isLocked &&
-                (bill.status === "pending_approval" || bill.status === "rejected") &&
+                (bill.status === "pending_approval" ||
+                  bill.status === "rejected" ||
+                  (bill.status === "approved" &&
+                    (profile.role === "developer" ||
+                      profile.role === "owner"))) &&
                 (profile.role === "developer" ||
                   profile.role === "owner" ||
                   canSubmitBills(profile)) && (

@@ -469,23 +469,46 @@ export function BillEntryForm({
                 type="date"
                 value={billDate}
                 onChange={(e) => setBillDate(e.target.value)}
-                /* Daksh May 2026 — date input min/max so a typo
-                 * like "102025" can't sneak through. <input
-                 * type=date> still allows manual keystrokes outside
-                 * the range on some browsers, so the handleSubmit
-                 * below ALSO validates the year. Min floor 2015
-                 * covers any old back-dated bill; max ceiling is
-                 * "end of next year" so an accountant entering a
-                 * bill on Dec 31 for early January still works. */
+                /* Daksh May 2026 — calendar picker only, NO keyboard
+                 * typing. Earlier guard rails caught "year 102025"
+                 * etc., but an accountant still typed "206" as a
+                 * year and the row landed at year 0206 (token
+                 * T-0206-410). Blocking every keydown except
+                 * Tab/Esc/Enter forces the user to use the calendar
+                 * picker — which only ever produces a real date. */
+                onKeyDown={(e) => {
+                  if (
+                    e.key === "Tab" ||
+                    e.key === "Escape" ||
+                    e.key === "Enter"
+                  ) {
+                    return; // allow form navigation keys
+                  }
+                  e.preventDefault();
+                }}
+                /* min/max keep the calendar picker itself ranged so
+                 * the user can't even SCROLL to a wrong year via
+                 * the picker. Floor 2015 covers historic back-dated
+                 * bills; ceiling = end of next year so a Dec 31
+                 * entry for early January still works. */
                 min="2015-01-01"
                 max={`${new Date().getFullYear() + 1}-12-31`}
+                /* Mobile hint: skip the alphanumeric keyboard
+                 * (we're blocking typing anyway). */
+                inputMode="none"
                 style={{
                   ...INPUT_STYLE,
                   ...(billDateLocked ? lockedInputOverlay : {}),
+                  /* Tell the user this isn't a text input — calendar
+                   * cursor (default arrow + small calendar icon
+                   * comes from the date input itself). */
+                  caretColor: "transparent",
+                  cursor: billDateLocked ? "not-allowed" : "pointer",
                 }}
                 required
                 disabled={fieldsDisabled || billDateLocked}
                 readOnly={billDateLocked}
+                title="Pick the bill date from the calendar — typing is disabled to avoid typos in the year"
               />
             </FormField>
             <FormField

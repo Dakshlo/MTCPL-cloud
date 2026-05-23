@@ -732,16 +732,32 @@ export function PrivateNotesModal({
                       type="date"
                       value={newEntryDate}
                       onChange={(e) => setNewEntryDate(e.target.value)}
-                      /* Same min/max guards as bill_date — stops
-                         the 6-digit-year typo class at the picker
-                         level. */
+                      /* Calendar-picker only — same lockdown as the
+                         bill date input. Blocks every keystroke
+                         except Tab/Esc/Enter so users can't type a
+                         wrong year. */
+                      onKeyDown={(e) => {
+                        if (
+                          e.key === "Tab" ||
+                          e.key === "Escape" ||
+                          e.key === "Enter"
+                        ) {
+                          return;
+                        }
+                        e.preventDefault();
+                      }}
+                      inputMode="none"
+                      /* min/max guards stop the calendar picker from
+                         even SCROLLING to a wrong year. */
                       min="2015-01-01"
                       max={`${new Date().getFullYear() + 1}-12-31`}
-                      title="Date this entry happened (defaults to today)"
+                      title="Pick the date from the calendar — typing is disabled"
                       style={{
                         ...INPUT_STYLE,
                         fontFamily: "ui-monospace, monospace",
                         padding: "7px 10px",
+                        caretColor: "transparent",
+                        cursor: "pointer",
                       }}
                     />
                     <input
