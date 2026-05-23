@@ -27,10 +27,12 @@ import {
   PeekProvider,
   PeekValue,
 } from "./_ui/sensitive-peek";
-import {
-  BILL_VENDOR_CATEGORIES,
-  billVendorCategoryDisplay,
-} from "@/lib/bill-vendor-categories";
+// Mig 061 follow-on (Daksh): category filter helpers — only one
+// usage remained after the live-filters refactor (the age-bucket
+// "Block Purchase" label lookup on the bucket-tile row). The
+// dropdown options moved into LiveDueBillsFilters.
+import { billVendorCategoryDisplay } from "@/lib/bill-vendor-categories";
+import { LiveDueBillsFilters } from "./live-due-bills-filters";
 
 type SearchParams = Promise<{
   vendor?: string;
@@ -569,172 +571,28 @@ export default async function AccountsHomePage({
         </div>
       )}
 
-      {/* Mig 042 follow-on — token search + bill-date range filter
-          live in the same GET form as the vendor select. One submit
-          handles all four; an age-bucket click adds `age=...` via a
-          separate Link, which we keep round-trippable through this
-          form via the hidden input.
-          UI fix (Daksh OCD pass): rebuilt as a 5-column grid with a
-          fixed-height label row so every input lands on the same
-          baseline. The earlier flex-end layout had the Token field
-          riding higher than its neighbours because the per-field
-          "Type any part of T-YYYY-N" hint stretched its column. The
-          hint now lives below the entire row instead of under one
-          input. */}
-      <form
-        method="GET"
-        style={{
-          display: "grid",
-          gridTemplateColumns: "minmax(140px, 1.4fr) minmax(160px, 1.6fr) minmax(160px, 1.6fr) minmax(140px, 1fr) minmax(140px, 1fr) auto",
-          alignItems: "end",
-          columnGap: 10,
-          rowGap: 4,
-          marginBottom: 14,
-          padding: "10px 12px",
-          background: "var(--surface, #fff)",
-          border: `1px solid ${ACCOUNTS_TOKENS.border}`,
-          borderRadius: 10,
-          boxShadow: ACCOUNTS_TOKENS.shadow,
+      {/* Daksh May 2026 — filter strip is now LIVE (no Apply button).
+          Each control auto-pushes the new URL via router.replace on
+          change so the bill list refreshes instantly. Selection
+          state is persisted in sessionStorage by dashboard-client
+          so the reload doesn't unselect already-ticked bills. The
+          old <form method="GET"> + Apply button pattern lives in
+          git history. */}
+      <LiveDueBillsFilters
+        vendors={vendors}
+        initialToken={tokenFilter}
+        initialVendor={vendorFilter}
+        initialCategory={categoryFilter}
+        initialDateFrom={dateFromFilter}
+        initialDateTo={dateToFilter}
+        initialAge={ageFilter}
+        tokens={{
+          borderStrong: ACCOUNTS_TOKENS.borderStrong,
+          border: ACCOUNTS_TOKENS.border,
+          shadow: ACCOUNTS_TOKENS.shadow,
+          surface: "var(--surface, #fff)",
         }}
-      >
-        {ageFilter && <input type="hidden" name="age" value={ageFilter} />}
-
-        <FilterField label="Token">
-          <input
-            type="search"
-            name="token"
-            defaultValue={tokenFilter}
-            style={{
-              padding: "6px 10px",
-              fontSize: 13,
-              background: "#fff",
-              border: `1px solid ${ACCOUNTS_TOKENS.borderStrong}`,
-              borderRadius: 8,
-              color: "var(--text)",
-              fontFamily: "ui-monospace, monospace",
-              width: "100%",
-            }}
-          />
-        </FilterField>
-
-        <FilterField label="Vendor">
-          <select
-            name="vendor"
-            defaultValue={vendorFilter}
-            style={{
-              padding: "6px 10px",
-              fontSize: 13,
-              background: "#fff",
-              border: `1px solid ${ACCOUNTS_TOKENS.borderStrong}`,
-              borderRadius: 8,
-              color: "var(--text)",
-              width: "100%",
-            }}
-          >
-            <option value="">All vendors</option>
-            {vendors.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.name}
-              </option>
-            ))}
-          </select>
-        </FilterField>
-
-        <FilterField label="Category">
-          {/* Mig 061 follow-on (Daksh): category filter. Flat list
-              for the filter dropdown — the optgroup-in-form pattern
-              is too narrow here. billVendorCategoryDisplay prepends
-              "Block Purchase — " to the stone sub-types so they're
-              unambiguous. */}
-          <select
-            name="category"
-            defaultValue={categoryFilter}
-            style={{
-              padding: "6px 10px",
-              fontSize: 13,
-              background: "#fff",
-              border: `1px solid ${ACCOUNTS_TOKENS.borderStrong}`,
-              borderRadius: 8,
-              color: "var(--text)",
-              width: "100%",
-            }}
-          >
-            <option value="">All categories</option>
-            {BILL_VENDOR_CATEGORIES.map((c) => (
-              <option key={c.value} value={c.value}>
-                {billVendorCategoryDisplay(c.value)}
-              </option>
-            ))}
-          </select>
-        </FilterField>
-
-        <FilterField label="Bill date — from">
-          <input
-            type="date"
-            name="date_from"
-            defaultValue={dateFromFilter}
-            style={{
-              padding: "6px 10px",
-              fontSize: 13,
-              background: "#fff",
-              border: `1px solid ${ACCOUNTS_TOKENS.borderStrong}`,
-              borderRadius: 8,
-              color: "var(--text)",
-              fontFamily: "ui-monospace, monospace",
-              width: "100%",
-            }}
-          />
-        </FilterField>
-
-        <FilterField label="to">
-          <input
-            type="date"
-            name="date_to"
-            defaultValue={dateToFilter}
-            style={{
-              padding: "6px 10px",
-              fontSize: 13,
-              background: "#fff",
-              border: `1px solid ${ACCOUNTS_TOKENS.borderStrong}`,
-              borderRadius: 8,
-              color: "var(--text)",
-              fontFamily: "ui-monospace, monospace",
-              width: "100%",
-            }}
-          />
-        </FilterField>
-
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <button type="submit" style={BUTTON_STYLES.secondary}>
-            Apply filters
-          </button>
-          {(vendorFilter || ageFilter || tokenFilter || dateFromFilter || dateToFilter || categoryFilter) && (
-            <Link
-              href="/accounts"
-              style={{
-                fontSize: 12,
-                color: "var(--muted)",
-                textDecoration: "underline",
-              }}
-            >
-              Clear
-            </Link>
-          )}
-        </div>
-
-        {/* Single hint row that spans all columns. Lives BELOW the
-            inputs so it doesn't push any one column out of line. */}
-        <span
-          style={{
-            gridColumn: "1 / -1",
-            fontSize: 10,
-            color: "var(--muted)",
-            marginTop: 2,
-          }}
-        >
-          Token: type any part of <code style={{ fontFamily: "ui-monospace, monospace" }}>T-YYYY-N</code>. Leave dates blank for an open-ended range.
-        </span>
-      </form>
+      />
 
       {/* Multi-select propose table */}
       {filteredDue.length === 0 && allDue.length === 0 ? (
@@ -758,42 +616,6 @@ export default async function AccountsHomePage({
         />
       )}
     </section>
-  );
-}
-
-/** Filter column wrapper. Label + input only — hints live on a
- *  single row below the entire form so every input lands on the
- *  same baseline (Daksh OCD fix: previously the Token column had a
- *  per-field hint and sat higher than the others). */
-function FilterField({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: 4,
-        minWidth: 0,
-      }}
-    >
-      <span
-        style={{
-          fontSize: 10,
-          fontWeight: 800,
-          color: "var(--muted)",
-          textTransform: "uppercase",
-          letterSpacing: "0.05em",
-        }}
-      >
-        {label}
-      </span>
-      {children}
-    </label>
   );
 }
 

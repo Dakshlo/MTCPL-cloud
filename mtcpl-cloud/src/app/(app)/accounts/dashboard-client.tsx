@@ -10,7 +10,7 @@
  */
 
 import Link from "next/link";
-import { Fragment, useMemo, useState, useTransition } from "react";
+import { Fragment, useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 import {
@@ -102,6 +102,62 @@ export function DueBillsClient({
   const [success, setSuccess] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [amountOverrides, setAmountOverrides] = useState<Record<string, string>>({});
+
+  // Daksh May 2026 — persist the tick selection across page reloads
+  // so changing a server-side filter (vendor / category / date range)
+  // doesn't unselect everything the accountant just queued. Stored in
+  // sessionStorage (cleared automatically when the tab closes); the
+  // accountant only ever cares about the current sitting.
+  //
+  // Edge case: if a previously-selected bill is no longer in the
+  // current `rows` (e.g. paid since selection, or filtered out by a
+  // server query), the ID stays in sessionStorage but doesn't render.
+  // Switching back to a broader filter brings it back into view with
+  // its tick intact.
+  const SELECTION_KEY = "mtcpl:due-bills:selected";
+  const AMOUNT_OVERRIDES_KEY = "mtcpl:due-bills:amount-overrides";
+  // Rehydrate on mount (client-only — sessionStorage is unavailable
+  // during SSR).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const sRaw = sessionStorage.getItem(SELECTION_KEY);
+      if (sRaw) {
+        const arr = JSON.parse(sRaw);
+        if (Array.isArray(arr) && arr.every((x) => typeof x === "string")) {
+          setSelected(new Set(arr));
+        }
+      }
+      const aRaw = sessionStorage.getItem(AMOUNT_OVERRIDES_KEY);
+      if (aRaw) {
+        const obj = JSON.parse(aRaw);
+        if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+          setAmountOverrides(obj as Record<string, string>);
+        }
+      }
+    } catch {
+      // Malformed sessionStorage — drop silently and start fresh.
+    }
+  }, []);
+  // Persist on every change. JSON.stringify a Set isn't supported
+  // directly, so spread to an array first.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      sessionStorage.setItem(SELECTION_KEY, JSON.stringify([...selected]));
+    } catch {
+      // Quota / private-mode — ignore. Worst case selection won't
+      // survive reload, which is the pre-fix behaviour.
+    }
+  }, [selected]);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      sessionStorage.setItem(AMOUNT_OVERRIDES_KEY, JSON.stringify(amountOverrides));
+    } catch {
+      // ignore
+    }
+  }, [amountOverrides]);
   // Mig 053 follow-on (Daksh, May 2026): live quick-filter that
   // matches token / vendor name / vendor bill no on every keystroke
   // — no Apply button. Filters client-side over what the server
