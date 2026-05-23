@@ -1225,6 +1225,16 @@ export async function unloadWithProblemAction(formData: FormData) {
     // Slab needs to physically travel to new vendor → reset receipt.
     updatePayload.received_at_vendor_at = null;
     updatePayload.received_at_vendor_by = null;
+    // Mig 070 — stamp the source vendor so the receiving cockpit
+    // can render the "Transferred from X" badge + the Accept / Flag
+    // buttons in Pending stock. Snapshot the name so the badge
+    // keeps reading even if the source vendor row is later
+    // archived. transferred_by is the operator who fired the
+    // transfer (usually the source vendor themselves).
+    updatePayload.transferred_from_vendor_id = item.vendor_id;
+    updatePayload.transferred_from_vendor_name = item.vendor_name;
+    updatePayload.transferred_at = now;
+    updatePayload.transferred_by = profile.id;
   }
   await admin.from("carving_items").update(updatePayload).eq("id", carvingItemId);
 
@@ -1303,6 +1313,243 @@ export async function unloadWithProblemAction(formData: FormData) {
         ? "Flagged as broken — team will triage"
         : "Unloaded with problem note";
   redirect(`${redirectTo}?toast=${encodeURIComponent(toastMsg)}`);
+}
+
+// ── Inter-vendor transfer Accept / Flag (mig 070) ───────────────
+//
+// The regular yard→shade receipt flow is driven by the
+// slab_transfer role (acknowledgeReceiptAction in this file). For
+// vendor→vendor transfers we don't necessarily involve the runner
+// — the source and target vendor are often a few metres apart and
+// just walk the slab over. So the receiving vendor needs to be able
+// to self-receive AND to refuse if the transfer was a mistake.
+//
+// Both actions are gated to the RECEIVING vendor (i.e. the current
+// vendor_id on the row) + carving_head + dev/owner. And both refuse
+// if the row isn't an in-transit transfer (transferred_from_vendor_id
+// NULL, or already received).
+
+/** Vendor self-receives a slab that another vendor transferred to
+ *  them. Equivalent to acknowledgeReceiptAction but scoped to inter-
+ *  vendor transfers so the slab_transfer runner role isn't
+ *  required. Clears the transfer attribution and stamps
+ *  received_at_vendor_at so the slab flips into Ready to load. */
+export async function acceptTransferReceiptAction(formData: FormData) {
+  const { profile } = await requireAuth([
+    "developer",
+    "owner",
+    "carving_head",
+    "vendor",
+  ]);
+  const admin = createAdminSupabaseClient();
+
+  const carvingItemId = txt(formData, "carving_item_id");
+  const redirectTo = txt(formData, "redirect_to") || "/vendor";
+  if (!carvingItemId) redirect(`${redirectTo}?toast=Missing+job+id`);
+
+  const { data: ci } = await admin
+    .from("carving_items")
+    .select(
+      "id, vendor_id, transferred_from_vendor_id, transferred_from_vendor_name, received_at_vendor_at, status",
+    )
+    .eq("id", carvingItemId)
+    .maybeSingle();
+  if (!ci) redirect(`${redirectTo}?toast=Job+not+found`);
+  const item = ci as {
+    id: string;
+    vendor_id: string;
+    transferred_from_vendor_id: string | null;
+    transferred_from_vendor_name: string | null;
+    received_at_vendor_at: string | null;
+    status: string;
+  };
+
+  if (profile.role === "vendor") {
+    if (!profile.vendor_id || profile.vendor_id !== item.vendor_id) {
+      redirect(`${redirectTo}?toast=Not+your+slab`);
+    }
+  }
+  if (!item.transferred_from_vendor_id) {
+    redirect(
+      `${redirectTo}?toast=${encodeURIComponent("Not an inter-vendor transfer — runner needs to deliver this one.")}`,
+    );
+  }
+  if (item.received_at_vendor_at) {
+    redirect(`${redirectTo}?toast=Already+received`);
+  }
+  if (item.status !== "carving_assigned") {
+    redirect(`${redirectTo}?toast=Slab+is+not+in+a+receivable+state`);
+  }
+
+  const now = new Date().toISOString();
+  await admin
+    .from("carving_items")
+    .update({
+      received_at_vendor_at: now,
+      received_at_vendor_by: profile.id,
+      // Clear the transfer attribution — the slab is now firmly at
+      // the receiving vendor's shade. Source vendor doesn't need to
+      // see it anymore. The audit trail keeps the history.
+      transferred_from_vendor_id: null,
+      transferred_from_vendor_name: null,
+      transferred_at: null,
+      transferred_by: null,
+    })
+    .eq("id", carvingItemId);
+
+  await recordEvent(
+    carvingItemId,
+    "transfer_accepted",
+    profile.id,
+    `Accepted transfer from ${item.transferred_from_vendor_name ?? "another vendor"}`,
+  );
+  await logAudit(
+    profile.id,
+    "carving_transfer_accepted",
+    "carving_item",
+    carvingItemId,
+    { from_vendor_id: item.transferred_from_vendor_id },
+  );
+
+  refreshAll();
+  redirect(
+    `${redirectTo}?toast=${encodeURIComponent("Slab marked received — now in Ready to load")}`,
+  );
+}
+
+/** Vendor refuses an inter-vendor transfer. The slab returns to the
+ *  source vendor's queue (vendor_id, vendor_name swap back), the
+ *  transferred_from columns clear, and a rejection note is logged
+ *  so the original vendor sees why it came back.
+ *  Reason is a short free-text string; the cockpit form supplies
+ *  one of "wrong_machine", "wrong_design", "overbooked", "other"
+ *  plus optional notes for "other". */
+export async function flagTransferIssueAction(formData: FormData) {
+  const { profile } = await requireAuth([
+    "developer",
+    "owner",
+    "carving_head",
+    "vendor",
+  ]);
+  const admin = createAdminSupabaseClient();
+
+  const carvingItemId = txt(formData, "carving_item_id");
+  const reasonRaw = txt(formData, "reason");
+  const notes = txt(formData, "notes") || null;
+  const redirectTo = txt(formData, "redirect_to") || "/vendor";
+
+  const VALID_REASONS = ["wrong_machine", "wrong_design", "overbooked", "other"];
+  const reason = VALID_REASONS.includes(reasonRaw) ? reasonRaw : "other";
+  if (!carvingItemId) redirect(`${redirectTo}?toast=Missing+job+id`);
+  if (reason === "other" && (!notes || notes.trim().length < 3)) {
+    redirect(`${redirectTo}?toast=Notes+required+for+'other'`);
+  }
+
+  const { data: ci } = await admin
+    .from("carving_items")
+    .select(
+      "id, vendor_id, vendor_name, transferred_from_vendor_id, transferred_from_vendor_name, received_at_vendor_at, status",
+    )
+    .eq("id", carvingItemId)
+    .maybeSingle();
+  if (!ci) redirect(`${redirectTo}?toast=Job+not+found`);
+  const item = ci as {
+    id: string;
+    vendor_id: string;
+    vendor_name: string;
+    transferred_from_vendor_id: string | null;
+    transferred_from_vendor_name: string | null;
+    received_at_vendor_at: string | null;
+    status: string;
+  };
+
+  if (profile.role === "vendor") {
+    if (!profile.vendor_id || profile.vendor_id !== item.vendor_id) {
+      redirect(`${redirectTo}?toast=Not+your+slab`);
+    }
+  }
+  if (!item.transferred_from_vendor_id) {
+    redirect(`${redirectTo}?toast=Not+an+inter-vendor+transfer`);
+  }
+  if (item.received_at_vendor_at) {
+    redirect(
+      `${redirectTo}?toast=${encodeURIComponent("Already received — use Problem/transfer to send it back.")}`,
+    );
+  }
+
+  // Load source vendor row so we can re-snapshot the vendor_type
+  // (might have been NULL on the original carving_item if legacy).
+  const { data: srcVendorRow } = await admin
+    .from("vendors")
+    .select("id, name, vendor_type, is_active")
+    .eq("id", item.transferred_from_vendor_id)
+    .maybeSingle();
+  const srcVendor = srcVendorRow as
+    | { id: string; name: string; vendor_type: string; is_active: boolean }
+    | null;
+  if (!srcVendor) {
+    redirect(`${redirectTo}?toast=Source+vendor+no+longer+exists`);
+  }
+  if (!srcVendor.is_active) {
+    redirect(`${redirectTo}?toast=Source+vendor+is+inactive`);
+  }
+
+  const reasonLabel: Record<string, string> = {
+    wrong_machine: "🛠 Wrong machine type for our setup",
+    wrong_design: "📐 Wrong design / file",
+    overbooked: "📅 Overbooked — can't take it",
+    other: "⚠ Other",
+  };
+  const flagNote = `${reasonLabel[reason]}${notes ? ` · ${notes}` : ""}`;
+  const refusedByVendorName = item.vendor_name;
+
+  await admin
+    .from("carving_items")
+    .update({
+      // Send the slab back to the source vendor's queue. Same shape
+      // as a fresh assignment (status='carving_assigned', no
+      // machine, no received marker).
+      vendor_id: srcVendor.id,
+      vendor_name: srcVendor.name,
+      vendor_type: srcVendor.vendor_type,
+      status: "carving_assigned",
+      received_at_vendor_at: null,
+      received_at_vendor_by: null,
+      cnc_machine_id: null,
+      loaded_at: null,
+      loaded_by: null,
+      vendor_estimated_minutes: null,
+      // Clear the transfer attribution — slab is back home.
+      transferred_from_vendor_id: null,
+      transferred_from_vendor_name: null,
+      transferred_at: null,
+      transferred_by: null,
+    })
+    .eq("id", carvingItemId);
+
+  await recordEvent(
+    carvingItemId,
+    "transfer_rejected",
+    profile.id,
+    `${refusedByVendorName} flagged the transfer · ${flagNote}`,
+  );
+  await logAudit(
+    profile.id,
+    "carving_transfer_rejected",
+    "carving_item",
+    carvingItemId,
+    {
+      refused_by_vendor_id: item.vendor_id,
+      returned_to_vendor_id: srcVendor.id,
+      reason,
+      notes,
+    },
+  );
+
+  refreshAll();
+  redirect(
+    `${redirectTo}?toast=${encodeURIComponent(`Flagged — slab returned to ${srcVendor.name}`)}`,
+  );
 }
 
 // ── Complete + unload — vendor marks done after the cut ────────────

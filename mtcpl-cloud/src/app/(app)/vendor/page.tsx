@@ -82,10 +82,13 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
     // + On Hold (carving_on_hold, mig 069) pulled together so we can
     // split client-side. Held slabs need the held_at + held_reason +
     // held_from_machine_id fields surfaced for the On Hold tray.
+    // Mig 070 — also surface transferred_from_* so Pending stock can
+    // render the "Transferred from X" badge + Accept/Flag buttons
+    // for inter-vendor transfers.
     admin
       .from("carving_items")
       .select(
-        "id, slab_requirement_id, status, urgency, estimated_minutes, vendor_estimated_minutes, cnc_machine_id, loaded_at, assigned_at, note, received_at_vendor_at, requires_machine_type, batch_id, held_at, held_reason, held_from_machine_id",
+        "id, slab_requirement_id, status, urgency, estimated_minutes, vendor_estimated_minutes, cnc_machine_id, loaded_at, assigned_at, note, received_at_vendor_at, requires_machine_type, batch_id, held_at, held_reason, held_from_machine_id, transferred_from_vendor_id, transferred_from_vendor_name, transferred_at",
       )
       .eq("vendor_id", vendorId)
       .in("status", ["carving_assigned", "carving_in_progress", "carving_on_hold"])
@@ -191,6 +194,9 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
     held_at?: string | null;
     held_reason?: string | null;
     held_from_machine_id?: string | null;
+    transferred_from_vendor_id?: string | null;
+    transferred_from_vendor_name?: string | null;
+    transferred_at?: string | null;
   }>) {
     const slab = slabById.get(row.slab_requirement_id) ?? null;
     const job: CarvingJobLite = {
@@ -208,6 +214,9 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
       received_at_vendor_at: row.received_at_vendor_at ?? null,
       requires_machine_type: row.requires_machine_type ?? null,
       batch_id: row.batch_id ?? null,
+      transferred_from_vendor_id: row.transferred_from_vendor_id ?? null,
+      transferred_from_vendor_name: row.transferred_from_vendor_name ?? null,
+      transferred_at: row.transferred_at ?? null,
     };
     if (row.status === "carving_on_hold") {
       held.push({

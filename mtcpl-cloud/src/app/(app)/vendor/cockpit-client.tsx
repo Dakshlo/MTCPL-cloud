@@ -14,6 +14,8 @@ import {
   holdSlabOnVendorAction,
   reloadHeldSlabAction,
   completeHeldSlabAction,
+  acceptTransferReceiptAction,
+  flagTransferIssueAction,
   getMachineHistory,
   type MachineHistory,
 } from "../carving/actions";
@@ -94,6 +96,13 @@ export type CarvingJobLite = {
    *  together in a single bulk-assign. Shared across all slabs in
    *  the batch; drives the coloured stripe on cards. */
   batch_id?: string | null;
+  /** Mig 070 — when the slab arrived via Problem/transfer from
+   *  another vendor, these capture the source. NULL for normal
+   *  carving-assigner deliveries. Drive the "Transferred from X"
+   *  badge + Accept / Flag buttons in Pending stock. */
+  transferred_from_vendor_id?: string | null;
+  transferred_from_vendor_name?: string | null;
+  transferred_at?: string | null;
 };
 
 export type CncMachineLive = {
@@ -1853,20 +1862,29 @@ function PendingStockRow({ job }: { job: CarvingJobLite }) {
   const isLathe = job.requires_machine_type === "lathe";
   // Migration 026 — slabs assigned together share a colour stripe.
   const tint = batchTint(job.batch_id);
+  // Mig 070 — inter-vendor transfer. When set, this slab came from
+  // another CNC vendor via Problem/Transfer; the receiving vendor
+  // can self-receive (Accept) or refuse (Flag), no slab_transfer
+  // runner required.
+  const isTransfer = Boolean(job.transferred_from_vendor_name);
+  // Distinct tint when it's a transfer so the receiving vendor sees
+  // it stand out from the yard-runner-delivered ones.
+  const accent = isTransfer
+    ? { bg: "rgba(20,184,166,0.06)", border: "rgba(20,184,166,0.45)", fg: "#0f766e" }
+    : { bg: "rgba(217,119,6,0.04)", border: "rgba(217,119,6,0.4)", fg: "#b45309" };
   return (
     <div
       style={{
         display: "flex",
-        alignItems: "center",
-        gap: 10,
+        flexDirection: "column",
+        gap: 8,
         padding: "10px 12px",
-        background: "rgba(217,119,6,0.04)",
-        border: "1px dashed rgba(217,119,6,0.4)",
+        background: accent.bg,
+        border: `1.5px ${isTransfer ? "solid" : "dashed"} ${accent.border}`,
         borderLeft: tint
           ? `5px solid ${tint.border}`
-          : "1px dashed rgba(217,119,6,0.4)",
+          : `1.5px ${isTransfer ? "solid" : "dashed"} ${accent.border}`,
         borderRadius: 8,
-        flexWrap: "wrap",
       }}
       title={tint ? "Part of a batch — these slabs were assigned together" : undefined}
     >
@@ -1895,15 +1913,33 @@ function PendingStockRow({ job }: { job: CarvingJobLite }) {
               🌀 LATHE
             </span>
           )}
-          <span
-            style={{
-              fontSize: 9, fontWeight: 800, padding: "2px 6px",
-              borderRadius: 3, background: "rgba(217,119,6,0.18)",
-              color: "#b45309", letterSpacing: "0.05em",
-            }}
-          >
-            🚚 IN TRANSIT
-          </span>
+          {isTransfer ? (
+            <span
+              style={{
+                fontSize: 10, fontWeight: 800, padding: "2px 8px",
+                borderRadius: 999, background: "rgba(20,184,166,0.18)",
+                color: accent.fg, letterSpacing: "0.04em",
+                border: `1px solid ${accent.border}`,
+              }}
+              title={
+                job.transferred_at
+                  ? `Transferred ${new Date(job.transferred_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`
+                  : undefined
+              }
+            >
+              ↔ FROM {(job.transferred_from_vendor_name ?? "?").toUpperCase()}
+            </span>
+          ) : (
+            <span
+              style={{
+                fontSize: 9, fontWeight: 800, padding: "2px 6px",
+                borderRadius: 3, background: "rgba(217,119,6,0.18)",
+                color: accent.fg, letterSpacing: "0.05em",
+              }}
+            >
+              🚚 IN TRANSIT
+            </span>
+          )}
           <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 13 }}>
             {job.slab_id}
           </span>
@@ -1924,10 +1960,221 @@ function PendingStockRow({ job }: { job: CarvingJobLite }) {
           </div>
         )}
         <div style={{ fontSize: 10, color: "var(--muted-light)", marginTop: 4 }}>
-          Transfer runner will deliver to your shade. Click ✅ Mark received once it arrives.
+          {isTransfer
+            ? `Sent from ${job.transferred_from_vendor_name}. Accept once it's at your shade, or Flag to send it back.`
+            : "Transfer runner will deliver to your shade. Click ✅ Mark received once it arrives."}
         </div>
       </div>
+      {/* Mig 070 — Accept / Flag controls for inter-vendor transfers.
+          Two forms, side-by-side, both with confirms + spinner
+          overlays (same pattern as the other cockpit forms). The
+          slab_transfer runner flow keeps the read-only display. */}
+      {isTransfer && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <form
+            action={acceptTransferReceiptAction}
+            onSubmit={(e) => {
+              if (
+                !window.confirm(
+                  `Accept ${job.slab_id} from ${job.transferred_from_vendor_name}?\n\nMoves it from Pending stock to Ready to load.`,
+                )
+              ) {
+                e.preventDefault();
+              }
+            }}
+            style={{ flex: "1 1 180px" }}
+          >
+            <FormPendingOverlay label="Accepting transfer…" />
+            <input type="hidden" name="carving_item_id" value={job.id} />
+            <input type="hidden" name="redirect_to" value="/vendor" />
+            <button
+              type="submit"
+              style={{
+                width: "100%",
+                padding: "10px 14px",
+                fontSize: 13,
+                fontWeight: 700,
+                background: accent.fg,
+                color: "#fff",
+                border: `1px solid ${accent.fg}`,
+                borderRadius: 8,
+                cursor: "pointer",
+                minHeight: 44,
+                touchAction: "manipulation",
+              }}
+            >
+              ✅ Accept · mark received
+            </button>
+          </form>
+          <FlagTransferButton job={job} />
+        </div>
+      )}
     </div>
+  );
+}
+
+/** Flag-transfer button + inline reason picker. Opens a small
+ *  controlled form on tap so the vendor picks a refuse-reason
+ *  (wrong machine / wrong design / overbooked / other) before
+ *  the slab gets sent back. */
+function FlagTransferButton({ job }: { job: CarvingJobLite }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState<string>("");
+  const [notes, setNotes] = useState<string>("");
+  const requiresNotes = reason === "other";
+  const canSubmit =
+    !!reason && (!requiresNotes || notes.trim().length >= 3);
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        style={{
+          flex: "1 1 140px",
+          padding: "10px 14px",
+          fontSize: 13,
+          fontWeight: 700,
+          background: "transparent",
+          color: "#b91c1c",
+          border: "1.5px solid rgba(220,38,38,0.45)",
+          borderRadius: 8,
+          cursor: "pointer",
+          minHeight: 44,
+          touchAction: "manipulation",
+        }}
+      >
+        🚩 Flag issue
+      </button>
+    );
+  }
+
+  return (
+    <form
+      action={flagTransferIssueAction}
+      onSubmit={(e) => {
+        if (
+          !window.confirm(
+            `Flag this transfer and send ${job.slab_id} back to ${job.transferred_from_vendor_name}?`,
+          )
+        ) {
+          e.preventDefault();
+        }
+      }}
+      style={{
+        flex: "1 1 100%",
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+        padding: 10,
+        background: "rgba(220,38,38,0.05)",
+        border: "1.5px dashed rgba(220,38,38,0.45)",
+        borderRadius: 8,
+      }}
+    >
+      <FormPendingOverlay label="Flagging transfer…" />
+      <input type="hidden" name="carving_item_id" value={job.id} />
+      <input type="hidden" name="redirect_to" value="/vendor" />
+      <div
+        style={{
+          fontSize: 11,
+          fontWeight: 800,
+          color: "#b91c1c",
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+        }}
+      >
+        🚩 Why are you flagging this transfer?
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        {[
+          { v: "wrong_machine", label: "🛠 Wrong machine type for our setup" },
+          { v: "wrong_design", label: "📐 Wrong design / file" },
+          { v: "overbooked", label: "📅 Overbooked — can't take it" },
+          { v: "other", label: "⚠ Other (notes required)" },
+        ].map((opt) => {
+          const checked = reason === opt.v;
+          return (
+            <label
+              key={opt.v}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "6px 8px",
+                background: checked ? "rgba(220,38,38,0.10)" : "var(--surface)",
+                border: `1px solid ${checked ? "rgba(220,38,38,0.5)" : "var(--border)"}`,
+                borderRadius: 6,
+                fontSize: 12,
+                cursor: "pointer",
+                touchAction: "manipulation",
+              }}
+            >
+              <input
+                type="radio"
+                name="reason"
+                value={opt.v}
+                checked={checked}
+                onChange={() => setReason(opt.v)}
+              />
+              {opt.label}
+            </label>
+          );
+        })}
+      </div>
+      {requiresNotes && (
+        <textarea
+          name="notes"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="What's wrong? (min 3 chars)"
+          rows={2}
+          style={{
+            padding: "8px 10px",
+            fontSize: 12,
+            border: "1px solid var(--border)",
+            borderRadius: 6,
+            background: "var(--bg)",
+            color: "var(--text)",
+            resize: "vertical",
+            fontFamily: "inherit",
+          }}
+        />
+      )}
+      <div style={{ display: "flex", gap: 6 }}>
+        <button
+          type="submit"
+          disabled={!canSubmit}
+          style={{
+            flex: 1,
+            padding: "8px 12px",
+            fontSize: 13,
+            fontWeight: 700,
+            background: canSubmit ? "#dc2626" : "var(--surface-alt)",
+            color: canSubmit ? "#fff" : "var(--muted)",
+            border: `1px solid ${canSubmit ? "#b91c1c" : "var(--border)"}`,
+            borderRadius: 6,
+            cursor: canSubmit ? "pointer" : "not-allowed",
+            minHeight: 40,
+            touchAction: "manipulation",
+          }}
+        >
+          🚩 Send back
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(false);
+            setReason("");
+            setNotes("");
+          }}
+          className="ghost-button"
+          style={{ padding: "8px 12px", fontSize: 12 }}
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
   );
 }
 
