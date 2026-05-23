@@ -101,11 +101,34 @@ export function LiveDueBillsFilters({
     if (initialAge) params.set("age", initialAge);
     // Daksh May 2026 — preserve `?selected=` across filter pushes
     // so the server keeps surfacing pinned bills regardless of
-    // which filter the operator just changed. The dashboard-client
-    // sync effect owns the lifecycle of this param; we just don't
-    // want to drop it on the floor.
-    const selectedParam = searchParams.get("selected");
-    if (selectedParam) params.set("selected", selectedParam);
+    // which filter the operator just changed.
+    //
+    // Read directly from sessionStorage (NOT searchParams). The
+    // dashboard-client persists selection there on every tick;
+    // its history.replaceState calls don't update Next.js's
+    // useSearchParams, so reading searchParams here returns a
+    // stale value the moment a tick happens between filter
+    // changes. sessionStorage is the source of truth.
+    let pinned: string[] = [];
+    try {
+      const raw =
+        typeof window !== "undefined"
+          ? window.sessionStorage.getItem("mtcpl:due-bills:selected")
+          : null;
+      if (raw) {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) pinned = arr.filter((x) => typeof x === "string");
+      }
+    } catch {
+      // Fall through to URL fallback.
+    }
+    if (pinned.length === 0) {
+      const fromUrl = searchParams.get("selected");
+      if (fromUrl) pinned = fromUrl.split(",").filter(Boolean);
+    }
+    if (pinned.length > 0) {
+      params.set("selected", pinned.sort().join(","));
+    }
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   }

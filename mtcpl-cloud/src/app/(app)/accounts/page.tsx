@@ -325,27 +325,53 @@ export default async function AccountsHomePage({
   // reflect the selected category only. (When a user picks "Repair
   // & Maintenance" they want every aging tile to scope to that
   // category too.)
+  //
+  // Daksh May 2026 follow-on — selected (pinned) bill IDs are
+  // EXEMPT from both client-side filters. The server's supplementary
+  // query already pulled them into allDue regardless of vendor /
+  // date / token filters; without this exemption, picking a Category
+  // (client-side filter) would silently drop them again. Same for
+  // an age-bucket tile click. The pin-on-top logic in
+  // dashboard-client then surfaces them above the rest.
+  const pinnedIdSet = new Set(selectedIds);
   const categoryFilteredDue = categoryFilter
-    ? allDue.filter((b) => b.vendorCategory === categoryFilter)
+    ? allDue.filter(
+        (b) => pinnedIdSet.has(b.id) || b.vendorCategory === categoryFilter,
+      )
     : allDue;
   const filteredDue = ageFilter
-    ? categoryFilteredDue.filter((b) => b.ageBucket === ageFilter)
+    ? categoryFilteredDue.filter(
+        (b) => pinnedIdSet.has(b.id) || b.ageBucket === ageFilter,
+      )
     : categoryFilteredDue;
 
-  const totalOutstanding = filteredDue.reduce((s, b) => s + b.amountOutstanding, 0);
-  const billsCount = filteredDue.length;
+  // Daksh May 2026 — totals + bucket counts use the STRICT filtered
+  // set (no pinned-bill exemption) so the headline numbers always
+  // reflect what the filter says, never inflated by a Vendor-A bill
+  // that's only on screen because it was pinned. The `filteredDue`
+  // set above is the DISPLAY set (with pinned exempted) — used only
+  // for the row list passed to DueBillsClient.
+  const strictCategoryFilteredDue = categoryFilter
+    ? allDue.filter((b) => b.vendorCategory === categoryFilter)
+    : allDue;
+  const strictFilteredDue = ageFilter
+    ? strictCategoryFilteredDue.filter((b) => b.ageBucket === ageFilter)
+    : strictCategoryFilteredDue;
+
+  const totalOutstanding = strictFilteredDue.reduce((s, b) => s + b.amountOutstanding, 0);
+  const billsCount = strictFilteredDue.length;
   const avgDaysOutstanding =
-    filteredDue.length === 0
+    strictFilteredDue.length === 0
       ? 0
       : Math.round(
-          filteredDue.reduce(
+          strictFilteredDue.reduce(
             (s, b) => s + Math.floor((todayMs - new Date(b.billDate).getTime()) / 86_400_000),
             0,
-          ) / filteredDue.length,
+          ) / strictFilteredDue.length,
         );
   const topVendor = (() => {
     const totals = new Map<string, { name: string; total: number }>();
-    for (const b of filteredDue) {
+    for (const b of strictFilteredDue) {
       const cur = totals.get(b.vendorId) ?? { name: b.vendorName, total: 0 };
       cur.total += b.amountOutstanding;
       totals.set(b.vendorId, cur);
@@ -359,19 +385,24 @@ export default async function AccountsHomePage({
 
   // Bucket counts/totals respect the category filter so the aging
   // strip stays meaningful when a category is selected (mig 061).
+  // Use the strict (no-pin) set so a pinned 90+ bill doesn't inflate
+  // the 0-30 bucket when you filter to 0-30.
+  const strictCategoryOnly = categoryFilter
+    ? allDue.filter((b) => b.vendorCategory === categoryFilter)
+    : allDue;
   const bucketCounts = {
-    "0_30": categoryFilteredDue.filter((b) => b.ageBucket === "0_30").length,
-    "31_60": categoryFilteredDue.filter((b) => b.ageBucket === "31_60").length,
-    "61_90": categoryFilteredDue.filter((b) => b.ageBucket === "61_90").length,
-    "90_plus": categoryFilteredDue.filter((b) => b.ageBucket === "90_plus").length,
+    "0_30": strictCategoryOnly.filter((b) => b.ageBucket === "0_30").length,
+    "31_60": strictCategoryOnly.filter((b) => b.ageBucket === "31_60").length,
+    "61_90": strictCategoryOnly.filter((b) => b.ageBucket === "61_90").length,
+    "90_plus": strictCategoryOnly.filter((b) => b.ageBucket === "90_plus").length,
   };
   const bucketTotals = {
-    "0_30": categoryFilteredDue.filter((b) => b.ageBucket === "0_30").reduce((s, b) => s + b.amountOutstanding, 0),
-    "31_60": categoryFilteredDue.filter((b) => b.ageBucket === "31_60").reduce((s, b) => s + b.amountOutstanding, 0),
-    "61_90": categoryFilteredDue.filter((b) => b.ageBucket === "61_90").reduce((s, b) => s + b.amountOutstanding, 0),
-    "90_plus": categoryFilteredDue.filter((b) => b.ageBucket === "90_plus").reduce((s, b) => s + b.amountOutstanding, 0),
+    "0_30": strictCategoryOnly.filter((b) => b.ageBucket === "0_30").reduce((s, b) => s + b.amountOutstanding, 0),
+    "31_60": strictCategoryOnly.filter((b) => b.ageBucket === "31_60").reduce((s, b) => s + b.amountOutstanding, 0),
+    "61_90": strictCategoryOnly.filter((b) => b.ageBucket === "61_90").reduce((s, b) => s + b.amountOutstanding, 0),
+    "90_plus": strictCategoryOnly.filter((b) => b.ageBucket === "90_plus").reduce((s, b) => s + b.amountOutstanding, 0),
   };
-  const grandTotal = categoryFilteredDue.reduce((s, b) => s + b.amountOutstanding, 0) || 1;
+  const grandTotal = strictCategoryOnly.reduce((s, b) => s + b.amountOutstanding, 0) || 1;
 
   const isApprover = canApproveBills(profile);
   const isAccountManager = canManageAccounts(profile);
