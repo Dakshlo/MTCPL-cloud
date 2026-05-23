@@ -117,14 +117,21 @@ export function DueBillsClient({
   const SELECTION_KEY = "mtcpl:due-bills:selected";
   const AMOUNT_OVERRIDES_KEY = "mtcpl:due-bills:amount-overrides";
   // Rehydrate on mount (client-only — sessionStorage is unavailable
-  // during SSR).
+  // during SSR). Also push the rehydrated selection into the URL
+  // (?selected=…) via router.replace so the server fires the
+  // supplementary query and returns the pinned bills with the rest
+  // of rows. Without this initial push, hitting /accounts directly
+  // wouldn't include selected bills filtered out by current
+  // server-side filters.
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
+      let rehydratedIds: string[] | null = null;
       const sRaw = sessionStorage.getItem(SELECTION_KEY);
       if (sRaw) {
         const arr = JSON.parse(sRaw);
         if (Array.isArray(arr) && arr.every((x) => typeof x === "string")) {
+          rehydratedIds = arr;
           setSelected(new Set(arr));
         }
       }
@@ -135,9 +142,29 @@ export function DueBillsClient({
           setAmountOverrides(obj as Record<string, string>);
         }
       }
+      // If we rehydrated something AND the URL doesn't already
+      // carry it, push so the server picks it up. router.replace
+      // (Next.js) triggers an RSC re-fetch which lands new rows
+      // including the supplementary "selected" bills.
+      if (rehydratedIds && rehydratedIds.length > 0) {
+        const url = new URL(window.location.href);
+        const currentSelected = (url.searchParams.get("selected") ?? "")
+          .split(",")
+          .filter(Boolean)
+          .sort()
+          .join(",");
+        const wanted = [...rehydratedIds].sort().join(",");
+        if (wanted !== currentSelected) {
+          url.searchParams.set("selected", wanted);
+          router.replace(url.pathname + url.search, { scroll: false });
+        }
+      }
     } catch {
       // Malformed sessionStorage — drop silently and start fresh.
     }
+    // router is stable across renders; safe to omit. Effect only
+    // runs on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   // Persist on every change. JSON.stringify a Set isn't supported
   // directly, so spread to an array first.
@@ -148,6 +175,40 @@ export function DueBillsClient({
     } catch {
       // Quota / private-mode — ignore. Worst case selection won't
       // survive reload, which is the pre-fix behaviour.
+    }
+    // Daksh May 2026 — also push the selection into the URL as
+    // `?selected=id1,id2,id3`. The server reads this and adds a
+    // supplementary query so pinned bills survive any filter
+    // change (even ones that would otherwise exclude them, e.g.
+    // selecting a Vendor-A bill then filtering to Vendor B).
+    // router.replace (not push) so the browser back-stack doesn't
+    // fill with every tick. Same-pathname guard prevents recursion
+    // on initial mount where the URL already matches.
+    try {
+      const url = new URL(window.location.href);
+      const wantedSelected = [...selected].sort().join(",");
+      const currentSelected = (url.searchParams.get("selected") ?? "")
+        .split(",")
+        .filter(Boolean)
+        .sort()
+        .join(",");
+      if (wantedSelected !== currentSelected) {
+        if (wantedSelected) {
+          url.searchParams.set("selected", wantedSelected);
+        } else {
+          url.searchParams.delete("selected");
+        }
+        // Replace history entry, don't push — accountant doesn't
+        // want back button to walk through every tick.
+        window.history.replaceState(
+          window.history.state,
+          "",
+          url.pathname + (url.search ? url.search : ""),
+        );
+      }
+    } catch {
+      // URL update is best-effort — server filter still works
+      // without it; the pin-on-top just won't survive a hard reload.
     }
   }, [selected]);
   useEffect(() => {

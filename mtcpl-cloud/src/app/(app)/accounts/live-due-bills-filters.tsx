@@ -99,6 +99,13 @@ export function LiveDueBillsFilters({
     }
     // Preserve the age bucket if it was in the URL.
     if (initialAge) params.set("age", initialAge);
+    // Daksh May 2026 — preserve `?selected=` across filter pushes
+    // so the server keeps surfacing pinned bills regardless of
+    // which filter the operator just changed. The dashboard-client
+    // sync effect owns the lifecycle of this param; we just don't
+    // want to drop it on the floor.
+    const selectedParam = searchParams.get("selected");
+    if (selectedParam) params.set("selected", selectedParam);
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   }
@@ -163,13 +170,30 @@ export function LiveDueBillsFilters({
         />
       </FilterField>
 
+      {/* Daksh May 2026 — Vendor and Category are mutually exclusive.
+       *  Picking one auto-clears the other, both in local state and
+       *  in the pushed URL. Each select disables itself when the
+       *  other is active so the operator sees the rule visually
+       *  (and the disabled control's title explains why). Picking
+       *  the "All …" option from EITHER releases the lock and the
+       *  other becomes usable again. */}
       <FilterField label="Vendor">
         <select
           value={vendor}
+          disabled={Boolean(category)}
+          title={
+            category
+              ? "Clear the Category filter to pick a vendor"
+              : undefined
+          }
           onChange={(e) => {
             const v = e.target.value;
             setVendor(v);
-            pushFilters({ vendor: v });
+            // Picking a vendor clears category; clearing vendor
+            // ("All vendors") leaves category alone (it's already
+            // empty if disabled).
+            if (v && category) setCategory("");
+            pushFilters({ vendor: v, category: v ? "" : category });
           }}
           style={{
             padding: "6px 10px",
@@ -179,6 +203,8 @@ export function LiveDueBillsFilters({
             borderRadius: 8,
             color: "var(--text)",
             width: "100%",
+            opacity: category ? 0.55 : 1,
+            cursor: category ? "not-allowed" : "pointer",
           }}
         >
           <option value="">All vendors</option>
@@ -193,10 +219,17 @@ export function LiveDueBillsFilters({
       <FilterField label="Category">
         <select
           value={category}
+          disabled={Boolean(vendor)}
+          title={
+            vendor
+              ? "Clear the Vendor filter to pick a category"
+              : undefined
+          }
           onChange={(e) => {
             const v = e.target.value;
             setCategory(v);
-            pushFilters({ category: v });
+            if (v && vendor) setVendor("");
+            pushFilters({ category: v, vendor: v ? "" : vendor });
           }}
           style={{
             padding: "6px 10px",
@@ -206,6 +239,8 @@ export function LiveDueBillsFilters({
             borderRadius: 8,
             color: "var(--text)",
             width: "100%",
+            opacity: vendor ? 0.55 : 1,
+            cursor: vendor ? "not-allowed" : "pointer",
           }}
         >
           <option value="">All categories</option>

@@ -45,6 +45,15 @@ type SearchParams = Promise<{
   // Mig 061 follow-on (Daksh): category filter so dad can see
   // outstanding sliced by raw material / equipment / jobwork / etc.
   category?: string;
+  // Daksh May 2026 — comma-separated bill IDs that the accountant
+  // currently has ticked. Pushed into the URL by dashboard-client
+  // whenever the selection set changes (also rehydrated from
+  // sessionStorage on mount). The server fires a supplementary
+  // query for any of these IDs missing from the filtered result
+  // and merges them in so the pinned-to-top logic in the client
+  // can always render them — even when the current filter would
+  // otherwise hide them.
+  selected?: string;
 }>;
 
 export default async function AccountsHomePage({
@@ -71,6 +80,15 @@ export default async function AccountsHomePage({
   const dateFromFilter = (sp.date_from ?? "").trim();
   const dateToFilter = (sp.date_to ?? "").trim();
   const categoryFilter = (sp.category ?? "").trim();
+  // Daksh May 2026 — pinned-bill IDs the accountant has ticked.
+  // Parsed from comma-separated `?selected=` URL param (client keeps
+  // it in sync with sessionStorage). Used at the bottom of the page
+  // logic to supplement the filtered query so a ticked bill is
+  // never silently filtered out of view.
+  const selectedIds = (sp.selected ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 
   const supabase = createAdminSupabaseClient();
 
@@ -106,7 +124,35 @@ export default async function AccountsHomePage({
   const { data: dueRaw, error } = await dueQuery;
   if (error) throw new Error(error.message);
 
-  const billIds = (dueRaw ?? []).map((b) => b.id as string);
+  // Daksh May 2026 — supplementary query for selected (ticked) bills
+  // the user wants pinned. Any IDs in ?selected= that are NOT already
+  // in dueRaw (because the current filter excludes them) get a
+  // separate fetch and are merged in. The pinned-to-top render
+  // logic in dashboard-client then surfaces them above the rest.
+  // Skip the query entirely when nothing's selected or every
+  // selected ID is already in dueRaw.
+  let dueRawWithSelected = dueRaw ?? [];
+  if (selectedIds.length > 0) {
+    const existingIds = new Set(dueRawWithSelected.map((b) => b.id as string));
+    const missingIds = selectedIds.filter((id) => !existingIds.has(id));
+    if (missingIds.length > 0) {
+      const { data: missingRows } = await supabase
+        .from("bills")
+        .select(
+          "id, token, vendor_bill_no, bill_date, description, cost_head, amount_total, amount_gst, amount_tds, amount_tcs, amount_payable_to_vendor, amount_paid, amount_outstanding, status, approved_at, bill_vendor_id, bill_vendors(id, name, nickname, payment_terms_days, category)",
+        )
+        // Same gates as the main query — a ticked bill that's been
+        // since paid in full / cancelled shouldn't re-surface.
+        .eq("status", "approved")
+        .gt("amount_outstanding", 0)
+        .in("id", missingIds);
+      if (missingRows && missingRows.length > 0) {
+        dueRawWithSelected = [...dueRawWithSelected, ...missingRows];
+      }
+    }
+  }
+
+  const billIds = dueRawWithSelected.map((b) => b.id as string);
   const openPaymentBillIds = new Set<string>();
   // Paid-in-parts breakdown — every bill_payments row at status='paid'
   // for the bills on this page, grouped per bill. Used to render the
@@ -164,7 +210,9 @@ export default async function AccountsHomePage({
       | { id: string; name: string; nickname: string | null; payment_terms_days: number | null; category: string | null }[]
       | null;
   };
-  const dueRows = ((dueRaw ?? []) as unknown) as DbRow[];
+  // Use the merged set (filtered query + supplementary "selected"
+  // pins) so the downstream allDue map renders both groups.
+  const dueRows = (dueRawWithSelected as unknown) as DbRow[];
 
   // App-level default if a vendor hasn't set its own terms. Was the
   // global "45 days" constant before mig 040 — keep here as fallback
