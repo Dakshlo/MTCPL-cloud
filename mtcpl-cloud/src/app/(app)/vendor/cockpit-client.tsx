@@ -20,6 +20,24 @@ import {
 import { SlabThumb } from "@/components/slab-thumb";
 import type { StoneTypeDef } from "@/lib/stone-utils";
 import { batchTint } from "@/lib/batch-colours";
+import { useFormStatus } from "react-dom";
+import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
+
+/**
+ * Daksh May 2026 — branded spinner overlay for vendor-cockpit form
+ * submissions (Mark complete, Hold, Problem/transfer, Load, Reload,
+ * Maintenance). Mounts INSIDE the <form> so it can read the form's
+ * pending state via useFormStatus; the overlay itself is
+ * position:fixed so the visible spinner is full-viewport regardless
+ * of where it lives in the DOM tree.
+ *
+ * Stays inert when the form isn't submitting. No props beyond the
+ * label so it can drop into any of our cockpit forms with one line.
+ */
+function FormPendingOverlay({ label }: { label: string }) {
+  const { pending } = useFormStatus();
+  return <FinanceLoadingOverlay show={pending} label={label} />;
+}
 
 // ── Types — kept here so server page can import them ──────────────
 
@@ -1637,6 +1655,9 @@ function ReloadHeldModal({
                 action={reloadHeldSlabAction}
                 style={{ width: "100%" }}
               >
+                <FormPendingOverlay
+                  label={`Reloading on ${m.machine_code}…`}
+                />
                 <input type="hidden" name="carving_item_id" value={held.id} />
                 <input type="hidden" name="target_machine_id" value={m.id} />
                 <input type="hidden" name="redirect_to" value="/vendor" />
@@ -1713,6 +1734,7 @@ function CompleteHeldModal({
         action={completeHeldSlabAction}
         style={{ display: "flex", flexDirection: "column", gap: 12 }}
       >
+        <FormPendingOverlay label="Marking complete…" />
         <input type="hidden" name="carving_item_id" value={held.id} />
         <input type="hidden" name="redirect_to" value="/vendor" />
         {held.slab && (
@@ -2593,6 +2615,7 @@ function MachineCard({
               }
             }}
           >
+            <FormPendingOverlay label="Bringing back online…" />
             <input type="hidden" name="cnc_machine_id" value={machine.id} />
             <button
               type="submit"
@@ -2834,6 +2857,9 @@ function LoadModal({
           action={effectiveIsPair ? loadTwoSlabsOnMultiHeadAction : loadSlabOnMachineAction}
           style={{ display: "flex", flexDirection: "column", gap: 14 }}
         >
+          <FormPendingOverlay
+            label={effectiveIsPair ? "Loading both slabs…" : "Loading slab…"}
+          />
           {/* Machine picker — first so the form layout reflects what
               the vendor's about to load onto. Switching to a 2-head
               machine swaps the slab picker into pair mode. */}
@@ -3253,6 +3279,7 @@ function CompleteModal({
       onClose={onClose}
     >
       <form action={completeAndUnloadAction} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <FormPendingOverlay label="Marking complete…" />
         <input type="hidden" name="carving_item_id" value={job.id} />
 
         {job.slab && (
@@ -3315,6 +3342,7 @@ function MaintenanceModal({
       onClose={onClose}
     >
       <form action={flagMaintenanceAction} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <FormPendingOverlay label="Flagging maintenance…" />
         <input type="hidden" name="cnc_machine_id" value={machine.id} />
 
         <div>
@@ -3418,6 +3446,7 @@ function ProblemModal({
       onClose={onClose}
     >
       <form action={unloadWithProblemAction} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <FormPendingOverlay label="Saving problem…" />
         <input type="hidden" name="carving_item_id" value={job.id} />
         <input type="hidden" name="redirect_to" value="/vendor" />
 
@@ -3872,6 +3901,7 @@ function HoldModal({
         action={holdSlabOnVendorAction}
         style={{ display: "flex", flexDirection: "column", gap: 14 }}
       >
+        <FormPendingOverlay label="Holding slab…" />
         <input type="hidden" name="carving_item_id" value={job.id} />
         <input type="hidden" name="redirect_to" value="/vendor" />
 
