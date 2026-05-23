@@ -268,6 +268,24 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
         ? m.machine_type
         : "single_head",
   }));
+  // Daksh May 2026 — natural-sort the machine grid so MA10 lands
+  // after MA9, not between MA1 and MA2. The Postgres .order(
+  // "machine_code") above gives a lexicographic sort which puts
+  // MA10, MA11, MA12 right after MA1. Sort here by the trailing
+  // integer with the alpha prefix as the tiebreak; falls back to
+  // string compare when no digits are present so non-numeric codes
+  // (rare but possible) don't break.
+  function naturalKey(code: string): [string, number] {
+    const m = code.match(/^([^\d]*)(\d+)/);
+    if (!m) return [code, 0];
+    return [m[1], parseInt(m[2], 10)];
+  }
+  machineCards.sort((a, b) => {
+    const [ap, an] = naturalKey(a.machine_code);
+    const [bp, bn] = naturalKey(b.machine_code);
+    if (ap !== bp) return ap.localeCompare(bp);
+    return an - bn;
+  });
 
   const recent = ((completedRecent ?? []) as Array<{
     id: string;
