@@ -1617,15 +1617,19 @@ export async function reloadHeldSlabAction(formData: FormData) {
   }
 
   // Load target machine + check it's idle + compatible.
+  // Daksh May 2026 — was selecting `name` which doesn't exist on
+  // cnc_machines; the row came back null and the action errored
+  // with "Machine not found" even though the ID was valid. Correct
+  // column is `machine_code` (the human label like "MA10").
   const { data: mach } = await admin
     .from("cnc_machines")
-    .select("id, name, status, machine_type, vendor_id")
+    .select("id, machine_code, status, machine_type, vendor_id")
     .eq("id", targetMachineId)
     .maybeSingle();
   if (!mach) redirect(`${redirectTo}?toast=Machine+not+found`);
   const machine = mach as {
     id: string;
-    name: string;
+    machine_code: string;
     status: string;
     machine_type: string;
     vendor_id: string;
@@ -1635,7 +1639,7 @@ export async function reloadHeldSlabAction(formData: FormData) {
   }
   if (machine.status !== "idle") {
     redirect(
-      `${redirectTo}?toast=${encodeURIComponent(`${machine.name} is not idle right now`)}`,
+      `${redirectTo}?toast=${encodeURIComponent(`${machine.machine_code} is not idle right now`)}`,
     );
   }
   // Work-type check: lathe slab → lathe machine; non-lathe → non-lathe.
@@ -1675,8 +1679,8 @@ export async function reloadHeldSlabAction(formData: FormData) {
   // ── Events + audit ──────────────────────────────────────────
   const sameMachine = machine.id === item.held_from_machine_id;
   const evtMsg = sameMachine
-    ? `Reloaded onto ${machine.name} (same machine)`
-    : `Reloaded onto ${machine.name} (was held from ${item.held_from_machine_id ?? "unknown"})`;
+    ? `Reloaded onto ${machine.machine_code} (same machine)`
+    : `Reloaded onto ${machine.machine_code} (was held from ${item.held_from_machine_id ?? "unknown"})`;
   await admin.from("cnc_machine_events").insert({
     cnc_machine_id: targetMachineId,
     event_type: "loaded",
@@ -1695,7 +1699,7 @@ export async function reloadHeldSlabAction(formData: FormData) {
 
   refreshAll();
   redirect(
-    `${redirectTo}?toast=${encodeURIComponent(`Reloaded on ${machine.name}`)}`,
+    `${redirectTo}?toast=${encodeURIComponent(`Reloaded on ${machine.machine_code}`)}`,
   );
 }
 

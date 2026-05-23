@@ -917,9 +917,23 @@ function Section({
             {isOpen ? "▼" : "▶"}
           </span>
         )}
-        <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>{title}</h2>
+        {/* Daksh May 2026 — heavier section headers so "CNC Machines"
+            / "Lathe Machines" pop on the tablet against the dense
+            machine grid below. Bumped 15→18px, weight 700→800,
+            tighter tracking. */}
+        <h2
+          style={{
+            margin: 0,
+            fontSize: 18,
+            fontWeight: 800,
+            letterSpacing: "-0.01em",
+            color: "var(--text)",
+          }}
+        >
+          {title}
+        </h2>
         {subtitle && (
-          <span className="muted" style={{ fontSize: 12 }}>
+          <span className="muted" style={{ fontSize: 12, fontWeight: 600 }}>
             {subtitle}
           </span>
         )}
@@ -1653,6 +1667,24 @@ function ReloadHeldModal({
               <form
                 key={m.id}
                 action={reloadHeldSlabAction}
+                onSubmit={(e) => {
+                  // Daksh May 2026 — confirm before sending. Reload
+                  // locks a machine + restarts the carving clock; an
+                  // accidental tap from the held tray was costly. The
+                  // confirm spells out which slab is going onto which
+                  // CNC so the vendor reads it before saying OK.
+                  const sameMachine = m.id === held.held_from_machine_id;
+                  const lines = [
+                    `Reload ${held.slab_id} onto ${m.machine_code}?`,
+                    "",
+                    sameMachine
+                      ? `Same CNC it was held from. The carving clock resets to 0.`
+                      : `Different CNC (was held from ${held.held_from_machine_id ?? "unknown"}). The carving clock resets to 0.`,
+                  ];
+                  if (!window.confirm(lines.join("\n"))) {
+                    e.preventDefault();
+                  }
+                }}
                 style={{ width: "100%" }}
               >
                 <FormPendingOverlay
@@ -2135,14 +2167,13 @@ function MachineCard({
     downtimeLabel = `Down for ${fmtDuration(downMin)}`;
   }
 
-  // Mig follow-on (Daksh, May 2026): lathe cards bumped from the
-  // 28px "kinda round" radius to 60px, which reads as a true
-  // pill on the cockpit grid — unmistakable next to the rectangular
-  // CNC cards. We can't make the whole card a perfect circle (the
-  // running state has slab thumb + countdown + action buttons that
-  // need columnar room), but the pill silhouette + the violet
-  // "chuck mark" decoration in the upper-right corner tells the
-  // operator "this one spins round work" at a glance on a fast scan.
+  // Daksh May 2026 — lathe cards used to render as a chunky 60px
+  // pill to call out "this one spins round work" at a glance. Daksh
+  // found it visually noisy next to the rectangular CNC cards. Now
+  // both shapes share the same 10px-rounded rectangle, and the
+  // violet "chuck mark" decoration in the upper-right corner is
+  // the sole signal that the card is a lathe. Easier to scan, less
+  // alignment chaos in the grid.
   const isLathe = machine.machine_type === "lathe";
   return (
     <div
@@ -2150,7 +2181,7 @@ function MachineCard({
         padding: 0,
         background: tint.bg,
         border: `2px solid ${tint.border}`,
-        borderRadius: isLathe ? 60 : 10,
+        borderRadius: 10,
         display: "flex",
         flexDirection: "column",
         position: "relative",
@@ -2653,7 +2684,12 @@ function ModalShell({
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
 
-  // Esc closes
+  // Esc closes + lock background scroll. Daksh May 2026 — on tablet,
+  // touch-scrolling the blurred backdrop was still scrolling the
+  // page underneath. Locking body overflow stops that bleed; the
+  // dialog's own content area still scrolls because it has its own
+  // overflowY:auto. CenterPeekModal already does this; the
+  // ModalShell variant did not.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -2662,7 +2698,12 @@ function ModalShell({
       }
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+    };
   }, [onClose]);
 
   return (
@@ -2670,6 +2711,15 @@ function ModalShell({
       onMouseDown={(e) => {
         if (dialogRef.current && !dialogRef.current.contains(e.target as Node)) {
           onClose();
+        }
+      }}
+      onTouchMove={(e) => {
+        // Daksh May 2026 — additional belt-and-braces for tablets:
+        // if the touchmove originates on the backdrop (not the
+        // dialog), preventDefault stops the OS-level page scroll
+        // that body:overflow:hidden alone misses on iOS Safari.
+        if (dialogRef.current && !dialogRef.current.contains(e.target as Node)) {
+          e.preventDefault();
         }
       }}
       style={{
