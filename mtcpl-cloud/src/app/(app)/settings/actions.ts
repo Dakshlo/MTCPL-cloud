@@ -229,8 +229,27 @@ export async function updateUserAction(formData: FormData) {
 
   // Role assignment rules:
   // - Developer: can assign any role including owner/developer
-  // - Owner + Planner: can assign any role EXCEPT owner and developer
-  const RESTRICTED_ASSIGNABLE = ["team_head", "block_slab_entry", "slab_entry", "block_entry", "cutting_operator"];
+  // - Owner + Planner: can assign anything EXCEPT owner/developer.
+  //   Daksh May 2026 — this list previously omitted carving_head,
+  //   vendor (CNC OPERATOR), and slab_transfer even though the UI
+  //   (UI_ROLES_PLANNER in /settings/page.tsx) offered them. So an
+  //   owner picking "CARVING HEAD" / "CNC OPERATOR" / "SLAB TRANSFER"
+  //   would hit "Cannot+assign+that+role" with no UI hint. Aligned
+  //   the server allowlist with what the UI shows — owner can hand
+  //   out every operational role but not promote to owner/developer
+  //   (or to the privileged finance roles that need separate dev
+  //   sign-off: accountant, accountant_star, crosscheck,
+  //   cnc_expense_entry, storekeeper).
+  const RESTRICTED_ASSIGNABLE = [
+    "team_head",
+    "carving_head",
+    "block_slab_entry",
+    "slab_entry",
+    "block_entry",
+    "cutting_operator",
+    "vendor",
+    "slab_transfer",
+  ];
   const role = requestedRole;
   if (currentUser.role === "owner" || currentUser.role === "team_head") {
     if (!RESTRICTED_ASSIGNABLE.includes(requestedRole)) {
