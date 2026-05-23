@@ -2036,17 +2036,27 @@ function ModalShell({
       }}
       style={{
         position: "fixed",
-        top: 0,
-        left: "var(--content-left)",
-        right: 0,
-        bottom: 0,
+        /* Daksh May 2026 — was anchored to `left: var(--content-left)`
+         * so the modal would sit over the working area on desktop
+         * (i.e. start after the sidebar). On vendor cockpit the
+         * sidebar is hidden via body.vendor-cockpit-fullscreen, and
+         * globals.css now zeroes --content-left in that mode, so
+         * `left: 0` here would also work — but using inset:0 is
+         * simpler and explicitly anchors to the whole viewport,
+         * leaving the centering math to flexbox below. */
+        inset: 0,
         background: "rgba(15,12,6,0.55)",
         backdropFilter: "blur(2px)",
         zIndex: 1000,
         display: "flex",
-        alignItems: "flex-end",
+        /* Was alignItems: "flex-end" — a bottom-sheet style that on
+         * tablet looked off-centre (skewed when the sidebar
+         * gutter was still factored in). Centre the dialog
+         * vertically so it reads as a proper peek modal on every
+         * screen size. */
+        alignItems: "center",
         justifyContent: "center",
-        padding: "0 0 0 0",
+        padding: "16px",
       }}
     >
       <div
@@ -2056,11 +2066,13 @@ function ModalShell({
         style={{
           background: "var(--surface)",
           border: "1px solid var(--border)",
-          borderRadius: "12px 12px 0 0",
-          boxShadow: "0 -18px 60px rgba(0,0,0,0.45)",
+          /* All-round 14px radius now (was 12px top-only because of
+           * the bottom-sheet origin). Reads as a floating card. */
+          borderRadius: 14,
+          boxShadow: "0 18px 60px rgba(0,0,0,0.45)",
           width: "100%",
           maxWidth: 520,
-          maxHeight: "92vh",
+          maxHeight: "calc(100vh - 32px)",
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",

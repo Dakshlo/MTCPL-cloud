@@ -2161,6 +2161,18 @@ body.inv-hide-sidebar .sidebar,
 body.inv-hide-sidebar .sidebar-backdrop,
 body.vendor-cockpit-fullscreen .sidebar,
 body.vendor-cockpit-fullscreen .sidebar-backdrop { display: none !important; }
+/* Daksh May 2026 — center-peek modals (vendor cockpit's Load slab /
+ * Problem with this slab / Flag maintenance, plus a few finance
+ * peek panels) anchor their backdrop to `left: var(--content-left)`
+ * so they sit over the working area, not under the sidebar. When
+ * the sidebar is hidden via either of these body classes, the
+ * variable still defaulted to var(--sidebar-width) (240px) on
+ * desktop — leaving a phantom 240px gutter on the left of every
+ * modal even though no sidebar is rendered. Reset to 0 in both
+ * modes so the modal genuinely spans + centres over the visible
+ * viewport. */
+body.inv-hide-sidebar,
+body.vendor-cockpit-fullscreen { --content-left: 0px; }
 
 /* ── Rotate-to-landscape prompt (phone, portrait) ─────────────
  * Daksh May 2026 — dad uses MTCPL from his phone when traveling.
