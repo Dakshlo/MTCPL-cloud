@@ -1404,6 +1404,384 @@ export async function completeAndUnloadAction(formData: FormData) {
   );
 }
 
+// ── Hold / Reload / Complete-from-hold (mig 069) ────────────────
+//
+// Daksh, May 2026: vendors needed a "park this slab" pattern between
+// loaded and complete. Three flows, all symmetric:
+//
+//   HOLD     — currently-loaded slab → status='carving_on_hold',
+//              machine freed back to 'idle' (unless a partner head
+//              is still cutting). Remembers the machine + reason so
+//              the reload modal can default back to that CNC.
+//   RELOAD   — held slab → status='carving_in_progress' on a chosen
+//              machine. Defaults to held_from_machine_id; the vendor
+//              can override to any idle CNC of compatible work-type.
+//              Resets the loaded_at clock — held time isn't carving
+//              time.
+//   COMPLETE — held slab → status='carving_complete' without a
+//              re-load. Used when the vendor decides the held slab
+//              is actually done (e.g. side-1-only carve was enough).
+//
+// Permissions match the existing load/unload pair: vendor (their
+// own slab), carving_head, developer, owner.
+
+/** Move a currently-loaded slab into the on-hold tray. Frees the
+ *  CNC machine. Records held_from_machine_id so the reload modal
+ *  can default back. */
+export async function holdSlabOnVendorAction(formData: FormData) {
+  const { profile } = await requireAuth([
+    "developer",
+    "owner",
+    "carving_head",
+    "vendor",
+  ]);
+  const admin = createAdminSupabaseClient();
+
+  const carvingItemId = txt(formData, "carving_item_id");
+  const reasonRaw = txt(formData, "reason"); // "two_side_flip" | "no_power" | "tool_change" | "other"
+  const notes = txt(formData, "notes") || null;
+  const redirectTo = txt(formData, "redirect_to") || "/vendor";
+
+  const VALID_REASONS = ["two_side_flip", "no_power", "tool_change", "other"];
+  const reason = VALID_REASONS.includes(reasonRaw) ? reasonRaw : "other";
+  if (!carvingItemId) redirect(`${redirectTo}?toast=Missing+job+id`);
+  if (reason === "other" && (!notes || notes.trim().length < 3)) {
+    redirect(`${redirectTo}?toast=Notes+required+for+'other'`);
+  }
+
+  // Load the row + its current machine.
+  const { data: ci } = await admin
+    .from("carving_items")
+    .select("id, vendor_id, status, cnc_machine_id, slab_requirement_id")
+    .eq("id", carvingItemId)
+    .maybeSingle();
+  if (!ci) redirect(`${redirectTo}?toast=Job+not+found`);
+  const item = ci as {
+    id: string;
+    vendor_id: string;
+    status: string;
+    cnc_machine_id: string | null;
+    slab_requirement_id: string;
+  };
+
+  // Vendor ownership check — same gate as unloadWithProblem.
+  if (profile.role === "vendor") {
+    if (!profile.vendor_id || profile.vendor_id !== item.vendor_id) {
+      redirect(`${redirectTo}?toast=Not+your+slab`);
+    }
+  }
+  if (item.status !== "carving_in_progress") {
+    redirect(`${redirectTo}?toast=Slab+is+not+currently+on+a+machine`);
+  }
+  if (!item.cnc_machine_id) {
+    redirect(`${redirectTo}?toast=Slab+has+no+machine`);
+  }
+
+  const machineId = item.cnc_machine_id;
+  const now = new Date().toISOString();
+  const fullReason = `${reason}${notes ? ` · ${notes}` : ""}`;
+
+  // ── Flip the carving_item to on-hold. ───────────────────────
+  // Detach from the machine but REMEMBER which machine it was on
+  // via held_from_machine_id so reload defaults back. loaded_at /
+  // vendor_estimated_minutes wiped because the held clock is a
+  // different metric.
+  await admin
+    .from("carving_items")
+    .update({
+      status: "carving_on_hold",
+      cnc_machine_id: null,
+      loaded_at: null,
+      loaded_by: null,
+      vendor_estimated_minutes: null,
+      held_at: now,
+      held_by: profile.id,
+      held_reason: fullReason,
+      held_from_machine_id: machineId,
+    })
+    .eq("id", carvingItemId);
+
+  // slab_requirements stays at 'carving_in_progress' — from the
+  // production side, the slab is still actively being worked (just
+  // off-machine for now). Same as carving_assigned in that sense.
+
+  // ── Machine state: same partner-survivor logic as unloadWithProblem. ──
+  const { data: partners } = await admin
+    .from("carving_items")
+    .select("id")
+    .eq("cnc_machine_id", machineId)
+    .eq("status", "carving_in_progress")
+    .neq("id", carvingItemId);
+  const survivors = (partners ?? []) as Array<{ id: string }>;
+  if (survivors.length > 0) {
+    const { data: mach } = await admin
+      .from("cnc_machines")
+      .select("current_carving_item_id")
+      .eq("id", machineId)
+      .maybeSingle();
+    if (
+      (mach as { current_carving_item_id?: string | null } | null)
+        ?.current_carving_item_id === carvingItemId
+    ) {
+      await admin
+        .from("cnc_machines")
+        .update({ current_carving_item_id: survivors[0].id })
+        .eq("id", machineId);
+    }
+  } else {
+    await admin
+      .from("cnc_machines")
+      .update({ status: "idle", current_carving_item_id: null })
+      .eq("id", machineId);
+  }
+
+  // ── Event log + audit ────────────────────────────────────────
+  const reasonLabel: Record<string, string> = {
+    two_side_flip: "🔄 Flip & carve other side",
+    no_power: "⚡ No power / scheduling",
+    tool_change: "🛠 Tool change",
+    other: "⏸ Other",
+  };
+  const evtMsg = `${reasonLabel[reason]}${notes ? ` · ${notes}` : ""}`;
+  await admin.from("cnc_machine_events").insert({
+    cnc_machine_id: machineId,
+    event_type: "held",
+    carving_item_id: carvingItemId,
+    user_id: profile.id,
+    message: evtMsg,
+  });
+  await recordEvent(carvingItemId, "held", profile.id, evtMsg);
+  await logAudit(profile.id, "carving_held", "carving_item", carvingItemId, {
+    reason,
+    notes,
+    from_machine_id: machineId,
+  });
+
+  refreshAll();
+  redirect(
+    `${redirectTo}?toast=${encodeURIComponent("Slab on hold — see ⏸ On Hold to reload")}`,
+  );
+}
+
+/** Re-load a held slab onto a chosen machine. The reload modal
+ *  defaults `target_machine_id` to held_from_machine_id but the
+ *  vendor can override. Requires the target machine to be currently
+ *  idle (compatible work-type check is done at the picker level on
+ *  the client — same rule as the existing Load modal). */
+export async function reloadHeldSlabAction(formData: FormData) {
+  const { profile } = await requireAuth([
+    "developer",
+    "owner",
+    "carving_head",
+    "vendor",
+  ]);
+  const admin = createAdminSupabaseClient();
+
+  const carvingItemId = txt(formData, "carving_item_id");
+  const targetMachineId = txt(formData, "target_machine_id");
+  const vendorEstimatedMinutesRaw = txt(formData, "vendor_estimated_minutes");
+  const redirectTo = txt(formData, "redirect_to") || "/vendor";
+
+  if (!carvingItemId) redirect(`${redirectTo}?toast=Missing+job+id`);
+  if (!targetMachineId) redirect(`${redirectTo}?toast=Pick+a+machine`);
+
+  const vendorEstimatedMinutes = vendorEstimatedMinutesRaw
+    ? Math.max(0, Number(vendorEstimatedMinutesRaw))
+    : null;
+
+  // Load the held row.
+  const { data: ci } = await admin
+    .from("carving_items")
+    .select(
+      "id, vendor_id, status, cnc_machine_id, requires_machine_type, held_from_machine_id",
+    )
+    .eq("id", carvingItemId)
+    .maybeSingle();
+  if (!ci) redirect(`${redirectTo}?toast=Job+not+found`);
+  const item = ci as {
+    id: string;
+    vendor_id: string;
+    status: string;
+    cnc_machine_id: string | null;
+    requires_machine_type: string | null;
+    held_from_machine_id: string | null;
+  };
+
+  if (profile.role === "vendor") {
+    if (!profile.vendor_id || profile.vendor_id !== item.vendor_id) {
+      redirect(`${redirectTo}?toast=Not+your+slab`);
+    }
+  }
+  if (item.status !== "carving_on_hold") {
+    redirect(`${redirectTo}?toast=Slab+is+not+on+hold`);
+  }
+
+  // Load target machine + check it's idle + compatible.
+  const { data: mach } = await admin
+    .from("cnc_machines")
+    .select("id, name, status, machine_type, vendor_id")
+    .eq("id", targetMachineId)
+    .maybeSingle();
+  if (!mach) redirect(`${redirectTo}?toast=Machine+not+found`);
+  const machine = mach as {
+    id: string;
+    name: string;
+    status: string;
+    machine_type: string;
+    vendor_id: string;
+  };
+  if (machine.vendor_id !== item.vendor_id) {
+    redirect(`${redirectTo}?toast=Machine+belongs+to+another+vendor`);
+  }
+  if (machine.status !== "idle") {
+    redirect(
+      `${redirectTo}?toast=${encodeURIComponent(`${machine.name} is not idle right now`)}`,
+    );
+  }
+  // Work-type check: lathe slab → lathe machine; non-lathe → non-lathe.
+  if (item.requires_machine_type === "lathe" && machine.machine_type !== "lathe") {
+    redirect(`${redirectTo}?toast=Lathe+slab+needs+a+lathe+machine`);
+  }
+  if (item.requires_machine_type !== "lathe" && machine.machine_type === "lathe") {
+    redirect(`${redirectTo}?toast=Non-lathe+slab+cannot+go+on+a+lathe`);
+  }
+
+  const now = new Date().toISOString();
+
+  // ── Update carving_item ─────────────────────────────────────
+  await admin
+    .from("carving_items")
+    .update({
+      status: "carving_in_progress",
+      cnc_machine_id: targetMachineId,
+      loaded_at: now,
+      loaded_by: profile.id,
+      vendor_estimated_minutes: vendorEstimatedMinutes,
+      // Keep held_from_machine_id on the row as history — useful if
+      // the vendor needs to hold again later. Cleared by the next
+      // hold call when it re-stamps with the new machine.
+      held_at: null,
+      held_by: null,
+      held_reason: null,
+    })
+    .eq("id", carvingItemId);
+
+  // ── Update CNC machine ──────────────────────────────────────
+  await admin
+    .from("cnc_machines")
+    .update({ status: "carving", current_carving_item_id: carvingItemId })
+    .eq("id", targetMachineId);
+
+  // ── Events + audit ──────────────────────────────────────────
+  const sameMachine = machine.id === item.held_from_machine_id;
+  const evtMsg = sameMachine
+    ? `Reloaded onto ${machine.name} (same machine)`
+    : `Reloaded onto ${machine.name} (was held from ${item.held_from_machine_id ?? "unknown"})`;
+  await admin.from("cnc_machine_events").insert({
+    cnc_machine_id: targetMachineId,
+    event_type: "loaded",
+    carving_item_id: carvingItemId,
+    user_id: profile.id,
+    message: evtMsg,
+  });
+  await recordEvent(carvingItemId, "reloaded_from_hold", profile.id, evtMsg);
+  await logAudit(
+    profile.id,
+    "carving_reloaded_from_hold",
+    "carving_item",
+    carvingItemId,
+    { target_machine_id: targetMachineId, was_from: item.held_from_machine_id },
+  );
+
+  refreshAll();
+  redirect(
+    `${redirectTo}?toast=${encodeURIComponent(`Reloaded on ${machine.name}`)}`,
+  );
+}
+
+/** Mark a held slab as complete WITHOUT re-loading. The vendor
+ *  decides the held carving is actually done (e.g. they only needed
+ *  side 1 carved, or a partner is unable to finish side 2). Mirrors
+ *  the tail end of completeAndUnloadAction but skips the machine
+ *  side because the slab isn't on a machine. */
+export async function completeHeldSlabAction(formData: FormData) {
+  const { profile } = await requireAuth([
+    "developer",
+    "owner",
+    "carving_head",
+    "vendor",
+  ]);
+  const admin = createAdminSupabaseClient();
+
+  const carvingItemId = txt(formData, "carving_item_id");
+  const temporaryLocation = txt(formData, "temporary_location") || null;
+  const redirectTo = txt(formData, "redirect_to") || "/vendor";
+
+  if (!carvingItemId) redirect(`${redirectTo}?toast=Missing+job+id`);
+
+  const { data: ci } = await admin
+    .from("carving_items")
+    .select("id, vendor_id, status, slab_requirement_id")
+    .eq("id", carvingItemId)
+    .maybeSingle();
+  if (!ci) redirect(`${redirectTo}?toast=Job+not+found`);
+  const item = ci as {
+    id: string;
+    vendor_id: string;
+    status: string;
+    slab_requirement_id: string;
+  };
+
+  if (profile.role === "vendor") {
+    if (!profile.vendor_id || profile.vendor_id !== item.vendor_id) {
+      redirect(`${redirectTo}?toast=Not+your+slab`);
+    }
+  }
+  if (item.status !== "carving_on_hold") {
+    redirect(`${redirectTo}?toast=Slab+is+not+on+hold`);
+  }
+
+  const now = new Date().toISOString();
+
+  await admin
+    .from("carving_items")
+    .update({
+      status: "carving_complete",
+      completed_at: now,
+      unloaded_at: now,
+      unloaded_by: profile.id,
+      temporary_location: temporaryLocation,
+      // Clear held fields — done is done.
+      held_at: null,
+      held_by: null,
+      held_reason: null,
+      cnc_machine_id: null,
+    })
+    .eq("id", carvingItemId);
+
+  // slab_requirements doesn't flip here either — the team review
+  // step (approveCarvingJobAction) handles the final transition.
+
+  await recordEvent(
+    carvingItemId,
+    "completed_from_hold",
+    profile.id,
+    `Marked complete from on-hold tray${temporaryLocation ? ` · 📍 ${temporaryLocation}` : ""}`,
+  );
+  await logAudit(
+    profile.id,
+    "carving_completed_from_hold",
+    "carving_item",
+    carvingItemId,
+    { temporary_location: temporaryLocation },
+  );
+
+  refreshAll();
+  redirect(
+    `${redirectTo}?toast=${encodeURIComponent("Marked complete — awaiting team review")}`,
+  );
+}
+
 // Update temporary location after unload (e.g., slab moved across
 // the yard).
 export async function updateTemporaryLocationAction(formData: FormData) {

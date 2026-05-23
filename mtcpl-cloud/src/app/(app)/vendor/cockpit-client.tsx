@@ -11,6 +11,9 @@ import {
   updateTemporaryLocationAction,
   acknowledgeReceiptAction,
   unloadWithProblemAction,
+  holdSlabOnVendorAction,
+  reloadHeldSlabAction,
+  completeHeldSlabAction,
   getMachineHistory,
   type MachineHistory,
 } from "../carving/actions";
@@ -32,6 +35,24 @@ export type SlabLite = {
    *  at finish-block time. Surfaced on in-transit queue rows so the
    *  vendor knows where to pick the slab up. */
   stock_location?: string | null;
+};
+
+/** Mig 069 — a slab the vendor parked mid-carve. Smaller shape
+ *  than CarvingJobLite because the on-hold tray only needs to show
+ *  slab identity + how long it's been held + the machine to reload
+ *  back to. Action buttons (Reload / Mark done) live on the row. */
+export type HeldSlabLite = {
+  id: string;
+  slab_id: string;
+  urgency: "normal" | "urgent";
+  requires_machine_type: string | null;
+  held_at: string | null;
+  held_reason: string | null;
+  /** The CNC the slab was last loaded on. Reload modal defaults
+   *  here; vendor can override to any compatible idle CNC. NULL
+   *  if the held row pre-dates mig 069. */
+  held_from_machine_id: string | null;
+  slab: SlabLite | null;
 };
 
 export type CarvingJobLite = {
@@ -169,6 +190,7 @@ export function VendorCockpitClient({
   vendor,
   machines,
   queue,
+  held,
   recent,
   otherVendors,
   isStaffView,
@@ -178,6 +200,10 @@ export function VendorCockpitClient({
   vendor: Vendor;
   machines: CncMachineLive[];
   queue: CarvingJobLite[];
+  /** Mig 069 — slabs the vendor parked mid-carve. Rendered in a
+   *  dedicated tray (header launcher tile + center-peek modal).
+   *  Empty array when no slabs are held. */
+  held: HeldSlabLite[];
   recent: Array<{
     id: string;
     slab_id: string;
@@ -216,6 +242,10 @@ export function VendorCockpitClient({
   // Per-slab "Problem / transfer" modal — opened from a running
   // machine card. Tracks the carving_item the operator is acting on.
   const [problemFor, setProblemFor] = useState<CarvingJobLite | null>(null);
+  // Mig 069 — per-slab Hold modal (healthy-path mid-carve pause).
+  // Same shape as problemFor but a different surface so the reason
+  // list stays distinct from problem-side reasons.
+  const [holdFor, setHoldFor] = useState<CarvingJobLite | null>(null);
   // Daksh May 2026 — pending stock / ready to load / recent completed
   // moved out of inline sections into a centered peek modal. The
   // header KPI tiles now act as launchers — tap "Pending stock" to
@@ -224,8 +254,17 @@ export function VendorCockpitClient({
   // completed" to see the last 10 with approval status. Single state
   // covers all three because only one peek is open at a time.
   const [peekOpen, setPeekOpen] = useState<
-    null | "pending" | "ready" | "recent"
+    null | "pending" | "ready" | "recent" | "hold"
   >(null);
+  // Mig 069 — which held slab is being reloaded right now? When set,
+  // we render a small picker modal showing the default machine
+  // (held_from_machine_id) + a list of any other idle compatible
+  // CNCs the vendor can pick instead.
+  const [reloadFor, setReloadFor] = useState<HeldSlabLite | null>(null);
+  // Mig 069 — which held slab is being directly marked complete?
+  // Opens a tiny form prompting for an optional temporary location
+  // (matches the complete-from-machine flow).
+  const [completeHeldFor, setCompleteHeldFor] = useState<HeldSlabLite | null>(null);
 
   // Daksh May 2026 — the vendor role has only this one workspace,
   // so the global sidebar is dead weight. Tag <body> with
@@ -400,6 +439,19 @@ export function VendorCockpitClient({
               title="Slabs physically here and ready to load on a CNC"
               emphasize
             />
+            {/* Mig 069 — On Hold launcher. Pulses violet when there
+                are held slabs because they're often time-sensitive
+                (waiting for a flip, a tool change, or power to
+                come back). Hidden tile shows '0' so it doesn't
+                clutter the header when nothing's parked. */}
+            <StatButton
+              label="On hold"
+              value={held.length}
+              fg="#a78bfa"
+              onClick={() => setPeekOpen("hold")}
+              title="Slabs parked mid-carve — reload onto a CNC or mark done"
+              emphasize={held.length > 0}
+            />
           </div>
         </div>
       </div>
@@ -442,6 +494,7 @@ export function VendorCockpitClient({
                 onMaintenance={() => setMaintenanceFor(m)}
                 onHistory={() => setHistoryFor(m)}
                 onProblem={(job) => setProblemFor(job)}
+                onHold={(job) => setHoldFor(job)}
                 stoneTypes={stoneTypes}
               />
             ))}
@@ -620,7 +673,7 @@ export function VendorCockpitClient({
         );
       })()}
 
-      {/* ── Peek modal ── one of pending / ready / recent ── */}
+      {/* ── Peek modal ── one of pending / ready / recent / hold ── */}
       {peekOpen && (
         <CenterPeekModal
           title={
@@ -628,14 +681,18 @@ export function VendorCockpitClient({
               ? "Pending stock"
               : peekOpen === "ready"
                 ? "Ready to load"
-                : "Recently completed"
+                : peekOpen === "hold"
+                  ? "⏸ On hold"
+                  : "Recently completed"
           }
           subtitle={
             peekOpen === "pending"
               ? `${pendingStock.length} slab${pendingStock.length !== 1 ? "s" : ""} in transit to your shade`
               : peekOpen === "ready"
                 ? `${readyToLoad.length} slab${readyToLoad.length !== 1 ? "s" : ""} physically here, ready to load`
-                : `Last ${recent.length} unloaded — awaiting team review unless approved`
+                : peekOpen === "hold"
+                  ? `${held.length} slab${held.length !== 1 ? "s" : ""} parked — reload onto a CNC or mark done`
+                  : `Last ${recent.length} unloaded — awaiting team review unless approved`
           }
           onClose={() => setPeekOpen(null)}
         >
@@ -699,7 +756,49 @@ export function VendorCockpitClient({
                 ))}
               </div>
             ))}
+          {peekOpen === "hold" &&
+            (held.length === 0 ? (
+              <Empty text="No slabs on hold. Use the Hold button on a loaded slab to park it for later." />
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {held.map((h) => (
+                  <HeldSlabRow
+                    key={h.id}
+                    held={h}
+                    machines={machines}
+                    stoneTypes={stoneTypes}
+                    now={now}
+                    onReload={() => {
+                      setReloadFor(h);
+                      setPeekOpen(null);
+                    }}
+                    onComplete={() => {
+                      setCompleteHeldFor(h);
+                      setPeekOpen(null);
+                    }}
+                  />
+                ))}
+              </div>
+            ))}
         </CenterPeekModal>
+      )}
+      {/* Mig 069 — Reload-from-hold picker. Defaults to held_from
+          machine; vendor can override to any compatible idle CNC. */}
+      {reloadFor && (
+        <ReloadHeldModal
+          held={reloadFor}
+          machines={machines}
+          stoneTypes={stoneTypes}
+          onClose={() => setReloadFor(null)}
+        />
+      )}
+      {/* Mig 069 — Mark-done-from-hold. Tiny form with temp location. */}
+      {completeHeldFor && (
+        <CompleteHeldModal
+          held={completeHeldFor}
+          stoneTypes={stoneTypes}
+          onClose={() => setCompleteHeldFor(null)}
+        />
       )}
 
       {/* ── Modals ── */}
@@ -742,6 +841,9 @@ export function VendorCockpitClient({
           currentVendorId={vendor.id}
           onClose={() => setProblemFor(null)}
         />
+      )}
+      {holdFor && (
+        <HoldModal job={holdFor} onClose={() => setHoldFor(null)} />
       )}
     </div>
   );
@@ -1216,6 +1318,477 @@ function RecentCompletedRow({
   );
 }
 
+// ── On-hold row (mig 069) ─────────────────────────────────────────
+//
+// Daksh's "park this slab" pattern. Rendered inside the On Hold
+// center-peek modal. Each row carries:
+//   • Slab thumb + identity + dims (so the operator recognises it)
+//   • Held-for chip ("Held 2h 14m") with the chosen reason underneath
+//   • From-machine chip — the CNC it was last on, so the operator
+//     knows where to put it back
+//   • [▶ Reload here] / [↻ Reload elsewhere] / [✅ Mark done]
+//     primary actions. The "Reload here" button is a one-tap default
+//     when the original machine is idle; if it's busy, the label
+//     swaps to "Pick a CNC" so the picker modal does the work.
+
+function HeldSlabRow({
+  held,
+  machines,
+  stoneTypes,
+  now,
+  onReload,
+  onComplete,
+}: {
+  held: HeldSlabLite;
+  machines: CncMachineLive[];
+  stoneTypes: StoneTypeDef[];
+  now: number;
+  onReload: () => void;
+  onComplete: () => void;
+}) {
+  const isUrgent = held.urgency === "urgent";
+  const isLathe = held.requires_machine_type === "lathe";
+  const fromMachine = held.held_from_machine_id
+    ? machines.find((m) => m.id === held.held_from_machine_id)
+    : null;
+  const fromIsIdle = fromMachine?.status === "idle";
+  const elapsedMin =
+    held.held_at != null
+      ? Math.max(0, (now - new Date(held.held_at).getTime()) / 60000)
+      : null;
+  return (
+    <div
+      style={{
+        padding: 12,
+        background: "rgba(167,139,250,0.06)",
+        border: "1.5px solid rgba(167,139,250,0.45)",
+        borderRadius: 12,
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+      }}
+    >
+      {/* Top row — slab identity */}
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+        {held.slab && (
+          <SlabThumb
+            stone={held.slab.stone}
+            l={held.slab.length_in}
+            w={held.slab.width_in}
+            t={held.slab.thickness_in}
+            stoneTypes={stoneTypes}
+            size={48}
+            height={48}
+          />
+        )}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            {isUrgent && (
+              <span
+                style={{
+                  fontSize: 9,
+                  fontWeight: 800,
+                  padding: "1px 6px",
+                  borderRadius: 999,
+                  background: "#dc2626",
+                  color: "#fff",
+                  letterSpacing: "0.05em",
+                }}
+              >
+                ⚡ URGENT
+              </span>
+            )}
+            {isLathe && (
+              <span
+                style={{
+                  fontSize: 9,
+                  fontWeight: 800,
+                  padding: "1px 6px",
+                  borderRadius: 3,
+                  background: "rgba(124,58,237,0.15)",
+                  color: "#7c3aed",
+                }}
+              >
+                🌀 LATHE
+              </span>
+            )}
+            <span
+              style={{
+                fontFamily: "ui-monospace, monospace",
+                fontWeight: 700,
+                fontSize: 14,
+              }}
+            >
+              {held.slab_id}
+            </span>
+          </div>
+          {held.slab && (
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
+              {held.slab.temple} · {dimStr(held.slab)}
+            </div>
+          )}
+        </div>
+        {elapsedMin != null && (
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: "#6d28d9",
+              background: "rgba(167,139,250,0.18)",
+              border: "1px solid rgba(167,139,250,0.5)",
+              padding: "4px 8px",
+              borderRadius: 999,
+              whiteSpace: "nowrap",
+              fontFamily: "ui-monospace, monospace",
+            }}
+            title="Held for"
+          >
+            ⏱ {fmtDuration(elapsedMin)}
+          </div>
+        )}
+      </div>
+
+      {/* Reason + from-machine row */}
+      {(held.held_reason || fromMachine) && (
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            flexWrap: "wrap",
+            fontSize: 11,
+            color: "var(--muted)",
+          }}
+        >
+          {held.held_reason && (
+            <span
+              style={{
+                background: "var(--surface)",
+                border: "1px solid var(--border)",
+                padding: "3px 8px",
+                borderRadius: 6,
+              }}
+              title="Reason given when slab was held"
+            >
+              💭 {held.held_reason}
+            </span>
+          )}
+          {fromMachine && (
+            <span
+              style={{
+                background: fromIsIdle ? "rgba(34,197,94,0.12)" : "var(--surface)",
+                border: `1px solid ${fromIsIdle ? "rgba(34,197,94,0.45)" : "var(--border)"}`,
+                color: fromIsIdle ? "#15803d" : "var(--text)",
+                padding: "3px 8px",
+                borderRadius: 6,
+                fontWeight: 600,
+              }}
+              title={
+                fromIsIdle
+                  ? `${fromMachine.machine_code} is idle — Reload sends it back here`
+                  : `${fromMachine.machine_code} is busy — Reload will pick a different CNC`
+              }
+            >
+              🏭 from {fromMachine.machine_code}
+              {fromIsIdle ? " · ready" : " · busy"}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Actions row */}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button
+          type="button"
+          onClick={onReload}
+          style={{
+            flex: "1 1 180px",
+            padding: "10px 14px",
+            fontSize: 14,
+            fontWeight: 700,
+            background: "#7c3aed",
+            color: "#fff",
+            border: "1px solid #6d28d9",
+            borderRadius: 8,
+            cursor: "pointer",
+            minHeight: 44,
+            touchAction: "manipulation",
+          }}
+        >
+          {fromIsIdle ? `▶ Reload on ${fromMachine?.machine_code}` : "▶ Reload — pick CNC"}
+        </button>
+        <button
+          type="button"
+          onClick={onComplete}
+          className="ghost-button"
+          style={{
+            padding: "10px 14px",
+            fontSize: 13,
+            minHeight: 44,
+            touchAction: "manipulation",
+          }}
+          title="Mark this slab done without re-loading (side-1 carve was enough)"
+        >
+          ✅ Mark done
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Reload picker — shows the default (held_from) CNC on top + any
+ *  other compatible idle CNCs. One tap submits via a server form
+ *  action so we don't need to manage pending state. */
+function ReloadHeldModal({
+  held,
+  machines,
+  stoneTypes,
+  onClose,
+}: {
+  held: HeldSlabLite;
+  machines: CncMachineLive[];
+  stoneTypes: StoneTypeDef[];
+  onClose: () => void;
+}) {
+  // Compatible CNCs: same vendor's machines, currently idle, work-
+  // type matches (lathe slabs → lathe machines, others → non-lathe).
+  const compatibleIdle = machines.filter((m) => {
+    if (m.status !== "idle") return false;
+    if (held.requires_machine_type === "lathe") {
+      return m.machine_type === "lathe";
+    }
+    return m.machine_type !== "lathe";
+  });
+  // Default machine = the one the slab was held from, IF still idle.
+  // Otherwise fall back to the first compatible idle.
+  const defaultMachine =
+    compatibleIdle.find((m) => m.id === held.held_from_machine_id) ??
+    compatibleIdle[0] ??
+    null;
+
+  return (
+    <ModalShell
+      title={`▶ Reload ${held.slab_id}`}
+      subtitle={
+        defaultMachine
+          ? `Default: ${defaultMachine.machine_code}${defaultMachine.id === held.held_from_machine_id ? " (same machine it was held from)" : ""}`
+          : "No idle machines available — finish a carve first, then try again"
+      }
+      onClose={onClose}
+    >
+      {compatibleIdle.length === 0 ? (
+        <div
+          style={{
+            padding: 16,
+            background: "rgba(220,38,38,0.06)",
+            border: "1px dashed rgba(220,38,38,0.4)",
+            borderRadius: 8,
+            color: "#b91c1c",
+            fontSize: 13,
+          }}
+        >
+          {held.requires_machine_type === "lathe"
+            ? "No idle lathe machines right now. Unload a running lathe first."
+            : "No idle CNC machines right now. Unload a running CNC first."}
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {held.slab && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                padding: 8,
+                background: "var(--surface-alt)",
+                borderRadius: 8,
+                marginBottom: 6,
+              }}
+            >
+              <SlabThumb
+                stone={held.slab.stone}
+                l={held.slab.length_in}
+                w={held.slab.width_in}
+                t={held.slab.thickness_in}
+                stoneTypes={stoneTypes}
+                size={42}
+                height={42}
+              />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 700 }}>
+                  {held.slab.temple}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--muted)" }}>
+                  {dimStr(held.slab)}
+                </div>
+              </div>
+            </div>
+          )}
+          <p
+            className="muted"
+            style={{ fontSize: 12, margin: "4px 0 6px" }}
+          >
+            Pick a machine to reload onto:
+          </p>
+          {compatibleIdle.map((m) => {
+            const isDefault = m.id === held.held_from_machine_id;
+            return (
+              <form
+                key={m.id}
+                action={reloadHeldSlabAction}
+                style={{ width: "100%" }}
+              >
+                <input type="hidden" name="carving_item_id" value={held.id} />
+                <input type="hidden" name="target_machine_id" value={m.id} />
+                <input type="hidden" name="redirect_to" value="/vendor" />
+                <button
+                  type="submit"
+                  style={{
+                    width: "100%",
+                    padding: "12px 14px",
+                    fontSize: 14,
+                    fontWeight: 700,
+                    background: isDefault ? "#7c3aed" : "var(--surface)",
+                    color: isDefault ? "#fff" : "var(--text)",
+                    border: `1.5px solid ${isDefault ? "#6d28d9" : "var(--border)"}`,
+                    borderRadius: 10,
+                    cursor: "pointer",
+                    textAlign: "left",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    touchAction: "manipulation",
+                    minHeight: 52,
+                  }}
+                >
+                  <span style={{ fontSize: 16 }}>{isDefault ? "★" : "▶"}</span>
+                  <span style={{ flex: 1 }}>
+                    {m.machine_code}
+                    {m.operator_name && (
+                      <span
+                        style={{
+                          marginLeft: 8,
+                          fontSize: 11,
+                          opacity: 0.7,
+                          fontWeight: 500,
+                        }}
+                      >
+                        ({m.operator_name})
+                      </span>
+                    )}
+                  </span>
+                  {isDefault && (
+                    <span style={{ fontSize: 10, opacity: 0.85, fontWeight: 600 }}>
+                      same as before
+                    </span>
+                  )}
+                  <span style={{ fontSize: 16 }}>›</span>
+                </button>
+              </form>
+            );
+          })}
+        </div>
+      )}
+    </ModalShell>
+  );
+}
+
+/** Mark-done-from-hold form. Optional temporary location to match
+ *  the regular complete-and-unload flow. */
+function CompleteHeldModal({
+  held,
+  stoneTypes,
+  onClose,
+}: {
+  held: HeldSlabLite;
+  stoneTypes: StoneTypeDef[];
+  onClose: () => void;
+}) {
+  return (
+    <ModalShell
+      title={`✅ Mark ${held.slab_id} done`}
+      subtitle="Confirms the carve is finished. Slab moves to Recently completed for team review."
+      onClose={onClose}
+    >
+      <form
+        action={completeHeldSlabAction}
+        style={{ display: "flex", flexDirection: "column", gap: 12 }}
+      >
+        <input type="hidden" name="carving_item_id" value={held.id} />
+        <input type="hidden" name="redirect_to" value="/vendor" />
+        {held.slab && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              padding: 8,
+              background: "var(--surface-alt)",
+              borderRadius: 8,
+            }}
+          >
+            <SlabThumb
+              stone={held.slab.stone}
+              l={held.slab.length_in}
+              w={held.slab.width_in}
+              t={held.slab.thickness_in}
+              stoneTypes={stoneTypes}
+              size={42}
+              height={42}
+            />
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700 }}>
+                {held.slab.temple}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--muted)" }}>
+                {dimStr(held.slab)}
+              </div>
+            </div>
+          </div>
+        )}
+        <label className="stack" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)" }}>
+            Where is the slab now?
+          </span>
+          <input
+            type="text"
+            name="temporary_location"
+            placeholder="e.g. Shade-A rack 3"
+            style={{
+              padding: "10px 12px",
+              fontSize: 14,
+              border: "1px solid var(--border)",
+              borderRadius: 8,
+              background: "var(--bg)",
+              color: "var(--text)",
+              minHeight: 44,
+            }}
+          />
+          <span style={{ fontSize: 11, color: "var(--muted)" }}>
+            Optional. Helps the carving team find it for review.
+          </span>
+        </label>
+        <button
+          type="submit"
+          style={{
+            padding: "12px 16px",
+            fontSize: 14,
+            fontWeight: 700,
+            background: "#16a34a",
+            color: "#fff",
+            border: "1px solid #15803d",
+            borderRadius: 8,
+            cursor: "pointer",
+            minHeight: 48,
+            touchAction: "manipulation",
+          }}
+        >
+          ✅ Mark done
+        </button>
+      </form>
+    </ModalShell>
+  );
+}
+
 // ── Pending stock row — assigned, not yet delivered ─────────────────
 //
 // Read-only. The transfer runner physically moves the slab from the
@@ -1477,6 +2050,7 @@ function MachineCard({
   onMaintenance,
   onHistory,
   onProblem,
+  onHold,
   stoneTypes,
 }: {
   machine: CncMachineLive;
@@ -1493,6 +2067,10 @@ function MachineCard({
    *  vendor. Lets them act on ONE slab of a 2-head pair without
    *  unloading the other. */
   onProblem: (job: CarvingJobLite) => void;
+  /** Mig 069 — per-slab "Hold" button. Healthy-path mid-carve
+   *  pause (two-side flip, scheduling). Routes to a dedicated Hold
+   *  modal with the four canonical reasons. */
+  onHold: (job: CarvingJobLite) => void;
   /** Phase 4 follow-up — used to colour the 3D slab thumb on
    *  running cards so the operator sees a stone-matched preview. */
   stoneTypes: StoneTypeDef[];
@@ -1896,31 +2474,68 @@ function MachineCard({
                       />
                     </div>
                   )}
-                  {/* Per-slab Problem button — opens a modal where
-                      the operator can flag (broken, design issue) or
-                      request a transfer. Stops propagation so the
-                      card click doesn't fire. */}
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onProblem(slabJob);
-                    }}
+                  {/* Per-slab actions row (mig 069):
+                        • ⏸ Hold — park the slab off-machine so another
+                          one can run; reload later from the On Hold
+                          tray. First-class because it's a HEALTHY-path
+                          mid-carve action (two-side flip, power
+                          schedule), not a problem-triggered one.
+                        • ⚠ Problem / transfer — broken / design /
+                          transfer flow.
+                      Stop propagation so card click doesn't fire. */}
+                  <div
                     style={{
                       marginTop: 8,
-                      fontSize: 11,
-                      padding: "5px 10px",
-                      background: "rgba(220,38,38,0.08)",
-                      color: "#991b1b",
-                      border: "1px solid rgba(220,38,38,0.3)",
-                      borderRadius: 6,
-                      cursor: "pointer",
-                      fontWeight: 700,
+                      display: "flex",
+                      gap: 6,
+                      flexWrap: "wrap",
                     }}
-                    title="Flag a problem (broken slab / carving issue) or transfer this slab to another vendor"
                   >
-                    ⚠ Problem / transfer this slab
-                  </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onHold(slabJob);
+                      }}
+                      style={{
+                        flex: "1 1 120px",
+                        fontSize: 11,
+                        padding: "6px 10px",
+                        background: "rgba(167,139,250,0.10)",
+                        color: "#6d28d9",
+                        border: "1.5px solid rgba(167,139,250,0.5)",
+                        borderRadius: 6,
+                        cursor: "pointer",
+                        fontWeight: 700,
+                        touchAction: "manipulation",
+                      }}
+                      title="Park this slab off-machine so another can run. Reload from the ⏸ On Hold tray later."
+                    >
+                      ⏸ Hold this slab
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onProblem(slabJob);
+                      }}
+                      style={{
+                        flex: "1 1 120px",
+                        fontSize: 11,
+                        padding: "6px 10px",
+                        background: "rgba(220,38,38,0.08)",
+                        color: "#991b1b",
+                        border: "1px solid rgba(220,38,38,0.3)",
+                        borderRadius: 6,
+                        cursor: "pointer",
+                        fontWeight: 700,
+                        touchAction: "manipulation",
+                      }}
+                      title="Flag a problem (broken slab / carving issue) or transfer this slab to another vendor"
+                    >
+                      ⚠ Problem / transfer
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
@@ -3226,5 +3841,195 @@ function HistoryEventRow({ event }: { event: MachineHistory["events"][number] })
         )}
       </div>
     </div>
+  );
+}
+
+// ── Hold modal (mig 069) ────────────────────────────────────────
+//
+// Healthy-path mid-carve pause. Four canonical reasons + an Other.
+// Submits to holdSlabOnVendorAction; the slab vanishes from the
+// machine card and appears in the On Hold tray.
+function HoldModal({
+  job,
+  onClose,
+}: {
+  job: CarvingJobLite;
+  onClose: () => void;
+}) {
+  const [reason, setReason] = useState<string>("");
+  const [notes, setNotes] = useState<string>("");
+  const requiresNotes = reason === "other";
+  const canSubmit =
+    !!reason && (!requiresNotes || notes.trim().length >= 3);
+
+  return (
+    <ModalShell
+      title="⏸ Hold this slab"
+      subtitle={`${job.slab_id}${job.slab ? ` · ${job.slab.temple}` : ""}`}
+      onClose={onClose}
+    >
+      <form
+        action={holdSlabOnVendorAction}
+        style={{ display: "flex", flexDirection: "column", gap: 14 }}
+      >
+        <input type="hidden" name="carving_item_id" value={job.id} />
+        <input type="hidden" name="redirect_to" value="/vendor" />
+
+        <div>
+          <Label>Why are you parking it?</Label>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {[
+              {
+                v: "two_side_flip",
+                label: "🔄 Flip & carve other side",
+                help: "Side 1 done. Free the machine for another slab; reload to flip later.",
+              },
+              {
+                v: "no_power",
+                label: "⚡ No power / scheduling",
+                help: "Can't keep this CNC running right now. Park and reload when ready.",
+              },
+              {
+                v: "tool_change",
+                label: "🛠 Tool change",
+                help: "Need a different bit. Reload after the swap.",
+              },
+              {
+                v: "other",
+                label: "⏸ Other reason",
+                help: "Anything else — notes required.",
+              },
+            ].map((opt) => {
+              const checked = reason === opt.v;
+              return (
+                <label
+                  key={opt.v}
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 10,
+                    padding: "10px 12px",
+                    background: checked
+                      ? "rgba(167,139,250,0.10)"
+                      : "var(--surface)",
+                    border: `1.5px solid ${
+                      checked ? "rgba(167,139,250,0.55)" : "var(--border)"
+                    }`,
+                    borderRadius: 8,
+                    cursor: "pointer",
+                    touchAction: "manipulation",
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="reason"
+                    value={opt.v}
+                    checked={checked}
+                    onChange={() => setReason(opt.v)}
+                    style={{ marginTop: 2, cursor: "pointer", flexShrink: 0 }}
+                  />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontWeight: 700,
+                        fontSize: 13,
+                        color: "var(--text)",
+                      }}
+                    >
+                      {opt.label}
+                    </div>
+                    <div
+                      style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}
+                    >
+                      {opt.help}
+                    </div>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+
+        <div>
+          <Label>
+            Notes{" "}
+            {requiresNotes && (
+              <span style={{ color: "#dc2626" }}>(required)</span>
+            )}
+          </Label>
+          <textarea
+            name="notes"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            rows={2}
+            placeholder={
+              reason === "two_side_flip"
+                ? "e.g. side-1 carved, flip for back side later"
+                : reason === "no_power"
+                  ? "e.g. waiting on diesel delivery 6pm"
+                  : reason === "tool_change"
+                    ? "e.g. swapping to 6mm ball for finishing pass"
+                    : "What's going on?"
+            }
+            style={{
+              padding: "10px 12px",
+              fontSize: 13,
+              border: "1px solid var(--border)",
+              borderRadius: 8,
+              background: "var(--bg)",
+              color: "var(--text)",
+              resize: "vertical",
+              fontFamily: "inherit",
+              width: "100%",
+            }}
+          />
+        </div>
+
+        <div
+          style={{
+            padding: "8px 12px",
+            fontSize: 11,
+            background: "rgba(167,139,250,0.08)",
+            border: "1px dashed rgba(167,139,250,0.4)",
+            borderRadius: 6,
+            color: "#5b21b6",
+          }}
+        >
+          The machine will go idle (or stay carving if a partner is
+          still on the other head). Find this slab later in the{" "}
+          <strong>⏸ On hold</strong> tile.
+        </div>
+
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            type="submit"
+            disabled={!canSubmit}
+            style={{
+              flex: 1,
+              padding: "12px 16px",
+              fontSize: 14,
+              fontWeight: 700,
+              background: canSubmit ? "#7c3aed" : "var(--surface-alt)",
+              color: canSubmit ? "#fff" : "var(--muted)",
+              border: `1.5px solid ${canSubmit ? "#6d28d9" : "var(--border)"}`,
+              borderRadius: 8,
+              cursor: canSubmit ? "pointer" : "not-allowed",
+              minHeight: 48,
+              touchAction: "manipulation",
+            }}
+          >
+            ⏸ Hold this slab
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="ghost-button"
+            style={{ padding: "12px 16px", fontSize: 13 }}
+          >
+            Cancel
+          </button>
+        </div>
+      </form>
+    </ModalShell>
   );
 }

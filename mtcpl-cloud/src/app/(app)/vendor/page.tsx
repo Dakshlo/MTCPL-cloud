@@ -17,7 +17,7 @@
 
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { VendorCockpitClient, type CarvingJobLite, type CncMachineLive, type SlabLite } from "./cockpit-client";
+import { VendorCockpitClient, type CarvingJobLite, type CncMachineLive, type SlabLite, type HeldSlabLite } from "./cockpit-client";
 
 type SearchParams = Promise<{ vendor_id?: string; toast?: string }>;
 
@@ -79,14 +79,16 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
       .eq("is_active", true)
       .order("machine_code"),
     // Queue (carving_assigned, no machine) + Active (carving_in_progress)
-    // pulled together so we can split client-side.
+    // + On Hold (carving_on_hold, mig 069) pulled together so we can
+    // split client-side. Held slabs need the held_at + held_reason +
+    // held_from_machine_id fields surfaced for the On Hold tray.
     admin
       .from("carving_items")
       .select(
-        "id, slab_requirement_id, status, urgency, estimated_minutes, vendor_estimated_minutes, cnc_machine_id, loaded_at, assigned_at, note, received_at_vendor_at, requires_machine_type, batch_id",
+        "id, slab_requirement_id, status, urgency, estimated_minutes, vendor_estimated_minutes, cnc_machine_id, loaded_at, assigned_at, note, received_at_vendor_at, requires_machine_type, batch_id, held_at, held_reason, held_from_machine_id",
       )
       .eq("vendor_id", vendorId)
-      .in("status", ["carving_assigned", "carving_in_progress"])
+      .in("status", ["carving_assigned", "carving_in_progress", "carving_on_hold"])
       .order("assigned_at", { ascending: true }),
     admin
       .from("carving_items")
@@ -167,6 +169,11 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
   // so the cockpit can render both slabs side-by-side and act on
   // either one independently (e.g. unload one mid-carving).
   const activeByMachine = new Map<string, CarvingJobLite[]>();
+  // Mig 069 — on-hold tray. Slabs the vendor parked mid-carve so
+  // they could free the machine for another piece. Surfaced by its
+  // own peek modal in the cockpit; the slab keeps its vendor + its
+  // held_from_machine so the reload modal can default back.
+  const held: HeldSlabLite[] = [];
   for (const row of (queueAndActive ?? []) as Array<{
     id: string;
     slab_requirement_id: string;
@@ -181,6 +188,9 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
     received_at_vendor_at?: string | null;
     requires_machine_type?: string | null;
     batch_id?: string | null;
+    held_at?: string | null;
+    held_reason?: string | null;
+    held_from_machine_id?: string | null;
   }>) {
     const slab = slabById.get(row.slab_requirement_id) ?? null;
     const job: CarvingJobLite = {
@@ -199,6 +209,19 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
       requires_machine_type: row.requires_machine_type ?? null,
       batch_id: row.batch_id ?? null,
     };
+    if (row.status === "carving_on_hold") {
+      held.push({
+        id: row.id,
+        slab_id: row.slab_requirement_id,
+        urgency: job.urgency,
+        requires_machine_type: row.requires_machine_type ?? null,
+        held_at: row.held_at ?? null,
+        held_reason: row.held_reason ?? null,
+        held_from_machine_id: row.held_from_machine_id ?? null,
+        slab,
+      });
+      continue;
+    }
     if (row.status === "carving_assigned") queue.push(job);
     else if (row.cnc_machine_id) {
       const arr = activeByMachine.get(row.cnc_machine_id) ?? [];
@@ -206,6 +229,13 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
       activeByMachine.set(row.cnc_machine_id, arr);
     }
   }
+  // Sort held: most-recently-held first so a quick flip-and-reload
+  // shows up at the top of the tray.
+  held.sort((a, b) => {
+    const aT = a.held_at ? new Date(a.held_at).getTime() : 0;
+    const bT = b.held_at ? new Date(b.held_at).getTime() : 0;
+    return bT - aT;
+  });
   // Sort the queue: urgent first, then oldest assigned first.
   queue.sort((a, b) => {
     if (a.urgency !== b.urgency) return a.urgency === "urgent" ? -1 : 1;
@@ -269,6 +299,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
       vendor={{ id: vendorRow.id, name: vendorRow.name }}
       machines={machineCards}
       queue={queue}
+      held={held}
       recent={recent}
       otherVendors={otherVendors}
       isStaffView={profile.role !== "vendor"}
