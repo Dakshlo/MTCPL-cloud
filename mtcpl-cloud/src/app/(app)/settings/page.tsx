@@ -441,8 +441,15 @@ export default async function SettingsPage() {
                     </summary>
 
                     <div className="settings-table-edit">
-                      {/* Own row: only allow changing display name */}
-                      {isSelf ? (
+                      {/* Daksh May 2026 — self-rename locked.
+                          Several role gates key off the display name
+                          (sidebar grants dashboard access to specific
+                          names like RAJESH / NARESH). If a user
+                          renames themselves they silently lose those
+                          grants. Only developer can edit their own
+                          row here; everyone else sees a read-only
+                          panel telling them to ask an admin. */}
+                      {isSelf && currentUser.role === "developer" ? (
                         <form action={updateOwnNameAction} className="settings-form-row" style={{ flexWrap: "wrap" }}>
                           <label className="stack" style={{ flex: "2 1 160px" }}>
                             <span>Your Display Name</span>
@@ -461,6 +468,33 @@ export default async function SettingsPage() {
                             Role and status can only be changed by another admin.
                           </p>
                         </form>
+                      ) : isSelf ? (
+                        <div
+                          style={{
+                            padding: "12px 14px",
+                            background: "var(--surface-alt)",
+                            border: "1px solid var(--border)",
+                            borderRadius: 8,
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 8,
+                              fontSize: 13,
+                              fontWeight: 700,
+                            }}
+                          >
+                            <span>🔒</span>
+                            <span>{user.full_name || "—"}</span>
+                          </div>
+                          <p className="muted" style={{ fontSize: 11, margin: "6px 0 0" }}>
+                            Your display name is locked because role
+                            permissions key off it. Ask the developer
+                            if it really needs to change.
+                          </p>
+                        </div>
                       ) : (
                       <form action={updateUserAction} className="settings-form-row" style={{ flexWrap: "wrap" }}>
                             <input type="hidden" name="id" value={user.id} />

@@ -304,10 +304,12 @@ export async function updateUserAction(formData: FormData) {
 }
 
 export async function updateOwnNameAction(formData: FormData) {
-  const { profile: currentUser } = await requireAuth([
-    "owner", "team_head", "developer", "block_slab_entry",
-    "slab_entry", "block_entry", "cutting_operator",
-  ]);
+  // Daksh May 2026 — locked to developer. Multiple role gates key
+  // off the display name (sidebar grants RAJESH / NARESH dashboard
+  // access by name match), and a self-rename would silently revoke
+  // those grants. UI no longer renders the form for non-devs, but
+  // a stale tab / scripted POST is still blocked here.
+  const { profile: currentUser } = await requireAuth(["developer"]);
   const admin = createAdminSupabaseClient();
 
   const full_name = text(formData, "full_name").trim();

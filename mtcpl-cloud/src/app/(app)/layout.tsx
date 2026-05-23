@@ -375,11 +375,16 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         <div className="topbar">
           <div className="topbar-left">
             <span className="topbar-label">Signed in as</span>
+            {/* Daksh May 2026 — link still goes to /profile but
+                the page itself is now read-only for non-devs (some
+                role gates key off the display name; a self-rename
+                would silently revoke those grants). Tooltip + dashed
+                underline removed to stop hinting "click to edit". */}
             <Link
               href="/profile"
               className="topbar-name"
-              title="Click to update your display name"
-              style={{ textDecoration: "none", borderBottom: "1px dashed var(--border)", cursor: "pointer" }}
+              title="View your profile"
+              style={{ textDecoration: "none", cursor: "pointer" }}
             >
               {displayName}
             </Link>
