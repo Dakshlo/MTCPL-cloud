@@ -937,44 +937,79 @@ export function DueBillsClient({
         </div>
       )}
 
-      {/* Sticky action bar (sticky when selection is non-empty) */}
+      {/* Daksh May 2026 — sticky-was-wrong fix. position: sticky
+          only kicks in once the user has scrolled PAST the bar's
+          natural position; while scrolling through a long list the
+          bar sat at the END of the list, out of view. Switched to
+          position: fixed so the bar is ALWAYS pinned to the
+          viewport bottom whenever there's a selection — no matter
+          how deep into the list the accountant has scrolled.
+          left: var(--content-left) matches the Pay Today footer
+          pattern so the bar starts where the sidebar ends; on
+          mobile (<900px) --content-left collapses to 0. The
+          bottom-padding spacer below reserves layout space so
+          the last list row isn't hidden behind the fixed bar. */}
       {canPropose && selected.size > 0 && (
-        <div
-          style={{
-            position: "sticky",
-            bottom: 16,
-            marginTop: 14,
-            padding: "14px 18px",
-            background: "#fff",
-            border: `1.5px solid ${ACCOUNTS_TOKENS.accent}`,
-            borderRadius: 12,
-            boxShadow: "0 8px 24px rgba(79,70,229,0.18)",
-            display: "flex",
-            alignItems: "center",
-            gap: 14,
-            flexWrap: "wrap",
-            zIndex: 5,
-          }}
-        >
-          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-              {selected.size} bill{selected.size === 1 ? "" : "s"} selected
-            </span>
-            <Money value={selectedTotal} size="large" tone="accent" />
-          </div>
-          <div style={{ flex: 1 }} />
-          <button type="button" onClick={clearAll} style={BUTTON_STYLES.ghost} disabled={pending}>
-            Clear
-          </button>
-          <button
-            type="button"
-            onClick={handlePropose}
-            disabled={pending}
-            style={BUTTON_STYLES.primary}
+        <>
+          <div
+            style={{
+              position: "fixed",
+              left: "var(--content-left, 240px)",
+              right: 0,
+              bottom: 0,
+              padding: "12px 24px calc(12px + env(safe-area-inset-bottom, 0px))",
+              background: "rgba(255,255,255,0.96)",
+              backdropFilter: "blur(8px)",
+              WebkitBackdropFilter: "blur(8px)",
+              borderTop: `1.5px solid ${ACCOUNTS_TOKENS.accent}`,
+              boxShadow: "0 -8px 24px rgba(79,70,229,0.14)",
+              display: "flex",
+              alignItems: "center",
+              gap: 14,
+              flexWrap: "wrap",
+              zIndex: 50,
+            }}
           >
-            {pending ? "Proposing…" : `💸 Propose ${selected.size} for Pay Today`}
-          </button>
-        </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: "var(--muted)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                }}
+              >
+                {selected.size} bill{selected.size === 1 ? "" : "s"} selected
+              </span>
+              <Money value={selectedTotal} size="large" tone="accent" />
+            </div>
+            <div style={{ flex: 1 }} />
+            <button
+              type="button"
+              onClick={clearAll}
+              style={BUTTON_STYLES.ghost}
+              disabled={pending}
+            >
+              Clear
+            </button>
+            <button
+              type="button"
+              onClick={handlePropose}
+              disabled={pending}
+              style={BUTTON_STYLES.primary}
+            >
+              {pending
+                ? "Proposing…"
+                : `💸 Propose ${selected.size} for Pay Today`}
+            </button>
+          </div>
+          {/* Spacer so the last list row isn't visually hidden
+              behind the fixed bar. Matches the bar's approximate
+              height (~72px) — tighter than the bar itself so it
+              doesn't add a giant gap when the bar wraps. */}
+          <div aria-hidden style={{ height: 80 }} />
+        </>
       )}
     </div>
   );

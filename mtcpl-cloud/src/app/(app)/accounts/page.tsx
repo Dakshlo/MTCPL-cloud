@@ -700,54 +700,11 @@ export default async function AccountsHomePage({
         />
       )}
 
-      {/* Daksh May 2026 — discreet entry point to the cross-vendor
-          royalty summary peek. Owner / developer only; passphrase-
-          gated on the destination page. Sits at the very bottom of
-          the dashboard as dad asked ("most bottom of dashboard")
-          so it doesn't distract from the daily Due Bills flow but
-          is one tap away when he wants the cross-vendor view. */}
-      {(profile.role === "owner" || profile.role === "developer") && (
-        <div
-          style={{
-            marginTop: 28,
-            display: "flex",
-            justifyContent: "center",
-          }}
-        >
-          <Link
-            href="/accounts/royalty-summary"
-            title="Cross-vendor royalty summary (passphrase required)"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "8px 16px",
-              fontSize: 12,
-              fontWeight: 600,
-              color: "var(--muted)",
-              background: "var(--surface)",
-              border: "1px dashed var(--border)",
-              borderRadius: 999,
-              textDecoration: "none",
-              transition: "color 0.12s, border-color 0.12s",
-            }}
-          >
-            <span
-              aria-hidden
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: "50%",
-                background: "#d97706",
-                display: "inline-block",
-                boxShadow: "0 0 0 3px rgba(217,119,6,0.15)",
-              }}
-            />
-            🏷️ Royalty Summary · all vendors
-            <span style={{ opacity: 0.6, fontSize: 11 }}>🔒</span>
-          </Link>
-        </div>
-      )}
+      {/* Daksh May 2026 — Royalty Summary pill removed from this
+          page; it was duplicated from /dashboard. Dad wanted it ONLY
+          on the main dashboard (he'll locate the dot there). The
+          /accounts/royalty-summary route still exists and is
+          reachable from /dashboard. */}
     </section>
   );
 }
