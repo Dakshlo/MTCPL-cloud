@@ -3972,8 +3972,12 @@ export async function applyAdvanceToBillAction(
 
   // 1. Insert the synthetic bill_payments row — arrives PRE-PAID so
   //    no other action tries to propose / confirm / mark-paid it.
-  //    payment_method='advance_credit' + payment_reference=ADV token
-  //    keep the row readable on the bill detail page.
+  //    payment_method='other' (the only enum value that fits a
+  //    non-cash, non-bank-instrument transfer — mig 028 enum is
+  //    strict: cash/cheque/neft/rtgs/upi/imps/card/other). The row
+  //    is still uniquely identifiable by is_advance_application +
+  //    source_advance_id + the 'ADV-LINK:' prefix in
+  //    payment_reference, so UI / filters can tell it apart.
   const { data: paymentRow, error: payErr } = await supabase
     .from("bill_payments")
     .insert({
@@ -3981,7 +3985,7 @@ export async function applyAdvanceToBillAction(
       status: "paid",
       proposed_amount: amount,
       paid_amount: amount,
-      payment_method: "advance_credit",
+      payment_method: "other",
       payment_reference: `ADV-LINK:${a.token}`,
       payment_note: note,
       proposed_by: profile.id,
