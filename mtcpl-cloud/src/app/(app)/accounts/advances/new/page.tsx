@@ -41,7 +41,7 @@ export default async function NewAdvancePage({ searchParams }: { searchParams: S
   const { data: vendorRows } = await supabase
     .from("bill_vendors")
     .select("id, name")
-    .is("archived_at", null)
+    .eq("is_active", true)
     .order("name");
   const vendors = ((vendorRows ?? []) as Array<{ id: string; name: string }>);
 

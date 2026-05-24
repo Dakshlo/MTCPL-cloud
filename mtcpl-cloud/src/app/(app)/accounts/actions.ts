@@ -3606,15 +3606,16 @@ export async function recordAdvanceAction(
     return { ok: false, error: "Add a short reason for the advance." };
   }
 
-  // Confirm vendor exists + is active.
+  // Confirm vendor exists + is active. bill_vendors uses
+  // is_active BOOLEAN (mig 028) — NOT an archived_at timestamp.
   const { data: vendor, error: vErr } = await supabase
     .from("bill_vendors")
-    .select("id, name, archived_at")
+    .select("id, name, is_active")
     .eq("id", vendorId)
     .maybeSingle();
   if (vErr) return { ok: false, error: vErr.message };
   if (!vendor) return { ok: false, error: "Vendor not found." };
-  if ((vendor as { archived_at: string | null }).archived_at) {
+  if ((vendor as { is_active: boolean }).is_active === false) {
     return { ok: false, error: "Vendor is archived." };
   }
 
