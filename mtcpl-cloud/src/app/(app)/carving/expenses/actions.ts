@@ -25,9 +25,14 @@ import {
 
 type ActionResult = { ok: true } | { ok: false; error: string };
 
+// Daksh May 2026 (mig 071) — electricity dropped from the per-vendor
+// category set. Electricity is now a single plant-wide monthly entry
+// (cnc_plant_electricity) because the real meter sits at the plant
+// gate, not per vendor. Existing per-vendor electricity rows from
+// before this date stay in cnc_vendor_expenses (history); new entries
+// can't use that category any more.
 const EXPENSE_CATEGORIES = new Set([
   "tools",
-  "electricity",
   "labor",
   "office",
   "maintenance",
@@ -222,6 +227,158 @@ export async function cancelCncExpenseAction(
     amount: Number((updated as { amount?: number }).amount ?? 0),
     reason,
   });
+  refreshCarvingPaths();
+  return { ok: true };
+}
+
+// ══════════════════════════════════════════════════════════════════
+// Plant electricity (mig 071) — one entry per (year, month) plant-wide
+// ══════════════════════════════════════════════════════════════════
+
+/** Insert OR replace the plant electricity entry for a given month.
+ *  The unique partial index on cnc_plant_electricity (active rows only)
+ *  means we can't have two non-cancelled rows for the same month. So
+ *  if one already exists for (year, month), we soft-cancel it first
+ *  and insert the new one — gives a clean edit-by-re-entry flow. */
+export async function addPlantElectricityAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canEnterCncExpenses(profile)) {
+    return { ok: false, error: "Not allowed to enter plant electricity." };
+  }
+  const supabase = createAdminSupabaseClient();
+
+  const year = intOrNaN(formData, "year");
+  const month = intOrNaN(formData, "month");
+  const amount = numOrNaN(formData, "amount");
+  const unitsRaw = (formData.get("units_kwh") ?? "").toString().trim();
+  const units = unitsRaw ? Number(unitsRaw) : null;
+  const note = txt(formData, "note") || null;
+
+  if (!Number.isFinite(year) || year < 2020 || year > 2100) {
+    return { ok: false, error: "Pick a valid year." };
+  }
+  if (!Number.isFinite(month) || month < 1 || month > 12) {
+    return { ok: false, error: "Pick a valid month." };
+  }
+  if (!Number.isFinite(amount) || amount < 0) {
+    return { ok: false, error: "Amount must be a positive number." };
+  }
+  if (units != null && (!Number.isFinite(units) || units < 0)) {
+    return { ok: false, error: "Units (kWh) must be a positive number." };
+  }
+
+  const now = new Date().toISOString();
+
+  // If a non-cancelled row already exists for this (year, month),
+  // soft-cancel it so the new insert doesn't collide with the unique
+  // partial index. Audit captures the replacement for traceability.
+  const { data: existing } = await supabase
+    .from("cnc_plant_electricity")
+    .select("id, amount, units_kwh")
+    .eq("year", year)
+    .eq("month", month)
+    .is("cancelled_at", null)
+    .maybeSingle();
+  if (existing) {
+    const old = existing as { id: string; amount: number; units_kwh: number | null };
+    const { error: cancelErr } = await supabase
+      .from("cnc_plant_electricity")
+      .update({
+        cancelled_at: now,
+        cancelled_by: profile.id,
+        cancel_reason: "replaced by new entry for the same month",
+        updated_at: now,
+        updated_by: profile.id,
+      })
+      .eq("id", old.id);
+    if (cancelErr) return { ok: false, error: cancelErr.message };
+    void logAudit(
+      profile.id,
+      "cnc_plant_electricity_replaced",
+      "cnc_plant_electricity",
+      old.id,
+      {
+        year,
+        month,
+        old_amount: Number(old.amount ?? 0),
+        old_units: old.units_kwh != null ? Number(old.units_kwh) : null,
+      },
+    );
+  }
+
+  const { data: inserted, error: insErr } = await supabase
+    .from("cnc_plant_electricity")
+    .insert({
+      year,
+      month,
+      amount,
+      units_kwh: units,
+      note,
+      entered_by: profile.id,
+    })
+    .select("id")
+    .single();
+  if (insErr) return { ok: false, error: insErr.message };
+
+  void logAudit(
+    profile.id,
+    "cnc_plant_electricity_added",
+    "cnc_plant_electricity",
+    inserted.id,
+    { year, month, amount, units_kwh: units },
+  );
+  refreshCarvingPaths();
+  return { ok: true };
+}
+
+/** Soft-cancel the plant electricity entry for a given month. Reason
+ *  optional but recommended (typo / wrong month / wrong amount). */
+export async function cancelPlantElectricityAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canEnterCncExpenses(profile)) {
+    return { ok: false, error: "Not allowed to cancel plant electricity." };
+  }
+  const supabase = createAdminSupabaseClient();
+
+  const id = txt(formData, "id");
+  const reason = txt(formData, "reason") || null;
+  if (!id) return { ok: false, error: "Missing entry id." };
+
+  const now = new Date().toISOString();
+  const { data: updated, error: updErr } = await supabase
+    .from("cnc_plant_electricity")
+    .update({
+      cancelled_at: now,
+      cancelled_by: profile.id,
+      cancel_reason: reason,
+      updated_at: now,
+      updated_by: profile.id,
+    })
+    .eq("id", id)
+    .is("cancelled_at", null)
+    .select("id, year, month, amount")
+    .maybeSingle();
+  if (updErr) return { ok: false, error: updErr.message };
+  if (!updated) {
+    return { ok: false, error: "Entry already cancelled or not found." };
+  }
+
+  void logAudit(
+    profile.id,
+    "cnc_plant_electricity_cancelled",
+    "cnc_plant_electricity",
+    id,
+    {
+      year: (updated as { year?: number }).year,
+      month: (updated as { month?: number }).month,
+      amount: Number((updated as { amount?: number }).amount ?? 0),
+      reason,
+    },
+  );
   refreshCarvingPaths();
   return { ok: true };
 }

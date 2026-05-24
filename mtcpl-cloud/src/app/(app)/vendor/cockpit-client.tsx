@@ -2314,29 +2314,45 @@ function PendingStockRow({ job }: { job: CarvingJobLite }) {
   const accent = isTransfer
     ? { bg: "rgba(20,184,166,0.06)", border: "rgba(20,184,166,0.45)", fg: "#0f766e" }
     : { bg: "rgba(217,119,6,0.04)", border: "rgba(217,119,6,0.4)", fg: "#b45309" };
+  // Daksh May 2026 — compacted to match the QueueRow shape: single
+  // horizontal row, slab info left, action(s) on the right. The
+  // previous column layout + multi-line helper text made each row
+  // tall and the list felt sparse on tablet/desktop.
   return (
     <div
       style={{
         display: "flex",
-        flexDirection: "column",
-        gap: 8,
+        alignItems: "center",
+        gap: 10,
         padding: "10px 12px",
         background: accent.bg,
-        border: `1.5px ${isTransfer ? "solid" : "dashed"} ${accent.border}`,
+        border: `1px ${isTransfer ? "solid" : "dashed"} ${accent.border}`,
         borderLeft: tint
           ? `5px solid ${tint.border}`
-          : `1.5px ${isTransfer ? "solid" : "dashed"} ${accent.border}`,
+          : `1px ${isTransfer ? "solid" : "dashed"} ${accent.border}`,
         borderRadius: 8,
+        flexWrap: "wrap",
       }}
       title={tint ? "Part of a batch — these slabs were assigned together" : undefined}
     >
-      <div style={{ flex: "1 1 220px", minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+      <div style={{ flex: "1 1 180px", minWidth: 0 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            flexWrap: "wrap",
+          }}
+        >
           {isUrgent && (
             <span
               style={{
-                fontSize: 10, fontWeight: 800, padding: "2px 8px",
-                borderRadius: 999, background: "#dc2626", color: "#fff",
+                fontSize: 10,
+                fontWeight: 800,
+                padding: "2px 8px",
+                borderRadius: 999,
+                background: "#dc2626",
+                color: "#fff",
                 letterSpacing: "0.05em",
               }}
             >
@@ -2346,9 +2362,13 @@ function PendingStockRow({ job }: { job: CarvingJobLite }) {
           {isLathe && (
             <span
               style={{
-                fontSize: 9, fontWeight: 800, padding: "2px 6px",
-                borderRadius: 3, background: "rgba(124,58,237,0.15)",
-                color: "#7c3aed", letterSpacing: "0.05em",
+                fontSize: 9,
+                fontWeight: 800,
+                padding: "2px 6px",
+                borderRadius: 3,
+                background: "rgba(124,58,237,0.15)",
+                color: "#7c3aed",
+                letterSpacing: "0.05em",
               }}
               title="Cylindrical — lathe required"
             >
@@ -2358,15 +2378,18 @@ function PendingStockRow({ job }: { job: CarvingJobLite }) {
           {isTransfer ? (
             <span
               style={{
-                fontSize: 10, fontWeight: 800, padding: "2px 8px",
-                borderRadius: 999, background: "rgba(20,184,166,0.18)",
-                color: accent.fg, letterSpacing: "0.04em",
-                border: `1px solid ${accent.border}`,
+                fontSize: 9,
+                fontWeight: 800,
+                padding: "2px 6px",
+                borderRadius: 3,
+                background: "rgba(20,184,166,0.18)",
+                color: accent.fg,
+                letterSpacing: "0.04em",
               }}
               title={
                 job.transferred_at
                   ? `Transferred ${new Date(job.transferred_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`
-                  : undefined
+                  : "Inter-vendor transfer"
               }
             >
               ↔ FROM {(job.transferred_from_vendor_name ?? "?").toUpperCase()}
@@ -2374,15 +2397,25 @@ function PendingStockRow({ job }: { job: CarvingJobLite }) {
           ) : (
             <span
               style={{
-                fontSize: 9, fontWeight: 800, padding: "2px 6px",
-                borderRadius: 3, background: "rgba(217,119,6,0.18)",
-                color: accent.fg, letterSpacing: "0.05em",
+                fontSize: 9,
+                fontWeight: 800,
+                padding: "2px 6px",
+                borderRadius: 3,
+                background: "rgba(217,119,6,0.18)",
+                color: accent.fg,
+                letterSpacing: "0.05em",
               }}
             >
               🚚 IN TRANSIT
             </span>
           )}
-          <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 13 }}>
+          <span
+            style={{
+              fontFamily: "ui-monospace, monospace",
+              fontWeight: 700,
+              fontSize: 13,
+            }}
+          >
             {job.slab_id}
           </span>
         </div>
@@ -2394,25 +2427,31 @@ function PendingStockRow({ job }: { job: CarvingJobLite }) {
         {job.slab?.stock_location && (
           <div
             style={{
-              fontSize: 11, color: "#7c2d12", marginTop: 2,
-              fontFamily: "ui-monospace, monospace", fontWeight: 700,
+              fontSize: 11,
+              color: "#7c2d12",
+              marginTop: 2,
+              fontFamily: "ui-monospace, monospace",
+              fontWeight: 700,
             }}
+            title="Last known pickup location for the transfer runner"
           >
-            📍 Currently at: {job.slab.stock_location}
+            📍 {job.slab.stock_location}
           </div>
         )}
-        <div style={{ fontSize: 10, color: "var(--muted-light)", marginTop: 4 }}>
-          {isTransfer
-            ? `Sent from ${job.transferred_from_vendor_name}. Accept once it's at your shade, or Flag to send it back.`
-            : "Transfer runner will deliver to your shade. Click ✅ Mark received once it arrives."}
-        </div>
       </div>
-      {/* Mig 070 — Accept / Flag controls for inter-vendor transfers.
-          Two forms, side-by-side, both with confirms + spinner
-          overlays (same pattern as the other cockpit forms). The
-          slab_transfer runner flow keeps the read-only display. */}
+      {/* Mig 070 — Accept / Flag controls for inter-vendor transfers
+          (right side, compact). Non-transfer pending rows have no
+          right-side action because the runner delivers; once they
+          mark received it moves to Ready to load on its own. */}
       {isTransfer && (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+            flexShrink: 0,
+          }}
+        >
           <form
             action={acceptTransferReceiptAction}
             onSubmit={(e) => {
@@ -2424,7 +2463,6 @@ function PendingStockRow({ job }: { job: CarvingJobLite }) {
                 e.preventDefault();
               }
             }}
-            style={{ flex: "1 1 180px" }}
           >
             <FormPendingOverlay label="Accepting transfer…" />
             <input type="hidden" name="carving_item_id" value={job.id} />
@@ -2432,20 +2470,18 @@ function PendingStockRow({ job }: { job: CarvingJobLite }) {
             <button
               type="submit"
               style={{
-                width: "100%",
-                padding: "10px 14px",
-                fontSize: 13,
-                fontWeight: 700,
+                fontSize: 11,
+                padding: "6px 12px",
                 background: accent.fg,
                 color: "#fff",
-                border: `1px solid ${accent.fg}`,
-                borderRadius: 8,
+                border: "none",
+                borderRadius: 6,
+                fontWeight: 700,
                 cursor: "pointer",
-                minHeight: 44,
-                touchAction: "manipulation",
+                width: "100%",
               }}
             >
-              ✅ Accept · mark received
+              ✅ Accept
             </button>
           </form>
           <FlagTransferButton job={job} />
@@ -3163,6 +3199,40 @@ function MachineCard({
                   {slabJob.slab && (
                     <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
                       {slabJob.slab.temple} · {dimStr(slabJob.slab)}
+                    </div>
+                  )}
+                  {/* Daksh May 2026 — surface label + note on the
+                      running card so the operator sees the full
+                      slab identity (e.g. "Jagti dodiya thar (mohit)")
+                      and any carving-head instructions without
+                      having to open the detail panel. */}
+                  {slabJob.slab?.label && (
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: "var(--text)",
+                        marginTop: 3,
+                        fontWeight: 600,
+                        wordBreak: "break-word",
+                      }}
+                      title="Slab label (set at cut time)"
+                    >
+                      🏷 {slabJob.slab.label}
+                    </div>
+                  )}
+                  {slabJob.note && (
+                    <div
+                      style={{
+                        fontSize: 10.5,
+                        color: "#475569",
+                        marginTop: 3,
+                        fontStyle: "italic",
+                        lineHeight: 1.35,
+                        wordBreak: "break-word",
+                      }}
+                      title="Note from the carving head when assigning"
+                    >
+                      “{slabJob.note}”
                     </div>
                   )}
                   {/* Timer + progress only shown on the first row

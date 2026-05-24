@@ -22,13 +22,16 @@ import { canEnterCncExpenses } from "@/lib/expenses-permissions";
 import { getProfilesMap } from "@/lib/profiles";
 import {
   addCncExpenseAction,
+  addPlantElectricityAction,
   cancelCncExpenseAction,
+  cancelPlantElectricityAction,
   editCncExpenseAction,
 } from "./actions";
 import {
   CncExpensesClient,
   type CncExpenseRow,
   type CncVendorOption,
+  type PlantElectricityRow,
 } from "./expenses-client";
 
 type Search = Promise<{ year?: string; month?: string }>;
@@ -111,6 +114,50 @@ export default async function CncExpensesPage({ searchParams }: { searchParams: 
     updatedByName: e.updated_by ? profilesMap[e.updated_by] ?? "Unknown" : null,
   }));
 
+  // Mig 071 — single-row plant electricity entry for this month
+  // (active one only — soft-cancelled rows ignored).
+  const { data: peRaw } = await supabase
+    .from("cnc_plant_electricity")
+    .select(
+      "id, year, month, units_kwh, amount, note, entered_by, entered_at, updated_at, updated_by",
+    )
+    .eq("year", year)
+    .eq("month", month)
+    .is("cancelled_at", null)
+    .maybeSingle();
+  const plantElectricity: PlantElectricityRow | null = peRaw
+    ? (() => {
+        const r = peRaw as {
+          id: string;
+          year: number;
+          month: number;
+          units_kwh: number | string | null;
+          amount: number | string;
+          note: string | null;
+          entered_by: string | null;
+          entered_at: string;
+          updated_at: string;
+          updated_by: string | null;
+        };
+        return {
+          id: r.id,
+          year: r.year,
+          month: r.month,
+          unitsKwh: r.units_kwh != null ? Number(r.units_kwh) : null,
+          amount: Number(r.amount ?? 0),
+          note: r.note,
+          enteredByName: r.entered_by
+            ? profilesMap[r.entered_by] ?? "Unknown"
+            : null,
+          enteredAt: r.entered_at,
+          updatedAt: r.updated_at,
+          updatedByName: r.updated_by
+            ? profilesMap[r.updated_by] ?? "Unknown"
+            : null,
+        };
+      })()
+    : null;
+
   const monthLabel = `${MONTH_NAMES[month - 1]} ${year}`;
   // Prev / next month for the sticky-footer quick-nav.
   const prevMonth = month === 1 ? { y: year - 1, m: 12 } : { y: year, m: month - 1 };
@@ -125,11 +172,14 @@ export default async function CncExpensesPage({ searchParams }: { searchParams: 
       month={month}
       vendors={vendors}
       expenses={expenses}
+      plantElectricity={plantElectricity}
       prevHref={prevHref}
       nextHref={nextHref}
       addAction={addCncExpenseAction}
       editAction={editCncExpenseAction}
       cancelAction={cancelCncExpenseAction}
+      addPlantElectricityAction={addPlantElectricityAction}
+      cancelPlantElectricityAction={cancelPlantElectricityAction}
     />
   );
 }

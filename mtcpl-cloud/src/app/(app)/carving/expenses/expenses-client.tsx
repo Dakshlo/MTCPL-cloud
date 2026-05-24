@@ -22,6 +22,12 @@ export type CncVendorOption = {
   name: string;
 };
 
+// Daksh May 2026 (mig 071) — "electricity" stays in this union so
+// historical rows (entered before the global move) still render
+// correctly in the per-vendor list, but it's NO LONGER offered as
+// an option in the per-vendor category dropdown (see CATEGORIES
+// below). All new electricity entries go through the plant-wide
+// PlantElectricityPanel below.
 export type ExpenseCategory =
   | "tools"
   | "electricity"
@@ -29,6 +35,19 @@ export type ExpenseCategory =
   | "office"
   | "maintenance"
   | "other";
+
+export type PlantElectricityRow = {
+  id: string;
+  year: number;
+  month: number;
+  unitsKwh: number | null;
+  amount: number;
+  note: string | null;
+  enteredByName: string | null;
+  enteredAt: string;
+  updatedAt: string;
+  updatedByName: string | null;
+};
 
 export type CncExpenseRow = {
   id: string;
@@ -46,7 +65,18 @@ export type CncExpenseRow = {
 
 type ActionResult = { ok: true } | { ok: false; error: string };
 
+// Per-vendor add/edit dropdown — electricity removed mig 071. Goes
+// to the plant-wide entry panel instead.
 const CATEGORIES: { value: ExpenseCategory; label: string; icon: string }[] = [
+  { value: "tools",       label: "Tools",        icon: "🛠" },
+  { value: "labor",       label: "Labor",        icon: "👷" },
+  { value: "office",      label: "Office",       icon: "📎" },
+  { value: "maintenance", label: "Maintenance",  icon: "🔧" },
+  { value: "other",       label: "Other",        icon: "•" },
+];
+// Full list (incl. electricity) so legacy rows still render with
+// the right icon + label.
+const ALL_CATEGORIES_DISPLAY: { value: ExpenseCategory; label: string; icon: string }[] = [
   { value: "tools",       label: "Tools",        icon: "🛠" },
   { value: "electricity", label: "Electricity",  icon: "⚡" },
   { value: "labor",       label: "Labor",        icon: "👷" },
@@ -66,11 +96,11 @@ function fmtINR(n: number): string {
 }
 
 function categoryLabel(c: ExpenseCategory): string {
-  return CATEGORIES.find((x) => x.value === c)?.label ?? c;
+  return ALL_CATEGORIES_DISPLAY.find((x) => x.value === c)?.label ?? c;
 }
 
 function categoryIcon(c: ExpenseCategory): string {
-  return CATEGORIES.find((x) => x.value === c)?.icon ?? "•";
+  return ALL_CATEGORIES_DISPLAY.find((x) => x.value === c)?.icon ?? "•";
 }
 
 export function CncExpensesClient({
@@ -79,22 +109,28 @@ export function CncExpensesClient({
   month,
   vendors,
   expenses,
+  plantElectricity,
   prevHref,
   nextHref,
   addAction,
   editAction,
   cancelAction,
+  addPlantElectricityAction,
+  cancelPlantElectricityAction,
 }: {
   monthLabel: string;
   year: number;
   month: number;
   vendors: CncVendorOption[];
   expenses: CncExpenseRow[];
+  plantElectricity: PlantElectricityRow | null;
   prevHref: string;
   nextHref: string;
   addAction: (formData: FormData) => Promise<ActionResult>;
   editAction: (formData: FormData) => Promise<ActionResult>;
   cancelAction: (formData: FormData) => Promise<ActionResult>;
+  addPlantElectricityAction: (formData: FormData) => Promise<ActionResult>;
+  cancelPlantElectricityAction: (formData: FormData) => Promise<ActionResult>;
 }) {
   // Group by vendor for the per-vendor cards.
   const expensesByVendor = useMemo(() => {
@@ -201,6 +237,18 @@ export function CncExpensesClient({
           <strong> /carving/vendors</strong> first.
         </div>
       )}
+
+      {/* Daksh May 2026 (mig 071) — plant-wide electricity panel.
+          Pinned above the vendor cards because it covers ALL
+          vendors and only takes one entry per month. */}
+      <PlantElectricityPanel
+        year={year}
+        month={month}
+        monthLabel={monthLabel}
+        row={plantElectricity}
+        addAction={addPlantElectricityAction}
+        cancelAction={cancelPlantElectricityAction}
+      />
 
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         {vendors.map((v) => {
@@ -736,5 +784,399 @@ function iconBtn(color = "var(--muted)"): React.CSSProperties {
     border: `1px solid ${color === "var(--muted)" ? "var(--border)" : color}`,
     borderRadius: 6,
     cursor: "pointer",
+  };
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Plant Electricity panel (mig 071, Daksh May 2026)
+// ──────────────────────────────────────────────────────────────────
+// One entry per (year, month) plant-wide. When a row already exists
+// for this month, show its values; clicking Edit replaces the row
+// (server soft-cancels old + inserts new — preserves audit).
+// ──────────────────────────────────────────────────────────────────
+function PlantElectricityPanel({
+  year,
+  month,
+  monthLabel,
+  row,
+  addAction,
+  cancelAction,
+}: {
+  year: number;
+  month: number;
+  monthLabel: string;
+  row: PlantElectricityRow | null;
+  addAction: (formData: FormData) => Promise<ActionResult>;
+  cancelAction: (formData: FormData) => Promise<ActionResult>;
+}) {
+  const [editing, setEditing] = useState<boolean>(!row);
+  const [amount, setAmount] = useState<string>(
+    row ? String(row.amount) : "",
+  );
+  const [units, setUnits] = useState<string>(
+    row?.unitsKwh != null ? String(row.unitsKwh) : "",
+  );
+  const [note, setNote] = useState<string>(row?.note ?? "");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  function reset() {
+    setAmount(row ? String(row.amount) : "");
+    setUnits(row?.unitsKwh != null ? String(row.unitsKwh) : "");
+    setNote(row?.note ?? "");
+    setError(null);
+  }
+
+  function submit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError(null);
+    startTransition(async () => {
+      const fd = new FormData();
+      fd.set("year", String(year));
+      fd.set("month", String(month));
+      fd.set("amount", amount);
+      fd.set("units_kwh", units);
+      fd.set("note", note);
+      const res = await addAction(fd);
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      setEditing(false);
+    });
+  }
+
+  function onCancel() {
+    if (!row) return;
+    const reason = window.prompt(
+      `Cancel the plant electricity entry for ${monthLabel}?\n\nOptional reason:`,
+    );
+    if (reason === null) return; // user hit cancel on the prompt
+    startTransition(async () => {
+      const fd = new FormData();
+      fd.set("id", row.id);
+      fd.set("reason", reason);
+      const res = await cancelAction(fd);
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      setEditing(true);
+      setAmount("");
+      setUnits("");
+      setNote("");
+    });
+  }
+
+  const inrFmt = (n: number) =>
+    `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+  const rate =
+    row && row.unitsKwh && row.unitsKwh > 0
+      ? row.amount / row.unitsKwh
+      : null;
+
+  return (
+    <section
+      style={{
+        background:
+          "linear-gradient(180deg, rgba(217,119,6,0.10) 0%, rgba(217,119,6,0.02) 100%)",
+        border: "1.5px solid rgba(217,119,6,0.40)",
+        borderRadius: 12,
+        padding: 14,
+        display: "flex",
+        flexDirection: "column",
+        gap: 12,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "baseline",
+          flexWrap: "wrap",
+          gap: 8,
+        }}
+      >
+        <div>
+          <div
+            style={{
+              fontSize: 10,
+              fontWeight: 800,
+              color: "#92400e",
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+            }}
+          >
+            ⚡ Plant Electricity · plant-wide
+          </div>
+          <div style={{ fontSize: 16, fontWeight: 800, marginTop: 2 }}>
+            {monthLabel}
+          </div>
+          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+            Single monthly bill for the whole CNC plant. Per-vendor
+            split is no longer captured — the meter sits at the
+            plant gate. Units (kWh) are optional.
+          </div>
+        </div>
+        {!editing && row && (
+          <div style={{ display: "flex", gap: 6 }}>
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              style={iconBtn("#92400e")}
+            >
+              ✎ Replace
+            </button>
+            <button
+              type="button"
+              onClick={onCancel}
+              style={iconBtn("#b91c1c")}
+              disabled={pending}
+            >
+              ✕ Cancel
+            </button>
+          </div>
+        )}
+      </div>
+
+      {!editing && row ? (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+            gap: 10,
+          }}
+        >
+          <Tile label="Bill amount" value={inrFmt(row.amount)} accent="#b45309" />
+          <Tile
+            label="Units (kWh)"
+            value={
+              row.unitsKwh != null
+                ? row.unitsKwh.toLocaleString("en-IN", {
+                    maximumFractionDigits: 2,
+                  })
+                : "—"
+            }
+          />
+          <Tile
+            label="₹/kWh"
+            value={rate != null ? rate.toFixed(2) : "—"}
+            hint="Derived"
+          />
+          <Tile
+            label="Entered by"
+            value={row.enteredByName ?? "—"}
+            hint={new Date(row.enteredAt).toLocaleString("en-IN", {
+              timeZone: "Asia/Kolkata",
+              day: "numeric",
+              month: "short",
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+          />
+          {row.note && (
+            <div
+              style={{
+                gridColumn: "1 / -1",
+                fontSize: 12,
+                color: "var(--text)",
+                background: "rgba(255,255,255,0.6)",
+                border: "1px solid rgba(217,119,6,0.25)",
+                borderRadius: 8,
+                padding: "8px 10px",
+              }}
+            >
+              <strong style={{ color: "#92400e" }}>Note:</strong> {row.note}
+            </div>
+          )}
+        </div>
+      ) : (
+        <form
+          onSubmit={submit}
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+            gap: 10,
+            background: "rgba(255,255,255,0.55)",
+            padding: 10,
+            borderRadius: 10,
+            border: "1px dashed rgba(217,119,6,0.35)",
+          }}
+        >
+          <label
+            style={{ display: "flex", flexDirection: "column", gap: 4 }}
+          >
+            <span style={fieldLabelStyle}>Bill amount (₹) *</span>
+            <input
+              type="number"
+              required
+              min="0"
+              step="0.01"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="e.g. 84500"
+              style={inputStyleLocal()}
+            />
+          </label>
+          <label
+            style={{ display: "flex", flexDirection: "column", gap: 4 }}
+          >
+            <span style={fieldLabelStyle}>Units (kWh)</span>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={units}
+              onChange={(e) => setUnits(e.target.value)}
+              placeholder="optional"
+              style={inputStyleLocal()}
+            />
+          </label>
+          <label
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+              gridColumn: "1 / -1",
+            }}
+          >
+            <span style={fieldLabelStyle}>Note</span>
+            <input
+              type="text"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="optional — e.g. ATD bill no, meter reading"
+              maxLength={500}
+              style={inputStyleLocal()}
+            />
+          </label>
+          {error && (
+            <div
+              role="alert"
+              style={{
+                gridColumn: "1 / -1",
+                padding: "8px 10px",
+                background: "rgba(220,38,38,0.08)",
+                color: "#b91c1c",
+                border: "1px solid rgba(220,38,38,0.3)",
+                borderRadius: 6,
+                fontSize: 12,
+              }}
+            >
+              {error}
+            </div>
+          )}
+          <div
+            style={{
+              gridColumn: "1 / -1",
+              display: "flex",
+              gap: 8,
+              justifyContent: "flex-end",
+            }}
+          >
+            {row && (
+              <button
+                type="button"
+                onClick={() => {
+                  reset();
+                  setEditing(false);
+                }}
+                style={iconBtn("var(--muted)")}
+                disabled={pending}
+              >
+                ✕ Cancel edit
+              </button>
+            )}
+            <button
+              type="submit"
+              disabled={pending || !amount}
+              className="primary-button"
+              style={{
+                padding: "8px 16px",
+                fontSize: 13,
+                fontWeight: 700,
+              }}
+            >
+              {pending
+                ? "Saving…"
+                : row
+                  ? "✓ Replace entry"
+                  : "✓ Save monthly bill"}
+            </button>
+          </div>
+        </form>
+      )}
+    </section>
+  );
+}
+
+function Tile({
+  label,
+  value,
+  hint,
+  accent,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  accent?: string;
+}) {
+  return (
+    <div
+      style={{
+        padding: "10px 12px",
+        background: "rgba(255,255,255,0.7)",
+        border: "1px solid rgba(217,119,6,0.25)",
+        borderRadius: 10,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          fontWeight: 800,
+          color: "#92400e",
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          fontSize: 18,
+          fontWeight: 800,
+          color: accent ?? "var(--text)",
+          marginTop: 2,
+          fontFamily: "ui-monospace, monospace",
+        }}
+      >
+        {value}
+      </div>
+      {hint && (
+        <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
+          {hint}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const fieldLabelStyle: React.CSSProperties = {
+  fontSize: 10,
+  fontWeight: 800,
+  color: "var(--muted)",
+  textTransform: "uppercase",
+  letterSpacing: "0.06em",
+};
+
+function inputStyleLocal(): React.CSSProperties {
+  return {
+    padding: "8px 10px",
+    fontSize: 13,
+    background: "#fff",
+    color: "var(--text)",
+    border: "1px solid var(--border)",
+    borderRadius: 7,
+    minWidth: 0,
   };
 }

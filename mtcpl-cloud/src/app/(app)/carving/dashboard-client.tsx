@@ -277,6 +277,25 @@ export function CarvingDashboardClient({
 
   const queryNorm = query.trim().toLowerCase();
 
+  // Daksh May 2026 — if the search query is a 3-dim triple like
+  // "53x29x14" / "53 × 29 × 14" / "53*29*14" (any case, decimals
+  // OK), we match orientation-agnostically against the slab/job
+  // dimensions (L×W×T sorted vs query sorted). Otherwise fall back
+  // to the existing substring search across slab id / label /
+  // description / temple / stone / vendor name / status.
+  const dimQuery = useMemo(() => {
+    const m = queryNorm.match(
+      /^\s*(\d+(?:\.\d+)?)\s*[x×*]\s*(\d+(?:\.\d+)?)\s*[x×*]\s*(\d+(?:\.\d+)?)\s*$/i,
+    );
+    if (!m) return null;
+    const a = Number(m[1]);
+    const b = Number(m[2]);
+    const c = Number(m[3]);
+    if (!Number.isFinite(a) || !Number.isFinite(b) || !Number.isFinite(c))
+      return null;
+    return [a, b, c].sort((x, y) => x - y) as [number, number, number];
+  }, [queryNorm]);
+
   // Single fat filter — temple + stone dropdowns were dropped per
   // the carving head's request: "just keep search bar". Search now
   // matches across slab id / label / description / temple / stone /
@@ -293,8 +312,27 @@ export function CarvingDashboardClient({
     status?: string;
     priority?: boolean | null;
     source_block_id?: string | null;
+    length_ft?: number | null;
+    width_ft?: number | null;
+    thickness_ft?: number | null;
   }): boolean {
     if (priorityOnly && !item.priority) return false;
+    // Dimension search short-circuits the text search — if the user
+    // typed a triple, we ONLY want dim-matching slabs. Orientation-
+    // agnostic via sorted multiset compare.
+    if (dimQuery) {
+      const L = Number(item.length_ft);
+      const W = Number(item.width_ft);
+      const T = Number(item.thickness_ft);
+      if (!Number.isFinite(L) || !Number.isFinite(W) || !Number.isFinite(T))
+        return false;
+      const triple = [L, W, T].sort((x, y) => x - y);
+      return (
+        triple[0] === dimQuery[0] &&
+        triple[1] === dimQuery[1] &&
+        triple[2] === dimQuery[2]
+      );
+    }
     if (queryNorm) {
       const haystack = [
         item.id,
@@ -1535,11 +1573,62 @@ function TempleSlabsPeek({
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
 
+  // Daksh May 2026 — temple-peek search bar. Local-only state (the
+  // peek scopes to one temple already, so this is just within-temple
+  // narrowing). Supports both substring (slab id / label / stock
+  // location) and dimension queries (53x29x14, orientation-agnostic).
+  const [peekQuery, setPeekQuery] = useState("");
+  const peekQueryNorm = peekQuery.trim().toLowerCase();
+  const peekDimQuery = useMemo(() => {
+    const m = peekQueryNorm.match(
+      /^\s*(\d+(?:\.\d+)?)\s*[x×*]\s*(\d+(?:\.\d+)?)\s*[x×*]\s*(\d+(?:\.\d+)?)\s*$/i,
+    );
+    if (!m) return null;
+    const a = Number(m[1]);
+    const b = Number(m[2]);
+    const c = Number(m[3]);
+    if (!Number.isFinite(a) || !Number.isFinite(b) || !Number.isFinite(c))
+      return null;
+    return [a, b, c].sort((x, y) => x - y) as [number, number, number];
+  }, [peekQueryNorm]);
+
+  const visibleSlabs = useMemo(() => {
+    if (!peekQueryNorm) return slabs;
+    return slabs.filter((s) => {
+      if (peekDimQuery) {
+        const triple = [
+          Number(s.length_ft),
+          Number(s.width_ft),
+          Number(s.thickness_ft),
+        ].sort((x, y) => x - y);
+        return (
+          triple[0] === peekDimQuery[0] &&
+          triple[1] === peekDimQuery[1] &&
+          triple[2] === peekDimQuery[2]
+        );
+      }
+      const hay = [
+        s.id,
+        s.label,
+        s.temple,
+        s.stone,
+        s.source_block_id,
+        s.stock_location,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+        .toLowerCase();
+      return hay.includes(peekQueryNorm);
+    });
+  }, [slabs, peekQueryNorm, peekDimQuery]);
+
   // Walk the slabs once: count occurrences per pair key, then assign
-  // each key a colour index. Singletons get no colour (NULL).
+  // each key a colour index. Singletons get no colour (NULL). Run
+  // against the VISIBLE list so a search that narrows to one slab
+  // doesn't strand its mirror in a now-orphan tint.
   const groupColorMap = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const s of slabs) {
+    for (const s of visibleSlabs) {
       const k = pairGroupKey(s);
       counts.set(k, (counts.get(k) ?? 0) + 1);
     }
@@ -1552,7 +1641,7 @@ function TempleSlabsPeek({
       }
     }
     return colourByKey;
-  }, [slabs]);
+  }, [visibleSlabs]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1625,8 +1714,34 @@ function TempleSlabsPeek({
               {temple}
             </h2>
             <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>
-              {slabs.length} slab{slabs.length !== 1 ? "s" : ""} ready to assign
+              {peekQueryNorm
+                ? `${visibleSlabs.length} of ${slabs.length} slab${slabs.length !== 1 ? "s" : ""} match`
+                : `${slabs.length} slab${slabs.length !== 1 ? "s" : ""} ready to assign`}
             </p>
+            {/* Daksh May 2026 — within-temple search. Supports id /
+                label / stock-location substring, and dimension
+                triples like "53x29x14" (orientation-agnostic). */}
+            <input
+              type="search"
+              value={peekQuery}
+              onChange={(e) => setPeekQuery(e.target.value)}
+              placeholder="🔍 Filter — slab id, label, stock loc, or 53x29x14"
+              autoCapitalize="characters"
+              autoCorrect="off"
+              spellCheck={false}
+              style={{
+                marginTop: 8,
+                padding: "8px 10px",
+                fontSize: 12,
+                width: "100%",
+                maxWidth: 420,
+                border: "1px solid var(--border)",
+                borderRadius: 6,
+                background: "var(--surface)",
+                color: "var(--text)",
+                fontFamily: "ui-monospace, monospace",
+              }}
+            />
           </div>
           {/* Bulk-select toggle — same fn as the toolbar button so
               entering bulk mode here just flips the same state.
@@ -1726,33 +1841,50 @@ function TempleSlabsPeek({
           </div>
         )}
         <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
-              gap: 8,
-            }}
-          >
-            {slabs.map((s) => {
-              const tint = groupColorMap.get(pairGroupKey(s));
-              if (!tint) {
-                return renderCard(s);
-              }
-              return (
-                <div
-                  key={s.id}
-                  style={{
-                    background: tint.bg,
-                    border: `2px solid ${tint.border}`,
-                    borderRadius: 10,
-                    padding: 2,
-                  }}
-                >
-                  {renderCard(s)}
-                </div>
-              );
-            })}
-          </div>
+          {visibleSlabs.length === 0 ? (
+            <div
+              style={{
+                padding: 32,
+                textAlign: "center",
+                color: "var(--muted)",
+                fontSize: 13,
+              }}
+            >
+              No slabs match{" "}
+              <code style={{ fontFamily: "ui-monospace, monospace" }}>
+                {peekQuery}
+              </code>{" "}
+              in {temple}.
+            </div>
+          ) : (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+                gap: 8,
+              }}
+            >
+              {visibleSlabs.map((s) => {
+                const tint = groupColorMap.get(pairGroupKey(s));
+                if (!tint) {
+                  return renderCard(s);
+                }
+                return (
+                  <div
+                    key={s.id}
+                    style={{
+                      background: tint.bg,
+                      border: `2px solid ${tint.border}`,
+                      borderRadius: 10,
+                      padding: 2,
+                    }}
+                  >
+                    {renderCard(s)}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -1805,6 +1937,14 @@ function JobsByTemple({
     return new Date(j.assigned_at).getTime();
   };
 
+  // Daksh May 2026 — within each vendor's section in the Active tab,
+  // CARVING NOW cards should always float to the top so the operator
+  // sees what's running before what's still queued. Rank: 0 =
+  // carving_in_progress (running), 1 = everything else (assigned/
+  // pending). Date tiebreak stays as before.
+  const activeSortRank = (j: JobRow): number =>
+    j.status === "carving_in_progress" ? 0 : 1;
+
   // Group key + display label depend on groupBy. Within each group
   // we sort items latest-first; the groups themselves sort by their
   // most-recent item so the "freshest" vendor/temple is at top.
@@ -1812,9 +1952,18 @@ function JobsByTemple({
     const grouped = groupBy === "vendor"
       ? groupByKey(jobs, (j) => j.vendor_name || "(no vendor)")
       : groupByKey(jobs, (j) => j.temple);
-    // Sort items inside each group by latest activity desc.
+    // Sort items inside each group. Active tab (which has the
+    // 'deadline' field on it) gets the carving-now-first sort;
+    // other tabs keep the date-only sort they had.
+    const sortByCarvingFirst = fields.includes("deadline");
     for (const g of grouped) {
-      g.items.sort((a, b) => primaryDate(b) - primaryDate(a));
+      g.items.sort((a, b) => {
+        if (sortByCarvingFirst) {
+          const r = activeSortRank(a) - activeSortRank(b);
+          if (r !== 0) return r;
+        }
+        return primaryDate(b) - primaryDate(a);
+      });
     }
     // Sort groups by their freshest item desc.
     return grouped.sort((a, b) => {
@@ -1947,7 +2096,8 @@ function JobsByTemple({
                         🪚 MANUAL CARVING       (in_progress, no machine, Manual vendor)
                         🪚 AWAITING MANUAL START (assigned, Manual vendor)
                         🚚 AWAITING DELIVERY    (assigned, CNC, no receipt yet)
-                        📦 AT VENDOR            (assigned, CNC, received but not loaded)
+                        📦 IN STOCK             (assigned, CNC, received but not loaded —
+                                                 was "AT VENDOR", renamed per Daksh May 2026)
                         ⏳ WAITING              (legacy fallback)
                       Carving rows still show the running-for / remaining
                       duo when a loaded_at + ETA exist. */}
@@ -2069,7 +2219,7 @@ function JobsByTemple({
                         >
                           <span>
                             {received
-                              ? `📦 AT VENDOR${sinceReceivedMin != null ? ` · ${fmtDur(sinceReceivedMin)}` : ""}`
+                              ? `📦 IN STOCK${sinceReceivedMin != null ? ` · ${fmtDur(sinceReceivedMin)}` : ""}`
                               : `🚚 AWAITING DELIVERY${sinceAssignedMin != null ? ` · ${fmtDur(sinceAssignedMin)}` : ""}`}
                           </span>
                           {isUrgent && <span style={{ fontSize: 9, fontWeight: 800 }}>⚡ URGENT</span>}
