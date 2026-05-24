@@ -131,6 +131,46 @@ export default async function BillVendorDetailPage({
     .filter((b) => b.status !== "cancelled" && b.status !== "rejected")
     .reduce((s, b) => s + Number(b.amount_tcs ?? 0), 0);
 
+  // Mig 073 — advance credit balance (per-vendor view) + the
+  // vendor's advance history. Used by the new KPI tile + the
+  // Advances section below the bill history.
+  const [{ data: balanceRow }, { data: advanceRows }] = await Promise.all([
+    supabase
+      .from("vendor_advance_balance")
+      .select("available_balance, total_paid, total_applied, open_advance_count")
+      .eq("vendor_id", vendor.id)
+      .maybeSingle(),
+    supabase
+      .from("vendor_advances")
+      .select("id, token, amount, status, proposed_at, paid_at, cancelled_at, payment_reference")
+      .eq("vendor_id", vendor.id)
+      .order("proposed_at", { ascending: false })
+      .limit(20),
+  ]);
+  type AdvBal = {
+    available_balance: number;
+    total_paid: number;
+    total_applied: number;
+    open_advance_count: number;
+  };
+  const advanceBalance = (balanceRow as AdvBal | null) ?? {
+    available_balance: 0,
+    total_paid: 0,
+    total_applied: 0,
+    open_advance_count: 0,
+  };
+  type AdvanceLite = {
+    id: string;
+    token: string;
+    amount: number | string;
+    status: string;
+    proposed_at: string;
+    paid_at: string | null;
+    cancelled_at: string | null;
+    payment_reference: string | null;
+  };
+  const advances = (advanceRows ?? []) as AdvanceLite[];
+
   return (
     <section className="page-card">
       <div style={{ marginBottom: 14 }}>
@@ -217,6 +257,42 @@ export default async function BillVendorDetailPage({
             <span style={{ fontSize: 22, fontWeight: 800, color: "var(--text)", letterSpacing: "-0.02em", fontFamily: "ui-monospace, monospace" }}>
               {billsCount}
             </span>
+          </div>
+          {/* Mig 073 — Advance balance KPI. Always renders for visibility
+              (₹0 is informative when zero open). */}
+          <div>
+            <div
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                color: "var(--muted)",
+                textTransform: "uppercase",
+                letterSpacing: "0.05em",
+              }}
+            >
+              📥 Advance credit
+            </div>
+            {Number(advanceBalance.available_balance) > 0 ? (
+              <Money value={Number(advanceBalance.available_balance)} size="large" tone="warning" />
+            ) : (
+              <span
+                style={{
+                  fontSize: 18,
+                  fontWeight: 700,
+                  color: "var(--muted)",
+                  letterSpacing: "-0.02em",
+                  fontFamily: "ui-monospace, monospace",
+                }}
+              >
+                ₹0
+              </span>
+            )}
+            {Number(advanceBalance.open_advance_count) > 0 && (
+              <div style={{ fontSize: 10, color: "var(--muted)" }}>
+                across {advanceBalance.open_advance_count} open advance
+                {advanceBalance.open_advance_count === 1 ? "" : "s"}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -478,6 +554,114 @@ export default async function BillVendorDetailPage({
               </div>
             </div>
           )}
+
+        {/* Mig 073 — Advances section. Lists every advance for this
+            vendor (paid, in-flight, cancelled). Click-through to the
+            advance detail page. */}
+        {advances.length > 0 && (
+          <div
+            style={{
+              padding: "18px 20px",
+              background: "var(--surface)",
+              border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+              borderRadius: 12,
+              marginTop: 16,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 12,
+              }}
+            >
+              <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>
+                📥 Advances · {advances.length}
+              </h3>
+              <Link
+                href={`/accounts/advances?vendor=${vendor.id}`}
+                style={{ fontSize: 12, color: ACCOUNTS_TOKENS.accent, textDecoration: "underline" }}
+              >
+                See all →
+              </Link>
+            </div>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr>
+                    <th style={TABLE_STYLES.th}>Token</th>
+                    <th style={TABLE_STYLES.thRight}>Amount</th>
+                    <th style={TABLE_STYLES.th}>Status</th>
+                    <th style={TABLE_STYLES.th}>Paid at</th>
+                    <th style={TABLE_STYLES.th}>Reference</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {advances.map((a) => (
+                    <tr key={a.id}>
+                      <td style={TABLE_STYLES.td}>
+                        <Link
+                          href={`/accounts/advances/${a.id}`}
+                          style={{
+                            fontFamily: "ui-monospace, monospace",
+                            fontWeight: 700,
+                            color: ACCOUNTS_TOKENS.warning,
+                            textDecoration: "none",
+                          }}
+                        >
+                          {a.token}
+                        </Link>
+                      </td>
+                      <td style={TABLE_STYLES.tdRight}>
+                        <Money value={Number(a.amount)} />
+                      </td>
+                      <td style={TABLE_STYLES.td}>
+                        <span
+                          style={{
+                            fontSize: 10,
+                            fontWeight: 800,
+                            padding: "2px 8px",
+                            borderRadius: 999,
+                            background:
+                              a.status === "paid"
+                                ? ACCOUNTS_TOKENS.successLight
+                                : a.status === "cancelled"
+                                  ? ACCOUNTS_TOKENS.surfaceMuted
+                                  : ACCOUNTS_TOKENS.warningLight,
+                            color:
+                              a.status === "paid"
+                                ? ACCOUNTS_TOKENS.success
+                                : a.status === "cancelled"
+                                  ? "var(--muted)"
+                                  : ACCOUNTS_TOKENS.warning,
+                            textTransform: "uppercase",
+                            letterSpacing: "0.05em",
+                          }}
+                        >
+                          {a.status}
+                        </span>
+                      </td>
+                      <td style={{ ...TABLE_STYLES.td, fontSize: 11, color: "var(--muted)" }}>
+                        {a.paid_at
+                          ? new Date(a.paid_at).toLocaleDateString("en-IN", {
+                              timeZone: "Asia/Kolkata",
+                              day: "numeric",
+                              month: "short",
+                              year: "numeric",
+                            })
+                          : "—"}
+                      </td>
+                      <td style={{ ...TABLE_STYLES.td, fontSize: 11, fontFamily: "ui-monospace, monospace" }}>
+                        {a.payment_reference ?? "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
     </section>
   );

@@ -326,6 +326,15 @@ const navEntries: NavEntry[] = [
     department: "finance",
   },
   {
+    // Mig 073 — vendor advance payments. Owner records, owner
+    // confirms, accountant pays + applies to bills.
+    href: "/accounts/advances",
+    label: "Advances",
+    icon: "📥",
+    roles: ["developer", "owner", "accountant", "accountant_star"],
+    department: "finance",
+  },
+  {
     // Mig 053 — Final Audit queue. UTR cross-check against bank
     // statement. Final auditor's primary page; owner sees it for
     // visibility into flagged payments.

@@ -364,6 +364,19 @@ export default async function AccountsHomePage({
     : strictCategoryFilteredDue;
 
   const totalOutstanding = strictFilteredDue.reduce((s, b) => s + b.amountOutstanding, 0);
+
+  // Mig 073 — open advance credit across ALL vendors. Sums the
+  // per-vendor available_balance from the vendor_advance_balance
+  // view. Surfaces as a small KPI tile so dad sees at a glance how
+  // much vendor credit is sitting in the system.
+  const { data: advanceBalanceRows } = await supabase
+    .from("vendor_advance_balance")
+    .select("available_balance, open_advance_count");
+  type AdvBalRow = { available_balance: number | string; open_advance_count: number };
+  const totalAdvanceCredit = ((advanceBalanceRows ?? []) as AdvBalRow[])
+    .reduce((s, r) => s + Number(r.available_balance ?? 0), 0);
+  const totalOpenAdvances = ((advanceBalanceRows ?? []) as AdvBalRow[])
+    .reduce((s, r) => s + (Number(r.open_advance_count) || 0), 0);
   const billsCount = strictFilteredDue.length;
   const avgDaysOutstanding =
     strictFilteredDue.length === 0
@@ -521,6 +534,33 @@ export default async function AccountsHomePage({
           tone="warning"
           icon="🏢"
         />
+        {/* Mig 073 — Open advance credit across all vendors. Click
+            through to /accounts/advances?status=paid to see the list. */}
+        <Link
+          href="/accounts/advances?status=paid"
+          style={{ textDecoration: "none", color: "inherit" }}
+          title="Total vendor credit balance — money paid in advance, waiting to be applied to bills"
+        >
+          <KpiCard
+            label="Open advance credit"
+            value={
+              totalAdvanceCredit > 0 ? (
+                <Money value={totalAdvanceCredit} size="large" tone="warning" />
+              ) : (
+                <span style={{ fontSize: 18, color: "var(--muted)", fontWeight: 600 }}>
+                  ₹0
+                </span>
+              )
+            }
+            sublabel={
+              totalOpenAdvances > 0
+                ? `${totalOpenAdvances} advance${totalOpenAdvances === 1 ? "" : "s"} waiting to be applied`
+                : "No open advances"
+            }
+            tone="warning"
+            icon="📥"
+          />
+        </Link>
       </div>
       </PeekProvider>
 

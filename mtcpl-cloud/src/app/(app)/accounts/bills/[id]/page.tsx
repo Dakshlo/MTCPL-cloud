@@ -23,6 +23,7 @@ import { BillBackLink } from "./bill-back-link";
 import { PartialRejectionForm } from "./partial-rejection-form";
 import { CancelBillButton } from "./cancel-bill-button";
 import { HoldBillForm } from "./hold-bill-form";
+import { ApplyAdvanceButton } from "./apply-advance-button";
 import {
   ACCOUNTS_TOKENS,
   BillStatusPill,
@@ -77,6 +78,83 @@ export default async function BillDetailPage({
     : ((bill.bill_vendors as VendorInfo) ?? null);
 
   const profilesMap = await getProfilesMap();
+
+  // Mig 073 — vendor advance applications on this bill (active ones
+  // only). Plus the vendor's remaining advance credit balance so the
+  // "Apply more" CTA can show the available pool.
+  const [{ data: appsRaw }, { data: balanceRaw }] = await Promise.all([
+    supabase
+      .from("vendor_advance_applications")
+      .select(
+        "id, vendor_advance_id, amount_applied, applied_at, applied_by, note, vendor_advances(id, token, amount)",
+      )
+      .eq("bill_id", id)
+      .is("unapplied_at", null)
+      .order("applied_at", { ascending: false }),
+    supabase
+      .from("vendor_advance_balance")
+      .select("vendor_id, available_balance, open_advance_count")
+      .eq("vendor_id", bill.bill_vendor_id)
+      .maybeSingle(),
+  ]);
+  type AppRow = {
+    id: string;
+    vendor_advance_id: string;
+    amount_applied: number | string;
+    applied_at: string;
+    applied_by: string;
+    note: string | null;
+    vendor_advances:
+      | { id: string; token: string; amount: number | string }
+      | { id: string; token: string; amount: number | string }[]
+      | null;
+  };
+  const appliedAdvances = (appsRaw ?? []) as AppRow[];
+  const totalAppliedFromAdvances = appliedAdvances.reduce(
+    (s, a) => s + Number(a.amount_applied),
+    0,
+  );
+  const vendorAdvanceBalance = balanceRaw
+    ? Number((balanceRaw as { available_balance: number }).available_balance ?? 0)
+    : 0;
+  // Open advances for this vendor — used by the "Apply more" modal.
+  // Per-advance "remaining" = amount - sum(active applications on it
+  // from ANY bill). We only surface ones with remaining > 0.
+  type OpenAdvRow = { id: string; token: string; amount: number | string };
+  type AdvWithRemaining = { id: string; token: string; remaining: number };
+  let openAdvancesWithRemaining: AdvWithRemaining[] = [];
+  if (vendorAdvanceBalance > 0) {
+    const { data: openAdvancesRaw } = await supabase
+      .from("vendor_advances")
+      .select("id, token, amount")
+      .eq("vendor_id", bill.bill_vendor_id)
+      .eq("status", "paid")
+      .is("cancelled_at", null)
+      .order("paid_at", { ascending: true });
+    const openAdvances = (openAdvancesRaw ?? []) as OpenAdvRow[];
+    if (openAdvances.length > 0) {
+      const advanceIds = openAdvances.map((a) => a.id);
+      const { data: appliedRows } = await supabase
+        .from("vendor_advance_applications")
+        .select("vendor_advance_id, amount_applied")
+        .in("vendor_advance_id", advanceIds)
+        .is("unapplied_at", null);
+      const appliedPerAdvance = new Map<string, number>();
+      for (const r of (appliedRows ?? []) as Array<{ vendor_advance_id: string; amount_applied: number }>) {
+        appliedPerAdvance.set(
+          r.vendor_advance_id,
+          (appliedPerAdvance.get(r.vendor_advance_id) ?? 0) + Number(r.amount_applied ?? 0),
+        );
+      }
+      openAdvancesWithRemaining = openAdvances
+        .map((a) => ({
+          id: a.id,
+          token: a.token,
+          remaining: Math.max(0, Number(a.amount) - (appliedPerAdvance.get(a.id) ?? 0)),
+        }))
+        .filter((a) => a.remaining > 0.005);
+    }
+  }
 
   const { data: paymentsRaw } = await supabase
     .from("bill_payments")
@@ -1003,6 +1081,124 @@ export default async function BillDetailPage({
               </div>
             );
           })()}
+
+          {/* Mig 073 — Vendor Advance Applied panel. Shows credits
+              that have been pulled from advances to this bill, plus
+              an "Apply more" button when the vendor still has open
+              credit. Card-only visible when there's something to
+              show OR when the vendor has open credit to apply. */}
+          {(appliedAdvances.length > 0 || openAdvancesWithRemaining.length > 0) && (
+            <div
+              style={{
+                background: appliedAdvances.length > 0 ? "#ecfdf5" : "#f0fdf4",
+                border: `1px solid ${appliedAdvances.length > 0 ? "#10b981" : "#22c55e"}`,
+                borderLeft: `4px solid ${appliedAdvances.length > 0 ? "#10b981" : "#22c55e"}`,
+                borderRadius: 10,
+                padding: 16,
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 10,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 800,
+                    color: "#047857",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                  }}
+                >
+                  📥 Vendor advance credit
+                </div>
+                {totalAppliedFromAdvances > 0 && (
+                  <div style={{ fontSize: 14, fontWeight: 800, color: "#047857", fontFamily: "ui-monospace, monospace" }}>
+                    −₹{totalAppliedFromAdvances.toLocaleString("en-IN")} applied
+                  </div>
+                )}
+              </div>
+
+              {appliedAdvances.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {appliedAdvances.map((a) => {
+                    const adv = Array.isArray(a.vendor_advances) ? a.vendor_advances[0] ?? null : a.vendor_advances;
+                    return (
+                      <div
+                        key={a.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 10,
+                          padding: "6px 10px",
+                          background: "#fff",
+                          border: "1px solid rgba(16,185,129,0.3)",
+                          borderRadius: 8,
+                          fontSize: 12,
+                        }}
+                      >
+                        <Link
+                          href={`/accounts/advances/${a.vendor_advance_id}`}
+                          style={{
+                            fontFamily: "ui-monospace, monospace",
+                            fontWeight: 700,
+                            color: "#047857",
+                            textDecoration: "none",
+                          }}
+                        >
+                          {adv?.token ?? "ADV"}
+                        </Link>
+                        <span style={{ flex: 1, color: "var(--muted)" }}>
+                          {a.note ?? "applied to this bill"}
+                        </span>
+                        <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>
+                          ₹{Number(a.amount_applied).toLocaleString("en-IN")}
+                        </span>
+                        <span style={{ fontSize: 10, color: "var(--muted)" }}>
+                          {new Date(a.applied_at).toLocaleDateString("en-IN", {
+                            timeZone: "Asia/Kolkata",
+                            day: "numeric",
+                            month: "short",
+                            year: "numeric",
+                          })}
+                          {profilesMap[a.applied_by] && ` · ${profilesMap[a.applied_by]}`}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Apply-more button: only visible when vendor has open
+                  credit + the user can apply. Opens a tiny client modal
+                  to pick which advance + how much. */}
+              {openAdvancesWithRemaining.length > 0 &&
+                canManageAccounts(profile) &&
+                bill.status !== "cancelled" &&
+                bill.status !== "rejected" &&
+                Number(bill.amount_outstanding) > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                    <ApplyAdvanceButton
+                      billId={bill.id}
+                      billOutstanding={Number(bill.amount_outstanding)}
+                      advances={openAdvancesWithRemaining}
+                    />
+                    <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                      Vendor has ₹{vendorAdvanceBalance.toLocaleString("en-IN")}{" "}
+                      open credit across {openAdvancesWithRemaining.length}{" "}
+                      advance{openAdvancesWithRemaining.length === 1 ? "" : "s"}.
+                    </span>
+                  </div>
+                )}
+            </div>
+          )}
 
           {/* Description */}
           <Section title="Description">

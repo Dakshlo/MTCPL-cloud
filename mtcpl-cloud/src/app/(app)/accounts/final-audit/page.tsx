@@ -58,6 +58,10 @@ export default async function FinalAuditPage() {
     )
     .eq("status", "paid")
     .eq("final_audit_status", "pending")
+    // Mig 073 — synthetic advance-application rows are NOT real bank
+    // payments (the cash moved when the original advance was paid),
+    // so they shouldn't appear in Final Audit's queue.
+    .eq("is_advance_application", false)
     .order("paid_at", { ascending: false })
     .limit(200);
 
@@ -77,6 +81,7 @@ export default async function FinalAuditPage() {
       "id, bill_id, status, final_audit_status, paid_amount, payment_method, payment_reference, payment_note, paid_by, paid_at, final_audit_at, final_audit_by, final_audit_flag_reason, final_audit_flag_note, bills(id, token, vendor_bill_no, bill_vendor_id, bill_vendors(id, name))",
     )
     .eq("status", "paid")
+    .eq("is_advance_application", false)
     .in("final_audit_status", ["verified", "flagged"])
     .not("final_audit_at", "is", null)
     .gte("final_audit_at", cutoffIso)
