@@ -2819,6 +2819,224 @@ export async function cancelVendorRoyaltyEntryAction(
 // = soft-cancel with cancel_reason='owner_rejected' so the audit
 // trail records who killed it and when.
 
+/**
+ * Daksh May 2026 — cross-vendor royalty summary for the owner /
+ * developer dashboard peek. Aggregates approved entries by day,
+ * week, or month within a date range. Used by /accounts/royalty-
+ * summary so dad can scan a single screen instead of opening
+ * every vendor's private-notes panel one-by-one.
+ *
+ * Gating: owner/developer only + ROYALTY_APPROVAL_PASSPHRASE
+ * (same 125500 used by the approval queue). Only approved entries
+ * count — pending + rejected are ignored. cancelled_at IS NULL so
+ * soft-cancelled rows drop out too.
+ *
+ * entry_date is the source of truth (mig 068). Falls back to
+ * created_at::date for legacy rows where entry_date is NULL.
+ */
+export async function getRoyaltySummaryAction(
+  formData: FormData,
+): Promise<
+  | {
+      ok: true;
+      buckets: Array<{
+        /** Bucket key — YYYY-MM-DD for day, YYYY-Www for week,
+         *  YYYY-MM for month. */
+        key: string;
+        /** Human label — e.g. "Fri 22 May 2026", "Week 21 (18-24 May)",
+         *  "May 2026". */
+        label: string;
+        received: number;
+        given: number;
+        net: number;
+        entryCount: number;
+      }>;
+      totals: {
+        received: number;
+        given: number;
+        net: number;
+        entryCount: number;
+      };
+    }
+  | { ok: false; error: string }
+> {
+  const { profile } = await requireAuth();
+  if (profile.role !== "owner" && profile.role !== "developer") {
+    return { ok: false, error: "Only owner / developer." };
+  }
+  const passphrase = String(formData.get("passphrase") || "");
+  if (passphrase !== ROYALTY_APPROVAL_PASSPHRASE) {
+    return { ok: false, error: "Incorrect summary passphrase." };
+  }
+
+  const fromDate = String(formData.get("from_date") || "").trim();
+  const toDate = String(formData.get("to_date") || "").trim();
+  const granularityRaw = String(formData.get("granularity") || "day").trim();
+  const granularity: "day" | "week" | "month" =
+    granularityRaw === "week" || granularityRaw === "month"
+      ? granularityRaw
+      : "day";
+
+  // Validate dates with the same shape guard used by bill_date.
+  // Empty fromDate / toDate mean "no bound on that side" — open
+  // range; the summary defaults the picker to current month but
+  // a user can clear it for an unbounded query.
+  function validateDate(s: string): string | null {
+    if (!s) return null;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return "Date must be YYYY-MM-DD.";
+    const y = parseInt(s.slice(0, 4), 10);
+    const ny = new Date().getFullYear() + 1;
+    if (y < 2015 || y > ny) return `Date year ${y} looks wrong.`;
+    return null;
+  }
+  const fromErr = validateDate(fromDate);
+  if (fromErr) return { ok: false, error: `From date: ${fromErr}` };
+  const toErr = validateDate(toDate);
+  if (toErr) return { ok: false, error: `To date: ${toErr}` };
+
+  const admin = createAdminSupabaseClient();
+  let q = admin
+    .from("vendor_royalty_entries")
+    .select("amount, entry_type, entry_date, created_at")
+    .eq("status", "approved")
+    .is("cancelled_at", null);
+  if (fromDate) {
+    // Match rows where the effective bucket date (entry_date or
+    // created_at) is >= fromDate. Supabase can't OR across columns
+    // easily without .or(), so use the conservative approach: if
+    // entry_date is set, filter by it; if not, by created_at. Use
+    // .or() with the postgrest syntax.
+    q = q.or(
+      `and(entry_date.gte.${fromDate}),and(entry_date.is.null,created_at.gte.${fromDate}T00:00:00.000Z)`,
+    );
+  }
+  if (toDate) {
+    q = q.or(
+      `and(entry_date.lte.${toDate}),and(entry_date.is.null,created_at.lte.${toDate}T23:59:59.999Z)`,
+    );
+  }
+  q = q.limit(5000); // hard cap so an unbounded query can't OOM.
+
+  const { data, error } = await q;
+  if (error) return { ok: false, error: error.message };
+
+  type Row = {
+    amount: number;
+    entry_type: "received" | "given";
+    entry_date: string | null;
+    created_at: string;
+  };
+
+  // Bucket key per granularity. The "label" is a human-readable
+  // version for the table column. Week labels use ISO week numbers
+  // ("Week 21") with the Mon-Sun span attached for context.
+  function keyAndLabel(iso: string): { key: string; label: string } {
+    const d = new Date(`${iso}T00:00:00+05:30`);
+    if (granularity === "day") {
+      const dow = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getDay()];
+      const month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getMonth()];
+      return {
+        key: iso,
+        label: `${dow} ${d.getDate()} ${month} ${d.getFullYear()}`,
+      };
+    }
+    if (granularity === "month") {
+      const month = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][d.getMonth()];
+      return {
+        key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`,
+        label: `${month} ${d.getFullYear()}`,
+      };
+    }
+    // Week — ISO week number. Anchor to Monday of the week.
+    const tmp = new Date(d);
+    // JS getDay: 0=Sun, 1=Mon. Convert so Mon=0.
+    const dayMonFirst = (tmp.getDay() + 6) % 7;
+    tmp.setDate(tmp.getDate() - dayMonFirst);
+    const monday = new Date(tmp);
+    const sunday = new Date(tmp);
+    sunday.setDate(monday.getDate() + 6);
+    // ISO week computation
+    const target = new Date(Date.UTC(monday.getFullYear(), monday.getMonth(), monday.getDate()));
+    const dayNum = (target.getUTCDay() + 6) % 7;
+    target.setUTCDate(target.getUTCDate() - dayNum + 3);
+    const firstThursday = target.getTime();
+    target.setUTCMonth(0, 1);
+    if (target.getUTCDay() !== 4) {
+      target.setUTCMonth(0, 1 + ((4 - target.getUTCDay()) + 7) % 7);
+    }
+    const weekNum =
+      1 + Math.ceil((firstThursday - target.getTime()) / 604800000);
+    const monthShort = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    return {
+      key: `${monday.getFullYear()}-W${String(weekNum).padStart(2, "0")}`,
+      label: `Week ${weekNum} · ${monday.getDate()} ${monthShort[monday.getMonth()]} – ${sunday.getDate()} ${monthShort[sunday.getMonth()]}`,
+    };
+  }
+
+  const bucketMap = new Map<
+    string,
+    { label: string; received: number; given: number; entryCount: number }
+  >();
+  const rows = (data ?? []) as Row[];
+  for (const r of rows) {
+    const iso = r.entry_date ?? r.created_at.slice(0, 10);
+    const { key, label } = keyAndLabel(iso);
+    const bucket = bucketMap.get(key) ?? {
+      label,
+      received: 0,
+      given: 0,
+      entryCount: 0,
+    };
+    const amt = Number(r.amount) || 0;
+    if (r.entry_type === "received") bucket.received += amt;
+    else bucket.given += amt;
+    bucket.entryCount += 1;
+    bucketMap.set(key, bucket);
+  }
+
+  // Sort buckets by key (which sorts chronologically because of
+  // the ISO format on all three granularities).
+  const buckets = [...bucketMap.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, b]) => ({
+      key,
+      label: b.label,
+      received: b.received,
+      given: b.given,
+      // Net = given - received. Positive means we paid out more
+      // (royalty points flowed FROM us TO vendors). Same
+      // convention as the per-vendor net balance display.
+      net: b.given - b.received,
+      entryCount: b.entryCount,
+    }));
+
+  const totals = buckets.reduce(
+    (acc, b) => ({
+      received: acc.received + b.received,
+      given: acc.given + b.given,
+      net: acc.net + b.net,
+      entryCount: acc.entryCount + b.entryCount,
+    }),
+    { received: 0, given: 0, net: 0, entryCount: 0 },
+  );
+
+  void logAudit(
+    profile.id,
+    "royalty_summary_viewed",
+    "bill_vendor",
+    "",
+    {
+      from_date: fromDate || null,
+      to_date: toDate || null,
+      granularity,
+      buckets: buckets.length,
+      total_entries: totals.entryCount,
+    },
+  );
+
+  return { ok: true, buckets, totals };
+}
+
 /** List every pending royalty entry across all vendors. Owner /
  *  developer only; passphrase 125500 required. */
 export async function listPendingRoyaltyEntriesAction(
