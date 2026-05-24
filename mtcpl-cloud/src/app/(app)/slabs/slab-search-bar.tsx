@@ -33,8 +33,20 @@ type Slab = {
 export function SlabSearchBar({ slabs }: { slabs: Slab[] }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
+  // Daksh May 2026 — when a query (esp. a dimension like 27x15x15)
+  // returns slabs across multiple temples, the user wants to narrow
+  // by temple. Empty string = all temples. Resets every time the
+  // query text changes so it doesn't get stuck on a stale value.
+  const [templeFilter, setTempleFilter] = useState<string>("");
   const inputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+
+  // Reset the temple chip when the user re-types — otherwise picking
+  // "Aasta Temple" and then searching for something unrelated would
+  // silently filter out every other temple's matches.
+  useEffect(() => {
+    setTempleFilter("");
+  }, [q]);
 
   // Focus the input when the modal opens.
   useEffect(() => {
@@ -57,24 +69,60 @@ export function SlabSearchBar({ slabs }: { slabs: Slab[] }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
 
-  // Compute matches. Cap at 50 so a blank query doesn't try to render
-  // every slab in inventory at once.
-  const results = useMemo(() => {
+  // Compute the full pre-temple-filter matches first so the temple
+  // chips can show the WHOLE temple set the query produced (not just
+  // what's left after a temple is already picked). Cap at 200 here —
+  // bigger than the visible 50 so the chip-counts stay accurate even
+  // when results overflow the visible list.
+  const rawMatches = useMemo(() => {
     const lower = q.trim().toLowerCase();
-    if (!lower) return slabs.slice(0, 50);
-    const dims = `${q}`.replace(/\s+/g, "");
+    if (!lower) return slabs.slice(0, 200);
+    // Permutations of L×W×T so partial dim text like "27x15" hits
+    // any orientation. Same trick used on /carving search.
     return slabs
       .filter((s) => {
         if (s.id.toLowerCase().includes(lower)) return true;
         if (s.label.toLowerCase().includes(lower)) return true;
         if (s.temple.toLowerCase().includes(lower)) return true;
         if ((s.stone ?? "").toLowerCase().includes(lower)) return true;
-        const dimStr = `${s.length_ft}x${s.width_ft}x${s.thickness_ft}`.toLowerCase();
-        if (dimStr.includes(dims.toLowerCase())) return true;
+        const L = s.length_ft;
+        const W = s.width_ft;
+        const T = s.thickness_ft;
+        const perms = [
+          `${L}x${W}x${T}`,
+          `${L}x${T}x${W}`,
+          `${W}x${L}x${T}`,
+          `${W}x${T}x${L}`,
+          `${T}x${L}x${W}`,
+          `${T}x${W}x${L}`,
+        ];
+        for (const p of perms) {
+          if (p.toLowerCase().includes(lower)) return true;
+        }
         return false;
       })
-      .slice(0, 50);
+      .slice(0, 200);
   }, [slabs, q]);
+
+  // Distinct temples in the raw match set + counts, so the chip strip
+  // can render "TEMPLE · N" and the user can narrow with one tap.
+  const templeCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const s of rawMatches) {
+      const t = s.temple || "(no temple)";
+      m.set(t, (m.get(t) ?? 0) + 1);
+    }
+    return [...m.entries()].sort((a, b) => b[1] - a[1]);
+  }, [rawMatches]);
+
+  // Apply the temple chip filter on top of the raw matches, then
+  // cap to 50 for render.
+  const results = useMemo(() => {
+    const narrowed = templeFilter
+      ? rawMatches.filter((s) => s.temple === templeFilter)
+      : rawMatches;
+    return narrowed.slice(0, 50);
+  }, [rawMatches, templeFilter]);
 
   // Click on a result — scroll the slab card into view in the
   // SlabGrid below, briefly highlight it, and close the modal.
@@ -233,6 +281,81 @@ export function SlabSearchBar({ slabs }: { slabs: Slab[] }) {
               </kbd>
             </div>
 
+            {/* Daksh May 2026 — temple filter chip strip. Only shown
+                when the current query hits >1 temple, otherwise
+                there's nothing to narrow. Each chip carries a count
+                of slabs for that temple in the current match set. */}
+            {templeCounts.length > 1 && (
+              <div
+                style={{
+                  display: "flex",
+                  gap: 6,
+                  flexWrap: "wrap",
+                  padding: "8px 14px",
+                  background: "var(--surface-alt, #fafaf7)",
+                  borderBottom: "1px solid var(--border)",
+                  alignItems: "center",
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: "var(--muted)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.06em",
+                    marginRight: 4,
+                  }}
+                >
+                  🏛 Temple
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setTempleFilter("")}
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    padding: "3px 9px",
+                    borderRadius: 999,
+                    background: templeFilter === "" ? "var(--gold-dark)" : "var(--surface)",
+                    color: templeFilter === "" ? "#fff" : "var(--muted)",
+                    border: `1px solid ${templeFilter === "" ? "var(--gold-dark)" : "var(--border)"}`,
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  All ({rawMatches.length})
+                </button>
+                {templeCounts.map(([temple, count]) => {
+                  const isActive = templeFilter === temple;
+                  return (
+                    <button
+                      key={temple}
+                      type="button"
+                      onClick={() => setTempleFilter(isActive ? "" : temple)}
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        padding: "3px 9px",
+                        borderRadius: 999,
+                        background: isActive ? "var(--gold-dark)" : "var(--surface)",
+                        color: isActive ? "#fff" : "var(--text)",
+                        border: `1px solid ${isActive ? "var(--gold-dark)" : "var(--border)"}`,
+                        cursor: "pointer",
+                        whiteSpace: "nowrap",
+                        maxWidth: 220,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                      title={`${temple} · ${count} slab${count === 1 ? "" : "s"}`}
+                    >
+                      {temple} · {count}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
             {/* Results list */}
             <div style={{ flex: 1, overflowY: "auto", padding: "6px 0" }}>
               {results.length === 0 ? (
@@ -330,9 +453,16 @@ export function SlabSearchBar({ slabs }: { slabs: Slab[] }) {
               }}
             >
               <span>
-                {results.length === 50
-                  ? "Showing first 50 — refine search to see more"
-                  : `${results.length} match${results.length === 1 ? "" : "es"}`}
+                {templeFilter ? (
+                  <>
+                    {results.length} match{results.length === 1 ? "" : "es"}{" "}
+                    in <strong>{templeFilter}</strong>
+                  </>
+                ) : results.length === 50 ? (
+                  "Showing first 50 — refine search to see more"
+                ) : (
+                  `${results.length} match${results.length === 1 ? "" : "es"}`
+                )}
               </span>
               <span style={{ fontStyle: "italic" }}>Click any row to jump to it in the list below</span>
             </div>

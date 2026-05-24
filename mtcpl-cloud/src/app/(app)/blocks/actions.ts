@@ -237,9 +237,20 @@ export async function manualCutBlockAction(formData: FormData) {
   const slabIds = JSON.parse(String(formData.get("slab_ids") || "[]")) as string[];
   const remainders = JSON.parse(String(formData.get("remainders_json") || "[]")) as Array<{ id: string; l: number; w: number; h: number }>;
   const restock = String(formData.get("restock") || "") === "yes";
+  // Daksh May 2026 — where are the cut slabs being placed (e.g.
+  // "Yard 4", "Shade B rack 12"). Mirrors what the formal cutting
+  // flow's finish_block_cut RPC captures (mig 020). Required so the
+  // labels print sheet + the AI lookup can answer "where is this
+  // slab now". Trimmed; capped to 100 chars to match column.
+  const stockLocation = textValue(formData, "stock_location").slice(0, 100);
 
   if (!blockId || slabIds.length === 0) {
     throw new Error("Block and at least one slab are required.");
+  }
+  if (!stockLocation) {
+    throw new Error(
+      "Stock location is required — tell us where the cut slabs are being placed (Yard / rack / shade).",
+    );
   }
 
   // 1. Consume block (race-condition guard: only if still available)
@@ -255,11 +266,13 @@ export async function manualCutBlockAction(formData: FormData) {
   }
 
   // 2. Mark slabs cut_done (race-condition guard: only if still open)
+  //    + stamp the stock_location so the labels print + Find ID work.
   const slabUpdate = await supabase
     .from("slab_requirements")
     .update({
       status: "cut_done",
       source_block_id: blockId,
+      stock_location: stockLocation,
       updated_by: profile.id,
       updated_at: new Date().toISOString(),
     })
@@ -301,6 +314,7 @@ export async function manualCutBlockAction(formData: FormData) {
     slabs: slabIds,
     restocked_blocks: restockedIds,
     restock,
+    stock_location: stockLocation,
   });
 
   // 5. Revalidate

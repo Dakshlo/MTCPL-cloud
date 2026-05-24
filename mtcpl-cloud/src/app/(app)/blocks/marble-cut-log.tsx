@@ -472,6 +472,35 @@ export function MarbleCutLog({
                                 {b.cut_by_name && <>by <strong style={{ color: "var(--text)" }}>{b.cut_by_name}</strong> · </>}
                                 {fmtDateTime(b.cut_at)}
                               </span>
+                              {/* Daksh May 2026 — Slab labels print
+                                  per block. Re-prints the stencilling
+                                  sheet later if the original was lost
+                                  or the team needs another copy. The
+                                  labels route accepts a raw block id
+                                  (no cut session needed for marble
+                                  manual cuts). */}
+                              {b.slabs.length > 0 && (
+                                <a
+                                  href={`/cutting/${b.id}/labels`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  title="Print slab IDs to stencil on the physical slabs"
+                                  style={{
+                                    fontSize: 10,
+                                    fontWeight: 700,
+                                    letterSpacing: "0.04em",
+                                    textTransform: "uppercase",
+                                    padding: "4px 9px",
+                                    borderRadius: 5,
+                                    border: "1px solid #d97706",
+                                    background: "#fffbeb",
+                                    color: "#92400e",
+                                    textDecoration: "none",
+                                  }}
+                                >
+                                  🏷 Labels
+                                </a>
+                              )}
                               {undoAction && (
                                 <button
                                   type="button"

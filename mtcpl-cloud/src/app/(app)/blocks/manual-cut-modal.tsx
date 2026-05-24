@@ -50,6 +50,10 @@ export function ManualCutModal({
   const [remainders, setRemainders] = useState<RemainderEntry[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Daksh May 2026 — stock location field (required for marble).
+  // Captured here so we don't need a 2-stage flow; the EN + HI labels
+  // sit right above the action buttons so the worker can't miss it.
+  const [stockLocation, setStockLocation] = useState<string>("");
 
   function toggleSlab(id: string) {
     setSelectedIds((prev) => {
@@ -141,6 +145,13 @@ export function ManualCutModal({
       setError("Select at least one slab to mark as cut.");
       return;
     }
+    const loc = stockLocation.trim();
+    if (!loc) {
+      setError(
+        "Where are the cut slabs being placed? Enter the stock location (e.g. Yard 4 / Shade B rack 12). · स्लैब कहाँ रखी जा रही हैं? स्थान दर्ज करें।",
+      );
+      return;
+    }
     setError(null);
     setSubmitting(true);
     try {
@@ -151,7 +162,15 @@ export function ManualCutModal({
       formData.set("slab_ids", JSON.stringify(slabIdsList));
       formData.set("remainders_json", remaindersJson);
       formData.set("restock", restock ? "yes" : "no");
+      formData.set("stock_location", loc);
       await manualCutBlockAction(formData);
+      // Daksh May 2026 — pop the slab-labels print page in a new tab
+      // so the team can immediately stencil IDs on the physical slabs.
+      // window.open is gated on a click (handleSubmit is a click
+      // handler) so popup blockers are happy.
+      if (typeof window !== "undefined") {
+        window.open(`/cutting/${block.id}/labels`, "_blank", "noopener,noreferrer");
+      }
       onClose();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
@@ -700,6 +719,70 @@ export function ManualCutModal({
             )}
           </div>}
 
+        </div>
+        {/* Daksh May 2026 — required stock-location field above
+         *  the action footer. English + Hindi labels so dad's team
+         *  on the floor reads it in their natural language. On
+         *  Record Cut the value gets passed to manualCutBlockAction
+         *  (which writes it to slab_requirements.stock_location)
+         *  and a print page pops in a new tab for stencilling. */}
+        <div
+          style={{
+            padding: "12px 20px",
+            borderTop: "1px solid var(--border)",
+            background: "rgba(217,119,6,0.06)",
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+            flexShrink: 0,
+          }}
+        >
+          <label
+            htmlFor="stock-location-input"
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+              fontSize: 12,
+              color: "var(--text)",
+            }}
+          >
+            <span style={{ fontWeight: 700 }}>
+              📍 Stock location <span style={{ color: "#b91c1c" }}>*</span>
+              <span
+                style={{
+                  fontWeight: 500,
+                  color: "var(--muted)",
+                  marginLeft: 8,
+                  fontSize: 11,
+                }}
+              >
+                Where are the cut slabs placed? · स्लैब कहाँ रखी गई
+                हैं?
+              </span>
+            </span>
+            <input
+              id="stock-location-input"
+              type="text"
+              value={stockLocation}
+              onChange={(e) => setStockLocation(e.target.value)}
+              maxLength={100}
+              placeholder="e.g. Yard 4 · Shade B · रैक 12"
+              style={{
+                padding: "8px 12px",
+                fontSize: 13,
+                border: "1px solid var(--border)",
+                borderRadius: 6,
+                background: "#fff",
+                color: "var(--text)",
+                fontFamily: "ui-monospace, monospace",
+              }}
+            />
+            <span style={{ fontSize: 10, color: "var(--muted)" }}>
+              Required — the team uses this to find the slabs later.
+              Printed on each slab label.
+            </span>
+          </label>
         </div>
         {/* Sticky footer — actions always visible regardless of scroll
          *  position. selectedIds count shown alongside so the user can

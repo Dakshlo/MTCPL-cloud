@@ -42,34 +42,60 @@ export default async function CuttingLabelsPrintPage({ params }: { params: Param
   const { id } = await params;
   const supabase = createAdminSupabaseClient();
 
-  // Find the cut session block. We need block_id to query all slabs
-  // attributed to that physical block.
-  const { data: csb, error } = await supabase
+  // Daksh May 2026 — the [id] param can be either:
+  //   1. a cut_session_blocks.id (formal cutting flow; carries a
+  //      session_code like CUT-202605191025), OR
+  //   2. a raw block_id (e.g. MT-B-303) for marble manual cuts that
+  //      bypass the cut-session flow.
+  // Try (1) first; if no row, fall back to (2). All downstream code
+  // works off `blockId` so the two paths converge.
+  const { data: csbRaw } = await supabase
     .from("cut_session_blocks")
     .select("id, status, block_id, cut_session_id, updated_at")
     .eq("id", id)
     .maybeSingle();
 
-  if (error || !csb) notFound();
-  const sessionBlock = csb as {
+  type SessionBlock = {
     id: string;
     status: string;
     block_id: string;
-    cut_session_id: string;
+    cut_session_id: string | null;
     updated_at: string;
   };
+  let sessionBlock: SessionBlock | null = null;
+  let blockId: string;
 
-  // Pull session info + parent block info + every slab tied to this block.
+  if (csbRaw) {
+    sessionBlock = csbRaw as SessionBlock;
+    blockId = sessionBlock.block_id;
+  } else {
+    // Fallback — interpret [id] as a block_id directly. Only honour
+    // if the row actually exists, otherwise 404.
+    const { data: directBlock } = await supabase
+      .from("blocks")
+      .select("id, updated_at")
+      .eq("id", id)
+      .maybeSingle();
+    if (!directBlock) notFound();
+    blockId = (directBlock as { id: string }).id;
+  }
+
+  // Pull session info (only when a session block is in play) + parent
+  // block info + every slab tied to this block. The marble manual-cut
+  // path has no session so we skip that lookup.
+  const sessionPromise = sessionBlock?.cut_session_id
+    ? supabase
+        .from("cut_sessions")
+        .select("session_code, kerf_mm")
+        .eq("id", sessionBlock.cut_session_id)
+        .maybeSingle()
+    : Promise.resolve({ data: null });
   const [{ data: session }, { data: parentBlock }, { data: slabs }] = await Promise.all([
-    supabase
-      .from("cut_sessions")
-      .select("session_code, kerf_mm")
-      .eq("id", sessionBlock.cut_session_id)
-      .maybeSingle(),
+    sessionPromise,
     supabase
       .from("blocks")
       .select("id, stone, yard, length_ft, width_ft, height_ft, quality")
-      .eq("id", sessionBlock.block_id)
+      .eq("id", blockId)
       .maybeSingle(),
     // Every slab whose source_block_id is this block — covers plan
     // cuts, extras, transfers, AND manual slabs added later by office
@@ -81,7 +107,7 @@ export default async function CuttingLabelsPrintPage({ params }: { params: Param
       .select(
         "id, label, temple, stone, length_ft, width_ft, thickness_ft, status, stock_location, priority",
       )
-      .eq("source_block_id", sessionBlock.block_id)
+      .eq("source_block_id", blockId)
       .order("temple")
       .order("id"),
   ]);
@@ -321,7 +347,7 @@ export default async function CuttingLabelsPrintPage({ params }: { params: Param
 
       <div className="screen-bar">
         <span className="screen-bar-title">
-          Slab Labels — {sessionBlock.block_id} · {session?.session_code ?? ""}
+          Slab Labels — {blockId} · {session?.session_code ?? ""}
         </span>
         <PrintBtn />
       </div>
@@ -331,7 +357,7 @@ export default async function CuttingLabelsPrintPage({ params }: { params: Param
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
           <div>
             <div className="doc-eyebrow">MTCPL · Slab Labels (post-cut)</div>
-            <div className="doc-title">{sessionBlock.block_id}</div>
+            <div className="doc-title">{blockId}</div>
             <div className="doc-sub">
               {slabRows.length} slab{slabRows.length !== 1 ? "s" : ""} attributed to this block ·
               cutter writes each ID on the physical slab
@@ -347,7 +373,7 @@ export default async function CuttingLabelsPrintPage({ params }: { params: Param
         <div className="meta-row">
           <div className="meta-cell">
             <div className="meta-label">Block</div>
-            <div className="meta-val mono">{sessionBlock.block_id}</div>
+            <div className="meta-val mono">{blockId}</div>
           </div>
           {parentBlock && (
             <>
@@ -460,7 +486,7 @@ export default async function CuttingLabelsPrintPage({ params }: { params: Param
         </div>
 
         <div className="doc-footer">
-          <span>MTCPL · Slab labels · {sessionBlock.block_id}</span>
+          <span>MTCPL · Slab labels · {blockId}</span>
           <span>{slabRows.length} rows</span>
         </div>
       </div>

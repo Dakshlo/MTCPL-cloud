@@ -370,11 +370,27 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
   }
 
   // Split done rows into today vs earlier (based on updated_at falling in the IST "today" window)
+  // Daksh May 2026 — explicit sort on both buckets (latest cut first)
+  // so the order is bulletproof regardless of DB-side ordering.
+  // earlierRows was perceived as "random" because the block IDs (MT-B-NNN)
+  // don't follow cut order; sorting by updated_at DESC keeps it
+  // chronological from the user's POV.
+  const sortLatestFirst = (a: CutBlockRow, b: CutBlockRow) => {
+    const av = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+    const bv = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+    return bv - av;
+  };
   const todayRows = activeTab === "done"
-    ? rows.filter(b => b.updated_at && b.updated_at >= todayStartIso && b.updated_at < tomorrowStartIso)
+    ? rows
+        .filter(b => b.updated_at && b.updated_at >= todayStartIso && b.updated_at < tomorrowStartIso)
+        .slice()
+        .sort(sortLatestFirst)
     : [];
   const earlierRows = activeTab === "done"
-    ? rows.filter(b => !b.updated_at || b.updated_at < todayStartIso || b.updated_at >= tomorrowStartIso)
+    ? rows
+        .filter(b => !b.updated_at || b.updated_at < todayStartIso || b.updated_at >= tomorrowStartIso)
+        .slice()
+        .sort(sortLatestFirst)
     : [];
 
   const tabs: { key: Tab; label: string; count: number | null }[] = [
@@ -843,6 +859,32 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                         }}
                       >
                         🖨 Print
+                      </Link>
+                    )}
+                    {/* Daksh May 2026 — Slab Labels button surfaced
+                        on the outer card so the team can print
+                        without first opening View. Only relevant
+                        once the cut is done (labels = post-cut
+                        stencilling reference). */}
+                    {(block.status === "done_prompt" || block.status === "done") && (
+                      <Link
+                        href={`/cutting/${block.id}/labels`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          textDecoration: "none",
+                          fontSize: 12,
+                          padding: "4px 12px",
+                          background: "#fffbeb",
+                          border: "1px solid #d97706",
+                          borderRadius: 6,
+                          color: "#92400e",
+                          fontWeight: 600,
+                          whiteSpace: "nowrap",
+                        }}
+                        title="Print slab IDs to stencil on the physical slabs"
+                      >
+                        🏷 Labels
                       </Link>
                     )}
                     <Link
@@ -1401,6 +1443,21 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                                   }}
                                 >
                                   🖨 Print
+                                </Link>
+                                {/* Daksh May 2026 — Slab Labels on
+                                    Earlier cards too. */}
+                                <Link
+                                  href={`/cutting/${block.id}/labels`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  style={{
+                                    textDecoration: "none", fontSize: 12, padding: "4px 12px",
+                                    background: "#fffbeb", border: "1px solid #d97706", borderRadius: 6,
+                                    color: "#92400e", fontWeight: 600, whiteSpace: "nowrap",
+                                  }}
+                                  title="Print slab IDs to stencil on the physical slabs"
+                                >
+                                  🏷 Labels
                                 </Link>
                                 <Link
                                   href={`/cutting/${block.id}`}
