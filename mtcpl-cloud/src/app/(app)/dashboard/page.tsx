@@ -387,6 +387,54 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
         </div>
       )}
 
+      {/* Daksh May 2026 — discreet entry to cross-vendor royalty
+          summary. Owner / developer only; passphrase-gated on the
+          destination page. Lives at the very bottom of the
+          dashboard ("most bottom of dashboard" per dad's ask) so
+          it's one tap away without elbowing the rest of the
+          surfaces. */}
+      {(profile.role === "owner" || profile.role === "developer") && (
+        <div
+          style={{
+            marginTop: 24,
+            display: "flex",
+            justifyContent: "center",
+          }}
+        >
+          <Link
+            href="/accounts/royalty-summary"
+            title="Cross-vendor royalty summary (passphrase required)"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "8px 16px",
+              fontSize: 12,
+              fontWeight: 600,
+              color: "var(--muted)",
+              background: "var(--surface)",
+              border: "1px dashed var(--border)",
+              borderRadius: 999,
+              textDecoration: "none",
+            }}
+          >
+            <span
+              aria-hidden
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                background: "#d97706",
+                display: "inline-block",
+                boxShadow: "0 0 0 3px rgba(217,119,6,0.15)",
+              }}
+            />
+            🏷️ Royalty Summary · all vendors
+            <span style={{ opacity: 0.6, fontSize: 11 }}>🔒</span>
+          </Link>
+        </div>
+      )}
+
     </div>
   );
 }
