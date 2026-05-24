@@ -14,6 +14,7 @@ import {
   holdSlabOnVendorAction,
   reloadHeldSlabAction,
   reloadTwoHeldSlabsOnMultiHeadAction,
+  sendHeldSlabBackToReadyAction,
   completeHeldSlabAction,
   acceptTransferReceiptAction,
   flagTransferIssueAction,
@@ -1587,7 +1588,12 @@ function HeldSlabRow({
         </div>
       )}
 
-      {/* Actions row */}
+      {/* Actions row — Reload (purple, primary), Back-to-queue
+          (amber-ghost), Mark done (green-ghost). Daksh May 2026:
+          added Back-to-queue so a held slab can re-enter the
+          regular Ready-to-load queue without forcing a machine
+          pick right now (used when priorities reshuffle or the
+          slab is going to be loaded as a pair later). */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <button
           type="button"
@@ -1608,6 +1614,43 @@ function HeldSlabRow({
         >
           {fromIsIdle ? `▶ Reload on ${fromMachine?.machine_code}` : "▶ Reload — pick CNC"}
         </button>
+        {/* Back-to-Ready-to-load — confirms before flipping so an
+            accidental tap on a tablet can't bounce a slab out of
+            the On Hold tray. */}
+        <form
+          action={sendHeldSlabBackToReadyAction}
+          onSubmit={(e) => {
+            const msg = [
+              `Send ${held.slab_id} back to Ready to load?`,
+              "",
+              "The slab leaves the On Hold tray and rejoins the regular",
+              "queue. You can load it on any compatible CNC from there.",
+              "",
+              "All hold metadata (reason, time held) is cleared.",
+            ].join("\n");
+            if (!window.confirm(msg)) e.preventDefault();
+          }}
+          style={{ margin: 0 }}
+        >
+          <FormPendingOverlay label="Sending back to queue…" />
+          <input type="hidden" name="carving_item_id" value={held.id} />
+          <input type="hidden" name="redirect_to" value="/vendor" />
+          <button
+            type="submit"
+            className="ghost-button"
+            style={{
+              padding: "10px 14px",
+              fontSize: 13,
+              minHeight: 44,
+              touchAction: "manipulation",
+              color: "#b45309",
+              borderColor: "rgba(180,115,51,0.45)",
+            }}
+            title="Move this slab back into the Ready to load queue without picking a machine yet"
+          >
+            ↩ Back to queue
+          </button>
+        </form>
         <button
           type="button"
           onClick={onComplete}
@@ -3585,11 +3628,12 @@ function LoadModal({
               : "Pick the slab and machine, then enter your tighter ETA."
       }
       onClose={onClose}
-      // Wider modal in pair mode so Slab A and Slab B can sit
-      // side-by-side. Daksh May 2026 — the old vertical stack hid
-      // the Load button below the fold and confused the eye about
-      // which grid was which.
-      maxWidth={effectiveIsPair ? 920 : 560}
+      // Daksh May 2026 round 2 — single mode at 560 was still too
+      // narrow on tablet/desktop (lots of scroll, Load button below
+      // fold). Both modes now open wide: pair at 920 (room for two
+      // grids), single at 760 so the slab cards lay out 3-4 across
+      // with no vertical chase.
+      maxWidth={effectiveIsPair ? 920 : 760}
     >
       {compatibleQueue.length === 0 ? (
         <Empty

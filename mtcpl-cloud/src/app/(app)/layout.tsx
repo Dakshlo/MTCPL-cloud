@@ -418,6 +418,12 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                   role === "team_head" ||
                   role === "crosscheck" ||
                   role === "carving_head");
+              // Daksh May 2026 — vendors also walk the shop floor
+              // and stencilled slabs land in their shade; they need
+              // Find ID too. Vendor role has no active_department,
+              // so we light up the production lookup directly
+              // regardless of dept.
+              const showProductionForVendor = role === "vendor";
               const showFinance =
                 dept === "finance" &&
                 (role === "developer" ||
@@ -428,7 +434,8 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               const showInventory =
                 dept === "inventory" &&
                 (role === "developer" || role === "owner");
-              if (showProduction) return <TopbarIdLookup domain="production" />;
+              if (showProduction || showProductionForVendor)
+                return <TopbarIdLookup domain="production" />;
               if (showFinance) return <TopbarIdLookup domain="finance" />;
               if (showInventory) return <TopbarIdLookup domain="inventory" />;
               return null;

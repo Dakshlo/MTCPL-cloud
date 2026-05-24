@@ -2264,6 +2264,102 @@ export async function reloadTwoHeldSlabsOnMultiHeadAction(formData: FormData) {
   );
 }
 
+/** Daksh May 2026 — flip a held slab back into the regular "ready
+ *  to load" queue without picking a machine right now. Use case:
+ *  the vendor parked the slab mid-carve, the situation changes
+ *  (different priority lands, a different vendor will take it, the
+ *  vendor wants to load it via the standard load modal so they
+ *  can pair it), and they want it out of the On Hold tray and back
+ *  in the regular queue. NOT the same as Mark done — the carve
+ *  hasn't finished, just the hold is released.
+ *
+ *  Resets all hold metadata + cnc_machine_id + loaded_at so the
+ *  row looks identical to a freshly-assigned-not-loaded job. */
+export async function sendHeldSlabBackToReadyAction(formData: FormData) {
+  const { profile } = await requireAuth([
+    "developer",
+    "owner",
+    "carving_head",
+    "vendor",
+  ]);
+  const admin = createAdminSupabaseClient();
+
+  const carvingItemId = txt(formData, "carving_item_id");
+  const redirectTo = txt(formData, "redirect_to") || "/vendor";
+
+  if (!carvingItemId) redirect(`${redirectTo}?toast=Missing+job+id`);
+
+  const { data: ci } = await admin
+    .from("carving_items")
+    .select(
+      "id, vendor_id, status, slab_requirement_id, held_from_machine_id",
+    )
+    .eq("id", carvingItemId)
+    .maybeSingle();
+  if (!ci) redirect(`${redirectTo}?toast=Job+not+found`);
+  const item = ci as {
+    id: string;
+    vendor_id: string;
+    status: string;
+    slab_requirement_id: string;
+    held_from_machine_id: string | null;
+  };
+
+  if (profile.role === "vendor") {
+    if (!profile.vendor_id || profile.vendor_id !== item.vendor_id) {
+      redirect(`${redirectTo}?toast=Not+your+slab`);
+    }
+  }
+  if (item.status !== "carving_on_hold") {
+    redirect(`${redirectTo}?toast=Slab+is+not+on+hold`);
+  }
+
+  const now = new Date().toISOString();
+  await admin
+    .from("carving_items")
+    .update({
+      status: "carving_assigned",
+      cnc_machine_id: null,
+      loaded_at: null,
+      loaded_by: null,
+      vendor_estimated_minutes: null,
+      held_at: null,
+      held_by: null,
+      held_reason: null,
+      // Keep held_from_machine_id as soft history so the next load
+      // modal's defaulting can still suggest the same machine.
+    })
+    .eq("id", carvingItemId)
+    .eq("status", "carving_on_hold");
+
+  // Slab table mirrors the carving_items state.
+  await admin
+    .from("slab_requirements")
+    .update({
+      status: "carving_assigned",
+      updated_by: profile.id,
+      updated_at: now,
+    })
+    .eq("id", item.slab_requirement_id);
+
+  await recordEvent(
+    carvingItemId,
+    "hold_released",
+    profile.id,
+    "Returned to Ready-to-load queue from On Hold",
+  );
+  await logAudit(
+    profile.id,
+    "carving_hold_released",
+    "carving_item",
+    carvingItemId,
+    { was_held_from: item.held_from_machine_id },
+  );
+
+  refreshAll();
+  redirect(`${redirectTo}?toast=Slab+is+back+in+Ready+to+load`);
+}
+
 /** Mark a held slab as complete WITHOUT re-loading. The vendor
  *  decides the held carving is actually done (e.g. they only needed
  *  side 1 carved, or a partner is unable to finish side 2). Mirrors

@@ -302,6 +302,15 @@ export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder={domainConfig.placeholder}
+                /* Daksh May 2026 — hint mobile/tablet OSes to suggest
+                   uppercase-from-the-start, no autocorrect, no
+                   autocapitalisation-after-dash. IDs are always
+                   uppercase here. inputMode="text" (not "search")
+                   keeps the soft keyboard predictable. */
+                autoCapitalize="characters"
+                autoCorrect="off"
+                spellCheck={false}
+                inputMode="text"
                 style={{
                   flex: 1,
                   padding: "9px 12px",
@@ -313,6 +322,7 @@ export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
                   border: "1px solid rgba(15, 23, 42, 0.12)",
                   borderRadius: 9,
                   letterSpacing: "0.02em",
+                  textTransform: "uppercase",
                 }}
               />
               <button
@@ -334,6 +344,19 @@ export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
                 {loading ? "Searching…" : "Find"}
               </button>
             </form>
+
+            {/* Daksh May 2026 — custom touch keypad for tablets.
+                Slab/block IDs mix LETTERS + NUMBERS + DASH, and the
+                native on-screen keyboard makes you switch modes
+                three times to type "MT-B-090". A single-screen
+                keypad with 0-9 + A-Z + dash + backspace fixes that.
+                Toggle-on so desktop users with a real keyboard
+                aren't bothered; persisted in localStorage. */}
+            <FindIdKeypad
+              value={query}
+              onChange={(v) => setQuery(v)}
+              onSubmit={() => void runSearch()}
+            />
 
             {/* Result */}
             {error && (
@@ -370,6 +393,237 @@ export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
         </>
       )}
     </div>
+  );
+}
+
+// ── Touch keypad (Daksh May 2026) ─────────────────────────────────
+//
+// On a tablet's soft keyboard, typing "MT-B-090" means flipping
+// between letters → symbols → numbers → letters again — slow and
+// error-prone. This component renders an always-uppercase pad with
+// 0-9 + A-Z + dash + backspace all on one screen. The user can
+// toggle it on (sticky in localStorage) so dev/desktop users with a
+// real keyboard aren't bothered.
+//
+// Internals are stateless beyond the toggle: every press mutates the
+// parent's query state via onChange. Submit button shortcuts the
+// usual Find flow.
+function FindIdKeypad({
+  value,
+  onChange,
+  onSubmit,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  onSubmit: () => void;
+}) {
+  const [shown, setShown] = useState<boolean>(false);
+
+  // Read persisted preference on mount. Keep it client-only so SSR
+  // never tries to localStorage (would crash).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const v = window.localStorage.getItem("mtcpl_findid_keypad");
+      if (v === "1") setShown(true);
+    } catch {
+      /* private mode etc — silently fall through */
+    }
+  }, []);
+
+  function toggle() {
+    setShown((s) => {
+      const next = !s;
+      try {
+        window.localStorage.setItem(
+          "mtcpl_findid_keypad",
+          next ? "1" : "0",
+        );
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }
+
+  function append(ch: string) {
+    onChange((value + ch).toUpperCase());
+  }
+  function backspace() {
+    onChange(value.slice(0, -1));
+  }
+  function clear() {
+    onChange("");
+  }
+
+  const digits = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"];
+  // Letters laid out QWERTY-ish so the eye lands on common ID
+  // prefixes (WF, MT, AGROHA …) without hunting around an alphabet
+  // grid. Row 1 = top QWERTY, Row 2 = home, Row 3 = bottom.
+  const lettersRows = [
+    ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
+    ["A", "S", "D", "F", "G", "H", "J", "K", "L"],
+    ["Z", "X", "C", "V", "B", "N", "M"],
+  ];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          alignItems: "center",
+          gap: 8,
+        }}
+      >
+        <button
+          type="button"
+          onClick={toggle}
+          aria-pressed={shown}
+          title="Show / hide the touch keypad"
+          style={{
+            fontSize: 10,
+            fontWeight: 700,
+            padding: "3px 9px",
+            border: "1px solid rgba(15, 23, 42, 0.18)",
+            background: shown ? "rgba(180,115,51,0.15)" : "rgba(255,255,255,0.4)",
+            color: shown ? "var(--gold-dark)" : "rgba(15,23,42,0.65)",
+            borderRadius: 999,
+            cursor: "pointer",
+            letterSpacing: "0.05em",
+            textTransform: "uppercase",
+          }}
+        >
+          ⌨ Touch keypad {shown ? "on" : "off"}
+        </button>
+      </div>
+
+      {shown && (
+        <div
+          style={{
+            padding: 8,
+            background: "rgba(15, 23, 42, 0.05)",
+            border: "1px solid rgba(15, 23, 42, 0.1)",
+            borderRadius: 10,
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+          }}
+        >
+          {/* Digits row */}
+          <KeypadRow keys={digits} onPress={append} />
+          {/* Letter rows */}
+          {lettersRows.map((row, i) => (
+            <KeypadRow key={i} keys={row} onPress={append} />
+          ))}
+          {/* Symbol + action row */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1.2fr 1.2fr 1.6fr",
+              gap: 4,
+            }}
+          >
+            <KeypadKey label="-" onPress={() => append("-")} />
+            <KeypadKey label="⌫" onPress={backspace} tone="warn" />
+            <KeypadKey label="Clear" onPress={clear} tone="warn" />
+            <KeypadKey
+              label="🔍 Find"
+              onPress={onSubmit}
+              tone="primary"
+              disabled={!value.trim()}
+            />
+          </div>
+          <div
+            style={{
+              fontSize: 10,
+              color: "rgba(15,23,42,0.5)",
+              textAlign: "center",
+              marginTop: 2,
+            }}
+          >
+            All keys auto-uppercase · zero-pad guessed (mt-b-90 → MT-B-090)
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function KeypadRow({
+  keys,
+  onPress,
+}: {
+  keys: string[];
+  onPress: (k: string) => void;
+}) {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: `repeat(${keys.length}, minmax(0, 1fr))`,
+        gap: 4,
+      }}
+    >
+      {keys.map((k) => (
+        <KeypadKey key={k} label={k} onPress={() => onPress(k)} />
+      ))}
+    </div>
+  );
+}
+
+function KeypadKey({
+  label,
+  onPress,
+  tone = "default",
+  disabled,
+}: {
+  label: string;
+  onPress: () => void;
+  tone?: "default" | "primary" | "warn";
+  disabled?: boolean;
+}) {
+  const palette =
+    tone === "primary"
+      ? {
+          bg: "var(--gold)",
+          fg: "#fff",
+          border: "var(--gold-dark)",
+        }
+      : tone === "warn"
+        ? {
+            bg: "rgba(180, 115, 51, 0.12)",
+            fg: "#92400e",
+            border: "rgba(180, 115, 51, 0.35)",
+          }
+        : {
+            bg: "#fff",
+            fg: "var(--text)",
+            border: "rgba(15, 23, 42, 0.18)",
+          };
+  return (
+    <button
+      type="button"
+      onClick={onPress}
+      disabled={disabled}
+      style={{
+        padding: "10px 0",
+        fontSize: 14,
+        fontWeight: 800,
+        fontFamily: "ui-monospace, SFMono-Regular, monospace",
+        background: palette.bg,
+        color: palette.fg,
+        border: `1px solid ${palette.border}`,
+        borderRadius: 7,
+        cursor: disabled ? "not-allowed" : "pointer",
+        touchAction: "manipulation",
+        userSelect: "none",
+        opacity: disabled ? 0.5 : 1,
+        minHeight: 36,
+      }}
+    >
+      {label}
+    </button>
   );
 }
 
@@ -595,25 +849,12 @@ function Field({ k, v, mono }: { k: string; v: React.ReactNode; mono?: boolean }
 function SlabResultPanel({ result }: { result: Extract<LookupResult, { kind: "slab" }> }) {
   const s = result.slab;
 
-  // Compose the "where it is now" stage. Slab status is the
-  // canonical state but we mix in the carving / dispatch context
-  // when it's available so the very first line of the panel reads
-  // like "carving in progress at Mohit Carving Works" rather than
-  // just "carving_in_progress".
-  let stageContext: string | null = null;
-  if (result.dispatch?.delivered_at) {
-    stageContext = `Delivered to ${result.dispatch.receiver_name ?? result.dispatch.temple ?? "—"}`;
-  } else if (result.dispatch?.dispatched_at) {
-    stageContext = `On vehicle ${result.dispatch.vehicle_no ?? "—"}`;
-  } else if (result.carving) {
-    stageContext = `${result.carving.vendor_name}${
-      result.carving.location ? ` · ${result.carving.location}` : ""
-    }`;
-  } else if (result.cut?.cut_at) {
-    stageContext = `Cut ${fmtDate(result.cut.cut_at)} · ${result.cut.session_code}`;
-  } else if (s.yard) {
-    stageContext = `Yard ${s.yard}`;
-  }
+  // Daksh May 2026 — the server now composes the "where is it now"
+  // sentence (status + carving + dispatch + stock_location) into a
+  // single current_location string. Render that as the headline and
+  // surface stock_location as its own field below in the basics
+  // section so the user can see the literal stencilled rack code.
+  const stageContext: string = result.current_location;
 
   return (
     <div
@@ -659,7 +900,14 @@ function SlabResultPanel({ result }: { result: Extract<LookupResult, { kind: "sl
           )}
         </div>
         {stageContext && (
-          <div style={{ fontSize: 12, color: "var(--text)", fontWeight: 600 }}>
+          <div
+            style={{
+              fontSize: 13,
+              color: "var(--text)",
+              fontWeight: 700,
+              lineHeight: 1.35,
+            }}
+          >
             {stageContext}
           </div>
         )}
@@ -713,6 +961,12 @@ function SlabResultPanel({ result }: { result: Extract<LookupResult, { kind: "sl
             mono
           />
         )}
+        {/* Daksh May 2026 — surface the literal stencilled rack/location
+            so production / vendor can walk straight to it. Mig 020. */}
+        {s.stock_location && (
+          <Field k="Stock location" v={s.stock_location} mono />
+        )}
+        {s.yard != null && <Field k="Yard (source block)" v={String(s.yard)} mono />}
         {s.deadline && <Field k="Deadline" v={fmtDate(s.deadline)} />}
       </div>
 
@@ -837,16 +1091,10 @@ function BlockResultPanel({ result }: { result: Extract<LookupResult, { kind: "b
 
   // Block stage context — what's happening with cutting + how many
   // slabs have come out.
-  let stageContext: string | null = null;
-  if (result.cutting?.session_block_status === "done") {
-    stageContext = `Cut done · session ${result.cutting.session_code}`;
-  } else if (result.cutting?.session_block_status === "cutting") {
-    stageContext = `Cutting in progress · session ${result.cutting.session_code}`;
-  } else if (result.cutting) {
-    stageContext = `Cut session ${result.cutting.session_code}`;
-  } else {
-    stageContext = `Yard ${b.yard}`;
-  }
+  // Daksh May 2026 — use the server-composed current_location string
+  // for the headline. The block also gets created-by + cut-by + cut-at
+  // surfaced below.
+  const stageContext: string = result.current_location;
 
   return (
     <div
@@ -905,7 +1153,14 @@ function BlockResultPanel({ result }: { result: Extract<LookupResult, { kind: "b
           )}
         </div>
         {stageContext && (
-          <div style={{ fontSize: 12, color: "var(--text)", fontWeight: 600 }}>
+          <div
+            style={{
+              fontSize: 13,
+              color: "var(--text)",
+              fontWeight: 700,
+              lineHeight: 1.35,
+            }}
+          >
             {stageContext}
           </div>
         )}
@@ -940,6 +1195,10 @@ function BlockResultPanel({ result }: { result: Extract<LookupResult, { kind: "b
         />
         <Field k="CFT" v={fmtNum(b.cft, 2)} mono />
         {b.quality && <Field k="Quality" v={b.quality} />}
+        <Field k="Added on" v={fmtDate(b.created_at)} />
+        {b.created_by_name && (
+          <Field k="Added by" v={b.created_by_name} />
+        )}
       </div>
 
       {result.cutting && (
@@ -960,6 +1219,12 @@ function BlockResultPanel({ result }: { result: Extract<LookupResult, { kind: "b
             </div>
             <Field k="Session" v={result.cutting.session_code} mono />
             <Field k="Status" v={result.cutting.session_block_status} mono />
+            {result.cutting.cut_at && (
+              <Field k="Cut completed" v={fmtDate(result.cutting.cut_at)} />
+            )}
+            {result.cutting.planner_name && (
+              <Field k="Planner" v={result.cutting.planner_name} />
+            )}
             {result.cutting.largest_remainder_cft != null && (
               <Field
                 k="Largest remainder"

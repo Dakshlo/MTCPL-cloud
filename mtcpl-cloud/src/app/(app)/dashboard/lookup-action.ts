@@ -47,7 +47,17 @@ export type SlabResult = {
     priority_note: string | null;
     created_at: string;
     updated_at: string;
+    /** Mig 020 — last known physical location (stencilled at cut
+     *  time, refreshable by vendors via Edit-location). NULL when
+     *  the slab is mid-flight (in transit, on a machine, etc) and
+     *  the cutter never set it. */
+    stock_location: string | null;
   };
+  /** Daksh May 2026 — one-line "where is it now per system" string
+   *  derived from status + carving + dispatch + stock_location.
+   *  Renders as the most prominent line of the panel so production
+   *  / vendor sees the answer at a glance. */
+  current_location: string;
   cut: {
     session_code: string;
     cut_at: string | null;
@@ -88,17 +98,25 @@ export type BlockResult = {
     quality: string | null;
     created_at: string;
     updated_at: string;
+    created_by_name: string | null;
   };
   cutting: {
     session_code: string;
     session_block_status: string;
     needs_reprint: boolean;
     largest_remainder_cft: number | null;
+    /** Daksh May 2026 — completed-at + cutter name so production
+     *  can answer "when was this block cut and by whom". cut_at
+     *  is the cut_session_blocks.updated_at when status='done'.
+     *  cut_by is the cut_sessions.planned_by profile. */
+    cut_at: string | null;
+    planner_name: string | null;
   } | null;
   slabs_from_block: {
     total: number;
     by_status: Record<string, number>;
   };
+  current_location: string;
 };
 
 export type NotFoundResult = {
@@ -109,15 +127,46 @@ export type NotFoundResult = {
 
 export type LookupResult = SlabResult | BlockResult | NotFoundResult;
 
+/** Build zero-padded variants of an ID so typing "MT-B-90" finds
+ *  "MT-B-090" and vice versa. Splits the input on the LAST dash
+ *  (the segment most likely to carry leading zeros — e.g. block ids
+ *  like MT-B-245 and slab ids like AGROHA-0002-13). If the last
+ *  segment is purely numeric, returns variants padded to 1..5 digits;
+ *  otherwise returns just the trimmed original. Always uppercase.
+ *
+ *  Examples:
+ *    "mt-b-90"   → ["MT-B-90","MT-B-090","MT-B-0090","MT-B-00090","MT-B-9"]
+ *    "wf-0001"   → ["WF-0001","WF-1","WF-01","WF-001","WF-00001"]
+ *    "AGROHA-2-13" → permutes the last "13" to "013","0013",… */
+function zeroPadVariants(raw: string): string[] {
+  const q = raw.trim().toUpperCase();
+  if (!q) return [];
+  const lastDash = q.lastIndexOf("-");
+  if (lastDash === -1) return [q];
+  const prefix = q.slice(0, lastDash + 1);
+  const tail = q.slice(lastDash + 1);
+  if (!/^\d+$/.test(tail)) return [q]; // not numeric — nothing to pad
+  const n = parseInt(tail, 10);
+  if (!Number.isFinite(n)) return [q];
+  const variants = new Set<string>([q]);
+  for (let w = 1; w <= 5; w++) {
+    variants.add(`${prefix}${String(n).padStart(w, "0")}`);
+  }
+  return [...variants];
+}
+
 export async function lookupId(query: string): Promise<LookupResult> {
   // Mig 044 follow-on (Daksh): widened from dev/owner only to
-  // every role that legitimately walks the workshop floor.
+  // every role that legitimately walks the workshop floor. May 2026
+  // — added vendor too. Their stencilled slabs land in the shade and
+  // they need to look the slab up just like staff do.
   await requireAuth([
     "developer",
     "owner",
     "team_head",
     "crosscheck",
     "carving_head",
+    "vendor",
   ]);
   const admin = createAdminSupabaseClient();
 
@@ -130,29 +179,33 @@ export async function lookupId(query: string): Promise<LookupResult> {
     return { kind: "not_found", query: "", suggestions: [] };
   }
 
+  // Daksh May 2026 — zero-pad variants so "mt-b-90" finds "MT-B-090".
+  // The first match wins; try slabs first (more common), then blocks.
+  const variants = zeroPadVariants(q);
+
   // Try the slab table first — slab IDs are far more common (1500+)
   // than block IDs (~250) so this is the more likely match.
-  const { data: slabRow } = await admin
+  const { data: slabRows } = await admin
     .from("slab_requirements")
     .select(
-      "id, label, temple, stone, length_ft, width_ft, thickness_ft, source_block_id, status, priority, deadline, priority_note, created_at, updated_at",
+      "id, label, temple, stone, length_ft, width_ft, thickness_ft, source_block_id, status, priority, deadline, priority_note, created_at, updated_at, stock_location",
     )
-    .eq("id", q)
-    .maybeSingle();
+    .in("id", variants)
+    .limit(1);
 
-  if (slabRow) {
-    return await loadSlabContext(admin, slabRow as Record<string, unknown>);
+  if (slabRows && slabRows.length > 0) {
+    return await loadSlabContext(admin, slabRows[0] as Record<string, unknown>);
   }
 
-  // Try block table next.
-  const { data: blockRow } = await admin
+  // Try block table next — same variant set.
+  const { data: blockRows } = await admin
     .from("blocks")
     .select("*")
-    .eq("id", q)
-    .maybeSingle();
+    .in("id", variants)
+    .limit(1);
 
-  if (blockRow) {
-    return await loadBlockContext(admin, blockRow as Record<string, unknown>);
+  if (blockRows && blockRows.length > 0) {
+    return await loadBlockContext(admin, blockRows[0] as Record<string, unknown>);
   }
 
   // Nothing found — pull a few prefix suggestions so the user can pick
@@ -212,6 +265,7 @@ async function loadSlabContext(
     priority_note: string | null;
     created_at: string;
     updated_at: string;
+    stock_location: string | null;
   };
 
   const L = Number(slab.length_ft);
@@ -311,6 +365,28 @@ async function loadSlabContext(
     }
   }
 
+  // Compose a single "where is it now per system" line. Most
+  // specific signal wins (dispatch > carving > stock_location >
+  // yard > unknown). This is what production/vendor scan first.
+  let currentLocation = "Unknown — no location signal in the system";
+  if (dispatch?.delivered_at) {
+    currentLocation = `Delivered to ${dispatch.receiver_name ?? dispatch.temple ?? "—"}`;
+  } else if (dispatch?.dispatched_at) {
+    currentLocation = `On vehicle ${dispatch.vehicle_no ?? "—"} (dispatched ${new Date(dispatch.dispatched_at).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" })})`;
+  } else if (carving?.status === "carving_in_progress") {
+    currentLocation = `On a CNC at ${carving.vendor_name}`;
+  } else if (carving?.status === "completed") {
+    currentLocation = `Carving completed at ${carving.vendor_name}${carving.location ? ` · ${carving.location}` : ""}`;
+  } else if (carving?.status === "carving_assigned") {
+    currentLocation = `Assigned to ${carving.vendor_name} (in transit or pending stock)`;
+  } else if (carving) {
+    currentLocation = `${carving.vendor_name}${carving.location ? ` · ${carving.location}` : ""}`;
+  } else if (slab.stock_location) {
+    currentLocation = `Stock: ${slab.stock_location}`;
+  } else if (yard != null) {
+    currentLocation = `Yard ${yard} (uncut block stock)`;
+  }
+
   return {
     kind: "slab",
     slab: {
@@ -330,7 +406,9 @@ async function loadSlabContext(
       priority_note: slab.priority_note,
       created_at: slab.created_at,
       updated_at: slab.updated_at,
+      stock_location: slab.stock_location ?? null,
     },
+    current_location: currentLocation,
     cut,
     carving,
     dispatch,
@@ -353,10 +431,23 @@ async function loadBlockContext(
     quality?: string | null;
     created_at: string;
     updated_at: string;
+    created_by?: string | null;
   };
   const L = Number(blk.length_ft);
   const W = Number(blk.width_ft);
   const H = Number(blk.height_ft);
+
+  // Daksh May 2026 — who entered the block (for "when was this
+  // block added, by whom" production questions).
+  let createdByName: string | null = null;
+  if (blk.created_by) {
+    const { data: who } = await admin
+      .from("profiles")
+      .select("full_name")
+      .eq("id", blk.created_by)
+      .maybeSingle();
+    createdByName = (who as { full_name?: string } | null)?.full_name ?? null;
+  }
 
   // Most recent cut session for this block.
   let cutting: BlockResult["cutting"] = null;
@@ -373,18 +464,31 @@ async function loadBlockContext(
       needs_reprint?: boolean;
       largest_remainder?: { l: number; w: number; h: number } | null;
       cut_session_id: string;
+      updated_at: string;
     };
     const { data: sess } = await admin
       .from("cut_sessions")
-      .select("session_code")
+      .select("session_code, planned_by")
       .eq("id", c.cut_session_id)
       .maybeSingle();
     const lr = c.largest_remainder;
+    const s = sess as { session_code?: string; planned_by?: string | null } | null;
+    let plannerName: string | null = null;
+    if (s?.planned_by) {
+      const { data: planner } = await admin
+        .from("profiles")
+        .select("full_name")
+        .eq("id", s.planned_by)
+        .maybeSingle();
+      plannerName = (planner as { full_name?: string } | null)?.full_name ?? null;
+    }
     cutting = {
-      session_code: (sess as { session_code?: string } | null)?.session_code ?? "—",
+      session_code: s?.session_code ?? "—",
       session_block_status: c.status,
       needs_reprint: Boolean(c.needs_reprint),
       largest_remainder_cft: lr ? toCft(lr.l, lr.w, lr.h) : null,
+      cut_at: c.status === "done" ? c.updated_at : null,
+      planner_name: plannerName,
     };
   }
 
@@ -397,6 +501,18 @@ async function loadBlockContext(
   for (const s of slabs ?? []) {
     const st = (s as { status: string }).status;
     by_status[st] = (by_status[st] ?? 0) + 1;
+  }
+
+  // "Where is the block now": pre-cut → yard; mid-cut → on the
+  // cutter; post-cut → not a single location any more (slabs
+  // dispersed) but we still tell the user the block's last yard.
+  let currentLocation: string;
+  if (cutting?.session_block_status === "cutting") {
+    currentLocation = `On the cutter · session ${cutting.session_code}`;
+  } else if (cutting?.session_block_status === "done") {
+    currentLocation = `Cut done — slabs dispersed (was Yard ${blk.yard})`;
+  } else {
+    currentLocation = `Yard ${blk.yard}`;
   }
 
   return {
@@ -414,11 +530,13 @@ async function loadBlockContext(
       quality: blk.quality ?? null,
       created_at: blk.created_at,
       updated_at: blk.updated_at,
+      created_by_name: createdByName,
     },
     cutting,
     slabs_from_block: {
       total: slabs?.length ?? 0,
       by_status,
     },
+    current_location: currentLocation,
   };
 }
