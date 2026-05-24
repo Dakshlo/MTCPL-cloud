@@ -389,10 +389,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
 
       {/* Daksh May 2026 — discreet entry to cross-vendor royalty
           summary. Owner / developer only; passphrase-gated on the
-          destination page. Lives at the very bottom of the
-          dashboard ("most bottom of dashboard" per dad's ask) so
-          it's one tap away without elbowing the rest of the
-          surfaces. */}
+          destination page. Shrunk to a single tiny dot per dad's
+          ask — he knows where it lives and doesn't want a button
+          taking up real estate. */}
       {(profile.role === "owner" || profile.role === "developer") && (
         <div
           style={{
@@ -404,34 +403,17 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
           <Link
             href="/accounts/royalty-summary"
             title="Cross-vendor royalty summary (passphrase required)"
+            aria-label="Royalty Summary"
             style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "8px 16px",
-              fontSize: 12,
-              fontWeight: 600,
-              color: "var(--muted)",
-              background: "var(--surface)",
-              border: "1px dashed var(--border)",
-              borderRadius: 999,
-              textDecoration: "none",
+              display: "inline-block",
+              width: 10,
+              height: 10,
+              borderRadius: "50%",
+              background: "#d97706",
+              boxShadow: "0 0 0 3px rgba(217,119,6,0.15)",
+              opacity: 0.55,
             }}
-          >
-            <span
-              aria-hidden
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: "50%",
-                background: "#d97706",
-                display: "inline-block",
-                boxShadow: "0 0 0 3px rgba(217,119,6,0.15)",
-              }}
-            />
-            🏷️ Royalty Summary · all vendors
-            <span style={{ opacity: 0.6, fontSize: 11 }}>🔒</span>
-          </Link>
+          />
         </div>
       )}
 

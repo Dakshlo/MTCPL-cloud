@@ -15,8 +15,17 @@
  */
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { Fragment, useEffect, useMemo, useState, useTransition } from "react";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
+
+type VendorBreakdown = {
+  id: string;
+  name: string;
+  received: number;
+  given: number;
+  net: number;
+  entryCount: number;
+};
 
 type SummaryResult =
   | {
@@ -28,6 +37,7 @@ type SummaryResult =
         given: number;
         net: number;
         entryCount: number;
+        vendors: VendorBreakdown[];
       }>;
       totals: {
         received: number;
@@ -35,6 +45,7 @@ type SummaryResult =
         net: number;
         entryCount: number;
       };
+      vendors: VendorBreakdown[];
     }
   | { ok: false; error: string };
 
@@ -74,10 +85,18 @@ export function RoyaltySummaryClient({
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  // Filters
-  const [fromDate, setFromDate] = useState<string>(firstOfMonthIstYmd());
+  // Filters. For Day mode we collapse to a single date — both
+  // from/to track the same value so the existing server contract
+  // (date range) stays simple. For Week/Month we expose From/To.
+  const [fromDate, setFromDate] = useState<string>(todayIstYmd());
   const [toDate, setToDate] = useState<string>(todayIstYmd());
   const [granularity, setGranularity] = useState<Granularity>("day");
+
+  // Which bucket row is expanded to show its per-vendor breakdown.
+  // null = none expanded. Reset whenever filters change.
+  const [expandedBucketKey, setExpandedBucketKey] = useState<string | null>(
+    null,
+  );
 
   // Result
   const [result, setResult] = useState<
@@ -107,6 +126,23 @@ export function RoyaltySummaryClient({
       setResult(r);
     });
   }
+
+  // When user flips to Day mode, collapse the range to a single day
+  // (the "To" value) so the picker shows one input. When flipping to
+  // Week / Month, expand to "this month so far" — a useful default.
+  useEffect(() => {
+    if (granularity === "day") {
+      if (fromDate !== toDate) setFromDate(toDate);
+    } else {
+      if (fromDate === toDate) setFromDate(firstOfMonthIstYmd());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [granularity]);
+
+  // Collapse any expanded row when the data set changes.
+  useEffect(() => {
+    setExpandedBucketKey(null);
+  }, [fromDate, toDate, granularity]);
 
   // Re-fetch when granularity / date range changes after unlock.
   useEffect(() => {
@@ -316,68 +352,107 @@ export function RoyaltySummaryClient({
               alignItems: "flex-end",
             }}
           >
-            <label
-              style={{ display: "flex", flexDirection: "column", gap: 4 }}
-            >
-              <span
-                style={{
-                  fontSize: 10,
-                  fontWeight: 700,
-                  color: "var(--muted)",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.06em",
-                }}
+            {granularity === "day" ? (
+              <label
+                style={{ display: "flex", flexDirection: "column", gap: 4 }}
               >
-                From
-              </span>
-              <input
-                type="date"
-                value={fromDate}
-                onChange={(e) => setFromDate(e.target.value)}
-                min="2015-01-01"
-                max={`${new Date().getFullYear() + 1}-12-31`}
-                style={{
-                  padding: "7px 10px",
-                  fontSize: 13,
-                  border: "1px solid var(--border)",
-                  borderRadius: 6,
-                  background: "#fff",
-                  fontFamily: "ui-monospace, monospace",
-                  fontWeight: 600,
-                }}
-              />
-            </label>
-            <label
-              style={{ display: "flex", flexDirection: "column", gap: 4 }}
-            >
-              <span
-                style={{
-                  fontSize: 10,
-                  fontWeight: 700,
-                  color: "var(--muted)",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.06em",
-                }}
-              >
-                To
-              </span>
-              <input
-                type="date"
-                value={toDate}
-                onChange={(e) => setToDate(e.target.value)}
-                min="2015-01-01"
-                max={`${new Date().getFullYear() + 1}-12-31`}
-                style={{
-                  padding: "7px 10px",
-                  fontSize: 13,
-                  border: "1px solid var(--border)",
-                  borderRadius: 6,
-                  background: "#fff",
-                  fontFamily: "ui-monospace, monospace",
-                  fontWeight: 600,
-                }}
-              />
-            </label>
+                <span
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: "var(--muted)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.06em",
+                  }}
+                >
+                  Date
+                </span>
+                <input
+                  type="date"
+                  value={toDate}
+                  onChange={(e) => {
+                    setFromDate(e.target.value);
+                    setToDate(e.target.value);
+                  }}
+                  min="2015-01-01"
+                  max={`${new Date().getFullYear() + 1}-12-31`}
+                  style={{
+                    padding: "7px 10px",
+                    fontSize: 13,
+                    border: "1px solid var(--border)",
+                    borderRadius: 6,
+                    background: "#fff",
+                    fontFamily: "ui-monospace, monospace",
+                    fontWeight: 600,
+                  }}
+                />
+              </label>
+            ) : (
+              <>
+                <label
+                  style={{ display: "flex", flexDirection: "column", gap: 4 }}
+                >
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: "var(--muted)",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.06em",
+                    }}
+                  >
+                    From
+                  </span>
+                  <input
+                    type="date"
+                    value={fromDate}
+                    onChange={(e) => setFromDate(e.target.value)}
+                    min="2015-01-01"
+                    max={`${new Date().getFullYear() + 1}-12-31`}
+                    style={{
+                      padding: "7px 10px",
+                      fontSize: 13,
+                      border: "1px solid var(--border)",
+                      borderRadius: 6,
+                      background: "#fff",
+                      fontFamily: "ui-monospace, monospace",
+                      fontWeight: 600,
+                    }}
+                  />
+                </label>
+                <label
+                  style={{ display: "flex", flexDirection: "column", gap: 4 }}
+                >
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: "var(--muted)",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.06em",
+                    }}
+                  >
+                    To
+                  </span>
+                  <input
+                    type="date"
+                    value={toDate}
+                    onChange={(e) => setToDate(e.target.value)}
+                    min="2015-01-01"
+                    max={`${new Date().getFullYear() + 1}-12-31`}
+                    style={{
+                      padding: "7px 10px",
+                      fontSize: 13,
+                      border: "1px solid var(--border)",
+                      borderRadius: 6,
+                      background: "#fff",
+                      fontFamily: "ui-monospace, monospace",
+                      fontWeight: 600,
+                    }}
+                  />
+                </label>
+              </>
+            )}
             <div
               style={{ display: "flex", flexDirection: "column", gap: 4 }}
             >
@@ -577,59 +652,109 @@ export function RoyaltySummaryClient({
                           : b.net < -0.5
                             ? "#15803d"
                             : "var(--muted)";
+                      const isExpanded = expandedBucketKey === b.key;
+                      const isSingleBucket = result.buckets.length === 1;
+                      // Auto-expand when only one bucket (typical for
+                      // Day mode, single date) so dad sees vendors
+                      // without clicking.
+                      const showVendors = isExpanded || isSingleBucket;
                       return (
-                        <tr
-                          key={b.key}
-                          style={{ borderBottom: "1px solid #f1f5f9" }}
-                        >
-                          <td style={{ ...td(), fontWeight: 600 }}>
-                            {b.label}
-                          </td>
-                          <td
+                        <Fragment key={b.key}>
+                          <tr
+                            onClick={() =>
+                              setExpandedBucketKey(
+                                isExpanded ? null : b.key,
+                              )
+                            }
                             style={{
-                              ...td(),
-                              textAlign: "right",
-                              fontFamily: "ui-monospace, monospace",
-                              color: b.received > 0 ? "#15803d" : "var(--muted-light)",
-                              fontWeight: b.received > 0 ? 700 : 500,
+                              borderBottom: "1px solid #f1f5f9",
+                              cursor: isSingleBucket ? "default" : "pointer",
+                              background: isExpanded ? "#fffbeb" : undefined,
                             }}
                           >
-                            {b.received > 0 ? `+${fmtPoints(b.received)}` : "—"}
-                          </td>
-                          <td
-                            style={{
-                              ...td(),
-                              textAlign: "right",
-                              fontFamily: "ui-monospace, monospace",
-                              color: b.given > 0 ? "#b45309" : "var(--muted-light)",
-                              fontWeight: b.given > 0 ? 700 : 500,
-                            }}
-                          >
-                            {b.given > 0 ? `−${fmtPoints(b.given)}` : "—"}
-                          </td>
-                          <td
-                            style={{
-                              ...td(),
-                              textAlign: "right",
-                              fontFamily: "ui-monospace, monospace",
-                              fontWeight: 800,
-                              color: netColor,
-                            }}
-                          >
-                            {netSign}
-                            {fmtPoints(Math.abs(b.net))}
-                          </td>
-                          <td
-                            style={{
-                              ...td(),
-                              textAlign: "right",
-                              color: "var(--muted)",
-                              fontSize: 12,
-                            }}
-                          >
-                            {b.entryCount}
-                          </td>
-                        </tr>
+                            <td style={{ ...td(), fontWeight: 600 }}>
+                              {!isSingleBucket && (
+                                <span
+                                  aria-hidden
+                                  style={{
+                                    display: "inline-block",
+                                    width: 12,
+                                    color: "#94a3b8",
+                                    fontSize: 10,
+                                    marginRight: 6,
+                                  }}
+                                >
+                                  {isExpanded ? "▾" : "▸"}
+                                </span>
+                              )}
+                              {b.label}
+                            </td>
+                            <td
+                              style={{
+                                ...td(),
+                                textAlign: "right",
+                                fontFamily: "ui-monospace, monospace",
+                                color:
+                                  b.received > 0
+                                    ? "#15803d"
+                                    : "var(--muted-light)",
+                                fontWeight: b.received > 0 ? 700 : 500,
+                              }}
+                            >
+                              {b.received > 0
+                                ? `+${fmtPoints(b.received)}`
+                                : "—"}
+                            </td>
+                            <td
+                              style={{
+                                ...td(),
+                                textAlign: "right",
+                                fontFamily: "ui-monospace, monospace",
+                                color:
+                                  b.given > 0
+                                    ? "#b45309"
+                                    : "var(--muted-light)",
+                                fontWeight: b.given > 0 ? 700 : 500,
+                              }}
+                            >
+                              {b.given > 0
+                                ? `−${fmtPoints(b.given)}`
+                                : "—"}
+                            </td>
+                            <td
+                              style={{
+                                ...td(),
+                                textAlign: "right",
+                                fontFamily: "ui-monospace, monospace",
+                                fontWeight: 800,
+                                color: netColor,
+                              }}
+                            >
+                              {netSign}
+                              {fmtPoints(Math.abs(b.net))}
+                            </td>
+                            <td
+                              style={{
+                                ...td(),
+                                textAlign: "right",
+                                color: "var(--muted)",
+                                fontSize: 12,
+                              }}
+                            >
+                              {b.entryCount}
+                            </td>
+                          </tr>
+                          {showVendors && b.vendors.length > 0 && (
+                            <tr style={{ borderBottom: "1px solid #f1f5f9" }}>
+                              <td colSpan={5} style={{ padding: 0 }}>
+                                <VendorBreakdownRows
+                                  vendors={b.vendors}
+                                  parentTone={isExpanded ? "#fffbeb" : "#fafafa"}
+                                />
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
                       );
                     })}
                   </tbody>
@@ -697,6 +822,129 @@ export function RoyaltySummaryClient({
                 </table>
               </div>
             ))}
+
+          {/* Per-vendor totals across the WHOLE selected range —
+              the answer to "show me which vendor". Always visible
+              when there's data; lets dad scan vendor-by-vendor net
+              without expanding each bucket. */}
+          {result && result.vendors.length > 0 && (
+            <div
+              style={{
+                background: "var(--surface)",
+                border: "1px solid var(--border)",
+                borderRadius: 12,
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  padding: "10px 14px",
+                  background: "#f8fafc",
+                  borderBottom: "1px solid #e2e8f0",
+                  fontSize: 11,
+                  fontWeight: 800,
+                  color: "#64748b",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.08em",
+                }}
+              >
+                Per vendor · {result.vendors.length} vendor
+                {result.vendors.length === 1 ? "" : "s"} active in this range
+              </div>
+              <table
+                style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  fontSize: 13,
+                }}
+              >
+                <thead>
+                  <tr
+                    style={{
+                      background: "#f8fafc",
+                      borderBottom: "1px solid #e2e8f0",
+                    }}
+                  >
+                    <th style={th()}>Vendor</th>
+                    <th style={{ ...th(), textAlign: "right" }}>Received</th>
+                    <th style={{ ...th(), textAlign: "right" }}>Given</th>
+                    <th style={{ ...th(), textAlign: "right" }}>Net</th>
+                    <th style={{ ...th(), textAlign: "right" }}>Entries</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.vendors.map((v) => {
+                    const netSign =
+                      v.net > 0.5 ? "+" : v.net < -0.5 ? "−" : "";
+                    const netColor =
+                      v.net > 0.5
+                        ? "#b45309"
+                        : v.net < -0.5
+                          ? "#15803d"
+                          : "var(--muted)";
+                    return (
+                      <tr
+                        key={v.id}
+                        style={{ borderBottom: "1px solid #f1f5f9" }}
+                      >
+                        <td style={{ ...td(), fontWeight: 600 }}>{v.name}</td>
+                        <td
+                          style={{
+                            ...td(),
+                            textAlign: "right",
+                            fontFamily: "ui-monospace, monospace",
+                            color:
+                              v.received > 0
+                                ? "#15803d"
+                                : "var(--muted-light)",
+                            fontWeight: v.received > 0 ? 700 : 500,
+                          }}
+                        >
+                          {v.received > 0
+                            ? `+${fmtPoints(v.received)}`
+                            : "—"}
+                        </td>
+                        <td
+                          style={{
+                            ...td(),
+                            textAlign: "right",
+                            fontFamily: "ui-monospace, monospace",
+                            color:
+                              v.given > 0 ? "#b45309" : "var(--muted-light)",
+                            fontWeight: v.given > 0 ? 700 : 500,
+                          }}
+                        >
+                          {v.given > 0 ? `−${fmtPoints(v.given)}` : "—"}
+                        </td>
+                        <td
+                          style={{
+                            ...td(),
+                            textAlign: "right",
+                            fontFamily: "ui-monospace, monospace",
+                            fontWeight: 800,
+                            color: netColor,
+                          }}
+                        >
+                          {netSign}
+                          {fmtPoints(Math.abs(v.net))}
+                        </td>
+                        <td
+                          style={{
+                            ...td(),
+                            textAlign: "right",
+                            color: "var(--muted)",
+                            fontSize: 12,
+                          }}
+                        >
+                          {v.entryCount}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <Link
@@ -798,6 +1046,103 @@ function TotalTile({
         {prefix ?? ""}
         {value}
       </div>
+    </div>
+  );
+}
+
+/** Renders the per-vendor breakdown inside an expanded bucket row.
+ *  Lives in a single colSpan=5 cell so we don't fight the parent
+ *  table's column widths. Indented + slightly muted so it reads as
+ *  a sub-list, not a peer of the main row. */
+function VendorBreakdownRows({
+  vendors,
+  parentTone,
+}: {
+  vendors: VendorBreakdown[];
+  parentTone: string;
+}) {
+  return (
+    <div style={{ background: parentTone, padding: "6px 14px 10px 32px" }}>
+      <table
+        style={{
+          width: "100%",
+          borderCollapse: "collapse",
+          fontSize: 12,
+        }}
+      >
+        <tbody>
+          {vendors.map((v) => {
+            const netSign = v.net > 0.5 ? "+" : v.net < -0.5 ? "−" : "";
+            const netColor =
+              v.net > 0.5
+                ? "#b45309"
+                : v.net < -0.5
+                  ? "#15803d"
+                  : "var(--muted)";
+            return (
+              <tr key={v.id}>
+                <td
+                  style={{
+                    padding: "4px 8px 4px 0",
+                    color: "#475569",
+                    fontWeight: 600,
+                  }}
+                >
+                  · {v.name}
+                </td>
+                <td
+                  style={{
+                    padding: "4px 8px",
+                    textAlign: "right",
+                    fontFamily: "ui-monospace, monospace",
+                    color: v.received > 0 ? "#15803d" : "var(--muted-light)",
+                    fontWeight: v.received > 0 ? 700 : 500,
+                    minWidth: 90,
+                  }}
+                >
+                  {v.received > 0 ? `+${fmtPoints(v.received)}` : "—"}
+                </td>
+                <td
+                  style={{
+                    padding: "4px 8px",
+                    textAlign: "right",
+                    fontFamily: "ui-monospace, monospace",
+                    color: v.given > 0 ? "#b45309" : "var(--muted-light)",
+                    fontWeight: v.given > 0 ? 700 : 500,
+                    minWidth: 90,
+                  }}
+                >
+                  {v.given > 0 ? `−${fmtPoints(v.given)}` : "—"}
+                </td>
+                <td
+                  style={{
+                    padding: "4px 8px",
+                    textAlign: "right",
+                    fontFamily: "ui-monospace, monospace",
+                    fontWeight: 800,
+                    color: netColor,
+                    minWidth: 90,
+                  }}
+                >
+                  {netSign}
+                  {fmtPoints(Math.abs(v.net))}
+                </td>
+                <td
+                  style={{
+                    padding: "4px 0 4px 8px",
+                    textAlign: "right",
+                    color: "var(--muted)",
+                    fontSize: 11,
+                    minWidth: 40,
+                  }}
+                >
+                  {v.entryCount}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }

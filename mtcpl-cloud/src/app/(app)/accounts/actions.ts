@@ -2850,6 +2850,16 @@ export async function getRoyaltySummaryAction(
         given: number;
         net: number;
         entryCount: number;
+        /** Per-vendor breakdown for THIS bucket. Sorted by net
+         *  magnitude desc so the biggest movers float to the top. */
+        vendors: Array<{
+          id: string;
+          name: string;
+          received: number;
+          given: number;
+          net: number;
+          entryCount: number;
+        }>;
       }>;
       totals: {
         received: number;
@@ -2857,6 +2867,17 @@ export async function getRoyaltySummaryAction(
         net: number;
         entryCount: number;
       };
+      /** Per-vendor totals across the WHOLE range — separate from
+       *  the per-bucket breakdown so dad can see "this month: vendor
+       *  A net +X, vendor B net -Y" at a glance. */
+      vendors: Array<{
+        id: string;
+        name: string;
+        received: number;
+        given: number;
+        net: number;
+        entryCount: number;
+      }>;
     }
   | { ok: false; error: string }
 > {
@@ -2897,7 +2918,9 @@ export async function getRoyaltySummaryAction(
   const admin = createAdminSupabaseClient();
   let q = admin
     .from("vendor_royalty_entries")
-    .select("amount, entry_type, entry_date, created_at")
+    .select(
+      "amount, entry_type, entry_date, created_at, bill_vendor_id, bill_vendors!inner(name)",
+    )
     .eq("status", "approved")
     .is("cancelled_at", null);
   if (fromDate) {
@@ -2925,6 +2948,8 @@ export async function getRoyaltySummaryAction(
     entry_type: "received" | "given";
     entry_date: string | null;
     created_at: string;
+    bill_vendor_id: string;
+    bill_vendors: { name: string } | { name: string }[] | null;
   };
 
   // Bucket key per granularity. The "label" is a human-readable
@@ -2973,25 +2998,98 @@ export async function getRoyaltySummaryAction(
     };
   }
 
+  type VendorTally = {
+    id: string;
+    name: string;
+    received: number;
+    given: number;
+    entryCount: number;
+  };
   const bucketMap = new Map<
     string,
-    { label: string; received: number; given: number; entryCount: number }
+    {
+      label: string;
+      received: number;
+      given: number;
+      entryCount: number;
+      vendorMap: Map<string, VendorTally>;
+    }
   >();
+  // Whole-range per-vendor totals — independent of bucketing, so
+  // each vendor appears once with their net across the entire
+  // selected period.
+  const overallVendorMap = new Map<string, VendorTally>();
+
   const rows = (data ?? []) as Row[];
   for (const r of rows) {
     const iso = r.entry_date ?? r.created_at.slice(0, 10);
     const { key, label } = keyAndLabel(iso);
-    const bucket = bucketMap.get(key) ?? {
-      label,
-      received: 0,
-      given: 0,
-      entryCount: 0,
-    };
+    const bucket =
+      bucketMap.get(key) ??
+      {
+        label,
+        received: 0,
+        given: 0,
+        entryCount: 0,
+        vendorMap: new Map<string, VendorTally>(),
+      };
     const amt = Number(r.amount) || 0;
     if (r.entry_type === "received") bucket.received += amt;
     else bucket.given += amt;
     bucket.entryCount += 1;
+
+    const vendorEmbed = Array.isArray(r.bill_vendors)
+      ? r.bill_vendors[0] ?? null
+      : r.bill_vendors;
+    const vendorName = vendorEmbed?.name ?? "(unknown vendor)";
+
+    // Bucket-level vendor tally
+    const bv =
+      bucket.vendorMap.get(r.bill_vendor_id) ?? {
+        id: r.bill_vendor_id,
+        name: vendorName,
+        received: 0,
+        given: 0,
+        entryCount: 0,
+      };
+    if (r.entry_type === "received") bv.received += amt;
+    else bv.given += amt;
+    bv.entryCount += 1;
+    bucket.vendorMap.set(r.bill_vendor_id, bv);
+
+    // Overall vendor tally
+    const ov =
+      overallVendorMap.get(r.bill_vendor_id) ?? {
+        id: r.bill_vendor_id,
+        name: vendorName,
+        received: 0,
+        given: 0,
+        entryCount: 0,
+      };
+    if (r.entry_type === "received") ov.received += amt;
+    else ov.given += amt;
+    ov.entryCount += 1;
+    overallVendorMap.set(r.bill_vendor_id, ov);
+
     bucketMap.set(key, bucket);
+  }
+
+  function shapeVendors(m: Map<string, VendorTally>) {
+    return [...m.values()]
+      .map((v) => ({
+        id: v.id,
+        name: v.name,
+        received: v.received,
+        given: v.given,
+        net: v.given - v.received,
+        entryCount: v.entryCount,
+      }))
+      // Biggest movers first (by abs net), so dad's eye lands on
+      // the vendors that matter; ties broken by name for stability.
+      .sort(
+        (a, b) =>
+          Math.abs(b.net) - Math.abs(a.net) || a.name.localeCompare(b.name),
+      );
   }
 
   // Sort buckets by key (which sorts chronologically because of
@@ -3008,6 +3106,7 @@ export async function getRoyaltySummaryAction(
       // convention as the per-vendor net balance display.
       net: b.given - b.received,
       entryCount: b.entryCount,
+      vendors: shapeVendors(b.vendorMap),
     }));
 
   const totals = buckets.reduce(
@@ -3019,6 +3118,8 @@ export async function getRoyaltySummaryAction(
     }),
     { received: 0, given: 0, net: 0, entryCount: 0 },
   );
+
+  const vendors = shapeVendors(overallVendorMap);
 
   void logAudit(
     profile.id,
@@ -3034,7 +3135,7 @@ export async function getRoyaltySummaryAction(
     },
   );
 
-  return { ok: true, buckets, totals };
+  return { ok: true, buckets, totals, vendors };
 }
 
 /** List every pending royalty entry across all vendors. Owner /
