@@ -6,6 +6,30 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
 
+/**
+ * Daksh May 2026 — temporary feature flag.
+ *
+ * The slab_transfer runner role isn't stabilised on the floor yet,
+ * so the "yard → vendor shade" handoff step is being skipped: when
+ * the carving head assigns a slab to a vendor, the slab is treated
+ * as IMMEDIATELY received at the vendor's shade. It bypasses the
+ * Pending stock tray and lands straight in Ready to load.
+ *
+ * Mechanics: assign actions stamp received_at_vendor_at=NOW() +
+ * received_at_vendor_by=actor on the new carving_items row when
+ * this flag is true.
+ *
+ * To re-enable the real transfer flow (the day the slab_transfer
+ * runner is trained up): flip this to false. Existing assignments
+ * already in flight are unaffected — only NEW assignments take
+ * the new path.
+ *
+ * Inter-vendor transfers (Problem/Transfer → other vendor) keep
+ * their existing flow because they have their own Accept/Flag
+ * self-receive path that doesn't depend on slab_transfer.
+ */
+const SKIP_SLAB_TRANSFER_STAGE = true;
+
 // ── Shared helpers ──────────────────────────────────────────────────
 
 function txt(formData: FormData, key: string) {
@@ -464,6 +488,18 @@ export async function assignCarvingJobAction(formData: FormData) {
   if (slabErr) redirect(`/carving?toast=${encodeURIComponent(slabErr.message)}`);
   if (!slabRow?.length) redirect(`/carving?toast=Slab+no+longer+available+for+assignment`);
 
+  // Daksh May 2026 — SKIP_SLAB_TRANSFER_STAGE flag: stamp the
+  // receipt timestamp at assign time so the slab lands directly in
+  // the vendor's Ready to load bucket, skipping the Pending stock
+  // (transfer in-progress) tray. Reverting the flag to false
+  // restores the regular yard→shade flow.
+  const nowIso = new Date().toISOString();
+  const autoReceipt = SKIP_SLAB_TRANSFER_STAGE
+    ? {
+        received_at_vendor_at: nowIso,
+        received_at_vendor_by: profile.id,
+      }
+    : {};
   const { data: item, error: itemErr } = await admin
     .from("carving_items")
     .insert({
@@ -480,6 +516,7 @@ export async function assignCarvingJobAction(formData: FormData) {
       estimated_minutes: estimatedMinutes || null,
       requires_machine_type: finalRequiresMachineType,
       assigned_by: profile.id,
+      ...autoReceipt,
     })
     .select("id")
     .single();
@@ -589,6 +626,14 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
   // group slabs sharing a batch_id with the same colour stripe.
   const batchId = crypto.randomUUID();
   const now = new Date().toISOString();
+  // Daksh May 2026 — see SKIP_SLAB_TRANSFER_STAGE comment at the
+  // top of this file. Same auto-receipt as the single-slab path.
+  const autoReceiptBatch = SKIP_SLAB_TRANSFER_STAGE
+    ? {
+        received_at_vendor_at: now,
+        received_at_vendor_by: profile.id,
+      }
+    : {};
   const successes: string[] = [];
   const failures: Array<{ slab: string; reason: string }> = [];
 
@@ -624,6 +669,7 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
         requires_machine_type: finalRequiresMachineType,
         batch_id: batchId,
         assigned_by: profile.id,
+        ...autoReceiptBatch,
       })
       .select("id")
       .single();
