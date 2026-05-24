@@ -128,10 +128,12 @@ type Vendor = { id: string; name: string; vendor_type?: string };
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
-// Each status has its own visual identity so a glance across the
-// cockpit immediately reads the floor. Idle stays low-key (no
-// information to act on); carving is the most prominent (the floor's
-// active work); maintenance pops red so it can't be missed.
+// Daksh May 2026 — swapped palette so the active work is the
+// confident green and the idle pool is a low-key light blue / nearly
+// no colour. Before: idle=green (felt like "good, leave alone"),
+// carving=blue (felt cold). Now: idle=light-blue (waiting state),
+// carving=green (good, healthy progress), maintenance still red.
+// Inactive (offline) stays neutral grey.
 const STATUS_TINT: Record<
   string,
   {
@@ -146,19 +148,19 @@ const STATUS_TINT: Record<
 > = {
   idle: {
     bg: "var(--surface)",
-    bgAccent: "rgba(22,163,74,0.06)",
+    bgAccent: "rgba(56,189,248,0.08)",
     border: "var(--border)",
-    accent: "#16a34a",
-    fg: "#15803d",
+    accent: "#38bdf8",
+    fg: "#0369a1",
     label: "FREE",
     icon: "○",
   },
   carving: {
-    bg: "linear-gradient(180deg, rgba(37,99,235,0.12) 0%, rgba(37,99,235,0.05) 100%)",
-    bgAccent: "rgba(37,99,235,0.18)",
-    border: "rgba(37,99,235,0.55)",
-    accent: "#2563eb",
-    fg: "#1d4ed8",
+    bg: "linear-gradient(180deg, rgba(22,163,74,0.14) 0%, rgba(22,163,74,0.05) 100%)",
+    bgAccent: "rgba(22,163,74,0.18)",
+    border: "rgba(22,163,74,0.55)",
+    accent: "#16a34a",
+    fg: "#15803d",
     label: "RUNNING",
     icon: "▶",
   },
@@ -2876,7 +2878,9 @@ function MachineCard({
       progressPct = Math.max(0, Math.min(100, (elapsedMin / eta) * 100));
       if (remaining >= 0) {
         remainingLabel = `${fmtDuration(remaining)} left`;
-        remainingColor = remaining <= 15 ? "#b45309" : "#1d4ed8";
+        // Daksh May 2026 — green for normal remaining (carving palette),
+        // amber for last-15-minute warning, red handled below.
+        remainingColor = remaining <= 15 ? "#b45309" : "#15803d";
       } else {
         remainingLabel = `${fmtDuration(remaining)} over`;
         remainingColor = "#b91c1c";
@@ -2912,9 +2916,10 @@ function MachineCard({
         position: "relative",
         overflow: "hidden",
         // Carving cards lift slightly to telegraph "this is active work"
+        // Daksh May 2026 — green shadow on carving (was blue).
         boxShadow:
           machine.status === "carving"
-            ? "0 4px 14px rgba(37,99,235,0.18)"
+            ? "0 4px 14px rgba(22,163,74,0.18)"
             : machine.status === "maintenance"
               ? "0 4px 14px rgba(220,38,38,0.18)"
               : "none",
@@ -3249,7 +3254,7 @@ function MachineCard({
                       }}
                     >
                       {runningForLabel && (
-                        <span style={{ fontSize: 12, fontWeight: 700, color: "#2563eb" }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: "#15803d" }}>
                           ▶ {runningForLabel}
                         </span>
                       )}
@@ -3271,7 +3276,7 @@ function MachineCard({
                       style={{
                         marginTop: 6,
                         height: 4,
-                        background: "rgba(37,99,235,0.15)",
+                        background: "rgba(22,163,74,0.15)",
                         borderRadius: 2,
                         overflow: "hidden",
                       }}
@@ -3280,7 +3285,9 @@ function MachineCard({
                         style={{
                           height: "100%",
                           width: `${progressPct}%`,
-                          background: progressPct > 100 ? "#dc2626" : "#2563eb",
+                          // Daksh May 2026 — green progress fill
+                          // (carving palette swapped from blue).
+                          background: progressPct > 100 ? "#dc2626" : "#16a34a",
                           transition: "width 0.5s",
                         }}
                       />
@@ -3359,11 +3366,108 @@ function MachineCard({
             >
               ✓ Mark complete + unload {machine.current_jobs.length > 1 ? "both" : ""}
             </button>
+            {/* Daksh May 2026 — Flag maintenance is now available
+                even while the machine is running. Pauses the slab
+                timer in place; resolving maintenance shifts loaded_at
+                forward by the down-time so the slab clock picks up
+                where it stopped. */}
+            <button
+              type="button"
+              onClick={onMaintenance}
+              className="ghost-button"
+              style={{ fontSize: 11, padding: "6px 10px" }}
+              title="Pause the slab timer + mark machine under maintenance. Resolving brings the slab timer back from where it stopped."
+            >
+              🔧 Flag maintenance (pauses slab)
+            </button>
           </>
         )}
 
         {machine.status === "maintenance" && (
           <>
+            {/* Daksh May 2026 — if the machine went into maintenance
+                MID-CARVE, current_jobs is still populated. Surface a
+                small "paused slab" card per loaded job so the operator
+                knows which slab(s) are sitting on the machine while
+                it's down. The slab elapsed displayed here is what we
+                saw at pause time (now − loaded_at). resolveMaintenance
+                shifts loaded_at forward by the pause duration so this
+                value picks up correctly when the machine comes back. */}
+            {machine.current_jobs.length > 0 && (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 6,
+                  padding: "8px 10px",
+                  background: "rgba(56,189,248,0.08)",
+                  border: "1px dashed rgba(56,189,248,0.45)",
+                  borderRadius: 6,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 800,
+                    color: "#0369a1",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.06em",
+                  }}
+                >
+                  ⏸ Slab timer paused
+                </div>
+                {machine.current_jobs.map((slabJob) => {
+                  const pausedAt = slabJob.loaded_at
+                    ? new Date(slabJob.loaded_at).getTime()
+                    : null;
+                  // If maintenance started AFTER loaded_at, pause-time
+                  // elapsed = maintenance_flagged_at − loaded_at.
+                  // Otherwise (edge) fall back to 0.
+                  const flaggedAt = machine.maintenance_flagged_at
+                    ? new Date(machine.maintenance_flagged_at).getTime()
+                    : null;
+                  const pausedElapsedMin =
+                    pausedAt && flaggedAt && flaggedAt > pausedAt
+                      ? (flaggedAt - pausedAt) / 60_000
+                      : null;
+                  return (
+                    <div
+                      key={slabJob.id}
+                      style={{ display: "flex", flexDirection: "column", gap: 2 }}
+                    >
+                      <div
+                        style={{
+                          fontFamily: "ui-monospace, monospace",
+                          fontSize: 12,
+                          fontWeight: 700,
+                          color: "#0c4a6e",
+                        }}
+                      >
+                        {slabJob.slab_id}
+                      </div>
+                      {slabJob.slab && (
+                        <div style={{ fontSize: 10, color: "var(--muted)" }}>
+                          {slabJob.slab.temple} · {dimStr(slabJob.slab)}
+                        </div>
+                      )}
+                      {pausedElapsedMin != null && (
+                        <div
+                          style={{
+                            fontSize: 10,
+                            color: "#0369a1",
+                            fontFamily: "ui-monospace, monospace",
+                            fontWeight: 600,
+                          }}
+                          title="Slab was this far when maintenance started — it resumes from here once back online"
+                        >
+                          ⏸ paused at {fmtDuration(pausedElapsedMin)} carved
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
             <div
               style={{
                 padding: "10px 12px",

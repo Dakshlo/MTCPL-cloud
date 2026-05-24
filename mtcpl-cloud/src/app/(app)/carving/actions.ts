@@ -2498,13 +2498,29 @@ export async function flagMaintenanceAction(formData: FormData) {
 
   const { data: m } = await admin
     .from("cnc_machines")
-    .select("id, status")
+    .select("id, status, current_carving_item_id")
     .eq("id", machineId)
     .maybeSingle();
   if (!m) redirect("/vendor?toast=Machine+not+found");
-  if ((m as { status: string }).status === "carving") {
-    redirect("/vendor?toast=Unload+the+slab+before+flagging+maintenance");
+  const machineRow = m as {
+    id: string;
+    status: string;
+    current_carving_item_id: string | null;
+  };
+  if (machineRow.status === "maintenance") {
+    redirect("/vendor?toast=Machine+is+already+under+maintenance");
   }
+  if (machineRow.status === "inactive") {
+    redirect("/vendor?toast=Machine+is+offline");
+  }
+
+  // Daksh May 2026 — was idle-only ("Unload the slab before flagging
+  // maintenance"). Now: flagging maintenance on a RUNNING machine
+  // pauses the slab timer in place. We keep current_carving_item_id
+  // intact + flip status to maintenance. resolveMaintenanceAction
+  // shifts loaded_at forward by the maintenance duration so the
+  // timer resumes from where it stopped.
+  const wasCarving = machineRow.status === "carving";
 
   const now = new Date().toISOString();
   await admin
@@ -2521,16 +2537,27 @@ export async function flagMaintenanceAction(formData: FormData) {
     cnc_machine_id: machineId,
     event_type: "maintenance_start",
     reason,
-    message: detail || null,
+    message: detail
+      ? wasCarving
+        ? `${detail} (timer paused — slab still loaded)`
+        : detail
+      : wasCarving
+        ? "timer paused — slab still loaded"
+        : null,
     user_id: profile.id,
   });
   await logAudit(profile.id, "cnc_maintenance_start", "cnc_machine", machineId, {
     reason,
     detail,
+    paused_carving: wasCarving,
   });
 
   refreshAll();
-  redirect("/vendor?toast=Machine+flagged+for+maintenance");
+  redirect(
+    wasCarving
+      ? "/vendor?toast=Machine+down+%E2%80%94+slab+timer+paused"
+      : "/vendor?toast=Machine+flagged+for+maintenance",
+  );
 }
 
 export async function resolveMaintenanceAction(formData: FormData) {
@@ -2542,15 +2569,64 @@ export async function resolveMaintenanceAction(formData: FormData) {
 
   const { data: m } = await admin
     .from("cnc_machines")
-    .select("id, status")
+    .select(
+      "id, status, current_carving_item_id, maintenance_flagged_at",
+    )
     .eq("id", machineId)
     .maybeSingle();
   if (!m) redirect("/vendor?toast=Machine+not+found");
+  const machineRow = m as {
+    id: string;
+    status: string;
+    current_carving_item_id: string | null;
+    maintenance_flagged_at: string | null;
+  };
+
+  const now = Date.now();
+  const flaggedAt = machineRow.maintenance_flagged_at
+    ? new Date(machineRow.maintenance_flagged_at).getTime()
+    : null;
+  // If maintenance was applied while the machine was carving, the
+  // current_carving_item_id is still set. Resume to 'carving' and
+  // shift every active carving_item's loaded_at FORWARD by the
+  // maintenance duration so the elapsed display picks up exactly
+  // where it stopped. Multi-head pairs share the same machine, so
+  // we update by cnc_machine_id (catches both heads at once).
+  const resumeCarving = machineRow.current_carving_item_id != null;
+  let pauseMinutes = 0;
+  if (resumeCarving && flaggedAt != null) {
+    const pauseMs = Math.max(0, now - flaggedAt);
+    pauseMinutes = Math.round(pauseMs / 60_000);
+    // Postgres: loaded_at = loaded_at + pause_interval
+    // Use an RPC-free approach by reading + writing per item (rare
+    // case — usually 1-2 items on a 2-head). Keeps the migration
+    // surface small (no new SQL function).
+    const { data: items } = await admin
+      .from("carving_items")
+      .select("id, loaded_at")
+      .eq("cnc_machine_id", machineId)
+      .eq("status", "carving_in_progress");
+    if (items && items.length > 0) {
+      await Promise.all(
+        items.map((row) => {
+          const r = row as { id: string; loaded_at: string | null };
+          if (!r.loaded_at) return Promise.resolve();
+          const shifted = new Date(
+            new Date(r.loaded_at).getTime() + pauseMs,
+          ).toISOString();
+          return admin
+            .from("carving_items")
+            .update({ loaded_at: shifted })
+            .eq("id", r.id);
+        }),
+      );
+    }
+  }
 
   await admin
     .from("cnc_machines")
     .update({
-      status: "idle",
+      status: resumeCarving ? "carving" : "idle",
       maintenance_reason: null,
       maintenance_flagged_at: null,
       maintenance_flagged_by: null,
@@ -2561,11 +2637,21 @@ export async function resolveMaintenanceAction(formData: FormData) {
     cnc_machine_id: machineId,
     event_type: "maintenance_end",
     user_id: profile.id,
+    message: resumeCarving
+      ? `paused ${pauseMinutes}m — slab timer resumed`
+      : null,
   });
-  await logAudit(profile.id, "cnc_maintenance_end", "cnc_machine", machineId, {});
+  await logAudit(profile.id, "cnc_maintenance_end", "cnc_machine", machineId, {
+    resumed_carving: resumeCarving,
+    pause_minutes: pauseMinutes,
+  });
 
   refreshAll();
-  redirect("/vendor?toast=Machine+back+online");
+  redirect(
+    resumeCarving
+      ? `/vendor?toast=${encodeURIComponent(`Back online — slab timer resumed (was paused ${pauseMinutes}m)`)}`
+      : "/vendor?toast=Machine+back+online",
+  );
 }
 
 export async function approveCarvingJobAction(formData: FormData) {

@@ -334,6 +334,25 @@ export function CarvingDashboardClient({
       );
     }
     if (queryNorm) {
+      // Daksh May 2026 — include EVERY permutation of L×W×T in the
+      // haystack so typing partial dimensions like "99x" / "99x50"
+      // hits (orientation-agnostic substring). A complete triple
+      // takes the multiset path above, so we only get here for
+      // partial-dim / non-dim queries.
+      const L = item.length_ft != null ? Number(item.length_ft) : NaN;
+      const W = item.width_ft != null ? Number(item.width_ft) : NaN;
+      const T = item.thickness_ft != null ? Number(item.thickness_ft) : NaN;
+      const dimPerms: string[] = [];
+      if (Number.isFinite(L) && Number.isFinite(W) && Number.isFinite(T)) {
+        dimPerms.push(
+          `${L}x${W}x${T}`,
+          `${L}x${T}x${W}`,
+          `${W}x${L}x${T}`,
+          `${W}x${T}x${L}`,
+          `${T}x${L}x${W}`,
+          `${T}x${W}x${L}`,
+        );
+      }
       const haystack = [
         item.id,
         item.slab_requirement_id,
@@ -345,6 +364,7 @@ export function CarvingDashboardClient({
         item.vendor_name,
         item.status,
         item.source_block_id,
+        ...dimPerms,
       ]
         .filter(Boolean)
         .join(" · ")
@@ -1607,6 +1627,23 @@ function TempleSlabsPeek({
           triple[2] === peekDimQuery[2]
         );
       }
+      // Daksh May 2026 — same permutation trick as matches() so
+      // partial dim text ("99x" / "99x50") still hits inside the
+      // temple peek, regardless of which axis the user starts with.
+      const L = Number(s.length_ft);
+      const W = Number(s.width_ft);
+      const T = Number(s.thickness_ft);
+      const dimPerms: string[] = [];
+      if (Number.isFinite(L) && Number.isFinite(W) && Number.isFinite(T)) {
+        dimPerms.push(
+          `${L}x${W}x${T}`,
+          `${L}x${T}x${W}`,
+          `${W}x${L}x${T}`,
+          `${W}x${T}x${L}`,
+          `${T}x${L}x${W}`,
+          `${T}x${W}x${L}`,
+        );
+      }
       const hay = [
         s.id,
         s.label,
@@ -1614,6 +1651,7 @@ function TempleSlabsPeek({
         s.stone,
         s.source_block_id,
         s.stock_location,
+        ...dimPerms,
       ]
         .filter(Boolean)
         .join(" · ")
@@ -2115,11 +2153,14 @@ function JobsByTemple({
                       const elapsedMin = (now - new Date(j.loaded_at).getTime()) / 60000;
                       const eta = j.vendor_estimated_minutes ?? j.estimated_minutes ?? null;
                       const remaining = eta != null ? eta - elapsedMin : null;
+                      // Daksh May 2026 — Active-tab CARVING NOW pill
+                      // recoloured from blue → green to match the
+                      // cockpit palette swap.
                       return (
                         <div
                           style={{
-                            background: isManual ? "rgba(120,53,15,0.08)" : "rgba(37,99,235,0.08)",
-                            border: `1px solid ${isManual ? "rgba(120,53,15,0.35)" : "rgba(37,99,235,0.35)"}`,
+                            background: isManual ? "rgba(120,53,15,0.08)" : "rgba(22,163,74,0.10)",
+                            border: `1px solid ${isManual ? "rgba(120,53,15,0.35)" : "rgba(22,163,74,0.40)"}`,
                             borderRadius: 6,
                             padding: "5px 8px",
                             display: "flex",
@@ -2127,13 +2168,13 @@ function JobsByTemple({
                             gap: 2,
                           }}
                         >
-                          <div style={{ fontSize: 9, fontWeight: 800, color: isManual ? "#92400e" : "#1d4ed8", letterSpacing: "0.07em" }}>
+                          <div style={{ fontSize: 9, fontWeight: 800, color: isManual ? "#92400e" : "#15803d", letterSpacing: "0.07em" }}>
                             {isManual ? "🪚 MANUAL CARVING" : "▶ CARVING NOW"}
                           </div>
                           <div
                             style={{
                               fontSize: 10,
-                              color: isManual ? "#78350f" : "#1e3a8a",
+                              color: isManual ? "#78350f" : "#166534",
                               fontFamily: "ui-monospace, monospace",
                               display: "flex",
                               gap: 6,
@@ -2142,7 +2183,7 @@ function JobsByTemple({
                           >
                             <span>▶ {fmtDur(elapsedMin)}</span>
                             {remaining != null && (
-                              <span style={{ color: remaining < 0 ? "#dc2626" : remaining < 15 ? "#b45309" : isManual ? "#92400e" : "#1d4ed8", fontWeight: 700 }}>
+                              <span style={{ color: remaining < 0 ? "#dc2626" : remaining < 15 ? "#b45309" : isManual ? "#92400e" : "#15803d", fontWeight: 700 }}>
                                 ⏱ {remaining < 0 ? `${fmtDur(remaining)} over` : `${fmtDur(remaining)} left`}
                               </span>
                             )}
