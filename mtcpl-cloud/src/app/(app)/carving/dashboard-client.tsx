@@ -210,6 +210,41 @@ export function CarvingDashboardClient({
   // Default 'all' keeps the old behaviour.
   const [dateFilter, setDateFilter] = useState<"all" | "1d" | "2d" | "7d" | "30d">("all");
 
+  // Daksh May 2026 — "from date" cutoff for the Unassigned tab.
+  // Live production launched 22 May 2026; ~1100 slabs from the
+  // testing period are still in the unassigned pool. This date
+  // picker lets the carving head hide them with one tap: only
+  // slabs whose updated_at >= the picked date pass through.
+  //
+  // Persisted in localStorage so the cutoff sticks across reloads
+  // and across navigation. Default is 2026-05-22 (go-live day);
+  // user can change to any date or "All time" (empty string) to
+  // see everything including legacy.
+  const UNASSIGNED_FROM_STORAGE_KEY = "mtcpl:carving:unassigned-from-date";
+  const DEFAULT_UNASSIGNED_FROM = "2026-05-22";
+  const [unassignedFromDate, setUnassignedFromDate] = useState<string>(
+    DEFAULT_UNASSIGNED_FROM,
+  );
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(UNASSIGNED_FROM_STORAGE_KEY);
+      // Empty string is a valid "All time" choice; null means
+      // never-set, fall back to default.
+      if (raw !== null) setUnassignedFromDate(raw);
+    } catch {
+      // Private mode / quota — ignore, keep the default.
+    }
+  }, []);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(UNASSIGNED_FROM_STORAGE_KEY, unassignedFromDate);
+    } catch {
+      // ignore
+    }
+  }, [unassignedFromDate]);
+
   // Cmd/Ctrl-K or `/` focuses the search input — power users can fly.
   const searchInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -291,10 +326,26 @@ export function CarvingDashboardClient({
     return Date.now() - new Date(iso).getTime() <= days * 86400000;
   }
 
+  // Daksh May 2026 — apply the "from date" cutoff before the
+  // rolling-window dateFilter. Slab passes if its updated_at is
+  // ≥ the cutoff date (or the cutoff is the empty "All time"
+  // sentinel). Cheap string compare since updated_at is ISO and
+  // the cutoff is YYYY-MM-DD; ISO sort order = chronological.
+  function passesUnassignedFrom(iso: string | null | undefined): boolean {
+    if (!unassignedFromDate) return true;
+    if (!iso) return false;
+    // Compare YYYY-MM-DD prefix — works because IS0 timestamps
+    // sort lexicographically by date prefix.
+    return iso.slice(0, 10) >= unassignedFromDate;
+  }
   const filteredUnassigned = useMemo(
-    () => unassignedSlabs.filter((s) => matches(s) && passesDate(s.updated_at)),
+    () =>
+      unassignedSlabs.filter(
+        (s) =>
+          matches(s) && passesDate(s.updated_at) && passesUnassignedFrom(s.updated_at),
+      ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [unassignedSlabs, priorityOnly, queryNorm, dateFilter],
+    [unassignedSlabs, priorityOnly, queryNorm, dateFilter, unassignedFromDate],
   );
   const filteredActive = useMemo(
     () => activeJobs.filter((j) => matches(j) && passesDate(j.assigned_at)),
@@ -622,6 +673,77 @@ export function CarvingDashboardClient({
             </button>
           );
         })}
+        {/* Daksh May 2026 — "From date" cutoff for the Unassigned
+            tab only. Hides legacy test slabs from before the
+            22 May 2026 go-live. Persists in localStorage; clear
+            with the small ✕ button to show everything again.
+            Hidden on other tabs because the rolling-window pills
+            above already handle "Assigned in", "Completed in",
+            "Approved in". */}
+        {tab === "unassigned" && (
+          <>
+            <span
+              aria-hidden
+              style={{
+                width: 1,
+                height: 18,
+                background: "var(--border)",
+                margin: "0 4px",
+              }}
+            />
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                color: "var(--muted)",
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+              }}
+            >
+              From
+            </span>
+            <input
+              type="date"
+              value={unassignedFromDate}
+              onChange={(e) => setUnassignedFromDate(e.target.value)}
+              style={{
+                padding: "4px 8px",
+                fontSize: 11,
+                border: `1.5px solid ${
+                  unassignedFromDate ? "var(--gold-dark)" : "var(--border)"
+                }`,
+                background: unassignedFromDate
+                  ? "rgba(180,115,51,0.1)"
+                  : "var(--bg)",
+                color: unassignedFromDate ? "var(--gold-dark)" : "var(--text)",
+                borderRadius: 999,
+                fontFamily: "ui-monospace, monospace",
+                fontWeight: 700,
+              }}
+              title="Hide slabs that became ready before this date — covers the legacy test pool from before go-live"
+            />
+            {unassignedFromDate && (
+              <button
+                type="button"
+                onClick={() => setUnassignedFromDate("")}
+                title="Show all slabs (no date cutoff)"
+                style={{
+                  padding: "4px 8px",
+                  fontSize: 10,
+                  fontWeight: 700,
+                  background: "transparent",
+                  border: "1px solid var(--border)",
+                  color: "var(--muted)",
+                  borderRadius: 999,
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                ✕ all time
+              </button>
+            )}
+          </>
+        )}
       </div>
     </div>
   );
