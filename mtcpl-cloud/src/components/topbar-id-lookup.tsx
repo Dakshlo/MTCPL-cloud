@@ -83,6 +83,47 @@ export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
+  // Daksh May 2026 — lifted from the keypad so the input itself can
+  // react. When the touch keypad is ON we want to BLOCK the device's
+  // soft keyboard from popping up (otherwise both keyboards stack).
+  // The trick: inputMode="none" — desktop browsers ignore it (real
+  // keyboard still types), mobile/tablet browsers suppress the
+  // virtual keyboard. Auto-detect runs once on mount.
+  const [keypadShown, setKeypadShown] = useState<boolean>(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const stored = window.localStorage.getItem("mtcpl_findid_keypad");
+      if (stored === "1") {
+        setKeypadShown(true);
+      } else if (stored === "0") {
+        setKeypadShown(false);
+      } else {
+        // No stored preference — default ON for coarse-pointer
+        // (touch) devices, OFF for desktop. matchMedia is the
+        // standard way to ask "is this a touch-first device?".
+        const isTouch =
+          typeof window.matchMedia === "function" &&
+          window.matchMedia("(pointer: coarse)").matches;
+        setKeypadShown(isTouch);
+      }
+    } catch {
+      /* private mode or weird sandbox — leave off */
+    }
+  }, []);
+
+  function setKeypadShownPersisted(next: boolean) {
+    setKeypadShown(next);
+    try {
+      window.localStorage.setItem(
+        "mtcpl_findid_keypad",
+        next ? "1" : "0",
+      );
+    } catch {
+      /* ignore */
+    }
+  }
+
   // Domain reset — switching active department wipes the input + result.
   useEffect(() => {
     setQuery("");
@@ -305,12 +346,15 @@ export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
                 /* Daksh May 2026 — hint mobile/tablet OSes to suggest
                    uppercase-from-the-start, no autocorrect, no
                    autocapitalisation-after-dash. IDs are always
-                   uppercase here. inputMode="text" (not "search")
-                   keeps the soft keyboard predictable. */
+                   uppercase here.
+                   inputMode="none" when our touch keypad is on
+                   suppresses the device soft keyboard on tablets
+                   (desktop ignores it — physical typing still works).
+                   That's the answer to "two keyboards stacking". */
                 autoCapitalize="characters"
                 autoCorrect="off"
                 spellCheck={false}
-                inputMode="text"
+                inputMode={keypadShown ? "none" : "text"}
                 style={{
                   flex: 1,
                   padding: "9px 12px",
@@ -356,6 +400,8 @@ export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
               value={query}
               onChange={(v) => setQuery(v)}
               onSubmit={() => void runSearch()}
+              shown={keypadShown}
+              onToggle={() => setKeypadShownPersisted(!keypadShown)}
             />
 
             {/* Result */}
@@ -412,40 +458,18 @@ function FindIdKeypad({
   value,
   onChange,
   onSubmit,
+  shown,
+  onToggle,
 }: {
   value: string;
   onChange: (next: string) => void;
   onSubmit: () => void;
+  /** Lifted state (parent owns it). The parent also flips the
+   *  input's inputMode based on the same flag so the device's soft
+   *  keyboard can't stack on top of this one. */
+  shown: boolean;
+  onToggle: () => void;
 }) {
-  const [shown, setShown] = useState<boolean>(false);
-
-  // Read persisted preference on mount. Keep it client-only so SSR
-  // never tries to localStorage (would crash).
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const v = window.localStorage.getItem("mtcpl_findid_keypad");
-      if (v === "1") setShown(true);
-    } catch {
-      /* private mode etc — silently fall through */
-    }
-  }, []);
-
-  function toggle() {
-    setShown((s) => {
-      const next = !s;
-      try {
-        window.localStorage.setItem(
-          "mtcpl_findid_keypad",
-          next ? "1" : "0",
-        );
-      } catch {
-        /* ignore */
-      }
-      return next;
-    });
-  }
-
   function append(ch: string) {
     onChange((value + ch).toUpperCase());
   }
@@ -478,9 +502,9 @@ function FindIdKeypad({
       >
         <button
           type="button"
-          onClick={toggle}
+          onClick={onToggle}
           aria-pressed={shown}
-          title="Show / hide the touch keypad"
+          title="Show / hide the touch keypad. On tablet, leaving this on also blocks the device's soft keyboard from popping over the top."
           style={{
             fontSize: 10,
             fontWeight: 700,
