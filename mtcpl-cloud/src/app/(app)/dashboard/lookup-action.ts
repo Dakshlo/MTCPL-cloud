@@ -125,7 +125,56 @@ export type NotFoundResult = {
   suggestions: Array<{ kind: "slab" | "block"; id: string; hint: string }>;
 };
 
-export type LookupResult = SlabResult | BlockResult | NotFoundResult;
+/** Daksh May 2026 — when a search matches multiple slabs / blocks
+ *  (typical for dimension queries like "53x29x14" or for ID prefixes
+ *  that hit several variants), return a clickable list instead of
+ *  guessing. Each row carries enough context to identify the right
+ *  one, and the client lets the user pick one to drill in. */
+export type MultipleResult = {
+  kind: "multiple";
+  query: string;
+  /** Short label describing why these results are grouped — e.g.
+   *  "10 matches for dimensions 53″×29″×14″" or "3 IDs match
+   *  MT-B-90". Rendered as the panel header. */
+  reason: string;
+  items: Array<{
+    kind: "slab" | "block";
+    id: string;
+    /** One-line summary so the user can pick. */
+    summary: string;
+    /** Status string (rendered as a tinted chip). Falls back to "" if
+     *  the row has no status (shouldn't happen for our tables). */
+    status: string;
+  }>;
+};
+
+export type LookupResult =
+  | SlabResult
+  | BlockResult
+  | NotFoundResult
+  | MultipleResult;
+
+/** Daksh May 2026 — detect a dimension-triple query like
+ *  "53x29x14" / "53 × 29 × 14" / "53*29*14". Returns three numbers
+ *  (always in stored units, which are INCHES for slabs/blocks here)
+ *  or null when the query isn't dim-shaped. We accept x, ×, * or
+ *  any whitespace between values, and integer + decimal numbers. */
+function parseDimensionQuery(
+  raw: string,
+): { a: number; b: number; c: number } | null {
+  const cleaned = raw.trim();
+  if (!cleaned) return null;
+  const m = cleaned.match(
+    /^\s*(\d+(?:\.\d+)?)\s*[x×*]\s*(\d+(?:\.\d+)?)\s*[x×*]\s*(\d+(?:\.\d+)?)\s*$/i,
+  );
+  if (!m) return null;
+  const a = Number(m[1]);
+  const b = Number(m[2]);
+  const c = Number(m[3]);
+  if (!Number.isFinite(a) || !Number.isFinite(b) || !Number.isFinite(c))
+    return null;
+  return { a, b, c };
+}
 
 /** Build zero-padded variants of an ID so typing "MT-B-90" finds
  *  "MT-B-090" and vice versa. Splits the input on the LAST dash
@@ -179,8 +228,59 @@ export async function lookupId(query: string): Promise<LookupResult> {
     return { kind: "not_found", query: "", suggestions: [] };
   }
 
+  // ── DIMENSION SEARCH (Daksh May 2026) ───────────────────────────
+  // If the query looks like "53x29x14" / "53 × 29 × 14", treat it
+  // as a dimension lookup. Match orientation-agnostically (any
+  // permutation of the three numbers across L/W/T or L/W/H). We
+  // search both slabs and blocks. Results capped at 10 to keep
+  // the panel scannable; user picks one to drill in.
+  const dims = parseDimensionQuery(query);
+  if (dims) {
+    const list = await searchByDimensions(admin, dims);
+    if (list.length === 1) {
+      // Single match — return the full detail directly, just like
+      // an exact ID lookup would.
+      const only = list[0];
+      if (only.kind === "slab") {
+        const { data } = await admin
+          .from("slab_requirements")
+          .select(
+            "id, label, temple, stone, length_ft, width_ft, thickness_ft, source_block_id, status, priority, deadline, priority_note, created_at, updated_at, stock_location",
+          )
+          .eq("id", only.id)
+          .maybeSingle();
+        if (data)
+          return await loadSlabContext(
+            admin,
+            data as Record<string, unknown>,
+          );
+      } else {
+        const { data } = await admin
+          .from("blocks")
+          .select("*")
+          .eq("id", only.id)
+          .maybeSingle();
+        if (data)
+          return await loadBlockContext(
+            admin,
+            data as Record<string, unknown>,
+          );
+      }
+    }
+    if (list.length > 1) {
+      const sorted = [dims.a, dims.b, dims.c].sort((x, y) => x - y);
+      return {
+        kind: "multiple",
+        query: q,
+        reason: `${list.length} match${list.length === 1 ? "" : "es"} for dimensions ${sorted[0]}″ × ${sorted[1]}″ × ${sorted[2]}″ (any orientation)`,
+        items: list,
+      };
+    }
+    // 0 matches — fall through to ID search / suggestions.
+  }
+
   // Daksh May 2026 — zero-pad variants so "mt-b-90" finds "MT-B-090".
-  // The first match wins; try slabs first (more common), then blocks.
+  // Hits across BOTH tables get rolled up; >1 hit returns a list.
   const variants = zeroPadVariants(q);
 
   // Try the slab table first — slab IDs are far more common (1500+)
@@ -191,21 +291,73 @@ export async function lookupId(query: string): Promise<LookupResult> {
       "id, label, temple, stone, length_ft, width_ft, thickness_ft, source_block_id, status, priority, deadline, priority_note, created_at, updated_at, stock_location",
     )
     .in("id", variants)
-    .limit(1);
+    .limit(10);
+  // Also check blocks for the same variants (possible collision
+  // since both tables share an ID namespace).
+  const { data: blockMatches } = await admin
+    .from("blocks")
+    .select("id, yard, status, stone")
+    .in("id", variants)
+    .limit(10);
 
-  if (slabRows && slabRows.length > 0) {
-    return await loadSlabContext(admin, slabRows[0] as Record<string, unknown>);
+  const idHits: MultipleResult["items"] = [];
+  for (const r of slabRows ?? []) {
+    const s = r as {
+      id: string;
+      temple: string;
+      status: string;
+      length_ft: number | string;
+      width_ft: number | string;
+      thickness_ft: number | string;
+    };
+    idHits.push({
+      kind: "slab",
+      id: s.id,
+      summary: `${s.temple} · ${Number(s.length_ft)}″×${Number(s.width_ft)}″×${Number(s.thickness_ft)}″`,
+      status: s.status,
+    });
+  }
+  for (const r of blockMatches ?? []) {
+    const b = r as { id: string; yard: number; status: string; stone: string };
+    idHits.push({
+      kind: "block",
+      id: b.id,
+      summary: `Yard ${b.yard} · ${b.stone}`,
+      status: b.status,
+    });
   }
 
-  // Try block table next — same variant set.
-  const { data: blockRows } = await admin
-    .from("blocks")
-    .select("*")
-    .in("id", variants)
-    .limit(1);
-
-  if (blockRows && blockRows.length > 0) {
-    return await loadBlockContext(admin, blockRows[0] as Record<string, unknown>);
+  if (idHits.length === 1) {
+    const only = idHits[0];
+    if (only.kind === "slab") {
+      const fullRow = (slabRows ?? []).find(
+        (r) => (r as { id: string }).id === only.id,
+      );
+      if (fullRow)
+        return await loadSlabContext(
+          admin,
+          fullRow as Record<string, unknown>,
+        );
+    } else {
+      const { data } = await admin
+        .from("blocks")
+        .select("*")
+        .eq("id", only.id)
+        .maybeSingle();
+      if (data)
+        return await loadBlockContext(
+          admin,
+          data as Record<string, unknown>,
+        );
+    }
+  }
+  if (idHits.length > 1) {
+    return {
+      kind: "multiple",
+      query: q,
+      reason: `${idHits.length} IDs match "${q}"`,
+      items: idHits.slice(0, 10),
+    };
   }
 
   // Nothing found — pull a few prefix suggestions so the user can pick
@@ -539,4 +691,98 @@ async function loadBlockContext(
     },
     current_location: currentLocation,
   };
+}
+
+// ── Dimension search (Daksh May 2026) ──────────────────────────────
+//
+// Match orientation-agnostically: a user typing "53x29x14" finds a
+// slab stored as (29, 53, 14) too. Multiset compare on the three
+// numbers. We scope the DB query with .in() per axis so each axis
+// only needs to be one of the three input values (gives us a
+// reasonable candidate pool), then JS-post-filter to enforce the
+// exact multiset equality. Capped at 10 rows from each table so the
+// caller can render a clean list.
+async function searchByDimensions(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  dims: { a: number; b: number; c: number },
+): Promise<MultipleResult["items"]> {
+  const wanted = [dims.a, dims.b, dims.c].sort((x, y) => x - y);
+  const eq = (xs: number[], ys: number[]) =>
+    xs.length === ys.length && xs.every((v, i) => v === ys[i]);
+
+  const items: MultipleResult["items"] = [];
+
+  // Slabs: (length_ft, width_ft, thickness_ft) — stored in inches
+  // despite the _ft suffix (legacy naming, see toCft note above).
+  const { data: slabs } = await admin
+    .from("slab_requirements")
+    .select(
+      "id, temple, status, length_ft, width_ft, thickness_ft, stock_location",
+    )
+    .in("length_ft", wanted)
+    .in("width_ft", wanted)
+    .in("thickness_ft", wanted)
+    .limit(60);
+  for (const r of slabs ?? []) {
+    const s = r as {
+      id: string;
+      temple: string;
+      status: string;
+      length_ft: number | string;
+      width_ft: number | string;
+      thickness_ft: number | string;
+      stock_location: string | null;
+    };
+    const triple = [
+      Number(s.length_ft),
+      Number(s.width_ft),
+      Number(s.thickness_ft),
+    ].sort((x, y) => x - y);
+    if (!eq(triple, wanted)) continue;
+    items.push({
+      kind: "slab",
+      id: s.id,
+      summary: `${s.temple}${s.stock_location ? ` · ${s.stock_location}` : ""}`,
+      status: s.status,
+    });
+    if (items.length >= 10) break;
+  }
+
+  // Blocks: (length_ft, width_ft, height_ft). Different last-axis
+  // column name from slabs.
+  if (items.length < 10) {
+    const { data: blocks } = await admin
+      .from("blocks")
+      .select("id, yard, status, stone, length_ft, width_ft, height_ft")
+      .in("length_ft", wanted)
+      .in("width_ft", wanted)
+      .in("height_ft", wanted)
+      .limit(60);
+    for (const r of blocks ?? []) {
+      const b = r as {
+        id: string;
+        yard: number;
+        status: string;
+        stone: string;
+        length_ft: number | string;
+        width_ft: number | string;
+        height_ft: number | string;
+      };
+      const triple = [
+        Number(b.length_ft),
+        Number(b.width_ft),
+        Number(b.height_ft),
+      ].sort((x, y) => x - y);
+      if (!eq(triple, wanted)) continue;
+      items.push({
+        kind: "block",
+        id: b.id,
+        summary: `Yard ${b.yard} · ${b.stone}`,
+        status: b.status,
+      });
+      if (items.length >= 10) break;
+    }
+  }
+
+  return items;
 }

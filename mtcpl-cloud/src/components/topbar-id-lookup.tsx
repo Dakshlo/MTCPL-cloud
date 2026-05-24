@@ -516,15 +516,19 @@ function FindIdKeypad({
           {lettersRows.map((row, i) => (
             <KeypadRow key={i} keys={row} onPress={append} />
           ))}
-          {/* Symbol + action row */}
+          {/* Symbol + action row. `.` for decimal dimensions
+              (26.5x18.5x14), `-` for ID dashes, X is on the letters
+              row but doubles as the dim separator (regex also accepts
+              × and *). */}
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "1fr 1.2fr 1.2fr 1.6fr",
+              gridTemplateColumns: "1fr 1fr 1.2fr 1.2fr 1.8fr",
               gap: 4,
             }}
           >
             <KeypadKey label="-" onPress={() => append("-")} />
+            <KeypadKey label="." onPress={() => append(".")} />
             <KeypadKey label="⌫" onPress={backspace} tone="warn" />
             <KeypadKey label="Clear" onPress={clear} tone="warn" />
             <KeypadKey
@@ -542,7 +546,8 @@ function FindIdKeypad({
               marginTop: 2,
             }}
           >
-            All keys auto-uppercase · zero-pad guessed (mt-b-90 → MT-B-090)
+            Auto-uppercase · zero-pad guessed · use X for dimensions
+            (53X29X14)
           </div>
         </div>
       )}
@@ -640,14 +645,16 @@ const DOMAIN_CONFIG: Record<
   }
 > = {
   production: {
-    title: "Look up a slab or block ID",
+    title: "Look up a slab, block, or dimensions",
     deptLabel: "Production",
     accent: "#c9a14a",
-    placeholder: "WF-0001 · MT-B-245 · AGROHA-0002-13",
+    placeholder: "MT-B-245 · WF-0001 · 53x29x14",
     helpText: (
       <>
-        Type any slab or block ID (case-insensitive, leading / trailing
-        space OK). Hit <strong>Find</strong> or press Enter.
+        Type any slab/block ID (case-insensitive, zero-pad guessed —
+        <code> mt-b-90 </code> finds <code>MT-B-090</code>) or
+        dimensions like <code>53x29x14</code>. If more than one slab
+        matches, you&apos;ll pick from a short list.
       </>
     ),
   },
@@ -783,7 +790,147 @@ function ResultPanel({
   void domain;
   if (result.kind === "slab") return <SlabResultPanel result={result} />;
   if (result.kind === "block") return <BlockResultPanel result={result} />;
+  if (result.kind === "multiple")
+    return <MultipleResultPanel result={result} onPick={onPick} />;
   return null;
+}
+
+/** Daksh May 2026 — list panel for searches that match >1 row
+ *  (dimension queries, ID prefixes hitting multiple variants).
+ *  Each row tap re-runs the search with that exact ID so the user
+ *  drills straight into the full single-result detail card. */
+function MultipleResultPanel({
+  result,
+  onPick,
+}: {
+  result: Extract<LookupResult, { kind: "multiple" }>;
+  onPick: (q: string) => void;
+}) {
+  return (
+    <div
+      style={{
+        padding: 12,
+        background: "rgba(15, 23, 42, 0.04)",
+        borderRadius: 10,
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 11,
+          fontWeight: 800,
+          color: "rgba(15,23,42,0.7)",
+          letterSpacing: "0.04em",
+        }}
+      >
+        {result.reason}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        {result.items.map((it) => {
+          const tone = STATUS_TONE[it.status] ?? {
+            fg: "#525252",
+            bg: "rgba(82,82,82,0.10)",
+          };
+          return (
+            <button
+              key={`${it.kind}-${it.id}`}
+              type="button"
+              onClick={() => onPick(it.id)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "10px 12px",
+                background: "#fff",
+                border: "1px solid rgba(15,23,42,0.10)",
+                borderRadius: 8,
+                cursor: "pointer",
+                textAlign: "left",
+                minHeight: 44,
+                touchAction: "manipulation",
+              }}
+            >
+              <span
+                aria-hidden
+                style={{
+                  fontSize: 10,
+                  fontWeight: 800,
+                  padding: "2px 7px",
+                  borderRadius: 999,
+                  background:
+                    it.kind === "slab"
+                      ? "rgba(124,58,237,0.12)"
+                      : "rgba(180,115,51,0.15)",
+                  color: it.kind === "slab" ? "#7c3aed" : "#92400e",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                }}
+              >
+                {it.kind}
+              </span>
+              <span
+                style={{
+                  fontFamily: "ui-monospace, monospace",
+                  fontWeight: 800,
+                  fontSize: 12.5,
+                  color: "var(--text)",
+                  minWidth: 110,
+                }}
+              >
+                {it.id}
+              </span>
+              <span
+                style={{
+                  flex: 1,
+                  fontSize: 11.5,
+                  color: "rgba(15,23,42,0.65)",
+                  fontWeight: 600,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {it.summary}
+              </span>
+              {it.status && (
+                <span
+                  style={{
+                    fontSize: 9,
+                    fontWeight: 800,
+                    padding: "2px 7px",
+                    background: tone.bg,
+                    color: tone.fg,
+                    borderRadius: 999,
+                    fontFamily: "ui-monospace, monospace",
+                    letterSpacing: "0.04em",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {it.status.replace(/_/g, " ")}
+                </span>
+              )}
+              <span
+                style={{ fontSize: 14, color: "rgba(15,23,42,0.4)" }}
+              >
+                ›
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <div
+        style={{
+          fontSize: 10,
+          color: "rgba(15,23,42,0.5)",
+          marginTop: 2,
+        }}
+      >
+        Tap any row to see its full detail.
+      </div>
+    </div>
+  );
 }
 
 function StagePill({ status }: { status: string }) {

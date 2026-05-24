@@ -450,7 +450,84 @@ function ResultPanel({
   }
 
   if (result.kind === "slab") return <SlabPanel data={result} />;
-  return <BlockPanel data={result} />;
+  if (result.kind === "block") return <BlockPanel data={result} />;
+
+  // Daksh May 2026 — dimension / multi-match search returns a list.
+  // Reuse the same suggestion-style buttons; tapping any row re-runs
+  // the search with that exact ID and the panel re-renders as the
+  // full single-result detail card.
+  return (
+    <div>
+      <div
+        style={{
+          fontSize: 12,
+          color: "var(--muted)",
+          marginBottom: 8,
+          fontWeight: 600,
+        }}
+      >
+        {result.reason}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        {result.items.map((it) => (
+          <button
+            key={`${it.kind}-${it.id}`}
+            type="button"
+            onClick={() => onPickSuggestion(it.id)}
+            style={{
+              textAlign: "left",
+              padding: "10px 12px",
+              background: "var(--surface-alt)",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              cursor: "pointer",
+              fontSize: 13,
+              color: "var(--text)",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                padding: "2px 7px",
+                borderRadius: 999,
+                background:
+                  it.kind === "slab"
+                    ? "rgba(124,58,237,0.12)"
+                    : "rgba(180,115,51,0.15)",
+                color: it.kind === "slab" ? "#7c3aed" : "#92400e",
+                textTransform: "uppercase",
+                letterSpacing: "0.05em",
+              }}
+            >
+              {it.kind}
+            </span>
+            <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>
+              {it.id}
+            </span>
+            <span className="muted" style={{ marginLeft: 4, fontSize: 11, flex: 1 }}>
+              {it.summary}
+            </span>
+            {it.status && (
+              <span
+                className="muted"
+                style={{
+                  fontSize: 10,
+                  fontFamily: "ui-monospace, monospace",
+                  letterSpacing: "0.03em",
+                }}
+              >
+                {it.status.replace(/_/g, " ")}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 // ── Slab result ─────────────────────────────────────────────────────
