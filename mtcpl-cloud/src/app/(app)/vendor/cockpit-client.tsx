@@ -412,7 +412,21 @@ export function VendorCockpitClient({
           {isStaffView && otherVendors.length > 0 && (
             <select
               value={vendor.id}
-              onChange={(e) => router.push(`/vendor?vendor_id=${e.target.value}`)}
+              onChange={(e) => {
+                // Daksh May 2026 — server-action redirects all land on
+                // /vendor (without ?vendor_id=), so the selected vendor
+                // would snap back to the alphabetical first (ALKESH)
+                // after every action. Pinning the choice in a cookie
+                // lets vendor/page.tsx fall back to the cookie when
+                // no query param is present. 7-day TTL is plenty —
+                // longer than dev/owner spend reviewing a vendor in
+                // one stretch, short enough that it doesn't hang
+                // around forever.
+                if (typeof document !== "undefined") {
+                  document.cookie = `mtcpl_vendor_pick=${e.target.value}; Path=/; Max-Age=${60 * 60 * 24 * 7}; SameSite=Lax`;
+                }
+                router.push(`/vendor?vendor_id=${e.target.value}`);
+              }}
               style={{
                 background: "rgba(255,255,255,0.1)",
                 color: "#fff",

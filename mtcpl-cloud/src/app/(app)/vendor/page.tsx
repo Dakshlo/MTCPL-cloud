@@ -15,6 +15,7 @@
  * owns the modals and the live timer ticking.
  */
 
+import { cookies } from "next/headers";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { VendorCockpitClient, type CarvingJobLite, type CncMachineLive, type SlabLite, type HeldSlabLite } from "./cockpit-client";
@@ -30,20 +31,47 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
 
   // Resolve which vendor we're viewing.
   // - Vendor role: scoped to their own vendor_id.
-  // - Other roles: pick from ?vendor_id=... or pick first CNC vendor.
+  // - Other roles: pick from ?vendor_id=... → cookie (sticky pick) →
+  //   first CNC vendor (alphabetical fallback).
+  //
+  // Daksh May 2026 — the cookie tier is the fix for the "every
+  // action snaps the page back to ALKESH" bug. Server actions
+  // redirect to /vendor without a query string, dropping the
+  // ?vendor_id=. The dropdown writes mtcpl_vendor_pick when staff
+  // change the selection; we read it here so the choice survives
+  // every load/hold/complete action. The cookie is validated below
+  // against actual vendor access — if it points to a deleted or
+  // inactive vendor, we drop through to the alphabetical default.
   let vendorId: string | null = profile.vendor_id ?? null;
   if (profile.role !== "vendor") {
-    if (params.vendor_id) vendorId = params.vendor_id;
-    else if (!vendorId) {
-      const { data: firstVendor } = await admin
-        .from("vendors")
-        .select("id")
-        .eq("vendor_type", "CNC")
-        .eq("is_active", true)
-        .order("name")
-        .limit(1)
-        .maybeSingle();
-      vendorId = (firstVendor as { id?: string } | null)?.id ?? null;
+    if (params.vendor_id) {
+      vendorId = params.vendor_id;
+    } else {
+      const cookieStore = await cookies();
+      const stickyPick = cookieStore.get("mtcpl_vendor_pick")?.value ?? null;
+      if (stickyPick) {
+        // Validate the sticky pick still resolves to an active CNC
+        // vendor before honouring it. Avoids landing on a stale
+        // cookie pointing at a deleted/inactive vendor.
+        const { data: pickRow } = await admin
+          .from("vendors")
+          .select("id")
+          .eq("id", stickyPick)
+          .eq("is_active", true)
+          .maybeSingle();
+        if (pickRow) vendorId = stickyPick;
+      }
+      if (!vendorId) {
+        const { data: firstVendor } = await admin
+          .from("vendors")
+          .select("id")
+          .eq("vendor_type", "CNC")
+          .eq("is_active", true)
+          .order("name")
+          .limit(1)
+          .maybeSingle();
+        vendorId = (firstVendor as { id?: string } | null)?.id ?? null;
+      }
     }
   }
 
