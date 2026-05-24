@@ -167,3 +167,14 @@ export function canRenameBillVendor(p: Pick<Profile, "role">): boolean {
   if (p.role === "owner") return true;
   return false;
 }
+
+/** Mig 072 — hold a portion of an approved bill's payable amount.
+ *  Accountant can then propose only the un-held remainder. Owner
+ *  uses this when dad wants to withhold against a quality dispute,
+ *  retention, shortage, etc. Owner + developer only — accountants
+ *  see the hold (and the clamped proposable) but can't modify it. */
+export function canHoldBill(p: Pick<Profile, "role">): boolean {
+  if (p.role === "developer") return true;
+  if (p.role === "owner") return true;
+  return false;
+}

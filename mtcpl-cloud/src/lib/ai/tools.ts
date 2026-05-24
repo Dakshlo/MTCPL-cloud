@@ -329,7 +329,7 @@ export const AI_TOOLS = [
   {
     name: "list_due_bills",
     description:
-      "List approved bills with amount_outstanding > 0. Default sort: oldest first by bill_date. Each row: token, vendor name, vendor's bill no, bill date, days since bill, amount_total, amount_tax (CGST+SGST+IGST), amount_tds, amount_tcs, amount_outstanding. Use for 'show me due bills', 'overdue bills', '90+ day bills', 'bills for vendor X', or any 'which bills' question. Pass `vendor` for fuzzy vendor match; pass `age_bucket` to filter by aging window (0_30 / 31_60 / 61_90 / 90_plus); pass `token` for a substring token search.",
+      "List approved bills with amount_outstanding > 0. Default sort: oldest first by bill_date. Each row: token, vendor name, vendor's bill no, bill date, days since bill, amount_total, amount_tax (CGST+SGST+IGST), amount_tds, amount_tcs, amount_outstanding, AND (mig 072) held_amount + held_reason + amount_proposable (= outstanding − held). Use for 'show me due bills', 'overdue bills', '90+ day bills', 'bills for vendor X', 'which bills are on hold', or any 'which bills' / 'kitna pay kar sakte' question. Pass `vendor` for fuzzy vendor match; pass `age_bucket` to filter by aging window (0_30 / 31_60 / 61_90 / 90_plus); pass `token` for a substring token search.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -2508,7 +2508,7 @@ async function listDueBills(input: Record<string, unknown>) {
   let q = admin
     .from("bills")
     .select(
-      "id, token, vendor_bill_no, bill_date, cost_head, amount_subtotal, amount_gst, amount_tds, amount_tcs, amount_total, amount_payable_to_vendor, amount_paid, amount_outstanding, bill_vendor_id, bill_vendors(name)",
+      "id, token, vendor_bill_no, bill_date, cost_head, amount_subtotal, amount_gst, amount_tds, amount_tcs, amount_total, amount_payable_to_vendor, amount_paid, amount_outstanding, held_amount, held_reason, bill_vendor_id, bill_vendors(name)",
     )
     .eq("status", "approved")
     .gt("amount_outstanding", 0)
@@ -2538,6 +2538,8 @@ async function listDueBills(input: Record<string, unknown>) {
     amount_payable_to_vendor: number | null;
     amount_paid: number;
     amount_outstanding: number;
+    held_amount: number | string | null;
+    held_reason: string | null;
     bill_vendor_id: string;
     bill_vendors: { name: string } | { name: string }[] | null;
   };
@@ -2547,6 +2549,11 @@ async function listDueBills(input: Record<string, unknown>) {
     const days = Math.floor((todayMs - new Date(b.bill_date).getTime()) / 86_400_000);
     const bucket: "0_30" | "31_60" | "61_90" | "90_plus" =
       days <= 30 ? "0_30" : days <= 60 ? "31_60" : days <= 90 ? "61_90" : "90_plus";
+    // Mig 072 — proposable = outstanding − held. Surface both so the
+    // assistant can answer "how much can I actually propose?" cleanly.
+    const heldAmt = Number(b.held_amount ?? 0);
+    const outstandingAmt = Number(b.amount_outstanding);
+    const proposable = Math.max(0, outstandingAmt - heldAmt);
     return {
       token: b.token,
       vendor: v?.name ?? "Unknown",
@@ -2562,7 +2569,10 @@ async function listDueBills(input: Record<string, unknown>) {
       amountTotalInr: round2(Number(b.amount_total)),
       amountPayableToVendorInr: round2(Number(b.amount_payable_to_vendor ?? b.amount_total)),
       amountPaidInr: round2(Number(b.amount_paid)),
-      amountOutstandingInr: round2(Number(b.amount_outstanding)),
+      amountOutstandingInr: round2(outstandingAmt),
+      heldAmountInr: round2(heldAmt),
+      heldReason: b.held_reason ?? null,
+      amountProposableInr: round2(proposable),
     };
   });
 

@@ -49,6 +49,11 @@ export type DueBillRow = {
   amountPayableToVendor: number;
   amountPaid: number;
   amountOutstanding: number;
+  /** Mig 072 — owner-held slice. 0 = no hold. Renders a 🔒 chip on
+   *  the row + clamps the proposable amount input to
+   *  (amountOutstanding − heldAmount). Server enforces too. */
+  heldAmount: number;
+  heldReason: string | null;
   ageBucket: "0_30" | "31_60" | "61_90" | "90_plus";
   hasOpenPayment: boolean;
   /** Days since bill_date. Used for the premature-payment guard. */
@@ -590,10 +595,16 @@ export function DueBillsClient({
                       style={{
                         background: isSelected
                           ? ACCOUNTS_TOKENS.accentLight
-                          : idx % 2 === 0
-                            ? "#fff"
-                            : ACCOUNTS_TOKENS.surfaceMuted,
+                          : r.heldAmount > 0
+                            ? "rgba(254,243,199,0.45)" // Mig 072 — soft amber tint on held rows
+                            : idx % 2 === 0
+                              ? "#fff"
+                              : ACCOUNTS_TOKENS.surfaceMuted,
                         opacity: r.hasOpenPayment ? 0.55 : 1,
+                        boxShadow:
+                          r.heldAmount > 0
+                            ? "inset 4px 0 0 #d97706" // amber left stripe so held bills jump out
+                            : undefined,
                         transition: "background 0.1s",
                       }}
                     >
@@ -710,6 +721,33 @@ export function DueBillsClient({
                     </td>
                     <td style={TABLE_STYLES.tdRight}>
                       <Money value={r.amountOutstanding} tone="warning" />
+                      {/* Mig 072 — show the owner-held slice inline so
+                          the accountant sees, at a glance, what's
+                          actually proposable. Hover for the reason. */}
+                      {r.heldAmount > 0 && (
+                        <div
+                          title={
+                            r.heldReason
+                              ? `Held by owner: ${r.heldReason}`
+                              : "Held by owner"
+                          }
+                          style={{
+                            marginTop: 4,
+                            fontSize: 10,
+                            fontWeight: 800,
+                            padding: "2px 7px",
+                            borderRadius: 999,
+                            background: "#fef3c7",
+                            color: "#92400e",
+                            border: "1px solid #d97706",
+                            fontFamily: "ui-monospace, monospace",
+                            display: "inline-block",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          🔒 HELD ₹{r.heldAmount.toLocaleString("en-IN")}
+                        </div>
+                      )}
                     </td>
                     <td style={TABLE_STYLES.td}>
                       {/* Mig 064 follow-on (Daksh, 2nd pass) — royalty
@@ -752,59 +790,96 @@ export function DueBillsClient({
                     </td>
                     {canPropose && (
                       <td style={TABLE_STYLES.tdRight}>
-                        {isSelected ? (
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            max={r.amountOutstanding}
-                            value={display}
-                            disabled={r.hasOpenPayment}
-                            onChange={(e) => {
-                              // Cap at outstanding — can't propose more than
-                              // what's owed. Empty string is allowed during
-                              // typing so the user can clear and retype.
-                              const raw = e.target.value;
-                              if (raw === "") {
-                                setAmountOverrides((p) => ({ ...p, [r.id]: "" }));
-                                return;
+                        {(() => {
+                          // Mig 072 — proposable = outstanding − held.
+                          // When fully held, the row is greyed out
+                          // and the propose input becomes a notice
+                          // pointing to the bill detail page.
+                          const proposable = Math.max(
+                            0,
+                            r.amountOutstanding - r.heldAmount,
+                          );
+                          const fullyHeld = r.heldAmount >= r.amountOutstanding;
+                          if (!isSelected) {
+                            return <span style={{ fontSize: 11, color: "var(--muted)" }}>—</span>;
+                          }
+                          if (fullyHeld) {
+                            return (
+                              <span
+                                style={{
+                                  fontSize: 10,
+                                  fontWeight: 700,
+                                  color: "#92400e",
+                                  fontFamily: "ui-monospace, monospace",
+                                }}
+                                title="Owner has held the full outstanding — release the hold before proposing"
+                              >
+                                🔒 fully held
+                              </span>
+                            );
+                          }
+                          return (
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              max={proposable}
+                              value={display}
+                              disabled={r.hasOpenPayment}
+                              onChange={(e) => {
+                                // Cap at PROPOSABLE — outstanding minus
+                                // owner's hold. Empty string is allowed
+                                // during typing so the user can clear
+                                // and retype.
+                                const raw = e.target.value;
+                                if (raw === "") {
+                                  setAmountOverrides((p) => ({ ...p, [r.id]: "" }));
+                                  return;
+                                }
+                                const n = Number(raw);
+                                if (!Number.isFinite(n) || n < 0) return;
+                                const clamped =
+                                  n > proposable
+                                    ? String(proposable)
+                                    : raw;
+                                setAmountOverrides((p) => ({ ...p, [r.id]: clamped }));
+                              }}
+                              onBlur={(e) => {
+                                // On blur, normalise: empty/0 → proposable,
+                                // otherwise leave the user's number alone.
+                                const n = Number(e.target.value);
+                                if (!Number.isFinite(n) || n <= 0) {
+                                  setAmountOverrides((p) => {
+                                    const next = { ...p };
+                                    delete next[r.id];
+                                    return next;
+                                  });
+                                }
+                              }}
+                              title={
+                                r.heldAmount > 0
+                                  ? `Max ₹${proposable.toLocaleString("en-IN")} — outstanding ₹${r.amountOutstanding.toLocaleString("en-IN")} minus held ₹${r.heldAmount.toLocaleString("en-IN")}`
+                                  : `Max ₹${proposable.toLocaleString("en-IN")} — capped at outstanding`
                               }
-                              const n = Number(raw);
-                              if (!Number.isFinite(n) || n < 0) return;
-                              const clamped =
-                                n > r.amountOutstanding
-                                  ? String(r.amountOutstanding)
-                                  : raw;
-                              setAmountOverrides((p) => ({ ...p, [r.id]: clamped }));
-                            }}
-                            onBlur={(e) => {
-                              // On blur, normalise: empty/0 → outstanding,
-                              // otherwise leave the user's number alone.
-                              const n = Number(e.target.value);
-                              if (!Number.isFinite(n) || n <= 0) {
-                                setAmountOverrides((p) => {
-                                  const next = { ...p };
-                                  delete next[r.id];
-                                  return next;
-                                });
-                              }
-                            }}
-                            title={`Max ₹${r.amountOutstanding.toLocaleString("en-IN")} — capped at outstanding`}
-                            style={{
-                              width: 120,
-                              padding: "6px 8px",
-                              fontSize: 12,
-                              fontFamily: "ui-monospace, monospace",
-                              border: `1px solid ${ACCOUNTS_TOKENS.accent}`,
-                              borderRadius: 6,
-                              background: "#fff",
-                              color: "var(--text)",
-                              textAlign: "right",
-                            }}
-                          />
-                        ) : (
-                          <span style={{ fontSize: 11, color: "var(--muted)" }}>—</span>
-                        )}
+                              style={{
+                                width: 120,
+                                padding: "6px 8px",
+                                fontSize: 12,
+                                fontFamily: "ui-monospace, monospace",
+                                border: `1px solid ${
+                                  r.heldAmount > 0
+                                    ? "#d97706"
+                                    : ACCOUNTS_TOKENS.accent
+                                }`,
+                                borderRadius: 6,
+                                background:
+                                  r.heldAmount > 0 ? "#fffbeb" : "#fff",
+                                color: "var(--text)",
+                                textAlign: "right",
+                              }}
+                            />
+                          );
+                        })()}
                       </td>
                     )}
                     </tr>

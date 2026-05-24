@@ -22,6 +22,7 @@ import {
   canApproveBills,
   canConfirmPayments,
   canFinalAudit,
+  canHoldBill,
   canManageAccounts,
   canManageBillVendors,
   canMarkPaid,
@@ -927,6 +928,168 @@ export async function clearPartialRejectionAction(
 }
 
 // ──────────────────────────────────────────────────────────────────
+// Bill hold-amount (mig 072, Daksh May 2026)
+// ──────────────────────────────────────────────────────────────────
+//
+// Owner withholds a slice of an approved bill's payable amount.
+// Accountant can then only propose the un-held portion. Hold is
+// idempotent — re-holding overwrites (audit log keeps history).
+// ──────────────────────────────────────────────────────────────────
+
+export async function holdBillAmountAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canHoldBill(profile)) {
+    return { ok: false, error: "Only owner / developer can hold a bill." };
+  }
+  const supabase = createAdminSupabaseClient();
+
+  const billId = String(formData.get("bill_id") ?? "").trim();
+  const amountRaw = String(formData.get("amount") ?? "").trim();
+  const reason = String(formData.get("reason") ?? "").trim() || null;
+  if (!billId) return { ok: false, error: "Missing bill id." };
+  const amount = Number(amountRaw);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { ok: false, error: "Hold amount must be a positive number." };
+  }
+
+  // Load the current state — outstanding is our cap (we can't hold
+  // more than what's still owed), and we need amount_total for the
+  // schema-level check the trigger enforces too.
+  const { data: bill, error: loadErr } = await supabase
+    .from("bills")
+    .select(
+      "id, token, status, amount_total, amount_paid, amount_outstanding, held_amount, cancelled_at",
+    )
+    .eq("id", billId)
+    .maybeSingle();
+  if (loadErr) return { ok: false, error: loadErr.message };
+  if (!bill) return { ok: false, error: "Bill not found." };
+  const b = bill as {
+    id: string;
+    token: string;
+    status: string;
+    amount_total: number | string;
+    amount_paid: number | string;
+    amount_outstanding: number | string;
+    held_amount: number | string;
+    cancelled_at: string | null;
+  };
+  if (b.cancelled_at) {
+    return { ok: false, error: "Cannot hold a cancelled bill." };
+  }
+  if (b.status !== "approved" && b.status !== "pending_approval") {
+    return {
+      ok: false,
+      error: `Hold only applies to approved or pending bills (this one is ${b.status}).`,
+    };
+  }
+  const outstanding = Number(b.amount_outstanding ?? 0);
+  if (amount > outstanding + 0.005) {
+    return {
+      ok: false,
+      error: `Hold (₹${amount.toLocaleString("en-IN")}) cannot exceed outstanding (₹${outstanding.toLocaleString("en-IN")}).`,
+    };
+  }
+
+  const now = new Date().toISOString();
+  const previousHeld = Number(b.held_amount ?? 0);
+  const { error: updErr } = await supabase
+    .from("bills")
+    .update({
+      held_amount: amount,
+      held_reason: reason,
+      held_at: now,
+      held_by: profile.id,
+    })
+    .eq("id", billId);
+  if (updErr) return { ok: false, error: updErr.message };
+
+  await logAudit(profile.id, "bill_held", "bill", billId, {
+    token: b.token,
+    previous_held: previousHeld,
+    new_held: amount,
+    reason,
+  });
+  await refreshAccountsPaths();
+  return { ok: true };
+}
+
+export async function releaseBillHoldAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canHoldBill(profile)) {
+    return { ok: false, error: "Only owner / developer can release a hold." };
+  }
+  const supabase = createAdminSupabaseClient();
+
+  const billId = String(formData.get("bill_id") ?? "").trim();
+  const releaseNote = String(formData.get("release_note") ?? "").trim() || null;
+  if (!billId) return { ok: false, error: "Missing bill id." };
+
+  const { data: bill, error: loadErr } = await supabase
+    .from("bills")
+    .select("id, token, held_amount, held_reason")
+    .eq("id", billId)
+    .maybeSingle();
+  if (loadErr) return { ok: false, error: loadErr.message };
+  if (!bill) return { ok: false, error: "Bill not found." };
+  const b = bill as {
+    id: string;
+    token: string;
+    held_amount: number | string;
+    held_reason: string | null;
+  };
+  if (Number(b.held_amount ?? 0) <= 0) {
+    return { ok: false, error: "Bill has no active hold to release." };
+  }
+
+  const { error: updErr } = await supabase
+    .from("bills")
+    .update({
+      held_amount: 0,
+      held_reason: null,
+      held_at: null,
+      held_by: null,
+    })
+    .eq("id", billId);
+  if (updErr) return { ok: false, error: updErr.message };
+
+  await logAudit(profile.id, "bill_hold_released", "bill", billId, {
+    token: b.token,
+    released_amount: Number(b.held_amount ?? 0),
+    previous_reason: b.held_reason,
+    release_note: releaseNote,
+  });
+  await refreshAccountsPaths();
+  return { ok: true };
+}
+
+// Form-action wrappers so the buttons can <form action={...}> without
+// the client-component overhead. Mirrors approveBillFormAction etc.
+export async function holdBillAmountFormAction(formData: FormData) {
+  const res = await holdBillAmountAction(formData);
+  if (!res.ok) {
+    const billId = String(formData.get("bill_id") ?? "");
+    redirect(`/accounts/bills/${billId}?error=${encodeURIComponent(res.error)}`);
+  }
+  const billId = String(formData.get("bill_id") ?? "");
+  redirect(`/accounts/bills/${billId}?toast=Hold+applied`);
+}
+
+export async function releaseBillHoldFormAction(formData: FormData) {
+  const res = await releaseBillHoldAction(formData);
+  if (!res.ok) {
+    const billId = String(formData.get("bill_id") ?? "");
+    redirect(`/accounts/bills/${billId}?error=${encodeURIComponent(res.error)}`);
+  }
+  const billId = String(formData.get("bill_id") ?? "");
+  redirect(`/accounts/bills/${billId}?toast=Hold+released`);
+}
+
+// ──────────────────────────────────────────────────────────────────
 // Payment proposal / confirmation / execution
 // ──────────────────────────────────────────────────────────────────
 
@@ -955,9 +1118,12 @@ export async function proposePaymentsAction(formData: FormData): Promise<
   }
 
   // Pull each bill's current state + check no open payment row already.
+  // Mig 072 — also pull held_amount so we can clamp the proposable
+  // amount to (outstanding - held) and refuse proposals on bills
+  // where the entire outstanding is held.
   const { data: bills, error: loadErr } = await supabase
     .from("bills")
-    .select("id, token, status, amount_outstanding")
+    .select("id, token, status, amount_outstanding, held_amount")
     .in("id", billIds);
   if (loadErr) return { ok: false, error: loadErr.message };
 
@@ -977,6 +1143,11 @@ export async function proposePaymentsAction(formData: FormData): Promise<
     const billId = b.id as string;
     const token = b.token as string;
     const outstanding = Number(b.amount_outstanding ?? 0);
+    // Mig 072 — proposable = outstanding minus the owner-held slice.
+    // A bill with held >= outstanding is paused entirely until owner
+    // releases (or reduces) the hold.
+    const held = Number(b.held_amount ?? 0);
+    const proposable = Math.max(0, outstanding - held);
     if (b.status !== "approved") {
       skipped.push(`${token} (not approved)`);
       continue;
@@ -985,15 +1156,21 @@ export async function proposePaymentsAction(formData: FormData): Promise<
       skipped.push(`${token} (no outstanding)`);
       continue;
     }
+    if (proposable <= 0) {
+      skipped.push(`${token} (fully held by owner — release hold first)`);
+      continue;
+    }
     if (billsWithOpen.has(billId)) {
       skipped.push(`${token} (already has open payment)`);
       continue;
     }
     const requested = proposedAmounts[billId];
+    // Clamp to the post-hold proposable ceiling, not raw outstanding,
+    // so the accountant can never propose money that's been held.
     const amount =
       Number.isFinite(requested) && requested > 0
-        ? Math.min(Number(requested), outstanding)
-        : outstanding;
+        ? Math.min(Number(requested), proposable)
+        : proposable;
     rowsToInsert.push({
       bill_id: billId,
       status: "proposed",

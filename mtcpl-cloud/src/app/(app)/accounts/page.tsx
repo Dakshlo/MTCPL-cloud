@@ -102,7 +102,7 @@ export default async function AccountsHomePage({
   let dueQuery = supabase
     .from("bills")
     .select(
-      "id, token, vendor_bill_no, bill_date, description, cost_head, amount_total, amount_gst, amount_tds, amount_tcs, amount_payable_to_vendor, amount_paid, amount_outstanding, status, approved_at, bill_vendor_id, bill_vendors(id, name, nickname, payment_terms_days, category)",
+      "id, token, vendor_bill_no, bill_date, description, cost_head, amount_total, amount_gst, amount_tds, amount_tcs, amount_payable_to_vendor, amount_paid, amount_outstanding, held_amount, held_reason, status, approved_at, bill_vendor_id, bill_vendors(id, name, nickname, payment_terms_days, category)",
     )
     .eq("status", "approved")
     .gt("amount_outstanding", 0)
@@ -139,7 +139,7 @@ export default async function AccountsHomePage({
       const { data: missingRows } = await supabase
         .from("bills")
         .select(
-          "id, token, vendor_bill_no, bill_date, description, cost_head, amount_total, amount_gst, amount_tds, amount_tcs, amount_payable_to_vendor, amount_paid, amount_outstanding, status, approved_at, bill_vendor_id, bill_vendors(id, name, nickname, payment_terms_days, category)",
+          "id, token, vendor_bill_no, bill_date, description, cost_head, amount_total, amount_gst, amount_tds, amount_tcs, amount_payable_to_vendor, amount_paid, amount_outstanding, held_amount, held_reason, status, approved_at, bill_vendor_id, bill_vendors(id, name, nickname, payment_terms_days, category)",
         )
         // Same gates as the main query — a ticked bill that's been
         // since paid in full / cancelled shouldn't re-surface.
@@ -203,6 +203,9 @@ export default async function AccountsHomePage({
     amount_payable_to_vendor: number | null;
     amount_paid: number;
     amount_outstanding: number;
+    /** Mig 072 — owner hold. 0 = no hold. */
+    held_amount: number | string | null;
+    held_reason: string | null;
     approved_at: string | null;
     bill_vendor_id: string;
     bill_vendors:
@@ -304,6 +307,8 @@ export default async function AccountsHomePage({
       amountPayableToVendor: Number(r.amount_payable_to_vendor ?? r.amount_total),
       amountPaid: Number(r.amount_paid),
       amountOutstanding: Number(r.amount_outstanding),
+      heldAmount: Number(r.held_amount ?? 0),
+      heldReason: r.held_reason ?? null,
       ageBucket: bucketFor(r.bill_date),
       hasOpenPayment: openPaymentBillIds.has(r.id),
       daysSinceBill: days,

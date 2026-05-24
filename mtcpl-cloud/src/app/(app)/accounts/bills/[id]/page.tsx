@@ -6,6 +6,7 @@ import { getProfilesMap } from "@/lib/profiles";
 import {
   canApproveBills,
   canConfirmPayments,
+  canHoldBill,
   canManageAccounts,
   canMarkPaid,
   canSubmitBills,
@@ -14,12 +15,14 @@ import {
   approveBillFormAction,
   cancelBillAction,
   clearPartialRejectionFormAction,
+  releaseBillHoldFormAction,
 } from "../../actions";
 import { RejectBillForm } from "./reject-bill-form";
 import { ApproveBillButton } from "./approve-bill-button";
 import { BillBackLink } from "./bill-back-link";
 import { PartialRejectionForm } from "./partial-rejection-form";
 import { CancelBillButton } from "./cancel-bill-button";
+import { HoldBillForm } from "./hold-bill-form";
 import {
   ACCOUNTS_TOKENS,
   BillStatusPill,
@@ -49,7 +52,7 @@ export default async function BillDetailPage({
   const { data: bill } = await supabase
     .from("bills")
     .select(
-      "id, token, vendor_bill_no, bill_date, description, cost_head, amount_subtotal, gst_percent, cgst_percent, sgst_percent, igst_percent, tds_percent, tcs_percent, amount_gst, amount_cgst, amount_sgst, amount_igst, amount_tds, amount_tcs, amount_total, amount_payable_to_vendor, amount_paid, amount_outstanding, block_cft, status, rejection_note, partial_rejection_amount, partial_rejection_note, partial_rejection_at, partial_rejection_by, submitted_by, submitted_at, approved_by, approved_at, rejected_by, rejected_at, cancelled_by, cancelled_at, bill_vendor_id, bill_vendors(id, name, category, gstin, phone, email, address, bank_name, bank_account, ifsc, upi_id, tds_applicable, tcs_applicable)",
+      "id, token, vendor_bill_no, bill_date, description, cost_head, amount_subtotal, gst_percent, cgst_percent, sgst_percent, igst_percent, tds_percent, tcs_percent, amount_gst, amount_cgst, amount_sgst, amount_igst, amount_tds, amount_tcs, amount_total, amount_payable_to_vendor, amount_paid, amount_outstanding, block_cft, status, rejection_note, partial_rejection_amount, partial_rejection_note, partial_rejection_at, partial_rejection_by, held_amount, held_reason, held_at, held_by, submitted_by, submitted_at, approved_by, approved_at, rejected_by, rejected_at, cancelled_by, cancelled_at, bill_vendor_id, bill_vendors(id, name, category, gstin, phone, email, address, bank_name, bank_account, ifsc, upi_id, tds_applicable, tcs_applicable)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -828,6 +831,174 @@ export default async function BillDetailPage({
                   <p style={{ margin: 0, fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}>
                     A payment has been marked paid — this rejection is now frozen for audit.
                   </p>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* Mig 072 — Owner Hold panel. Owner withholds a slice of
+              the bill so the accountant can only propose the un-held
+              remainder. Visible to everyone when there's an active
+              hold; only owner / developer can apply / release. */}
+          {(() => {
+            const heldAmt = Number(bill.held_amount ?? 0);
+            const outstanding = Number(bill.amount_outstanding ?? 0);
+            const canModify =
+              canHoldBill(profile) &&
+              !bill.cancelled_at &&
+              (bill.status === "approved" || bill.status === "pending_approval");
+            const showCard = heldAmt > 0 || canModify;
+            if (!showCard) return null;
+            const heldByName = bill.held_by
+              ? profilesMap[bill.held_by] ?? "Unknown"
+              : null;
+            const proposable = Math.max(0, outstanding - heldAmt);
+            return (
+              <div
+                style={{
+                  background:
+                    heldAmt > 0 ? "#fef3c7" : "#fffbeb",
+                  border: `1px solid ${heldAmt > 0 ? "#d97706" : "#fcd34d"}`,
+                  borderLeft:
+                    heldAmt > 0
+                      ? "4px solid #d97706"
+                      : "1px solid #fcd34d",
+                  borderRadius: 10,
+                  padding: 16,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 10,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 10,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 800,
+                      color: "#92400e",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                    }}
+                  >
+                    🔒 Owner hold
+                  </div>
+                  {heldAmt > 0 && (
+                    <div
+                      style={{
+                        fontSize: 14,
+                        fontWeight: 800,
+                        color: "#92400e",
+                        fontFamily: "ui-monospace, monospace",
+                      }}
+                      title="Held — accountant cannot propose this amount"
+                    >
+                      −₹{heldAmt.toLocaleString("en-IN")} held
+                    </div>
+                  )}
+                </div>
+
+                {heldAmt > 0 && (
+                  <>
+                    {bill.held_reason && (
+                      <p
+                        style={{
+                          margin: 0,
+                          fontSize: 13,
+                          color: "var(--text)",
+                          lineHeight: 1.5,
+                          whiteSpace: "pre-wrap",
+                        }}
+                      >
+                        {bill.held_reason}
+                      </p>
+                    )}
+                    <p style={{ margin: 0, fontSize: 11, color: "var(--muted)" }}>
+                      {heldByName ? `Held by ${heldByName}` : "Held"}
+                      {bill.held_at
+                        ? ` · ${new Date(bill.held_at).toLocaleString("en-IN", {
+                            timeZone: "Asia/Kolkata",
+                            day: "numeric",
+                            month: "short",
+                            year: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}`
+                        : ""}
+                    </p>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 16,
+                        fontSize: 12,
+                        color: "var(--muted)",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <span>
+                        Outstanding:{" "}
+                        <strong
+                          style={{
+                            color: "var(--text)",
+                            fontFamily: "ui-monospace, monospace",
+                          }}
+                        >
+                          ₹{outstanding.toLocaleString("en-IN")}
+                        </strong>
+                      </span>
+                      <span>
+                        Proposable now:{" "}
+                        <strong
+                          style={{
+                            color: proposable > 0 ? "#15803d" : "#b91c1c",
+                            fontFamily: "ui-monospace, monospace",
+                          }}
+                        >
+                          ₹{proposable.toLocaleString("en-IN")}
+                        </strong>
+                      </span>
+                    </div>
+                  </>
+                )}
+
+                {canModify && (
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 8,
+                      flexWrap: "wrap",
+                      alignItems: "stretch",
+                    }}
+                  >
+                    <HoldBillForm
+                      billId={bill.id}
+                      maxAmount={outstanding}
+                      currentAmount={heldAmt}
+                      currentReason={bill.held_reason ?? null}
+                    />
+                    {heldAmt > 0 && (
+                      <form action={releaseBillHoldFormAction}>
+                        <input type="hidden" name="bill_id" value={bill.id} />
+                        <button
+                          type="submit"
+                          style={{
+                            ...BUTTON_STYLES.ghost,
+                            color: "#15803d",
+                            borderColor: "#15803d",
+                          }}
+                          title="Release the hold — full outstanding becomes proposable again"
+                        >
+                          🔓 Release hold
+                        </button>
+                      </form>
+                    )}
+                  </div>
                 )}
               </div>
             );

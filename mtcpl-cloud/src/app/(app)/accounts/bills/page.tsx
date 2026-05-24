@@ -18,7 +18,13 @@ import {
   VendorIdentity,
 } from "../_ui/components";
 
-type SearchParams = Promise<{ status?: string; vendor?: string; q?: string }>;
+type SearchParams = Promise<{
+  status?: string;
+  vendor?: string;
+  q?: string;
+  /** Mig 072 — "1" filters the list to bills with an active hold. */
+  hold?: string;
+}>;
 
 const ALL_STATUSES = ["pending_approval", "approved", "rejected", "fully_paid", "cancelled"];
 const STATUS_LABELS: Record<string, string> = {
@@ -39,6 +45,9 @@ type BillRow = {
   amount_total: number;
   amount_paid: number;
   amount_outstanding: number;
+  /** Mig 072 — owner-held slice. 0 = no hold. Surfaces a 🔒 chip
+   *  on the row + powers the "Held only" filter. */
+  held_amount: number;
   status: string;
   submitted_by: string | null;
   submitted_at: string | null;
@@ -64,6 +73,9 @@ export default async function BillsListPage({
   const statusFilter = sp.status ?? "";
   const vendorFilter = sp.vendor ?? "";
   const searchQuery = (sp.q ?? "").trim();
+  // Mig 072 — ?hold=1 in the URL restricts to bills with an active
+  // owner hold (held_amount > 0).
+  const heldOnly = (sp.hold ?? "") === "1";
 
   const restrictToOwn =
     profile.role === "biller" &&
@@ -82,13 +94,14 @@ export default async function BillsListPage({
   let query = supabase
     .from("bills")
     .select(
-      "id, token, vendor_bill_no, bill_date, description, cost_head, amount_total, amount_paid, amount_outstanding, status, submitted_by, submitted_at, bill_vendor_id, bill_vendors(id, name)",
+      "id, token, vendor_bill_no, bill_date, description, cost_head, amount_total, amount_paid, amount_outstanding, held_amount, status, submitted_by, submitted_at, bill_vendor_id, bill_vendors(id, name)",
     )
     .order("submitted_at", { ascending: false })
     .limit(500);
   if (restrictToOwn) query = query.eq("submitted_by", profile.id);
   if (statusFilter && ALL_STATUSES.includes(statusFilter)) query = query.eq("status", statusFilter);
   if (vendorFilter) query = query.eq("bill_vendor_id", vendorFilter);
+  if (heldOnly) query = query.gt("held_amount", 0);
   // Token + vendor's-bill-no + VENDOR NAME search. PostgREST can't
   // OR across an embedded relation column directly, so we first
   // resolve vendor IDs whose name matches, then merge those into
@@ -174,6 +187,17 @@ export default async function BillsListPage({
               label={`${STATUS_LABELS[s]} · ${counts[s] ?? 0}`}
             />
           ))}
+          {/* Mig 072 — dedicated chip to filter only bills with an
+              active owner hold. Lives next to the status chips
+              because dad asked for "a filter option to see hold
+              ones". URL param ?hold=1; toggling sends the same URL
+              with/without the param to flip. */}
+          <HeldOnlyChip
+            current={heldOnly}
+            statusFilter={statusFilter}
+            vendorFilter={vendorFilter}
+            searchQuery={searchQuery}
+          />
         </div>
         <div style={{ flex: 1, display: "flex", justifyContent: "flex-end", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <form method="GET" style={{ display: "inline-flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -321,7 +345,35 @@ export default async function BillsListPage({
                       )}
                     </td>
                     <td style={TABLE_STYLES.td}>
-                      <BillStatusPill status={b.status} />
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <BillStatusPill status={b.status} />
+                        {Number(b.held_amount) > 0 && (
+                          <span
+                            style={{
+                              fontSize: 10,
+                              fontWeight: 800,
+                              padding: "2px 8px",
+                              borderRadius: 999,
+                              background: "#fef3c7",
+                              color: "#92400e",
+                              border: "1px solid #d97706",
+                              fontFamily: "ui-monospace, monospace",
+                              letterSpacing: "0.02em",
+                              whiteSpace: "nowrap",
+                            }}
+                            title="Owner has held part of this bill — accountant can only propose the remainder"
+                          >
+                            🔒 HELD ₹{Number(b.held_amount).toLocaleString("en-IN")}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td style={{ ...TABLE_STYLES.td, fontSize: 12, color: "var(--muted)" }}>
                       {b.submitted_by ? profilesMap[b.submitted_by] ?? "—" : "—"}
@@ -381,6 +433,52 @@ function StatusChip({
       }}
     >
       {label}
+    </Link>
+  );
+}
+
+/** Mig 072 — "🔒 Held only" filter pill. Distinct amber styling so
+ *  it doesn't blend with the neutral status chips. Tapping toggles
+ *  the URL's ?hold=1 param. Preserves the other active filters. */
+function HeldOnlyChip({
+  current,
+  statusFilter,
+  vendorFilter,
+  searchQuery,
+}: {
+  current: boolean;
+  statusFilter: string;
+  vendorFilter: string;
+  searchQuery: string;
+}) {
+  const params = new URLSearchParams();
+  if (statusFilter) params.set("status", statusFilter);
+  if (vendorFilter) params.set("vendor", vendorFilter);
+  if (searchQuery) params.set("q", searchQuery);
+  if (!current) params.set("hold", "1");
+  const href = `/accounts/bills${params.toString() ? `?${params.toString()}` : ""}`;
+  return (
+    <Link
+      href={href}
+      style={{
+        textDecoration: "none",
+        fontSize: 12,
+        fontWeight: 700,
+        padding: "5px 12px",
+        borderRadius: 999,
+        background: current ? "#d97706" : "#fffbeb",
+        color: current ? "#fff" : "#92400e",
+        border: `1px solid ${current ? "#b45309" : "#fcd34d"}`,
+        whiteSpace: "nowrap",
+        transition: "all 0.12s",
+      }}
+      title={
+        current
+          ? "Showing only bills with an active owner hold — tap to clear"
+          : "Show only bills with an active owner hold"
+      }
+    >
+      🔒 {current ? "Held only ✓" : "Held only"}
     </Link>
   );
 }
