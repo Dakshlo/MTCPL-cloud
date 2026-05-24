@@ -71,9 +71,12 @@ type Slab = {
 
 type WorkType = "flat" | "lathe";
 
+// Daksh May 2026 — same palette swap as the vendor cockpit + the
+// carving floor / TV mode: idle = low-key light blue, carving =
+// confident green, maintenance unchanged.
 const MACHINE_TINT: Record<Machine["status"], { bg: string; border: string; fg: string; label: string }> = {
-  idle: { bg: "rgba(22,163,74,0.1)", border: "rgba(22,163,74,0.4)", fg: "#15803d", label: "FREE" },
-  carving: { bg: "rgba(37,99,235,0.08)", border: "rgba(37,99,235,0.4)", fg: "#1d4ed8", label: "RUNNING" },
+  idle: { bg: "rgba(56,189,248,0.08)", border: "rgba(56,189,248,0.4)", fg: "#0369a1", label: "FREE" },
+  carving: { bg: "rgba(22,163,74,0.10)", border: "rgba(22,163,74,0.45)", fg: "#15803d", label: "RUNNING" },
   maintenance: { bg: "rgba(220,38,38,0.08)", border: "rgba(220,38,38,0.4)", fg: "#b91c1c", label: "DOWN" },
   inactive: { bg: "var(--surface-alt)", border: "var(--border)", fg: "var(--muted)", label: "OFF" },
 };

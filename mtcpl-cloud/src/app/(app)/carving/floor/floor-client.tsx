@@ -87,9 +87,12 @@ function fmtDuration(minutes: number): string {
   return remH > 0 ? `${d}d ${remH}h` : `${d}d`;
 }
 
+// Daksh May 2026 — palette swap (mirrors STATUS_TINT in the vendor
+// cockpit): idle is now a low-key light-blue (waiting state), carving
+// is confident green (healthy active work), maintenance stays red.
 const STATUS_TINT: Record<FloorMachine["status"], { bg: string; border: string; fg: string; accent: string; label: string }> = {
-  idle: { bg: "var(--surface)", border: "var(--border)", fg: "#15803d", accent: "#16a34a", label: "FREE" },
-  carving: { bg: "rgba(37,99,235,0.06)", border: "rgba(37,99,235,0.5)", fg: "#1d4ed8", accent: "#2563eb", label: "RUNNING" },
+  idle: { bg: "var(--surface)", border: "var(--border)", fg: "#0369a1", accent: "#38bdf8", label: "FREE" },
+  carving: { bg: "rgba(22,163,74,0.08)", border: "rgba(22,163,74,0.55)", fg: "#15803d", accent: "#16a34a", label: "RUNNING" },
   maintenance: { bg: "rgba(220,38,38,0.06)", border: "rgba(220,38,38,0.5)", fg: "#b91c1c", accent: "#dc2626", label: "DOWN" },
   inactive: { bg: "var(--surface-alt)", border: "var(--border)", fg: "var(--muted)", accent: "var(--muted)", label: "OFFLINE" },
 };
@@ -276,8 +279,8 @@ function GridHeader({
         </div>
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-        <Stat label="Free" value={fleetTotals.idle} fg="#22c55e" />
-        <Stat label="Carving" value={fleetTotals.carving} fg="#60a5fa" />
+        <Stat label="Free" value={fleetTotals.idle} fg="#38bdf8" />
+        <Stat label="Carving" value={fleetTotals.carving} fg="#16a34a" />
         <Stat label="Maint" value={fleetTotals.maintenance} fg="#f87171" />
         <Stat label="Stock pending" value={fleetTotals.queue} fg="#fbbf24" />
         <Stat label="Today" value={fleetTotals.today} fg="#E8C572" />
@@ -417,8 +420,8 @@ function TvHeader({
       {/* Right: fleet stats + exit TV. Stats stay always-visible since
           they're the headline numbers the floor wants to see. */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-        <TvStat label="Free" value={fleetTotals.idle} fg={isDark ? "#22c55e" : "#15803d"} dark={isDark} />
-        <TvStat label="Carving" value={fleetTotals.carving} fg={isDark ? "#60a5fa" : "#1d4ed8"} dark={isDark} />
+        <TvStat label="Free" value={fleetTotals.idle} fg={isDark ? "#38bdf8" : "#0369a1"} dark={isDark} />
+        <TvStat label="Carving" value={fleetTotals.carving} fg={isDark ? "#4ade80" : "#15803d"} dark={isDark} />
         <TvStat label="Maint" value={fleetTotals.maintenance} fg={isDark ? "#f87171" : "#b91c1c"} dark={isDark} />
         <TvStat label="Stock pending" value={fleetTotals.queue} fg={isDark ? "#fbbf24" : "#b45309"} dark={isDark} />
         <button
@@ -1056,8 +1059,8 @@ function VendorTvSlide({ vendor, now, slideKey, dark }: { vendor: FloorVendor; n
           {vendor.totals.total} CNC{vendor.totals.total !== 1 ? "s" : ""}
         </span>
         <div style={{ marginLeft: "auto", display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <TvBigStat label="Free" value={vendor.totals.idle} fg={dark ? "#22c55e" : "#15803d"} dark={dark} />
-          <TvBigStat label="Carving" value={vendor.totals.carving} fg={dark ? "#60a5fa" : "#1d4ed8"} dark={dark} />
+          <TvBigStat label="Free" value={vendor.totals.idle} fg={dark ? "#38bdf8" : "#0369a1"} dark={dark} />
+          <TvBigStat label="Carving" value={vendor.totals.carving} fg={dark ? "#4ade80" : "#15803d"} dark={dark} />
           <TvBigStat label="Maint" value={vendor.totals.maintenance} fg={dark ? "#f87171" : "#b91c1c"} dark={dark} />
           <TvBigStat label="Stock pending" value={vendor.totals.queue} fg={dark ? "#fbbf24" : "#b45309"} dark={dark} />
           <TvBigStat label="Today" value={vendor.totals.today} fg={dark ? "#E8C572" : "#b87333"} dark={dark} />
@@ -1195,7 +1198,7 @@ function CompactMachineTile({ machine, now }: { machine: FloorMachine; now: numb
             const remaining = eta != null ? eta - elapsed : null;
             return (
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 2, fontFamily: "ui-monospace, monospace" }}>
-                <span style={{ color: "#2563eb", fontWeight: 700 }}>
+                <span style={{ color: "#15803d", fontWeight: 700 }}>
                   ▶ {fmtDuration(elapsed)}
                 </span>
                 {remaining != null && (
@@ -1225,16 +1228,20 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
   // Theme-aware palette. Dark uses translucent overlays on a black
   // bg; light uses soft pastel gradients. Accent colour matches in
   // both for consistency.
+  // Daksh May 2026 — palette swap: carving cards lean green, idle
+  // stays soft + low-key (light surface). Both modes (dark TV /
+  // light grid) recoloured in lockstep so the wall display matches
+  // the in-app cockpit.
   const cardBg = dark
     ? machine.status === "carving"
-      ? "rgba(37,99,235,0.18)"
+      ? "rgba(22,163,74,0.18)"
       : machine.status === "maintenance"
         ? "rgba(220,38,38,0.18)"
         : machine.status === "idle"
-          ? "rgba(22,163,74,0.12)"
+          ? "rgba(56,189,248,0.10)"
           : "rgba(255,255,255,0.05)"
     : machine.status === "carving"
-      ? "linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%)"
+      ? "linear-gradient(180deg, #f0fdf4 0%, #dcfce7 100%)"
       : machine.status === "maintenance"
         ? "linear-gradient(180deg, #fef2f2 0%, #fee2e2 100%)"
         : machine.status === "idle"
@@ -1242,7 +1249,7 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
           : "#f5f5f0";
   const cardBorder =
     machine.status === "carving"
-      ? "#2563eb"
+      ? "#16a34a"
       : machine.status === "maintenance"
         ? "#dc2626"
         : machine.status === "idle"
@@ -1250,11 +1257,11 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
           : (dark ? "rgba(255,255,255,0.1)" : "#e5e7eb");
   const accent =
     machine.status === "carving"
-      ? "#2563eb"
+      ? "#16a34a"
       : machine.status === "maintenance"
         ? "#dc2626"
         : machine.status === "idle"
-          ? "#16a34a"
+          ? "#38bdf8"
           : "#9ca3af";
   const label = STATUS_TINT[machine.status].label;
   const codeColor = dark ? "#fff" : "#1a1a1a";
@@ -1358,7 +1365,7 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
                   marginTop: 6,
                 }}
               >
-                <span style={{ fontSize: 16, fontWeight: 800, color: dark ? "#93c5fd" : "#1d4ed8" }}>
+                <span style={{ fontSize: 16, fontWeight: 800, color: dark ? "#4ade80" : "#15803d" }}>
                   ▶ {fmtDuration(elapsed)}
                 </span>
                 {remaining != null && (
@@ -1370,7 +1377,7 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
                         ? (dark ? "#fca5a5" : "#dc2626")
                         : remaining < 15
                           ? (dark ? "#fbbf24" : "#b45309")
-                          : (dark ? "#93c5fd" : "#1d4ed8"),
+                          : (dark ? "#4ade80" : "#15803d"),
                     }}
                   >
                     ⏱ {remaining < 0 ? `${fmtDuration(remaining)} over` : fmtDuration(remaining) + " left"}
@@ -1478,8 +1485,8 @@ function TvBigStat({ label, value, fg, dark = false }: { label: string; value: n
 function VendorStatRow({ totals }: { totals: FloorVendor["totals"] }) {
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-      <Tile label="Free" value={totals.idle} fg="#16a34a" />
-      <Tile label="Carving" value={totals.carving} fg="#2563eb" />
+      <Tile label="Free" value={totals.idle} fg="#38bdf8" />
+      <Tile label="Carving" value={totals.carving} fg="#16a34a" />
       <Tile label="Maint" value={totals.maintenance} fg="#dc2626" />
       <Tile label="Stock pending" value={totals.queue} fg="#b45309" />
       <Tile label="Today" value={totals.today} fg="#b87333" />

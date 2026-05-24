@@ -3193,13 +3193,16 @@ function JobTimelineSection({ jobId }: { jobId: string }) {
 }
 
 function StatusPill({ status }: { status: string }) {
+  // Daksh May 2026 — palette swap: carving_in_progress now reads
+  // as green (active work = healthy). dispatched stays blue (it's a
+  // logistics state, not a machine status — different semantic).
   const tone =
     status === "completed"
       ? { fg: "#15803d", bg: "rgba(22,163,74,0.12)" }
       : status === "dispatched"
         ? { fg: "#1d4ed8", bg: "rgba(37,99,235,0.12)" }
         : status === "carving_in_progress"
-          ? { fg: "#2563eb", bg: "rgba(37,99,235,0.1)" }
+          ? { fg: "#15803d", bg: "rgba(22,163,74,0.12)" }
           : status === "carving_assigned"
             ? { fg: "#b45309", bg: "rgba(217,119,6,0.1)" }
             : { fg: "var(--muted)", bg: "var(--surface-alt)" };

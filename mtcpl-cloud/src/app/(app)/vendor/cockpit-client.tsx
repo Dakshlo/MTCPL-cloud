@@ -471,8 +471,11 @@ export function VendorCockpitClient({
               borderRadius: 10,
             }}
           >
-            <Stat label="Idle" value={totals.idle} fg="#22c55e" />
-            <Stat label="Carving" value={totals.carving} fg="#60a5fa" />
+            {/* Daksh May 2026 — palette swap so the header counters
+                match the machine cards: idle = light blue, carving =
+                green, maintenance unchanged red. */}
+            <Stat label="Idle" value={totals.idle} fg="#38bdf8" />
+            <Stat label="Carving" value={totals.carving} fg="#4ade80" />
             <Stat label="Maintenance" value={totals.maintenance} fg="#f87171" />
           </div>
           {/* Launcher group */}
