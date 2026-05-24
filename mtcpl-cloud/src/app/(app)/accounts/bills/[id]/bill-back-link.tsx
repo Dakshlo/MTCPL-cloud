@@ -18,12 +18,21 @@
  * so the "previous route" is always the actual immediately-prior
  * page, with its full query string intact.
  *
+ * Daksh May 2026 — also use router.back() when history is back-able,
+ * so the destination page's scroll position is restored (Next.js
+ * App Router does this automatically for browser-back navigation).
+ * Previously the back link was a plain <Link href> push, which
+ * scrolls the target page to the top — that meant after going into
+ * a bill from deep in the Due Bills list, the user landed back at
+ * the top and had to scroll all the way down again.
+ *
  * Falls back to:
  *   1. document.referrer (for hard refreshes / external entry)
  *   2. /accounts/bills "All bills" — safe default
  */
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 const PREV_ROUTE_KEY = "mtcpl-prev-route";
@@ -57,8 +66,17 @@ export function BillBackLink({
   fallbackHref?: string;
   fallbackLabel?: string;
 }) {
+  const router = useRouter();
   const [href, setHref] = useState(fallbackHref);
   const [label, setLabel] = useState(fallbackLabel);
+  // Daksh May 2026 — when set, the click handler calls router.back()
+  // instead of pushing href. router.back() restores the destination
+  // page's scroll position automatically (App Router behaviour),
+  // which is what dad asked for ("take me back to where I was in
+  // the list, not the top"). We only flip this on when we're
+  // confident there IS a back entry that matches our prevRoute —
+  // otherwise router.back() could navigate off the app.
+  const [useBack, setUseBack] = useState(false);
 
   useEffect(() => {
     // 1. Try sessionStorage (written by RouteTracker on every SPA
@@ -107,19 +125,55 @@ export function BillBackLink({
       // Preserve query string so the user lands on the EXACT page
       // they left — filters / sort / pagination intact.
       setHref(urlPath + urlSearch);
+      // History-aware back: if the browser thinks there's a back
+      // entry, route via router.back() so the destination's scroll
+      // position is restored. window.history.length is at least 1
+      // (the current entry); >1 means there's at least one entry
+      // to go back to. Combined with the prevRoute match above,
+      // we're very likely in an SPA-back situation.
+      if (typeof window !== "undefined" && window.history.length > 1) {
+        setUseBack(true);
+      }
     }
   }, []);
 
+  const baseStyle: React.CSSProperties = {
+    color: "var(--muted)",
+    textDecoration: "none",
+    fontSize: 13,
+    fontWeight: 600,
+  };
+
+  if (useBack) {
+    // Render as a button — calling router.back() triggers App
+    // Router's automatic scroll-restoration. Falls back to
+    // router.push if history is somehow already at the start.
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          try {
+            router.back();
+          } catch {
+            router.push(href);
+          }
+        }}
+        style={{
+          ...baseStyle,
+          background: "transparent",
+          border: "none",
+          padding: 0,
+          cursor: "pointer",
+          font: "inherit",
+        }}
+      >
+        ← {label}
+      </button>
+    );
+  }
+
   return (
-    <Link
-      href={href}
-      style={{
-        color: "var(--muted)",
-        textDecoration: "none",
-        fontSize: 13,
-        fontWeight: 600,
-      }}
-    >
+    <Link href={href} style={baseStyle}>
       ← {label}
     </Link>
   );
