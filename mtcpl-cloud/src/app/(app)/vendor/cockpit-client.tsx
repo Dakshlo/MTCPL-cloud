@@ -13,6 +13,7 @@ import {
   unloadWithProblemAction,
   holdSlabOnVendorAction,
   reloadHeldSlabAction,
+  reloadTwoHeldSlabsOnMultiHeadAction,
   completeHeldSlabAction,
   acceptTransferReceiptAction,
   flagTransferIssueAction,
@@ -292,6 +293,14 @@ export function VendorCockpitClient({
   // Opens a tiny form prompting for an optional temporary location
   // (matches the complete-from-machine flow).
   const [completeHeldFor, setCompleteHeldFor] = useState<HeldSlabLite | null>(null);
+  // Daksh May 2026 — pair-reload of two held slabs onto a 2-head CNC
+  // in one atomic step. State holds both slabs of the pair so the
+  // modal can show them side-by-side + post to the new
+  // reloadTwoHeldSlabsOnMultiHeadAction.
+  const [reloadPairFor, setReloadPairFor] = useState<{
+    a: HeldSlabLite;
+    b: HeldSlabLite;
+  } | null>(null);
 
   // Daksh May 2026 — the vendor role has only this one workspace,
   // so the global sidebar is dead weight. Tag <body> with
@@ -788,6 +797,25 @@ export function VendorCockpitClient({
               <Empty text="No slabs on hold. Use the Hold button on a loaded slab to park it for later." />
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {/* Daksh May 2026 — pair-reload. Detect pairs in the
+                    held list: two slabs from the same source machine
+                    with matching dims/temple/label can be reloaded
+                    together onto a 2-head CNC. Surface each detected
+                    pair as a pinned callout above the per-slab rows
+                    so the vendor doesn't have to load one, then fail
+                    on the second because the machine is no longer
+                    idle. */}
+                {detectHeldPairs(held).map((pair) => (
+                  <HeldPairCallout
+                    key={`${pair.a.id}__${pair.b.id}`}
+                    pair={pair}
+                    stoneTypes={stoneTypes}
+                    onPairReload={() => {
+                      setReloadPairFor(pair);
+                      setPeekOpen(null);
+                    }}
+                  />
+                ))}
                 {held.map((h) => (
                   <HeldSlabRow
                     key={h.id}
@@ -825,6 +853,15 @@ export function VendorCockpitClient({
           held={completeHeldFor}
           stoneTypes={stoneTypes}
           onClose={() => setCompleteHeldFor(null)}
+        />
+      )}
+      {/* Daksh May 2026 — pair-reload picker (2-head CNCs only). */}
+      {reloadPairFor && (
+        <ReloadPairModal
+          pair={reloadPairFor}
+          machines={machines}
+          stoneTypes={stoneTypes}
+          onClose={() => setReloadPairFor(null)}
         />
       )}
 
@@ -1848,6 +1885,354 @@ function CompleteHeldModal({
           ✅ Mark done
         </button>
       </form>
+    </ModalShell>
+  );
+}
+
+// ── Pair-reload detection + modal (Daksh May 2026) ─────────────────
+//
+// A "held pair" is two held slabs that:
+//   - came off the SAME source machine (same held_from_machine_id),
+//   - have identical L×W×T + temple + label,
+//   - and the source machine was a 2-head CNC (we can't be sure of
+//     the source's current type without re-fetching, so the
+//     dimensional + same-source check is our heuristic and the server
+//     re-validates the target machine is multi_head_2 anyway).
+//
+// Returns one entry per pair; if 4 held slabs came off the same
+// machine in two distinct geometries, you get two pairs. If 3
+// identical slabs are held (rare — would need a manual oddity), only
+// the first two pair up and the third lives as a regular row.
+function detectHeldPairs(
+  held: HeldSlabLite[],
+): Array<{ a: HeldSlabLite; b: HeldSlabLite; source: string }> {
+  const pairs: Array<{ a: HeldSlabLite; b: HeldSlabLite; source: string }> = [];
+  const claimed = new Set<string>();
+  for (let i = 0; i < held.length; i++) {
+    const a = held[i];
+    if (claimed.has(a.id)) continue;
+    if (!a.slab || !a.held_from_machine_id) continue;
+    // Only flat-panel work pairs on a 2-head CNC — lathes are
+    // single-head, so a lathe-tagged held slab can never pair.
+    if (a.requires_machine_type === "lathe") continue;
+    for (let j = i + 1; j < held.length; j++) {
+      const b = held[j];
+      if (claimed.has(b.id)) continue;
+      if (!b.slab || !b.held_from_machine_id) continue;
+      if (b.requires_machine_type === "lathe") continue;
+      if (a.held_from_machine_id !== b.held_from_machine_id) continue;
+      if (
+        a.slab.length_in !== b.slab.length_in ||
+        a.slab.width_in !== b.slab.width_in ||
+        a.slab.thickness_in !== b.slab.thickness_in
+      )
+        continue;
+      if ((a.slab.temple ?? "") !== (b.slab.temple ?? "")) continue;
+      if ((a.slab.label ?? "") !== (b.slab.label ?? "")) continue;
+      pairs.push({ a, b, source: a.held_from_machine_id });
+      claimed.add(a.id);
+      claimed.add(b.id);
+      break;
+    }
+  }
+  return pairs;
+}
+
+/** Pinned callout above the held list when a pair is detected.
+ *  Single tap opens the pair-reload modal — no need to chase down
+ *  each row individually. */
+function HeldPairCallout({
+  pair,
+  stoneTypes,
+  onPairReload,
+}: {
+  pair: { a: HeldSlabLite; b: HeldSlabLite };
+  stoneTypes: StoneTypeDef[];
+  onPairReload: () => void;
+}) {
+  const { a, b } = pair;
+  return (
+    <div
+      style={{
+        padding: 12,
+        background:
+          "linear-gradient(180deg, rgba(37,99,235,0.10) 0%, rgba(37,99,235,0.04) 100%)",
+        border: "1.5px solid rgba(37,99,235,0.45)",
+        borderRadius: 12,
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 11,
+          fontWeight: 800,
+          color: "#1d4ed8",
+          letterSpacing: "0.06em",
+          textTransform: "uppercase",
+        }}
+      >
+        ▶▶ Pair-reload available
+      </div>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: 8,
+          alignItems: "stretch",
+        }}
+      >
+        {[a, b].map((h) => (
+          <div
+            key={h.id}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: 8,
+              background: "var(--surface)",
+              border: "1px solid var(--border)",
+              borderRadius: 8,
+            }}
+          >
+            {h.slab && (
+              <SlabThumb
+                stone={h.slab.stone}
+                l={h.slab.length_in}
+                w={h.slab.width_in}
+                t={h.slab.thickness_in}
+                stoneTypes={stoneTypes}
+                size={36}
+                height={36}
+              />
+            )}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  fontFamily: "ui-monospace, monospace",
+                  fontWeight: 700,
+                  fontSize: 12,
+                }}
+              >
+                {h.slab_id}
+              </div>
+              {h.slab && (
+                <div style={{ fontSize: 10, color: "var(--muted)" }}>
+                  {dimStr(h.slab)}
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+      <button
+        type="button"
+        onClick={onPairReload}
+        style={{
+          padding: "12px 14px",
+          fontSize: 14,
+          fontWeight: 800,
+          background: "#1d4ed8",
+          color: "#fff",
+          border: "1px solid #1e40af",
+          borderRadius: 10,
+          cursor: "pointer",
+          minHeight: 48,
+          touchAction: "manipulation",
+        }}
+      >
+        ▶▶ Reload both on a 2-head CNC
+      </button>
+      <div style={{ fontSize: 11, color: "var(--muted)" }}>
+        Both came off the same machine and have matching dimensions —
+        load them back as a pair in one tap.
+      </div>
+    </div>
+  );
+}
+
+/** Pair-reload picker — list of idle 2-head CNCs belonging to this
+ *  vendor. Tapping a machine button submits the new server action
+ *  with both carving_item ids + the target machine id. */
+function ReloadPairModal({
+  pair,
+  machines,
+  stoneTypes,
+  onClose,
+}: {
+  pair: { a: HeldSlabLite; b: HeldSlabLite };
+  machines: CncMachineLive[];
+  stoneTypes: StoneTypeDef[];
+  onClose: () => void;
+}) {
+  const { a, b } = pair;
+  // Eligible targets: this vendor's idle multi_head_2 machines.
+  // Default = the source machine if still idle (vendors usually
+  // reload onto the same machine they came off of).
+  const eligible = machines.filter(
+    (m) => m.status === "idle" && m.machine_type === "multi_head_2",
+  );
+  const defaultMachine =
+    eligible.find((m) => m.id === a.held_from_machine_id) ??
+    eligible[0] ??
+    null;
+
+  return (
+    <ModalShell
+      title={`▶▶ Pair-reload ${a.slab_id} + ${b.slab_id}`}
+      subtitle={
+        defaultMachine
+          ? `Default: ${defaultMachine.machine_code}${defaultMachine.id === a.held_from_machine_id ? " (same machine they were held from)" : ""}`
+          : "No idle 2-head CNCs right now — finish or hold one first"
+      }
+      onClose={onClose}
+    >
+      {eligible.length === 0 ? (
+        <div
+          style={{
+            padding: 16,
+            background: "rgba(220,38,38,0.06)",
+            border: "1px dashed rgba(220,38,38,0.4)",
+            borderRadius: 8,
+            color: "#b91c1c",
+            fontSize: 13,
+          }}
+        >
+          No idle 2-head CNC machines right now. Unload or hold a
+          running one first, then try again.
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {/* Show both slabs as a confirmation summary */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 8,
+            }}
+          >
+            {[a, b].map((h) => (
+              <div
+                key={h.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: 8,
+                  background: "var(--surface-alt)",
+                  borderRadius: 8,
+                }}
+              >
+                {h.slab && (
+                  <SlabThumb
+                    stone={h.slab.stone}
+                    l={h.slab.length_in}
+                    w={h.slab.width_in}
+                    t={h.slab.thickness_in}
+                    stoneTypes={stoneTypes}
+                    size={40}
+                    height={40}
+                  />
+                )}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700 }}>
+                    {h.slab?.temple}
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--muted)" }}>
+                    {h.slab ? dimStr(h.slab) : ""}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="muted" style={{ fontSize: 12, margin: "4px 0 6px" }}>
+            Pick a 2-head CNC to load both onto:
+          </p>
+          {eligible.map((m) => {
+            const isDefault = m.id === a.held_from_machine_id;
+            return (
+              <form
+                key={m.id}
+                action={reloadTwoHeldSlabsOnMultiHeadAction}
+                onSubmit={(e) => {
+                  const sameMachine = m.id === a.held_from_machine_id;
+                  const lines = [
+                    `Pair-reload ${a.slab_id} + ${b.slab_id} onto ${m.machine_code}?`,
+                    "",
+                    sameMachine
+                      ? "Same 2-head CNC both were held from. Carving clock resets to 0."
+                      : "Different 2-head CNC. Carving clock resets to 0.",
+                  ];
+                  if (!window.confirm(lines.join("\n"))) {
+                    e.preventDefault();
+                  }
+                }}
+                style={{ width: "100%" }}
+              >
+                <FormPendingOverlay
+                  label={`Reloading pair on ${m.machine_code}…`}
+                />
+                <input type="hidden" name="carving_item_a_id" value={a.id} />
+                <input type="hidden" name="carving_item_b_id" value={b.id} />
+                <input type="hidden" name="target_machine_id" value={m.id} />
+                <input type="hidden" name="redirect_to" value="/vendor" />
+                <button
+                  type="submit"
+                  style={{
+                    width: "100%",
+                    padding: "12px 14px",
+                    fontSize: 14,
+                    fontWeight: 700,
+                    background: isDefault ? "#1d4ed8" : "var(--surface)",
+                    color: isDefault ? "#fff" : "var(--text)",
+                    border: `1.5px solid ${isDefault ? "#1e40af" : "var(--border)"}`,
+                    borderRadius: 10,
+                    cursor: "pointer",
+                    textAlign: "left",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    touchAction: "manipulation",
+                    minHeight: 52,
+                  }}
+                >
+                  <span style={{ fontSize: 16 }}>
+                    {isDefault ? "★" : "▶▶"}
+                  </span>
+                  <span style={{ flex: 1 }}>
+                    {m.machine_code}
+                    {m.operator_name && (
+                      <span
+                        style={{
+                          marginLeft: 8,
+                          fontSize: 11,
+                          opacity: 0.7,
+                          fontWeight: 500,
+                        }}
+                      >
+                        ({m.operator_name})
+                      </span>
+                    )}
+                  </span>
+                  {isDefault && (
+                    <span
+                      style={{
+                        fontSize: 10,
+                        opacity: 0.85,
+                        fontWeight: 600,
+                      }}
+                    >
+                      same as before
+                    </span>
+                  )}
+                  <span style={{ fontSize: 16 }}>›</span>
+                </button>
+              </form>
+            );
+          })}
+        </div>
+      )}
     </ModalShell>
   );
 }
@@ -2923,11 +3308,16 @@ function ModalShell({
   subtitle,
   children,
   onClose,
+  maxWidth = 520,
 }: {
   title: string;
   subtitle?: string;
   children: React.ReactNode;
   onClose: () => void;
+  /** Override the default 520px max width. Used by the LoadModal in
+   *  pair mode so Slab A + Slab B can sit side-by-side instead of
+   *  stacked, which Daksh hated on tablet + desktop. */
+  maxWidth?: number;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
 
@@ -3006,7 +3396,7 @@ function ModalShell({
           borderRadius: 14,
           boxShadow: "0 18px 60px rgba(0,0,0,0.45)",
           width: "100%",
-          maxWidth: 520,
+          maxWidth,
           maxHeight: "calc(100vh - 32px)",
           display: "flex",
           flexDirection: "column",
@@ -3068,6 +3458,7 @@ function LoadModal({
   const [machineId, setMachineId] = useState(machine.id);
   const selectedMachine = machines.find((m) => m.id === machineId) ?? machine;
   const machineIsTwoHead = selectedMachine.machine_type === "multi_head_2";
+  const machineIsLathe = selectedMachine.machine_type === "lathe";
   // For 2-head machines, the vendor can choose pair mode (default,
   // both heads running on identical slabs) OR single mode (only one
   // head loaded, second turned off — rare but real). Single mode
@@ -3076,11 +3467,30 @@ function LoadModal({
   const [loadMode, setLoadMode] = useState<"pair" | "single">("pair");
   const effectiveIsPair = machineIsTwoHead && loadMode === "pair";
 
-  const [carvingItemId, setCarvingItemId] = useState<string>(queue[0]?.id ?? "");
+  // Daksh May 2026 — filter the slab queue to JUST those compatible
+  // with the currently-selected machine type. Was unfiltered, which
+  // let a vendor pick a flat slab when a lathe was selected (the
+  // server now blocks it, but the picker should never even offer it).
+  // Lathe machines see only lathe-tagged slabs; non-lathe machines
+  // see only non-lathe-tagged slabs.
+  const compatibleQueue = useMemo(
+    () =>
+      queue.filter((q) =>
+        machineIsLathe
+          ? q.requires_machine_type === "lathe"
+          : q.requires_machine_type !== "lathe",
+      ),
+    [queue, machineIsLathe],
+  );
+
+  const [carvingItemId, setCarvingItemId] = useState<string>(
+    compatibleQueue[0]?.id ?? "",
+  );
   // Second slab id for 2-head pair loads. Filtered to "matches first"
   // so the vendor can't accidentally pair non-identical slabs.
   const [carvingItemBId, setCarvingItemBId] = useState<string>("");
-  const selectedJob = queue.find((q) => q.id === carvingItemId) ?? null;
+  const selectedJob =
+    compatibleQueue.find((q) => q.id === carvingItemId) ?? null;
   const idleMachines = machines.filter((m) => m.status === "idle");
   // Days + hours pickers — carving runs span hours to multiple days,
   // so days is a more useful primary unit than minutes.
@@ -3091,7 +3501,7 @@ function LoadModal({
   // Slabs that match the primary one's L×W×T + temple + label —
   // these are the only valid second-head pairings on a 2-head load.
   const matchingPair = effectiveIsPair && selectedJob?.slab
-    ? queue.filter(
+    ? compatibleQueue.filter(
         (q) =>
           q.id !== carvingItemId &&
           q.slab &&
@@ -3113,6 +3523,17 @@ function LoadModal({
   useEffect(() => {
     if (!machineIsTwoHead) setLoadMode("pair"); // benign default; pair logic gated by machineIsTwoHead anyway
   }, [machineIsTwoHead]);
+
+  // When the compatible queue changes (because the machine type
+  // changed), make sure the currently-selected slab is still valid.
+  // If not, drop it and default to the first compatible slab.
+  useEffect(() => {
+    if (carvingItemId && !compatibleQueue.some((q) => q.id === carvingItemId)) {
+      setCarvingItemId(compatibleQueue[0]?.id ?? "");
+    } else if (!carvingItemId && compatibleQueue[0]) {
+      setCarvingItemId(compatibleQueue[0].id);
+    }
+  }, [compatibleQueue, carvingItemId]);
 
   // When user picks a different slab, prefill estimate from carving
   // head's number (vendor can adjust).
@@ -3136,19 +3557,36 @@ function LoadModal({
           ? "Load 2 identical slabs (2-head CNC)"
           : machineIsTwoHead
             ? "Load 1 slab onto 2-head CNC (single mode)"
-            : "Load slab onto CNC"
+            : machineIsLathe
+              ? "Load slab onto lathe"
+              : "Load slab onto CNC"
       }
       subtitle={
         effectiveIsPair
           ? "Both heads carve the same shape — pick two slabs with identical L×W×T + temple + label."
           : machineIsTwoHead
             ? "Second head will be turned off. Pick the slab to load on head 1."
-            : "Pick the slab and machine, then enter your tighter ETA."
+            : machineIsLathe
+              ? "Only lathe-tagged (cylindrical) slabs are loadable here."
+              : "Pick the slab and machine, then enter your tighter ETA."
       }
       onClose={onClose}
+      // Wider modal in pair mode so Slab A and Slab B can sit
+      // side-by-side. Daksh May 2026 — the old vertical stack hid
+      // the Load button below the fold and confused the eye about
+      // which grid was which.
+      maxWidth={effectiveIsPair ? 920 : 560}
     >
-      {queue.length === 0 ? (
-        <Empty text="No slabs ready to load. Check the Pending stock list — slabs need to be delivered by the transfer runner first." />
+      {compatibleQueue.length === 0 ? (
+        <Empty
+          text={
+            machineIsLathe
+              ? "No lathe-tagged slabs ready to load. Pick a different machine, or wait for a lathe slab to arrive."
+              : queue.length > 0
+                ? "No slabs ready for this machine type. Pick a different machine."
+                : "No slabs ready to load. Check the Pending stock list — slabs need to be delivered by the transfer runner first."
+          }
+        />
       ) : (
         <form
           action={effectiveIsPair ? loadTwoSlabsOnMultiHeadAction : loadSlabOnMachineAction}
@@ -3269,80 +3707,141 @@ function LoadModal({
             </div>
           )}
 
-          {/* Primary slab picker — 3D card grid instead of list rows.
-              Vendor sees a thumbnail + slab id + temple + dims and
-              can tap a card to select. */}
-          <div>
-            <Label>{effectiveIsPair ? "Slab A (head 1)" : "Slab to load"}</Label>
-            <input
-              type="hidden"
-              name={effectiveIsPair ? "carving_item_a_id" : "carving_item_id"}
-              value={carvingItemId}
-            />
+          {/* Slab picker(s). Pair mode lays Slab A and Slab B in two
+              columns (side-by-side) on tablet/desktop so the head can
+              compare them at a glance and the Load button doesn't get
+              pushed off-screen. Single mode is a single full-width
+              grid. Each grid is independently scrollable, capped at
+              ~360px so neither hogs the modal height. */}
+          {effectiveIsPair ? (
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
-                gap: 8,
-                maxHeight: 320,
-                overflowY: "auto",
+                // Two columns on wide screens; falls back to 1 col on
+                // narrow tablet portrait so cards don't get squashed.
+                gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+                gap: 14,
               }}
             >
-              {queue.map((q) => (
-                <SlabPickerCard
-                  key={q.id}
-                  job={q}
-                  selected={q.id === carvingItemId}
-                  onSelect={() => setCarvingItemId(q.id)}
-                  stoneTypes={stoneTypes}
+              {/* Slab A column */}
+              <div>
+                <Label>Slab A (head 1)</Label>
+                <input
+                  type="hidden"
+                  name="carving_item_a_id"
+                  value={carvingItemId}
                 />
-              ))}
-            </div>
-          </div>
-
-          {/* Pair picker — only shows when in PAIR mode on a 2-head
-              machine. Filtered to slabs that have IDENTICAL geometry
-              + temple + label as the primary, since the heads run
-              the same toolpath. Single mode skips this entirely. */}
-          {effectiveIsPair && (
-            <div>
-              <Label>Slab B (head 2 — must match A)</Label>
-              <input type="hidden" name="carving_item_b_id" value={carvingItemBId} />
-              {matchingPair.length === 0 ? (
-                <div
-                  style={{
-                    padding: "8px 12px",
-                    background: "rgba(217,119,6,0.06)",
-                    border: "1px solid rgba(217,119,6,0.25)",
-                    borderRadius: 6,
-                    fontSize: 12,
-                    color: "#b45309",
-                  }}
-                >
-                  No matching slab in the queue. 2-head loads need a second
-                  slab with the same dimensions, temple, and label.
-                </div>
-              ) : (
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
+                    gridTemplateColumns:
+                      "repeat(auto-fill, minmax(120px, 1fr))",
                     gap: 8,
-                    maxHeight: 280,
+                    maxHeight: 360,
                     overflowY: "auto",
+                    padding: 4,
+                    border: "1px solid var(--border)",
+                    borderRadius: 8,
+                    background: "var(--surface-alt, #fafaf7)",
                   }}
                 >
-                  {matchingPair.map((q) => (
+                  {compatibleQueue.map((q) => (
                     <SlabPickerCard
                       key={q.id}
                       job={q}
-                      selected={q.id === carvingItemBId}
-                      onSelect={() => setCarvingItemBId(q.id)}
+                      selected={q.id === carvingItemId}
+                      onSelect={() => setCarvingItemId(q.id)}
                       stoneTypes={stoneTypes}
                     />
                   ))}
                 </div>
-              )}
+              </div>
+              {/* Slab B column — only the matching-geometry subset */}
+              <div>
+                <Label>Slab B (head 2 — must match A)</Label>
+                <input
+                  type="hidden"
+                  name="carving_item_b_id"
+                  value={carvingItemBId}
+                />
+                {matchingPair.length === 0 ? (
+                  <div
+                    style={{
+                      padding: "12px 14px",
+                      background: "rgba(217,119,6,0.06)",
+                      border: "1px solid rgba(217,119,6,0.25)",
+                      borderRadius: 8,
+                      fontSize: 12,
+                      color: "#b45309",
+                      minHeight: 360,
+                      display: "flex",
+                      alignItems: "center",
+                    }}
+                  >
+                    No matching slab in the queue. 2-head loads need a
+                    second slab with the same dimensions, temple, and
+                    label.
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns:
+                        "repeat(auto-fill, minmax(120px, 1fr))",
+                      gap: 8,
+                      maxHeight: 360,
+                      overflowY: "auto",
+                      padding: 4,
+                      border: "1px solid var(--border)",
+                      borderRadius: 8,
+                      background: "var(--surface-alt, #fafaf7)",
+                    }}
+                  >
+                    {matchingPair.map((q) => (
+                      <SlabPickerCard
+                        key={q.id}
+                        job={q}
+                        selected={q.id === carvingItemBId}
+                        onSelect={() => setCarvingItemBId(q.id)}
+                        stoneTypes={stoneTypes}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div>
+              <Label>Slab to load</Label>
+              <input
+                type="hidden"
+                name="carving_item_id"
+                value={carvingItemId}
+              />
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns:
+                    "repeat(auto-fill, minmax(140px, 1fr))",
+                  gap: 8,
+                  maxHeight: 320,
+                  overflowY: "auto",
+                  padding: 4,
+                  border: "1px solid var(--border)",
+                  borderRadius: 8,
+                  background: "var(--surface-alt, #fafaf7)",
+                }}
+              >
+                {compatibleQueue.map((q) => (
+                  <SlabPickerCard
+                    key={q.id}
+                    job={q}
+                    selected={q.id === carvingItemId}
+                    onSelect={() => setCarvingItemId(q.id)}
+                    stoneTypes={stoneTypes}
+                  />
+                ))}
+              </div>
             </div>
           )}
 
@@ -3468,19 +3967,46 @@ function LoadModal({
             </div>
           </div>
 
-          <button
-            type="submit"
-            className="primary-button"
-            disabled={effectiveIsPair && !carvingItemBId}
+          {/* Sticky Load button so it's always reachable, even when
+              the slab grids are scrolled. Daksh May 2026 — vendors
+              kept losing the button below the fold on tablet, hence
+              the position:sticky + drop-shadow lift. */}
+          <div
             style={{
-              fontSize: 14,
+              position: "sticky",
+              // -18px matches ModalShell content padding so it sits
+              // flush against the bottom edge of the scroll area.
+              bottom: -18,
+              marginTop: 4,
+              marginLeft: -16,
+              marginRight: -16,
               padding: "12px 16px",
-              fontWeight: 700,
-              opacity: effectiveIsPair && !carvingItemBId ? 0.5 : 1,
+              background: "var(--surface)",
+              borderTop: "1px solid var(--border)",
+              boxShadow: "0 -6px 12px rgba(15,12,6,0.06)",
+              zIndex: 5,
             }}
           >
-            {effectiveIsPair ? "▶ Load both heads" : "▶ Load now"}
-          </button>
+            <button
+              type="submit"
+              className="primary-button"
+              disabled={
+                !carvingItemId || (effectiveIsPair && !carvingItemBId)
+              }
+              style={{
+                width: "100%",
+                fontSize: 15,
+                padding: "14px 16px",
+                fontWeight: 800,
+                opacity:
+                  !carvingItemId || (effectiveIsPair && !carvingItemBId)
+                    ? 0.5
+                    : 1,
+              }}
+            >
+              {effectiveIsPair ? "▶ Load both heads" : "▶ Load now"}
+            </button>
+          </div>
         </form>
       )}
     </ModalShell>

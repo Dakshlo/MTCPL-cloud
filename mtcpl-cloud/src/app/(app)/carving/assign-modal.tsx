@@ -23,7 +23,19 @@
  */
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useFormStatus } from "react-dom";
+import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 import { assignCarvingJobAction } from "./actions";
+
+/** Same pattern as the vendor cockpit's FormPendingOverlay — when
+ *  the parent <form> is submitting, drop the MTCPL spinner overlay
+ *  so the carving head sees pressing the button DID register. Daksh
+ *  May 2026: dad's complaint was the assign button gave no feedback
+ *  and the head kept tapping multiple times. */
+function FormPendingOverlay({ label }: { label: string }) {
+  const { pending } = useFormStatus();
+  return <FinanceLoadingOverlay show={pending} label={label} />;
+}
 
 type Machine = {
   id: string;
@@ -300,6 +312,7 @@ export function AssignModal({
 
         <div style={{ flex: 1, overflowY: "auto", padding: "14px 18px 18px" }}>
           <form action={assignCarvingJobAction} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <FormPendingOverlay label="Assigning to vendor…" />
             <input type="hidden" name="slab_id" value={slab.id} />
             <input type="hidden" name="requires_machine_type" value={requiresMachineType} />
 

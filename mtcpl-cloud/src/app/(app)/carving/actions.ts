@@ -810,18 +810,21 @@ export async function loadSlabOnMachineAction(formData: FormData) {
 
   // ── Machine type check (migration 024) ──────────────────────────
   // Derive the job's required machine type. NULL on the job means
-  // "flat-panel default" which maps to multi_head_2 (the only
-  // non-lathe type in the fleet). Lathes only do cylindrical work,
-  // so a flat-panel job can never go on a lathe.
-  const requiredType =
-    item.requires_machine_type ??
-    (machine.machine_type === "lathe" ? null : "multi_head_2");
-  if (requiredType && machine.machine_type !== requiredType) {
-    redirect(
-      `/vendor?toast=${encodeURIComponent(
-        `This job is tagged for ${requiredType}. Pick a ${requiredType} machine.`,
-      )}`,
-    );
+  // "flat-panel default" which always maps to multi_head_2 (the only
+  // non-lathe type in the fleet). Daksh May 2026 — the prior derivation
+  // had a bug where if the machine itself was a lathe, requiredType
+  // would collapse to NULL and the check would pass, letting flat
+  // slabs land on a lathe. Fixed: flat-panel always demands
+  // multi_head_2 regardless of which machine is being loaded.
+  const requiredType = item.requires_machine_type ?? "multi_head_2";
+  if (machine.machine_type !== requiredType) {
+    const friendly =
+      requiredType === "lathe"
+        ? "This is a lathe (cylindrical) slab — pick a lathe machine, not a flat-panel CNC."
+        : machine.machine_type === "lathe"
+          ? "This is a flat-panel slab — it cannot be loaded onto a lathe machine."
+          : `This job is tagged for ${requiredType}. Pick a ${requiredType} machine.`;
+    redirect(`/vendor?toast=${encodeURIComponent(friendly)}`);
   }
 
   // ── Dimension check (migration 024) ─────────────────────────────
@@ -1993,6 +1996,271 @@ export async function reloadHeldSlabAction(formData: FormData) {
   refreshAll();
   redirect(
     `${redirectTo}?toast=${encodeURIComponent(`Reloaded on ${machine.machine_code}`)}`,
+  );
+}
+
+/** Mig 069 + Daksh May 2026 — reload TWO held slabs onto a 2-head
+ *  CNC in one shot. Without this, the vendor would have to load slab
+ *  A first (machine flips to 'carving') and then can't load slab B
+ *  to the same machine because the idle guard rejects it. This
+ *  mirrors loadTwoSlabsOnMultiHeadAction but for items currently in
+ *  the on-hold state, atomically clearing both rows' hold metadata
+ *  and flipping the target multi_head_2 machine to 'carving'.
+ *
+ *  Both slabs must:
+ *    - belong to the same vendor as the target machine,
+ *    - be in status 'carving_on_hold',
+ *    - have non-lathe requires_machine_type,
+ *    - share L×W×T + temple + label (geometry must match for the jig).
+ *  Target machine must be multi_head_2 + idle. */
+export async function reloadTwoHeldSlabsOnMultiHeadAction(formData: FormData) {
+  const { profile } = await requireAuth([
+    "developer",
+    "owner",
+    "carving_head",
+    "vendor",
+  ]);
+  const admin = createAdminSupabaseClient();
+
+  const carvingItemAId = txt(formData, "carving_item_a_id");
+  const carvingItemBId = txt(formData, "carving_item_b_id");
+  const targetMachineId = txt(formData, "target_machine_id");
+  const vendorEstimatedMinutesRaw = txt(formData, "vendor_estimated_minutes");
+  const redirectTo = txt(formData, "redirect_to") || "/vendor";
+
+  if (!carvingItemAId || !carvingItemBId) {
+    redirect(`${redirectTo}?toast=Missing+one+of+the+slabs`);
+  }
+  if (carvingItemAId === carvingItemBId) {
+    redirect(`${redirectTo}?toast=Pick+two+different+held+slabs`);
+  }
+  if (!targetMachineId) redirect(`${redirectTo}?toast=Pick+a+machine`);
+
+  const vendorEstimatedMinutes = vendorEstimatedMinutesRaw
+    ? Math.max(0, Number(vendorEstimatedMinutesRaw))
+    : null;
+
+  // Load both held items + the machine in parallel.
+  const [{ data: aRow }, { data: bRow }, { data: mRow }] = await Promise.all([
+    admin
+      .from("carving_items")
+      .select(
+        "id, vendor_id, status, cnc_machine_id, slab_requirement_id, requires_machine_type, held_from_machine_id",
+      )
+      .eq("id", carvingItemAId)
+      .maybeSingle(),
+    admin
+      .from("carving_items")
+      .select(
+        "id, vendor_id, status, cnc_machine_id, slab_requirement_id, requires_machine_type, held_from_machine_id",
+      )
+      .eq("id", carvingItemBId)
+      .maybeSingle(),
+    admin
+      .from("cnc_machines")
+      .select("id, machine_code, status, machine_type, vendor_id")
+      .eq("id", targetMachineId)
+      .maybeSingle(),
+  ]);
+
+  if (!aRow || !bRow) redirect(`${redirectTo}?toast=One+of+the+slabs+not+found`);
+  if (!mRow) redirect(`${redirectTo}?toast=Machine+not+found`);
+
+  type Item = {
+    id: string;
+    vendor_id: string;
+    status: string;
+    cnc_machine_id: string | null;
+    slab_requirement_id: string;
+    requires_machine_type: string | null;
+    held_from_machine_id: string | null;
+  };
+  const a = aRow as Item;
+  const b = bRow as Item;
+  const machine = mRow as {
+    id: string;
+    machine_code: string;
+    status: string;
+    machine_type: string;
+    vendor_id: string;
+  };
+
+  // Vendor ownership: same vendor on every row.
+  if (profile.role === "vendor") {
+    if (
+      !profile.vendor_id ||
+      profile.vendor_id !== a.vendor_id ||
+      profile.vendor_id !== b.vendor_id
+    ) {
+      redirect(`${redirectTo}?toast=Not+your+slab`);
+    }
+  }
+  if (a.vendor_id !== machine.vendor_id || b.vendor_id !== machine.vendor_id) {
+    redirect(`${redirectTo}?toast=Machine+belongs+to+a+different+vendor`);
+  }
+
+  // Both must be on hold.
+  if (a.status !== "carving_on_hold" || b.status !== "carving_on_hold") {
+    redirect(`${redirectTo}?toast=Both+slabs+must+be+on+hold`);
+  }
+
+  // Target machine must be a 2-head + idle.
+  if (machine.machine_type !== "multi_head_2") {
+    redirect(`${redirectTo}?toast=Pair+reload+needs+a+2-head+CNC`);
+  }
+  if (machine.status !== "idle") {
+    redirect(
+      `${redirectTo}?toast=${encodeURIComponent(`${machine.machine_code} is not idle right now`)}`,
+    );
+  }
+
+  // Neither slab may be tagged for a non-multi-head type.
+  for (const j of [a, b]) {
+    if (j.requires_machine_type && j.requires_machine_type !== "multi_head_2") {
+      redirect(
+        `${redirectTo}?toast=${encodeURIComponent(
+          `One of the slabs is tagged for ${j.requires_machine_type}. Pair reload only works for multi_head_2.`,
+        )}`,
+      );
+    }
+  }
+
+  // Validate identical slab geometry — must match for the jig.
+  const { data: slabRows } = await admin
+    .from("slab_requirements")
+    .select("id, label, temple, length_ft, width_ft, thickness_ft")
+    .in("id", [a.slab_requirement_id, b.slab_requirement_id]);
+  if (!slabRows || slabRows.length !== 2) {
+    redirect(`${redirectTo}?toast=Could+not+load+slab+geometry+for+matching`);
+  }
+  const sRows = slabRows as Array<{
+    id: string;
+    label: string | null;
+    temple: string;
+    length_ft: number | string;
+    width_ft: number | string;
+    thickness_ft: number | string;
+  }>;
+  const slabA = sRows.find((s) => s.id === a.slab_requirement_id)!;
+  const slabB = sRows.find((s) => s.id === b.slab_requirement_id)!;
+  const dimsMatch =
+    Number(slabA.length_ft) === Number(slabB.length_ft) &&
+    Number(slabA.width_ft) === Number(slabB.width_ft) &&
+    Number(slabA.thickness_ft) === Number(slabB.thickness_ft);
+  const labelMatch = (slabA.label ?? "") === (slabB.label ?? "");
+  const templeMatch = (slabA.temple ?? "") === (slabB.temple ?? "");
+  if (!dimsMatch || !labelMatch || !templeMatch) {
+    redirect(
+      `${redirectTo}?toast=${encodeURIComponent(
+        "Pair reload needs IDENTICAL slabs (same L×W×T + temple + label).",
+      )}`,
+    );
+  }
+
+  const now = new Date().toISOString();
+
+  // Atomically flip both items. Race-guard: only update if STILL
+  // on-hold. If either flips out from under us, roll back the one
+  // that succeeded so we don't leave a half-loaded machine.
+  const updateOne = (id: string) =>
+    admin
+      .from("carving_items")
+      .update({
+        status: "carving_in_progress",
+        cnc_machine_id: targetMachineId,
+        loaded_at: now,
+        loaded_by: profile.id,
+        vendor_estimated_minutes: vendorEstimatedMinutes,
+        held_at: null,
+        held_by: null,
+        held_reason: null,
+      })
+      .eq("id", id)
+      .eq("status", "carving_on_hold")
+      .select("id");
+
+  const [{ data: updA }, { data: updB }] = await Promise.all([
+    updateOne(a.id),
+    updateOne(b.id),
+  ]);
+  if (!updA?.length || !updB?.length) {
+    // Roll back any partial success — restore the on-hold state on
+    // whichever slab DID flip so we don't end up with a held slab
+    // pointing at a machine that's now occupied by only one slab.
+    const rollback = async (id: string, originalHeldFrom: string | null) => {
+      await admin
+        .from("carving_items")
+        .update({
+          status: "carving_on_hold",
+          cnc_machine_id: null,
+          loaded_at: null,
+          loaded_by: null,
+          vendor_estimated_minutes: null,
+          held_at: now,
+          held_by: profile.id,
+          held_reason: "auto-reverted pair reload conflict",
+          held_from_machine_id: originalHeldFrom,
+        })
+        .eq("id", id);
+    };
+    if (updA?.length) await rollback(a.id, a.held_from_machine_id);
+    if (updB?.length) await rollback(b.id, b.held_from_machine_id);
+    redirect(
+      `${redirectTo}?toast=Could+not+claim+both+slabs+(state+changed).+Refresh+and+retry.`,
+    );
+  }
+
+  // Flip the machine. Mirror loadTwoSlabsOnMultiHeadAction —
+  // current_carving_item_id points at the first head's item; the
+  // second is implicit (any caller that needs both reads
+  // cnc_machines.current_carving_item_id + queries carving_items
+  // WHERE cnc_machine_id=machine.id).
+  await admin
+    .from("cnc_machines")
+    .update({ status: "carving", current_carving_item_id: a.id })
+    .eq("id", targetMachineId)
+    .eq("status", "idle");
+
+  // Events + audit on both items + the machine.
+  const evtMsg = `Pair-reloaded from hold onto ${machine.machine_code}`;
+  await Promise.all([
+    recordEvent(
+      a.id,
+      "reloaded_from_hold",
+      profile.id,
+      `${evtMsg} (paired with ${b.id})`,
+    ),
+    recordEvent(
+      b.id,
+      "reloaded_from_hold",
+      profile.id,
+      `${evtMsg} (paired with ${a.id})`,
+    ),
+  ]);
+  await admin.from("cnc_machine_events").insert({
+    cnc_machine_id: targetMachineId,
+    event_type: "loaded",
+    carving_item_id: a.id,
+    user_id: profile.id,
+    message: `${evtMsg} · pair ${a.id} + ${b.id}`,
+  });
+  await logAudit(
+    profile.id,
+    "carving_reloaded_pair_from_hold",
+    "carving_item",
+    a.id,
+    {
+      paired_with: b.id,
+      target_machine_id: targetMachineId,
+      was_a_from: a.held_from_machine_id,
+      was_b_from: b.held_from_machine_id,
+      vendor_estimated_minutes: vendorEstimatedMinutes,
+    },
+  );
+
+  refreshAll();
+  redirect(
+    `${redirectTo}?toast=${encodeURIComponent(`Both slabs reloaded on ${machine.machine_code}`)}`,
   );
 }
 
