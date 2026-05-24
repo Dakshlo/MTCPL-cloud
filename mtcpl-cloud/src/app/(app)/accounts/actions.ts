@@ -19,6 +19,7 @@ import { logAudit } from "@/lib/audit";
 import { notify } from "@/lib/notifications";
 import {
   canAddBillVendors,
+  canApplyAdvanceToBill,
   canApproveBills,
   canConfirmPayments,
   canFinalAudit,
@@ -26,8 +27,10 @@ import {
   canManageAccounts,
   canManageBillVendors,
   canMarkPaid,
+  canRecordAdvance,
   canRenameBillVendor,
   canSubmitBills,
+  canUnapplyAdvance,
 } from "@/lib/accounts-permissions";
 
 type ActionResult = { ok: true } | { ok: false; error: string };
@@ -3563,4 +3566,600 @@ export async function rejectRoyaltyEntryAction(
     },
   );
   return { ok: true };
+}
+
+// ══════════════════════════════════════════════════════════════════
+// Vendor Advance Payment (mig 073, Daksh May 2026)
+// ══════════════════════════════════════════════════════════════════
+//
+// Dad's mental model: vendor demands money before the bill arrives.
+// Pay the advance now via the existing propose → confirm → HDFC →
+// paid pipeline; the paid advance sits as a vendor credit balance.
+// When the real bill arrives later, accountant applies some/all of
+// that credit to the bill via a synthetic bill_payments row tagged
+// is_advance_application=TRUE. The existing recalc trigger reduces
+// the bill's amount_outstanding automatically.
+
+/** Owner records a new vendor advance. Skips submit/approve gate —
+ *  owner IS the submitter. Lands at status='proposed' so it rides
+ *  the regular Pay Today / HDFC CSV / mark-paid flow. */
+export async function recordAdvanceAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canRecordAdvance(profile)) {
+    return { ok: false, error: "Only owner / developer can record an advance." };
+  }
+  const supabase = createAdminSupabaseClient();
+
+  const vendorId = String(formData.get("vendor_id") ?? "").trim();
+  const amountRaw = String(formData.get("amount") ?? "").trim();
+  const description = String(formData.get("description") ?? "").trim();
+  const note = String(formData.get("note") ?? "").trim() || null;
+
+  if (!vendorId) return { ok: false, error: "Pick a vendor." };
+  const amount = Number(amountRaw);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { ok: false, error: "Advance amount must be greater than zero." };
+  }
+  if (!description) {
+    return { ok: false, error: "Add a short reason for the advance." };
+  }
+
+  // Confirm vendor exists + is active.
+  const { data: vendor, error: vErr } = await supabase
+    .from("bill_vendors")
+    .select("id, name, archived_at")
+    .eq("id", vendorId)
+    .maybeSingle();
+  if (vErr) return { ok: false, error: vErr.message };
+  if (!vendor) return { ok: false, error: "Vendor not found." };
+  if ((vendor as { archived_at: string | null }).archived_at) {
+    return { ok: false, error: "Vendor is archived." };
+  }
+
+  // Allocate the next ADV-N token. We compute it by scanning
+  // existing tokens (vendor_advance_token_seq isn't easily callable
+  // from PostgREST in a portable way). Concurrent inserts re-try
+  // on UNIQUE collision via the safety loop below.
+  async function nextToken(): Promise<string> {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const { data: maxRow } = await supabase
+        .from("vendor_advances")
+        .select("token")
+        .like("token", "ADV-%")
+        .order("created_at", { ascending: false })
+        .limit(100);
+      let maxN = 0;
+      for (const r of (maxRow ?? []) as Array<{ token: string }>) {
+        const m = r.token.match(/^ADV-(\d+)$/);
+        if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
+      }
+      const candidate = `ADV-${maxN + 1 + attempt}`;
+      // Probe — does this token already exist? UNIQUE collisions
+      // are vanishingly rare in this app (low concurrency) so the
+      // probe is correctness insurance, not the hot path.
+      const { data: exists } = await supabase
+        .from("vendor_advances")
+        .select("id")
+        .eq("token", candidate)
+        .maybeSingle();
+      if (!exists) return candidate;
+    }
+    // Fallback: timestamp-suffixed token — collision-free but uglier.
+    return `ADV-${Date.now()}`;
+  }
+  const token = await nextToken();
+
+  const now = new Date().toISOString();
+  const { data: inserted, error: insErr } = await supabase
+    .from("vendor_advances")
+    .insert({
+      token,
+      vendor_id: vendorId,
+      amount,
+      description,
+      note,
+      status: "proposed",
+      proposed_by: profile.id,
+      proposed_at: now,
+      created_at: now,
+      updated_at: now,
+    })
+    .select("id, token")
+    .single();
+  if (insErr) return { ok: false, error: insErr.message };
+
+  await logAudit(profile.id, "vendor_advance_recorded", "vendor_advance", inserted.id, {
+    token,
+    vendor_id: vendorId,
+    vendor_name: (vendor as { name: string }).name,
+    amount,
+    description,
+  });
+
+  void notify(
+    "vendor_advance_recorded",
+    `Advance ${token} for ${(vendor as { name: string }).name} · ₹${amount.toLocaleString("en-IN")}`,
+    {
+      message: "Awaiting confirmation on Pay Today.",
+      entityType: "vendor_advance",
+      entityId: inserted.id,
+      actorId: profile.id,
+      targetRoles: ["owner", "developer", "accountant"],
+    },
+  );
+
+  await refreshAccountsPaths();
+  return { ok: true };
+}
+
+/** Owner confirms a proposed advance (mirrors confirmPaymentsAction
+ *  but for a single advance row — advances don't batch). */
+export async function confirmAdvanceAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canConfirmPayments(profile)) {
+    return { ok: false, error: "You can't confirm advances." };
+  }
+  const supabase = createAdminSupabaseClient();
+
+  const advanceId = String(formData.get("advance_id") ?? "").trim();
+  if (!advanceId) return { ok: false, error: "Missing advance id." };
+
+  const now = new Date().toISOString();
+  const { data: updated, error } = await supabase
+    .from("vendor_advances")
+    .update({
+      status: "confirmed",
+      confirmed_by: profile.id,
+      confirmed_at: now,
+      updated_at: now,
+    })
+    .eq("id", advanceId)
+    .eq("status", "proposed")
+    .select("id, token, vendor_id, amount")
+    .maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!updated) {
+    return { ok: false, error: "Advance is not in proposed state." };
+  }
+
+  await logAudit(profile.id, "vendor_advance_confirmed", "vendor_advance", advanceId, {
+    token: (updated as { token: string }).token,
+  });
+  await refreshAccountsPaths();
+  return { ok: true };
+}
+
+/** Accountant captures the bank reference + flips advance to paid.
+ *  Mirrors markPaymentPaidAction — payment_method + reference are
+ *  user-entered after the bank transfer actually goes through. */
+export async function markAdvancePaidAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canMarkPaid(profile)) {
+    return { ok: false, error: "Only the accountant or a developer can mark advance paid." };
+  }
+  const supabase = createAdminSupabaseClient();
+
+  const advanceId = String(formData.get("advance_id") ?? "").trim();
+  const method = String(formData.get("payment_method") ?? "").trim();
+  const reference = String(formData.get("payment_reference") ?? "").trim();
+  if (!advanceId) return { ok: false, error: "Missing advance id." };
+  if (!method) return { ok: false, error: "Pick a payment method (NEFT / cheque / cash / UPI)." };
+  if (!reference) return { ok: false, error: "Enter the payment reference (UTR / cheque no)." };
+
+  const now = new Date().toISOString();
+  const { data: updated, error } = await supabase
+    .from("vendor_advances")
+    .update({
+      status: "paid",
+      paid_by: profile.id,
+      paid_at: now,
+      payment_method: method,
+      payment_reference: reference,
+      updated_at: now,
+    })
+    .eq("id", advanceId)
+    .in("status", ["confirmed", "bank_rejected"])
+    .select("id, token, vendor_id, amount")
+    .maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!updated) {
+    return {
+      ok: false,
+      error: "Advance is not in confirmed (or bank-rejected) state.",
+    };
+  }
+
+  await logAudit(profile.id, "vendor_advance_paid", "vendor_advance", advanceId, {
+    token: (updated as { token: string }).token,
+    payment_method: method,
+    payment_reference: reference,
+  });
+
+  void notify(
+    "vendor_advance_paid",
+    `Advance ${(updated as { token: string }).token} paid`,
+    {
+      message: "Sits as vendor credit until applied to a bill.",
+      entityType: "vendor_advance",
+      entityId: advanceId,
+      actorId: profile.id,
+      targetRoles: ["owner", "developer", "accountant"],
+    },
+  );
+
+  await refreshAccountsPaths();
+  return { ok: true };
+}
+
+/** Owner cancels a pre-paid advance. After paid, the cancel is
+ *  blocked — money has moved, refund must be chased manually + logged
+ *  in vendor private notes. */
+export async function cancelAdvanceAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canRecordAdvance(profile)) {
+    return { ok: false, error: "Only owner / developer can cancel an advance." };
+  }
+  const supabase = createAdminSupabaseClient();
+
+  const advanceId = String(formData.get("advance_id") ?? "").trim();
+  const reason = String(formData.get("reason") ?? "").trim() || null;
+  if (!advanceId) return { ok: false, error: "Missing advance id." };
+
+  // Load to gate-check status.
+  const { data: row, error: loadErr } = await supabase
+    .from("vendor_advances")
+    .select("id, token, status, paid_at")
+    .eq("id", advanceId)
+    .maybeSingle();
+  if (loadErr) return { ok: false, error: loadErr.message };
+  if (!row) return { ok: false, error: "Advance not found." };
+  const adv = row as { id: string; token: string; status: string; paid_at: string | null };
+  if (adv.status === "paid") {
+    return {
+      ok: false,
+      error:
+        "Cannot cancel a paid advance — money has already moved. Chase the vendor for a refund and log it in their private notes.",
+    };
+  }
+  if (adv.status === "cancelled") {
+    return { ok: false, error: "Advance is already cancelled." };
+  }
+
+  const now = new Date().toISOString();
+  const { error: updErr } = await supabase
+    .from("vendor_advances")
+    .update({
+      status: "cancelled",
+      cancelled_by: profile.id,
+      cancelled_at: now,
+      cancel_reason: reason,
+      updated_at: now,
+    })
+    .eq("id", advanceId)
+    .in("status", ["proposed", "confirmed", "bank_rejected"]);
+  if (updErr) return { ok: false, error: updErr.message };
+
+  await logAudit(profile.id, "vendor_advance_cancelled", "vendor_advance", advanceId, {
+    token: adv.token,
+    reason,
+  });
+  await refreshAccountsPaths();
+  return { ok: true };
+}
+
+/** Apply some of a paid vendor advance to a specific bill. Inserts
+ *  a tagged synthetic bill_payments row (is_advance_application=TRUE)
+ *  + a vendor_advance_applications junction row. The existing
+ *  recalc_bill_amount_paid trigger then reduces the bill's
+ *  amount_outstanding for free. The synthetic row is filtered out
+ *  of HDFC CSV + Final Audit (money already moved when the advance
+ *  was paid). */
+export async function applyAdvanceToBillAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canApplyAdvanceToBill(profile)) {
+    return { ok: false, error: "You can't apply an advance to a bill." };
+  }
+  const supabase = createAdminSupabaseClient();
+
+  const billId = String(formData.get("bill_id") ?? "").trim();
+  const advanceId = String(formData.get("advance_id") ?? "").trim();
+  const amountRaw = String(formData.get("amount_applied") ?? "").trim();
+  const note = String(formData.get("note") ?? "").trim() || null;
+  if (!billId) return { ok: false, error: "Missing bill id." };
+  if (!advanceId) return { ok: false, error: "Pick an advance to apply." };
+  const amount = Number(amountRaw);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { ok: false, error: "Amount to apply must be greater than zero." };
+  }
+
+  // Load both rows + the already-applied total for the advance.
+  const [{ data: bill, error: billErr }, { data: adv, error: advErr }, { data: applied }] =
+    await Promise.all([
+      supabase
+        .from("bills")
+        .select("id, token, bill_vendor_id, amount_outstanding, status, cancelled_at")
+        .eq("id", billId)
+        .maybeSingle(),
+      supabase
+        .from("vendor_advances")
+        .select("id, token, vendor_id, amount, status, cancelled_at")
+        .eq("id", advanceId)
+        .maybeSingle(),
+      supabase
+        .from("vendor_advance_applications")
+        .select("amount_applied")
+        .eq("vendor_advance_id", advanceId)
+        .is("unapplied_at", null),
+    ]);
+  if (billErr) return { ok: false, error: billErr.message };
+  if (advErr) return { ok: false, error: advErr.message };
+  if (!bill) return { ok: false, error: "Bill not found." };
+  if (!adv) return { ok: false, error: "Advance not found." };
+
+  const b = bill as {
+    id: string;
+    token: string;
+    bill_vendor_id: string;
+    amount_outstanding: number | string;
+    status: string;
+    cancelled_at: string | null;
+  };
+  const a = adv as {
+    id: string;
+    token: string;
+    vendor_id: string;
+    amount: number | string;
+    status: string;
+    cancelled_at: string | null;
+  };
+
+  if (b.cancelled_at) return { ok: false, error: "Bill is cancelled." };
+  if (b.status === "cancelled" || b.status === "rejected") {
+    return { ok: false, error: `Bill is in ${b.status} state.` };
+  }
+  if (a.status !== "paid" || a.cancelled_at) {
+    return { ok: false, error: "Advance is not in paid state." };
+  }
+  if (a.vendor_id !== b.bill_vendor_id) {
+    return {
+      ok: false,
+      error: "Advance + bill vendor don't match.",
+    };
+  }
+
+  const outstanding = Number(b.amount_outstanding ?? 0);
+  if (outstanding <= 0) {
+    return { ok: false, error: "Bill has no outstanding amount to apply against." };
+  }
+
+  const totalApplied = (applied ?? []).reduce(
+    (s, r) => s + Number((r as { amount_applied: number }).amount_applied ?? 0),
+    0,
+  );
+  const advanceRemaining = Number(a.amount) - totalApplied;
+  if (advanceRemaining <= 0.005) {
+    return { ok: false, error: "Advance is already fully consumed." };
+  }
+
+  // Clamp: can't apply more than (a) what's left on the advance, or
+  // (b) what the bill still owes. Either gate fails loud rather
+  // than silent-truncating — accountant should see the real numbers.
+  if (amount > advanceRemaining + 0.005) {
+    return {
+      ok: false,
+      error: `Can apply at most ₹${advanceRemaining.toLocaleString("en-IN")} from ${a.token} (already applied ₹${totalApplied.toLocaleString("en-IN")}).`,
+    };
+  }
+  if (amount > outstanding + 0.005) {
+    return {
+      ok: false,
+      error: `Bill outstanding is ₹${outstanding.toLocaleString("en-IN")} — can't apply more than that.`,
+    };
+  }
+
+  const now = new Date().toISOString();
+
+  // 1. Insert the synthetic bill_payments row — arrives PRE-PAID so
+  //    no other action tries to propose / confirm / mark-paid it.
+  //    payment_method='advance_credit' + payment_reference=ADV token
+  //    keep the row readable on the bill detail page.
+  const { data: paymentRow, error: payErr } = await supabase
+    .from("bill_payments")
+    .insert({
+      bill_id: b.id,
+      status: "paid",
+      proposed_amount: amount,
+      paid_amount: amount,
+      payment_method: "advance_credit",
+      payment_reference: `ADV-LINK:${a.token}`,
+      payment_note: note,
+      proposed_by: profile.id,
+      proposed_at: now,
+      confirmed_by: profile.id,
+      confirmed_at: now,
+      paid_by: profile.id,
+      paid_at: now,
+      is_advance_application: true,
+      source_advance_id: a.id,
+      updated_at: now,
+    })
+    .select("id")
+    .single();
+  if (payErr) return { ok: false, error: payErr.message };
+
+  // 2. Insert the junction row pointing at the synthetic payment.
+  //    The DB trigger enforces the application cap as a final guard.
+  const { error: appErr } = await supabase
+    .from("vendor_advance_applications")
+    .insert({
+      vendor_advance_id: a.id,
+      bill_id: b.id,
+      amount_applied: amount,
+      payment_row_id: paymentRow.id,
+      applied_by: profile.id,
+      applied_at: now,
+      note,
+    });
+  if (appErr) {
+    // Roll back the payment row if the application insert fails so
+    // we don't leave a synthetic payment with no junction record.
+    await supabase
+      .from("bill_payments")
+      .update({
+        status: "cancelled",
+        cancelled_at: now,
+        cancelled_by: profile.id,
+        cancel_reason: "advance_application_rollback",
+        updated_at: now,
+      })
+      .eq("id", paymentRow.id);
+    return { ok: false, error: appErr.message };
+  }
+
+  await logAudit(profile.id, "vendor_advance_applied", "vendor_advance", a.id, {
+    advance_token: a.token,
+    bill_id: b.id,
+    bill_token: b.token,
+    amount_applied: amount,
+    payment_row_id: paymentRow.id,
+  });
+
+  await refreshAccountsPaths();
+  return { ok: true };
+}
+
+/** Owner reverses a previous application. Soft-cancels the synthetic
+ *  payment row (bill outstanding goes back up via the recalc
+ *  trigger) AND soft-cancels the junction (frees the credit). */
+export async function unapplyAdvanceFromBillAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canUnapplyAdvance(profile)) {
+    return {
+      ok: false,
+      error: "Only owner / developer can reverse an advance application.",
+    };
+  }
+  const supabase = createAdminSupabaseClient();
+
+  const applicationId = String(formData.get("application_id") ?? "").trim();
+  const reason = String(formData.get("reason") ?? "").trim() || null;
+  if (!applicationId) return { ok: false, error: "Missing application id." };
+
+  const { data: app, error: loadErr } = await supabase
+    .from("vendor_advance_applications")
+    .select("id, vendor_advance_id, bill_id, amount_applied, payment_row_id, unapplied_at")
+    .eq("id", applicationId)
+    .maybeSingle();
+  if (loadErr) return { ok: false, error: loadErr.message };
+  if (!app) return { ok: false, error: "Application not found." };
+  const a = app as {
+    id: string;
+    vendor_advance_id: string;
+    bill_id: string;
+    amount_applied: number | string;
+    payment_row_id: string;
+    unapplied_at: string | null;
+  };
+  if (a.unapplied_at) {
+    return { ok: false, error: "Application is already unapplied." };
+  }
+
+  const now = new Date().toISOString();
+
+  // Soft-cancel the synthetic payment row first — the recalc trigger
+  // on bill_payments will push bill.amount_outstanding back up by
+  // amount_applied (cancelled rows are excluded from amount_paid).
+  const { error: payErr } = await supabase
+    .from("bill_payments")
+    .update({
+      status: "cancelled",
+      cancelled_at: now,
+      cancelled_by: profile.id,
+      cancel_reason: reason ?? "advance_application_unapplied",
+      updated_at: now,
+    })
+    .eq("id", a.payment_row_id);
+  if (payErr) return { ok: false, error: payErr.message };
+
+  // Then mark the application unapplied so the credit frees up.
+  const { error: unapplyErr } = await supabase
+    .from("vendor_advance_applications")
+    .update({
+      unapplied_at: now,
+      unapplied_by: profile.id,
+      unapply_reason: reason,
+    })
+    .eq("id", applicationId);
+  if (unapplyErr) return { ok: false, error: unapplyErr.message };
+
+  await logAudit(profile.id, "vendor_advance_unapplied", "vendor_advance", a.vendor_advance_id, {
+    application_id: a.id,
+    bill_id: a.bill_id,
+    amount_applied: Number(a.amount_applied),
+    reason,
+  });
+  await refreshAccountsPaths();
+  return { ok: true };
+}
+
+// Form-action wrappers — server-redirect on result so the buttons
+// can <form action={...}> without client-side overhead. Mirror
+// holdBillAmountFormAction / releaseBillHoldFormAction.
+
+export async function recordAdvanceFormAction(formData: FormData) {
+  const res = await recordAdvanceAction(formData);
+  if (!res.ok) {
+    redirect(
+      `/accounts/advances/new?error=${encodeURIComponent(res.error)}`,
+    );
+  }
+  redirect("/accounts/advances?toast=Advance+recorded");
+}
+
+export async function confirmAdvanceFormAction(formData: FormData) {
+  const res = await confirmAdvanceAction(formData);
+  const advanceId = String(formData.get("advance_id") ?? "");
+  if (!res.ok) {
+    redirect(`/accounts/advances/${advanceId}?error=${encodeURIComponent(res.error)}`);
+  }
+  redirect(`/accounts/advances/${advanceId}?toast=Confirmed`);
+}
+
+export async function cancelAdvanceFormAction(formData: FormData) {
+  const res = await cancelAdvanceAction(formData);
+  const advanceId = String(formData.get("advance_id") ?? "");
+  if (!res.ok) {
+    redirect(`/accounts/advances/${advanceId}?error=${encodeURIComponent(res.error)}`);
+  }
+  redirect(`/accounts/advances?toast=Advance+cancelled`);
+}
+
+export async function applyAdvanceFormAction(formData: FormData) {
+  const res = await applyAdvanceToBillAction(formData);
+  const billId = String(formData.get("bill_id") ?? "");
+  if (!res.ok) {
+    redirect(`/accounts/bills/${billId}?error=${encodeURIComponent(res.error)}`);
+  }
+  redirect(`/accounts/bills/${billId}?toast=Advance+applied`);
+}
+
+export async function unapplyAdvanceFormAction(formData: FormData) {
+  const res = await unapplyAdvanceFromBillAction(formData);
+  const billId = String(formData.get("bill_id") ?? "");
+  if (!res.ok) {
+    redirect(`/accounts/bills/${billId}?error=${encodeURIComponent(res.error)}`);
+  }
+  redirect(`/accounts/bills/${billId}?toast=Advance+unapplied`);
 }

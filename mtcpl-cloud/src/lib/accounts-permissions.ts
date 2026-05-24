@@ -178,3 +178,32 @@ export function canHoldBill(p: Pick<Profile, "role">): boolean {
   if (p.role === "owner") return true;
   return false;
 }
+
+/** Mig 073 — record / cancel a vendor advance payment (vendor
+ *  demands money before sending the bill). Owner + developer only —
+ *  advance entries move real money without a corresponding bill,
+ *  so the entry IS the authorisation. Accountants confirm + mark
+ *  paid via the existing payment-pipeline helpers. */
+export function canRecordAdvance(p: Pick<Profile, "role">): boolean {
+  if (p.role === "developer") return true;
+  if (p.role === "owner") return true;
+  return false;
+}
+
+/** Mig 073 — apply a paid advance to a specific bill (reduces the
+ *  bill's outstanding via a synthetic bill_payments row). Same gate
+ *  as managing accounts — accountant decides which credit covers
+ *  which bill at bill-entry time or afterwards. */
+export function canApplyAdvanceToBill(p: Pick<Profile, "role">): boolean {
+  return canManageAccounts(p);
+}
+
+/** Mig 073 — undo an applied advance (mistake correction). Pushes
+ *  the bill's outstanding back up + frees the credit back into the
+ *  vendor's pool. Owner + developer only because reversing a credit
+ *  application can mask reconciliation errors. */
+export function canUnapplyAdvance(p: Pick<Profile, "role">): boolean {
+  if (p.role === "developer") return true;
+  if (p.role === "owner") return true;
+  return false;
+}
