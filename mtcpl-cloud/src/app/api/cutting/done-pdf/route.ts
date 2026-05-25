@@ -138,11 +138,6 @@ export async function GET(req: NextRequest) {
 
     // Follow-up lookups — fetched explicitly instead of via PostgREST
     // embedded resources. Smaller surface for "join failed" errors.
-    const allSlabIds = [
-      ...new Set(
-        csbRows.flatMap((r) => r.cut_session_slabs.map((s) => s.slab_requirement_id)),
-      ),
-    ];
     const blockIds = [...new Set(csbRows.map((r) => r.block_id))];
     const operatorIds = [
       ...new Set(csbRows.map((r) => r.operator_id).filter((x): x is string => !!x)),
@@ -151,12 +146,31 @@ export async function GET(req: NextRequest) {
       ...new Set(csbRows.map((r) => r.cut_session_id).filter(Boolean)),
     ];
 
+    // Daksh May 2026 round 4 — slabs fetched by source_block_id, NOT
+    // by cut_session_slabs ids. The original cut_session_slabs list
+    // only carries the PLANNED slabs from layout.placed, so the PDF
+    // missed every manually-added "+ADDED" slab + every transferred
+    // slab. MT-B-331 had 18 cut (6 planned + 12 added); the PDF
+    // showed only the 6. Querying slab_requirements WHERE
+    // source_block_id IN (...) AND status IN POST_CUT_STATUSES
+    // captures every slab that physically came out of the block,
+    // regardless of how it got linked.
     const [slabsRes, blocksRes, opsRes, sessionsRes] = await Promise.all([
-      allSlabIds.length > 0
+      blockIds.length > 0
         ? admin
             .from("slab_requirements")
-            .select("id, temple, length_ft, width_ft, thickness_ft, label")
-            .in("id", allSlabIds)
+            .select(
+              "id, temple, length_ft, width_ft, thickness_ft, label, description, source_block_id, status",
+            )
+            .in("source_block_id", blockIds)
+            .in("status", [
+              "cut_done",
+              "carving_assigned",
+              "carving_in_progress",
+              "completed",
+              "dispatched",
+              "rejected",
+            ])
         : Promise.resolve({ data: [], error: null }),
       blockIds.length > 0
         ? admin.from("blocks").select("id, tonnes, yard").in("id", blockIds)
@@ -172,25 +186,51 @@ export async function GET(req: NextRequest) {
         : Promise.resolve({ data: [], error: null }),
     ]);
 
-    const slabMap = new Map<
-      string,
-      { temple: string; length_ft: number; width_ft: number; thickness_ft: number; label: string | null }
-    >();
-    for (const s of (slabsRes.data ?? []) as Array<{
+    // Group slabs by source_block_id so each section can pull its
+    // own list. Same row keyed under both lookups so the per-id
+    // map (used to enrich layout.placed display) still works as a
+    // fallback for legacy paths.
+    type SlabRow = {
+      id: string;
+      temple: string;
+      length_ft: number;
+      width_ft: number;
+      thickness_ft: number;
+      label: string | null;
+      description: string | null;
+    };
+    const slabsByBlock = new Map<string, SlabRow[]>();
+    const slabById = new Map<string, SlabRow>();
+    for (const raw of (slabsRes.data ?? []) as Array<{
       id: string;
       temple: string | null;
       length_ft: number | string | null;
       width_ft: number | string | null;
       thickness_ft: number | string | null;
       label: string | null;
+      description: string | null;
+      source_block_id: string | null;
     }>) {
-      slabMap.set(s.id, {
-        temple: s.temple ?? "—",
-        length_ft: Number(s.length_ft) || 0,
-        width_ft: Number(s.width_ft) || 0,
-        thickness_ft: Number(s.thickness_ft) || 0,
-        label: s.label,
-      });
+      const row: SlabRow = {
+        id: raw.id,
+        temple: raw.temple ?? "—",
+        length_ft: Number(raw.length_ft) || 0,
+        width_ft: Number(raw.width_ft) || 0,
+        thickness_ft: Number(raw.thickness_ft) || 0,
+        label: raw.label,
+        description: raw.description,
+      };
+      slabById.set(raw.id, row);
+      if (raw.source_block_id) {
+        const list = slabsByBlock.get(raw.source_block_id) ?? [];
+        list.push(row);
+        slabsByBlock.set(raw.source_block_id, list);
+      }
+    }
+    // Sort slabs inside each block by id (alphabetic = chronological
+    // since the codes are auto-incremented) for a stable PDF order.
+    for (const list of slabsByBlock.values()) {
+      list.sort((a, b) => a.id.localeCompare(b.id));
     }
 
     const blockMeta = new Map<string, { tonnes: number | null; yard: number }>();
@@ -229,6 +269,11 @@ export async function GET(req: NextRequest) {
       const meta = blockMeta.get(r.block_id);
       const session = sessionMap.get(r.cut_session_id);
 
+      // Mig 077 follow-on (Daksh) — use source_block_id-keyed lookup
+      // so manually-added "+ADDED" slabs + transferred slabs all
+      // surface, not just the original layout.placed list.
+      const actualSlabs = slabsByBlock.get(r.block_id) ?? [];
+
       return {
         cutSessionBlockId: r.id,
         blockCode: r.block_id,
@@ -246,19 +291,13 @@ export async function GET(req: NextRequest) {
           r.approved_by && profilesMap[r.approved_by]
             ? profilesMap[r.approved_by]!
             : "—",
-        slabs: (layout?.placed ?? []).map((s) => {
-          // Prefer slab_requirements lookup (canonical) — falls back to
-          // layout placed if the requirement row was deleted.
-          const sr = slabMap.get(s.id);
-          const dims = sr
-            ? `${sr.length_ft}×${sr.width_ft}×${sr.thickness_ft}″`
-            : `${s.sw ?? "—"}×${s.sh ?? "—"}×${s.sd ?? "—"}″`;
-          return {
-            id: s.id,
-            temple: sr?.temple ?? s.temple ?? "—",
-            dims,
-          };
-        }),
+        slabs: actualSlabs.map((s) => ({
+          id: s.id,
+          temple: s.temple,
+          dims: `${s.length_ft}×${s.width_ft}×${s.thickness_ft}″`,
+          label: s.label,
+          description: s.description,
+        })),
       };
     });
 

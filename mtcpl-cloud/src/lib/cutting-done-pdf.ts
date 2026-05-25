@@ -36,6 +36,12 @@ export type DoneBlockSection = {
     id: string;
     temple: string;
     dims: string;           // "36×3×4″"
+    /** Daksh May 2026 round 4 — surface the slab label (set at cut
+     *  time, e.g. "Jali Embedment") + free-text description so the
+     *  office can identify each piece without cross-referencing
+     *  Required Sizes. */
+    label?: string | null;
+    description?: string | null;
   }>;
 };
 
@@ -289,7 +295,13 @@ export async function generateCuttingDonePdf(
       y -= 12;
 
       block.slabs.forEach((s, i) => {
-        ensureSpace(16);
+        // Variable row height — label + description add extra lines
+        // underneath the main row when present. Reserve enough space
+        // up front so we don't page-break mid-row.
+        const hasLabel = !!(s.label && s.label.trim());
+        const hasDesc = !!(s.description && s.description.trim());
+        const rowHeight = 14 + (hasLabel ? 11 : 0) + (hasDesc ? 11 : 0);
+        ensureSpace(rowHeight + 2);
         drawText(String(i + 1), {
           x: cols[0].x,
           y,
@@ -318,7 +330,32 @@ export async function generateCuttingDonePdf(
           font: fontMono,
           color: COLOR_TEXT,
         });
-        y -= 14;
+        y -= 12;
+        // Daksh May 2026 round 4 — slab label + free-text description
+        // under the row. Indented from the slab-id column so they
+        // visually attach to the row above. Wrapped to ~80 chars to
+        // keep the table neat.
+        if (hasLabel) {
+          drawText(`Label: ${truncate(s.label!.trim(), 80, fontReg, 8.5)}`, {
+            x: cols[1].x,
+            y,
+            size: 8.5,
+            font: fontReg,
+            color: COLOR_TEXT,
+          });
+          y -= 11;
+        }
+        if (hasDesc) {
+          drawText(`Note: ${truncate(s.description!.trim(), 80, fontReg, 8.5)}`, {
+            x: cols[1].x,
+            y,
+            size: 8.5,
+            font: fontReg,
+            color: COLOR_MUTED,
+          });
+          y -= 11;
+        }
+        y -= 2; // breathing room before the next row
       });
     }
 
