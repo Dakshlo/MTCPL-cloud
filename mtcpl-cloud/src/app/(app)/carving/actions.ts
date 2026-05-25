@@ -5,7 +5,11 @@ import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
-import { canAddExternalCutSlab } from "@/lib/cutting-permissions";
+import {
+  canAccessCarvingPage,
+  canAddExternalCutSlab,
+  canSeeAwaitingReview,
+} from "@/lib/cutting-permissions";
 import { nextSlabCodeFromMaxId } from "../slabs/utils";
 
 /**
@@ -724,7 +728,15 @@ export async function deleteVendorAction(formData: FormData) {
 // ── Carving job lifecycle ───────────────────────────────────────────
 
 export async function assignCarvingJobAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge"]);
+  // Mig 074/076 — anyone who can ACCESS the /carving page can assign
+  // (dev/owner/carving_head/senior_incharge/team_head + vendors with
+  // can_assign_carving). Mohit's submission was failing because his
+  // vendor role isn't in the role-list above; canAccessCarvingPage
+  // wraps the same logic the page guard uses.
+  const { profile } = await requireAuth();
+  if (!canAccessCarvingPage(profile)) {
+    redirect("/carving?toast=Not+authorised+to+assign+carving");
+  }
   const admin = createAdminSupabaseClient();
 
   const slabId = txt(formData, "slab_id");
@@ -869,7 +881,11 @@ export async function assignCarvingJobAction(formData: FormData) {
 // are KEPT — the vendor gets a partial batch. Toast surfaces the
 // count of successes vs failures so the head can retry the rest.
 export async function assignCarvingJobsBatchAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge"]);
+  // Mig 074/076 — same widening as the single-assign action above.
+  const { profile } = await requireAuth();
+  if (!canAccessCarvingPage(profile)) {
+    redirect("/carving?toast=Not+authorised+to+assign+carving");
+  }
   const admin = createAdminSupabaseClient();
 
   // slab_ids is a JSON-stringified array (form sends "[a,b,c]").
@@ -3490,6 +3506,7 @@ export async function acknowledgeReceiptAction(formData: FormData) {
     "developer",
     "owner",
     "carving_head",
+    "senior_incharge",
     "vendor",
     "slab_transfer",
   ]);
@@ -4071,7 +4088,11 @@ export async function transferCarvingJobAction(formData: FormData) {
   // work when they realise they can't handle it (broken stock,
   // wrong machine type, overbooked, etc). Ownership check below
   // ensures vendors can only transfer slabs they currently own.
-  const { profile } = await requireAuth(["developer", "owner", "carving_head", "vendor"]);
+  // Mig 076 — senior_incharge added so Rajesh can transfer from
+  // the /carving/[id] detail page. (Daksh flagged the bug: clicking
+  // Transfer from the detail page redirected him to /slabs because
+  // his role wasn't in the list.)
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "vendor"]);
   const admin = createAdminSupabaseClient();
 
   const carvingItemId = txt(formData, "carving_item_id");
