@@ -57,13 +57,13 @@ export default async function VariousCostingLanding() {
         }}
       >
         <CostingCard
-          href="/carving/reports"
+          href="/reports/various-costing/cnc"
           enabled={canCnc}
           icon="🛠"
           tone="#7c3aed"
           title="CNC Costing"
           subtitle="Cost per SFT / CFT — carving department"
-          description="Per-vendor monthly report with daily / weekly / monthly views. Includes the operational expense entry surface and per-machine asset register."
+          description="Focused dashboard with daily / weekly / monthly / yearly views. KPI tiles, per-vendor breakdown, expense categories. The full Excel-style report is one click away from there."
         />
         <CostingCard
           href="/reports/various-costing/cutter"
