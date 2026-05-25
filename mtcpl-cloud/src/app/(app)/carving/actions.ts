@@ -255,6 +255,176 @@ export async function addExternalCutSlabAction(formData: FormData) {
   );
 }
 
+/** Edit an externally-added cut slab. Same permission gate as the add
+ *  action. Refuses to touch slabs that came from cutting
+ *  (source_block_id IS NOT NULL) or that have left the Unassigned tab
+ *  (status !== 'cut_done') — once assigned, dimensions must not change
+ *  out from under the vendor.
+ */
+export async function updateExternalCutSlabAction(formData: FormData) {
+  const { profile } = await requireAuth();
+  if (!canAddExternalCutSlab(profile)) {
+    redirect("/carving?toast=Not+authorised+to+edit+external+slabs");
+  }
+  const admin = createAdminSupabaseClient();
+  const redirectTo = txt(formData, "redirect_to") || "/carving";
+
+  const id = txt(formData, "id");
+  if (!id) redirect(`${redirectTo}?toast=Missing+slab+id`);
+
+  // Load + validate it's an external + still unassigned.
+  const { data: existing } = await admin
+    .from("slab_requirements")
+    .select("id, status, source_block_id")
+    .eq("id", id)
+    .maybeSingle();
+  if (!existing) redirect(`${redirectTo}?toast=Slab+not+found`);
+  const row = existing as {
+    id: string;
+    status: string;
+    source_block_id: string | null;
+  };
+  if (row.source_block_id !== null) {
+    redirect(
+      `${redirectTo}?toast=${encodeURIComponent("Only externally-added slabs can be edited here")}`,
+    );
+  }
+  if (row.status !== "cut_done") {
+    redirect(
+      `${redirectTo}?toast=${encodeURIComponent(`Slab is in ${row.status} state — already assigned, can't edit here`)}`,
+    );
+  }
+
+  const temple = txt(formData, "temple");
+  if (!temple) redirect(`${redirectTo}?toast=Temple+is+required`);
+  const stone = txt(formData, "stone");
+  if (!stone) redirect(`${redirectTo}?toast=Stone+type+is+required`);
+  const lengthIn = num(formData, "length_in");
+  const widthIn = num(formData, "width_in");
+  const thicknessIn = num(formData, "thickness_in");
+  if (lengthIn <= 0 || widthIn <= 0 || thicknessIn <= 0) {
+    redirect(`${redirectTo}?toast=Length+%2F+width+%2F+thickness+must+be+positive`);
+  }
+
+  const label = txt(formData, "label") || temple;
+  const description = txt(formData, "description") || null;
+  const stockLocation = txt(formData, "stock_location") || null;
+  const quality = txt(formData, "quality") || null;
+  const priority = txt(formData, "priority") === "true";
+
+  const { error } = await admin
+    .from("slab_requirements")
+    .update({
+      label,
+      description,
+      temple,
+      stone,
+      quality,
+      length_ft: lengthIn,
+      width_ft: widthIn,
+      thickness_ft: thicknessIn,
+      priority,
+      stock_location: stockLocation,
+      updated_by: profile.id,
+    })
+    .eq("id", id)
+    .is("source_block_id", null)
+    .eq("status", "cut_done");
+  if (error) {
+    redirect(
+      `${redirectTo}?toast=${encodeURIComponent(error.message)}`,
+    );
+  }
+
+  await logAudit(
+    profile.id,
+    "external_cut_slab_updated",
+    "slab",
+    id,
+    {
+      temple,
+      stone,
+      length_in: lengthIn,
+      width_in: widthIn,
+      thickness_in: thicknessIn,
+      stock_location: stockLocation,
+    },
+  );
+
+  refreshAll();
+  redirect(
+    `${redirectTo}?tab=unassigned&toast=${encodeURIComponent(`Slab ${id} updated`)}`,
+  );
+}
+
+/** Delete an externally-added cut slab. Same gates as the edit action:
+ *  external only (source_block_id IS NULL) + unassigned only
+ *  (status='cut_done'). Hard delete because there's no downstream
+ *  paper trail to preserve — the slab never went through cutting and
+ *  was never assigned to a vendor.
+ */
+export async function deleteExternalCutSlabAction(formData: FormData) {
+  const { profile } = await requireAuth();
+  if (!canAddExternalCutSlab(profile)) {
+    redirect("/carving?toast=Not+authorised+to+delete+external+slabs");
+  }
+  const admin = createAdminSupabaseClient();
+  const redirectTo = txt(formData, "redirect_to") || "/carving";
+
+  const id = txt(formData, "id");
+  if (!id) redirect(`${redirectTo}?toast=Missing+slab+id`);
+
+  // Same validation as the edit path — match-by-id with the safety
+  // filters so a race can't sneak through.
+  const { data: existing } = await admin
+    .from("slab_requirements")
+    .select("id, status, source_block_id, temple")
+    .eq("id", id)
+    .maybeSingle();
+  if (!existing) redirect(`${redirectTo}?toast=Slab+not+found`);
+  const row = existing as {
+    id: string;
+    status: string;
+    source_block_id: string | null;
+    temple: string;
+  };
+  if (row.source_block_id !== null) {
+    redirect(
+      `${redirectTo}?toast=${encodeURIComponent("Only externally-added slabs can be deleted here")}`,
+    );
+  }
+  if (row.status !== "cut_done") {
+    redirect(
+      `${redirectTo}?toast=${encodeURIComponent(`Slab is in ${row.status} state — already assigned, can't delete here`)}`,
+    );
+  }
+
+  const { error } = await admin
+    .from("slab_requirements")
+    .delete()
+    .eq("id", id)
+    .is("source_block_id", null)
+    .eq("status", "cut_done");
+  if (error) {
+    redirect(
+      `${redirectTo}?toast=${encodeURIComponent(error.message)}`,
+    );
+  }
+
+  await logAudit(
+    profile.id,
+    "external_cut_slab_deleted",
+    "slab",
+    id,
+    { temple: row.temple },
+  );
+
+  refreshAll();
+  redirect(
+    `${redirectTo}?tab=unassigned&toast=${encodeURIComponent(`Slab ${id} deleted`)}`,
+  );
+}
+
 // ── Vendor CRUD (team-side) ─────────────────────────────────────────
 
 export async function createVendorAction(formData: FormData) {

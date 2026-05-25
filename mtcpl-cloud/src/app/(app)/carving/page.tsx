@@ -10,7 +10,10 @@ import {
 import { CarvingDashboardClient } from "./dashboard-client";
 import { VendorsManagerPeek } from "./vendors-manager-peek";
 import { CockpitSidebarToggle } from "@/components/cockpit-sidebar-toggle";
-import { AddExternalCutSlabButton } from "./add-external-cut-slab";
+import {
+  ExternalCutSlabsPanel,
+  type ExternalSlab,
+} from "./add-external-cut-slab";
 
 type Tab = "unassigned" | "active" | "review" | "done";
 
@@ -136,17 +139,62 @@ export default async function CarvingDashboardPage({
       .order("name"),
   ]);
 
-  // Daksh May 2026 round 2 — temples list for the AddExternalCutSlab
-  // modal (temple-wise selection mirrors the Required Sizes form).
-  // Only fetched when the viewer can actually use the button so the
-  // payload stays trimmed for vendor-with-flag and other callers.
+  // Daksh May 2026 round 2 — data for the ExternalCutSlabs peek view.
+  //   • templesForExternal: master list used by the temple dropdown
+  //     (temple-wise selection mirrors Required Sizes).
+  //   • externalSlabsForPanel: every externally-added slab still in
+  //     Unassigned (source_block_id IS NULL + status='cut_done'). The
+  //     panel groups them by temple and exposes Edit + Delete inline.
+  // Both fetched only when the viewer can actually use the panel so
+  // vendor-with-flag and other callers keep the payload trimmed.
   const canAddExternal = canAddExternalCutSlab(profile);
-  const { data: templesForExternal } = canAddExternal
-    ? await admin
-        .from("temples")
-        .select("id, name, code_prefix, default_stone")
-        .order("name")
-    : { data: null };
+  const [
+    { data: templesForExternal },
+    { data: externalSlabsRaw },
+  ] = canAddExternal
+    ? await Promise.all([
+        admin
+          .from("temples")
+          .select("id, name, code_prefix, default_stone")
+          .order("name"),
+        admin
+          .from("slab_requirements")
+          .select(
+            "id, temple, stone, length_ft, width_ft, thickness_ft, label, description, stock_location, quality, priority",
+          )
+          .is("source_block_id", null)
+          .eq("status", "cut_done")
+          .order("temple")
+          .order("id"),
+      ])
+    : [{ data: null }, { data: null }];
+  const externalSlabsForPanel: ExternalSlab[] = (
+    (externalSlabsRaw ?? []) as Array<{
+      id: string;
+      temple: string;
+      stone: string | null;
+      length_ft: number | string;
+      width_ft: number | string;
+      thickness_ft: number | string;
+      label: string | null;
+      description: string | null;
+      stock_location: string | null;
+      quality: string | null;
+      priority: boolean | null;
+    }>
+  ).map((s) => ({
+    id: s.id,
+    temple: s.temple,
+    stone: s.stone ?? "",
+    length_ft: Number(s.length_ft) || 0,
+    width_ft: Number(s.width_ft) || 0,
+    thickness_ft: Number(s.thickness_ft) || 0,
+    label: s.label,
+    description: s.description,
+    stock_location: s.stock_location,
+    quality: s.quality,
+    priority: s.priority === true,
+  }));
 
   // Enrich jobs with temple + slab label — job rows on carving_items
   // don't carry temple, so we join via slab_requirement_id.
@@ -357,7 +405,7 @@ export default async function CarvingDashboardPage({
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           {canAddExternal && (
-            <AddExternalCutSlabButton
+            <ExternalCutSlabsPanel
               temples={(templesForExternal ?? []) as Array<{
                 id: string;
                 name: string;
@@ -365,6 +413,7 @@ export default async function CarvingDashboardPage({
                 default_stone?: string | null;
               }>}
               stoneTypes={(stoneTypes ?? []) as Array<{ id?: string; name: string }>}
+              externalSlabs={externalSlabsForPanel}
             />
           )}
           <VendorsManagerPeek vendors={vendorsForPeek} />
