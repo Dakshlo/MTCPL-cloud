@@ -320,6 +320,16 @@ export function VendorCockpitClient({
   // refreshed cockpit grid. Without this the LoadModal stays open
   // showing "No slabs ready to load" because the slab it was for
   // is no longer in the queue — confusing.
+  //
+  // Daksh May 2026 round 3 — added the reload-from-hold setters
+  // (setReloadFor, setReloadPairFor, setCompleteHeldFor). They were
+  // missing from the closer, so after a successful reload-from-hold
+  // the modal stayed open showing the (now-empty) machine picker.
+  // If the user tapped Load a second time, the slab loaded again
+  // and the cockpit ended up with a duplicate carving_item on the
+  // CNC. Closing every action modal here is the canonical fix —
+  // the success redirect drops back to /vendor with no query state
+  // so the modal has nothing left to act on anyway.
   useEffect(() => {
     if (!toast) return;
     const lower = toast.toLowerCase();
@@ -329,13 +339,22 @@ export function VendorCockpitClient({
       lower.includes("marked received") ||
       lower.includes("flagged") ||
       lower.includes("back online") ||
-      lower.includes("location saved");
+      lower.includes("location saved") ||
+      lower.includes("reloaded") ||
+      lower.includes("sent back") ||
+      lower.includes("transferred") ||
+      lower.includes("on hold");
     if (successy) {
       setLoadFor(null);
       setCompleteFor(null);
       setMaintenanceFor(null);
       setEditLocFor(null);
       setProblemFor(null);
+      setReloadFor(null);
+      setReloadPairFor(null);
+      setCompleteHeldFor(null);
+      setHoldFor(null);
+      setHistoryFor(null);
     }
   }, [toast]);
 
@@ -1440,6 +1459,23 @@ function RecentCompletedRow({
             {row.slab.temple} · {dimStr(row.slab)}
           </div>
         )}
+        {/* Daksh May 2026 round 3 — slab label surfaced on the
+            recently-completed row too. Vendor identifies the slab
+            by its label more often than by the autogen id. */}
+        {row.slab?.label && (
+          <div
+            style={{
+              fontSize: 11,
+              color: "var(--text)",
+              marginTop: 3,
+              fontWeight: 600,
+              wordBreak: "break-word",
+            }}
+            title="Slab label (set at cut time)"
+          >
+            🏷 {row.slab.label}
+          </div>
+        )}
         <div style={{ fontSize: 10, color: "var(--muted-light)", marginTop: 4 }}>
           📍 {row.temporary_location ?? "—"}
         </div>
@@ -1577,6 +1613,23 @@ function HeldSlabRow({
           {held.slab && (
             <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
               {held.slab.temple} · {dimStr(held.slab)}
+            </div>
+          )}
+          {/* Daksh May 2026 round 3 — slab label surfaced on the held
+              card too, matches the running CNC card + queue/pending
+              rows. Same identity info everywhere in the cockpit. */}
+          {held.slab?.label && (
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--text)",
+                marginTop: 3,
+                fontWeight: 600,
+                wordBreak: "break-word",
+              }}
+              title="Slab label (set at cut time)"
+            >
+              🏷 {held.slab.label}
             </div>
           )}
         </div>
@@ -2607,6 +2660,40 @@ function PendingStockRow({ job }: { job: CarvingJobLite }) {
             {job.slab.temple} · {dimStr(job.slab)}
           </div>
         )}
+        {/* Daksh May 2026 round 3 — surface label + carving-head note
+            on every peek row, not just the running CNC card. The
+            vendor needs the full slab identity ("Jagti dodiya thar
+            (mohit)") and any drop-off instructions before they
+            decide what to do with the slab. */}
+        {job.slab?.label && (
+          <div
+            style={{
+              fontSize: 11,
+              color: "var(--text)",
+              marginTop: 3,
+              fontWeight: 600,
+              wordBreak: "break-word",
+            }}
+            title="Slab label (set at cut time)"
+          >
+            🏷 {job.slab.label}
+          </div>
+        )}
+        {job.note && (
+          <div
+            style={{
+              fontSize: 10.5,
+              color: "#475569",
+              marginTop: 3,
+              fontStyle: "italic",
+              lineHeight: 1.35,
+              wordBreak: "break-word",
+            }}
+            title="Note from the carving head when assigning"
+          >
+            “{job.note}”
+          </div>
+        )}
         {job.slab?.stock_location && (
           <div
             style={{
@@ -2953,8 +3040,34 @@ function QueueRow({
             ETA from carving head: {fmtDuration(job.estimated_minutes)}
           </div>
         )}
+        {/* Daksh May 2026 round 3 — slab label surfaced on every row,
+            not just the running CNC card. */}
+        {job.slab?.label && (
+          <div
+            style={{
+              fontSize: 11,
+              color: "var(--text)",
+              marginTop: 3,
+              fontWeight: 600,
+              wordBreak: "break-word",
+            }}
+            title="Slab label (set at cut time)"
+          >
+            🏷 {job.slab.label}
+          </div>
+        )}
         {job.note && (
-          <div style={{ fontSize: 11, color: "var(--text)", marginTop: 4, fontStyle: "italic" }}>
+          <div
+            style={{
+              fontSize: 10.5,
+              color: "#475569",
+              marginTop: 3,
+              fontStyle: "italic",
+              lineHeight: 1.35,
+              wordBreak: "break-word",
+            }}
+            title="Note from the carving head when assigning"
+          >
             “{job.note}”
           </div>
         )}
