@@ -10,6 +10,16 @@ export function getDefaultRouteForRole(role?: AppRole | null) {
     case "owner":
       return "/dashboard";
     case "team_head":
+    // Mig 076 — senior_incharge shares team_head's landing page
+    // (/slabs). Daksh's spec is "all current permissions exactly
+    // like now" + Carving extras; the day-to-day surface stays
+    // Required Sizes, the carving extras are one click away in
+    // the sidebar.  Without this case the role fell into
+    // default → "/login" and ERR_TOO_MANY_REDIRECTS on every
+    // page load (requireAuth bounces to the default route on
+    // role mismatch, then /login bounces back because the user
+    // is signed in).
+    case "senior_incharge":
       return "/slabs";
     case "carving_head":
       // Daksh (May 2026): Total Ready Sizes removed from the
