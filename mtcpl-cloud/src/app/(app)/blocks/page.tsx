@@ -219,21 +219,38 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
   };
   async function fetchSlabsForBlocks(blockIds: string[]): Promise<CutSlabRow[]> {
     if (blockIds.length === 0) return [];
-    const PAGE = 500;
+    const CHUNK = 500; // safe size for the .in() URL list
+    const PAGE = 1000; // PostgREST default row cap per request
     const out: CutSlabRow[] = [];
     // Chunk block-id list to keep .in() query strings safe.
     // No status filter: we want to surface every slab linked to a
     // cut block — including ones still in 'planned' / 'open' if the
     // operator generated them but hasn't moved them along yet.
     // The component already shows status per slab.
-    for (let i = 0; i < blockIds.length; i += PAGE) {
-      const chunk = blockIds.slice(i, i + PAGE);
-      const { data, error: pageErr } = await admin
-        .from("slab_requirements")
-        .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, status, source_block_id")
-        .in("source_block_id", chunk);
-      if (pageErr) throw new Error(pageErr.message);
-      if (data) out.push(...(data as CutSlabRow[]));
+    //
+    // Daksh May 2026 round 2 — the per-chunk query needs its OWN
+    // pagination via .range(). Without it, PostgREST silently caps
+    // each request at 1000 rows. Once cumulative slab count crosses
+    // that, blocks at the tail of the chunk lost slabs randomly
+    // (e.g. MT-B-380 showed "1 cut" in the Marble Cutting Log even
+    // though six slabs existed; Total Ready Sizes + the labels page
+    // both read slab_requirements with their own pagination and
+    // showed all six). Order by id so the pagination is deterministic
+    // and pages don't shuffle rows across requests.
+    for (let i = 0; i < blockIds.length; i += CHUNK) {
+      const chunk = blockIds.slice(i, i + CHUNK);
+      for (let offset = 0; offset < 100_000; offset += PAGE) {
+        const { data, error: pageErr } = await admin
+          .from("slab_requirements")
+          .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, status, source_block_id")
+          .in("source_block_id", chunk)
+          .order("id")
+          .range(offset, offset + PAGE - 1);
+        if (pageErr) throw new Error(pageErr.message);
+        if (!data || data.length === 0) break;
+        out.push(...(data as CutSlabRow[]));
+        if (data.length < PAGE) break;
+      }
     }
     return out;
   }
