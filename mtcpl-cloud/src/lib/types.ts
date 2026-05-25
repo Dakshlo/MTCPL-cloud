@@ -105,6 +105,12 @@ export type Profile = {
    *  so they can assign work to themselves (e.g. Mohit, who runs his
    *  own CNCs AND assigns the carving). */
   can_assign_carving?: boolean;
+  /** Mig 077 — extra vendor IDs this user can act as on /vendor.
+   *  Daksh: while Alkesh is unavailable, Mohit's row carries
+   *  [alkesh-uuid] so the cockpit + the action ownership checks
+   *  treat Mohit as Alkesh too. Empty array (default) means no
+   *  change in behaviour. Set via Settings UI by owner/developer. */
+  managed_vendor_ids?: string[];
 };
 
 export type Vendor = {

@@ -45,7 +45,12 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
     profile.role === "carving_head" || profile.role === "senior_incharge";
 
   // Resolve which vendor we're viewing.
-  // - Vendor role: scoped to their own vendor_id.
+  // - Vendor role: scoped to their own vendor_id, UNLESS their
+  //   profile has managed_vendor_ids set (mig 077). When that
+  //   array is populated and ?vendor_id is in it, the vendor user
+  //   gets to act as that other vendor too — Daksh: "Alkesh is
+  //   unavailable, give Mohit access to Alkesh's cockpit so we can
+  //   manage that." Switcher is offered as a sidebar entry.
   // - Other roles: pick from ?vendor_id=... → cookie (sticky pick) →
   //   first CNC vendor (alphabetical fallback).
   //
@@ -57,8 +62,16 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
   // every load/hold/complete action. The cookie is validated below
   // against actual vendor access — if it points to a deleted or
   // inactive vendor, we drop through to the alphabetical default.
+  const managedVendorIds = profile.managed_vendor_ids ?? [];
   let vendorId: string | null = profile.vendor_id ?? null;
-  if (profile.role !== "vendor") {
+  if (profile.role === "vendor") {
+    // Mig 077 — vendor users with managed_vendor_ids can drop into
+    // those other cockpits via ?vendor_id=. Any other id (including
+    // none) means stay on their own.
+    if (params.vendor_id && managedVendorIds.includes(params.vendor_id)) {
+      vendorId = params.vendor_id;
+    }
+  } else {
     if (params.vendor_id) {
       vendorId = params.vendor_id;
     } else {
@@ -358,11 +371,29 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
 
   const vendorRow = vendor as { id: string; name: string };
   // Drop the current vendor + ensure shape matches client type.
+  //
+  // Mig 077 — for a vendor user (Mohit), narrow the switcher list to
+  // their own vendor_id + each entry in managed_vendor_ids. That way
+  // Mohit's cockpit shows a flip between his cockpit and Alkesh's
+  // (the only two he's allowed to act on), not the org-wide list.
+  const allowedSwitchIds = new Set<string>(
+    profile.role === "vendor"
+      ? [
+          ...(profile.vendor_id ? [profile.vendor_id] : []),
+          ...(profile.managed_vendor_ids ?? []),
+        ]
+      : ((vendorPickerRows as { id: string }[] | null) ?? []).map((v) => v.id),
+  );
   const otherVendors = (
     (vendorPickerRows as { id: string; name: string; vendor_type: string }[] | null) ?? []
   )
-    .filter((v) => v.id !== vendorId)
+    .filter((v) => v.id !== vendorId && allowedSwitchIds.has(v.id))
     .map((v) => ({ id: v.id, name: v.name, vendor_type: v.vendor_type }));
+
+  // Mig 077 — show the switcher to managed-vendor users too, even
+  // though their role is "vendor". The list above is already
+  // scoped to vendors they can act on.
+  const hasManagedVendors = (profile.managed_vendor_ids ?? []).length > 0;
 
   return (
     <VendorCockpitClient
@@ -372,7 +403,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
       held={held}
       recent={recent}
       otherVendors={otherVendors}
-      isStaffView={profile.role !== "vendor"}
+      isStaffView={profile.role !== "vendor" || hasManagedVendors}
       readOnly={readOnlyCockpit}
       toast={params.toast ?? null}
       stoneTypes={stoneTypes ?? []}

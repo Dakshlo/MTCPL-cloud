@@ -1519,7 +1519,15 @@ export async function unloadWithProblemAction(formData: FormData) {
 
   // Vendor ownership check.
   if (profile.role === "vendor") {
-    if (!profile.vendor_id || profile.vendor_id !== item.vendor_id) {
+    // Mig 077 — a vendor user's profile.managed_vendor_ids array
+    // extends ownership to those vendor ids. Used so Mohit can act
+    // on Alkesh's cockpit while Alkesh is unavailable.
+    const managedVendorIds = profile.managed_vendor_ids ?? [];
+    const ownsOrManages =
+      !!profile.vendor_id &&
+      (profile.vendor_id === item.vendor_id ||
+        managedVendorIds.includes(item.vendor_id));
+    if (!ownsOrManages) {
       redirect(`${redirectTo}?toast=Not+your+slab`);
     }
   }
@@ -1727,7 +1735,15 @@ export async function transferReadySlabAction(formData: FormData) {
 
   // Vendor ownership.
   if (profile.role === "vendor") {
-    if (!profile.vendor_id || profile.vendor_id !== item.vendor_id) {
+    // Mig 077 — a vendor user's profile.managed_vendor_ids array
+    // extends ownership to those vendor ids. Used so Mohit can act
+    // on Alkesh's cockpit while Alkesh is unavailable.
+    const managedVendorIds = profile.managed_vendor_ids ?? [];
+    const ownsOrManages =
+      !!profile.vendor_id &&
+      (profile.vendor_id === item.vendor_id ||
+        managedVendorIds.includes(item.vendor_id));
+    if (!ownsOrManages) {
       redirect(`${redirectTo}?toast=Not+your+slab`);
     }
   }
@@ -1850,7 +1866,15 @@ export async function acceptTransferReceiptAction(formData: FormData) {
   };
 
   if (profile.role === "vendor") {
-    if (!profile.vendor_id || profile.vendor_id !== item.vendor_id) {
+    // Mig 077 — a vendor user's profile.managed_vendor_ids array
+    // extends ownership to those vendor ids. Used so Mohit can act
+    // on Alkesh's cockpit while Alkesh is unavailable.
+    const managedVendorIds = profile.managed_vendor_ids ?? [];
+    const ownsOrManages =
+      !!profile.vendor_id &&
+      (profile.vendor_id === item.vendor_id ||
+        managedVendorIds.includes(item.vendor_id));
+    if (!ownsOrManages) {
       redirect(`${redirectTo}?toast=Not+your+slab`);
     }
   }
@@ -1949,7 +1973,15 @@ export async function flagTransferIssueAction(formData: FormData) {
   };
 
   if (profile.role === "vendor") {
-    if (!profile.vendor_id || profile.vendor_id !== item.vendor_id) {
+    // Mig 077 — a vendor user's profile.managed_vendor_ids array
+    // extends ownership to those vendor ids. Used so Mohit can act
+    // on Alkesh's cockpit while Alkesh is unavailable.
+    const managedVendorIds = profile.managed_vendor_ids ?? [];
+    const ownsOrManages =
+      !!profile.vendor_id &&
+      (profile.vendor_id === item.vendor_id ||
+        managedVendorIds.includes(item.vendor_id));
+    if (!ownsOrManages) {
       redirect(`${redirectTo}?toast=Not+your+slab`);
     }
   }
@@ -2213,7 +2245,15 @@ export async function holdSlabOnVendorAction(formData: FormData) {
 
   // Vendor ownership check — same gate as unloadWithProblem.
   if (profile.role === "vendor") {
-    if (!profile.vendor_id || profile.vendor_id !== item.vendor_id) {
+    // Mig 077 — a vendor user's profile.managed_vendor_ids array
+    // extends ownership to those vendor ids. Used so Mohit can act
+    // on Alkesh's cockpit while Alkesh is unavailable.
+    const managedVendorIds = profile.managed_vendor_ids ?? [];
+    const ownsOrManages =
+      !!profile.vendor_id &&
+      (profile.vendor_id === item.vendor_id ||
+        managedVendorIds.includes(item.vendor_id));
+    if (!ownsOrManages) {
       redirect(`${redirectTo}?toast=Not+your+slab`);
     }
   }
@@ -2356,7 +2396,15 @@ export async function reloadHeldSlabAction(formData: FormData) {
   };
 
   if (profile.role === "vendor") {
-    if (!profile.vendor_id || profile.vendor_id !== item.vendor_id) {
+    // Mig 077 — a vendor user's profile.managed_vendor_ids array
+    // extends ownership to those vendor ids. Used so Mohit can act
+    // on Alkesh's cockpit while Alkesh is unavailable.
+    const managedVendorIds = profile.managed_vendor_ids ?? [];
+    const ownsOrManages =
+      !!profile.vendor_id &&
+      (profile.vendor_id === item.vendor_id ||
+        managedVendorIds.includes(item.vendor_id));
+    if (!ownsOrManages) {
       redirect(`${redirectTo}?toast=Not+your+slab`);
     }
   }
@@ -2605,11 +2653,13 @@ export async function reloadTwoHeldSlabsOnMultiHeadAction(formData: FormData) {
 
   // Vendor ownership: same vendor on every row.
   if (profile.role === "vendor") {
-    if (
-      !profile.vendor_id ||
-      profile.vendor_id !== a.vendor_id ||
-      profile.vendor_id !== b.vendor_id
-    ) {
+    // Mig 077 — extend ownership via managed_vendor_ids. Both slabs
+    // must belong to a vendor the actor either IS or manages.
+    const managedVendorIds = profile.managed_vendor_ids ?? [];
+    const allowed = (id: string) =>
+      !!profile.vendor_id &&
+      (profile.vendor_id === id || managedVendorIds.includes(id));
+    if (!allowed(a.vendor_id) || !allowed(b.vendor_id)) {
       redirect(`${redirectTo}?toast=Not+your+slab`);
     }
   }
@@ -2824,7 +2874,15 @@ export async function sendHeldSlabBackToReadyAction(formData: FormData) {
   };
 
   if (profile.role === "vendor") {
-    if (!profile.vendor_id || profile.vendor_id !== item.vendor_id) {
+    // Mig 077 — a vendor user's profile.managed_vendor_ids array
+    // extends ownership to those vendor ids. Used so Mohit can act
+    // on Alkesh's cockpit while Alkesh is unavailable.
+    const managedVendorIds = profile.managed_vendor_ids ?? [];
+    const ownsOrManages =
+      !!profile.vendor_id &&
+      (profile.vendor_id === item.vendor_id ||
+        managedVendorIds.includes(item.vendor_id));
+    if (!ownsOrManages) {
       redirect(`${redirectTo}?toast=Not+your+slab`);
     }
   }
@@ -2913,7 +2971,15 @@ export async function completeHeldSlabAction(formData: FormData) {
   };
 
   if (profile.role === "vendor") {
-    if (!profile.vendor_id || profile.vendor_id !== item.vendor_id) {
+    // Mig 077 — a vendor user's profile.managed_vendor_ids array
+    // extends ownership to those vendor ids. Used so Mohit can act
+    // on Alkesh's cockpit while Alkesh is unavailable.
+    const managedVendorIds = profile.managed_vendor_ids ?? [];
+    const ownsOrManages =
+      !!profile.vendor_id &&
+      (profile.vendor_id === item.vendor_id ||
+        managedVendorIds.includes(item.vendor_id));
+    if (!ownsOrManages) {
       redirect(`${redirectTo}?toast=Not+your+slab`);
     }
   }
