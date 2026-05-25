@@ -22,6 +22,7 @@ export async function createMarbleTruckAction(formData: FormData) {
   const { profile } = await requireAuth([
     "owner",
     "team_head",
+    "senior_incharge",
     "block_slab_entry",
     "block_entry",
   ]);

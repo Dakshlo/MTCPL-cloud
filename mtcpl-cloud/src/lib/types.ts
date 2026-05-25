@@ -57,7 +57,16 @@ export type AppRole =
   //   maintenance, other). No other surface in the app is visible.
   //   Data flows automatically into the carving monthly report's
   //   cost-per-CFT analysis.
-  | "cnc_expense_entry";
+  | "cnc_expense_entry"
+  // Migration 076 — senior_incharge.
+  //
+  // senior_incharge — superset of team_head (Rajesh Kumar's profile).
+  //   Adds Carving Jobs assign + approve ("Carving Done Approval"
+  //   sign-off), Ready Sizes Stock assign, External cut-slab entry,
+  //   read-only Global My Jobs (sees every vendor cockpit; can't
+  //   load / hold / complete). Cutting + Blocks + Settings
+  //   permissions stay identical to team_head.
+  | "senior_incharge";
 
 export type StoneType = "PinkStone" | "WhiteStone";
 

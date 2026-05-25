@@ -27,7 +27,7 @@ function redirectWithToast(path: string, message: string): never {
 }
 
 export async function addBlockAction(formData: FormData) {
-  const { profile } = await requireAuth(["owner", "team_head", "block_slab_entry", "block_entry"]);
+  const { profile } = await requireAuth(["owner", "team_head", "senior_incharge", "block_slab_entry", "block_entry"]);
   const supabase = createAdminSupabaseClient();
 
   // Explicit high limit so the next-code picker sees every block. Without
@@ -110,7 +110,7 @@ export async function addBlockAction(formData: FormData) {
 }
 
 export async function updateBlockAction(formData: FormData) {
-  const { profile } = await requireAuth(["owner", "team_head", "block_slab_entry", "block_entry"]);
+  const { profile } = await requireAuth(["owner", "team_head", "senior_incharge", "block_slab_entry", "block_entry"]);
   const supabase = createAdminSupabaseClient();
 
   const originalId = textValue(formData, "original_id");
@@ -154,7 +154,7 @@ export async function updateBlockAction(formData: FormData) {
 export async function addBlockVendorAction(
   name: string
 ): Promise<{ error: string } | { ok: true; canonicalName: string }> {
-  await requireAuth(["owner", "team_head", "block_slab_entry", "block_entry"]);
+  await requireAuth(["owner", "team_head", "senior_incharge", "block_slab_entry", "block_entry"]);
   const admin = createAdminSupabaseClient(); // bypass RLS — vendors write policy is owner-only
 
   const trimmed = name.trim();
@@ -192,7 +192,7 @@ export async function addBlockVendorAction(
 }
 
 export async function deleteBlockAction(formData: FormData) {
-  const { profile } = await requireAuth(["owner", "team_head", "block_slab_entry", "block_entry"]);
+  const { profile } = await requireAuth(["owner", "team_head", "senior_incharge", "block_slab_entry", "block_entry"]);
   const supabase = createAdminSupabaseClient();
 
   const id = textValue(formData, "delete_target_id") || textValue(formData, "id");
@@ -228,7 +228,7 @@ export async function deleteBlockAction(formData: FormData) {
 }
 
 export async function manualCutBlockAction(formData: FormData) {
-  const { profile } = await requireAuth(["owner", "team_head", "cutting_operator"]);
+  const { profile } = await requireAuth(["owner", "team_head", "senior_incharge", "cutting_operator"]);
   const supabase = createAdminSupabaseClient();
 
   const blockId = textValue(formData, "block_id");
@@ -340,7 +340,7 @@ export async function manualCutBlockAction(formData: FormData) {
 export async function undoMarbleCutAction(
   blockId: string,
 ): Promise<{ success?: boolean; error?: string; resetSlabCount?: number }> {
-  const { profile } = await requireAuth(["owner", "team_head", "developer"]);
+  const { profile } = await requireAuth(["owner", "team_head", "senior_incharge", "developer"]);
   const supabase = createAdminSupabaseClient();
 
   if (!blockId || typeof blockId !== "string") {

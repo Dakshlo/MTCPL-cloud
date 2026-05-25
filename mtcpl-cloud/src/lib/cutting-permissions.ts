@@ -67,7 +67,7 @@ export function canManageOperators(profile: Pick<Profile, "role" | "full_name">)
  * gate; the role list above is the narrow set we trust to even be
  * eligible.
  */
-const CUT_APPROVE_FLAG_ELIGIBLE_ROLES = ["team_head", "carving_head", "crosscheck"] as const;
+const CUT_APPROVE_FLAG_ELIGIBLE_ROLES = ["team_head", "senior_incharge", "carving_head", "crosscheck"] as const;
 
 export function canApproveCuts(
   profile: Pick<Profile, "role" | "can_approve_cuts">,
@@ -107,6 +107,7 @@ export function canAccessCarvingPage(
   if (profile.role === "developer") return true;
   if (profile.role === "owner") return true;
   if (profile.role === "carving_head") return true;
+  if (profile.role === "senior_incharge") return true;
   if (profile.role === "team_head") return true;
   if (profile.can_assign_carving === true) return true;
   return false;
@@ -130,6 +131,7 @@ export function canAddExternalCutSlab(profile: Pick<Profile, "role">): boolean {
   if (profile.role === "developer") return true;
   if (profile.role === "owner") return true;
   if (profile.role === "carving_head") return true;
+  if (profile.role === "senior_incharge") return true;
   if (profile.role === "team_head") return true;
   return false;
 }
@@ -145,6 +147,10 @@ export function canSeeAwaitingReview(
   if (profile.role === "developer") return true;
   if (profile.role === "owner") return true;
   if (profile.role === "carving_head") return true;
+  // Mig 076 — senior_incharge has the "Carving Done Approval"
+  // sign-off responsibility (the rename Daksh asked for; the
+  // server-side query keys stay 'review' for backward compat).
+  if (profile.role === "senior_incharge") return true;
   return false;
 }
 
@@ -164,6 +170,7 @@ export function canReadRequiredSizes(
   if (profile.role === "developer") return true;
   if (profile.role === "owner") return true;
   if (profile.role === "team_head") return true;
+  if (profile.role === "senior_incharge") return true;
   if (profile.role === "slab_entry") return true;
   if (profile.role === "block_slab_entry") return true;
   return false;

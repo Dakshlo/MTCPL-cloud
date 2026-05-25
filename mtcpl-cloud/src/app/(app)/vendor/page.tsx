@@ -25,9 +25,24 @@ type SearchParams = Promise<{ vendor_id?: string; toast?: string }>;
 export default async function VendorPortalPage({ searchParams }: { searchParams: SearchParams }) {
   // Vendor portal also accessible by carving_head + dev/owner so they
   // can see what their vendors are doing without role-switching.
-  const { profile } = await requireAuth(["vendor", "developer", "owner", "carving_head"]);
+  const { profile } = await requireAuth([
+    "vendor",
+    "developer",
+    "owner",
+    "carving_head",
+    "senior_incharge",
+  ]);
   const params = await searchParams;
   const admin = createAdminSupabaseClient();
+
+  // Daksh May 2026 round 2 — carving_head + senior_incharge see /vendor
+  // as read-only ("Global My Jobs" oversight view). They can browse the
+  // floor + drop-into different vendors via the picker, but action
+  // buttons are hidden. Owner stays write-capable (dad uses /vendor for
+  // occasional intervention); the vendor themselves keeps full access
+  // to their own cockpit.
+  const readOnlyCockpit =
+    profile.role === "carving_head" || profile.role === "senior_incharge";
 
   // Resolve which vendor we're viewing.
   // - Vendor role: scoped to their own vendor_id.
@@ -358,6 +373,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
       recent={recent}
       otherVendors={otherVendors}
       isStaffView={profile.role !== "vendor"}
+      readOnly={readOnlyCockpit}
       toast={params.toast ?? null}
       stoneTypes={stoneTypes ?? []}
     />

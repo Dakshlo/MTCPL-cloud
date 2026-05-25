@@ -724,7 +724,7 @@ export async function deleteVendorAction(formData: FormData) {
 // ── Carving job lifecycle ───────────────────────────────────────────
 
 export async function assignCarvingJobAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner", "carving_head"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge"]);
   const admin = createAdminSupabaseClient();
 
   const slabId = txt(formData, "slab_id");
@@ -869,7 +869,7 @@ export async function assignCarvingJobAction(formData: FormData) {
 // are KEPT — the vendor gets a partial batch. Toast surfaces the
 // count of successes vs failures so the head can retry the rest.
 export async function assignCarvingJobsBatchAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner", "carving_head"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge"]);
   const admin = createAdminSupabaseClient();
 
   // slab_ids is a JSON-stringified array (form sends "[a,b,c]").
@@ -3179,7 +3179,7 @@ export async function resolveMaintenanceAction(formData: FormData) {
 }
 
 export async function approveCarvingJobAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner", "carving_head"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge"]);
   const admin = createAdminSupabaseClient();
   const jobId = txt(formData, "job_id");
   const notes = txt(formData, "notes") || null;
@@ -3274,7 +3274,7 @@ export async function approveCarvingJobAction(formData: FormData) {
 }
 
 export async function markReadyToDispatchAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner", "carving_head"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge"]);
   const admin = createAdminSupabaseClient();
   const jobId = txt(formData, "job_id");
   const location = txt(formData, "location");
@@ -3329,7 +3329,7 @@ export async function markReadyToDispatchAction(formData: FormData) {
 }
 
 export async function updateCarvingLocationAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner", "carving_head"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge"]);
   const admin = createAdminSupabaseClient();
   const jobId = txt(formData, "job_id");
   const location = txt(formData, "location");
@@ -3345,7 +3345,7 @@ export async function updateCarvingLocationAction(formData: FormData) {
 }
 
 export async function rejectCarvingJobAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner", "carving_head"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge"]);
   const admin = createAdminSupabaseClient();
   const jobId = txt(formData, "job_id");
   const notes = txt(formData, "notes");
@@ -3379,7 +3379,7 @@ export async function rejectCarvingJobAction(formData: FormData) {
 // detail page. See migration 014 for the schema change.
 
 export async function cancelCarvingJobAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner", "carving_head"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge"]);
   const admin = createAdminSupabaseClient();
   const jobId = txt(formData, "job_id");
 
@@ -3925,7 +3925,7 @@ export async function acknowledgeReceiptBatchAction(formData: FormData) {
 // actually needs a lathe. Only allowed while the job is still in
 // the queue or actively carving.
 export async function updateRequiresMachineTypeAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner", "carving_head"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge"]);
   const admin = createAdminSupabaseClient();
 
   const carvingItemId = txt(formData, "carving_item_id");
@@ -4167,7 +4167,7 @@ export async function transferCarvingJobAction(formData: FormData) {
 // Approve / Reject reuse the existing CNC-side actions.
 
 export async function markCarvingStartedManuallyAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner", "carving_head"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge"]);
   const admin = createAdminSupabaseClient();
 
   const carvingItemId = txt(formData, "carving_item_id");
@@ -4222,7 +4222,7 @@ export async function markCarvingStartedManuallyAction(formData: FormData) {
 }
 
 export async function markCarvingCompleteManuallyAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner", "carving_head"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge"]);
   const admin = createAdminSupabaseClient();
 
   const carvingItemId = txt(formData, "carving_item_id");
@@ -4294,7 +4294,7 @@ export type JobEvent = {
 };
 
 export async function getJobEvents(jobId: string): Promise<JobEvent[]> {
-  await requireAuth(["developer", "owner", "carving_head"]);
+  await requireAuth(["developer", "owner", "carving_head", "senior_incharge"]);
   const admin = createAdminSupabaseClient();
 
   const { data: events } = await admin

@@ -23,7 +23,7 @@ function toast(path: string, msg: string): never {
 }
 
 export async function addSlabAction(formData: FormData) {
-  const { profile } = await requireAuth(["owner", "team_head", "slab_entry"]);
+  const { profile } = await requireAuth(["owner", "team_head", "senior_incharge", "slab_entry"]);
   const supabase = createAdminSupabaseClient();
 
   const temple = text(formData, "temple");
@@ -107,7 +107,7 @@ export async function addSlabAction(formData: FormData) {
 }
 
 export async function updateSlabAction(formData: FormData) {
-  const { profile } = await requireAuth(["owner", "team_head", "slab_entry"]);
+  const { profile } = await requireAuth(["owner", "team_head", "senior_incharge", "slab_entry"]);
   const supabase = createAdminSupabaseClient();
 
   const id = text(formData, "id");
@@ -141,7 +141,7 @@ export async function updateSlabAction(formData: FormData) {
 }
 
 export async function deleteSlabAction(formData: FormData) {
-  const { profile } = await requireAuth(["owner", "team_head", "slab_entry", "block_slab_entry"]);
+  const { profile } = await requireAuth(["owner", "team_head", "senior_incharge", "slab_entry", "block_slab_entry"]);
   const supabase = createAdminSupabaseClient();
 
   const id = text(formData, "id");
@@ -183,7 +183,7 @@ export async function deleteSlabAction(formData: FormData) {
 // ────────────────────────────────────────────────────────────────────────────
 
 export async function addSlabLabelAction(name: string): Promise<{ error: string } | undefined> {
-  await requireAuth(["owner", "team_head", "slab_entry", "block_slab_entry"]);
+  await requireAuth(["owner", "team_head", "senior_incharge", "slab_entry", "block_slab_entry"]);
   const admin = createAdminSupabaseClient();
 
   const trimmed = name.trim();
@@ -211,7 +211,7 @@ export async function addSlabLabelAction(name: string): Promise<{ error: string 
 
 /** Delete multiple slabs that belong to the SAME batch_id. */
 export async function bulkDeleteSlabsAction(formData: FormData) {
-  const { profile } = await requireAuth(["owner", "team_head", "slab_entry", "block_slab_entry"]);
+  const { profile } = await requireAuth(["owner", "team_head", "senior_incharge", "slab_entry", "block_slab_entry"]);
   const supabase = createAdminSupabaseClient();
 
   const batchId = text(formData, "batch_id");
@@ -278,7 +278,7 @@ export async function bulkDeleteSlabsAction(formData: FormData) {
 
 /** Bulk-update fields on multiple slabs that share ONE batch_id. */
 export async function bulkUpdateSlabsAction(formData: FormData) {
-  const { profile } = await requireAuth(["owner", "team_head", "slab_entry", "block_slab_entry"]);
+  const { profile } = await requireAuth(["owner", "team_head", "senior_incharge", "slab_entry", "block_slab_entry"]);
   const supabase = createAdminSupabaseClient();
 
   const batchId = text(formData, "batch_id");

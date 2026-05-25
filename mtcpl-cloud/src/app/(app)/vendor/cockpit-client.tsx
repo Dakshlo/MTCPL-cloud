@@ -227,6 +227,7 @@ export function VendorCockpitClient({
   recent,
   otherVendors,
   isStaffView,
+  readOnly = false,
   toast,
   stoneTypes,
 }: {
@@ -248,6 +249,12 @@ export function VendorCockpitClient({
   }>;
   otherVendors: Vendor[];
   isStaffView: boolean;
+  /** Mig 076 — TRUE when carving_head / senior_incharge is viewing as
+   *  a "Global My Jobs" oversight tour. Hides every action button (Load,
+   *  Hold, Mark received, Problem/transfer, Maintenance, Complete +
+   *  every modal CTA). Read-only-by-construction so the role can't
+   *  intervene from this surface, only observe. */
+  readOnly?: boolean;
   toast: string | null;
   /** Stone palette for the 3D slab thumbs on machine cards + queue rows. */
   stoneTypes: StoneTypeDef[];
@@ -360,7 +367,10 @@ export function VendorCockpitClient({
   }, [queue]);
 
   return (
-    <div style={{ paddingBottom: 80 }}>
+    <div
+      className={readOnly ? "cockpit-readonly" : undefined}
+      style={{ paddingBottom: 80 }}
+    >
       {/* Daksh May 2026 — floating sidebar toggle. Cockpit hides the
           global sidebar by default for a focused full-screen feel,
           but Mohit (carving-head-vendor) needs to reach /carving +
@@ -368,6 +378,48 @@ export function VendorCockpitClient({
           the body class + sessionStorage so the same component can
           live on /carving too and keep state in sync. */}
       <CockpitSidebarToggle />
+
+      {/* Mig 076 — read-only oversight banner. Shown to carving_head /
+          senior_incharge when they're viewing the global cockpit. The
+          scoped CSS below disables every <form> submit button (Mark
+          received, Load, Hold, Problem, Complete, Maintenance, etc.)
+          and visually dims them so the role can browse the floor +
+          flip vendors but can't act. Peek toggles + the vendor picker
+          are <button type="button"> and stay enabled — that's
+          intentional, they're navigation, not actions. */}
+      {readOnly && (
+        <>
+          <style>{`
+            .cockpit-readonly form button[type="submit"],
+            .cockpit-readonly form input[type="submit"],
+            .cockpit-readonly form button:not([type]) {
+              pointer-events: none !important;
+              opacity: 0.4 !important;
+              filter: grayscale(70%) !important;
+              cursor: not-allowed !important;
+            }
+          `}</style>
+          <div
+            style={{
+              padding: "10px 14px",
+              marginBottom: 12,
+              background: "rgba(59,130,246,0.08)",
+              border: "1px solid rgba(59,130,246,0.35)",
+              borderRadius: 8,
+              color: "#1e40af",
+              fontSize: 13,
+              fontWeight: 600,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <span style={{ fontSize: 16 }}>👁</span>
+            Oversight view — actions disabled. Use the vendor switcher above to
+            tour other vendors&apos; cockpits.
+          </div>
+        </>
+      )}
 
       {/* Toast */}
       {toast && (
@@ -856,7 +908,7 @@ export function VendorCockpitClient({
       )}
       {/* Mig 069 — Reload-from-hold picker. Defaults to held_from
           machine; vendor can override to any compatible idle CNC. */}
-      {reloadFor && (
+      {reloadFor && !readOnly && (
         <ReloadHeldModal
           held={reloadFor}
           machines={machines}
@@ -865,7 +917,12 @@ export function VendorCockpitClient({
         />
       )}
       {/* Mig 069 — Mark-done-from-hold. Tiny form with temp location. */}
-      {completeHeldFor && (
+      {/* Mig 076 — readOnly mode (carving_head / senior_incharge
+          oversight tour) suppresses every modal that triggers an
+          action. Click handlers may still fire and set state, but
+          the modal never mounts so the user can't submit. Machine
+          History modal stays open in readOnly (it's pure view). */}
+      {completeHeldFor && !readOnly && (
         <CompleteHeldModal
           held={completeHeldFor}
           stoneTypes={stoneTypes}
@@ -873,7 +930,7 @@ export function VendorCockpitClient({
         />
       )}
       {/* Daksh May 2026 — pair-reload picker (2-head CNCs only). */}
-      {reloadPairFor && (
+      {reloadPairFor && !readOnly && (
         <ReloadPairModal
           pair={reloadPairFor}
           machines={machines}
@@ -883,7 +940,7 @@ export function VendorCockpitClient({
       )}
 
       {/* ── Modals ── */}
-      {loadFor && (
+      {loadFor && !readOnly && (
         <LoadModal
           machine={loadFor.machine}
           machines={machines}
@@ -894,20 +951,20 @@ export function VendorCockpitClient({
           onClose={() => setLoadFor(null)}
         />
       )}
-      {completeFor && completeFor.current_jobs[0] && (
+      {completeFor && completeFor.current_jobs[0] && !readOnly && (
         <CompleteModal
           machine={completeFor}
           job={completeFor.current_jobs[0]}
           onClose={() => setCompleteFor(null)}
         />
       )}
-      {maintenanceFor && (
+      {maintenanceFor && !readOnly && (
         <MaintenanceModal machine={maintenanceFor} onClose={() => setMaintenanceFor(null)} />
       )}
       {historyFor && (
         <MachineHistoryModal machine={historyFor} onClose={() => setHistoryFor(null)} />
       )}
-      {editLocFor && (
+      {editLocFor && !readOnly && (
         <EditLocationModal
           itemId={editLocFor.id}
           slabId={editLocFor.slab_id}
@@ -915,7 +972,7 @@ export function VendorCockpitClient({
           onClose={() => setEditLocFor(null)}
         />
       )}
-      {problemFor && (
+      {problemFor && !readOnly && (
         <ProblemModal
           job={problemFor}
           otherVendorsForTransfer={otherVendors}
@@ -923,7 +980,7 @@ export function VendorCockpitClient({
           onClose={() => setProblemFor(null)}
         />
       )}
-      {holdFor && (
+      {holdFor && !readOnly && (
         <HoldModal job={holdFor} onClose={() => setHoldFor(null)} />
       )}
     </div>

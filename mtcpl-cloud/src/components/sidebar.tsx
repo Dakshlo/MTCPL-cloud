@@ -111,21 +111,21 @@ const navEntries: NavEntry[] = [
     href: "/blocks",
     label: "Blocks",
     icon: "▣",
-    roles: ["developer", "owner", "team_head", "block_slab_entry", "block_entry"],
+    roles: ["developer", "owner", "team_head", "senior_incharge", "block_slab_entry", "block_entry"],
     department: "production",
   },
   {
     href: "/slabs",
     label: "Required Sizes",
     icon: "▤",
-    roles: ["developer", "owner", "team_head", "slab_entry", "block_slab_entry"],
+    roles: ["developer", "owner", "team_head", "senior_incharge", "slab_entry", "block_slab_entry"],
     department: "production",
   },
   {
     href: "/slabs/view",
     label: "Plan Generator",
     icon: "⌘",
-    roles: ["developer", "owner", "team_head"],
+    roles: ["developer", "owner", "team_head", "senior_incharge"],
     department: "production",
   },
   // — Section break before workshop / execution items —
@@ -135,14 +135,14 @@ const navEntries: NavEntry[] = [
     // Mig 060 — cnc_expense_entry sees the WORKSHOP banner so its
     // "Cutter Expenses" item renders under the right header (same
     // person handles CNC + cutter expense entry per Daksh's spec).
-    roles: ["developer", "owner", "team_head", "cutting_operator", "cnc_expense_entry"],
+    roles: ["developer", "owner", "team_head", "senior_incharge", "cutting_operator", "cnc_expense_entry"],
     department: "production",
   },
   {
     href: "/cutting",
     label: "Cutting",
     icon: "✂",
-    roles: ["developer", "owner", "cutting_operator", "team_head"],
+    roles: ["developer", "owner", "cutting_operator", "team_head", "senior_incharge"],
     department: "production",
   },
   {
@@ -154,7 +154,7 @@ const navEntries: NavEntry[] = [
     href: "/slabs/ready",
     label: "Total Ready Sizes",
     icon: "✦",
-    roles: ["developer", "owner", "team_head", "block_slab_entry"],
+    roles: ["developer", "owner", "team_head", "senior_incharge", "block_slab_entry"],
     department: "production",
   },
   {
@@ -176,14 +176,15 @@ const navEntries: NavEntry[] = [
     // so its single nav item ("CNC Expenses") renders under the
     // right banner. No other carving entries are visible to that
     // role (they're each role-gated independently).
-    roles: ["developer", "owner", "vendor", "carving_head", "cnc_expense_entry"],
+    roles: ["developer", "owner", "vendor", "carving_head", "senior_incharge", "cnc_expense_entry"],
     department: "production",
   },
   {
     href: "/slabs/ready/for-carving",
     label: "Ready Sizes Stock",
     icon: "📦",
-    roles: ["developer", "owner", "carving_head"],
+    // Mig 076 — senior_incharge also lands here for the assign flow.
+    roles: ["developer", "owner", "carving_head", "senior_incharge"],
     // Mig 074 — also visible to carving-head-lite (vendors who
     // assign their own work, e.g. Mohit). Daksh May 2026 round 2 —
     // swapped from Required Sizes to this page in Mohit's sidebar:
@@ -200,7 +201,10 @@ const navEntries: NavEntry[] = [
     // use the "+ External cut slab" data-entry affordance. He can
     // browse the page but his Assign clicks toast (assign actions
     // stay gated to dev/owner/carving_head).
-    roles: ["developer", "owner", "carving_head", "team_head"],
+    //
+    // Mig 076 — senior_incharge has full carving access (assign +
+    // approve Awaiting Review, now "Carving Done Approval").
+    roles: ["developer", "owner", "carving_head", "senior_incharge", "team_head"],
     // Mig 074 — also visible to carving-head-lite. The page itself
     // hides the Awaiting Review tab for flag-only holders so they
     // don't sign off on their own work.
@@ -211,7 +215,7 @@ const navEntries: NavEntry[] = [
     href: "/dispatch",
     label: "Dispatch",
     icon: "🚚",
-    roles: ["developer", "owner", "carving_head"],
+    roles: ["developer", "owner", "carving_head", "senior_incharge"],
     department: "production",
   },
   {
@@ -249,13 +253,19 @@ const navEntries: NavEntry[] = [
     label: "More",
     icon: "⋯",
     department: "production",
-    roles: ["developer", "owner", "vendor", "slab_transfer"],
+    // Mig 076 — carving_head + senior_incharge added so the
+    // Global My Jobs entry below shows up for them too (read-only
+    // oversight tour, gated by readOnlyCockpit on the /vendor page).
+    roles: ["developer", "owner", "vendor", "slab_transfer", "carving_head", "senior_incharge"],
     children: [
       {
         href: "/vendor",
         label: "My Jobs",
         icon: "👤",
-        roles: ["developer", "owner", "vendor"],
+        // Mig 076 — carving_head + senior_incharge see this entry but
+        // /vendor renders read-only for them (no Load / Hold /
+        // Complete / Problem buttons; oversight tour only).
+        roles: ["developer", "owner", "vendor", "carving_head", "senior_incharge"],
         department: "production",
       },
       {
@@ -473,6 +483,10 @@ function roleLabel(role: AppRole): string {
     // CNC expenses. Display label only; DB enum stays
     // `cnc_expense_entry`.
     cnc_expense_entry: "EXPENSES ENTRY",
+    // Mig 076 — Rajesh's expanded role. Reads as a star above the
+    // regular team head pill so the sidebar instantly signals the
+    // extra Carving authority.
+    senior_incharge: "SENIOR INCHARGE ★",
   };
   return labels[role] ?? role.replace(/_/g, " ").toUpperCase();
 }
@@ -901,7 +915,13 @@ export function Sidebar({
         <div
           className="sidebar-user-role"
           style={
-            role === "team_head" ? { color: "#7eaadc", fontWeight: 700 } : undefined
+            role === "team_head"
+              ? { color: "#7eaadc", fontWeight: 700 }
+              : role === "senior_incharge"
+              ? // Mig 076 — emerald + extra weight to stand out from
+                // TEAM HEAD's light blue. Rajesh-tier badge.
+                { color: "#34d399", fontWeight: 800, letterSpacing: "0.04em" }
+              : undefined
           }
         >
           {roleLabel(role)}

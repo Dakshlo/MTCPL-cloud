@@ -437,10 +437,14 @@ export default async function CarvingDashboardPage({
           [
             { key: "unassigned", label: "Unassigned", count: counts.unassigned },
             { key: "active", label: "Active", count: counts.active },
-            // Mig 074 — hide Awaiting Review for vendor-with-flag
+            // Mig 074 — hide Carving Done Approval for vendor-with-flag
             // users; they don't sign off on their own work.
+            // Mig 076 — renamed from "Awaiting Review" per Daksh:
+            // the slabs aren't awaiting anything, carving is done +
+            // needs sign-off. Server key stays 'review' so bookmarks
+            // keep working.
             ...(reviewAccess
-              ? [{ key: "review" as const, label: "Awaiting Review", count: counts.review }]
+              ? [{ key: "review" as const, label: "Carving Done Approval", count: counts.review }]
               : []),
             { key: "done", label: "Carving Done", count: counts.done },
           ] as Array<{ key: Tab; label: string; count: number }>

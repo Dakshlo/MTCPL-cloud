@@ -485,15 +485,26 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             })} />
 
             <span className="role-pill" style={
-              profile.role === "developer" ? { background: "var(--gold)", color: "#fff", fontWeight: 700 } :
-              profile.role === "owner"     ? { background: "#1a1a1a", color: "#fff", fontWeight: 700 } :
-              profile.role === "team_head" ? { background: "#1e3a5f", color: "#fff", fontWeight: 700 } :
+              profile.role === "developer"       ? { background: "var(--gold)", color: "#fff", fontWeight: 700 } :
+              profile.role === "owner"           ? { background: "#1a1a1a", color: "#fff", fontWeight: 700 } :
+              profile.role === "team_head"       ? { background: "#1e3a5f", color: "#fff", fontWeight: 700 } :
+              // Mig 076 — emerald + soft glow so Rajesh's pill reads
+              // as a tier above TEAM HEAD without clashing with the
+              // gold (developer) or black (owner) badges.
+              profile.role === "senior_incharge" ? {
+                background: "linear-gradient(135deg, #047857 0%, #10b981 100%)",
+                color: "#fff",
+                fontWeight: 800,
+                letterSpacing: "0.04em",
+                boxShadow: "0 0 0 1px rgba(255,255,255,0.18) inset, 0 1px 3px rgba(16,185,129,0.35)",
+              } :
               {}
             }>
               {({
                 developer: "DEVELOPER",
                 owner: "OWNER",
                 team_head: "TEAM HEAD",
+                senior_incharge: "SENIOR INCHARGE ★",
                 block_slab_entry: "BLOCK+SLAB ENTRY",
                 slab_entry: "SLAB ENTRY",
                 block_entry: "BLOCK ENTRY",
@@ -593,14 +604,18 @@ function buildTopbarTaskItems(counts: {
       department: "production",
     });
   }
-  // Daksh May 2026 round 2 — Carving Awaiting Review queue. Owner /
-  // developer / carving_head only (excludes can_assign_carving
-  // holders — they don't sign off on their own work).
+  // Daksh May 2026 round 2 — "Carving Done Approval" queue (Mig 076
+  // rename — was "Awaiting Review" but Daksh found that name
+  // confusing; the slabs aren't awaiting anything, the carving is
+  // done and needs sign-off). Server query key stays ?tab=review
+  // so any bookmarked URLs keep working. Audience: owner / developer
+  // / carving_head / senior_incharge — excludes can_assign_carving
+  // holders (they don't sign off on their own work).
   if (counts.awaitingReviewBadge !== null) {
     items.push({
       id: "awaiting-review",
       href: "/carving?tab=review",
-      label: "Awaiting Review",
+      label: "Carving Done Approval",
       description: "Completed carvings awaiting sign-off",
       count: counts.awaitingReviewBadge,
       icon: "🎨",

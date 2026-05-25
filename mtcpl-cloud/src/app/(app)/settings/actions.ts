@@ -22,7 +22,7 @@ function adjustHex(hex: string, factor: number): string {
 }
 
 export async function addStoneTypeAction(formData: FormData) {
-  await requireAuth(["owner", "team_head", "developer"]);
+  await requireAuth(["owner", "team_head", "senior_incharge", "developer"]);
   const supabase = await createServerSupabaseClient();
 
   const name = text(formData, "name").replace(/\s+/g, "");
@@ -56,7 +56,7 @@ export async function addStoneTypeAction(formData: FormData) {
  *  is attached. The UI enforces this, but the action enforces it too
  *  in case of a direct POST. */
 export async function setStoneCategoryAction(formData: FormData) {
-  await requireAuth(["owner", "team_head", "developer"]);
+  await requireAuth(["owner", "team_head", "senior_incharge", "developer"]);
   const supabase = await createServerSupabaseClient();
 
   const id = text(formData, "id");
@@ -101,7 +101,7 @@ export async function setStoneCategoryAction(formData: FormData) {
 }
 
 export async function deleteStoneTypeAction(formData: FormData) {
-  await requireAuth(["owner", "team_head", "developer"]);
+  await requireAuth(["owner", "team_head", "senior_incharge", "developer"]);
   const supabase = await createServerSupabaseClient();
 
   const id = text(formData, "id");
@@ -134,7 +134,7 @@ export async function deleteStoneTypeAction(formData: FormData) {
 // ── Temple Actions ───────────────────────────────────────────────────────────
 
 export async function addTempleAction(formData: FormData) {
-  await requireAuth(["owner", "team_head"]);
+  await requireAuth(["owner", "team_head", "senior_incharge"]);
   const supabase = await createServerSupabaseClient();
 
   const name = text(formData, "name");
@@ -152,7 +152,7 @@ export async function addTempleAction(formData: FormData) {
 }
 
 export async function updateTempleAction(formData: FormData) {
-  await requireAuth(["owner", "team_head"]);
+  await requireAuth(["owner", "team_head", "senior_incharge"]);
   const supabase = await createServerSupabaseClient();
 
   const id = text(formData, "id");
@@ -179,7 +179,7 @@ export async function updateTempleAction(formData: FormData) {
 }
 
 export async function deleteTempleAction(formData: FormData) {
-  await requireAuth(["owner", "team_head"]);
+  await requireAuth(["owner", "team_head", "senior_incharge"]);
   const supabase = await createServerSupabaseClient();
 
   const id = text(formData, "id");
@@ -205,7 +205,7 @@ export async function deleteTempleAction(formData: FormData) {
 }
 
 export async function updateUserAction(formData: FormData) {
-  const { profile: currentUser } = await requireAuth(["owner", "team_head", "developer"]);
+  const { profile: currentUser } = await requireAuth(["owner", "team_head", "senior_incharge", "developer"]);
   const admin = createAdminSupabaseClient();
 
   const id = text(formData, "id");
@@ -241,6 +241,10 @@ export async function updateUserAction(formData: FormData) {
   //   sign-off: accountant, accountant_star, crosscheck,
   //   cnc_expense_entry, storekeeper).
   const RESTRICTED_ASSIGNABLE = [
+    // Mig 076 — owner can promote to senior_incharge (Rajesh-tier).
+    // team_head cannot — a peer shouldn't be able to elevate another
+    // team_head over themselves. Handled below by a tighter gate.
+    "senior_incharge",
     "team_head",
     "carving_head",
     "block_slab_entry",
@@ -251,9 +255,17 @@ export async function updateUserAction(formData: FormData) {
     "slab_transfer",
   ];
   const role = requestedRole;
-  if (currentUser.role === "owner" || currentUser.role === "team_head") {
+  if (currentUser.role === "owner" || currentUser.role === "team_head" || currentUser.role === "senior_incharge") {
     if (!RESTRICTED_ASSIGNABLE.includes(requestedRole)) {
       redirect("/settings?toast=Cannot+assign+that+role");
+    }
+    // Senior_incharge is owner-promoted only; team_head can pick
+    // every other role but not lift someone to senior-tier.
+    if (
+      requestedRole === "senior_incharge" &&
+      currentUser.role === "team_head"
+    ) {
+      redirect("/settings?toast=Only+owner+can+promote+to+Senior+Incharge");
     }
   }
   // developer: no restriction

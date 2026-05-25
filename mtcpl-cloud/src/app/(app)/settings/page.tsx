@@ -27,6 +27,10 @@ import { UserRoleVendorPicker } from "./user-role-vendor-picker";
 const UI_ROLES_ALL = [
   { value: "developer",        label: "DEVELOPER" },
   { value: "owner",            label: "OWNER" },
+  // Mig 076 — senior_incharge listed BETWEEN owner and team_head so
+  // the visual hierarchy in the role picker matches the actual
+  // authority chain (Rajesh sits a tier above the regular team_head).
+  { value: "senior_incharge",  label: "SENIOR INCHARGE ★" },
   { value: "team_head",        label: "TEAM HEAD" },
   { value: "carving_head",     label: "CARVING HEAD" },
   { value: "block_slab_entry", label: "BLOCK+SLAB ENTRY" },
@@ -49,8 +53,10 @@ const UI_ROLES_ALL = [
   { value: "cnc_expense_entry", label: "EXPENSES ENTRY" },
 ];
 
-// Roles owner/team-head can assign — cannot promote to owner or developer
+// Roles owner/team-head can assign — cannot promote to owner or developer.
+// Mig 076 — owner can also assign senior_incharge (Rajesh-tier).
 const UI_ROLES_PLANNER = [
+  { value: "senior_incharge",  label: "SENIOR INCHARGE ★" },
   { value: "team_head",        label: "TEAM HEAD" },
   { value: "carving_head",     label: "CARVING HEAD" },
   { value: "block_slab_entry", label: "BLOCK+SLAB ENTRY" },
@@ -68,7 +74,11 @@ const ROLE_ACCESS: Record<string, string[]> = {
   developer:        ["Dashboard", "Blocks", "Slabs", "Plan Generator", "Cutting", "Settings"],
   owner:            ["Dashboard", "Blocks", "Slabs", "Plan Generator", "Cutting", "Settings"],
   team_head:        ["Blocks", "Slabs", "Plan Generator", "Cutting", "Settings"],
-  carving_head:     ["Ready Sizes", "Carving Jobs", "Slab Transfer", "Dispatch"],
+  // Mig 076 — Senior Incharge = team_head's surfaces PLUS the full
+  // carving stack (Ready Sizes Stock, Carving Jobs, Carving Done
+  // Approval) AND read-only Global My Jobs.
+  senior_incharge:  ["Blocks", "Slabs", "Plan Generator", "Cutting", "Ready Sizes Stock", "Carving Jobs", "Carving Done Approval", "My Jobs (read-only)", "Settings"],
+  carving_head:     ["Ready Sizes", "Carving Jobs", "Slab Transfer", "Dispatch", "My Jobs (read-only)"],
   block_slab_entry: ["Dashboard", "Blocks", "Slabs"],
   slab_entry:       ["Dashboard", "Slabs"],
   block_entry:      ["Blocks"],
@@ -113,7 +123,7 @@ function fmtAuditDate(iso: string) {
 }
 
 export default async function SettingsPage() {
-  const { profile: currentUser } = await requireAuth(["owner", "team_head", "developer"]);
+  const { profile: currentUser } = await requireAuth(["owner", "team_head", "senior_incharge", "developer"]);
   const admin = createAdminSupabaseClient();
 
   // System Status — load global + per-department flags (Migration 036).
@@ -373,10 +383,14 @@ export default async function SettingsPage() {
                 const role = user.role as AppRole;
                 const isSelf = user.id === currentUser.id;
                 const isDeveloper = role === "developer";
-                // Lock: developer rows for everyone; owner rows for team_head
+                // Lock: developer rows for everyone; owner rows for
+                // team_head / senior_incharge; senior_incharge rows
+                // for team_head (peer can't demote a senior). Owner +
+                // dev can edit anyone (except dev-by-non-dev).
                 const isLocked =
                   (isDeveloper && !isSelf) ||
-                  (role === "owner" && currentUser.role === "team_head");
+                  (role === "owner" && currentUser.role !== "developer" && currentUser.role !== "owner") ||
+                  (role === "senior_incharge" && currentUser.role === "team_head");
 
                 // Locked rows: render as plain div (not expandable)
                 if (isLocked) {
@@ -392,6 +406,15 @@ export default async function SettingsPage() {
                           <span className="role-pill" style={
                             isDeveloper ? { background: "var(--gold)", color: "#fff", fontWeight: 700 } :
                             role === "owner" ? { background: "#1a1a1a", color: "#fff", fontWeight: 700 } :
+                            role === "senior_incharge" ? {
+                              // Mig 076 — emerald gradient. See note on
+                              // the editable row below for full rationale.
+                              background: "linear-gradient(135deg, #047857 0%, #10b981 100%)",
+                              color: "#fff",
+                              fontWeight: 800,
+                              letterSpacing: "0.04em",
+                              boxShadow: "0 0 0 1px rgba(255,255,255,0.18) inset, 0 1px 3px rgba(16,185,129,0.35)",
+                            } :
                             role === "team_head" ? { background: "#1e3a5f", color: "#fff", fontWeight: 700 } : {}
                           }>
                             {roleLabel(role)}
@@ -424,6 +447,16 @@ export default async function SettingsPage() {
                           style={
                             isDeveloper ? { background: "var(--gold)", color: "#fff", fontWeight: 700 } :
                             role === "owner" ? { background: "#1a1a1a", color: "#fff", fontWeight: 700 } :
+                            role === "senior_incharge" ? {
+                              // Mig 076 — emerald gradient + subtle glow.
+                              // Rajesh-tier: visually one rank above the
+                              // dark-blue TEAM HEAD pill.
+                              background: "linear-gradient(135deg, #047857 0%, #10b981 100%)",
+                              color: "#fff",
+                              fontWeight: 800,
+                              letterSpacing: "0.04em",
+                              boxShadow: "0 0 0 1px rgba(255,255,255,0.18) inset, 0 1px 3px rgba(16,185,129,0.35)",
+                            } :
                             role === "team_head" ? { background: "#1e3a5f", color: "#fff", fontWeight: 700 } :
                             {}
                           }

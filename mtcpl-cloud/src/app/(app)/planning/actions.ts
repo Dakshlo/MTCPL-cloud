@@ -1352,7 +1352,7 @@ export async function approvePlanAction(formData: FormData) {
   const slabIdsParam = (formData.get("slab_ids") as string | null) ?? "";
 
   try {
-    const { profile } = await requireAuth(["owner", "team_head"]);
+    const { profile } = await requireAuth(["owner", "team_head", "senior_incharge"]);
     const supabase = createAdminSupabaseClient();
 
     const kerfMm = Number(formData.get("kerf_mm"));
