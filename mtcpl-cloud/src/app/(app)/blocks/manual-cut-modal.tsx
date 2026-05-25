@@ -93,15 +93,40 @@ export function ManualCutModal({
 
   const temples = Array.from(new Set(stoneNarrowed.map((s) => s.temple ?? "").filter(Boolean))).sort();
 
+  // Daksh May 2026 round 3 — dimension search on the manual cut
+  // picker. Type "36x11x3", "36×11×3", "36x11", or even "36x" and
+  // the list narrows to slabs whose L×W×T (stored in inches despite
+  // the column name) starts with those numbers. Mirrors the partial-
+  // dim search Daksh wanted on Find ID + Required Sizes search.
+  function normalizeDims(s: string): string {
+    return s
+      .toLowerCase()
+      .replace(/[×x*,]/g, "×")
+      .replace(/[″"'’′]/g, "")
+      .replace(/\s+/g, "");
+  }
   const filteredSlabs = stoneNarrowed.filter((s) => {
     if (templeFilter !== "all" && s.temple !== templeFilter) return false;
     if (!filter) return true;
     const q = filter.toLowerCase();
-    return (
+    if (
       s.id.toLowerCase().includes(q) ||
       (s.temple ?? "").toLowerCase().includes(q) ||
       (s.label ?? "").toLowerCase().includes(q)
-    );
+    ) {
+      return true;
+    }
+    // Dim match — normalise both query + slab dims to the same
+    // separator + drop quote glyphs, then test prefix. Handles
+    // "36", "36x", "36x11", "36x11x3", "36×11×3".
+    const qDim = normalizeDims(q);
+    if (qDim && /[0-9]/.test(qDim)) {
+      const slabDim = normalizeDims(
+        `${s.length_ft}×${s.width_ft}×${s.thickness_ft}`,
+      );
+      if (slabDim.includes(qDim)) return true;
+    }
+    return false;
   });
 
   // Group filtered slabs by temple for visual sectioning + per-temple

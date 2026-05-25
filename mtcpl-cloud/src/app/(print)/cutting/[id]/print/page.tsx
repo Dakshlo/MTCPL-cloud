@@ -38,7 +38,7 @@ function slabColor(id: string) {
 }
 
 export default async function CuttingPrintPage({ params }: { params: Params }) {
-  await requireAuth(["owner", "team_head", "cutting_operator"]);
+  await requireAuth(["owner", "team_head", "senior_incharge", "cutting_operator"]);
   const { id } = await params;
   const supabase = createAdminSupabaseClient();
 

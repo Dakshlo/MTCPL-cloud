@@ -38,7 +38,7 @@ type SlabRow = {
 };
 
 export default async function CuttingLabelsPrintPage({ params }: { params: Params }) {
-  await requireAuth(["owner", "team_head", "cutting_operator", "developer"]);
+  await requireAuth(["owner", "team_head", "senior_incharge", "cutting_operator", "developer"]);
   const { id } = await params;
   const supabase = createAdminSupabaseClient();
 

@@ -320,9 +320,16 @@ export async function manualCutBlockAction(formData: FormData) {
   // 5. Revalidate
   revalidatePath("/blocks");
   revalidatePath("/slabs");
+  revalidatePath("/slabs/ready");
+  revalidatePath("/slabs/ready/for-carving");
   revalidatePath("/planning");
   revalidatePath("/cutting");
   revalidatePath("/dashboard");
+  // Mig 076 round 3 — Block Journey shows per-block yield. After
+  // a manual cut it needs to recompute or the card still reads
+  // "0.00 CFT yield" until the cache TTL elapses. Daksh flagged
+  // this exact symptom on MT-B-387 with 7 ROHTAK slabs cut.
+  revalidatePath("/block-journey");
 }
 
 /**

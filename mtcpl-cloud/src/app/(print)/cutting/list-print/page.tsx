@@ -85,7 +85,7 @@ function istTodayBounds() {
 }
 
 export default async function CuttingListPrintPage({ searchParams }: { searchParams: SearchParams }) {
-  await requireAuth(["owner", "team_head", "cutting_operator"]);
+  await requireAuth(["owner", "team_head", "senior_incharge", "cutting_operator"]);
   const { facility: facilityParam, tab: tabParam, blocks: blocksParam } = await searchParams;
 
   const facility: FacilityScope =

@@ -18,6 +18,15 @@
 
 import { redirect } from "next/navigation";
 import { requireAuth, getDefaultRouteForRole } from "@/lib/auth";
+
+// Daksh May 2026 round 3 — force a fresh server render on every
+// page load. Without this, a marble manual-cut → block-journey
+// click within ~30s could land on a cached version that still
+// shows "0.00 CFT yield" because the cutDoneSlabs fetch happened
+// before the cut was recorded. force-dynamic guarantees the user
+// always sees the current cut state immediately after the action
+// redirects them.
+export const dynamic = "force-dynamic";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
 import { canTransferPlannedSlabs } from "@/lib/cutting-permissions";

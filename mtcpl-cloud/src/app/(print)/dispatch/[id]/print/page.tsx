@@ -24,7 +24,7 @@ export default async function DispatchChallanPrintPage({ params }: { params: Par
   // print the challan — they're the people who hand it to the driver.
   // Previously this was developer-only which silently bounced Naresh
   // (owner) back to /dashboard whenever he clicked "Print challan".
-  await requireAuth(["developer", "owner", "team_head", "cutting_operator"]);
+  await requireAuth(["developer", "owner", "team_head", "senior_incharge", "cutting_operator"]);
   const { id } = await params;
   const admin = createAdminSupabaseClient();
 
