@@ -16,6 +16,7 @@ import { computeCutEfficiency, computeActualCutEfficiency } from "@/lib/cut-effi
 import { POST_CUT_STATUSES } from "@/lib/slab-statuses";
 import { yardLabel, facilityOfYard, facilityLabel, FACILITIES, type Facility } from "@/lib/yards";
 import { PrintReportButton } from "./print-report-button";
+import { DownloadDonePdfButton, type DonePdfBlock } from "./download-done-pdf-button";
 import { SelectionProvider } from "./selection-context";
 import { BlockSelector } from "./block-selector";
 import { CuttingHistorySearchBar, type HistoryRow } from "./cutting-history-search-bar";
@@ -410,6 +411,42 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
     done:        "No completed cuts yet.",
   };
 
+  // Daksh May 2026 round 3 — flat shape the PDF button + tick modal
+  // consume. Today + earlier combined so the modal can pick across
+  // the whole done bucket; isToday flag drives the "TODAY" badge.
+  const donePdfBlocks: DonePdfBlock[] =
+    activeTab === "done"
+      ? [...todayRows, ...earlierRows].map((b) => {
+          const blk = b.layout?.blk;
+          const dimsOrTonnes =
+            blk?.l != null && blk?.w != null && blk?.h != null
+              ? `${blk.l}×${blk.w}×${blk.h}″`
+              : "—";
+          const cutDate = b.updated_at
+            ? new Date(b.updated_at).toLocaleString("en-IN", {
+                timeZone: "Asia/Kolkata",
+                day: "2-digit",
+                month: "short",
+                hour: "2-digit",
+                minute: "2-digit",
+              })
+            : "—";
+          const isToday =
+            !!b.updated_at &&
+            b.updated_at >= todayStartIso &&
+            b.updated_at < tomorrowStartIso;
+          return {
+            id: b.id,
+            blockCode: b.block_id,
+            stone: blk?.stone ?? "—",
+            cutDate,
+            dimsOrTonnes,
+            slabCount: b.layout?.placed?.length ?? 0,
+            isToday,
+          };
+        })
+      : [];
+
   return (
     <SelectionProvider>
     <section className="page-card">
@@ -420,7 +457,12 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
             Each block is handled independently — approve, cut, and record slabs one by one.
           </p>
         </div>
-        <PrintReportButton tab={activeTab} />
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <PrintReportButton tab={activeTab} />
+          {activeTab === "done" && (
+            <DownloadDonePdfButton blocks={donePdfBlocks} />
+          )}
+        </div>
       </div>
 
       {/* Tabs */}
