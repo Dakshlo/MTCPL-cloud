@@ -8,7 +8,7 @@ export default async function SlabViewPage({
   searchParams: Promise<{ temple?: string; stone?: string; priority?: string; status?: string; q?: string; quality?: string }>;
 }) {
   // Entry roles (block_entry / slab_entry) cannot access this page
-  const { profile } = await requireAuth(["owner", "team_head"]);
+  const { profile } = await requireAuth(["owner", "team_head", "senior_incharge"]);
   const supabase = await createDataClient(profile.role);
   const params = await searchParams;
 

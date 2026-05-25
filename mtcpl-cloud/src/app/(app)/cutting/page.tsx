@@ -129,6 +129,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
     "developer",
     "owner",
     "team_head",
+    "senior_incharge",
     "carving_head",
     "crosscheck",
     "cutting_operator",

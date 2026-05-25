@@ -11,7 +11,7 @@ export default async function PlanningPage({
 }: {
   searchParams: Promise<{ slabs?: string; err?: string }>;
 }) {
-  const { profile } = await requireAuth(["owner", "team_head"]);
+  const { profile } = await requireAuth(["owner", "team_head", "senior_incharge"]);
 
   const supabase = await createDataClient(profile.role);
   const params = await searchParams;

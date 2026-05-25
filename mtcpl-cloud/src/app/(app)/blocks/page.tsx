@@ -19,7 +19,7 @@ const BLOCK_ENTRY_ROLES = ["block_entry", "block_slab_entry"] as const;
 type SearchParams = Promise<{ cat?: string; marble_toast?: string; marble_error?: string }>;
 
 export default async function BlocksPage({ searchParams }: { searchParams: SearchParams }) {
-  const { profile } = await requireAuth(["owner", "team_head", "block_slab_entry", "slab_entry", "block_entry"]);
+  const { profile } = await requireAuth(["owner", "team_head", "senior_incharge", "block_slab_entry", "slab_entry", "block_entry"]);
   const { cat: catParam, marble_toast: marbleToast, marble_error: marbleError } = await searchParams;
   // Default landing = Sandstone (the everyday tab). "All" and "Marble"
   // need an explicit URL param. Users who want the combined view can

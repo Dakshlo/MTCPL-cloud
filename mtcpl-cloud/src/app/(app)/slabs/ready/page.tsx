@@ -23,7 +23,7 @@ import { ReadySlabsClient } from "./ready-client";
 // slabs drop from that view as soon as they're assigned.
 
 export default async function ReadySlabsPage() {
-  const { profile } = await requireAuth(["owner", "team_head", "block_slab_entry", "carving_head"]);
+  const { profile } = await requireAuth(["owner", "team_head", "senior_incharge", "block_slab_entry", "carving_head"]);
   void profile;
 
   const admin = createAdminSupabaseClient();

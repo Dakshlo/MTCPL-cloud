@@ -20,7 +20,7 @@ import { FloorViewClient } from "./floor-client";
 type Search = Promise<{ mode?: "grid" | "tv"; rotate?: string; vendor?: string }>;
 
 export default async function CarvingFloorPage({ searchParams }: { searchParams: Search }) {
-  await requireAuth(["developer", "owner", "carving_head"]);
+  await requireAuth(["developer", "owner", "carving_head", "senior_incharge"]);
   const params = await searchParams;
   const initialMode: "grid" | "tv" = params.mode === "tv" ? "tv" : "grid";
   // Default 10s — the floor TV cycles through vendors fast enough

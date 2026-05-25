@@ -5,7 +5,7 @@ import { ReportClient } from "./report-client";
 import type { StoneCategory } from "@/lib/stone-categories";
 
 export default async function BlockReportPage() {
-  await requireAuth(["owner", "team_head", "developer"]);
+  await requireAuth(["owner", "team_head", "senior_incharge", "developer"]);
   // Admin client bypasses RLS so developer can see all blocks too
   const admin = createAdminSupabaseClient();
 

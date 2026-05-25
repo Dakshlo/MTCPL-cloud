@@ -74,6 +74,10 @@ export function canApproveCuts(
 ): boolean {
   if (profile.role === "developer") return true;
   if (profile.role === "owner") return true;
+  // Mig 076 — senior_incharge has Cutting Audit authority by virtue
+  // of the role, no per-profile can_approve_cuts flag required.
+  // (Rajesh-tier; team_head still needs the flag.)
+  if (profile.role === "senior_incharge") return true;
   if (
     (CUT_APPROVE_FLAG_ELIGIBLE_ROLES as readonly string[]).includes(profile.role) &&
     profile.can_approve_cuts === true

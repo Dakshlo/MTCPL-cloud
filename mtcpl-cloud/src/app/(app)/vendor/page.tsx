@@ -148,6 +148,16 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
       )
       .eq("vendor_id", vendorId)
       .in("status", ["carving_assigned", "carving_in_progress", "carving_on_hold"])
+      // Daksh May 2026 round 3 — defensive filter for the recurring
+      // "4 slabs on a 2-head" bug. completeAndUnloadAction stamps
+      // completed_at + clears cnc_machine_id (ce01026), but
+      // pre-ce01026 rows can still have status='carving_in_progress'
+      // AND cnc_machine_id pointing at a machine AND completed_at set.
+      // The cockpit grouped those onto the machine card, so a
+      // running pair stacked on top of stale completed pair = 4 slabs
+      // visible. Adding completed_at IS NULL drops the orphans without
+      // a data migration.
+      .is("completed_at", null)
       .order("assigned_at", { ascending: true }),
     admin
       .from("carving_items")
@@ -308,6 +318,15 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
   });
 
   // Build machine cards with their currently-loaded job (if any).
+  // Daksh May 2026 round 3 — head-count cap on current_jobs. Belt-
+  // and-suspenders against the recurring "4 slabs on a 2-head" bug:
+  // even if some unforeseen path leaves orphans pointing at the
+  // machine, the card visually clamps to the machine_type's head
+  // count (2 for multi_head_2, 1 for everything else). The
+  // completed_at filter on the query above is the primary defence;
+  // this cap catches anything that still slips through.
+  const headCountFor = (t: string | null): number =>
+    t === "multi_head_2" ? 2 : 1;
   const machineCards: CncMachineLive[] = ((machines ?? []) as Array<{
     id: string;
     machine_code: string;
@@ -325,7 +344,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
       m.status === "carving" || m.status === "maintenance" || m.status === "inactive"
         ? m.status
         : "idle",
-    current_jobs: activeByMachine.get(m.id) ?? [],
+    current_jobs: (activeByMachine.get(m.id) ?? []).slice(0, headCountFor(m.machine_type)),
     maintenance_reason: m.maintenance_reason,
     maintenance_flagged_at: m.maintenance_flagged_at,
     machine_type:

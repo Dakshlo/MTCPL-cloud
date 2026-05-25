@@ -15,7 +15,7 @@ import {
 import { CarvingJobControls } from "./carving-job-controls";
 
 export default async function CarvingJobDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { profile } = await requireAuth(["developer", "owner", "carving_head"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge"]);
   const { id } = await params;
   const admin = createAdminSupabaseClient();
 

@@ -214,8 +214,11 @@ const navEntries: NavEntry[] = [
   {
     href: "/dispatch",
     label: "Dispatch",
+    // Mig 076 round 2 — Daksh asked to drop Dispatch from Rajesh's
+    // sidebar. He doesn't run the dispatch step; keeping it would
+    // surface a queue he never acts on.
     icon: "🚚",
-    roles: ["developer", "owner", "carving_head", "senior_incharge"],
+    roles: ["developer", "owner", "carving_head"],
     department: "production",
   },
   {

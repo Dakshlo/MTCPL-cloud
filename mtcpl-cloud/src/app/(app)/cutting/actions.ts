@@ -339,7 +339,7 @@ async function refuseIfMySlabsAreClaimed(
  * "saw actively running" in the UI.
  */
 export async function approveBlockAction(formData: FormData) {
-  const { profile } = await requireAuth(["owner", "team_head", "cutting_operator"]);
+  const { profile } = await requireAuth(["owner", "team_head", "senior_incharge", "cutting_operator"]);
   const supabase = createAdminSupabaseClient();
   const sessionBlockId = String(formData.get("session_block_id") || "");
   const sessionId = String(formData.get("session_id") || "");
@@ -382,7 +382,7 @@ export async function approveBlockAction(formData: FormData) {
  * not an identity. Block.id (e.g. MT-B-005) remains the canonical id.
  */
 export async function startCuttingAction(formData: FormData) {
-  const { profile } = await requireAuth(["owner", "team_head", "cutting_operator"]);
+  const { profile } = await requireAuth(["owner", "team_head", "senior_incharge", "cutting_operator"]);
   const supabase = createAdminSupabaseClient();
   const sessionBlockId = String(formData.get("session_block_id") || "");
   const sessionId = String(formData.get("session_id") || "");
@@ -453,7 +453,7 @@ export async function startCuttingAction(formData: FormData) {
 }
 
 export async function rejectBlockAction(formData: FormData) {
-  const { profile } = await requireAuth(["owner", "team_head", "cutting_operator"]);
+  const { profile } = await requireAuth(["owner", "team_head", "senior_incharge", "cutting_operator"]);
   const supabase = createAdminSupabaseClient();
   const sessionBlockId = String(formData.get("session_block_id") || "");
   const sessionId = String(formData.get("session_id") || "");
@@ -514,7 +514,7 @@ export type FinishBlockResult =
   | { ok: false; error: string };
 
 export async function finishBlockAction(formData: FormData): Promise<FinishBlockResult> {
-  const { profile } = await requireAuth(["owner", "team_head", "cutting_operator"]);
+  const { profile } = await requireAuth(["owner", "team_head", "senior_incharge", "cutting_operator"]);
   const supabase = createAdminSupabaseClient();
 
   const sessionBlockId = String(formData.get("session_block_id") || "");
@@ -1524,7 +1524,7 @@ export async function editPendingApprovalAction(
  * when the block is in one of those states.
  */
 export async function undoApproveAction(formData: FormData) {
-  const { profile } = await requireAuth(["owner", "team_head", "cutting_operator"]);
+  const { profile } = await requireAuth(["owner", "team_head", "senior_incharge", "cutting_operator"]);
   const supabase = createAdminSupabaseClient();
   const sessionBlockId = String(formData.get("session_block_id") || "");
   const sessionId = String(formData.get("session_id") || "");
@@ -1558,7 +1558,7 @@ export async function undoApproveAction(formData: FormData) {
  * the warning because they understand the change).
  */
 export async function acknowledgeReprintAction(formData: FormData) {
-  const { profile } = await requireAuth(["owner", "team_head", "cutting_operator", "developer"]);
+  const { profile } = await requireAuth(["owner", "team_head", "senior_incharge", "cutting_operator", "developer"]);
   const supabase = createAdminSupabaseClient();
   const sessionBlockId = String(formData.get("id") || "");
   if (!sessionBlockId) throw new Error("Block id required");
