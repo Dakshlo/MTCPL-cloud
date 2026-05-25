@@ -1,7 +1,10 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { POST_CUT_STATUSES } from "@/lib/slab-statuses";
+import { canAccessCarvingPage } from "@/lib/cutting-permissions";
+import { CockpitSidebarToggle } from "@/components/cockpit-sidebar-toggle";
 import { ReadySlabsClient } from "../ready-client";
 
 // Carving team's slab-pickup + lifecycle-bucket view. Sister page to
@@ -21,7 +24,12 @@ import { ReadySlabsClient } from "../ready-client";
 // keeps it so the carving team has the at-a-glance breakdown.
 
 export default async function ReadyForCarvingPage() {
-  await requireAuth(["developer", "owner", "carving_head"]);
+  // Mig 074 round 2 — widen the gate so vendor-with-flag (Mohit) can
+  // reach this page from the sidebar. Page itself is read + Assign;
+  // the Assign action posts to /carving where the same flag check
+  // applies on the action.
+  const { profile } = await requireAuth();
+  if (!canAccessCarvingPage(profile)) redirect("/");
 
   const admin = createAdminSupabaseClient();
 
@@ -43,6 +51,14 @@ export default async function ReadyForCarvingPage() {
 
   return (
     <>
+      {/* Mig 074 — vendor-with-flag (Mohit) needs the same Hide menu
+          affordance as on the cockpit / carving page, since this page
+          is now in his sidebar. Default = expanded so the sidebar stays
+          visible until he taps to hide. */}
+      {profile.role === "vendor" && profile.can_assign_carving === true && (
+        <CockpitSidebarToggle defaultCollapsed={false} />
+      )}
+
       <div className="page-header" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
         <div>
           <h1>Ready Sizes Stock</h1>

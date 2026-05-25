@@ -121,19 +121,22 @@ export function canSeeAwaitingReview(
 }
 
 /**
- * Mig 074 — read access to the Required Sizes (/slabs) page. The
- * flag user needs this to see what sizes the plant has on hand so
- * they can plan their carving assignments. Edit / create / delete
- * actions stay on the existing action-level gates.
+ * Read access to the Required Sizes (/slabs) page.
+ *
+ * Mig 074 first pass briefly included can_assign_carving holders here
+ * so Mohit could open the requirements list. Daksh May 2026 round 2 —
+ * dropped that carve-out: Mohit's sidebar now points at Ready Sizes
+ * Stock (the actionable bucket view) instead, and the abstract
+ * requirements list is the cutting/planning team's surface. Keeps the
+ * gate matching its original audience.
  */
 export function canReadRequiredSizes(
-  profile: Pick<Profile, "role" | "can_assign_carving">,
+  profile: Pick<Profile, "role">,
 ): boolean {
   if (profile.role === "developer") return true;
   if (profile.role === "owner") return true;
   if (profile.role === "team_head") return true;
   if (profile.role === "slab_entry") return true;
   if (profile.role === "block_slab_entry") return true;
-  if (profile.can_assign_carving === true) return true;
   return false;
 }

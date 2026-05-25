@@ -119,10 +119,6 @@ const navEntries: NavEntry[] = [
     label: "Required Sizes",
     icon: "▤",
     roles: ["developer", "owner", "team_head", "slab_entry", "block_slab_entry"],
-    // Mig 074 — also visible to carving-head-lite (vendors who
-    // assign their own work, e.g. Mohit). canReadRequiredSizes
-    // on the page itself does the read-only gate.
-    requiresFlag: "can_assign_carving",
     department: "production",
   },
   {
@@ -188,6 +184,12 @@ const navEntries: NavEntry[] = [
     label: "Ready Sizes Stock",
     icon: "📦",
     roles: ["developer", "owner", "carving_head"],
+    // Mig 074 — also visible to carving-head-lite (vendors who
+    // assign their own work, e.g. Mohit). Daksh May 2026 round 2 —
+    // swapped from Required Sizes to this page in Mohit's sidebar:
+    // the actionable stockpile is more useful than the abstract
+    // requirements list for the carving-assign role.
+    requiresFlag: "can_assign_carving",
     department: "production",
   },
   {

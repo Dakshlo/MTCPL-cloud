@@ -27,6 +27,7 @@ import type { StoneTypeDef } from "@/lib/stone-utils";
 import { batchTint } from "@/lib/batch-colours";
 import { useFormStatus } from "react-dom";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
+import { CockpitSidebarToggle } from "@/components/cockpit-sidebar-toggle";
 
 /**
  * Daksh May 2026 — branded spinner overlay for vendor-cockpit form
@@ -306,60 +307,6 @@ export function VendorCockpitClient({
     b: HeldSlabLite;
   } | null>(null);
 
-  // Daksh May 2026 — the vendor role has only this one workspace,
-  // so the global sidebar is dead weight. Tag <body> with
-  // `vendor-cockpit-fullscreen` while this component is mounted;
-  // a CSS rule in globals.css collapses the .app-shell grid + hides
-  // .sidebar. Cleanup on unmount so navigating away (e.g. to /pending
-  // or /profile) restores the sidebar for any role that has one.
-  //
-  // Daksh May 2026 (round 2) — carving-head-vendor (Mohit) needs
-  // sidebar access to reach /carving + /slabs. Default still HIDDEN
-  // (preserves the focused full-screen feel), with an expand
-  // affordance pinned to the top-left so any cockpit user can
-  // bring the sidebar back on demand. State persists in
-  // sessionStorage so flipping it open stays open as you move
-  // between cockpit and other pages.
-  const [sidebarExpanded, setSidebarExpanded] = useState<boolean>(false);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const stored = window.sessionStorage.getItem("mtcpl_cockpit_sidebar_expanded");
-      if (stored === "1") setSidebarExpanded(true);
-    } catch {
-      /* private mode etc — leave default */
-    }
-  }, []);
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    if (sidebarExpanded) {
-      // User wants the sidebar visible — remove the fullscreen
-      // class so the layout grid restores its sidebar column.
-      document.body.classList.remove("vendor-cockpit-fullscreen");
-    } else {
-      document.body.classList.add("vendor-cockpit-fullscreen");
-    }
-    // On unmount we always restore the normal sidebar behaviour
-    // (other pages assume the class is OFF).
-    return () => {
-      document.body.classList.remove("vendor-cockpit-fullscreen");
-    };
-  }, [sidebarExpanded]);
-  function toggleSidebar() {
-    setSidebarExpanded((s) => {
-      const next = !s;
-      try {
-        window.sessionStorage.setItem(
-          "mtcpl_cockpit_sidebar_expanded",
-          next ? "1" : "0",
-        );
-      } catch {
-        /* ignore */
-      }
-      return next;
-    });
-  }
-
   // After a server-action redirects back to /vendor with a
   // success toast (e.g. "Slab loaded", "Both slabs loaded",
   // "Marked complete"), close any open modal so the user sees the
@@ -417,45 +364,10 @@ export function VendorCockpitClient({
       {/* Daksh May 2026 — floating sidebar toggle. Cockpit hides the
           global sidebar by default for a focused full-screen feel,
           but Mohit (carving-head-vendor) needs to reach /carving +
-          /slabs without leaving the cockpit first. Tap to expand
-          the sidebar back into the layout; tap again to collapse.
-          Pinned top-left, fixed position, visible regardless of
-          scroll. Same touch target (44px) used elsewhere. */}
-      <button
-        type="button"
-        onClick={toggleSidebar}
-        aria-label={sidebarExpanded ? "Hide menu" : "Show menu"}
-        title={sidebarExpanded ? "Hide the side menu" : "Show the side menu"}
-        style={{
-          position: "fixed",
-          top: 12,
-          left: 12,
-          zIndex: 60,
-          minWidth: 44,
-          height: 44,
-          padding: "0 14px",
-          borderRadius: 10,
-          background: sidebarExpanded
-            ? "rgba(15,12,6,0.75)"
-            : "rgba(180,115,51,0.92)",
-          color: "#fff",
-          border: "1px solid rgba(255,255,255,0.15)",
-          boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
-          backdropFilter: "blur(4px)",
-          fontSize: 13,
-          fontWeight: 700,
-          cursor: "pointer",
-          touchAction: "manipulation",
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 8,
-        }}
-      >
-        <span style={{ fontSize: 16, lineHeight: 1 }}>
-          {sidebarExpanded ? "✕" : "☰"}
-        </span>
-        <span>{sidebarExpanded ? "Hide menu" : "Menu"}</span>
-      </button>
+          /slabs without leaving the cockpit first. The toggle owns
+          the body class + sessionStorage so the same component can
+          live on /carving too and keep state in sync. */}
+      <CockpitSidebarToggle />
 
       {/* Toast */}
       {toast && (

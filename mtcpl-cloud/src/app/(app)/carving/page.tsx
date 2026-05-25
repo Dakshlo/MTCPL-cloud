@@ -8,6 +8,7 @@ import {
 } from "@/lib/cutting-permissions";
 import { CarvingDashboardClient } from "./dashboard-client";
 import { VendorsManagerPeek } from "./vendors-manager-peek";
+import { CockpitSidebarToggle } from "@/components/cockpit-sidebar-toggle";
 
 type Tab = "unassigned" | "active" | "review" | "done";
 
@@ -318,6 +319,15 @@ export default async function CarvingDashboardPage({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20, paddingBottom: 32 }}>
+      {/* Mig 074 — vendor-with-flag (Mohit) needs to hide the global
+          sidebar here too once they've navigated into Carving Jobs,
+          mirroring the cockpit. Default = expanded so the sidebar
+          they just used to land on this page stays visible until
+          they tap Hide menu. */}
+      {profile.role === "vendor" && profile.can_assign_carving === true && (
+        <CockpitSidebarToggle defaultCollapsed={false} />
+      )}
+
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
         <div>

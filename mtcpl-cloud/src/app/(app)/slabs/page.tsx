@@ -12,10 +12,9 @@ import { SlabSearchBar } from "./slab-search-bar";
 const ENTRY_ROLES = ["slab_entry", "block_slab_entry"] as const;
 
 export default async function SlabsPage() {
-  // Mig 074 — gate via canReadRequiredSizes so vendor-with-flag
-  // (e.g. Mohit) gets read access in addition to the original
-  // entry / senior roles. canReadRequiredSizes encapsulates the
-  // role + flag check.
+  // Gate via canReadRequiredSizes — entry roles + senior roles. The
+  // helper is in cutting-permissions so other surfaces (block detail,
+  // slab forms) can share the same audience.
   const { profile } = await requireAuth();
   if (!canReadRequiredSizes(profile)) redirect("/");
   const admin = createAdminSupabaseClient();
