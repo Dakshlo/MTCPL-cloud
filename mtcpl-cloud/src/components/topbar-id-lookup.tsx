@@ -813,7 +813,8 @@ function ResultPanel({
   // earlier branches; here we just exhaust the union.
   void domain;
   if (result.kind === "slab") return <SlabResultPanel result={result} />;
-  if (result.kind === "block") return <BlockResultPanel result={result} />;
+  if (result.kind === "block")
+    return <BlockResultPanel result={result} onPick={onPick} />;
   if (result.kind === "multiple")
     return <MultipleResultPanel result={result} onPick={onPick} />;
   return null;
@@ -1086,6 +1087,53 @@ function SlabResultPanel({ result }: { result: Extract<LookupResult, { kind: "sl
 
       <div style={{ height: 1, background: "rgba(15,23,42,0.08)" }} />
 
+      {/* SLAB IDENTITY — label + description shown prominently
+          (Daksh May 2026 round 4: they were tucked into the section
+          header as a tiny suffix, easy to miss. Now full-width lines
+          right below the "where is it" headline). */}
+      {(s.label || s.description) && (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+            padding: "8px 10px",
+            background: "rgba(201,151,58,0.08)",
+            border: "1px solid rgba(201,151,58,0.25)",
+            borderRadius: 8,
+          }}
+        >
+          {s.label && (
+            <div
+              style={{
+                fontSize: 16,
+                fontWeight: 800,
+                color: "var(--text)",
+                lineHeight: 1.25,
+                wordBreak: "break-word",
+              }}
+              title="Slab label (set at cut time)"
+            >
+              🏷 {s.label}
+            </div>
+          )}
+          {s.description && (
+            <div
+              style={{
+                fontSize: 13,
+                fontStyle: "italic",
+                color: "var(--text)",
+                lineHeight: 1.4,
+                wordBreak: "break-word",
+              }}
+              title="Free-text per-slab note"
+            >
+              “{s.description}”
+            </div>
+          )}
+        </div>
+      )}
+
       {/* SLAB BASICS */}
       <div>
         <div
@@ -1099,11 +1147,6 @@ function SlabResultPanel({ result }: { result: Extract<LookupResult, { kind: "sl
           }}
         >
           Slab {s.id}
-          {s.label && (
-            <span style={{ color: "rgba(15,23,42,0.45)", marginLeft: 6 }}>
-              · {s.label}
-            </span>
-          )}
         </div>
         <Field k="Temple" v={s.temple} />
         {s.stone && <Field k="Stone" v={s.stone} />}
@@ -1161,6 +1204,10 @@ function SlabResultPanel({ result }: { result: Extract<LookupResult, { kind: "sl
             <Field k="Session" v={result.cut.session_code} mono />
             {result.cut.planner_name && (
               <Field k="Planner" v={result.cut.planner_name} />
+            )}
+            {/* Mig follow-on (Daksh) — operator (cutter) name */}
+            {result.cut.cutter_name && (
+              <Field k="Cutter" v={result.cut.cutter_name} />
             )}
             {result.cut.cut_at && (
               <Field k="Cut at" v={fmtDate(result.cut.cut_at)} />
@@ -1257,7 +1304,15 @@ function SlabResultPanel({ result }: { result: Extract<LookupResult, { kind: "sl
   );
 }
 
-function BlockResultPanel({ result }: { result: Extract<LookupResult, { kind: "block" }> }) {
+function BlockResultPanel({
+  result,
+  onPick,
+}: {
+  result: Extract<LookupResult, { kind: "block" }>;
+  /** Mig follow-on (Daksh) — clicking a slab chip in the cut-from
+   *  list re-runs Find ID with that slab's code. */
+  onPick: (q: string) => void;
+}) {
   const b = result.block;
 
   // Block stage context — what's happening with cutting + how many
@@ -1396,6 +1451,10 @@ function BlockResultPanel({ result }: { result: Extract<LookupResult, { kind: "b
             {result.cutting.planner_name && (
               <Field k="Planner" v={result.cutting.planner_name} />
             )}
+            {/* Mig follow-on (Daksh) — operator (cutter) name */}
+            {result.cutting.cutter_name && (
+              <Field k="Cutter" v={result.cutting.cutter_name} />
+            )}
             {result.cutting.largest_remainder_cft != null && (
               <Field
                 k="Largest remainder"
@@ -1418,12 +1477,14 @@ function BlockResultPanel({ result }: { result: Extract<LookupResult, { kind: "b
                 color: "rgba(15,23,42,0.55)",
                 textTransform: "uppercase",
                 letterSpacing: "0.1em",
-                marginBottom: 4,
+                marginBottom: 6,
               }}
             >
               Slabs cut from this block · {result.slabs_from_block.total} total
             </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+
+            {/* Status breakdown chips */}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
               {Object.entries(result.slabs_from_block.by_status).map(([st, n]) => {
                 const tone = STATUS_TONE[st] ?? {
                   fg: "#525252",
@@ -1448,6 +1509,131 @@ function BlockResultPanel({ result }: { result: Extract<LookupResult, { kind: "b
                 );
               })}
             </div>
+
+            {/* Mig follow-on (Daksh) — full clickable slab list.
+                Tap any code → re-run Find ID on that slab. Sorted
+                by id (auto-incremented, so chronological-ish). */}
+            {result.slabs_from_block.list.length > 0 && (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 4,
+                  maxHeight: 260,
+                  overflowY: "auto",
+                  paddingRight: 2,
+                }}
+              >
+                {result.slabs_from_block.list.map((sl) => {
+                  const tone = STATUS_TONE[sl.status] ?? {
+                    fg: "#525252",
+                    bg: "rgba(82,82,82,0.10)",
+                  };
+                  return (
+                    <button
+                      key={sl.id}
+                      type="button"
+                      onClick={() => onPick(sl.id)}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        padding: "7px 10px",
+                        background: "rgba(15,23,42,0.03)",
+                        border: "1px solid rgba(15,23,42,0.10)",
+                        borderRadius: 7,
+                        cursor: "pointer",
+                        textAlign: "left",
+                        fontFamily: "inherit",
+                        color: "var(--text)",
+                        transition: "background 0.08s, border-color 0.08s",
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = "rgba(201,151,58,0.10)";
+                        e.currentTarget.style.borderColor = "rgba(201,151,58,0.35)";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = "rgba(15,23,42,0.03)";
+                        e.currentTarget.style.borderColor = "rgba(15,23,42,0.10)";
+                      }}
+                      title="Click to search this slab in Find ID"
+                    >
+                      <span
+                        style={{
+                          fontFamily: "ui-monospace, monospace",
+                          fontSize: 12,
+                          fontWeight: 700,
+                          color: "var(--gold-dark)",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {sl.id}
+                      </span>
+                      <span
+                        style={{
+                          fontFamily: "ui-monospace, monospace",
+                          fontSize: 11,
+                          color: "rgba(15,23,42,0.55)",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {fmtNum(sl.length_in)}×{fmtNum(sl.width_in)}×{fmtNum(sl.thickness_in)}"
+                      </span>
+                      <span
+                        style={{
+                          flex: 1,
+                          minWidth: 0,
+                          fontSize: 11,
+                          color: "rgba(15,23,42,0.65)",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {sl.temple}
+                        {sl.label && (
+                          <span
+                            style={{
+                              color: "rgba(15,23,42,0.45)",
+                              marginLeft: 6,
+                            }}
+                          >
+                            · {sl.label}
+                          </span>
+                        )}
+                      </span>
+                      <span
+                        style={{
+                          padding: "2px 7px",
+                          fontSize: 9,
+                          fontWeight: 800,
+                          background: tone.bg,
+                          color: tone.fg,
+                          borderRadius: 999,
+                          textTransform: "uppercase",
+                          letterSpacing: "0.04em",
+                          whiteSpace: "nowrap",
+                          flexShrink: 0,
+                        }}
+                      >
+                        {sl.status.replace(/_/g, " ")}
+                      </span>
+                      <span
+                        aria-hidden
+                        style={{
+                          fontSize: 11,
+                          color: "rgba(15,23,42,0.35)",
+                          fontWeight: 600,
+                          flexShrink: 0,
+                        }}
+                      >
+                        →
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </>
       )}

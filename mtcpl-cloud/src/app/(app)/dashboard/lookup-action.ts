@@ -33,6 +33,10 @@ export type SlabResult = {
   slab: {
     id: string;
     label: string | null;
+    /** Daksh May 2026 round 4 — free-text per-slab note (mig 003).
+     *  Surfaces in Find ID as a prominent line so the user can
+     *  identify the piece without opening the slab grid. */
+    description: string | null;
     temple: string;
     stone: string | null;
     length_in: number;
@@ -62,6 +66,9 @@ export type SlabResult = {
     session_code: string;
     cut_at: string | null;
     planner_name: string | null;
+    /** Daksh May 2026 round 4 — operator (cutter) name from the
+     *  operators table via cut_session_blocks.operator_id. */
+    cutter_name: string | null;
     is_filler: boolean;
   } | null;
   carving: {
@@ -111,10 +118,25 @@ export type BlockResult = {
      *  cut_by is the cut_sessions.planned_by profile. */
     cut_at: string | null;
     planner_name: string | null;
+    /** Mig follow-on — operator (cutter) name from operators table
+     *  via cut_session_blocks.operator_id. */
+    cutter_name: string | null;
   } | null;
   slabs_from_block: {
     total: number;
     by_status: Record<string, number>;
+    /** Daksh May 2026 round 4 — full slab list so Find ID can show
+     *  every code coming out of this block, clickable to re-search.
+     *  Sorted by id ascending. */
+    list: Array<{
+      id: string;
+      label: string | null;
+      temple: string;
+      length_in: number;
+      width_in: number;
+      thickness_in: number;
+      status: string;
+    }>;
   };
   current_location: string;
 };
@@ -245,7 +267,7 @@ export async function lookupId(query: string): Promise<LookupResult> {
         const { data } = await admin
           .from("slab_requirements")
           .select(
-            "id, label, temple, stone, length_ft, width_ft, thickness_ft, source_block_id, status, priority, deadline, priority_note, created_at, updated_at, stock_location",
+            "id, label, description, temple, stone, length_ft, width_ft, thickness_ft, source_block_id, status, priority, deadline, priority_note, created_at, updated_at, stock_location",
           )
           .eq("id", only.id)
           .maybeSingle();
@@ -288,7 +310,7 @@ export async function lookupId(query: string): Promise<LookupResult> {
   const { data: slabRows } = await admin
     .from("slab_requirements")
     .select(
-      "id, label, temple, stone, length_ft, width_ft, thickness_ft, source_block_id, status, priority, deadline, priority_note, created_at, updated_at, stock_location",
+      "id, label, description, temple, stone, length_ft, width_ft, thickness_ft, source_block_id, status, priority, deadline, priority_note, created_at, updated_at, stock_location",
     )
     .in("id", variants)
     .limit(10);
@@ -405,6 +427,9 @@ async function loadSlabContext(
   const slab = raw as {
     id: string;
     label: string | null;
+    // Mig 003 — free-text per-slab note. May or may not be in
+    // `raw` depending on the caller's SELECT, defensive cast.
+    description?: string | null;
     temple: string;
     stone: string | null;
     length_ft: number | string;
@@ -446,14 +471,20 @@ async function loadSlabContext(
   if (cutSlab) {
     const { data: cutBlock } = await admin
       .from("cut_session_blocks")
-      .select("cut_session_id, updated_at, status")
+      .select("cut_session_id, updated_at, status, operator_id")
       .eq("id", (cutSlab as { cut_session_block_id: string }).cut_session_block_id)
       .maybeSingle();
     if (cutBlock) {
+      const cb = cutBlock as {
+        cut_session_id: string;
+        updated_at: string;
+        status: string;
+        operator_id: string | null;
+      };
       const { data: session } = await admin
         .from("cut_sessions")
         .select("session_code, planned_by")
-        .eq("id", (cutBlock as { cut_session_id: string }).cut_session_id)
+        .eq("id", cb.cut_session_id)
         .maybeSingle();
       if (session) {
         const sess = session as { session_code: string; planned_by: string | null };
@@ -466,11 +497,22 @@ async function loadSlabContext(
             .maybeSingle();
           plannerName = (planner as { full_name?: string } | null)?.full_name ?? null;
         }
-        const cb = cutBlock as { updated_at: string; status: string };
+        // Mig follow-on (Daksh) — fetch operator (cutter) name so
+        // Find ID can answer "who handled the cut".
+        let cutterName: string | null = null;
+        if (cb.operator_id) {
+          const { data: op } = await admin
+            .from("operators")
+            .select("name")
+            .eq("id", cb.operator_id)
+            .maybeSingle();
+          cutterName = (op as { name?: string } | null)?.name ?? null;
+        }
         cut = {
           session_code: sess.session_code,
           cut_at: cb.status === "done" ? cb.updated_at : null,
           planner_name: plannerName,
+          cutter_name: cutterName,
           is_filler: Boolean((cutSlab as { is_filler?: boolean }).is_filler),
         };
       }
@@ -544,6 +586,7 @@ async function loadSlabContext(
     slab: {
       id: slab.id,
       label: slab.label,
+      description: slab.description ?? null,
       temple: slab.temple,
       stone: slab.stone,
       length_in: L,
@@ -605,7 +648,7 @@ async function loadBlockContext(
   let cutting: BlockResult["cutting"] = null;
   const { data: csb } = await admin
     .from("cut_session_blocks")
-    .select("id, status, needs_reprint, largest_remainder, cut_session_id, updated_at")
+    .select("id, status, needs_reprint, largest_remainder, cut_session_id, updated_at, operator_id")
     .eq("block_id", blk.id)
     .order("updated_at", { ascending: false })
     .limit(1)
@@ -617,6 +660,7 @@ async function loadBlockContext(
       largest_remainder?: { l: number; w: number; h: number } | null;
       cut_session_id: string;
       updated_at: string;
+      operator_id: string | null;
     };
     const { data: sess } = await admin
       .from("cut_sessions")
@@ -634,6 +678,16 @@ async function loadBlockContext(
         .maybeSingle();
       plannerName = (planner as { full_name?: string } | null)?.full_name ?? null;
     }
+    // Mig follow-on (Daksh) — surface the cutter (operator) name too.
+    let cutterName: string | null = null;
+    if (c.operator_id) {
+      const { data: op } = await admin
+        .from("operators")
+        .select("name")
+        .eq("id", c.operator_id)
+        .maybeSingle();
+      cutterName = (op as { name?: string } | null)?.name ?? null;
+    }
     cutting = {
       session_code: s?.session_code ?? "—",
       session_block_status: c.status,
@@ -641,18 +695,39 @@ async function loadBlockContext(
       largest_remainder_cft: lr ? toCft(lr.l, lr.w, lr.h) : null,
       cut_at: c.status === "done" ? c.updated_at : null,
       planner_name: plannerName,
+      cutter_name: cutterName,
     };
   }
 
-  // Slabs derived from this block, grouped by status.
+  // Slabs derived from this block. Mig follow-on (Daksh) — return
+  // the FULL list (not just status counts) so Find ID can render
+  // each slab code as a clickable chip that re-searches it.
   const { data: slabs } = await admin
     .from("slab_requirements")
-    .select("status")
-    .eq("source_block_id", blk.id);
+    .select("id, label, temple, status, length_ft, width_ft, thickness_ft")
+    .eq("source_block_id", blk.id)
+    .order("id", { ascending: true });
   const by_status: Record<string, number> = {};
-  for (const s of slabs ?? []) {
-    const st = (s as { status: string }).status;
-    by_status[st] = (by_status[st] ?? 0) + 1;
+  const slabList: BlockResult["slabs_from_block"]["list"] = [];
+  for (const raw of (slabs ?? []) as Array<{
+    id: string;
+    label: string | null;
+    temple: string;
+    status: string;
+    length_ft: number | string;
+    width_ft: number | string;
+    thickness_ft: number | string;
+  }>) {
+    by_status[raw.status] = (by_status[raw.status] ?? 0) + 1;
+    slabList.push({
+      id: raw.id,
+      label: raw.label,
+      temple: raw.temple,
+      status: raw.status,
+      length_in: Number(raw.length_ft) || 0,
+      width_in: Number(raw.width_ft) || 0,
+      thickness_in: Number(raw.thickness_ft) || 0,
+    });
   }
 
   // "Where is the block now": pre-cut → yard; mid-cut → on the
@@ -688,6 +763,7 @@ async function loadBlockContext(
     slabs_from_block: {
       total: slabs?.length ?? 0,
       by_status,
+      list: slabList,
     },
     current_location: currentLocation,
   };
