@@ -61,7 +61,9 @@ type BlockRow = {
 };
 
 function defaultTab(role: string): Tab {
-  if (role === "team_head") return "pending";
+  // Mig 076 — senior_incharge mirrors team_head (lands on the
+  // approval queue, not the in-progress board).
+  if (role === "team_head" || role === "senior_incharge") return "pending";
   return "in_progress";
 }
 

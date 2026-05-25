@@ -78,7 +78,9 @@ export default async function SlabsPage() {
   ]);
 
   const profilesMap = await getProfilesMap();
-  const canEdit = ["developer", "owner", "team_head", "slab_entry", "block_slab_entry"].includes(profile.role);
+  // Mig 076 — senior_incharge has the same slab edit access as
+  // team_head (Rajesh-tier; was inherited from his prior role).
+  const canEdit = ["developer", "owner", "team_head", "senior_incharge", "slab_entry", "block_slab_entry"].includes(profile.role);
   const slabList = slabs;
   const templeList = temples ?? [];
   // Fallback: if stone_types query failed, use hardcoded defaults so form still works

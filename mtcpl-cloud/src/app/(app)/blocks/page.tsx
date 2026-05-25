@@ -272,8 +272,12 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
     slabsByBlock.set(s.source_block_id, arr);
   }
 
-  const canEdit = ["developer", "owner", "team_head", "block_slab_entry", "block_entry"].includes(profile.role);
-  const canViewReport = ["developer", "owner", "team_head"].includes(profile.role);
+  // Mig 076 — senior_incharge has full block edit + manual-cut
+  // access, mirrors team_head (this was Rajesh's pre-promotion role
+  // and the edit affordance is critical for his daily manual-cut
+  // workflow on the marble side).
+  const canEdit = ["developer", "owner", "team_head", "senior_incharge", "block_slab_entry", "block_entry"].includes(profile.role);
+  const canViewReport = ["developer", "owner", "team_head", "senior_incharge"].includes(profile.role);
   const allBlocks = blocks ?? [];
   const consumedList = consumed ?? [];
   const vendors = (vendorRows ?? []).map((v) => v.name);

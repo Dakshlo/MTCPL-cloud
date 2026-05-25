@@ -50,6 +50,7 @@ export default async function CuttingApprovalsPage() {
     "developer",
     "owner",
     "team_head",
+    "senior_incharge",
     "carving_head",
     "crosscheck",
     "cutting_operator",

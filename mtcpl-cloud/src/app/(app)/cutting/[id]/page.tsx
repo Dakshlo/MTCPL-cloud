@@ -75,6 +75,7 @@ export default async function CuttingDetailPage({
     "developer",
     "owner",
     "team_head",
+    "senior_incharge",
     "carving_head",
     "crosscheck",
     "cutting_operator",
@@ -297,6 +298,7 @@ export default async function CuttingDetailPage({
       (cutterEditUnlocked &&
         (isOriginalSubmitter ||
           profile.role === "team_head" ||
+          profile.role === "senior_incharge" ||
           profile.role === "cutting_operator")));
   // Resolve the staged payload safely — JSONB returned as `unknown`.
   type StagedPayload = {

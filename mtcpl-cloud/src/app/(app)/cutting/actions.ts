@@ -1386,6 +1386,7 @@ export async function editPendingApprovalAction(
       const isCutterRole =
         isOriginalSubmitter ||
         profile.role === "team_head" ||
+        profile.role === "senior_incharge" ||
         profile.role === "cutting_operator";
       if (!isCutterRole) {
         return {
@@ -1402,6 +1403,7 @@ export async function editPendingApprovalAction(
       !isApprover &&
       !isOriginalSubmitter &&
       profile.role !== "team_head" &&
+      profile.role !== "senior_incharge" &&
       profile.role !== "cutting_operator"
     ) {
       return {
