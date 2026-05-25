@@ -4,6 +4,7 @@ import Link from "next/link";
 import { headers, cookies } from "next/headers";
 
 import { LogoutButton } from "@/components/logout-button";
+import { MessengerPill } from "@/components/messenger-pill";
 import { NotificationBell } from "@/components/notification-bell";
 import { NavigationProgress } from "@/components/navigation-progress";
 import { RealtimeRefresh } from "@/components/realtime-refresh";
@@ -16,6 +17,7 @@ import { Heartbeat } from "@/components/heartbeat";
 import { LoginLocationProbe } from "@/components/login-location-probe";
 import { requireAuth } from "@/lib/auth";
 import { canApproveCuts, canSeeAwaitingReview } from "@/lib/cutting-permissions";
+import { canUseMessenger } from "@/lib/messenger-permissions";
 import {
   canApproveBills,
   canConfirmPayments,
@@ -486,6 +488,19 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               royaltyApprovalBadge,
               awaitingReviewBadge,
             })} />
+
+            {/* Mig 078 — Messenger pilot. canUseMessenger is locked
+                to developer + owner; everyone else never sees the
+                pill. The component owns its panel + realtime sub. */}
+            {canUseMessenger(profile) && (
+              <MessengerPill
+                profile={{
+                  id: profile.id,
+                  role: profile.role as "owner" | "developer",
+                  full_name: profile.full_name,
+                }}
+              />
+            )}
 
             <span className="role-pill" style={
               profile.role === "developer"       ? { background: "var(--gold)", color: "#fff", fontWeight: 700 } :
