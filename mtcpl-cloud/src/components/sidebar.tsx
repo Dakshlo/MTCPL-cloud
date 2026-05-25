@@ -235,17 +235,23 @@ const navEntries: NavEntry[] = [
     // removed from outer roles — they no longer have any visible
     // children here (Cutter / CNC / Various are dev-only inside this
     // group, and the entry user has direct sidebar entries above).
+    //
+    // Daksh May 2026 round 2: owner back in — dad wants the global
+    // cockpit ("My Jobs" view of every vendor) for read-mostly
+    // oversight + occasional intervention. Same /vendor route the
+    // developer uses; staff-vs-vendor scoping is handled inside
+    // the route already.
     type: "group",
     label: "More",
     icon: "⋯",
     department: "production",
-    roles: ["developer", "vendor", "slab_transfer"],
+    roles: ["developer", "owner", "vendor", "slab_transfer"],
     children: [
       {
         href: "/vendor",
         label: "My Jobs",
         icon: "👤",
-        roles: ["developer", "vendor"],
+        roles: ["developer", "owner", "vendor"],
         department: "production",
       },
       {

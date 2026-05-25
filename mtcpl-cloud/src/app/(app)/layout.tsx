@@ -15,7 +15,7 @@ import { Toast } from "@/components/toast";
 import { Heartbeat } from "@/components/heartbeat";
 import { LoginLocationProbe } from "@/components/login-location-probe";
 import { requireAuth } from "@/lib/auth";
-import { canApproveCuts } from "@/lib/cutting-permissions";
+import { canApproveCuts, canSeeAwaitingReview } from "@/lib/cutting-permissions";
 import {
   canApproveBills,
   canConfirmPayments,
@@ -259,6 +259,21 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     if (royaltyErr) return null;
     return count ?? 0;
   }
+  // Daksh May 2026 round 2 — surface the Carving Awaiting Review
+  // queue alongside the other approval badges. Same audience as
+  // /carving's review tab: owner + developer + carving_head (NOT
+  // can_assign_carving holders — they don't sign off on their own
+  // work; canSeeAwaitingReview encodes that exclusion).
+  async function fetchAwaitingReviewBadge(): Promise<number | null> {
+    if (!canSeeAwaitingReview(profile)) return null;
+    const { count, error: reviewErr } = await supabase
+      .from("carving_items")
+      .select("*", { count: "exact", head: true })
+      .not("completed_at", "is", null)
+      .is("review_approved_at", null);
+    if (reviewErr) return null;
+    return count ?? 0;
+  }
 
   const [
     approvalsBadge,
@@ -268,6 +283,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     rejectedBillsBadge,
     finalAuditBadge,
     royaltyApprovalBadge,
+    awaitingReviewBadge,
   ] = await Promise.all([
     fetchApprovalsBadge(),
     fetchBillsAuditBadge(),
@@ -276,6 +292,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     fetchRejectedBillsBadge(),
     fetchFinalAuditBadge(),
     fetchRoyaltyApprovalBadge(),
+    fetchAwaitingReviewBadge(),
   ]);
 
   return (
@@ -464,6 +481,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               inventoryAuditBadge,
               finalAuditBadge,
               royaltyApprovalBadge,
+              awaitingReviewBadge,
             })} />
 
             <span className="role-pill" style={
@@ -541,6 +559,7 @@ function buildTopbarTaskItems(counts: {
   inventoryAuditBadge: number | null;
   finalAuditBadge: number | null;
   royaltyApprovalBadge: number | null;
+  awaitingReviewBadge: number | null;
 }): TopbarTask[] {
   const items: TopbarTask[] = [];
   // Mig 058 follow-on (Daksh) — per-user rejected-bills item.
@@ -571,6 +590,20 @@ function buildTopbarTaskItems(counts: {
       description: "Cutter submissions awaiting your sign-off",
       count: counts.approvalsBadge,
       icon: "✓",
+      department: "production",
+    });
+  }
+  // Daksh May 2026 round 2 — Carving Awaiting Review queue. Owner /
+  // developer / carving_head only (excludes can_assign_carving
+  // holders — they don't sign off on their own work).
+  if (counts.awaitingReviewBadge !== null) {
+    items.push({
+      id: "awaiting-review",
+      href: "/carving?tab=review",
+      label: "Awaiting Review",
+      description: "Completed carvings awaiting sign-off",
+      count: counts.awaitingReviewBadge,
+      icon: "🎨",
       department: "production",
     });
   }

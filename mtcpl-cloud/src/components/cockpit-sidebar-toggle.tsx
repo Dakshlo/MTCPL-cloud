@@ -86,8 +86,15 @@ export function CockpitSidebarToggle({
       style={{
         position: "fixed",
         top: 12,
-        left: 12,
-        zIndex: 60,
+        // When the sidebar is expanded it occupies the leftmost
+        // var(--sidebar-width) (240px on desktop) at z-index 100, so a
+        // button pinned to left:12 ends up rendered BENEATH it (the
+        // original z-index:60 / left:12 bug). Push past the sidebar
+        // edge when expanded; sit at the top-left of the now-empty
+        // content area when collapsed. Bumped z-index above the
+        // sidebar's so the button always wins the stacking contest.
+        left: expanded ? "calc(var(--sidebar-width, 240px) + 12px)" : 12,
+        zIndex: 300,
         minWidth: 44,
         height: 44,
         padding: "0 14px",
@@ -106,6 +113,7 @@ export function CockpitSidebarToggle({
         display: "inline-flex",
         alignItems: "center",
         gap: 8,
+        transition: "left 0.15s ease",
       }}
     >
       <span style={{ fontSize: 16, lineHeight: 1 }}>
