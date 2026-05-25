@@ -125,7 +125,10 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
       daysElapsed,
       cftPerDay: report.totalCft / daysElapsed,
       sftPerDay: report.totalSft / daysElapsed,
-      costPerDay: report.operationalForPeriod / daysElapsed,
+      // Daksh round 2 — daily cost now includes depreciation so the
+      // rhythm matches the headline ₹/SFT (which is total cost ÷ SFT,
+      // not operational-only ÷ SFT).
+      costPerDay: report.totalCostForPeriod / daysElapsed,
     };
   })();
 
@@ -259,7 +262,7 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
           label="Cost per Unit"
           primary={`${fmtINR(report.costPerSft)} / SFT`}
           secondary={`${fmtINR(report.costPerCft)} / CFT`}
-          hint="Operational only — see full report for depreciation"
+          hint="Operational + depreciation ÷ output"
           tone="accent"
         />
         <DualKpiTile
@@ -271,8 +274,8 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
         />
         <KpiTile
           label="Total Cost"
-          value={fmtINR(report.operationalForPeriod)}
-          hint="Operational expenses (no depreciation)"
+          value={fmtINR(report.totalCostForPeriod)}
+          hint={`Op ${fmtINR(report.operationalForPeriod)} + Dep ${fmtINR(report.depreciationForPeriod)}`}
           tone="warning"
         />
         {dailyAvg && (
@@ -301,6 +304,8 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
                 <th style={{ ...th(), textAlign: "right" }}>CFT</th>
                 <th style={{ ...th(), textAlign: "right" }}>Slabs</th>
                 <th style={{ ...th(), textAlign: "right" }}>Op. Cost</th>
+                <th style={{ ...th(), textAlign: "right" }}>Dep.</th>
+                <th style={{ ...th(), textAlign: "right" }}>Total</th>
                 <th style={{ ...th(), textAlign: "right" }}>₹ / SFT</th>
                 <th style={{ ...th(), textAlign: "right" }}>₹ / CFT</th>
               </tr>
@@ -318,8 +323,14 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
                   <td style={{ ...td(), textAlign: "right", color: "var(--muted)" }}>
                     {v.slabsCount}
                   </td>
-                  <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 600 }}>
-                    {fmtINR(v.cost)}
+                  <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace" }}>
+                    {fmtINR(v.operationalCost)}
+                  </td>
+                  <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", color: "var(--muted)" }}>
+                    {fmtINR(v.depreciationCost)}
+                  </td>
+                  <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>
+                    {fmtINR(v.totalCost)}
                   </td>
                   <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace" }}>
                     {fmtINR(v.costPerSft)}
@@ -343,6 +354,12 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
                 <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>
                   {fmtINR(report.operationalForPeriod)}
                 </td>
+                <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800, color: "var(--muted)" }}>
+                  {fmtINR(report.depreciationForPeriod)}
+                </td>
+                <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>
+                  {fmtINR(report.totalCostForPeriod)}
+                </td>
                 <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>
                   {fmtINR(report.costPerSft)}
                 </td>
@@ -355,12 +372,13 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
         )}
       </Panel>
 
-      {/* ── Aggregate operational expense breakdown ─────────── */}
+      {/* ── Aggregate cost breakdown (operational categories +
+              depreciation row at the bottom). ─────────────────── */}
       <div style={{ marginTop: 16 }}>
-        <Panel title="Operational expense breakdown">
-          {report.expenseBreakdown.every((b) => b.amount === 0) ? (
+        <Panel title="Cost breakdown">
+          {report.totalCostForPeriod === 0 ? (
             <div style={{ padding: 14, color: "var(--muted)", fontSize: 13 }}>
-              No expenses logged for this period.{" "}
+              No costs logged for this period.{" "}
               <Link href="/carving/expenses" style={{ color: "var(--gold)", fontWeight: 600 }}>
                 Enter expenses →
               </Link>
@@ -369,7 +387,7 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>
-                  <th style={th()}>Category</th>
+                  <th style={th()}>Line</th>
                   <th style={{ ...th(), textAlign: "right" }}>Amount (prorated)</th>
                   <th style={{ ...th(), textAlign: "right" }}>Share</th>
                 </tr>
@@ -379,8 +397,8 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
                   .filter((b) => b.amount > 0)
                   .map((b) => {
                     const share =
-                      report.operationalForPeriod > 0
-                        ? (b.amount / report.operationalForPeriod) * 100
+                      report.totalCostForPeriod > 0
+                        ? (b.amount / report.totalCostForPeriod) * 100
                         : 0;
                     return (
                       <tr key={b.category} style={{ borderBottom: "1px solid var(--border)" }}>
@@ -394,10 +412,43 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
                       </tr>
                     );
                   })}
+                {/* Operational subtotal — only renders when there's
+                    BOTH operational expenses AND depreciation to
+                    distinguish (otherwise it's just noise). */}
+                {report.operationalForPeriod > 0 && report.depreciationForPeriod > 0 && (
+                  <tr style={{ background: "var(--bg)" }}>
+                    <td style={{ ...td(), fontWeight: 700 }}>Operational subtotal</td>
+                    <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>
+                      {fmtINR(report.operationalForPeriod)}
+                    </td>
+                    <td style={{ ...td(), textAlign: "right", color: "var(--muted)" }}>
+                      {fmtNum(
+                        report.totalCostForPeriod > 0
+                          ? (report.operationalForPeriod / report.totalCostForPeriod) * 100
+                          : 0,
+                        1,
+                      )}%
+                    </td>
+                  </tr>
+                )}
+                <tr style={{ borderTop: "1px solid var(--border)" }}>
+                  <td style={td()}>Depreciation (prorated)</td>
+                  <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 600 }}>
+                    {fmtINR(report.depreciationForPeriod)}
+                  </td>
+                  <td style={{ ...td(), textAlign: "right", color: "var(--muted)" }}>
+                    {fmtNum(
+                      report.totalCostForPeriod > 0
+                        ? (report.depreciationForPeriod / report.totalCostForPeriod) * 100
+                        : 0,
+                      1,
+                    )}%
+                  </td>
+                </tr>
                 <tr style={{ background: "#fffbeb", borderTop: "2px solid var(--gold)" }}>
-                  <td style={{ ...td(), fontWeight: 800 }}>Total operational</td>
-                  <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>
-                    {fmtINR(report.operationalForPeriod)}
+                  <td style={{ ...td(), fontWeight: 800 }}>Total cost</td>
+                  <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 14 }}>
+                    {fmtINR(report.totalCostForPeriod)}
                   </td>
                   <td style={td()} />
                 </tr>
@@ -413,10 +464,11 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
               background: "var(--bg)",
             }}
           >
-            ⚡ Sub-monthly views (daily / weekly) prorate each month's
-            total by days-in-window ÷ days-in-month. Depreciation is
-            intentionally omitted on this summary — see the full
-            Excel report below.
+            ⚡ Sub-monthly views (daily / weekly) prorate both
+            operational expenses AND depreciation by days-in-window ÷
+            days-in-month. Depreciation uses WDV (Written Down Value)
+            at the configured per-machine rate — same math as the
+            full Excel report.
           </div>
         </Panel>
       </div>

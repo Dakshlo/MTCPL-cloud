@@ -51,10 +51,14 @@ export type CncVendorRow = {
   sft: number;
   slabsCount: number;
   /** Operational expenses for this vendor in the period (prorated). */
-  cost: number;
-  /** cost / sft. NaN when no production. */
+  operationalCost: number;
+  /** Depreciation for this vendor's machines, prorated to the period. */
+  depreciationCost: number;
+  /** Operational + depreciation. */
+  totalCost: number;
+  /** totalCost / sft. NaN when no production. */
   costPerSft: number;
-  /** cost / cft. NaN when no production. */
+  /** totalCost / cft. NaN when no production. */
   costPerCft: number;
 };
 
@@ -69,16 +73,26 @@ export type CncVariousCostReport = {
   totalSft: number;
   slabsCount: number;
   /** Operational expense pool across all CNC vendors for the period
-   *  (prorated for sub-monthly views). Does NOT include depreciation
-   *  — that lives on the full /carving/reports page. */
+   *  (prorated for sub-monthly views). */
   operationalForPeriod: number;
+  /** Depreciation across all CNC machines for the period (prorated).
+   *  Same WDV math as /carving/reports — the two surfaces stay in
+   *  agreement so the user doesn't see different totals between the
+   *  summary and the deep-dive. */
+  depreciationForPeriod: number;
+  /** operationalForPeriod + depreciationForPeriod. */
+  totalCostForPeriod: number;
+  /** totalCostForPeriod / totalSft. NaN when no production. */
   costPerSft: number;
+  /** totalCostForPeriod / totalCft. NaN when no production. */
   costPerCft: number;
-  /** Aggregate per-category breakdown across all CNC vendors. */
+  /** Aggregate per-category operational breakdown across all CNC
+   *  vendors. (Depreciation is shown as a single line in the UI,
+   *  not split by category.) */
   expenseBreakdown: CncExpenseBreakdownRow[];
   /** One row per CNC vendor (active or not — we include vendors with
-   *  EITHER carving output OR operational expenses in the period so
-   *  the table shows a true picture). */
+   *  EITHER carving output OR operational expenses OR machines in
+   *  the period so the table shows a true picture). */
   perVendor: CncVendorRow[];
 };
 
@@ -209,6 +223,57 @@ function slabCft(l: number, w: number, t: number): number {
 
 function slabSft(l: number, w: number): number {
   return (l * w) / 144;
+}
+
+// ── Depreciation (mirrors src/lib/cnc-monthly-report.ts) ──────────
+// Each CNC machine carries a snapshot of its asset value (either
+// purchase_price + purchase_date OR current_book_value +
+// book_value_as_of) plus a WDV (Written Down Value) rate and salvage
+// floor. We compute the monthly share, prorate by days, sum per
+// vendor + total. Math is identical to /carving/reports so the two
+// surfaces show consistent numbers.
+
+type MachineAsset = {
+  id: string;
+  vendor_id: string;
+  purchase_price: number | null;
+  purchase_date: string | null;
+  current_book_value: number | null;
+  book_value_as_of: string | null;
+  depreciation_rate_pct: number;
+  salvage_value: number;
+};
+
+function monthlyDepreciationFor(
+  machine: MachineAsset,
+  forYear: number,
+  forMonth: number,
+): number {
+  let baseValue: number;
+  let baseDate: Date;
+  if (machine.purchase_price != null && machine.purchase_date) {
+    baseValue = machine.purchase_price;
+    baseDate = new Date(machine.purchase_date);
+  } else if (machine.current_book_value != null && machine.book_value_as_of) {
+    baseValue = machine.current_book_value;
+    baseDate = new Date(machine.book_value_as_of);
+  } else {
+    return 0;
+  }
+  if (!Number.isFinite(baseDate.getTime())) return 0;
+
+  const rate = Math.max(0, Math.min(1, machine.depreciation_rate_pct / 100));
+  const salvage = Math.max(0, machine.salvage_value);
+  const reportMidMs = Date.UTC(forYear, forMonth - 1, 15);
+  const yearsElapsed = Math.max(
+    0,
+    (reportMidMs - baseDate.getTime()) / (365.25 * 86_400_000),
+  );
+  const currentValue = Math.max(
+    salvage,
+    baseValue * Math.pow(1 - rate, yearsElapsed),
+  );
+  return (currentValue * rate) / 12;
 }
 
 /** For a (year, month) the report needs to know how many days of
@@ -399,12 +464,62 @@ export async function buildCncVariousCostReport(
 
   const operationalForPeriod = aggregateByCategory.cost;
 
+  // ── 2b. Depreciation per vendor (prorated to the window) ──────
+  // One fetch of every CNC machine + its asset register columns.
+  // For each (machine, year, month) the window touches, compute
+  // monthlyDepreciationFor() and prorate by days_in_window /
+  // days_in_month. Sum into the vendor's depreciation bucket.
+  const { data: machines, error: machinesErr } = await admin
+    .from("cnc_machines")
+    .select(
+      "id, vendor_id, purchase_price, purchase_date, current_book_value, book_value_as_of, depreciation_rate_pct, salvage_value",
+    );
+  if (machinesErr) throw new Error(`cnc_machines query failed: ${machinesErr.message}`);
+
+  const depreciationByVendor = new Map<string, number>();
+  let depreciationForPeriod = 0;
+  for (const raw of machines ?? []) {
+    const m: MachineAsset = {
+      id: raw.id as string,
+      vendor_id: raw.vendor_id as string,
+      purchase_price:
+        raw.purchase_price == null ? null : Number(raw.purchase_price),
+      purchase_date: raw.purchase_date as string | null,
+      current_book_value:
+        raw.current_book_value == null ? null : Number(raw.current_book_value),
+      book_value_as_of: raw.book_value_as_of as string | null,
+      depreciation_rate_pct: Number(raw.depreciation_rate_pct ?? 0),
+      salvage_value: Number(raw.salvage_value ?? 0),
+    };
+    let machineTotal = 0;
+    for (const { year, month } of yearMonthPairs) {
+      const monthly = monthlyDepreciationFor(m, year, month);
+      if (monthly <= 0) continue;
+      const monthLen = daysInMonth(year, month);
+      const daysInWindow = daysOfWindowInMonth(
+        period.startDate,
+        period.endDate,
+        year,
+        month,
+      );
+      // Day-level proration matches the operational expense math
+      // above + the existing /carving/reports per-vendor numbers.
+      machineTotal += monthly * (monthLen > 0 ? daysInWindow / monthLen : 0);
+    }
+    if (machineTotal > 0) {
+      const existing = depreciationByVendor.get(m.vendor_id) ?? 0;
+      depreciationByVendor.set(m.vendor_id, existing + machineTotal);
+      depreciationForPeriod += machineTotal;
+    }
+  }
+
   // ── 3. Resolve vendor names for any vendor that has expenses
   //     but no carving output in the window (so the table still
   //     shows them — they spent money even if no slabs landed). ──
   const allVendorIds = new Set<string>([
     ...carvedByVendor.keys(),
     ...expensesByVendor.keys(),
+    ...depreciationByVendor.keys(),
   ]);
   const knownNames = new Map<string, string>();
   for (const [id, v] of carvedByVendor) knownNames.set(id, v.vendorName);
@@ -426,20 +541,24 @@ export async function buildCncVariousCostReport(
     const cft = carved?.cft ?? 0;
     const sft = carved?.sft ?? 0;
     const slabsCount = carved?.slabsCount ?? 0;
-    const cost = exp?.cost ?? 0;
+    const operationalCost = exp?.cost ?? 0;
+    const depreciationCost = depreciationByVendor.get(vendorId) ?? 0;
+    const totalCost = operationalCost + depreciationCost;
     return {
       vendorId,
       vendorName: knownNames.get(vendorId) || "Unknown",
       cft,
       sft,
       slabsCount,
-      cost,
-      costPerSft: sft > 0 ? cost / sft : NaN,
-      costPerCft: cft > 0 ? cost / cft : NaN,
+      operationalCost,
+      depreciationCost,
+      totalCost,
+      costPerSft: sft > 0 ? totalCost / sft : NaN,
+      costPerCft: cft > 0 ? totalCost / cft : NaN,
     };
   });
-  // Sort by cost desc — biggest contributors at the top.
-  perVendor.sort((a, b) => b.cost - a.cost || b.cft - a.cft);
+  // Sort by total cost desc — biggest contributors at the top.
+  perVendor.sort((a, b) => b.totalCost - a.totalCost || b.cft - a.cft);
 
   // ── 5. Category breakdown ─────────────────────────────────────
   const CATEGORIES: CncExpenseBreakdownRow["category"][] = [
@@ -455,14 +574,18 @@ export async function buildCncVariousCostReport(
     amount: aggregateByCategory.byCategory[c] || 0,
   }));
 
+  const totalCostForPeriod = operationalForPeriod + depreciationForPeriod;
+
   return {
     period,
     totalCft,
     totalSft,
     slabsCount: totalSlabs,
     operationalForPeriod,
-    costPerSft: totalSft > 0 ? operationalForPeriod / totalSft : NaN,
-    costPerCft: totalCft > 0 ? operationalForPeriod / totalCft : NaN,
+    depreciationForPeriod,
+    totalCostForPeriod,
+    costPerSft: totalSft > 0 ? totalCostForPeriod / totalSft : NaN,
+    costPerCft: totalCft > 0 ? totalCostForPeriod / totalCft : NaN,
     expenseBreakdown,
     perVendor,
   };

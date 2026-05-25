@@ -217,11 +217,19 @@ export function CarvingDashboardClient({
   // slabs whose updated_at >= the picked date pass through.
   //
   // Persisted in localStorage so the cutoff sticks across reloads
-  // and across navigation. Default is 2026-05-22 (go-live day);
-  // user can change to any date or "All time" (empty string) to
-  // see everything including legacy.
+  // and across navigation. Empty string ("") = "All time" — the
+  // user has explicitly asked that this be the fresh-install default.
+  //
+  // Daksh round 2 — earlier default was hardcoded to 2026-05-22 so
+  // the carving head wouldn't see legacy test slabs. But the
+  // localStorage gets wiped on private mode / cleared cookies /
+  // new browser, and Daksh kept finding the picker "stuck on 22
+  // May" with no obvious way back to seeing everything. Default
+  // is now "" (all time) — the carving head can re-pick a cutoff
+  // any time, and that pick still sticks in localStorage as
+  // before.
   const UNASSIGNED_FROM_STORAGE_KEY = "mtcpl:carving:unassigned-from-date";
-  const DEFAULT_UNASSIGNED_FROM = "2026-05-22";
+  const DEFAULT_UNASSIGNED_FROM = "";
   const [unassignedFromDate, setUnassignedFromDate] = useState<string>(
     DEFAULT_UNASSIGNED_FROM,
   );
@@ -2032,60 +2040,216 @@ function JobsByTemple({
         {jobs.length} job{jobs.length > 1 ? "s" : ""} across {groups.length} {groupNoun}
         {groups.length > 1 ? "s" : ""}.
       </p>
-      {groups.map(({ key, items }) => (
-        <details key={key} open={openByDefault} style={{ marginBottom: 10 }}>
+      {groups.map(({ key, items }) => {
+        // Daksh May 2026 round 2 — vendor separation needs to be
+        // visually obvious. Compute a quick stat strip per group
+        // (slab count, total CFT/SFT, carving-now count) so the
+        // header actually carries information instead of just being
+        // an accordion chevron + name. All math is local in-memory
+        // — JobRow already has the dimensions on it.
+        let totalCft = 0;
+        let totalSft = 0;
+        let carvingNow = 0;
+        let inStock = 0;
+        let inTransit = 0;
+        for (const j of items) {
+          totalCft += (j.length_ft * j.width_ft * j.thickness_ft) / 1728;
+          totalSft += (j.length_ft * j.width_ft) / 144;
+          if (j.status === "carving_in_progress") carvingNow++;
+          else if (j.status === "carving_assigned") {
+            if (j.received_at_vendor_at) inStock++;
+            else inTransit++;
+          }
+        }
+        const fmtVol = (n: number) =>
+          n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+        return (
+        <details
+          key={key}
+          open={openByDefault}
+          // Bigger gap between vendor sections so the eye reads them
+          // as distinct groups, not a continuous list.
+          style={{ marginBottom: 22 }}
+        >
           <summary
             style={{
               cursor: "pointer",
-              padding: "10px 14px",
-              background: "var(--surface)",
-              border: "1px solid var(--border)",
-              borderRadius: "10px 10px 0 0",
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
+              padding: 0,
               userSelect: "none",
               listStyle: "none",
+              // Sit the chevron arrow without using ::marker (which
+              // we can't style cross-browser).
+              marginBottom: 0,
             }}
           >
-            <span style={{ fontSize: 11 }}>▾</span>
-            <span style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>
-              {groupIcon} {key}
-            </span>
-            <span
+            {/* Prominent vendor section header — gold accent bar on
+                the left, large name, summary stat strip, status
+                chips. Reads as a "card" not just an accordion line. */}
+            <div
               style={{
-                fontSize: 11,
-                fontWeight: 700,
-                padding: "2px 9px",
-                borderRadius: 999,
-                background: "var(--gold-dark)",
-                color: "#fff",
-                fontFamily: "ui-monospace, monospace",
-                minWidth: 24,
-                textAlign: "center",
+                position: "relative",
+                background:
+                  "linear-gradient(135deg, rgba(201,161,74,0.14) 0%, rgba(201,161,74,0.04) 100%)",
+                border: "1px solid var(--border)",
+                borderLeft: "5px solid var(--gold)",
+                borderRadius: "12px 12px 0 0",
+                padding: "14px 18px",
+                display: "flex",
+                alignItems: "center",
+                gap: 14,
+                transition: "transform 0.12s ease, box-shadow 0.12s ease",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.boxShadow =
+                  "0 2px 8px rgba(184,115,51,0.12)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.boxShadow = "none";
               }}
             >
-              {items.length}
-            </span>
+              <span
+                aria-hidden
+                style={{
+                  fontSize: 28,
+                  lineHeight: 1,
+                  filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.06))",
+                  flexShrink: 0,
+                }}
+              >
+                {groupIcon}
+              </span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
+                  style={{
+                    fontSize: 18,
+                    fontWeight: 800,
+                    color: "var(--text)",
+                    letterSpacing: "-0.01em",
+                    lineHeight: 1.2,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {key}
+                </div>
+                {/* Stat strip: count + volume + status chips. Only
+                    renders chips with non-zero counts so a Done-tab
+                    section doesn't show "carving now: 0". */}
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: "var(--muted)",
+                    marginTop: 4,
+                    display: "flex",
+                    gap: 14,
+                    flexWrap: "wrap",
+                    alignItems: "center",
+                  }}
+                >
+                  <span>
+                    <strong style={{ color: "var(--text)", fontWeight: 700 }}>
+                      {items.length}
+                    </strong>{" "}
+                    slab{items.length !== 1 ? "s" : ""}
+                  </span>
+                  <span style={{ fontFamily: "ui-monospace, monospace" }}>
+                    {fmtVol(totalSft)} SFT
+                  </span>
+                  <span style={{ fontFamily: "ui-monospace, monospace" }}>
+                    {fmtVol(totalCft)} CFT
+                  </span>
+                  {carvingNow > 0 && (
+                    <span
+                      style={{
+                        color: "#15803d",
+                        fontWeight: 700,
+                        padding: "1px 8px",
+                        borderRadius: 999,
+                        background: "rgba(22,163,74,0.12)",
+                        border: "1px solid rgba(22,163,74,0.25)",
+                      }}
+                    >
+                      ▶ {carvingNow} carving now
+                    </span>
+                  )}
+                  {inStock > 0 && (
+                    <span
+                      style={{
+                        color: "#78350f",
+                        fontWeight: 700,
+                        padding: "1px 8px",
+                        borderRadius: 999,
+                        background: "rgba(180,115,51,0.10)",
+                        border: "1px solid rgba(180,115,51,0.25)",
+                      }}
+                    >
+                      📦 {inStock} in stock
+                    </span>
+                  )}
+                  {inTransit > 0 && (
+                    <span
+                      style={{
+                        color: "#b45309",
+                        fontWeight: 700,
+                        padding: "1px 8px",
+                        borderRadius: 999,
+                        background: "rgba(217,119,6,0.10)",
+                        border: "1px solid rgba(217,119,6,0.25)",
+                      }}
+                    >
+                      🚚 {inTransit} in transit
+                    </span>
+                  )}
+                </div>
+              </div>
+              <span
+                aria-hidden
+                style={{
+                  fontSize: 14,
+                  color: "var(--muted)",
+                  fontWeight: 700,
+                  flexShrink: 0,
+                }}
+              >
+                ▾
+              </span>
+            </div>
           </summary>
           <div
             style={{
               background: "var(--bg)",
               border: "1px solid var(--border)",
               borderTop: "none",
-              borderRadius: "0 0 10px 10px",
-              padding: 10,
+              borderRadius: "0 0 12px 12px",
+              padding: 12,
               display: "grid",
-              // Compact card width — fits 4–5 cards per row on a
-              // typical desktop instead of 3.
-              gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
-              gap: 8,
+              // Slightly larger min-width so cards have room to
+              // breathe — was 200, now 220.
+              gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+              gap: 10,
             }}
           >
             {items.map((j) => {
               const days = daysUntil(j.due_at);
               const overdue = days !== null && days < 0;
               const openPeek = () => onOpenJob(j);
+              // Status-color left stripe so the user can scan a
+              // section and see at a glance "what state is each
+              // slab in" without reading every ribbon. Same palette
+              // as the existing ribbons inside the card — green for
+              // running, gold-tan for stock, orange for transit,
+              // sky-blue for approved, gold for awaiting review.
+              const statusStripe = (() => {
+                if (j.status === "carving_in_progress") return "#16a34a";
+                if (j.status === "carving_completed") return "#c9a14a";
+                if (j.status === "carving_approved") return "#0ea5e9";
+                if (j.status === "dispatched") return "#0284c7";
+                if (j.status === "carving_assigned") {
+                  return j.received_at_vendor_at ? "#b45309" : "#d97706";
+                }
+                return "var(--border)";
+              })();
               return (
                 <div
                   key={j.id}
@@ -2099,23 +2263,34 @@ function JobsByTemple({
                   role="button"
                   tabIndex={0}
                   style={{
-                    padding: "8px 10px",
+                    padding: "10px 12px",
                     background: "var(--surface)",
                     border: "1px solid var(--border)",
-                    borderRadius: 8,
+                    borderLeft: `4px solid ${statusStripe}`,
+                    borderRadius: 10,
                     display: "flex",
                     flexDirection: "column",
                     gap: 6,
                     cursor: "pointer",
-                    transition: "border-color 0.12s, background 0.12s",
+                    transition:
+                      "border-color 0.12s, background 0.12s, transform 0.12s, box-shadow 0.12s",
+                    boxShadow: "0 1px 2px rgba(15,23,42,0.04)",
                   }}
                   onMouseEnter={(e) => {
                     e.currentTarget.style.background = "var(--surface-alt)";
                     e.currentTarget.style.borderColor = "var(--gold-dark)";
+                    // Subtle lift instead of just border-color flip so
+                    // hover feels alive on dense card grids.
+                    e.currentTarget.style.transform = "translateY(-1px)";
+                    e.currentTarget.style.boxShadow =
+                      "0 4px 12px rgba(15,23,42,0.08)";
                   }}
                   onMouseLeave={(e) => {
                     e.currentTarget.style.background = "var(--surface)";
                     e.currentTarget.style.borderColor = "var(--border)";
+                    e.currentTarget.style.transform = "translateY(0)";
+                    e.currentTarget.style.boxShadow =
+                      "0 1px 2px rgba(15,23,42,0.04)";
                   }}
                 >
                   {/* 3D slab thumbnail */}
@@ -2568,7 +2743,8 @@ function JobsByTemple({
             })}
           </div>
         </details>
-      ))}
+        );
+      })}
     </>
   );
 }
