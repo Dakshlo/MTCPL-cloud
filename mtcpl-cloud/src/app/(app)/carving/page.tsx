@@ -415,7 +415,6 @@ export default async function CarvingDashboardPage({
         templeNames={templeNames}
         templeFilter={templeFilter}
         stoneTypes={stoneTypes ?? []}
-        canSeeReviewTab={reviewAccess}
       />
     </div>
   );
