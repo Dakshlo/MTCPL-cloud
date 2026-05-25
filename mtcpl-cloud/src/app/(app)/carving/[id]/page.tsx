@@ -268,7 +268,16 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
                 requiresMachineType={jobRow.requires_machine_type ?? null}
                 receivedAtVendorAt={jobRow.received_at_vendor_at ?? null}
                 vendors={(transferVendors ?? []) as Array<{ id: string; name: string; vendor_type: string }>}
-                canManage={["developer", "owner", "carving_head"].includes(profile.role)}
+                // Mig 076 round 3 — senior_incharge was missing here:
+                // server actions (transferCarvingJobAction +
+                // cancelCarvingAssignmentAction + the set-machine
+                // action) all permit senior_incharge, but the
+                // CarvingJobControls UI was gated to dev/owner/
+                // carving_head only — so Rajesh's account showed no
+                // buttons on /carving/[id] at all. Adding the role
+                // here surfaces the cancel / transfer / set-machine
+                // controls he's been allowed to use all along.
+                canManage={["developer", "owner", "carving_head", "senior_incharge"].includes(profile.role)}
               />
               {/* Manual vendor lifecycle buttons — Mark started / complete.
                   Server-rendered (no client state). */}
