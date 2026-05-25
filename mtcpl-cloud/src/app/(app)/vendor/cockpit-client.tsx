@@ -1691,19 +1691,44 @@ function ReloadHeldModal({
 }) {
   // Compatible CNCs: same vendor's machines, currently idle, work-
   // type matches (lathe slabs → lathe machines, others → non-lathe).
-  const compatibleIdle = machines.filter((m) => {
-    if (m.status !== "idle") return false;
-    if (held.requires_machine_type === "lathe") {
-      return m.machine_type === "lathe";
-    }
-    return m.machine_type !== "lathe";
+  const isCompatibleType = (m: CncMachineLive) =>
+    held.requires_machine_type === "lathe"
+      ? m.machine_type === "lathe"
+      : m.machine_type !== "lathe";
+  const compatibleIdle = machines.filter((m) => m.status === "idle" && isCompatibleType(m));
+
+  // Daksh May 2026 — pair-join candidates. A 2-head CNC currently
+  // running exactly ONE slab whose geometry (L×W×T) + temple + label
+  // match the held slab can accept the held one as the second head.
+  // Server re-validates the match before loading, so this UI filter
+  // is just to avoid offering hopeless options.
+  const pairJoinCandidates = machines.filter((m) => {
+    if (m.status !== "carving") return false;
+    if (m.machine_type !== "multi_head_2") return false;
+    if (held.requires_machine_type === "lathe") return false; // lathes don't pair
+    if (!held.slab) return false;
+    const active = m.current_jobs;
+    if (active.length !== 1) return false;
+    const partner = active[0]?.slab;
+    if (!partner) return false;
+    return (
+      partner.length_in === held.slab.length_in &&
+      partner.width_in === held.slab.width_in &&
+      partner.thickness_in === held.slab.thickness_in &&
+      (partner.temple ?? "") === (held.slab.temple ?? "") &&
+      (partner.label ?? "") === (held.slab.label ?? "")
+    );
   });
+
   // Default machine = the one the slab was held from, IF still idle.
-  // Otherwise fall back to the first compatible idle.
+  // Otherwise fall back to the first compatible idle, then the first
+  // pair-join candidate (so the modal opens with a sensible default).
   const defaultMachine =
     compatibleIdle.find((m) => m.id === held.held_from_machine_id) ??
     compatibleIdle[0] ??
+    pairJoinCandidates[0] ??
     null;
+  const anyTarget = compatibleIdle.length > 0 || pairJoinCandidates.length > 0;
 
   return (
     <ModalShell
@@ -1715,7 +1740,7 @@ function ReloadHeldModal({
       }
       onClose={onClose}
     >
-      {compatibleIdle.length === 0 ? (
+      {!anyTarget ? (
         <div
           style={{
             padding: 16,
@@ -1728,7 +1753,7 @@ function ReloadHeldModal({
         >
           {held.requires_machine_type === "lathe"
             ? "No idle lathe machines right now. Unload a running lathe first."
-            : "No idle CNC machines right now. Unload a running CNC first."}
+            : "No idle CNC machines right now (and no running 2-head CNC is carving a matching slab to pair with). Unload a running CNC first."}
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -1847,6 +1872,105 @@ function ReloadHeldModal({
               </form>
             );
           })}
+
+          {/* Daksh May 2026 — pair-join candidates: 2-head CNCs
+              currently running a slab whose dimensions + temple +
+              label match the held one. The held slab joins as the
+              second head; partner's clock keeps running. Distinct
+              green tint so the operator knows this is a different
+              load mode (the partner is still mid-carve). */}
+          {pairJoinCandidates.length > 0 && (
+            <>
+              <div
+                style={{
+                  marginTop: 10,
+                  paddingTop: 8,
+                  borderTop: "1px dashed var(--border)",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: "#15803d",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                }}
+              >
+                ⇄ Or join a running pair
+              </div>
+              <p
+                className="muted"
+                style={{ fontSize: 11, margin: "2px 0 4px" }}
+              >
+                These 2-head CNCs already have a matching slab
+                running. The held one drops in as the second head.
+              </p>
+              {pairJoinCandidates.map((m) => {
+                const partnerJob = m.current_jobs[0];
+                const partnerLabel = partnerJob?.slab_id ?? "running slab";
+                return (
+                  <form
+                    key={`pair-${m.id}`}
+                    action={reloadHeldSlabAction}
+                    onSubmit={(e) => {
+                      const lines = [
+                        `Add ${held.slab_id} to ${m.machine_code} as the second head?`,
+                        "",
+                        `Partner ${partnerLabel} keeps running. The held slab's clock starts now.`,
+                      ];
+                      if (!window.confirm(lines.join("\n"))) {
+                        e.preventDefault();
+                      }
+                    }}
+                    style={{ width: "100%" }}
+                  >
+                    <FormPendingOverlay label={`Joining ${m.machine_code}…`} />
+                    <input type="hidden" name="carving_item_id" value={held.id} />
+                    <input type="hidden" name="target_machine_id" value={m.id} />
+                    <input type="hidden" name="redirect_to" value="/vendor" />
+                    <button
+                      type="submit"
+                      style={{
+                        width: "100%",
+                        padding: "12px 14px",
+                        fontSize: 14,
+                        fontWeight: 700,
+                        background: "#15803d",
+                        color: "#fff",
+                        border: "1.5px solid #166534",
+                        borderRadius: 10,
+                        cursor: "pointer",
+                        textAlign: "left",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        touchAction: "manipulation",
+                        minHeight: 52,
+                      }}
+                    >
+                      <span style={{ fontSize: 16 }}>⇄</span>
+                      <span style={{ flex: 1 }}>
+                        Pair with {m.machine_code}
+                        {m.operator_name && (
+                          <span
+                            style={{
+                              marginLeft: 8,
+                              fontSize: 11,
+                              opacity: 0.85,
+                              fontWeight: 500,
+                            }}
+                          >
+                            ({m.operator_name})
+                          </span>
+                        )}
+                        <div style={{ fontSize: 10, opacity: 0.9, fontWeight: 500, marginTop: 2 }}>
+                          partner: {partnerLabel}
+                        </div>
+                      </span>
+                      <span style={{ fontSize: 16 }}>›</span>
+                    </button>
+                  </form>
+                );
+              })}
+            </>
+          )}
         </div>
       )}
     </ModalShell>

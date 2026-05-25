@@ -1896,7 +1896,7 @@ export async function reloadHeldSlabAction(formData: FormData) {
   const { data: ci } = await admin
     .from("carving_items")
     .select(
-      "id, vendor_id, status, cnc_machine_id, requires_machine_type, held_from_machine_id",
+      "id, vendor_id, status, cnc_machine_id, slab_requirement_id, requires_machine_type, held_from_machine_id",
     )
     .eq("id", carvingItemId)
     .maybeSingle();
@@ -1906,6 +1906,7 @@ export async function reloadHeldSlabAction(formData: FormData) {
     vendor_id: string;
     status: string;
     cnc_machine_id: string | null;
+    slab_requirement_id: string;
     requires_machine_type: string | null;
     held_from_machine_id: string | null;
   };
@@ -1940,17 +1941,78 @@ export async function reloadHeldSlabAction(formData: FormData) {
   if (machine.vendor_id !== item.vendor_id) {
     redirect(`${redirectTo}?toast=Machine+belongs+to+another+vendor`);
   }
-  if (machine.status !== "idle") {
-    redirect(
-      `${redirectTo}?toast=${encodeURIComponent(`${machine.machine_code} is not idle right now`)}`,
-    );
-  }
   // Work-type check: lathe slab → lathe machine; non-lathe → non-lathe.
   if (item.requires_machine_type === "lathe" && machine.machine_type !== "lathe") {
     redirect(`${redirectTo}?toast=Lathe+slab+needs+a+lathe+machine`);
   }
   if (item.requires_machine_type !== "lathe" && machine.machine_type === "lathe") {
     redirect(`${redirectTo}?toast=Non-lathe+slab+cannot+go+on+a+lathe`);
+  }
+
+  // Daksh May 2026 — busy-machine reload is allowed only when the
+  // target is a 2-head CNC currently running EXACTLY ONE matching
+  // slab (same L×W×T + temple + label as the held one). Otherwise
+  // the original "machine not idle" reject still applies.
+  let isPairJoin = false;
+  if (machine.status !== "idle") {
+    const isCandidateBusy =
+      machine.machine_type === "multi_head_2" && machine.status === "carving";
+    if (!isCandidateBusy) {
+      redirect(
+        `${redirectTo}?toast=${encodeURIComponent(`${machine.machine_code} is not idle right now`)}`,
+      );
+    }
+    // Confirm exactly one active item + matching geometry.
+    const { data: active } = await admin
+      .from("carving_items")
+      .select("id, slab_requirement_id")
+      .eq("cnc_machine_id", targetMachineId)
+      .eq("status", "carving_in_progress");
+    const activeRows = (active ?? []) as Array<{ id: string; slab_requirement_id: string }>;
+    if (activeRows.length !== 1) {
+      redirect(
+        `${redirectTo}?toast=${encodeURIComponent(`${machine.machine_code} can't accept a partner right now (has ${activeRows.length} active slab${activeRows.length === 1 ? "" : "s"}).`)}`,
+      );
+    }
+    const partnerSlabId = activeRows[0].slab_requirement_id;
+    if (partnerSlabId === item.slab_requirement_id) {
+      // Same slab_requirement_id on both sides means the held row
+      // IS the running one (impossible in practice but cheap to guard).
+      redirect(
+        `${redirectTo}?toast=${encodeURIComponent(`That slab is already on ${machine.machine_code}.`)}`,
+      );
+    }
+    const { data: slabRows } = await admin
+      .from("slab_requirements")
+      .select("id, label, temple, length_ft, width_ft, thickness_ft")
+      .in("id", [item.slab_requirement_id, partnerSlabId]);
+    if (!slabRows || slabRows.length !== 2) {
+      redirect(`${redirectTo}?toast=Could+not+load+slab+geometry+for+matching`);
+    }
+    const sRows = slabRows as Array<{
+      id: string;
+      label: string | null;
+      temple: string;
+      length_ft: number | string;
+      width_ft: number | string;
+      thickness_ft: number | string;
+    }>;
+    const selfSlab = sRows.find((s) => s.id === item.slab_requirement_id)!;
+    const partner = sRows.find((s) => s.id === partnerSlabId)!;
+    const dimsMatch =
+      Number(selfSlab.length_ft) === Number(partner.length_ft) &&
+      Number(selfSlab.width_ft) === Number(partner.width_ft) &&
+      Number(selfSlab.thickness_ft) === Number(partner.thickness_ft);
+    const labelMatch = (selfSlab.label ?? "") === (partner.label ?? "");
+    const templeMatch = (selfSlab.temple ?? "") === (partner.temple ?? "");
+    if (!dimsMatch || !labelMatch || !templeMatch) {
+      redirect(
+        `${redirectTo}?toast=${encodeURIComponent(
+          `Held slab doesn't match the slab running on ${machine.machine_code} (needs identical L×W×T + temple + label).`,
+        )}`,
+      );
+    }
+    isPairJoin = true;
   }
 
   const now = new Date().toISOString();
@@ -1974,10 +2036,15 @@ export async function reloadHeldSlabAction(formData: FormData) {
     .eq("id", carvingItemId);
 
   // ── Update CNC machine ──────────────────────────────────────
-  await admin
-    .from("cnc_machines")
-    .update({ status: "carving", current_carving_item_id: carvingItemId })
-    .eq("id", targetMachineId);
+  // Pair-join: machine is ALREADY 'carving' with current_carving_item_id
+  // pointing at the partner — leave those columns alone so the partner
+  // stays the pair anchor.
+  if (!isPairJoin) {
+    await admin
+      .from("cnc_machines")
+      .update({ status: "carving", current_carving_item_id: carvingItemId })
+      .eq("id", targetMachineId);
+  }
 
   // ── Events + audit ──────────────────────────────────────────
   const sameMachine = machine.id === item.held_from_machine_id;
