@@ -93,6 +93,11 @@ export function canApproveCuts(
  * Granted to:
  *   - developer / owner (always)
  *   - carving_head (always — original role)
+ *   - team_head (Daksh May 2026 round 2 — Rajesh needs to land here
+ *     to use the "Add external cut slab" affordance described below.
+ *     The existing assign actions stay gated to dev/owner/carving_head,
+ *     so team_head can browse but their Assign clicks toast if they
+ *     try — that's fine, the data-entry button is the goal.)
  *   - any profile with can_assign_carving=TRUE (typically a vendor
  *     who also runs the carving-assign step, e.g. Mohit)
  */
@@ -102,7 +107,30 @@ export function canAccessCarvingPage(
   if (profile.role === "developer") return true;
   if (profile.role === "owner") return true;
   if (profile.role === "carving_head") return true;
+  if (profile.role === "team_head") return true;
   if (profile.can_assign_carving === true) return true;
+  return false;
+}
+
+/**
+ * Daksh May 2026 round 2 — "external cut slab" data-entry button on
+ * the /carving Unassigned tab. Use case: a ready-to-carve slab walks
+ * in from an outside supplier without ever passing through MTCPL's
+ * cutting pipeline, so there's no block / cut session to attach to.
+ * The action inserts a slab_requirements row directly at
+ * status='cut_done' with source_block_id NULL, which lands in the
+ * carving Unassigned tab ready to assign without touching anything
+ * cutting-side.
+ *
+ * Restricted set: anything that touches stock data direct + leaves
+ * an audit trail. NOT given to can_assign_carving vendors — they
+ * should only assign existing in-system slabs, not invent new ones.
+ */
+export function canAddExternalCutSlab(profile: Pick<Profile, "role">): boolean {
+  if (profile.role === "developer") return true;
+  if (profile.role === "owner") return true;
+  if (profile.role === "carving_head") return true;
+  if (profile.role === "team_head") return true;
   return false;
 }
 

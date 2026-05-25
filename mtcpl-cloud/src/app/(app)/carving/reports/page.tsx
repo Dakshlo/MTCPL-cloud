@@ -15,6 +15,7 @@ import {
   type CncMonthlyReport,
   type CncReportPeriod,
 } from "@/lib/cnc-monthly-report";
+import { canEnterCncExpenses } from "@/lib/expenses-permissions";
 import { PrintButton } from "@/components/print-button";
 
 type Search = Promise<{
@@ -52,7 +53,8 @@ function inrPrecise(n: number): string {
 }
 
 export default async function CncMonthlyReportPage({ searchParams }: { searchParams: Search }) {
-  await requireAuth(["developer", "owner", "carving_head"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head"]);
+  const canEnterExpenses = canEnterCncExpenses(profile);
   const params = await searchParams;
   // Mig 053 follow-on (Daksh) — derive period from query params,
   // supporting daily / weekly / monthly views. Default = current month.
@@ -89,7 +91,7 @@ export default async function CncMonthlyReportPage({ searchParams }: { searchPar
           padding-right: 16px !important;
         }
       `}</style>
-      <Header period={period} xlsxHref={xlsxHref} />
+      <Header period={period} xlsxHref={xlsxHref} canEnterExpenses={canEnterExpenses} />
       <ReportTable report={report} />
       {/* Mig 063 follow-on (Daksh) — electricity bills land late
           (end of month / early next month). The cost calc shifts
@@ -118,9 +120,14 @@ export default async function CncMonthlyReportPage({ searchParams }: { searchPar
 function Header({
   period,
   xlsxHref,
+  canEnterExpenses,
 }: {
   period: CncReportPeriod;
   xlsxHref: string;
+  /** Daksh May 2026 — shortcut into the operational-expense entry
+   *  page next to Download/Print. Hidden for users who can't enter
+   *  expenses (matches canEnterCncExpenses gating). */
+  canEnterExpenses: boolean;
 }) {
   // Mig 053 follow-on (Daksh): view toggle + period-aware picker.
   //   Daily   → single date picker
@@ -271,6 +278,16 @@ function Header({
       )}
 
       <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+        {canEnterExpenses && (
+          <Link
+            href="/carving/expenses"
+            className="ghost-button"
+            style={{ fontSize: 13, padding: "8px 16px", fontWeight: 700, textDecoration: "none" }}
+            title="Open the CNC vendor expense entry page"
+          >
+            💸 Manage Expenses
+          </Link>
+        )}
         <Link
           href={xlsxHref}
           className="primary-button"

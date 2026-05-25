@@ -196,7 +196,11 @@ const navEntries: NavEntry[] = [
     href: "/carving",
     label: "Carving Jobs",
     icon: "🎨",
-    roles: ["developer", "owner", "carving_head"],
+    // team_head added Daksh May 2026 round 2 — Rajesh lands here to
+    // use the "+ External cut slab" data-entry affordance. He can
+    // browse the page but his Assign clicks toast (assign actions
+    // stay gated to dev/owner/carving_head).
+    roles: ["developer", "owner", "carving_head", "team_head"],
     // Mig 074 — also visible to carving-head-lite. The page itself
     // hides the Awaiting Review tab for flag-only holders so they
     // don't sign off on their own work.

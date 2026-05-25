@@ -4,11 +4,13 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import {
   canAccessCarvingPage,
+  canAddExternalCutSlab,
   canSeeAwaitingReview,
 } from "@/lib/cutting-permissions";
 import { CarvingDashboardClient } from "./dashboard-client";
 import { VendorsManagerPeek } from "./vendors-manager-peek";
 import { CockpitSidebarToggle } from "@/components/cockpit-sidebar-toggle";
+import { AddExternalCutSlabButton } from "./add-external-cut-slab";
 
 type Tab = "unassigned" | "active" | "review" | "done";
 
@@ -133,6 +135,18 @@ export default async function CarvingDashboardPage({
       .order("sort_order")
       .order("name"),
   ]);
+
+  // Daksh May 2026 round 2 — temples list for the AddExternalCutSlab
+  // modal (temple-wise selection mirrors the Required Sizes form).
+  // Only fetched when the viewer can actually use the button so the
+  // payload stays trimmed for vendor-with-flag and other callers.
+  const canAddExternal = canAddExternalCutSlab(profile);
+  const { data: templesForExternal } = canAddExternal
+    ? await admin
+        .from("temples")
+        .select("id, name, code_prefix, default_stone")
+        .order("name")
+    : { data: null };
 
   // Enrich jobs with temple + slab label — job rows on carving_items
   // don't carry temple, so we join via slab_requirement_id.
@@ -341,7 +355,20 @@ export default async function CarvingDashboardPage({
             Phase 2 module · assign cut slabs to carving vendors, track progress, approve and dispatch
           </p>
         </div>
-        <VendorsManagerPeek vendors={vendorsForPeek} />
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          {canAddExternal && (
+            <AddExternalCutSlabButton
+              temples={(templesForExternal ?? []) as Array<{
+                id: string;
+                name: string;
+                code_prefix: string;
+                default_stone?: string | null;
+              }>}
+              stoneTypes={(stoneTypes ?? []) as Array<{ id?: string; name: string }>}
+            />
+          )}
+          <VendorsManagerPeek vendors={vendorsForPeek} />
+        </div>
       </div>
 
       {/* Tabs — solid pill style. Active tab = filled gold; inactive

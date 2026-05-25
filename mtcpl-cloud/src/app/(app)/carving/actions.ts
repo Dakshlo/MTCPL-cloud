@@ -5,6 +5,8 @@ import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
+import { canAddExternalCutSlab } from "@/lib/cutting-permissions";
+import { nextSlabCodeFromMaxId } from "../slabs/utils";
 
 /**
  * Daksh May 2026 — temporary feature flag.
@@ -124,6 +126,133 @@ function refreshAll() {
   revalidatePath("/dashboard");
   revalidatePath("/vendor");
   revalidatePath("/dispatch");
+}
+
+// ── External cut-slab entry (Daksh May 2026 round 2) ────────────────
+//
+// Use case: a ready-to-carve slab walks in from an outside supplier
+// (was never cut in our plant), so there's no block → cut session →
+// slab_requirement chain. Without a way to register it, the carving
+// team can't assign work on it via the normal Unassigned tab flow.
+//
+// Shape: inserts a slab_requirements row directly at status='cut_done'
+// with source_block_id=NULL. Same ID-allocation pattern as the
+// existing addSlabAction on /slabs (per-temple prefix + collision
+// retry) so the external slabs co-exist cleanly with in-system ones.
+// The row immediately appears in the /carving Unassigned tab, ready
+// to assign to a vendor.
+//
+// Importantly: NO cut_session_blocks or block rows are touched, so
+// cutting reports + cutter costing stay clean. The lack of
+// source_block_id is the marker for "this came from outside".
+
+export async function addExternalCutSlabAction(formData: FormData) {
+  const { profile } = await requireAuth();
+  if (!canAddExternalCutSlab(profile)) {
+    redirect("/carving?toast=Not+authorised+to+add+external+slabs");
+  }
+  const admin = createAdminSupabaseClient();
+  const redirectTo = txt(formData, "redirect_to") || "/carving";
+
+  const temple = txt(formData, "temple");
+  if (!temple) redirect(`${redirectTo}?toast=Temple+is+required`);
+  const stone = txt(formData, "stone");
+  if (!stone) redirect(`${redirectTo}?toast=Stone+type+is+required`);
+
+  const lengthIn = num(formData, "length_in");
+  const widthIn = num(formData, "width_in");
+  const thicknessIn = num(formData, "thickness_in");
+  if (lengthIn <= 0 || widthIn <= 0 || thicknessIn <= 0) {
+    redirect(`${redirectTo}?toast=Length+%2F+width+%2F+thickness+must+be+positive`);
+  }
+
+  const label = txt(formData, "label") || temple;
+  const description = txt(formData, "description") || null;
+  const stockLocation = txt(formData, "stock_location") || null;
+  const quality = txt(formData, "quality") || null;
+  const priority = txt(formData, "priority") === "true";
+
+  // Look up the temple's code_prefix so the new ID slots into the same
+  // numbering as in-system slabs from that temple.
+  const { data: templeRow } = await admin
+    .from("temples")
+    .select("code_prefix")
+    .eq("name", temple)
+    .maybeSingle();
+  const prefix = (templeRow as { code_prefix?: string } | null)?.code_prefix ?? "SLB";
+
+  // ID allocation: copy the addSlabAction pattern. Highest-existing-ID
+  // lookup + collision retry handles concurrent inserts cleanly.
+  let baseId = "";
+  let lastError: { message: string; code?: string } | null = null;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const { data: maxRow } = await admin
+      .from("slab_requirements")
+      .select("id")
+      .like("id", `${prefix}-%`)
+      .order("id", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    baseId = nextSlabCodeFromMaxId(
+      (maxRow as { id?: string } | null)?.id ?? null,
+      prefix,
+    );
+
+    const row = {
+      id: baseId,
+      label,
+      description,
+      temple,
+      stone,
+      quality,
+      length_ft: lengthIn,
+      width_ft: widthIn,
+      thickness_ft: thicknessIn,
+      priority,
+      // Drop the slab straight into Unassigned on /carving. Skips
+      // the open → cut_session → cut_done lifecycle entirely.
+      status: "cut_done" as const,
+      // No block — the slab never went through our cutting.
+      source_block_id: null,
+      stock_location: stockLocation,
+      created_by: profile.id,
+      updated_by: profile.id,
+    };
+
+    const { error } = await admin.from("slab_requirements").insert(row);
+    if (!error) {
+      lastError = null;
+      break;
+    }
+    lastError = { message: error.message, code: error.code };
+    if (error.code !== "23505") break;
+    // 23505 = primary-key collision; refetch + retry.
+  }
+  if (lastError) {
+    redirect(
+      `${redirectTo}?toast=${encodeURIComponent(lastError.message)}`,
+    );
+  }
+
+  await logAudit(
+    profile.id,
+    "external_cut_slab_added",
+    "slab",
+    baseId,
+    {
+      temple,
+      stone,
+      length_in: lengthIn,
+      width_in: widthIn,
+      thickness_in: thicknessIn,
+      stock_location: stockLocation,
+    },
+  );
+
+  refreshAll();
+  redirect(
+    `${redirectTo}?tab=unassigned&toast=${encodeURIComponent(`External slab ${baseId} added`)}`,
+  );
 }
 
 // ── Vendor CRUD (team-side) ─────────────────────────────────────────
@@ -1801,6 +1930,13 @@ export async function completeAndUnloadAction(formData: FormData) {
   // keys on cnc_machine_id and the items still had
   // status='carving_in_progress'). The Awaiting Review query reads
   // completed_at IS NOT NULL so it picks them up regardless.
+  //
+  // Mig 075 — preserve the machine attribution into
+  // completed_on_cnc_machine_id BEFORE the clear, so the CNC monthly
+  // report (which used to read cnc_machine_id) still groups completed
+  // slabs under the right machine. cnc_machine_id stays "is this slab
+  // currently on a machine" — true only while running. The new column
+  // is "which machine did the work", set once and never cleared.
   await admin
     .from("carving_items")
     .update({
@@ -1809,6 +1945,7 @@ export async function completeAndUnloadAction(formData: FormData) {
       unloaded_by: profile.id,
       temporary_location: tempLocation,
       cnc_machine_id: null,
+      completed_on_cnc_machine_id: item.cnc_machine_id,
     })
     .in("id", idsToComplete);
 
@@ -2593,7 +2730,7 @@ export async function completeHeldSlabAction(formData: FormData) {
 
   const { data: ci } = await admin
     .from("carving_items")
-    .select("id, vendor_id, status, slab_requirement_id")
+    .select("id, vendor_id, status, slab_requirement_id, held_from_machine_id")
     .eq("id", carvingItemId)
     .maybeSingle();
   if (!ci) redirect(`${redirectTo}?toast=Job+not+found`);
@@ -2602,6 +2739,7 @@ export async function completeHeldSlabAction(formData: FormData) {
     vendor_id: string;
     status: string;
     slab_requirement_id: string;
+    held_from_machine_id: string | null;
   };
 
   if (profile.role === "vendor") {
@@ -2628,6 +2766,11 @@ export async function completeHeldSlabAction(formData: FormData) {
       held_by: null,
       held_reason: null,
       cnc_machine_id: null,
+      // Mig 075 — preserve machine attribution for the CNC monthly
+      // report. held_from_machine_id was saved when the slab was
+      // first held + survived reload cycles, so it's the right
+      // "which machine did the work" answer for a hold→complete row.
+      completed_on_cnc_machine_id: item.held_from_machine_id,
     })
     .eq("id", carvingItemId);
 

@@ -454,12 +454,21 @@ export async function buildCncReport(period: CncReportPeriod): Promise<CncMonthl
 
   // Pull the carving_items completed in the window WITH the slab
   // dimensions in a single round-trip via a simple slab-id join.
+  //
+  // Mig 075 — keys on completed_on_cnc_machine_id (set permanently at
+  // completion time) instead of cnc_machine_id (cleared on completion
+  // since ce01026 so the cockpit's per-machine grouping stays clean).
+  // Filtering on cnc_machine_id here would drop every newly-completed
+  // row — the bug Daksh saw as "May 2026 report all zeros after I
+  // added some CNCs". Backfill in mig 075 covers historical rows
+  // (copies from cnc_machine_id where still set; falls back to
+  // cnc_machine_events.unloaded and then held_from_machine_id).
   const { data: items, error: itemsErr } = await admin
     .from("carving_items")
-    .select("id, cnc_machine_id, completed_at, slab_requirement_id")
+    .select("id, completed_on_cnc_machine_id, completed_at, slab_requirement_id")
     .gte("completed_at", startIso)
     .lt("completed_at", endIso)
-    .not("cnc_machine_id", "is", null)
+    .not("completed_on_cnc_machine_id", "is", null)
     .not("completed_at", "is", null);
   if (itemsErr) throw new Error(`carving_items: ${itemsErr.message}`);
 
@@ -513,9 +522,10 @@ export async function buildCncReport(period: CncReportPeriod): Promise<CncMonthl
   // given cell, so the visual is "this work was measured in SFT"
   // or "in CFT" but never both for the same slab.
   for (const it of (items ?? []) as Array<{
-    cnc_machine_id: string | null; completed_at: string; slab_requirement_id: string;
+    completed_on_cnc_machine_id: string | null; completed_at: string; slab_requirement_id: string;
   }>) {
-    if (!it.cnc_machine_id) continue;
+    const machineId = it.completed_on_cnc_machine_id;
+    if (!machineId) continue;
     const dim = slabDims.get(it.slab_requirement_id);
     if (!dim) continue;
     const sqft = (dim.l * dim.w) / 144;
@@ -523,7 +533,7 @@ export async function buildCncReport(period: CncReportPeriod): Promise<CncMonthl
     const dateKey = istDateKey(it.completed_at);
     const row = rowByDate.get(dateKey);
     if (!row) continue;
-    const cell = row.values[it.cnc_machine_id] ?? { sqft: 0, cft: 0 };
+    const cell = row.values[machineId] ?? { sqft: 0, cft: 0 };
     if (dim.t <= 12) {
       // Thin slab → contribute to SFT only.
       cell.sqft = (cell.sqft ?? 0) + sqft;
@@ -531,7 +541,7 @@ export async function buildCncReport(period: CncReportPeriod): Promise<CncMonthl
       // Thick slab → contribute to CFT only.
       cell.cft = cell.cft + cft;
     }
-    row.values[it.cnc_machine_id] = cell;
+    row.values[machineId] = cell;
   }
 
   // ── Mig 054 — fetch operational expenses for every (vendor, year,
