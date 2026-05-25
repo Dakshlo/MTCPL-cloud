@@ -319,6 +319,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         role={profile.role}
         themePreference={profile.theme_preference ?? null}
         activeDepartment={effectiveDepartment(profile.role, profile.active_department ?? null)}
+        canAssignCarving={profile.can_assign_carving === true}
       />
 
       <main className="main-shell">

@@ -89,6 +89,13 @@ export type Profile = {
    *  role). Defaults to 'production' for existing accounts. See
    *  src/lib/departments.ts. */
   active_department?: "production" | "finance" | "inventory" | "invoicing" | null;
+  /** Migration 074 — carving-head-lite flag. When TRUE, the user can
+   *  access /carving (Unassigned + Active + Carving Done, but NOT
+   *  Awaiting Review) and /slabs (Required Sizes) in addition to
+   *  whatever their role allows. Typically set on a vendor profile
+   *  so they can assign work to themselves (e.g. Mohit, who runs his
+   *  own CNCs AND assigns the carving). */
+  can_assign_carving?: boolean;
 };
 
 export type Vendor = {

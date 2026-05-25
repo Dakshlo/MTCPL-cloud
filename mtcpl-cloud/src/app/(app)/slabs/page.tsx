@@ -1,7 +1,9 @@
+import { redirect } from "next/navigation";
 import Link from "next/link";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
+import { canReadRequiredSizes } from "@/lib/cutting-permissions";
 import { AddSlabForm } from "./add-slab-form";
 import { SlabGrid } from "./slab-grid";
 import { SlabSearchBar } from "./slab-search-bar";
@@ -10,7 +12,12 @@ import { SlabSearchBar } from "./slab-search-bar";
 const ENTRY_ROLES = ["slab_entry", "block_slab_entry"] as const;
 
 export default async function SlabsPage() {
-  const { profile } = await requireAuth(["owner", "team_head", "slab_entry", "block_slab_entry"]);
+  // Mig 074 — gate via canReadRequiredSizes so vendor-with-flag
+  // (e.g. Mohit) gets read access in addition to the original
+  // entry / senior roles. canReadRequiredSizes encapsulates the
+  // role + flag check.
+  const { profile } = await requireAuth();
+  if (!canReadRequiredSizes(profile)) redirect("/");
   const admin = createAdminSupabaseClient();
 
   const isEntryRole = (ENTRY_ROLES as readonly string[]).includes(profile.role);

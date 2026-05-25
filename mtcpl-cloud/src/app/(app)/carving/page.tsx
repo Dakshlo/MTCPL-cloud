@@ -1,6 +1,11 @@
+import { redirect } from "next/navigation";
 import Link from "next/link";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import {
+  canAccessCarvingPage,
+  canSeeAwaitingReview,
+} from "@/lib/cutting-permissions";
 import { CarvingDashboardClient } from "./dashboard-client";
 import { VendorsManagerPeek } from "./vendors-manager-peek";
 
@@ -11,10 +16,20 @@ export default async function CarvingDashboardPage({
 }: {
   searchParams: Promise<{ tab?: string; temple?: string }>;
 }) {
-  await requireAuth(["developer", "owner", "carving_head"]);
+  // Mig 074 — widen requireAuth so vendors with can_assign_carving
+  // can reach the page; canAccessCarvingPage covers dev/owner/
+  // carving_head + flag holders. Use requireAuth() with no role
+  // list (any signed-in user) then gate via the helper, since the
+  // flag check needs the full profile.
+  const { profile } = await requireAuth();
+  if (!canAccessCarvingPage(profile)) redirect("/");
+  const reviewAccess = canSeeAwaitingReview(profile);
   const admin = createAdminSupabaseClient();
   const params = await searchParams;
-  const tab: Tab = (params.tab as Tab) || "unassigned";
+  let tab: Tab = (params.tab as Tab) || "unassigned";
+  // Vendor-with-flag users can't see Awaiting Review — bounce them
+  // to Unassigned if they try to deep-link there.
+  if (tab === "review" && !reviewAccess) tab = "unassigned";
   const templeFilter = params.temple ?? "";
 
   // Paginated fetcher for unassigned slabs — Supabase's PostgREST
@@ -332,12 +347,18 @@ export default async function CarvingDashboardPage({
           borderRadius: 10,
         }}
       >
-        {([
-          { key: "unassigned", label: "Unassigned", count: counts.unassigned },
-          { key: "active", label: "Active", count: counts.active },
-          { key: "review", label: "Awaiting Review", count: counts.review },
-          { key: "done", label: "Carving Done", count: counts.done },
-        ] as Array<{ key: Tab; label: string; count: number }>).map((t) => {
+        {(
+          [
+            { key: "unassigned", label: "Unassigned", count: counts.unassigned },
+            { key: "active", label: "Active", count: counts.active },
+            // Mig 074 — hide Awaiting Review for vendor-with-flag
+            // users; they don't sign off on their own work.
+            ...(reviewAccess
+              ? [{ key: "review" as const, label: "Awaiting Review", count: counts.review }]
+              : []),
+            { key: "done", label: "Carving Done", count: counts.done },
+          ] as Array<{ key: Tab; label: string; count: number }>
+        ).map((t) => {
           const active = tab === t.key;
           // Preserve temple filter when switching tabs
           const hrefParams = new URLSearchParams();
@@ -387,13 +408,14 @@ export default async function CarvingDashboardPage({
         tab={tab}
         unassignedSlabs={unassignedSlabsAll ?? []}
         activeJobs={activeJobsEnriched}
-        reviewJobs={reviewJobsEnriched}
+        reviewJobs={reviewAccess ? reviewJobsEnriched : []}
         doneJobs={doneJobsEnriched}
         vendors={vendorsEnriched}
         machineCodeById={machineCodeById}
         templeNames={templeNames}
         templeFilter={templeFilter}
         stoneTypes={stoneTypes ?? []}
+        canSeeReviewTab={reviewAccess}
       />
     </div>
   );

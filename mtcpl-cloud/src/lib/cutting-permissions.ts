@@ -82,3 +82,58 @@ export function canApproveCuts(
   }
   return false;
 }
+
+/**
+ * Mig 074 — Carving-head-lite access. Reaches /carving (Unassigned +
+ * Active + Carving Done tabs) and /slabs (Required Sizes), so the
+ * holder can pick which slabs to assign and to whom. Does NOT include
+ * Awaiting Review — that stays the team's sign-off queue
+ * (canSeeAwaitingReview below).
+ *
+ * Granted to:
+ *   - developer / owner (always)
+ *   - carving_head (always — original role)
+ *   - any profile with can_assign_carving=TRUE (typically a vendor
+ *     who also runs the carving-assign step, e.g. Mohit)
+ */
+export function canAccessCarvingPage(
+  profile: Pick<Profile, "role" | "can_assign_carving">,
+): boolean {
+  if (profile.role === "developer") return true;
+  if (profile.role === "owner") return true;
+  if (profile.role === "carving_head") return true;
+  if (profile.can_assign_carving === true) return true;
+  return false;
+}
+
+/**
+ * Mig 074 — gates the Awaiting Review tab on /carving + downstream
+ * approve / re-route actions. Tighter than canAccessCarvingPage so
+ * vendors with can_assign_carving=TRUE don't approve their own work.
+ */
+export function canSeeAwaitingReview(
+  profile: Pick<Profile, "role">,
+): boolean {
+  if (profile.role === "developer") return true;
+  if (profile.role === "owner") return true;
+  if (profile.role === "carving_head") return true;
+  return false;
+}
+
+/**
+ * Mig 074 — read access to the Required Sizes (/slabs) page. The
+ * flag user needs this to see what sizes the plant has on hand so
+ * they can plan their carving assignments. Edit / create / delete
+ * actions stay on the existing action-level gates.
+ */
+export function canReadRequiredSizes(
+  profile: Pick<Profile, "role" | "can_assign_carving">,
+): boolean {
+  if (profile.role === "developer") return true;
+  if (profile.role === "owner") return true;
+  if (profile.role === "team_head") return true;
+  if (profile.role === "slab_entry") return true;
+  if (profile.role === "block_slab_entry") return true;
+  if (profile.can_assign_carving === true) return true;
+  return false;
+}

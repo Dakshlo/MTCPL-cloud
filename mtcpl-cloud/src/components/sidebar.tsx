@@ -25,6 +25,10 @@ type NavItem = {
    *  current active_department in addition to the existing role
    *  check. */
   department?: Department;
+  /** Migration 074 — extra visibility via a profile flag. When set,
+   *  the entry shows for any user whose profile has that flag set
+   *  to TRUE, in addition to the role-based gate above. */
+  requiresFlag?: "can_assign_carving";
 };
 
 type NavDivider = {
@@ -115,6 +119,10 @@ const navEntries: NavEntry[] = [
     label: "Required Sizes",
     icon: "▤",
     roles: ["developer", "owner", "team_head", "slab_entry", "block_slab_entry"],
+    // Mig 074 — also visible to carving-head-lite (vendors who
+    // assign their own work, e.g. Mohit). canReadRequiredSizes
+    // on the page itself does the read-only gate.
+    requiresFlag: "can_assign_carving",
     department: "production",
   },
   {
@@ -187,6 +195,10 @@ const navEntries: NavEntry[] = [
     label: "Carving Jobs",
     icon: "🎨",
     roles: ["developer", "owner", "carving_head"],
+    // Mig 074 — also visible to carving-head-lite. The page itself
+    // hides the Awaiting Review tab for flag-only holders so they
+    // don't sign off on their own work.
+    requiresFlag: "can_assign_carving",
     department: "production",
   },
   {
@@ -458,6 +470,7 @@ export function Sidebar({
   displayName,
   themePreference,
   activeDepartment,
+  canAssignCarving = false,
 }: {
   role: AppRole;
   displayName?: string;
@@ -468,6 +481,11 @@ export function Sidebar({
    *  role this is effectively pinned by their role and the filter is
    *  a no-op. */
   activeDepartment?: Department | null;
+  /** Migration 074 — when TRUE the user gets the entries marked
+   *  `requiresFlag: "can_assign_carving"` in addition to whatever
+   *  their role grants. Layout reads it from profile and passes
+   *  through. */
+  canAssignCarving?: boolean;
 }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -559,8 +577,21 @@ export function Sidebar({
   const allowedDepts = allowedDepartmentsForRole(role);
   const visibleDeptTiles = DEPARTMENTS.filter((d) => allowedDepts.includes(d.id));
 
-  // Step 1: standard role-based filter (unchanged from migration 028).
-  let visibleEntries = navEntries.filter((entry) => entry.roles.includes(role));
+  // Step 1: role OR flag filter. Mig 074 — entries with a
+  // `requiresFlag` ALSO match when the profile has that flag set,
+  // even if the role isn't in the role list. Dividers + groups
+  // stay role-only (groups self-filter via their children's
+  // visibility anyway).
+  let visibleEntries = navEntries.filter((entry) => {
+    if (entry.roles.includes(role)) return true;
+    if (entry.type === "item" || entry.type === undefined) {
+      const item = entry as NavItem;
+      if (item.requiresFlag === "can_assign_carving" && canAssignCarving) {
+        return true;
+      }
+    }
+    return false;
+  });
 
   // Step 2 (Migration 036): department filter for switchable roles.
   // Locked roles (everyone except dev/owner) keep the full role-filtered
