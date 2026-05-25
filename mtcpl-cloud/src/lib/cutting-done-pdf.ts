@@ -60,6 +60,36 @@ const MARGIN_BOTTOM = 40;
 const PAGE_W = 595; // A4 portrait
 const PAGE_H = 842;
 
+// pdf-lib's StandardFonts.Helvetica uses WinAnsi (Windows-1252)
+// encoding. Anything outside that 256-char set (e.g. ″ U+2033 inch
+// mark, ′ prime, em dash variants, smart quotes, the rupee sign)
+// throws at drawText time. This map covers the chars we actually
+// produce in this PDF — extend as needed. Unmapped chars fall back
+// to "?" via the regex sweep below.
+const WIN_ANSI_REPLACEMENTS: Record<string, string> = {
+  "″": '"',   // ″ double prime → inch mark
+  "′": "'",   // ′ prime
+  "‘": "'",   // ' smart open single
+  "’": "'",   // ' smart close single
+  "“": '"',   // " smart open double
+  "”": '"',   // " smart close double
+  "–": "-",   // – en dash
+  "…": "...", // … ellipsis
+  " ": " ",   // nbsp
+  "₹": "Rs.", // ₹ Indian rupee
+};
+function ansiSafe(input: string): string {
+  let out = input;
+  for (const [k, v] of Object.entries(WIN_ANSI_REPLACEMENTS)) {
+    if (out.includes(k)) out = out.split(k).join(v);
+  }
+  // Strip anything still outside WinAnsi range (0x00–0xFF). The full
+  // WinAnsi spec carves out a few high-bit slots, but for the chars
+  // this PDF actually uses (× ·  em dash) WinAnsi has them mapped
+  // explicitly, so the 0xFF cutoff is safe.
+  return out.replace(/[^\x00-\xFF]/g, "?");
+}
+
 const COLOR_TEXT = rgb(0.1, 0.1, 0.1);
 const COLOR_MUTED = rgb(0.45, 0.45, 0.45);
 const COLOR_RULE = rgb(0.85, 0.82, 0.74);
@@ -77,6 +107,21 @@ export async function generateCuttingDonePdf(
   let page = pdf.addPage([PAGE_W, PAGE_H]);
   let y = PAGE_H - MARGIN_TOP;
 
+  // Sanitised drawText wrapper — runs every string through ansiSafe()
+  // so non-WinAnsi characters (″ ′ ₹ smart quotes etc.) can't blow up
+  // pdf-lib mid-render. Closes over the live `page` reference so a
+  // page-break inside ensureSpace flows transparently.
+  function drawText(
+    text: string,
+    opts: Parameters<typeof page.drawText>[1],
+  ) {
+    // Important: call page.drawText (the pdf-lib method), NOT this
+    // wrapper. The original first cut had a replace-all that
+    // converted "page.drawText" → "drawText" everywhere and turned
+    // this body into infinite recursion.
+    page.drawText(ansiSafe(text), opts);
+  }
+
   function ensureSpace(needed: number) {
     if (y - needed < MARGIN_BOTTOM) {
       page = pdf.addPage([PAGE_W, PAGE_H]);
@@ -86,7 +131,7 @@ export async function generateCuttingDonePdf(
   }
 
   function drawHeader(continuation = false) {
-    page.drawText("MTCPL · Cutting Done Report", {
+    drawText("MTCPL · Cutting Done Report", {
       x: MARGIN_X,
       y,
       size: 14,
@@ -94,7 +139,7 @@ export async function generateCuttingDonePdf(
       color: COLOR_TEXT,
     });
     y -= 18;
-    page.drawText(continuation ? "(continued)" : input.title, {
+    drawText(continuation ? "(continued)" : input.title, {
       x: MARGIN_X,
       y,
       size: 11,
@@ -103,7 +148,7 @@ export async function generateCuttingDonePdf(
     });
     if (!continuation) {
       y -= 13;
-      page.drawText(input.subtitle, {
+      drawText(input.subtitle, {
         x: MARGIN_X,
         y,
         size: 9.5,
@@ -124,7 +169,7 @@ export async function generateCuttingDonePdf(
   drawHeader();
 
   if (input.blocks.length === 0) {
-    page.drawText("No blocks to report.", {
+    drawText("No blocks to report.", {
       x: MARGIN_X,
       y,
       size: 11,
@@ -144,7 +189,7 @@ export async function generateCuttingDonePdf(
     thickness: 0.5,
     color: COLOR_RULE,
   });
-  page.drawText(
+  drawText(
     `Generated ${input.generatedAt}  ·  by ${input.generatedBy}  ·  Computer-generated, no signature required`,
     {
       x: MARGIN_X,
@@ -173,7 +218,7 @@ export async function generateCuttingDonePdf(
       height: 20,
       color: COLOR_HEAD_BG,
     });
-    page.drawText(block.blockCode, {
+    drawText(block.blockCode, {
       x: MARGIN_X + 6,
       y: y - 13,
       size: 12,
@@ -181,7 +226,7 @@ export async function generateCuttingDonePdf(
       color: COLOR_TEXT,
     });
     const stoneText = `${block.stone}  ·  ${block.yard}  ·  ${block.blockDims}`;
-    page.drawText(stoneText, {
+    drawText(stoneText, {
       x: MARGIN_X + 110,
       y: y - 13,
       size: 10,
@@ -195,10 +240,10 @@ export async function generateCuttingDonePdf(
     function metaRow(leftLabel: string, leftVal: string, rightLabel: string, rightVal: string) {
       const xLeft = MARGIN_X + 4;
       const xRight = PAGE_W / 2 + 10;
-      page.drawText(leftLabel, { x: xLeft, y, size: 8, font: fontBold, color: COLOR_MUTED });
-      page.drawText(leftVal, { x: xLeft + 70, y, size: 9.5, font: fontReg, color: COLOR_TEXT });
-      page.drawText(rightLabel, { x: xRight, y, size: 8, font: fontBold, color: COLOR_MUTED });
-      page.drawText(rightVal, { x: xRight + 70, y, size: 9.5, font: fontReg, color: COLOR_TEXT });
+      drawText(leftLabel, { x: xLeft, y, size: 8, font: fontBold, color: COLOR_MUTED });
+      drawText(leftVal, { x: xLeft + 70, y, size: 9.5, font: fontReg, color: COLOR_TEXT });
+      drawText(rightLabel, { x: xRight, y, size: 8, font: fontBold, color: COLOR_MUTED });
+      drawText(rightVal, { x: xRight + 70, y, size: 9.5, font: fontReg, color: COLOR_TEXT });
       y -= 14;
     }
     metaRow("CUT DATE", block.cutDate, "SESSION", block.sessionCode);
@@ -209,7 +254,7 @@ export async function generateCuttingDonePdf(
 
     // Slab table
     if (block.slabs.length === 0) {
-      page.drawText("No slabs linked to this cut.", {
+      drawText("No slabs linked to this cut.", {
         x: MARGIN_X + 4,
         y,
         size: 9,
@@ -226,7 +271,7 @@ export async function generateCuttingDonePdf(
         { x: PAGE_W - MARGIN_X - 90, label: "DIMENSIONS" },
       ];
       for (const c of cols) {
-        page.drawText(c.label, {
+        drawText(c.label, {
           x: c.x,
           y,
           size: 8,
@@ -245,28 +290,28 @@ export async function generateCuttingDonePdf(
 
       block.slabs.forEach((s, i) => {
         ensureSpace(16);
-        page.drawText(String(i + 1), {
+        drawText(String(i + 1), {
           x: cols[0].x,
           y,
           size: 9,
           font: fontReg,
           color: COLOR_TEXT,
         });
-        page.drawText(s.id, {
+        drawText(s.id, {
           x: cols[1].x,
           y,
           size: 9,
           font: fontMono,
           color: COLOR_TEXT,
         });
-        page.drawText(truncate(s.temple, 24, fontReg, 9), {
+        drawText(truncate(s.temple, 24, fontReg, 9), {
           x: cols[2].x,
           y,
           size: 9,
           font: fontReg,
           color: COLOR_TEXT,
         });
-        page.drawText(s.dims, {
+        drawText(s.dims, {
           x: cols[3].x,
           y,
           size: 9,
