@@ -26,6 +26,10 @@ export function canEnterCncExpenses(p: Pick<Profile, "role">): boolean {
   if (p.role === "developer") return true;
   if (p.role === "owner") return true;
   if (p.role === "cnc_expense_entry") return true;
+  // Mig 076 round 2 — Daksh: "Manager" (DB enum 'crosscheck')
+  // also enters expenses now, on top of their bill / inventory
+  // audit duties.
+  if (p.role === "crosscheck") return true;
   return false;
 }
 
@@ -58,6 +62,9 @@ export function canEnterCutterExpenses(p: Pick<Profile, "role">): boolean {
   if (p.role === "developer") return true;
   if (p.role === "owner") return true;
   if (p.role === "cnc_expense_entry") return true;
+  // Mig 076 round 2 — mirror canEnterCncExpenses; Manager
+  // (crosscheck) enters both sides.
+  if (p.role === "crosscheck") return true;
   return false;
 }
 

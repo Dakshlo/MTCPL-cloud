@@ -145,8 +145,12 @@ export function allowedDepartmentsForRole(role: AppRole): Department[] {
     // both depts' pages cram into a single sidebar — the switcher
     // gives the same per-room pattern owner / dev / ACCOUNTANT★
     // already use.
+    //
+    // Mig 076 round 2 — display renamed to MANAGER. Production
+    // added so Mafat can enter CNC + Cutter expenses (Daksh's
+    // ask). Now a 3-tile Finance / Production / Inventory switcher.
     case "crosscheck":
-      return ["finance", "inventory"];
+      return ["finance", "production", "inventory"];
     case "biller":
     case "accountant":
       return ["finance"];

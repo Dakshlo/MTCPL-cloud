@@ -40,7 +40,10 @@ const UI_ROLES_ALL = [
   { value: "vendor",           label: "CNC OPERATOR" },
   { value: "slab_transfer",    label: "SLAB TRANSFER" },
   { value: "accountant",       label: "ACCOUNTANT" },
-  { value: "crosscheck",       label: "CROSSCHECK" },
+  // Mig 076 round 2 — Daksh renamed the display label to MANAGER.
+  // DB enum stays 'crosscheck' so existing rows + audit history don't
+  // need a backfill.
+  { value: "crosscheck",       label: "MANAGER" },
   // Mig 053 — was `final_auditor`. Has full accountant powers PLUS
   // owner backup for confirming proposed payments + approving bills.
   // Primary daily duty is the /accounts/final-audit page.

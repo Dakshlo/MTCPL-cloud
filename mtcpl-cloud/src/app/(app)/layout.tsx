@@ -512,6 +512,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                 biller: "BILLER",
                 accountant: "ACCOUNTANT",
                 accountant_star: "ACCOUNTANT ★",
+                // Mig 076 round 2 — display-only rename. DB enum
+                // stays 'crosscheck'.
+                crosscheck: "MANAGER",
                 cnc_expense_entry: "EXPENSES ENTRY",
               } as Record<string, string>)[profile.role] ?? profile.role.replace(/_/g, " ").toUpperCase()}
             </span>

@@ -135,7 +135,9 @@ const navEntries: NavEntry[] = [
     // Mig 060 — cnc_expense_entry sees the WORKSHOP banner so its
     // "Cutter Expenses" item renders under the right header (same
     // person handles CNC + cutter expense entry per Daksh's spec).
-    roles: ["developer", "owner", "team_head", "senior_incharge", "cutting_operator", "cnc_expense_entry"],
+    // Mig 076 round 2 — Manager (crosscheck) added so the Cutter
+    // Expenses entry below renders under a WORKSHOP header.
+    roles: ["developer", "owner", "team_head", "senior_incharge", "cutting_operator", "cnc_expense_entry", "crosscheck"],
     department: "production",
   },
   {
@@ -163,10 +165,13 @@ const navEntries: NavEntry[] = [
     // as a top-level sidebar entry. Owner / team_head can reach the
     // same page via the dashboard's Various Costing card → drill in.
     // Developer keeps access via the "More" expandable group below.
+    //
+    // Mig 076 round 2 — Manager (crosscheck) also enters expenses
+    // now. Surfaces alongside their other audit duties.
     href: "/cutting/expenses",
     label: "Cutter Expenses",
     icon: "💸",
-    roles: ["cnc_expense_entry"],
+    roles: ["cnc_expense_entry", "crosscheck"],
     department: "production",
   },
   {
@@ -176,7 +181,9 @@ const navEntries: NavEntry[] = [
     // so its single nav item ("CNC Expenses") renders under the
     // right banner. No other carving entries are visible to that
     // role (they're each role-gated independently).
-    roles: ["developer", "owner", "vendor", "carving_head", "senior_incharge", "cnc_expense_entry"],
+    // Mig 076 round 2 — Manager (crosscheck) added so the CNC
+    // Expenses entry below renders under a CARVING header for them.
+    roles: ["developer", "owner", "vendor", "carving_head", "senior_incharge", "cnc_expense_entry", "crosscheck"],
     department: "production",
   },
   {
@@ -226,10 +233,12 @@ const navEntries: NavEntry[] = [
     // is the data-entry user's work surface only. Owner / carving_head
     // reach the report via the dashboard's Various Costing card. Dev
     // keeps access via the "More" expandable group below.
+    //
+    // Mig 076 round 2 — Manager (crosscheck) also enters expenses.
     href: "/carving/expenses",
     label: "CNC Expenses",
     icon: "💸",
-    roles: ["cnc_expense_entry"],
+    roles: ["cnc_expense_entry", "crosscheck"],
     department: "production",
   },
   {
@@ -474,7 +483,10 @@ function roleLabel(role: AppRole): string {
     slab_transfer: "SLAB TRANSFER",
     biller: "BILLER",
     accountant: "ACCOUNTANT",
-    crosscheck: "CROSSCHECK",
+    // Mig 076 round 2 — Daksh renamed the display label from
+    // CROSSCHECK to MANAGER. DB enum stays 'crosscheck' (same
+    // display-only pattern accountant_star used before mig 061).
+    crosscheck: "MANAGER",
     storekeeper: "STOREKEEPER",
     // Mig 058 — Daksh: "change to accountant with star — we have
     // 2 accountants and don't want to bias one as senior." Mig 061
