@@ -846,6 +846,7 @@ export async function approveCutAction(
     "developer",
     "owner",
     "team_head",
+    "senior_incharge",
     "carving_head",
     "crosscheck",
   ]);
@@ -1159,6 +1160,7 @@ export async function requestCutterEditAction(
     "developer",
     "owner",
     "team_head",
+    "senior_incharge",
     "carving_head",
     "crosscheck",
   ]);
@@ -1248,6 +1250,7 @@ export async function lockCutterEditAction(
     "developer",
     "owner",
     "team_head",
+    "senior_incharge",
     "carving_head",
     "crosscheck",
   ]);

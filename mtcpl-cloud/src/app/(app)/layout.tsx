@@ -434,6 +434,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                 (role === "developer" ||
                   role === "owner" ||
                   role === "team_head" ||
+                  // Mig 076 — senior_incharge needs Find ID too;
+                  // they work across cutting + carving + slabs.
+                  role === "senior_incharge" ||
                   role === "crosscheck" ||
                   role === "carving_head");
               // Daksh May 2026 — vendors also walk the shop floor
