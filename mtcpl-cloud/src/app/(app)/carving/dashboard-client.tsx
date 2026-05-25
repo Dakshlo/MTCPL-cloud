@@ -2278,7 +2278,17 @@ function JobsByTemple({
                   }}
                   onMouseEnter={(e) => {
                     e.currentTarget.style.background = "var(--surface-alt)";
-                    e.currentTarget.style.borderColor = "var(--gold-dark)";
+                    // Daksh round 2 — DO NOT touch borderLeftColor /
+                    // the `borderColor` shorthand here. The 4-px
+                    // status stripe on the left side lives in
+                    // border-left-color; the shorthand wipes it and
+                    // mouseLeave repaints the wrong color, so cards
+                    // stayed grey-striped after a single hover until
+                    // a full reload. Animate only the three OTHER
+                    // sides — the status stripe stays put.
+                    e.currentTarget.style.borderTopColor = "var(--gold-dark)";
+                    e.currentTarget.style.borderRightColor = "var(--gold-dark)";
+                    e.currentTarget.style.borderBottomColor = "var(--gold-dark)";
                     // Subtle lift instead of just border-color flip so
                     // hover feels alive on dense card grids.
                     e.currentTarget.style.transform = "translateY(-1px)";
@@ -2287,7 +2297,9 @@ function JobsByTemple({
                   }}
                   onMouseLeave={(e) => {
                     e.currentTarget.style.background = "var(--surface)";
-                    e.currentTarget.style.borderColor = "var(--border)";
+                    e.currentTarget.style.borderTopColor = "var(--border)";
+                    e.currentTarget.style.borderRightColor = "var(--border)";
+                    e.currentTarget.style.borderBottomColor = "var(--border)";
                     e.currentTarget.style.transform = "translateY(0)";
                     e.currentTarget.style.boxShadow =
                       "0 1px 2px rgba(15,23,42,0.04)";
