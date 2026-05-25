@@ -4,36 +4,27 @@
 // Messenger pill + floating phone-shaped panel (Mig 078)
 // ──────────────────────────────────────────────────────────────────
 // Daksh May 2026 pilot — WhatsApp-shaped 1:1 chat baked into the
-// MTCPL topbar for the owner ↔ developer pair. Single client
-// component because the pill state + the panel state + the
-// realtime subscription all need to share refs; splitting would
-// require a context provider for two consumers.
+// MTCPL topbar. Round-2 follow-on: widened from a strict owner ↔
+// developer pair to a contacts roster (every owner + developer can
+// chat with every other one). The panel now has TWO views:
 //
-// Layout decisions:
-//   • Pill matches the shape of TopbarTasksBadge / NotificationBell
-//     (rounded, 12 px font, small unread counter). Hidden entirely
-//     when the role doesn't qualify — the parent in layout.tsx
-//     already gates on canUseMessenger.
-//   • Panel is position: fixed, bottom-right on desktop, full-screen
-//     sheet on mobile. The phone look comes from a tall 28-px-radius
-//     card with a thin frame; intentionally not a literal iPhone
-//     bezel — that would feel like a toy.
+//   • Contacts list — opens by default. Each row: avatar, name,
+//     role pill, last message snippet (with "You:" prefix if the
+//     last one was from us), time, unread badge.
+//   • Thread view — opened by clicking a contact. Shows the
+//     conversation with that peer. ← back arrow at top-left
+//     returns to the contacts list.
 //
-// Realtime:
-//   • One channel per-mount on `messenger_messages`. Re-fetch the
-//     whole thread on any event (the pilot's scale is hundreds of
-//     rows total — refetch is cheap, way simpler than reconciling
-//     patches). Mirrors RealtimeRefresh's pattern of "subscribe,
-//     debounce, refetch."
-//   • The pill's unread count updates the same way; while the panel
-//     is open we re-fetch the thread (which carries the count) and
-//     then call markThreadReadAction so the badge collapses.
+// State machine: { view: "contacts" | "thread", activePeerId }.
+// The realtime subscription refetches the relevant view's data on
+// every messenger_messages change.
 //
-// Voice notes:
-//   • MediaRecorder API. Press-and-hold the 🎙 button to record.
-//     Release to upload. Drag-up >60 px before releasing to cancel.
-//     Permissions live; if the browser denies mic access we toast
-//     and disable the button for the session.
+// Visual / layout (unchanged from round-1):
+//   • Pill mirrors TopbarTasksBadge / NotificationBell shape.
+//   • Panel is position: fixed, bottom-right on desktop, full-
+//     screen sheet on mobile. Phone-shaped via radius + size.
+//
+// Voice notes: MediaRecorder hold-to-record, drag-up to cancel.
 // ──────────────────────────────────────────────────────────────────
 
 import {
@@ -49,14 +40,14 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import {
   getMessengerUnreadCount,
   getSignedMediaUrl,
+  loadMessengerContacts,
   loadMessengerThread,
   markThreadReadAction,
   sendMediaMessage,
   sendTextMessage,
   softDeleteMessage,
-  type MessengerInitialState,
+  type MessengerContact,
   type MessengerMessage,
-  type MessengerPeer,
 } from "@/app/(app)/messenger/actions";
 
 type MessengerProfile = {
@@ -65,24 +56,9 @@ type MessengerProfile = {
   full_name: string | null;
 };
 
-type ThreadState = {
-  messages: MessengerMessage[];
-  peer: MessengerPeer | null;
-  unreadCount: number;
-};
-
-const EMPTY_THREAD: ThreadState = {
-  messages: [],
-  peer: null,
-  unreadCount: 0,
-};
-
-// ── Date helpers (IST-friendly) ───────────────────────────────────
+// ── Date helpers ──────────────────────────────────────────────────
 
 function dateKey(iso: string): string {
-  // YYYY-MM-DD in the user's local timezone — good enough for
-  // grouping into "today" / "yesterday" buckets without dragging
-  // a timezone library in.
   const d = new Date(iso);
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -97,7 +73,6 @@ function dividerLabel(key: string): string {
   const yKey = dateKey(y.toISOString());
   if (key === todayKey) return "Today";
   if (key === yKey) return "Yesterday";
-  // "25 May 2026"
   const d = new Date(key + "T00:00:00");
   return d.toLocaleDateString("en-IN", {
     day: "numeric",
@@ -115,15 +90,40 @@ function timeLabel(iso: string): string {
   });
 }
 
-// ── Public component ──────────────────────────────────────────────
+/** Compact "now-ish" label for contact rows: 10:32, Yesterday, 23 May. */
+function contactsTimeLabel(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const todayKey = dateKey(new Date().toISOString());
+  const y = new Date();
+  y.setDate(y.getDate() - 1);
+  const yKey = dateKey(y.toISOString());
+  const k = dateKey(iso);
+  if (k === todayKey) {
+    return d.toLocaleTimeString("en-IN", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+  }
+  if (k === yKey) return "Yesterday";
+  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+}
+
+function avatarLetter(name: string | null | undefined): string {
+  const trimmed = (name || "").trim();
+  return trimmed ? trimmed.charAt(0).toUpperCase() : "•";
+}
+
+function roleLabel(role: "owner" | "developer"): string {
+  return role === "owner" ? "Owner" : "Developer";
+}
+
+// ── Pill ──────────────────────────────────────────────────────────
 
 export function MessengerPill({ profile }: { profile: MessengerProfile }) {
   const [open, setOpen] = useState(false);
-  const [thread, setThread] = useState<ThreadState>(EMPTY_THREAD);
   const [badge, setBadge] = useState(0);
-  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
-
-  const pillRef = useRef<HTMLButtonElement | null>(null);
 
   // Initial unread count for the badge — cheap query, fire on mount.
   useEffect(() => {
@@ -136,47 +136,7 @@ export function MessengerPill({ profile }: { profile: MessengerProfile }) {
     };
   }, []);
 
-  // Hydrate the thread the first time the panel opens. After that
-  // we rely on the realtime subscription (inside <MessengerPanel/>)
-  // to keep messages fresh.
-  const refreshThread = useCallback(async () => {
-    const res: MessengerInitialState = await loadMessengerThread();
-    if (!res.ok) return;
-    setThread({
-      messages: res.messages,
-      peer: res.peer,
-      unreadCount: res.unreadCount,
-    });
-    setBadge(res.unreadCount);
-    setHasLoadedOnce(true);
-  }, []);
-
-  useEffect(() => {
-    if (open && !hasLoadedOnce) {
-      void refreshThread();
-    }
-  }, [open, hasLoadedOnce, refreshThread]);
-
-  // Stamp read_at when the panel becomes visible. The thread query
-  // already returns the latest read_at values, so we don't need
-  // to await before showing — fire and forget.
-  useEffect(() => {
-    if (!open) return;
-    void markThreadReadAction().then(() => {
-      setBadge(0);
-      setThread((t) => ({
-        ...t,
-        messages: t.messages.map((m) =>
-          m.recipient_id === profile.id && !m.read_at && !m.deleted_at
-            ? { ...m, read_at: new Date().toISOString() }
-            : m,
-        ),
-        unreadCount: 0,
-      }));
-    });
-  }, [open, profile.id]);
-
-  // Esc closes the panel.
+  // Esc closes the panel from anywhere.
   useEffect(() => {
     if (!open) return;
     function onKey(e: KeyboardEvent) {
@@ -189,7 +149,6 @@ export function MessengerPill({ profile }: { profile: MessengerProfile }) {
   return (
     <>
       <button
-        ref={pillRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         title={badge > 0 ? `${badge} unread` : "Messenger"}
@@ -249,50 +208,57 @@ export function MessengerPill({ profile }: { profile: MessengerProfile }) {
       {open && (
         <MessengerPanel
           self={profile}
-          thread={thread}
-          setThread={setThread}
-          setBadge={setBadge}
           onClose={() => setOpen(false)}
-          refreshThread={refreshThread}
+          setBadge={setBadge}
         />
       )}
     </>
   );
 }
 
-// ── Panel ─────────────────────────────────────────────────────────
+// ── Panel (state machine: contacts ↔ thread) ──────────────────────
 
 function MessengerPanel({
   self,
-  thread,
-  setThread,
-  setBadge,
   onClose,
-  refreshThread,
+  setBadge,
 }: {
   self: MessengerProfile;
-  thread: ThreadState;
-  setThread: React.Dispatch<React.SetStateAction<ThreadState>>;
-  setBadge: React.Dispatch<React.SetStateAction<number>>;
   onClose: () => void;
-  refreshThread: () => Promise<void>;
+  setBadge: React.Dispatch<React.SetStateAction<number>>;
 }) {
-  const scrollerRef = useRef<HTMLDivElement | null>(null);
-  const textRef = useRef<HTMLTextAreaElement | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [draft, setDraft] = useState("");
-  const [isSending, setIsSending] = useState(false);
+  const [view, setView] = useState<"contacts" | "thread">("contacts");
+  const [contacts, setContacts] = useState<MessengerContact[]>([]);
+  const [activePeer, setActivePeer] = useState<MessengerContact | null>(null);
+  const [messages, setMessages] = useState<MessengerMessage[]>([]);
+  const [loadingContacts, setLoadingContacts] = useState(true);
   const [toast, setToast] = useState<string | null>(null);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
-  // Auto-scroll to bottom whenever the message count changes (new
-  // messages or first load).
+  const refreshContacts = useCallback(async () => {
+    const res = await loadMessengerContacts();
+    if (!res.ok) {
+      setLoadingContacts(false);
+      return;
+    }
+    setContacts(res.contacts);
+    setLoadingContacts(false);
+    const total = res.contacts.reduce((s, c) => s + c.unread_count, 0);
+    setBadge(total);
+  }, [setBadge]);
+
+  const refreshThread = useCallback(async (peerId: string) => {
+    const res = await loadMessengerThread(peerId);
+    if (!res.ok) return;
+    setActivePeer(res.peer);
+    setMessages(res.messages);
+  }, []);
+
+  // Hydrate contacts on mount.
   useEffect(() => {
-    const el = scrollerRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }, [thread.messages.length]);
+    void refreshContacts();
+  }, [refreshContacts]);
 
   // Toast auto-dismiss.
   useEffect(() => {
@@ -301,7 +267,16 @@ function MessengerPanel({
     return () => window.clearTimeout(id);
   }, [toast]);
 
-  // ── Realtime ────────────────────────────────────────────────────
+  // Track the active peer ID in a ref so the realtime callback
+  // always reads the latest value without resubscribing every time
+  // we change view/active peer (which would tear down + reset the
+  // channel on every navigation).
+  const activePeerIdRef = useRef<string | null>(null);
+  activePeerIdRef.current = activePeer?.id ?? null;
+  const viewRef = useRef(view);
+  viewRef.current = view;
+
+  // Realtime — one channel for the panel's lifetime.
   useEffect(() => {
     const supabase = createBrowserSupabaseClient();
     let debounce: number | null = null;
@@ -315,7 +290,11 @@ function MessengerPanel({
           if (debounce !== null) window.clearTimeout(debounce);
           debounce = window.setTimeout(() => {
             startTransition(() => {
-              void refreshThread();
+              void refreshContacts();
+              const peerId = activePeerIdRef.current;
+              if (viewRef.current === "thread" && peerId) {
+                void refreshThread(peerId);
+              }
             });
           }, 200);
         },
@@ -326,14 +305,49 @@ function MessengerPanel({
       if (debounce !== null) window.clearTimeout(debounce);
       void supabase.removeChannel(channel);
     };
-  }, [refreshThread]);
+  }, [refreshContacts, refreshThread]);
 
-  // ── Send handlers ───────────────────────────────────────────────
+  // Open a thread: load it + stamp read_at + optimistically zero the
+  // peer's unread count locally so the badge updates instantly.
+  const openThread = useCallback(
+    async (peer: MessengerContact) => {
+      setActivePeer(peer);
+      setView("thread");
+      setMessages([]); // brief loading state
+      await refreshThread(peer.id);
+      const fd = new FormData();
+      fd.set("peer_id", peer.id);
+      void markThreadReadAction(fd).then(() => {
+        setContacts((prev) =>
+          prev.map((c) =>
+            c.id === peer.id ? { ...c, unread_count: 0 } : c,
+          ),
+        );
+        setBadge((b) => Math.max(0, b - peer.unread_count));
+      });
+    },
+    [refreshThread, setBadge],
+  );
+
+  const backToContacts = useCallback(() => {
+    setView("contacts");
+    setActivePeer(null);
+    setMessages([]);
+    void refreshContacts();
+  }, [refreshContacts]);
+
+  // ── Sending ─────────────────────────────────────────────────────
+
+  const [draft, setDraft] = useState("");
+  const [isSending, setIsSending] = useState(false);
+
   const sendText = useCallback(async () => {
+    if (!activePeer) return;
     const body = draft.trim();
     if (!body) return;
     setIsSending(true);
     const fd = new FormData();
+    fd.set("recipient_id", activePeer.id);
     fd.set("body", body);
     const res = await sendTextMessage(fd);
     setIsSending(false);
@@ -342,105 +356,77 @@ function MessengerPanel({
       return;
     }
     setDraft("");
-    // Optimistic local append — realtime will reconcile shortly.
-    // The realtime event for this insert may race the HTTP response;
-    // if a refreshThread already landed first, the message is in the
-    // list under its real id, so skip the optimistic add to avoid a
-    // double-render flicker.
-    setThread((t) => {
-      if (!t.peer) return t;
-      const realId = res.id;
-      if (realId && t.messages.some((m) => m.id === realId)) return t;
-      return {
-        ...t,
-        messages: [
-          ...t.messages,
-          {
-            id: realId ?? `local-${Date.now()}`,
-            sender_id: self.id,
-            recipient_id: t.peer.id,
-            kind: "text",
-            body,
-            media_path: null,
-            media_mime: null,
-            media_duration_sec: null,
-            read_at: null,
-            deleted_at: null,
-            deleted_by: null,
-            created_at: new Date().toISOString(),
-          },
-        ],
-      };
+    // Optimistic append — realtime + refresh will reconcile shortly.
+    // Skip if a refetch already landed this row (race-safe).
+    setMessages((prev) => {
+      if (res.id && prev.some((m) => m.id === res.id)) return prev;
+      return [
+        ...prev,
+        {
+          id: res.id ?? `local-${Date.now()}`,
+          sender_id: self.id,
+          recipient_id: activePeer.id,
+          kind: "text",
+          body,
+          media_path: null,
+          media_mime: null,
+          media_duration_sec: null,
+          read_at: null,
+          deleted_at: null,
+          deleted_by: null,
+          created_at: new Date().toISOString(),
+        },
+      ];
     });
-  }, [draft, self.id, setThread]);
+  }, [activePeer, draft, self.id]);
 
   const sendMedia = useCallback(
     async (file: File, kind: "voice" | "image", durationSec?: number) => {
+      if (!activePeer) return;
       setIsSending(true);
       const fd = new FormData();
+      fd.set("recipient_id", activePeer.id);
       fd.set("file", file);
       fd.set("kind", kind);
-      if (durationSec !== undefined) fd.set("duration_sec", String(durationSec));
+      if (durationSec !== undefined) {
+        fd.set("duration_sec", String(durationSec));
+      }
       const res = await sendMediaMessage(fd);
       setIsSending(false);
       if (!res.ok) {
         setToast(res.error);
-        return;
       }
-      // No optimistic insert — we don't have the storage path yet.
-      // Realtime will land it within ~200 ms.
     },
-    [],
+    [activePeer],
   );
 
-  const handleDelete = useCallback(
-    async (id: string) => {
-      const fd = new FormData();
-      fd.set("id", id);
-      const res = await softDeleteMessage(fd);
-      if (!res.ok) {
-        setToast(res.error);
-        return;
-      }
-      setThread((t) => ({
-        ...t,
-        messages: t.messages.map((m) =>
-          m.id === id
-            ? {
-                ...m,
-                body: null,
-                media_path: null,
-                deleted_at: new Date().toISOString(),
-                deleted_by: self.id,
-              }
-            : m,
-        ),
-      }));
-    },
-    [self.id, setThread],
-  );
+  const handleDelete = useCallback(async (id: string) => {
+    const fd = new FormData();
+    fd.set("id", id);
+    const res = await softDeleteMessage(fd);
+    if (!res.ok) {
+      setToast(res.error);
+      return;
+    }
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === id
+          ? {
+              ...m,
+              body: null,
+              media_path: null,
+              deleted_at: new Date().toISOString(),
+              deleted_by: self.id,
+            }
+          : m,
+      ),
+    );
+  }, [self.id]);
 
   // ── Render ──────────────────────────────────────────────────────
 
-  const grouped = useMemo(() => {
-    const groups: Array<{ key: string; items: MessengerMessage[] }> = [];
-    for (const m of thread.messages) {
-      const k = dateKey(m.created_at);
-      const last = groups[groups.length - 1];
-      if (last && last.key === k) last.items.push(m);
-      else groups.push({ key: k, items: [m] });
-    }
-    return groups;
-  }, [thread.messages]);
-
-  const peerLabel = thread.peer?.full_name?.trim() || (thread.peer?.role ?? "peer");
-  const peerRoleLabel = thread.peer?.role
-    ? thread.peer.role.charAt(0).toUpperCase() + thread.peer.role.slice(1)
-    : "";
-
   return (
     <>
-      {/* Click-shield + dim layer (mobile sheet ergonomics) */}
       <div
         onClick={onClose}
         style={{
@@ -453,6 +439,8 @@ function MessengerPanel({
       <div
         role="dialog"
         aria-label="Messenger"
+        onClick={(e) => e.stopPropagation()}
+        className="messenger-panel"
         style={{
           position: "fixed",
           right: 18,
@@ -463,21 +451,14 @@ function MessengerPanel({
           background: "var(--surface, #fff)",
           border: "1px solid var(--border, #e5e7eb)",
           borderRadius: 28,
-          boxShadow: "0 24px 64px rgba(15,23,42,0.28), 0 0 0 1px rgba(15,23,42,0.04)",
+          boxShadow:
+            "0 24px 64px rgba(15,23,42,0.28), 0 0 0 1px rgba(15,23,42,0.04)",
           zIndex: 1600,
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
-          // Phone-shape only on screens wide enough. On narrow
-          // (mobile) screens we go full-screen sheet so the user
-          // isn't typing in a 360-px window inside a 360-px screen.
         }}
-        className="messenger-panel"
-        onClick={(e) => e.stopPropagation()}
       >
-        {/* Mobile full-screen styling via inline media query — Daksh
-            doesn't use Tailwind here; CSS variables + inline styles
-            match the rest of the topbar widgets. */}
         <style>{`
           @media (max-width: 640px) {
             .messenger-panel {
@@ -499,150 +480,31 @@ function MessengerPanel({
           }
         `}</style>
 
-        {/* Header */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            padding: "12px 14px",
-            background: "var(--gold, #c9a14a)",
-            color: "#fff",
-            flexShrink: 0,
-          }}
-        >
-          <span
-            aria-hidden
-            style={{
-              width: 36,
-              height: 36,
-              borderRadius: "50%",
-              background: "rgba(255,255,255,0.22)",
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 17,
-              fontWeight: 800,
-              flexShrink: 0,
-            }}
-          >
-            {peerLabel.charAt(0).toUpperCase() || "•"}
-          </span>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div
-              style={{
-                fontSize: 14,
-                fontWeight: 800,
-                lineHeight: 1.2,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {peerLabel}
-            </div>
-            <div style={{ fontSize: 10.5, opacity: 0.85, lineHeight: 1.2 }}>
-              {peerRoleLabel} {thread.peer ? "· online" : ""}
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close messenger"
-            style={{
-              background: "rgba(255,255,255,0.18)",
-              color: "#fff",
-              border: "none",
-              borderRadius: "50%",
-              width: 28,
-              height: 28,
-              cursor: "pointer",
-              fontSize: 16,
-              lineHeight: 1,
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            ×
-          </button>
-        </div>
-
-        {/* Body — scrolling messages */}
-        <div
-          ref={scrollerRef}
-          style={{
-            flex: 1,
-            overflowY: "auto",
-            padding: "14px 12px",
-            background:
-              "linear-gradient(180deg, rgba(201,161,74,0.04), rgba(201,161,74,0.0) 220px), var(--bg, #faf7f0)",
-            display: "flex",
-            flexDirection: "column",
-            gap: 4,
-          }}
-        >
-          {!thread.peer && (
-            <div
-              style={{
-                textAlign: "center",
-                padding: 18,
-                fontSize: 13,
-                color: "var(--muted)",
-              }}
-            >
-              The other side isn't set up yet. Ask Daksh to provision the peer
-              profile.
-            </div>
-          )}
-
-          {grouped.map((g) => (
-            <div key={g.key}>
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "center",
-                  margin: "10px 0 6px",
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: 10.5,
-                    fontWeight: 700,
-                    padding: "2px 10px",
-                    borderRadius: 999,
-                    background: "rgba(15,23,42,0.06)",
-                    color: "rgba(15,23,42,0.55)",
-                    letterSpacing: "0.04em",
-                  }}
-                >
-                  {dividerLabel(g.key)}
-                </span>
-              </div>
-              {g.items.map((m) => (
-                <Bubble
-                  key={m.id}
-                  message={m}
-                  isOwn={m.sender_id === self.id}
-                  onDelete={() => handleDelete(m.id)}
-                  onImagePreview={(url) => setLightboxUrl(url)}
-                />
-              ))}
-            </div>
-          ))}
-        </div>
-
-        {/* Footer composer */}
-        <Composer
-          draft={draft}
-          setDraft={setDraft}
-          textRef={textRef}
-          fileInputRef={fileInputRef}
-          onSendText={sendText}
-          onSendMedia={sendMedia}
-          onError={(msg) => setToast(msg)}
-          disabled={!thread.peer || isSending}
-        />
+        {view === "contacts" ? (
+          <ContactsView
+            self={self}
+            contacts={contacts}
+            loading={loadingContacts}
+            onOpen={openThread}
+            onClose={onClose}
+          />
+        ) : (
+          <ThreadView
+            self={self}
+            peer={activePeer}
+            messages={messages}
+            draft={draft}
+            setDraft={setDraft}
+            isSending={isSending}
+            onSendText={sendText}
+            onSendMedia={sendMedia}
+            onDelete={handleDelete}
+            onBack={backToContacts}
+            onClose={onClose}
+            onError={(m) => setToast(m)}
+            onImagePreview={(url) => setLightboxUrl(url)}
+          />
+        )}
 
         {toast && (
           <div
@@ -699,6 +561,482 @@ function MessengerPanel({
   );
 }
 
+// ── Contacts list view ────────────────────────────────────────────
+
+function ContactsView({
+  self,
+  contacts,
+  loading,
+  onOpen,
+  onClose,
+}: {
+  self: MessengerProfile;
+  contacts: MessengerContact[];
+  loading: boolean;
+  onOpen: (peer: MessengerContact) => void;
+  onClose: () => void;
+}) {
+  return (
+    <>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          padding: "12px 14px",
+          background: "var(--gold, #c9a14a)",
+          color: "#fff",
+          flexShrink: 0,
+        }}
+      >
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 800, lineHeight: 1.2 }}>
+            Messages
+          </div>
+          <div style={{ fontSize: 10.5, opacity: 0.85, lineHeight: 1.2 }}>
+            Signed in as {self.full_name || roleLabel(self.role)}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close messenger"
+          style={{
+            background: "rgba(255,255,255,0.18)",
+            color: "#fff",
+            border: "none",
+            borderRadius: "50%",
+            width: 28,
+            height: 28,
+            cursor: "pointer",
+            fontSize: 16,
+            lineHeight: 1,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          ×
+        </button>
+      </div>
+
+      <div
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          background: "var(--bg, #faf7f0)",
+        }}
+      >
+        {loading ? (
+          <div style={{ padding: 24, textAlign: "center", color: "var(--muted)", fontSize: 13 }}>
+            Loading…
+          </div>
+        ) : contacts.length === 0 ? (
+          <div
+            style={{
+              padding: 24,
+              textAlign: "center",
+              color: "var(--muted)",
+              fontSize: 13,
+              lineHeight: 1.5,
+            }}
+          >
+            No one to chat with yet.
+            <br />
+            Ask Daksh to add another owner or developer profile.
+          </div>
+        ) : (
+          contacts.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => onOpen(c)}
+              style={{
+                width: "100%",
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                padding: "12px 14px",
+                background: "transparent",
+                border: "none",
+                borderBottom: "1px solid rgba(15,23,42,0.06)",
+                cursor: "pointer",
+                textAlign: "left",
+                color: "var(--text)",
+                transition: "background 0.12s ease",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "rgba(201,161,74,0.08)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "transparent";
+              }}
+            >
+              <span
+                aria-hidden
+                style={{
+                  width: 42,
+                  height: 42,
+                  borderRadius: "50%",
+                  background:
+                    c.role === "developer"
+                      ? "linear-gradient(135deg, #d4ad58, #c9a14a)"
+                      : "linear-gradient(135deg, #1a1a1a, #404040)",
+                  color: "#fff",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 17,
+                  fontWeight: 800,
+                  flexShrink: 0,
+                  boxShadow: "0 1px 2px rgba(15,23,42,0.12)",
+                }}
+              >
+                {avatarLetter(c.full_name)}
+              </span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    fontSize: 14,
+                    fontWeight: 700,
+                    lineHeight: 1.25,
+                  }}
+                >
+                  <span
+                    style={{
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      flex: 1,
+                      minWidth: 0,
+                    }}
+                  >
+                    {c.full_name || roleLabel(c.role)}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      padding: "1px 7px",
+                      borderRadius: 999,
+                      background:
+                        c.role === "developer"
+                          ? "rgba(201,161,74,0.18)"
+                          : "rgba(15,23,42,0.08)",
+                      color:
+                        c.role === "developer"
+                          ? "var(--gold-dark, #a88534)"
+                          : "rgba(15,23,42,0.65)",
+                      letterSpacing: "0.03em",
+                      textTransform: "uppercase",
+                      flexShrink: 0,
+                    }}
+                  >
+                    {roleLabel(c.role)}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    fontSize: 12,
+                    color:
+                      c.unread_count > 0
+                        ? "var(--text)"
+                        : "rgba(15,23,42,0.55)",
+                    fontWeight: c.unread_count > 0 ? 600 : 400,
+                    marginTop: 2,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {c.last_message_snippet
+                    ? (c.last_message_from_self ? "You: " : "") +
+                      c.last_message_snippet
+                    : "Tap to start a conversation"}
+                </div>
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "flex-end",
+                  gap: 4,
+                  flexShrink: 0,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 10.5,
+                    color: "rgba(15,23,42,0.45)",
+                    fontVariantNumeric: "tabular-nums",
+                  }}
+                >
+                  {contactsTimeLabel(c.last_message_at)}
+                </span>
+                {c.unread_count > 0 && (
+                  <span
+                    style={{
+                      fontSize: 10.5,
+                      fontWeight: 800,
+                      padding: "1px 7px",
+                      borderRadius: 999,
+                      background: "var(--gold)",
+                      color: "#fff",
+                      minWidth: 18,
+                      textAlign: "center",
+                    }}
+                  >
+                    {c.unread_count > 99 ? "99+" : c.unread_count}
+                  </span>
+                )}
+              </div>
+            </button>
+          ))
+        )}
+      </div>
+    </>
+  );
+}
+
+// ── Thread view ───────────────────────────────────────────────────
+
+function ThreadView({
+  self,
+  peer,
+  messages,
+  draft,
+  setDraft,
+  isSending,
+  onSendText,
+  onSendMedia,
+  onDelete,
+  onBack,
+  onClose,
+  onError,
+  onImagePreview,
+}: {
+  self: MessengerProfile;
+  peer: MessengerContact | null;
+  messages: MessengerMessage[];
+  draft: string;
+  setDraft: (s: string) => void;
+  isSending: boolean;
+  onSendText: () => Promise<void> | void;
+  onSendMedia: (
+    file: File,
+    kind: "voice" | "image",
+    durationSec?: number,
+  ) => Promise<void> | void;
+  onDelete: (id: string) => void;
+  onBack: () => void;
+  onClose: () => void;
+  onError: (msg: string) => void;
+  onImagePreview: (url: string) => void;
+}) {
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const textRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [messages.length]);
+
+  const grouped = useMemo(() => {
+    const groups: Array<{ key: string; items: MessengerMessage[] }> = [];
+    for (const m of messages) {
+      const k = dateKey(m.created_at);
+      const last = groups[groups.length - 1];
+      if (last && last.key === k) last.items.push(m);
+      else groups.push({ key: k, items: [m] });
+    }
+    return groups;
+  }, [messages]);
+
+  const peerName = peer?.full_name?.trim() || (peer ? roleLabel(peer.role) : "—");
+
+  return (
+    <>
+      {/* Header */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          padding: "10px 12px",
+          background: "var(--gold, #c9a14a)",
+          color: "#fff",
+          flexShrink: 0,
+        }}
+      >
+        <button
+          type="button"
+          onClick={onBack}
+          aria-label="Back to contacts"
+          style={{
+            background: "rgba(255,255,255,0.18)",
+            color: "#fff",
+            border: "none",
+            borderRadius: "50%",
+            width: 30,
+            height: 30,
+            cursor: "pointer",
+            fontSize: 16,
+            lineHeight: 1,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+          }}
+        >
+          ←
+        </button>
+        <span
+          aria-hidden
+          style={{
+            width: 34,
+            height: 34,
+            borderRadius: "50%",
+            background:
+              peer?.role === "developer"
+                ? "linear-gradient(135deg, #d4ad58, #c9a14a)"
+                : "rgba(255,255,255,0.22)",
+            color: "#fff",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 16,
+            fontWeight: 800,
+            flexShrink: 0,
+            boxShadow: peer?.role === "developer" ? "0 1px 2px rgba(15,23,42,0.18)" : undefined,
+          }}
+        >
+          {avatarLetter(peer?.full_name)}
+        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: 14,
+              fontWeight: 800,
+              lineHeight: 1.2,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {peerName}
+          </div>
+          <div style={{ fontSize: 10.5, opacity: 0.85, lineHeight: 1.2 }}>
+            {peer ? roleLabel(peer.role) : ""}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close messenger"
+          style={{
+            background: "rgba(255,255,255,0.18)",
+            color: "#fff",
+            border: "none",
+            borderRadius: "50%",
+            width: 28,
+            height: 28,
+            cursor: "pointer",
+            fontSize: 16,
+            lineHeight: 1,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+          }}
+        >
+          ×
+        </button>
+      </div>
+
+      {/* Body */}
+      <div
+        ref={scrollerRef}
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          padding: "14px 12px",
+          background:
+            "linear-gradient(180deg, rgba(201,161,74,0.04), rgba(201,161,74,0.0) 220px), var(--bg, #faf7f0)",
+          display: "flex",
+          flexDirection: "column",
+          gap: 4,
+        }}
+      >
+        {messages.length === 0 && peer && (
+          <div
+            style={{
+              textAlign: "center",
+              padding: 18,
+              fontSize: 13,
+              color: "var(--muted)",
+              lineHeight: 1.5,
+            }}
+          >
+            No messages yet. Say hi 👋
+          </div>
+        )}
+
+        {grouped.map((g) => (
+          <div key={g.key}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                margin: "10px 0 6px",
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 10.5,
+                  fontWeight: 700,
+                  padding: "2px 10px",
+                  borderRadius: 999,
+                  background: "rgba(15,23,42,0.06)",
+                  color: "rgba(15,23,42,0.55)",
+                  letterSpacing: "0.04em",
+                }}
+              >
+                {dividerLabel(g.key)}
+              </span>
+            </div>
+            {g.items.map((m) => (
+              <Bubble
+                key={m.id}
+                message={m}
+                isOwn={m.sender_id === self.id}
+                onDelete={() => onDelete(m.id)}
+                onImagePreview={onImagePreview}
+              />
+            ))}
+          </div>
+        ))}
+      </div>
+
+      {/* Composer */}
+      <Composer
+        draft={draft}
+        setDraft={setDraft}
+        textRef={textRef}
+        fileInputRef={fileInputRef}
+        onSendText={onSendText}
+        onSendMedia={onSendMedia}
+        onError={onError}
+        disabled={!peer || isSending}
+      />
+    </>
+  );
+}
+
 // ── Bubble ────────────────────────────────────────────────────────
 
 function Bubble({
@@ -716,13 +1054,9 @@ function Bubble({
   const [menuOpen, setMenuOpen] = useState(false);
   const pressTimer = useRef<number | null>(null);
 
-  // Long-press handler (touch). Right-click handler (desktop) lives
-  // on the bubble element below.
   const startPress = () => {
     if (!isOwn || isDeleted) return;
-    pressTimer.current = window.setTimeout(() => {
-      setMenuOpen(true);
-    }, 500);
+    pressTimer.current = window.setTimeout(() => setMenuOpen(true), 500);
   };
   const cancelPress = () => {
     if (pressTimer.current !== null) {
@@ -799,19 +1133,18 @@ function Bubble({
           }}
         >
           {timeLabel(message.created_at)}
-          {isOwn && !isDeleted && message.read_at ? " · ✓✓" : isOwn && !isDeleted ? " · ✓" : ""}
+          {isOwn && !isDeleted && message.read_at
+            ? " · ✓✓"
+            : isOwn && !isDeleted
+              ? " · ✓"
+              : ""}
         </div>
 
-        {/* Delete mini-menu */}
         {menuOpen && (
           <>
             <div
               onClick={() => setMenuOpen(false)}
-              style={{
-                position: "fixed",
-                inset: 0,
-                zIndex: 10,
-              }}
+              style={{ position: "fixed", inset: 0, zIndex: 10 }}
             />
             <div
               style={{
@@ -893,15 +1226,17 @@ function VoiceBubble({
         style={{
           width: 200,
           height: 32,
-          // The native control bar matches surprisingly well on
-          // Chrome / Safari; on Firefox it's a bit chunky but
-          // serviceable. Filter for the gold tint on the own-side
-          // bubble so the playhead reads against the gold fill.
           filter: isOwn ? "invert(1) hue-rotate(180deg)" : undefined,
         }}
       />
       {message.media_duration_sec !== null && (
-        <span style={{ fontSize: 11, opacity: 0.75, fontVariantNumeric: "tabular-nums" }}>
+        <span
+          style={{
+            fontSize: 11,
+            opacity: 0.75,
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
           {formatDuration(message.media_duration_sec)}
         </span>
       )}
@@ -930,7 +1265,15 @@ function ImageBubble({
 
   if (!url) {
     return (
-      <span style={{ fontSize: 12, opacity: 0.7, display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <span
+        style={{
+          fontSize: 12,
+          opacity: 0.7,
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+        }}
+      >
         <span aria-hidden>🖼</span>
         <span>Loading image…</span>
       </span>
@@ -960,7 +1303,7 @@ function formatDuration(sec: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-// ── Composer (text input + paperclip + hold-to-record) ────────────
+// ── Composer (text + paperclip + hold-to-record) ──────────────────
 
 function Composer({
   draft,
@@ -997,7 +1340,6 @@ function Composer({
   const streamRef = useRef<MediaStream | null>(null);
   const [micDisabled, setMicDisabled] = useState(false);
 
-  // Auto-grow the textarea.
   useEffect(() => {
     const el = textRef.current;
     if (!el) return;
@@ -1011,7 +1353,6 @@ function Composer({
     if (rec && rec.state !== "inactive") {
       rec.stop();
     }
-    // Tracks stop on the stream end inside `onstop` below.
   }
 
   function teardownRecording() {
@@ -1057,8 +1398,7 @@ function Composer({
         }
         const type = chunks[0]?.type || mime || "audio/webm";
         const blob = new Blob(chunks, { type });
-        const ext =
-          type.includes("mp4") ? "m4a" : type.includes("ogg") ? "ogg" : "webm";
+        const ext = type.includes("mp4") ? "m4a" : type.includes("ogg") ? "ogg" : "webm";
         const file = new File([blob], `voice-${Date.now()}.${ext}`, { type });
         await onSendMedia(file, "voice", dur);
       };
@@ -1068,10 +1408,7 @@ function Composer({
       recTimerRef.current = window.setInterval(() => {
         const e = Math.round((Date.now() - recStartRef.current) / 1000);
         setElapsed(e);
-        if (e >= 120) {
-          // 2-min UI ceiling per Daksh's spec — auto-stop and send.
-          stopRecorder(true);
-        }
+        if (e >= 120) stopRecorder(true);
       }, 200);
     } catch (err) {
       teardownRecording();
@@ -1213,11 +1550,7 @@ function Composer({
           }}
           disabled={disabled || micDisabled}
           style={{
-            background: recording
-              ? cancelArmed
-                ? "#dc2626"
-                : "#dc2626"
-              : "var(--gold)",
+            background: recording ? "#dc2626" : "var(--gold)",
             color: "#fff",
             border: "none",
             borderRadius: "50%",
@@ -1230,9 +1563,7 @@ function Composer({
             justifyContent: "center",
             flexShrink: 0,
             opacity: micDisabled ? 0.45 : 1,
-            animation: recording
-              ? "mtcpl-mic-pulse 1.4s infinite"
-              : undefined,
+            animation: recording ? "mtcpl-mic-pulse 1.4s infinite" : undefined,
             transform: recording ? "scale(1.08)" : "scale(1)",
             transition: "transform 0.18s ease",
             touchAction: "none",
@@ -1272,7 +1603,9 @@ function Composer({
               animation: "mtcpl-mic-pulse 1.2s infinite",
             }}
           />
-          {cancelArmed ? "Release to cancel" : `${formatDuration(elapsed)} · slide up to cancel`}
+          {cancelArmed
+            ? "Release to cancel"
+            : `${formatDuration(elapsed)} · slide up to cancel`}
         </div>
       )}
     </div>

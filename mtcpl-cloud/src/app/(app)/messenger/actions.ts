@@ -3,43 +3,53 @@
 // ──────────────────────────────────────────────────────────────────
 // Messenger server actions (Mig 078)
 // ──────────────────────────────────────────────────────────────────
-// All writes for the owner ↔ developer chat pilot live here. Reads
-// (the initial thread + peer + unread) also land here so the client
-// component never needs to query the DB directly — it only needs
-// the realtime subscription to know "something changed, refetch".
+// All reads + writes for the messenger pilot live here. Reads also
+// land here (rather than letting the client query DB directly) so
+// permission gating + recipient validation happen in one place.
 //
-// Auth posture:
-//   • Every entrypoint calls requireAuth() then canUseMessenger().
-//     If the caller doesn't qualify we return an error rather than
-//     redirecting — the messenger is a popover; a 302 mid-action
-//     would silently fail in the panel UI. The caller renders the
-//     error in a toast.
-//   • All DB work goes through createAdminSupabaseClient() because
-//     the only RLS in play is the blanket SELECT-to-authenticated
-//     read policy from mig 029 (good for realtime). Writes via
-//     service role match every other action in this app.
+// Round-2 follow-on: the pilot widened from a strict owner ↔
+// developer pair to "any owner or developer can chat with any other
+// owner or developer." That changed the loader shape — we now have:
 //
-// Storage:
+//   • loadMessengerContacts() — returns the user's roster
+//     (everyone-they-can-chat-with), each row carrying the unread
+//     count + the latest message snippet. Powers the contacts list.
+//   • loadMessengerThread(peerId) — returns one specific
+//     conversation. Powers the thread view.
+//
+// All sends + the read-marker now take an explicit recipient_id
+// (sender) or peer_id (receiver) from FormData. The server
+// validates that the target is a permitted messenger user via
+// isPermittedMessengerRole — a tampered client can't aim a message
+// at a slab-entry profile.
+//
+// Auth posture (unchanged):
+//   • requireAuth() then canUseMessenger() on every entrypoint.
+//     Failures return { ok: false, ... } rather than redirecting
+//     (the messenger is a popover; 302 mid-action silently fails
+//     in the panel).
+//   • All DB work via createAdminSupabaseClient(). Only RLS in
+//     play is the mig 029 authenticated_read_all SELECT policy.
+//
+// Storage (unchanged):
 //   • messenger_media bucket (private). Voice notes (webm/opus,
-//     ≤2 MB) and images (jpeg/png, ≤1 MB). Files are uploaded under
-//     a randomly-named path; we never trust client-supplied names.
-//   • Reads via `createSignedUrl(path, 300)` — 5-min freshness is
-//     plenty for the panel's lifetime; if the user holds the panel
-//     open longer the next router.refresh re-mints fresh URLs.
+//     ≤2 MB), images (jpeg/png/webp, ≤1 MB). Reads via
+//     `createSignedUrl(path, 300)`.
 // ──────────────────────────────────────────────────────────────────
 
 import { randomUUID } from "node:crypto";
 
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { canUseMessenger, peerRoleFor } from "@/lib/messenger-permissions";
+import {
+  canUseMessenger,
+  isPermittedMessengerRole,
+} from "@/lib/messenger-permissions";
 
 // ── Constants ─────────────────────────────────────────────────────
 
 const BUCKET = "messenger_media";
-
 const MAX_TEXT_LEN = 2000;
-
 const VOICE_MAX_BYTES = 2 * 1024 * 1024; // 2 MB
 const IMAGE_MAX_BYTES = 1 * 1024 * 1024; // 1 MB
 
@@ -49,17 +59,13 @@ const VOICE_MIME_ALLOW = new Set([
   "audio/ogg",
   "audio/ogg;codecs=opus",
   "audio/mp4",
-  // MediaRecorder on Safari ≥ 14.5 emits audio/mp4. Listed so iOS
-  // users on the dev's side aren't shut out of voice notes.
 ]);
+const IMAGE_MIME_ALLOW = new Set(["image/jpeg", "image/png", "image/webp"]);
 
-const IMAGE_MIME_ALLOW = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  // webp slipped in because pasted screenshots on macOS Sonoma come
-  // out as webp now. Same ≤1 MB ceiling applies.
-]);
+// All columns we want back on a message row. Centralised so the
+// contacts loader + the thread loader return identical shapes.
+const MESSAGE_COLS =
+  "id, sender_id, recipient_id, kind, body, media_path, media_mime, media_duration_sec, read_at, deleted_at, deleted_by, created_at";
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -80,25 +86,48 @@ export type MessengerMessage = {
   created_at: string;
 };
 
-export type MessengerPeer = {
+export type MessengerRole = "owner" | "developer";
+
+export type MessengerSelf = {
   id: string;
+  role: MessengerRole;
   full_name: string | null;
-  role: "owner" | "developer";
 };
 
-export type MessengerInitialState =
+export type MessengerContact = {
+  id: string;
+  full_name: string | null;
+  role: MessengerRole;
+  /** Unread messages addressed to caller from this peer. */
+  unread_count: number;
+  /** ISO of the latest message in either direction; null if no history. */
+  last_message_at: string | null;
+  /** Human-readable preview ("Hi", "🎙 Voice note", "🚫 Deleted message"). */
+  last_message_snippet: string | null;
+  /** True if the latest message was sent BY caller. Used to prefix "You:". */
+  last_message_from_self: boolean;
+};
+
+export type MessengerContactsState =
+  | { ok: true; self: MessengerSelf; contacts: MessengerContact[] }
+  | { ok: false; reason: "not_permitted" | "internal_error" };
+
+export type MessengerThreadState =
   | {
       ok: true;
-      self: { id: string; role: "owner" | "developer"; full_name: string | null };
-      peer: MessengerPeer | null; // null = peer profile not provisioned yet
+      self: MessengerSelf;
+      peer: MessengerContact;
       messages: MessengerMessage[];
-      unreadCount: number;
     }
-  | { ok: false; reason: "not_permitted" | "internal_error" };
+  | { ok: false; reason: "not_permitted" | "peer_not_found" | "internal_error" };
+
+type ActionResult =
+  | { ok: true; id?: string }
+  | { ok: false; error: string };
 
 // ── Helpers ───────────────────────────────────────────────────────
 
-/** Filter for "thread between A and B": either direction of the pair. */
+/** PostgREST OR filter for "either direction of this pair." */
 function pairOr(selfId: string, peerId: string) {
   return (
     `and(sender_id.eq.${selfId},recipient_id.eq.${peerId}),` +
@@ -117,97 +146,181 @@ function extensionFor(mime: string, kind: "voice" | "image"): string {
   return "jpg";
 }
 
+/** One-line snippet for the contacts list. Mirrors WhatsApp's preview. */
+function snippetFor(
+  msg: Pick<MessengerMessage, "kind" | "body" | "deleted_at">,
+): string {
+  if (msg.deleted_at) return "🚫 Deleted message";
+  if (msg.kind === "voice") return "🎙 Voice note";
+  if (msg.kind === "image") return "🖼 Image";
+  return (msg.body || "").trim();
+}
+
+/** Light row used during contacts aggregation (no full media columns
+ *  needed for snippet generation). */
+type ContactScanRow = {
+  sender_id: string;
+  recipient_id: string;
+  kind: MessengerKind;
+  body: string | null;
+  read_at: string | null;
+  deleted_at: string | null;
+  created_at: string;
+};
+
 // ── Read APIs ─────────────────────────────────────────────────────
 
-/** Load the peer + the whole thread + the unread count in a single
- *  trip. Called when the panel mounts. The client subscribes to
- *  postgres_changes and reruns this whenever a row changes. */
-export async function loadMessengerThread(): Promise<MessengerInitialState> {
+/** Load the user's contact roster — every permitted messenger user
+ *  except the caller, with unread count + latest-message snippet
+ *  attached. Sorted: contacts with activity first (most recent on
+ *  top), then those without (alphabetical by name).
+ *
+ *  Two queries:
+ *    1. profiles where role IN (...) AND is_active AND id <> self
+ *    2. last 2000 messages involving self, grouped in-memory by peer.
+ *
+ *  2000 is generous for the pilot scale and lets us avoid a per-
+ *  contact roundtrip. Once we widen further or thread volume grows
+ *  this could become a single SQL with DISTINCT ON. */
+export async function loadMessengerContacts(): Promise<MessengerContactsState> {
   const { profile } = await requireAuth();
-  if (!canUseMessenger(profile)) {
-    return { ok: false, reason: "not_permitted" };
-  }
+  if (!canUseMessenger(profile)) return { ok: false, reason: "not_permitted" };
 
   const admin = createAdminSupabaseClient();
-  const otherRole = peerRoleFor(profile.role);
 
-  // Find the (single) peer profile for the pilot. is_active = true
-  // so a soft-deactivated owner/dev row doesn't get picked up.
-  const { data: peerRow, error: peerErr } = await admin
+  const { data: peers, error: peersErr } = await admin
     .from("profiles")
     .select("id, full_name, role")
-    .eq("role", otherRole)
+    .in("role", ["owner", "developer"])
     .eq("is_active", true)
-    .limit(1)
-    .maybeSingle();
+    .neq("id", profile.id);
+  if (peersErr) return { ok: false, reason: "internal_error" };
 
-  if (peerErr) {
-    return { ok: false, reason: "internal_error" };
-  }
-
-  const peer: MessengerPeer | null = peerRow
-    ? {
-        id: peerRow.id as string,
-        full_name: (peerRow.full_name as string | null) ?? null,
-        role: peerRow.role as "owner" | "developer",
-      }
-    : null;
-
-  // With no peer there's nothing to fetch — return an empty thread.
-  if (!peer) {
-    return {
-      ok: true,
-      self: {
-        id: profile.id,
-        role: profile.role as "owner" | "developer",
-        full_name: profile.full_name,
-      },
-      peer: null,
-      messages: [],
-      unreadCount: 0,
-    };
-  }
-
-  // Pull the entire thread in chronological order. The pilot pair
-  // is tiny (Daksh's estimate: hundreds of rows over weeks); no
-  // pagination needed yet. Once we widen the helper we'll add a
-  // cursor here. Explicit limit() so we never OOM on a bug.
   const { data: msgs, error: msgsErr } = await admin
     .from("messenger_messages")
     .select(
-      "id, sender_id, recipient_id, kind, body, media_path, media_mime, media_duration_sec, read_at, deleted_at, deleted_by, created_at",
+      "sender_id, recipient_id, kind, body, read_at, deleted_at, created_at",
     )
-    .or(pairOr(profile.id, peer.id))
-    .order("created_at", { ascending: true })
-    .limit(500);
+    .or(`sender_id.eq.${profile.id},recipient_id.eq.${profile.id}`)
+    .order("created_at", { ascending: false })
+    .limit(2000);
+  if (msgsErr) return { ok: false, reason: "internal_error" };
 
-  if (msgsErr) {
-    return { ok: false, reason: "internal_error" };
-  }
+  const rows = (msgs ?? []) as ContactScanRow[];
 
-  const messages = (msgs ?? []) as MessengerMessage[];
-  const unreadCount = messages.filter(
-    (m) => m.recipient_id === profile.id && !m.read_at && !m.deleted_at,
-  ).length;
+  const contacts: MessengerContact[] = (peers ?? []).map((p) => {
+    const peerId = p.id as string;
+    let lastMsg: ContactScanRow | null = null;
+    let unread = 0;
+    for (const m of rows) {
+      const otherId = m.sender_id === profile.id ? m.recipient_id : m.sender_id;
+      if (otherId !== peerId) continue;
+      if (!lastMsg) lastMsg = m; // rows come sorted DESC, so first hit wins
+      if (
+        m.recipient_id === profile.id &&
+        !m.read_at &&
+        !m.deleted_at
+      ) {
+        unread++;
+      }
+    }
+    return {
+      id: peerId,
+      full_name: (p.full_name as string | null) ?? null,
+      role: p.role as MessengerRole,
+      unread_count: unread,
+      last_message_at: lastMsg?.created_at ?? null,
+      last_message_snippet: lastMsg ? snippetFor(lastMsg) : null,
+      last_message_from_self: lastMsg ? lastMsg.sender_id === profile.id : false,
+    };
+  });
+
+  contacts.sort((a, b) => {
+    // Active contacts (any history) before never-messaged ones.
+    if (a.last_message_at && b.last_message_at) {
+      return b.last_message_at.localeCompare(a.last_message_at);
+    }
+    if (a.last_message_at) return -1;
+    if (b.last_message_at) return 1;
+    return (a.full_name || "").localeCompare(b.full_name || "");
+  });
 
   return {
     ok: true,
     self: {
       id: profile.id,
-      role: profile.role as "owner" | "developer",
+      role: profile.role as MessengerRole,
       full_name: profile.full_name,
     },
-    peer,
-    messages,
-    unreadCount,
+    contacts,
   };
 }
 
-/** Cheap stand-alone unread count for the pill badge — fetched
- *  separately from loadMessengerThread so the badge can update
- *  without touching the whole thread. Returns 0 when the role
- *  doesn't qualify (badge stays hidden via the role gate on the
- *  pill render itself). */
+/** Load the full conversation with one specific peer. The peer is
+ *  re-validated server-side (isPermittedMessengerRole + is_active)
+ *  so a tampered peerId can't be used to fetch unrelated rows. */
+export async function loadMessengerThread(
+  peerId: string,
+): Promise<MessengerThreadState> {
+  const { profile } = await requireAuth();
+  if (!canUseMessenger(profile)) return { ok: false, reason: "not_permitted" };
+  if (!peerId || typeof peerId !== "string") {
+    return { ok: false, reason: "peer_not_found" };
+  }
+  if (peerId === profile.id) return { ok: false, reason: "peer_not_found" };
+
+  const admin = createAdminSupabaseClient();
+
+  const { data: peerRow, error: peerErr } = await admin
+    .from("profiles")
+    .select("id, full_name, role, is_active")
+    .eq("id", peerId)
+    .maybeSingle();
+  if (peerErr) return { ok: false, reason: "internal_error" };
+  if (
+    !peerRow ||
+    !peerRow.is_active ||
+    !isPermittedMessengerRole(peerRow.role as string)
+  ) {
+    return { ok: false, reason: "peer_not_found" };
+  }
+
+  const { data: msgs, error: msgsErr } = await admin
+    .from("messenger_messages")
+    .select(MESSAGE_COLS)
+    .or(pairOr(profile.id, peerId))
+    .order("created_at", { ascending: true })
+    .limit(500);
+  if (msgsErr) return { ok: false, reason: "internal_error" };
+
+  const messages = (msgs ?? []) as MessengerMessage[];
+  const unread = messages.filter(
+    (m) => m.recipient_id === profile.id && !m.read_at && !m.deleted_at,
+  ).length;
+  const last = messages[messages.length - 1];
+
+  return {
+    ok: true,
+    self: {
+      id: profile.id,
+      role: profile.role as MessengerRole,
+      full_name: profile.full_name,
+    },
+    peer: {
+      id: peerRow.id as string,
+      full_name: (peerRow.full_name as string | null) ?? null,
+      role: peerRow.role as MessengerRole,
+      unread_count: unread,
+      last_message_at: last?.created_at ?? null,
+      last_message_snippet: last ? snippetFor(last) : null,
+      last_message_from_self: last ? last.sender_id === profile.id : false,
+    },
+    messages,
+  };
+}
+
+/** Total unread across every thread. Used by the pill badge before
+ *  the panel is opened. */
 export async function getMessengerUnreadCount(): Promise<number> {
   const { profile } = await requireAuth();
   if (!canUseMessenger(profile)) return 0;
@@ -223,10 +336,7 @@ export async function getMessengerUnreadCount(): Promise<number> {
   return count ?? 0;
 }
 
-/** Sign a media path for short-lived rendering. 5-min freshness is
- *  fine for the panel — even if the user lingers on a bubble, the
- *  next realtime tick re-mints URLs. Returns null on any failure
- *  (the bubble will fall back to a "media unavailable" stub). */
+/** Short-lived signed URL for a media path. */
 export async function getSignedMediaUrl(
   path: string,
 ): Promise<string | null> {
@@ -244,29 +354,33 @@ export async function getSignedMediaUrl(
 
 // ── Write APIs ────────────────────────────────────────────────────
 
-type ActionResult =
-  | { ok: true; id?: string }
-  | { ok: false; error: string };
-
-/** Resolve the (single) pilot peer for the caller. Centralised so
- *  every send/delete action uses the same lookup. */
-async function resolvePeerId(
-  callerRole: "owner" | "developer",
-): Promise<string | null> {
+/** Validate a recipient_id supplied by the client. Returns
+ *  { ok: true } if the target exists, is active, and has a
+ *  permitted role; otherwise an action-friendly error. */
+async function validateRecipient(
+  selfId: string,
+  recipientId: unknown,
+): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+  if (typeof recipientId !== "string" || !recipientId) {
+    return { ok: false, error: "Missing recipient" };
+  }
+  if (recipientId === selfId) {
+    return { ok: false, error: "Cannot message yourself" };
+  }
   const admin = createAdminSupabaseClient();
-  const otherRole = peerRoleFor(callerRole);
-  const { data } = await admin
+  const { data, error } = await admin
     .from("profiles")
-    .select("id")
-    .eq("role", otherRole)
-    .eq("is_active", true)
-    .limit(1)
+    .select("id, role, is_active")
+    .eq("id", recipientId)
     .maybeSingle();
-  return (data?.id as string | undefined) ?? null;
+  if (error || !data) return { ok: false, error: "Recipient not found" };
+  if (!data.is_active) return { ok: false, error: "Recipient is inactive" };
+  if (!isPermittedMessengerRole(data.role as string)) {
+    return { ok: false, error: "Recipient cannot receive messages" };
+  }
+  return { ok: true, id: data.id as string };
 }
 
-/** Send a plain text message to the pilot peer. Body must be
- *  non-empty after trim and ≤ 2000 chars. */
 export async function sendTextMessage(
   formData: FormData,
 ): Promise<ActionResult> {
@@ -275,6 +389,12 @@ export async function sendTextMessage(
     return { ok: false, error: "Not permitted" };
   }
 
+  const recipient = await validateRecipient(
+    profile.id,
+    formData.get("recipient_id"),
+  );
+  if (!recipient.ok) return recipient;
+
   const rawBody = formData.get("body");
   const body = typeof rawBody === "string" ? rawBody.trim() : "";
   if (!body) return { ok: false, error: "Message is empty" };
@@ -282,17 +402,12 @@ export async function sendTextMessage(
     return { ok: false, error: `Message too long (max ${MAX_TEXT_LEN})` };
   }
 
-  const peerId = await resolvePeerId(profile.role as "owner" | "developer");
-  if (!peerId) {
-    return { ok: false, error: "No peer found — the other side isn't set up yet" };
-  }
-
   const admin = createAdminSupabaseClient();
   const { data, error } = await admin
     .from("messenger_messages")
     .insert({
       sender_id: profile.id,
-      recipient_id: peerId,
+      recipient_id: recipient.id,
       kind: "text",
       body,
     })
@@ -302,15 +417,6 @@ export async function sendTextMessage(
   return { ok: true, id: data?.id as string | undefined };
 }
 
-/** Send a voice note or an image. Validates mime + size, uploads
- *  to storage under a random path, then inserts the row. Failure
- *  modes:
- *    • missing/unrecognised mime → "Unsupported file type"
- *    • oversized → "Voice too large (max 2 MB)" / image variant
- *    • storage 4xx → surfaced to the user verbatim
- *  Duration is voice-only and is trusted from the client (it's
- *  cosmetic — the actual audio is the source of truth). Capped at
- *  600 s server-side via the CHECK constraint anyway. */
 export async function sendMediaMessage(
   formData: FormData,
 ): Promise<ActionResult> {
@@ -318,6 +424,12 @@ export async function sendMediaMessage(
   if (!canUseMessenger(profile)) {
     return { ok: false, error: "Not permitted" };
   }
+
+  const recipient = await validateRecipient(
+    profile.id,
+    formData.get("recipient_id"),
+  );
+  if (!recipient.ok) return recipient;
 
   const rawKind = formData.get("kind");
   const kind = rawKind === "voice" || rawKind === "image" ? rawKind : null;
@@ -356,20 +468,10 @@ export async function sendMediaMessage(
     }
   }
 
-  const peerId = await resolvePeerId(profile.role as "owner" | "developer");
-  if (!peerId) {
-    return { ok: false, error: "No peer found — the other side isn't set up yet" };
-  }
-
   const admin = createAdminSupabaseClient();
   const ext = extensionFor(mime, kind);
   const path = `${profile.id}/${randomUUID()}.${ext}`;
 
-  // Stream the file body up to Supabase Storage. The SDK takes
-  // ArrayBuffer / Blob / Buffer — File works because it extends
-  // Blob, but we go through arrayBuffer() so the underlying fetch
-  // gets a known content length (avoids chunked-upload weirdness
-  // on some Supabase edge regions).
   const buffer = Buffer.from(await file.arrayBuffer());
   const { error: uploadErr } = await admin.storage
     .from(BUCKET)
@@ -386,7 +488,7 @@ export async function sendMediaMessage(
     .from("messenger_messages")
     .insert({
       sender_id: profile.id,
-      recipient_id: peerId,
+      recipient_id: recipient.id,
       kind,
       media_path: path,
       media_mime: mime,
@@ -395,9 +497,6 @@ export async function sendMediaMessage(
     .select("id")
     .single();
   if (error) {
-    // Best-effort cleanup so we don't leave orphan blobs around.
-    // Ignore the delete result — if it fails we still surface the
-    // insert error, which is what the user actually saw.
     await admin.storage.from(BUCKET).remove([path]).catch(() => undefined);
     return { ok: false, error: error.message };
   }
@@ -405,13 +504,7 @@ export async function sendMediaMessage(
   return { ok: true, id: data?.id as string | undefined };
 }
 
-/** Soft-delete a message. Only the original sender may delete their
- *  own message; recipient + bystanders get a silent no-op. The row
- *  stays auditable (deleted_at + deleted_by stamped); body is
- *  cleared, media_path is blanked, the storage object is left in
- *  place (cheap; not worth a deletion job for the pilot).
- *
- *  Recipient UI flips the bubble to "🚫 This message was deleted". */
+/** Soft-delete a message. Only the original sender may delete. */
 export async function softDeleteMessage(
   formData: FormData,
 ): Promise<ActionResult> {
@@ -426,10 +519,6 @@ export async function softDeleteMessage(
   }
 
   const admin = createAdminSupabaseClient();
-  // Match on sender_id so we don't accidentally allow the
-  // recipient to nuke the other side's message. deleted_at IS NULL
-  // means a re-delete is a no-op (avoids stomping the original
-  // deleted_at timestamp on an idempotent retry).
   const { data, error } = await admin
     .from("messenger_messages")
     .update({
@@ -448,14 +537,20 @@ export async function softDeleteMessage(
   return { ok: true };
 }
 
-/** Stamp read_at on every unread message addressed to the caller in
- *  this thread. Called when the panel opens AND every time a new
- *  inbound message arrives while the panel is open. Idempotent —
- *  filters on read_at IS NULL so a second call is a no-op. */
-export async function markThreadReadAction(): Promise<ActionResult> {
+/** Stamp read_at on every unread message addressed to caller from a
+ *  specific peer. Scoped to one thread so opening conversation A
+ *  doesn't accidentally mark conversation B's badges as read. */
+export async function markThreadReadAction(
+  formData: FormData,
+): Promise<ActionResult> {
   const { profile } = await requireAuth();
   if (!canUseMessenger(profile)) {
     return { ok: false, error: "Not permitted" };
+  }
+
+  const peerId = formData.get("peer_id");
+  if (typeof peerId !== "string" || !peerId) {
+    return { ok: false, error: "Missing peer" };
   }
 
   const admin = createAdminSupabaseClient();
@@ -463,6 +558,7 @@ export async function markThreadReadAction(): Promise<ActionResult> {
     .from("messenger_messages")
     .update({ read_at: new Date().toISOString() })
     .eq("recipient_id", profile.id)
+    .eq("sender_id", peerId)
     .is("read_at", null)
     .is("deleted_at", null);
   if (error) return { ok: false, error: error.message };

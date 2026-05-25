@@ -6,43 +6,49 @@
 // both already on the system every day and (b) any roundtrip
 // pathology (realtime drop, storage 403, signed-URL drift) will be
 // caught immediately rather than waiting on a stencil-line user to
-// notice. If the pilot survives a week we widen the helper to
-// include team_head / senior_incharge.
+// notice.
 //
-// One helper, used in three places:
-//   1. The topbar pill (renders only when canUseMessenger is true).
-//   2. Every server action in /messenger/actions.ts (redirect to
-//      default if the caller doesn't qualify — same shape as the
-//      other gated actions in the app).
-//   3. Recipient lookup at send time — the OTHER role is resolved
-//      via `profile.role === "owner" ? "developer" : "owner"`,
-//      which only makes sense if the caller's role is one of the
-//      two. That invariant is enforced by the gate.
+// Round-2 follow-on (Daksh, same week): the pilot needs to handle
+// MORE THAN ONE owner — there are multiple "owner" rows (Naresh and
+// Nikhil at minimum), and they should be able to chat with each
+// other AND with the developer. So the gate widened from "exactly
+// two roles, one of each" to "anyone whose role is owner OR
+// developer, and they can message anyone else in that same pool."
+// Conceptually identical to a small WhatsApp roster.
 //
-// Widening to more pairs later = update the role list here AND
-// rework the recipient lookup (which today assumes a single peer).
-// The schema is already generic (sender_id / recipient_id are plain
-// profile refs) — only the helper + the lookup are pair-specific.
+// Two helpers:
+//   • canUseMessenger — whether the user gets the 💬 pill at all.
+//     Used by the topbar mount AND every server action.
+//   • isPermittedMessengerRole — whether a CANDIDATE peer (resolved
+//     from a recipient_id in a FormData) qualifies to be on the
+//     receiving end of a message. Same set as canUseMessenger; the
+//     name is just clearer at the call site.
+//
+// Widening to more roles later = update the role set in BOTH
+// helpers (or refactor them to share a single PERMITTED_ROLES
+// constant). The actions deliberately validate the recipient
+// against this list at send time so a tampered client can't aim a
+// message at a slab-entry user's profile.
 // ──────────────────────────────────────────────────────────────────
 
-import type { Profile } from "@/lib/types";
+import type { AppRole, Profile } from "@/lib/types";
+
+const PERMITTED_ROLES: ReadonlySet<AppRole> = new Set<AppRole>([
+  "developer",
+  "owner",
+]);
 
 export function canUseMessenger(
   p: Pick<Profile, "role"> | null | undefined,
 ): boolean {
   if (!p) return false;
-  return p.role === "developer" || p.role === "owner";
+  return PERMITTED_ROLES.has(p.role);
 }
 
-/** Resolve the peer role for the messenger pilot pair. Throws if the
- *  caller is not a permitted messenger user — callers should gate on
- *  `canUseMessenger` first. Returns `"developer"` for an owner, and
- *  `"owner"` for a developer. The send actions use this to look up
- *  the (single) recipient profile at send time. */
-export function peerRoleFor(role: Profile["role"]): "owner" | "developer" {
-  if (role === "owner") return "developer";
-  if (role === "developer") return "owner";
-  throw new Error(
-    `peerRoleFor: role "${role}" is not part of the messenger pilot pair`,
-  );
+/** Does `role` qualify to receive messenger messages? Same set as
+ *  `canUseMessenger` — used by the server actions to validate the
+ *  recipient_id the client supplies. */
+export function isPermittedMessengerRole(role: string | null | undefined): boolean {
+  if (!role) return false;
+  return PERMITTED_ROLES.has(role as AppRole);
 }
