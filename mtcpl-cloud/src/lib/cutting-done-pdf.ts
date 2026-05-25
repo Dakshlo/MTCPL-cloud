@@ -98,9 +98,12 @@ function ansiSafe(input: string): string {
 
 const COLOR_TEXT = rgb(0.1, 0.1, 0.1);
 const COLOR_MUTED = rgb(0.45, 0.45, 0.45);
+const COLOR_LABEL = rgb(0.31, 0.20, 0.07); // dark brown for label text
+const COLOR_NOTE = rgb(0.40, 0.40, 0.45);  // slightly cool muted for descriptions
 const COLOR_RULE = rgb(0.85, 0.82, 0.74);
 const COLOR_ACCENT = rgb(0.71, 0.45, 0.20); // app gold
 const COLOR_HEAD_BG = rgb(0.97, 0.95, 0.88); // pale gold for header row
+const COLOR_ZEBRA = rgb(0.98, 0.97, 0.94);   // even-row tint for slab table
 
 export async function generateCuttingDonePdf(
   input: CuttingDonePdfInput,
@@ -258,7 +261,13 @@ export async function generateCuttingDonePdf(
 
     y -= 4;
 
-    // Slab table
+    // Slab table — Daksh May 2026 round 5: redesigned for legibility
+    // on tall lists. Zebra-striped row background (subtle gold tint
+    // on every other row), wider temple column so names don't get
+    // ellipsised to "UMIYA MATAJI TEMPLE AHM...", and combined
+    // label + description into one indented sub-line per slab when
+    // the slab has either. Fixed indent so the eye can track the
+    // hierarchy down the page.
     if (block.slabs.length === 0) {
       drawText("No slabs linked to this cut.", {
         x: MARGIN_X + 4,
@@ -269,93 +278,138 @@ export async function generateCuttingDonePdf(
       });
       y -= 16;
     } else {
-      // Column headers
-      const cols = [
-        { x: MARGIN_X + 4, label: "#" },
-        { x: MARGIN_X + 24, label: "SLAB ID" },
-        { x: MARGIN_X + 150, label: "TEMPLE" },
-        { x: PAGE_W - MARGIN_X - 90, label: "DIMENSIONS" },
-      ];
-      for (const c of cols) {
-        drawText(c.label, {
-          x: c.x,
-          y,
-          size: 8,
-          font: fontBold,
-          color: COLOR_MUTED,
-        });
-      }
-      y -= 10;
-      page.drawLine({
-        start: { x: MARGIN_X, y },
-        end: { x: PAGE_W - MARGIN_X, y },
-        thickness: 0.5,
-        color: COLOR_RULE,
+      // Column geometry — picked for an A4 (595px wide) page with
+      // ~36px margins. Temple column was 220px wide and capped at
+      // 24 chars; widening to ~270 + 36 chars cuts the truncation
+      // significantly while keeping the dims pinned right.
+      const COL_NUM = MARGIN_X + 4;
+      const COL_ID = MARGIN_X + 22;
+      const COL_TEMPLE = MARGIN_X + 110;
+      const COL_DIMS = PAGE_W - MARGIN_X - 70;
+      const ROW_LEFT = MARGIN_X;
+      const ROW_RIGHT = PAGE_W - MARGIN_X;
+
+      // Header row — slightly heavier band so the table reads
+      // separate from the meta grid above.
+      page.drawRectangle({
+        x: ROW_LEFT,
+        y: y - 4,
+        width: ROW_RIGHT - ROW_LEFT,
+        height: 14,
+        color: COLOR_HEAD_BG,
       });
-      y -= 12;
+      drawText("#", { x: COL_NUM, y, size: 8, font: fontBold, color: COLOR_MUTED });
+      drawText("SLAB ID", { x: COL_ID, y, size: 8, font: fontBold, color: COLOR_MUTED });
+      drawText("TEMPLE", { x: COL_TEMPLE, y, size: 8, font: fontBold, color: COLOR_MUTED });
+      drawText("DIMENSIONS", { x: COL_DIMS, y, size: 8, font: fontBold, color: COLOR_MUTED });
+      y -= 14;
+      page.drawLine({
+        start: { x: ROW_LEFT, y: y + 2 },
+        end: { x: ROW_RIGHT, y: y + 2 },
+        thickness: 0.5,
+        color: COLOR_ACCENT,
+      });
+      y -= 4;
 
       block.slabs.forEach((s, i) => {
-        // Variable row height — label + description add extra lines
-        // underneath the main row when present. Reserve enough space
-        // up front so we don't page-break mid-row.
         const hasLabel = !!(s.label && s.label.trim());
         const hasDesc = !!(s.description && s.description.trim());
-        const rowHeight = 14 + (hasLabel ? 11 : 0) + (hasDesc ? 11 : 0);
+        // Total row height = 13 (main line) + 10 (sub line, only
+        // when there's a label or description) + 2 (gap).
+        const hasSub = hasLabel || hasDesc;
+        const rowHeight = 13 + (hasSub ? 10 : 0) + 2;
         ensureSpace(rowHeight + 2);
+
+        // Zebra background BEHIND every other row — covers the
+        // main line + sub-line as one block so the row reads as
+        // a single unit.
+        if (i % 2 === 0) {
+          page.drawRectangle({
+            x: ROW_LEFT,
+            y: y - rowHeight + 11,
+            width: ROW_RIGHT - ROW_LEFT,
+            height: rowHeight,
+            color: COLOR_ZEBRA,
+          });
+        }
+
+        // Main line: # · slab id · temple · dims
         drawText(String(i + 1), {
-          x: cols[0].x,
+          x: COL_NUM,
           y,
           size: 9,
           font: fontReg,
-          color: COLOR_TEXT,
+          color: COLOR_MUTED,
         });
         drawText(s.id, {
-          x: cols[1].x,
+          x: COL_ID,
           y,
-          size: 9,
+          size: 9.5,
           font: fontMono,
           color: COLOR_TEXT,
         });
-        drawText(truncate(s.temple, 24, fontReg, 9), {
-          x: cols[2].x,
+        drawText(truncate(s.temple, 38, fontReg, 9), {
+          x: COL_TEMPLE,
           y,
           size: 9,
           font: fontReg,
           color: COLOR_TEXT,
         });
         drawText(s.dims, {
-          x: cols[3].x,
+          x: COL_DIMS,
           y,
           size: 9,
           font: fontMono,
           color: COLOR_TEXT,
         });
-        y -= 12;
-        // Daksh May 2026 round 4 — slab label + free-text description
-        // under the row. Indented from the slab-id column so they
-        // visually attach to the row above. Wrapped to ~80 chars to
-        // keep the table neat.
-        if (hasLabel) {
-          drawText(`Label: ${truncate(s.label!.trim(), 80, fontReg, 8.5)}`, {
-            x: cols[1].x,
-            y,
-            size: 8.5,
-            font: fontReg,
-            color: COLOR_TEXT,
-          });
-          y -= 11;
+        y -= 11;
+
+        // Sub-line: label · description, indented under the slab id.
+        // Combined into one line so each slab takes at most 2 lines
+        // regardless of which sub-fields are populated. Long combined
+        // strings truncated at 100 chars.
+        if (hasSub) {
+          const parts: Array<{ text: string; font: typeof fontReg; color: ReturnType<typeof rgb> }> = [];
+          if (hasLabel) {
+            parts.push({ text: `🏷 ${s.label!.trim()}`, font: fontBold, color: COLOR_LABEL });
+          }
+          if (hasDesc) {
+            parts.push({ text: `“${s.description!.trim()}”`, font: fontReg, color: COLOR_NOTE });
+          }
+          // Draw each part inline, starting at COL_ID. fontReg approx
+          // 0.5em per char at size 8.5 — track the cursor manually.
+          let cursorX = COL_ID;
+          const SUB_SIZE = 8.5;
+          let budget = 100; // total char budget across both parts
+          for (let p = 0; p < parts.length; p++) {
+            const isLast = p === parts.length - 1;
+            const trimmed = truncate(parts[p].text, budget, parts[p].font, SUB_SIZE);
+            drawText(trimmed, {
+              x: cursorX,
+              y,
+              size: SUB_SIZE,
+              font: parts[p].font,
+              color: parts[p].color,
+            });
+            // Advance cursor by approx width — Helvetica is ~5px/char
+            // at size 8.5. Good enough for a one-line sub-row.
+            cursorX += trimmed.length * 4.5;
+            budget -= trimmed.length + 2;
+            if (budget <= 0 || isLast) break;
+            // Separator dot between parts.
+            drawText("  ·  ", {
+              x: cursorX,
+              y,
+              size: SUB_SIZE,
+              font: fontReg,
+              color: COLOR_MUTED,
+            });
+            cursorX += 14;
+            budget -= 3;
+          }
+          y -= 10;
         }
-        if (hasDesc) {
-          drawText(`Note: ${truncate(s.description!.trim(), 80, fontReg, 8.5)}`, {
-            x: cols[1].x,
-            y,
-            size: 8.5,
-            font: fontReg,
-            color: COLOR_MUTED,
-          });
-          y -= 11;
-        }
-        y -= 2; // breathing room before the next row
+        y -= 2;
       });
     }
 
