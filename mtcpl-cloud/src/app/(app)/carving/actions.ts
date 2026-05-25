@@ -1658,6 +1658,12 @@ export async function completeAndUnloadAction(formData: FormData) {
 
   // Update every paired item with the same completed/unloaded stamp
   // + temp location so the pair lands in Awaiting Review together.
+  // Daksh May 2026 — also CLEAR cnc_machine_id. Without this, the
+  // items kept appearing on the machine card alongside any new pair
+  // loaded after (because the cockpit's activeByMachine grouping
+  // keys on cnc_machine_id and the items still had
+  // status='carving_in_progress'). The Awaiting Review query reads
+  // completed_at IS NOT NULL so it picks them up regardless.
   await admin
     .from("carving_items")
     .update({
@@ -1665,6 +1671,7 @@ export async function completeAndUnloadAction(formData: FormData) {
       unloaded_at: now,
       unloaded_by: profile.id,
       temporary_location: tempLocation,
+      cnc_machine_id: null,
     })
     .in("id", idsToComplete);
 
