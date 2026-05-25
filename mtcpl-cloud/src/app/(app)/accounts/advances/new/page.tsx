@@ -27,6 +27,7 @@ import {
   BUTTON_STYLES,
   INPUT_STYLE,
 } from "../../_ui/components";
+import { AdvanceVendorField } from "./vendor-field";
 
 type Search = Promise<{ error?: string; vendor_id?: string }>;
 
@@ -88,21 +89,10 @@ export default async function NewAdvancePage({ searchParams }: { searchParams: S
       >
         <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <span style={fieldLabel()}>Vendor *</span>
-          <select
-            name="vendor_id"
-            required
-            defaultValue={sp.vendor_id ?? ""}
-            style={{ ...INPUT_STYLE, padding: "10px 12px" }}
-          >
-            <option value="" disabled>
-              Pick a vendor…
-            </option>
-            {vendors.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.name}
-              </option>
-            ))}
-          </select>
+          <AdvanceVendorField
+            vendors={vendors}
+            defaultVendorId={sp.vendor_id ?? ""}
+          />
         </label>
 
         <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>

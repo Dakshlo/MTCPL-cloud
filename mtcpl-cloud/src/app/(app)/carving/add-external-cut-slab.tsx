@@ -6,6 +6,7 @@ import {
   deleteExternalCutSlabAction,
   updateExternalCutSlabAction,
 } from "./actions";
+import { StyledSelect } from "@/components/styled-select";
 
 // Daksh May 2026 round 2 — "View / Add external cut slab" peek panel
 // for the /carving Unassigned tab. Two purposes in one surface:
@@ -602,41 +603,39 @@ function AddOrEditForm({
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <Field label="Temple *" flex>
-          <select
-            name="temple"
+          <input type="hidden" name="temple" value={selectedTemple?.name ?? ""} />
+          <StyledSelect
+            placeholder="— select temple —"
+            searchPlaceholder="Search temples…"
             value={selectedTemple?.name ?? ""}
-            onChange={(e) => {
-              const t =
-                temples.find((x) => x.name === e.target.value) ?? null;
+            onChange={(name) => {
+              const t = temples.find((x) => x.name === name) ?? null;
               setSelectedTemple(t);
               if (t?.default_stone && !existing) setStone(t.default_stone);
             }}
+            options={temples.map((t) => ({
+              value: t.name,
+              label: t.name,
+              subtitle: t.code_prefix,
+              keywords: t.code_prefix,
+              icon: "🏛",
+            }))}
             required
-            style={selectStyle}
-          >
-            <option value="">— select temple —</option>
-            {temples.map((t) => (
-              <option key={t.id} value={t.name}>
-                {t.name} ({t.code_prefix})
-              </option>
-            ))}
-          </select>
+          />
         </Field>
         <Field label="Stone *" flex>
-          <select
-            name="stone"
+          <input type="hidden" name="stone" value={stone} />
+          <StyledSelect
+            placeholder="— select stone —"
+            searchPlaceholder="Search stones…"
             value={stone}
-            onChange={(e) => setStone(e.target.value)}
+            onChange={setStone}
+            options={stoneTypes.map((s) => ({
+              value: s.name,
+              label: s.name,
+            }))}
             required
-            style={selectStyle}
-          >
-            <option value="">— select stone —</option>
-            {stoneTypes.map((s) => (
-              <option key={s.name} value={s.name}>
-                {s.name}
-              </option>
-            ))}
-          </select>
+          />
         </Field>
       </div>
 
@@ -714,16 +713,17 @@ function AddOrEditForm({
       </Field>
       <div style={{ display: "flex", gap: 8 }}>
         <Field label="Quality" flex>
-          <select
-            name="quality"
+          <input type="hidden" name="quality" value={quality} />
+          <StyledSelect
+            placeholder="—"
             value={quality}
-            onChange={(e) => setQuality(e.target.value as "" | "A" | "B")}
-            style={selectStyle}
-          >
-            <option value="">—</option>
-            <option value="A">A</option>
-            <option value="B">B</option>
-          </select>
+            onChange={(v) => setQuality(v as "" | "A" | "B")}
+            options={[
+              { value: "", label: "—" },
+              { value: "A", label: "Grade A" },
+              { value: "B", label: "Grade B" },
+            ]}
+          />
         </Field>
         <Field label="Priority" flex>
           <label
@@ -832,8 +832,4 @@ const inputStyle: React.CSSProperties = {
   background: "var(--bg)",
   color: "var(--text)",
   width: "100%",
-};
-
-const selectStyle: React.CSSProperties = {
-  ...inputStyle,
 };
