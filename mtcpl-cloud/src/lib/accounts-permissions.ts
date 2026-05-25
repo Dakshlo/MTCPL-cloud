@@ -171,11 +171,19 @@ export function canRenameBillVendor(p: Pick<Profile, "role">): boolean {
 /** Mig 072 — hold a portion of an approved bill's payable amount.
  *  Accountant can then propose only the un-held remainder. Owner
  *  uses this when dad wants to withhold against a quality dispute,
- *  retention, shortage, etc. Owner + developer only — accountants
- *  see the hold (and the clamped proposable) but can't modify it. */
+ *  retention, shortage, etc.
+ *
+ *  Daksh May 2026 round 2 — opened up from owner/developer to also
+ *  include accountant + accountant_star. They're the ones entering
+ *  bills + watching outstanding move, so giving them the hold lever
+ *  cuts the loop where they have to ask the owner every time a
+ *  partial-pay dispute comes up. Owner still sees + can release
+ *  via the same panel. */
 export function canHoldBill(p: Pick<Profile, "role">): boolean {
   if (p.role === "developer") return true;
   if (p.role === "owner") return true;
+  if (p.role === "accountant") return true;
+  if (p.role === "accountant_star") return true;
   return false;
 }
 

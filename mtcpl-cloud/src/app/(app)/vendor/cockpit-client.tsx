@@ -18,6 +18,7 @@ import {
   completeHeldSlabAction,
   acceptTransferReceiptAction,
   flagTransferIssueAction,
+  transferReadySlabAction,
   getMachineHistory,
   type MachineHistory,
 } from "../carving/actions";
@@ -871,6 +872,7 @@ export function VendorCockpitClient({
                         setPeekOpen(null);
                       }
                     }}
+                    otherVendorsForTransfer={otherVendors}
                   />
                 ))}
               </div>
@@ -2874,10 +2876,12 @@ function QueueRow({
   job,
   hasIdleMachine,
   onLoad,
+  otherVendorsForTransfer,
 }: {
   job: CarvingJobLite;
   hasIdleMachine: boolean;
   onLoad: () => void;
+  otherVendorsForTransfer: Vendor[];
 }) {
   const isUrgent = job.urgency === "urgent";
   const received = !!job.received_at_vendor_at;
@@ -3025,8 +3029,170 @@ function QueueRow({
         >
           Load to CNC →
         </button>
+        <TransferReadyButton
+          job={job}
+          otherVendorsForTransfer={otherVendorsForTransfer}
+        />
       </div>
     </div>
+  );
+}
+
+/** Inline transfer form on a Ready-to-load row. Lets a vendor (or
+ *  developer / owner / carving head) shoot a not-yet-loaded slab to
+ *  another vendor without touching a CNC. Mirrors FlagTransferButton's
+ *  open-state pattern — collapsed button → expanded form with vendor
+ *  picker + optional notes + confirm-before-submit. */
+function TransferReadyButton({
+  job,
+  otherVendorsForTransfer,
+}: {
+  job: CarvingJobLite;
+  otherVendorsForTransfer: Vendor[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [newVendorId, setNewVendorId] = useState<string>("");
+  const [notes, setNotes] = useState<string>("");
+
+  const destVendor = otherVendorsForTransfer.find((v) => v.id === newVendorId);
+  const canSubmit = !!newVendorId;
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        style={{
+          fontSize: 11,
+          padding: "6px 12px",
+          background: "transparent",
+          color: "#7c2d12",
+          border: "1.5px solid rgba(217,119,6,0.45)",
+          borderRadius: 6,
+          fontWeight: 700,
+          cursor: "pointer",
+          width: "100%",
+          minHeight: 32,
+          touchAction: "manipulation",
+        }}
+        title="Send this slab to another vendor without loading it"
+      >
+        ↔ Transfer
+      </button>
+    );
+  }
+
+  return (
+    <form
+      action={transferReadySlabAction}
+      onSubmit={(e) => {
+        if (
+          !window.confirm(
+            `Transfer ${job.slab_id} to ${destVendor?.name ?? "another vendor"}?`,
+          )
+        ) {
+          e.preventDefault();
+        }
+      }}
+      style={{
+        flex: "1 1 100%",
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+        padding: 10,
+        background: "rgba(217,119,6,0.05)",
+        border: "1.5px dashed rgba(217,119,6,0.45)",
+        borderRadius: 8,
+      }}
+    >
+      <FormPendingOverlay label="Transferring slab…" />
+      <input type="hidden" name="carving_item_id" value={job.id} />
+      <input type="hidden" name="redirect_to" value="/vendor" />
+      <div
+        style={{
+          fontSize: 11,
+          fontWeight: 800,
+          color: "#7c2d12",
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+        }}
+      >
+        ↔ Transfer this slab to
+      </div>
+      <select
+        name="new_vendor_id"
+        value={newVendorId}
+        onChange={(e) => setNewVendorId(e.target.value)}
+        required
+        style={{
+          fontSize: 13,
+          padding: "10px 12px",
+          border: "1px solid var(--border)",
+          borderRadius: 6,
+          background: "var(--bg)",
+          color: "var(--text)",
+          width: "100%",
+        }}
+      >
+        <option value="">Pick a vendor…</option>
+        {otherVendorsForTransfer.map((v) => (
+          <option key={v.id} value={v.id}>
+            {v.name}
+            {v.vendor_type === "Manual" ? " (Manual)" : ""}
+          </option>
+        ))}
+      </select>
+      <textarea
+        name="notes"
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+        placeholder="Why? (optional — shown to receiving vendor)"
+        rows={2}
+        style={{
+          padding: "8px 10px",
+          fontSize: 12,
+          border: "1px solid var(--border)",
+          borderRadius: 6,
+          background: "var(--bg)",
+          color: "var(--text)",
+          resize: "vertical",
+          fontFamily: "inherit",
+        }}
+      />
+      <div style={{ display: "flex", gap: 6 }}>
+        <button
+          type="submit"
+          disabled={!canSubmit}
+          style={{
+            flex: 1,
+            padding: "8px 12px",
+            fontSize: 13,
+            fontWeight: 700,
+            background: canSubmit ? "#d97706" : "var(--surface-alt)",
+            color: canSubmit ? "#fff" : "var(--muted)",
+            border: `1px solid ${canSubmit ? "#b45309" : "var(--border)"}`,
+            borderRadius: 6,
+            cursor: canSubmit ? "pointer" : "not-allowed",
+            minHeight: 40,
+            touchAction: "manipulation",
+          }}
+        >
+          ↔ Send
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(false);
+            setNewVendorId("");
+            setNotes("");
+          }}
+          className="ghost-button"
+          style={{ padding: "8px 12px", fontSize: 12 }}
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
   );
 }
 

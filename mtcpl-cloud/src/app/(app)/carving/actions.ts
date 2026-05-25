@@ -1378,6 +1378,143 @@ export async function unloadWithProblemAction(formData: FormData) {
 // if the row isn't an in-transit transfer (transferred_from_vendor_id
 // NULL, or already received).
 
+/** Daksh May 2026 — Mig 070 follow-on. Transfer a READY-TO-LOAD slab
+ *  (status='carving_assigned', not yet on a machine) from one vendor
+ *  to another, without going through the Problem/Unload flow. Same
+ *  attribution pattern as unloadWithProblemAction(reason='needs_transfer')
+ *  but it skips the machine-state plumbing entirely (slab was never
+ *  on a machine).
+ *
+ *  Use case: vendor sees a slab in their Ready-to-load list, realises
+ *  they shouldn't carve it (overbooked, wrong machine type available,
+ *  etc.), and shoots it to another vendor without putting it on a
+ *  CNC first. Receiver gets the standard Accept / Flag pair from
+ *  mig 070 on their Pending Stock list.
+ */
+export async function transferReadySlabAction(formData: FormData) {
+  const { profile } = await requireAuth([
+    "developer",
+    "owner",
+    "carving_head",
+    "vendor",
+  ]);
+  const admin = createAdminSupabaseClient();
+
+  const carvingItemId = txt(formData, "carving_item_id");
+  const newVendorId = txt(formData, "new_vendor_id");
+  const notes = txt(formData, "notes") || null;
+  const redirectTo = txt(formData, "redirect_to") || "/vendor";
+
+  if (!carvingItemId) redirect(`${redirectTo}?toast=Missing+job+id`);
+  if (!newVendorId) redirect(`${redirectTo}?toast=Pick+a+vendor+to+transfer+to`);
+
+  const { data: ci } = await admin
+    .from("carving_items")
+    .select(
+      "id, vendor_id, vendor_name, status, cnc_machine_id, slab_requirement_id, requires_machine_type",
+    )
+    .eq("id", carvingItemId)
+    .maybeSingle();
+  if (!ci) redirect(`${redirectTo}?toast=Job+not+found`);
+  const item = ci as {
+    id: string;
+    vendor_id: string;
+    vendor_name: string;
+    status: string;
+    cnc_machine_id: string | null;
+    slab_requirement_id: string;
+    requires_machine_type: string | null;
+  };
+
+  // Vendor ownership.
+  if (profile.role === "vendor") {
+    if (!profile.vendor_id || profile.vendor_id !== item.vendor_id) {
+      redirect(`${redirectTo}?toast=Not+your+slab`);
+    }
+  }
+
+  // Status gate — must be Ready-to-load shaped (assigned, not on a
+  // machine). Held / in-progress / completed cases go through their
+  // own dedicated paths.
+  if (item.status !== "carving_assigned") {
+    redirect(
+      `${redirectTo}?toast=${encodeURIComponent(`Slab is in ${item.status} state — use the matching flow (hold / problem / etc.).`)}`,
+    );
+  }
+  if (item.cnc_machine_id) {
+    redirect(`${redirectTo}?toast=Slab+is+loaded+%E2%80%94+use+Problem%2FTransfer+from+the+machine+card+instead`);
+  }
+
+  // Destination vendor validation.
+  const { data: v } = await admin
+    .from("vendors")
+    .select("id, name, vendor_type, is_active")
+    .eq("id", newVendorId)
+    .maybeSingle();
+  if (!v) redirect(`${redirectTo}?toast=Destination+vendor+not+found`);
+  const vendor = v as {
+    id: string;
+    name: string;
+    vendor_type: string;
+    is_active: boolean;
+  };
+  if (!vendor.is_active) redirect(`${redirectTo}?toast=Destination+vendor+is+inactive`);
+  if (vendor.vendor_type !== "CNC" && vendor.vendor_type !== "Manual") {
+    redirect(`${redirectTo}?toast=Destination+must+be+CNC+or+Manual`);
+  }
+  if (vendor.id === item.vendor_id) {
+    redirect(`${redirectTo}?toast=Already+with+that+vendor`);
+  }
+
+  const now = new Date().toISOString();
+
+  // Flip the carving_item: new vendor, reset receipt, stamp the
+  // transfer-from attribution (same shape as unloadWithProblemAction's
+  // needs_transfer branch). Keep status='carving_assigned' so the
+  // receiving cockpit shows it in Pending Stock with Accept / Flag.
+  await admin
+    .from("carving_items")
+    .update({
+      vendor_id: vendor.id,
+      vendor_name: vendor.name,
+      vendor_type: vendor.vendor_type,
+      received_at_vendor_at: null,
+      received_at_vendor_by: null,
+      transferred_from_vendor_id: item.vendor_id,
+      transferred_from_vendor_name: item.vendor_name,
+      transferred_at: now,
+      transferred_by: profile.id,
+    })
+    .eq("id", carvingItemId)
+    .eq("status", "carving_assigned")
+    .is("cnc_machine_id", null);
+
+  // slab_requirements stays at 'carving_assigned' — nothing else
+  // changes for the slab pool view.
+
+  // Audit + per-job event.
+  const evtMsg = `Transferred ready slab to ${vendor.name}${notes ? ` · ${notes}` : ""}`;
+  await recordEvent(carvingItemId, "transferred_ready", profile.id, evtMsg);
+  await logAudit(
+    profile.id,
+    "carving_ready_slab_transferred",
+    "carving_item",
+    carvingItemId,
+    {
+      from_vendor_id: item.vendor_id,
+      from_vendor_name: item.vendor_name,
+      to_vendor_id: vendor.id,
+      to_vendor_name: vendor.name,
+      notes,
+    },
+  );
+
+  refreshAll();
+  redirect(
+    `${redirectTo}?toast=${encodeURIComponent(`Sent to ${vendor.name}`)}`,
+  );
+}
+
 /** Vendor self-receives a slab that another vendor transferred to
  *  them. Equivalent to acknowledgeReceiptAction but scoped to inter-
  *  vendor transfers so the slab_transfer runner role isn't
