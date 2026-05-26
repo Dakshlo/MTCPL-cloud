@@ -1131,16 +1131,19 @@ export async function proposePaymentsAction(formData: FormData): Promise<
   if (loadErr) return { ok: false, error: loadErr.message };
 
   // Daksh May 2026 — was `["proposed", "confirmed"]`, missed
-  // bank_rejected (mig 052). Add a new in-flight status? Append
-  // it here AND in src/app/(app)/accounts/page.tsx (the Due Bills
-  // query). Both lists must stay in sync — if the UI dim doesn't
-  // catch a status, the server-side guard here is the last line
-  // before a duplicate payment lands.
-  const { data: openPayments } = await supabase
+  // bank_rejected (mig 052). Also dropped the `.in("bill_id",
+  // billIds)` filter — billIds with hundreds of UUIDs makes the
+  // URL exceed PostgREST/Kong's ~8 KB limit, causing the query to
+  // fail silently. We just fetch every in-flight bill_id (typically
+  // <100 across the whole org) and check membership in-memory.
+  // See accounts/page.tsx for the longer write-up — same fix.
+  const { data: openPayments, error: openErr } = await supabase
     .from("bill_payments")
     .select("bill_id")
-    .in("bill_id", billIds)
     .in("status", ["proposed", "confirmed", "bank_rejected"]);
+  if (openErr) {
+    return { ok: false, error: `In-flight check failed: ${openErr.message}` };
+  }
   const billsWithOpen = new Set((openPayments ?? []).map((r) => r.bill_id as string));
 
   const batchId = randomUUID();

@@ -163,28 +163,31 @@ export default async function AccountsHomePage({
     Array<{ amount: number; paidAt: string | null; method: string | null }>
   >();
   if (billIds.length > 0) {
-    const [{ data: openPayments }, { data: paidPayments }] = await Promise.all([
+    // Daksh May 2026 — root cause of the "in-flight bills look
+    // actionable" bug: the in-flight query used to be
+    //   .in("bill_id", billIds).in("status", [...])
+    // With 766 due bills, billIds was ~28 KB worth of UUIDs in the
+    // URL. PostgREST + Kong reject anything past ~8 KB with a 414
+    // or empty body, and the Supabase JS client returns `data: null`
+    // without throwing. The two prior fix attempts (broader status
+    // list + explicit positive list) couldn't help because the query
+    // was failing at the HTTP layer before status filtering even ran.
+    //
+    // Fix: drop the `.in("bill_id", billIds)` filter on the
+    // in-flight query. There are typically <100 in-flight rows total
+    // across the whole org, so we just fetch them all — way smaller
+    // URL, way smaller payload than the previous shape. We still
+    // log errors loudly now so any future regression here surfaces.
+    //
+    // (paidPayments KEEPS the .in("bill_id") filter because there
+    // CAN be thousands of paid rows across history, and we need to
+    // group only the ones touching the bills on this page.
+    // If paidPayments ever starts silently failing for the same URL-
+    // length reason, switch IT to chunked queries.)
+    const [openRes, paidRes] = await Promise.all([
       supabase
         .from("bill_payments")
         .select("bill_id")
-        .in("bill_id", billIds)
-        // Daksh May 2026 — was `["proposed", "confirmed"]`, but
-        // mig 052 added 'bank_rejected' as a third in-flight state
-        // and that wasn't backfilled here. A bank-rejected payment
-        // is absolutely still in flight (bank declined, accountant
-        // has to retry / re-send / mark paid) but the page was
-        // treating it like there was no payment at all — letting
-        // the accountant propose a SECOND payment for the same bill
-        // (duplicate-payment risk).
-        //
-        // Tried the negative filter `.not("status", "in", ...)`
-        // first but it didn't appear to take effect — likely a
-        // PostgREST quirk, and we're the only place in the codebase
-        // using that syntax. Switched back to the explicit positive
-        // list that every other place uses (e.g. mig 073's trigger,
-        // getProposedPaymentsAction). Add a new in-flight status?
-        // Append it here AND to bill_payments-status-related
-        // server actions.
         .in("status", ["proposed", "confirmed", "bank_rejected"]),
       supabase
         .from("bill_payments")
@@ -193,7 +196,15 @@ export default async function AccountsHomePage({
         .eq("status", "paid")
         .order("paid_at", { ascending: true }),
     ]);
-    for (const p of openPayments ?? []) openPaymentBillIds.add(p.bill_id as string);
+    if (openRes.error) {
+      console.error("[due-bills] in-flight payments query failed", openRes.error);
+    }
+    if (paidRes.error) {
+      console.error("[due-bills] paid payments query failed", paidRes.error);
+    }
+    const openPayments = openRes.data ?? [];
+    const paidPayments = paidRes.data ?? [];
+    for (const p of openPayments) openPaymentBillIds.add(p.bill_id as string);
     for (const p of paidPayments ?? []) {
       const billId = p.bill_id as string;
       const list = paidPartsByBill.get(billId) ?? [];
