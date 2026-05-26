@@ -593,19 +593,43 @@ export function DueBillsClient({
                     )}
                     <tr
                       style={{
-                        background: isSelected
-                          ? ACCOUNTS_TOKENS.accentLight
+                        background: r.hasOpenPayment
+                          // Daksh May 2026 round 2 — in-flight bills
+                          // get a distinct purple-grey tint (matches
+                          // the "Pay Today" purple Mark-paid button
+                          // up the funnel) so they read as "elsewhere
+                          // in the workflow." Beats the previous
+                          // 0.55-opacity dim which looked too much
+                          // like a normal row.
+                          ? "rgba(124,58,237,0.06)"
+                          : isSelected
+                            ? ACCOUNTS_TOKENS.accentLight
+                            : r.heldAmount > 0
+                              ? "rgba(254,243,199,0.45)"
+                              : idx % 2 === 0
+                                ? "#fff"
+                                : ACCOUNTS_TOKENS.surfaceMuted,
+                        opacity: r.hasOpenPayment ? 0.7 : 1,
+                        // Desaturate in-flight rows so the colored
+                        // chips (Pink Stone, COST HEAD) read as
+                        // muted too — drives home that this row is
+                        // not actionable right now.
+                        filter: r.hasOpenPayment
+                          ? "grayscale(0.5)"
+                          : undefined,
+                        boxShadow: r.hasOpenPayment
+                          ? "inset 4px 0 0 #7c3aed" // purple stripe on in-flight rows
                           : r.heldAmount > 0
-                            ? "rgba(254,243,199,0.45)" // Mig 072 — soft amber tint on held rows
-                            : idx % 2 === 0
-                              ? "#fff"
-                              : ACCOUNTS_TOKENS.surfaceMuted,
-                        opacity: r.hasOpenPayment ? 0.55 : 1,
-                        boxShadow:
-                          r.heldAmount > 0
-                            ? "inset 4px 0 0 #d97706" // amber left stripe so held bills jump out
+                            ? "inset 4px 0 0 #d97706"
                             : undefined,
                         transition: "background 0.1s",
+                        // Block pointer events on the entire row
+                        // except the checkbox + the vendor link.
+                        // Implemented with pointer-events: none on
+                        // the children, OR by intercepting on the
+                        // checkbox via the disabled flag. Disabled
+                        // checkbox already blocks toggle; the visual
+                        // changes carry the rest.
                       }}
                     >
                     {canPropose && (
@@ -617,10 +641,39 @@ export function DueBillsClient({
                           onChange={() => toggle(r.id)}
                           title={
                             r.hasOpenPayment
-                              ? "A payment is already in flight for this bill"
+                              ? "🔒 Already in Pay Today — mark paid first to act on this bill again"
+                              : undefined
+                          }
+                          // Visually distinct disabled state — the
+                          // default macOS look is barely different
+                          // from enabled.
+                          style={
+                            r.hasOpenPayment
+                              ? { cursor: "not-allowed", opacity: 0.4 }
                               : undefined
                           }
                         />
+                        {r.hasOpenPayment && (
+                          <div
+                            style={{
+                              fontSize: 9,
+                              fontWeight: 800,
+                              color: "#7c3aed",
+                              letterSpacing: "0.06em",
+                              marginTop: 4,
+                              padding: "2px 5px",
+                              borderRadius: 4,
+                              background: "rgba(124,58,237,0.12)",
+                              border: "1px solid rgba(124,58,237,0.32)",
+                              textTransform: "uppercase",
+                              whiteSpace: "nowrap",
+                              textAlign: "center",
+                            }}
+                            title="A payment for this bill is currently in Pay Today (proposed / confirmed / bank-rejected). Mark it paid to act on this bill again."
+                          >
+                            🔒 In Pay Today
+                          </div>
+                        )}
                       </td>
                     )}
                     <td style={TABLE_STYLES.td}>

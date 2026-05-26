@@ -168,7 +168,20 @@ export default async function AccountsHomePage({
         .from("bill_payments")
         .select("bill_id")
         .in("bill_id", billIds)
-        .in("status", ["proposed", "confirmed"]),
+        // Daksh May 2026 — used to be `.in("status", ["proposed",
+        // "confirmed"])`, but mig 052 added 'bank_rejected' as a
+        // third in-flight state and that wasn't backfilled here.
+        // Symptom: a bill whose proposed payment got bank-rejected
+        // would silently un-dim on Due Bills, letting the accountant
+        // propose a SECOND payment for the same bill (duplicate
+        // payment risk).
+        //
+        // Switched to a *negative* filter (NOT IN paid/cancelled) so
+        // anything else — current statuses AND any future one — is
+        // treated as in-flight by default. Safer posture: better to
+        // over-dim than under-dim, since this is a duplicate-payment
+        // guard.
+        .not("status", "in", "(paid,cancelled)"),
       supabase
         .from("bill_payments")
         .select("bill_id, paid_amount, paid_at, payment_method")
