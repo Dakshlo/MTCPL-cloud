@@ -864,13 +864,16 @@ export async function assignCarvingJobAction(formData: FormData) {
   redirect("/carving?tab=active&toast=Job+queued");
 }
 
-// ── Migration 026: bulk-assign up to 4 slabs in one shot ───────────
+// ── Migration 026: bulk-assign up to 10 slabs in one shot ──────────
 //
 // The carving head usually assigns slabs in pairs (for 2-head CNCs)
-// or small batches (3-4 slabs going to the same vendor at once). The
-// single-slab assign flow makes them open the modal N times.
+// or small batches (a temple's full panel set, 3-10 slabs going to
+// the same vendor at once). The single-slab assign flow makes them
+// open the modal N times. Original cap was 4 (Daksh May 2026 round
+// 1); bumped to 10 round 2 once it was clear bigger batches were
+// common.
 //
-// This action accepts an array of slab_ids (1-4), one vendor, and a
+// This action accepts an array of slab_ids (1-10), one vendor, and a
 // single urgency/note/requires_machine_type. It creates N
 // carving_items rows that all share a fresh `batch_id` UUID so the
 // downstream UI (cockpit + transfer page) can colour-group them
@@ -915,8 +918,11 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
   if (slabIds.length === 0) {
     redirect("/carving?toast=No+slabs+selected");
   }
-  if (slabIds.length > 4) {
-    redirect("/carving?toast=Max+4+slabs+per+batch");
+  // Daksh May 2026 — bumped from 4 → 10 to match dashboard-client's
+  // BULK_MAX. Must stay in sync; the server-side cap is the last
+  // line of defence if a tampered form somehow gets more slabs in.
+  if (slabIds.length > 10) {
+    redirect("/carving?toast=Max+10+slabs+per+batch");
   }
   if (!vendorId) {
     redirect("/carving?toast=Pick+a+vendor");

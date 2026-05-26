@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Bulk assign — pick up to 4 slabs in the Unassigned tab, hit
+ * Bulk assign — pick up to 10 slabs in the Unassigned tab, hit
  * "Assign N selected", land here. One vendor, one set of params
  * (urgency / work-type / ETA / note) applied to every slab in the
  * selection. Behind the scenes each row gets the same `batch_id`

@@ -231,10 +231,17 @@ export async function lookupId(query: string): Promise<LookupResult> {
   // every role that legitimately walks the workshop floor. May 2026
   // — added vendor too. Their stencilled slabs land in the shade and
   // they need to look the slab up just like staff do.
+  //
+  // Mig 076 round 3 — Rajesh (senior_incharge) had the topbar pill
+  // visible (layout.tsx whitelists his role) but every lookup he
+  // tried bounced to / with no results because this requireAuth
+  // didn't include 'senior_incharge'. Added so his lookups work the
+  // same as team_head's.
   await requireAuth([
     "developer",
     "owner",
     "team_head",
+    "senior_incharge",
     "crosscheck",
     "carving_head",
     "vendor",

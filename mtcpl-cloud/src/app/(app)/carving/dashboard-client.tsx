@@ -166,14 +166,19 @@ export function CarvingDashboardClient({
   const [peekJob, setPeekJob] = useState<JobRow | null>(null);
 
   // Bulk-select mode on the Unassigned tab. The carving head taps
-  // "📋 Bulk select" to enter, then taps up to 4 slabs (2-head pair
+  // "📋 Bulk select" to enter, then taps up to 10 slabs (a 2-head
   // is the common case). A sticky bar at the bottom shows the count
   // + "Assign N selected →" which opens BulkAssignModal. The chosen
   // slabs share a batch_id so the vendor sees them colour-grouped.
   const [bulkMode, setBulkMode] = useState(false);
   const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
-  const BULK_MAX = 4;
+  // Daksh May 2026 — bumped from 4 to 10 so the carving head /
+  // senior incharge / dev / owner / Mohit can push bigger batches
+  // (e.g. a temple's full set of 8 panels) in one go without
+  // splitting it into multiple proposals. Server action enforces
+  // the same cap.
+  const BULK_MAX = 10;
 
   // After a successful batch assign the action redirects to
   // /carving?tab=active&toast=Batch+of+N+queued. Detect that and
@@ -573,9 +578,10 @@ export function CarvingDashboardClient({
         </button>
 
         {/* Bulk-select toggle — only on Unassigned tab. Lets the
-            carving head pick up to 4 slabs at once for a batch
+            carving head pick up to 10 slabs at once for a batch
             assign (most common case: 2 mirror slabs for a 2-head
-            CNC pair load). Exiting bulk mode clears selection. */}
+            CNC pair load; bigger batches for a temple's panel set).
+            Exiting bulk mode clears selection. */}
         {tab === "unassigned" && (
           <button
             type="button"
@@ -585,7 +591,7 @@ export function CarvingDashboardClient({
                 return !on;
               });
             }}
-            title="Select multiple slabs and assign them as a batch (max 4)"
+            title="Select multiple slabs and assign them as a batch (max 10)"
             style={{
               padding: "7px 12px",
               fontSize: 12,

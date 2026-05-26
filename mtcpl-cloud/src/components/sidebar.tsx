@@ -149,14 +149,24 @@ const navEntries: NavEntry[] = [
   },
   {
     // Total Ready Sizes — cutting-side verification view ("what we cut,
-    // what came out of which block"). Daksh asked to drop it from the
-    // carving_head sidebar because Parth already has "Ready Sizes Stock"
-    // (the actionable bucket view) and seeing both was redundant /
-    // confusing for the carving role.
+    // what came out of which block"). Originally dropped from the
+    // carving_head sidebar (Daksh round 1: Parth already has "Ready
+    // Sizes Stock", seeing both felt redundant) — but round 3 Daksh
+    // asked to put it back for carving_head too. Parth now uses
+    // Total Ready Sizes as the cross-check against what's still in
+    // his Ready Sizes Stock bucket (i.e. "the cutting team says they
+    // produced these N slabs — let me make sure I'm seeing them all").
     href: "/slabs/ready",
     label: "Total Ready Sizes",
     icon: "✦",
-    roles: ["developer", "owner", "team_head", "senior_incharge", "block_slab_entry"],
+    roles: [
+      "developer",
+      "owner",
+      "team_head",
+      "senior_incharge",
+      "carving_head",
+      "block_slab_entry",
+    ],
     department: "production",
   },
   {
