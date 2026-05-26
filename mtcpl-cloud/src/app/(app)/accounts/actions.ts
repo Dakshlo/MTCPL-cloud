@@ -1130,17 +1130,17 @@ export async function proposePaymentsAction(formData: FormData): Promise<
     .in("id", billIds);
   if (loadErr) return { ok: false, error: loadErr.message };
 
-  // Daksh May 2026 — same fix as the Due Bills page query. Was
-  // `.in("status", ["proposed", "confirmed"])`, which missed
-  // bank_rejected (mig 052) and would have missed any future
-  // not-paid-not-cancelled status. Negative filter is future-proof
-  // and is the right safety posture for the duplicate-payment guard
-  // — we'd rather refuse a valid retry than allow a double-pay.
+  // Daksh May 2026 — was `["proposed", "confirmed"]`, missed
+  // bank_rejected (mig 052). Add a new in-flight status? Append
+  // it here AND in src/app/(app)/accounts/page.tsx (the Due Bills
+  // query). Both lists must stay in sync — if the UI dim doesn't
+  // catch a status, the server-side guard here is the last line
+  // before a duplicate payment lands.
   const { data: openPayments } = await supabase
     .from("bill_payments")
     .select("bill_id")
     .in("bill_id", billIds)
-    .not("status", "in", "(paid,cancelled)");
+    .in("status", ["proposed", "confirmed", "bank_rejected"]);
   const billsWithOpen = new Set((openPayments ?? []).map((r) => r.bill_id as string));
 
   const batchId = randomUUID();

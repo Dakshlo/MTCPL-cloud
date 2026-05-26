@@ -168,20 +168,24 @@ export default async function AccountsHomePage({
         .from("bill_payments")
         .select("bill_id")
         .in("bill_id", billIds)
-        // Daksh May 2026 — used to be `.in("status", ["proposed",
-        // "confirmed"])`, but mig 052 added 'bank_rejected' as a
-        // third in-flight state and that wasn't backfilled here.
-        // Symptom: a bill whose proposed payment got bank-rejected
-        // would silently un-dim on Due Bills, letting the accountant
-        // propose a SECOND payment for the same bill (duplicate
-        // payment risk).
+        // Daksh May 2026 — was `["proposed", "confirmed"]`, but
+        // mig 052 added 'bank_rejected' as a third in-flight state
+        // and that wasn't backfilled here. A bank-rejected payment
+        // is absolutely still in flight (bank declined, accountant
+        // has to retry / re-send / mark paid) but the page was
+        // treating it like there was no payment at all — letting
+        // the accountant propose a SECOND payment for the same bill
+        // (duplicate-payment risk).
         //
-        // Switched to a *negative* filter (NOT IN paid/cancelled) so
-        // anything else — current statuses AND any future one — is
-        // treated as in-flight by default. Safer posture: better to
-        // over-dim than under-dim, since this is a duplicate-payment
-        // guard.
-        .not("status", "in", "(paid,cancelled)"),
+        // Tried the negative filter `.not("status", "in", ...)`
+        // first but it didn't appear to take effect — likely a
+        // PostgREST quirk, and we're the only place in the codebase
+        // using that syntax. Switched back to the explicit positive
+        // list that every other place uses (e.g. mig 073's trigger,
+        // getProposedPaymentsAction). Add a new in-flight status?
+        // Append it here AND to bill_payments-status-related
+        // server actions.
+        .in("status", ["proposed", "confirmed", "bank_rejected"]),
       supabase
         .from("bill_payments")
         .select("bill_id, paid_amount, paid_at, payment_method")
