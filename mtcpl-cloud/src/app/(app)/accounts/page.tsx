@@ -164,56 +164,73 @@ export default async function AccountsHomePage({
   >();
   if (billIds.length > 0) {
     // Daksh May 2026 — root cause of the "in-flight bills look
-    // actionable" bug: the in-flight query used to be
+    // actionable" + "paid chips disappeared" bugs: both queries used
     //   .in("bill_id", billIds).in("status", [...])
-    // With 766 due bills, billIds was ~28 KB worth of UUIDs in the
-    // URL. PostgREST + Kong reject anything past ~8 KB with a 414
-    // or empty body, and the Supabase JS client returns `data: null`
-    // without throwing. The two prior fix attempts (broader status
-    // list + explicit positive list) couldn't help because the query
-    // was failing at the HTTP layer before status filtering even ran.
+    // With ~780 due bills, billIds was ~28 KB worth of UUIDs in the
+    // URL. PostgREST + Kong reject anything past ~8 KB and Supabase
+    // JS returns data:null without throwing — the queries failed
+    // silently and the page rendered as if there were no payments
+    // at all.
     //
-    // Fix: drop the `.in("bill_id", billIds)` filter on the
-    // in-flight query. There are typically <100 in-flight rows total
-    // across the whole org, so we just fetch them all — way smaller
-    // URL, way smaller payload than the previous shape. We still
-    // log errors loudly now so any future regression here surfaces.
+    // Two-part fix:
     //
-    // (paidPayments KEEPS the .in("bill_id") filter because there
-    // CAN be thousands of paid rows across history, and we need to
-    // group only the ones touching the bills on this page.
-    // If paidPayments ever starts silently failing for the same URL-
-    // length reason, switch IT to chunked queries.)
-    const [openRes, paidRes] = await Promise.all([
+    // 1. In-flight query: drop `.in("bill_id", ...)` entirely.
+    //    There are typically <100 in-flight rows across the whole
+    //    org; just fetch them all + check membership in-memory.
+    //
+    // 2. Paid-history query: CAN'T just drop the bill_id filter
+    //    because paid history could be thousands of rows across
+    //    years. Instead, CHUNK billIds into batches of 150 (~6 KB
+    //    per URL, safely under PostgREST's limit) and run the
+    //    chunks in parallel. Merge into the same paidPartsByBill
+    //    map. Performance is fine — 5-6 small parallel queries
+    //    instead of one giant one.
+    //
+    // Both queries log errors loudly now so any future silent-fail
+    // here is visible in Vercel function logs.
+    const CHUNK_SIZE = 150;
+    const paidChunks: string[][] = [];
+    for (let i = 0; i < billIds.length; i += CHUNK_SIZE) {
+      paidChunks.push(billIds.slice(i, i + CHUNK_SIZE));
+    }
+    const [openRes, ...paidResults] = await Promise.all([
       supabase
         .from("bill_payments")
         .select("bill_id")
         .in("status", ["proposed", "confirmed", "bank_rejected"]),
-      supabase
-        .from("bill_payments")
-        .select("bill_id, paid_amount, paid_at, payment_method")
-        .in("bill_id", billIds)
-        .eq("status", "paid")
-        .order("paid_at", { ascending: true }),
+      ...paidChunks.map((chunk) =>
+        supabase
+          .from("bill_payments")
+          .select("bill_id, paid_amount, paid_at, payment_method")
+          .in("bill_id", chunk)
+          .eq("status", "paid")
+          .order("paid_at", { ascending: true }),
+      ),
     ]);
     if (openRes.error) {
       console.error("[due-bills] in-flight payments query failed", openRes.error);
     }
-    if (paidRes.error) {
-      console.error("[due-bills] paid payments query failed", paidRes.error);
-    }
     const openPayments = openRes.data ?? [];
-    const paidPayments = paidRes.data ?? [];
     for (const p of openPayments) openPaymentBillIds.add(p.bill_id as string);
-    for (const p of paidPayments ?? []) {
-      const billId = p.bill_id as string;
-      const list = paidPartsByBill.get(billId) ?? [];
-      list.push({
-        amount: Number(p.paid_amount) || 0,
-        paidAt: (p.paid_at as string | null) ?? null,
-        method: (p.payment_method as string | null) ?? null,
-      });
-      paidPartsByBill.set(billId, list);
+    for (let chunkIdx = 0; chunkIdx < paidResults.length; chunkIdx++) {
+      const result = paidResults[chunkIdx];
+      if (result.error) {
+        console.error(
+          `[due-bills] paid payments chunk ${chunkIdx} failed`,
+          result.error,
+        );
+        continue;
+      }
+      for (const p of result.data ?? []) {
+        const billId = p.bill_id as string;
+        const list = paidPartsByBill.get(billId) ?? [];
+        list.push({
+          amount: Number(p.paid_amount) || 0,
+          paidAt: (p.paid_at as string | null) ?? null,
+          method: (p.payment_method as string | null) ?? null,
+        });
+        paidPartsByBill.set(billId, list);
+      }
     }
   }
 
