@@ -33,6 +33,10 @@ import {
 // dropdown options moved into LiveDueBillsFilters.
 import { billVendorCategoryDisplay } from "@/lib/bill-vendor-categories";
 import { LiveDueBillsFilters } from "./live-due-bills-filters";
+import {
+  AccountsSidebarHideToggle,
+  AccountsSidebarHideHydrationScript,
+} from "./_components/sidebar-hide-toggle";
 
 type SearchParams = Promise<{
   vendor?: string;
@@ -478,6 +482,10 @@ export default async function AccountsHomePage({
 
   return (
     <section className="page-card">
+      {/* Pre-paint script so the sidebar's hidden state lands BEFORE
+          React hydrates — no flash of "sidebar then no sidebar" on
+          the very first paint for users whose preference is hidden. */}
+      <AccountsSidebarHideHydrationScript />
       {/* Mig 058 follow-on (Daksh) — Due Bills KPIs reveal a lot:
           total outstanding + top vendor outstanding combined are
           enough to read the company's cash position at a glance.
@@ -494,6 +502,13 @@ export default async function AccountsHomePage({
         }
         actions={
           <>
+            {/* Daksh May 2026 — Hide menu button so dad can see every
+                column of the Due Bills table (Vendor through Proposed)
+                in one full-screen view without horizontal scroll.
+                Toggle persists across reloads via localStorage; the
+                body class clears automatically when he navigates to
+                another department. */}
+            <AccountsSidebarHideToggle />
             {/* Mig 061 follow-on (Daksh): the Peek button reveals
                 the blurred sensitive amounts for 5s. Restricted to
                 owner + developer — accountants see the blur but
