@@ -573,68 +573,83 @@ export function DueBillsClient({
             ↓ Newest first
           </button>
         </div>
-        {/* Daksh May 2026 — single-bill-per-vendor toggle. Default
-            ON. When ON, ticking a bill locks every OTHER bill for
-            the same vendor so dad doesn't accidentally propose
-            multiple payments to the same vendor in one batch.
-            Toggle OFF reverts to plain "tick anything you want"
-            behaviour. Persisted in localStorage. */}
-        <div
-          style={{
-            display: "inline-flex",
-            background: ACCOUNTS_TOKENS.surfaceMuted,
-            border: `1px solid ${ACCOUNTS_TOKENS.border}`,
-            borderRadius: 8,
-            padding: 3,
-            gap: 2,
-          }}
-          role="group"
-          aria-label="Bills per vendor"
+        {/* Daksh May 2026 — single-bill-per-vendor switch. Sliding-
+            pill iOS-style toggle so it visually reads as a "mode
+            setting" (different shape + behaviour than the
+            segmented sort pills next to it). Whole pill is
+            clickable. Persists in localStorage. */}
+        <button
+          type="button"
+          onClick={() => setSingleVendorMode((v) => !v)}
+          role="switch"
+          aria-checked={singleVendorMode}
           title={
             singleVendorMode
-              ? "Single bill per vendor — picking one bill locks the rest from the same vendor"
-              : "Any bill — all vendors stay open for selection"
+              ? "Single bill per vendor — click to allow multiple bills per vendor"
+              : "Any bill — click to enforce one bill per vendor"
           }
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 10,
+            padding: "5px 6px 5px 12px",
+            background: singleVendorMode
+              ? "rgba(124, 58, 237, 0.08)" // soft purple fill when ON
+              : "var(--surface, #fff)",
+            border: `1.5px solid ${
+              singleVendorMode
+                ? "#7c3aed"
+                : ACCOUNTS_TOKENS.borderStrong
+            }`,
+            borderRadius: 999,
+            cursor: "pointer",
+            fontSize: 12,
+            fontWeight: 700,
+            color: singleVendorMode ? "#5b21b6" : "var(--muted)",
+            whiteSpace: "nowrap",
+            transition:
+              "background 0.18s ease, border-color 0.18s ease, color 0.18s ease",
+            boxShadow: singleVendorMode
+              ? "0 1px 2px rgba(124,58,237,0.18)"
+              : "0 1px 0 rgba(15,23,42,0.04)",
+          }}
         >
-          <button
-            type="button"
-            onClick={() => setSingleVendorMode(true)}
+          <span aria-hidden style={{ fontSize: 13, lineHeight: 1 }}>
+            {singleVendorMode ? "🔒" : "🔓"}
+          </span>
+          <span style={{ letterSpacing: "0.01em" }}>
+            {singleVendorMode ? "1 bill / vendor" : "Any bill"}
+          </span>
+          {/* The actual sliding switch — a 36×20 pill with a 14×14
+              dot that translates between left and right. Visually
+              distinct from the surrounding segmented controls. */}
+          <span
+            aria-hidden
             style={{
-              padding: "5px 12px",
-              fontSize: 12,
-              fontWeight: 700,
-              border: "none",
-              borderRadius: 5,
-              cursor: "pointer",
-              background: singleVendorMode ? "#fff" : "transparent",
-              color: singleVendorMode ? ACCOUNTS_TOKENS.accent : "var(--muted)",
-              boxShadow: singleVendorMode ? ACCOUNTS_TOKENS.shadow : "none",
+              position: "relative",
+              width: 30,
+              height: 18,
+              borderRadius: 999,
+              background: singleVendorMode ? "#7c3aed" : "#cbd5e1",
+              transition: "background 0.18s ease",
+              flexShrink: 0,
             }}
-            aria-pressed={singleVendorMode}
-            title="Pick only one bill per vendor in a batch"
           >
-            🔒 1 / vendor
-          </button>
-          <button
-            type="button"
-            onClick={() => setSingleVendorMode(false)}
-            style={{
-              padding: "5px 12px",
-              fontSize: 12,
-              fontWeight: 700,
-              border: "none",
-              borderRadius: 5,
-              cursor: "pointer",
-              background: !singleVendorMode ? "#fff" : "transparent",
-              color: !singleVendorMode ? ACCOUNTS_TOKENS.accent : "var(--muted)",
-              boxShadow: !singleVendorMode ? ACCOUNTS_TOKENS.shadow : "none",
-            }}
-            aria-pressed={!singleVendorMode}
-            title="Allow multiple bills per vendor in the same batch"
-          >
-            📋 Any bill
-          </button>
-        </div>
+            <span
+              style={{
+                position: "absolute",
+                top: 2,
+                left: singleVendorMode ? 14 : 2,
+                width: 14,
+                height: 14,
+                borderRadius: "50%",
+                background: "#fff",
+                boxShadow: "0 1px 2px rgba(15,23,42,0.28)",
+                transition: "left 0.18s ease",
+              }}
+            />
+          </span>
+        </button>
         {quickFilter && (
           <span
             style={{
