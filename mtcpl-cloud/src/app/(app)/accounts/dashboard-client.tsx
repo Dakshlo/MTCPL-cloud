@@ -865,6 +865,28 @@ export function DueBillsClient({
                               max={proposable}
                               value={display}
                               disabled={r.hasOpenPayment}
+                              onFocus={(e) => {
+                                // Daksh May 2026 — clear the auto-filled
+                                // default on first focus so dad doesn't
+                                // have to manually erase the full
+                                // outstanding before typing a partial
+                                // amount. Only fires when there's no
+                                // user-typed override yet (i.e. the
+                                // field is still showing the proposable
+                                // default). If he's already typed a
+                                // custom value, focus is a no-op and
+                                // his work is preserved.
+                                //
+                                // onBlur (below) handles the "clicked
+                                // away without typing" case — it
+                                // restores the default by deleting the
+                                // empty override.
+                                if (amountOverrides[r.id] == null) {
+                                  setAmountOverrides((p) => ({ ...p, [r.id]: "" }));
+                                  // Don't need .select() — the input is
+                                  // now empty, cursor is ready.
+                                }
+                              }}
                               onChange={(e) => {
                                 // Cap at PROPOSABLE — outstanding minus
                                 // owner's hold. Empty string is allowed
