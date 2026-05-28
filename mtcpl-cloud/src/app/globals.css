@@ -2174,6 +2174,26 @@ body.vendor-cockpit-fullscreen .sidebar-backdrop { display: none !important; }
 body.inv-hide-sidebar,
 body.vendor-cockpit-fullscreen { --content-left: 0px; }
 
+/* Daksh May 2026 — when the global sidebar is hidden, also collapse
+ * the page-content + page-card paddings AND drop the max-width cap
+ * so wide tables (Due Bills has 11 columns) get every available
+ * pixel. Without this override the inner padding ate ~100 px on
+ * each side and the Propose column still clipped on dad's laptop
+ * even after a full hide-menu. Applies to BOTH the inventory
+ * hide-sidebar mode AND the vendor-cockpit-fullscreen mode (they're
+ * both "give me as much width as possible" intents). */
+body.inv-hide-sidebar .page-content,
+body.vendor-cockpit-fullscreen .page-content {
+  padding-left: 10px;
+  padding-right: 10px;
+  max-width: none;
+}
+body.inv-hide-sidebar .page-card,
+body.vendor-cockpit-fullscreen .page-card {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
 /* ── Rotate-to-landscape prompt (phone, portrait) ─────────────
  * Daksh May 2026 — dad uses MTCPL from his phone when traveling.
  * Many pages were laid out for landscape; in portrait they wrap
