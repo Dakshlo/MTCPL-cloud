@@ -306,8 +306,25 @@ export function DueBillsClient({
   function toggle(id: string) {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(id)) {
+        next.delete(id);
+        // Daksh May 2026 — when a bill is UNticked, also clear any
+        // user-typed propose override for it. Without this, dad's
+        // flow was: tick bill (default ₹1L) → type 50K → untick →
+        // re-tick → still showed 50K instead of resetting to the
+        // current ₹1L outstanding. Mirrors the behaviour of
+        // clearAll() above (which already wipes overrides). Re-tick
+        // doesn't need to do anything — a fresh selection has no
+        // override, so the display falls back to outstanding.
+        setAmountOverrides((p) => {
+          if (p[id] == null) return p;
+          const updated = { ...p };
+          delete updated[id];
+          return updated;
+        });
+      } else {
+        next.add(id);
+      }
       return next;
     });
   }
