@@ -505,7 +505,7 @@ export function DueBillsClient({
             <thead style={TABLE_STYLES.thead}>
               <tr>
                 {canPropose && (
-                  <th style={{ ...TABLE_STYLES.th, width: 40 }}>
+                  <th style={{ ...TABLE_STYLES.th, width: 28, padding: "8px 4px" }}>
                     <input
                       type="checkbox"
                       checked={
@@ -529,8 +529,12 @@ export function DueBillsClient({
                 <th style={TABLE_STYLES.thRight}>Tax</th>
                 <th style={TABLE_STYLES.thRight}>Paid</th>
                 <th style={TABLE_STYLES.thRight}>Outstanding</th>
-                <th style={TABLE_STYLES.th}>Age / Verified</th>
+                {/* Daksh May 2026 — Propose moved before Age so it
+                    lands inside the viewport on a 1440-wide screen
+                    with the sidebar hidden. Age (the informational
+                    column) drops to last. */}
                 {canPropose && <th style={TABLE_STYLES.thRight}>Propose</th>}
+                <th style={TABLE_STYLES.th}>Age / Verified</th>
               </tr>
             </thead>
             <tbody>
@@ -633,7 +637,10 @@ export function DueBillsClient({
                       }}
                     >
                     {canPropose && (
-                      <td style={TABLE_STYLES.td}>
+                      // Daksh May 2026 — tighter padding on the
+                      // checkbox cell so dad isn't staring at 20 px
+                      // of whitespace before the vendor avatar.
+                      <td style={{ ...TABLE_STYLES.td, padding: "8px 4px" }}>
                         <input
                           type="checkbox"
                           checked={isSelected}
@@ -684,7 +691,7 @@ export function DueBillsClient({
                         <VendorIdentity
                           name={r.vendorName}
                           subLabel={r.token}
-                          size={32}
+                          size={26}
                         />
                       </Link>
                       {/* Mig 066 — small "owner" line so multi-firm
@@ -815,45 +822,11 @@ export function DueBillsClient({
                         </div>
                       )}
                     </td>
-                    <td style={TABLE_STYLES.td}>
-                      {/* Mig 064 follow-on (Daksh, 2nd pass) — royalty
-                          net dot sits to the LEFT of the age pill on
-                          each row (outside the pill, not inside).
-                          Same 3-px black dot used on the vendor
-                          profile page; click reveals "Net: +/-X (10s)"
-                          inline. Only renders when the vendor has a
-                          non-zero approved net AND the viewer's role
-                          can see royalty data. */}
-                      <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                        {r.vendorRoyaltyNet !== null && r.vendorRoyaltyNet !== 0 && (
-                          <RoyaltyNetPeek netValue={r.vendorRoyaltyNet} />
-                        )}
-                        <AgeBadge
-                          bucket={r.ageBucket}
-                          days={r.daysSinceBill}
-                          premature={r.prematureForPayment}
-                          termsDays={r.paymentTermsDays}
-                        />
-                      </div>
-                      {r.crosscheckedAt && (
-                        <div
-                          style={{
-                            marginTop: 4,
-                            fontSize: 10,
-                            color: "var(--muted)",
-                            fontFamily: "ui-monospace, monospace",
-                            whiteSpace: "nowrap",
-                          }}
-                          title={`Crosschecked at ${new Date(r.crosscheckedAt).toLocaleString("en-IN")}`}
-                        >
-                          ✅{" "}
-                          {new Date(r.crosscheckedAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata",
-                            day: "numeric",
-                            month: "short",
-                          })}
-                        </div>
-                      )}
-                    </td>
+                    {/* Daksh May 2026 — Propose td moved BEFORE the
+                        Age td so the actionable input lands inside
+                        the viewport on a 1440-wide screen with the
+                        sidebar hidden. Age (informational) is now
+                        the trailing column. */}
                     {canPropose && (
                       <td style={TABLE_STYLES.tdRight}>
                         {(() => {
@@ -928,8 +901,8 @@ export function DueBillsClient({
                                   : `Max ₹${proposable.toLocaleString("en-IN")} — capped at outstanding`
                               }
                               style={{
-                                width: 120,
-                                padding: "6px 8px",
+                                width: 100,
+                                padding: "5px 7px",
                                 fontSize: 12,
                                 fontFamily: "ui-monospace, monospace",
                                 border: `1px solid ${
@@ -948,6 +921,45 @@ export function DueBillsClient({
                         })()}
                       </td>
                     )}
+                    <td style={TABLE_STYLES.td}>
+                      {/* Mig 064 follow-on (Daksh, 2nd pass) — royalty
+                          net dot sits to the LEFT of the age pill on
+                          each row (outside the pill, not inside).
+                          Same 3-px black dot used on the vendor
+                          profile page; click reveals "Net: +/-X (10s)"
+                          inline. Only renders when the vendor has a
+                          non-zero approved net AND the viewer's role
+                          can see royalty data. */}
+                      <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                        {r.vendorRoyaltyNet !== null && r.vendorRoyaltyNet !== 0 && (
+                          <RoyaltyNetPeek netValue={r.vendorRoyaltyNet} />
+                        )}
+                        <AgeBadge
+                          bucket={r.ageBucket}
+                          days={r.daysSinceBill}
+                          premature={r.prematureForPayment}
+                          termsDays={r.paymentTermsDays}
+                        />
+                      </div>
+                      {r.crosscheckedAt && (
+                        <div
+                          style={{
+                            marginTop: 4,
+                            fontSize: 10,
+                            color: "var(--muted)",
+                            fontFamily: "ui-monospace, monospace",
+                            whiteSpace: "nowrap",
+                          }}
+                          title={`Crosschecked at ${new Date(r.crosscheckedAt).toLocaleString("en-IN")}`}
+                        >
+                          ✅{" "}
+                          {new Date(r.crosscheckedAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata",
+                            day: "numeric",
+                            month: "short",
+                          })}
+                        </div>
+                      )}
+                    </td>
                     </tr>
                   </Fragment>
                 );
