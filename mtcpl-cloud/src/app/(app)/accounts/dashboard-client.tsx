@@ -10,7 +10,16 @@
  */
 
 import Link from "next/link";
-import { Fragment, useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { useRouter } from "next/navigation";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 import {
@@ -357,7 +366,30 @@ export function DueBillsClient({
     [singleVendorMode, lockedVendorIds, selected],
   );
 
+  // Daksh May 2026 — preserve scroll position across toggles.
+  // The page pins ticked bills to the top of the list; that's the
+  // desired behaviour but the row-reorder + focus on the moved
+  // checkbox was making the browser auto-scroll to top, losing
+  // dad's place mid-search. We save the pre-toggle scrollY in a
+  // ref and restore it in useLayoutEffect (fires after React
+  // commits the new DOM, before the browser paints — so no
+  // visible jump). Ref is cleared once consumed so a normal
+  // selection update from elsewhere doesn't accidentally
+  // re-restore an old scroll position.
+  const preserveScrollYRef = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    if (typeof window === "undefined") return;
+    if (preserveScrollYRef.current === null) return;
+    window.scrollTo({ top: preserveScrollYRef.current, behavior: "auto" });
+    preserveScrollYRef.current = null;
+  });
+
   function toggle(id: string) {
+    // Snapshot scroll position BEFORE the state changes — the
+    // useLayoutEffect above restores it once React commits.
+    if (typeof window !== "undefined") {
+      preserveScrollYRef.current = window.scrollY;
+    }
     // Daksh May 2026 round 2 — refactored to NOT nest the
     // setAmountOverrides call inside setSelected's updater.
     // Nesting state setters inside another setter's updater is a
