@@ -449,18 +449,26 @@ export function SectionHeader({
 // ── Table style helpers ────────────────────────────────────────────
 
 export const TABLE_STYLES = {
+  // Daksh May 2026 — Due Bills has 11 columns (checkbox through
+  // Propose). After the Hide-menu button freed up sidebar width,
+  // the row STILL pushed Propose off-screen on a typical
+  // 1440-wide display. Trimmed padding (12→8 vertical, 14→10
+  // horizontal) and font (13→12) so the full row fits in one
+  // view. Other accounts tables (All Bills, Payment History,
+  // Advances, Final Audit) share these styles too — the slight
+  // density change there is fine and actually reads cleaner.
   table: {
     width: "100%",
     borderCollapse: "separate" as const,
     borderSpacing: 0,
-    fontSize: 13,
+    fontSize: 12,
   },
   thead: {
     background: ACCOUNTS_TOKENS.surfaceMuted,
   },
   th: {
     textAlign: "left" as const,
-    padding: "10px 14px",
+    padding: "8px 10px",
     fontSize: 10,
     fontWeight: 700,
     color: ACCOUNTS_TOKENS.neutral,
@@ -471,7 +479,7 @@ export const TABLE_STYLES = {
   },
   thRight: {
     textAlign: "right" as const,
-    padding: "10px 14px",
+    padding: "8px 10px",
     fontSize: 10,
     fontWeight: 700,
     color: ACCOUNTS_TOKENS.neutral,
@@ -481,17 +489,17 @@ export const TABLE_STYLES = {
     whiteSpace: "nowrap" as const,
   },
   td: {
-    padding: "12px 14px",
+    padding: "8px 10px",
     borderBottom: `1px solid ${ACCOUNTS_TOKENS.border}`,
     verticalAlign: "middle" as const,
-    fontSize: 13,
+    fontSize: 12,
   },
   tdRight: {
-    padding: "12px 14px",
+    padding: "8px 10px",
     textAlign: "right" as const,
     borderBottom: `1px solid ${ACCOUNTS_TOKENS.border}`,
     verticalAlign: "middle" as const,
-    fontSize: 13,
+    fontSize: 12,
   },
   tableWrap: {
     background: "var(--surface, #fff)",

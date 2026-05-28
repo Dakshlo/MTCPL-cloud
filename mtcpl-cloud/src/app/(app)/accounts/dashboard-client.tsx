@@ -733,11 +733,24 @@ export function DueBillsClient({
                         {r.vendorBillNo}
                       </code>
                     </td>
-                    <td style={{ ...TABLE_STYLES.td, fontSize: 12, color: "var(--muted)" }}>
-                      {new Date(r.billDate).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata",
+                    {/* Daksh May 2026 — date now single-line via
+                        whiteSpace: nowrap + 2-digit year ("19 Jan
+                        25" instead of "19 Jan / 2025" on two
+                        lines). Frees a meaningful chunk of column
+                        width so the Propose column fits. */}
+                    <td
+                      style={{
+                        ...TABLE_STYLES.td,
+                        fontSize: 12,
+                        color: "var(--muted)",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {new Date(r.billDate).toLocaleDateString("en-IN", {
+                        timeZone: "Asia/Kolkata",
                         day: "numeric",
                         month: "short",
-                        year: "numeric",
+                        year: "2-digit",
                       })}
                     </td>
                     <td style={TABLE_STYLES.td}>
