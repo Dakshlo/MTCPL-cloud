@@ -10,7 +10,7 @@
  */
 
 import Link from "next/link";
-import { Fragment, useEffect, useMemo, useState, useTransition } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 import {
@@ -107,6 +107,35 @@ export function DueBillsClient({
   const [success, setSuccess] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [amountOverrides, setAmountOverrides] = useState<Record<string, string>>({});
+
+  // Daksh May 2026 — single-bill-per-vendor mode. Default ON. When
+  // ON, ticking a bill locks every OTHER bill for the same vendor
+  // (greyscaled, disabled checkbox, "Vendor already in batch"
+  // badge) so dad doesn't accidentally propose two payments for
+  // the same vendor in one batch. Toggle OFF reverts to plain
+  // multi-bill behaviour. Persisted in localStorage so the
+  // preference sticks across reloads.
+  const SINGLE_VENDOR_KEY = "mtcpl:due-bills:single-per-vendor";
+  const [singleVendorMode, setSingleVendorMode] = useState<boolean>(true);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const v = window.localStorage.getItem(SINGLE_VENDOR_KEY);
+      // Default is ON. Only flip to OFF if the stored value is
+      // explicitly "0" (user has previously opted out).
+      if (v === "0") setSingleVendorMode(false);
+    } catch {
+      // ignore — private mode etc., keep the default
+    }
+  }, []);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(SINGLE_VENDOR_KEY, singleVendorMode ? "1" : "0");
+    } catch {
+      // ignore
+    }
+  }, [singleVendorMode]);
 
   // Daksh May 2026 — persist the tick selection across page reloads
   // so changing a server-side filter (vendor / category / date range)
@@ -303,6 +332,31 @@ export function DueBillsClient({
   // sticky propose bar.
   const prematureSelected = selectedRows.filter((r) => r.prematureForPayment);
 
+  // Daksh May 2026 — single-bill-per-vendor lock set. When mode is
+  // ON, any vendor that already has a ticked bill goes into this
+  // set; the row-render gates extra bills for that vendor as
+  // "vendor already in batch". Built from the FULL rows list (not
+  // just filteredRows) so a vendor lock survives the quick-filter
+  // — e.g. dad ticks one bill, then searches for a different vendor,
+  // then comes back: the original tick is still locking the others.
+  const lockedVendorIds = useMemo(() => {
+    if (!singleVendorMode) return new Set<string>();
+    const s = new Set<string>();
+    for (const r of rows) if (selected.has(r.id)) s.add(r.vendorId);
+    return s;
+  }, [rows, selected, singleVendorMode]);
+  // Helper used by the row render + select-all + the propose action.
+  // True when the row is BLOCKED by the single-per-vendor rule:
+  // the vendor already has another selected bill, and THIS row
+  // itself isn't the selected one.
+  const isRowVendorLocked = useCallback(
+    (r: DueBillRow) =>
+      singleVendorMode &&
+      lockedVendorIds.has(r.vendorId) &&
+      !selected.has(r.id),
+    [singleVendorMode, lockedVendorIds, selected],
+  );
+
   function toggle(id: string) {
     // Daksh May 2026 round 2 — refactored to NOT nest the
     // setAmountOverrides call inside setSelected's updater.
@@ -337,7 +391,21 @@ export function DueBillsClient({
     // should only pick rows currently visible after the filter, not
     // every row in memory.
     const next = new Set(selected);
-    for (const r of filteredRows) if (!r.hasOpenPayment) next.add(r.id);
+    // Daksh May 2026 — when single-vendor-mode is ON, select-all
+    // can pick at most ONE bill per vendor. We walk filteredRows
+    // in order and skip any whose vendor is already in the running
+    // set (either pre-selected or just added by this pass).
+    const seenVendors = new Set<string>();
+    for (const id of next) {
+      const row = rows.find((r) => r.id === id);
+      if (row) seenVendors.add(row.vendorId);
+    }
+    for (const r of filteredRows) {
+      if (r.hasOpenPayment) continue;
+      if (singleVendorMode && seenVendors.has(r.vendorId)) continue;
+      next.add(r.id);
+      if (singleVendorMode) seenVendors.add(r.vendorId);
+    }
     setSelected(next);
   }
 
@@ -505,6 +573,68 @@ export function DueBillsClient({
             ↓ Newest first
           </button>
         </div>
+        {/* Daksh May 2026 — single-bill-per-vendor toggle. Default
+            ON. When ON, ticking a bill locks every OTHER bill for
+            the same vendor so dad doesn't accidentally propose
+            multiple payments to the same vendor in one batch.
+            Toggle OFF reverts to plain "tick anything you want"
+            behaviour. Persisted in localStorage. */}
+        <div
+          style={{
+            display: "inline-flex",
+            background: ACCOUNTS_TOKENS.surfaceMuted,
+            border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+            borderRadius: 8,
+            padding: 3,
+            gap: 2,
+          }}
+          role="group"
+          aria-label="Bills per vendor"
+          title={
+            singleVendorMode
+              ? "Single bill per vendor — picking one bill locks the rest from the same vendor"
+              : "Any bill — all vendors stay open for selection"
+          }
+        >
+          <button
+            type="button"
+            onClick={() => setSingleVendorMode(true)}
+            style={{
+              padding: "5px 12px",
+              fontSize: 12,
+              fontWeight: 700,
+              border: "none",
+              borderRadius: 5,
+              cursor: "pointer",
+              background: singleVendorMode ? "#fff" : "transparent",
+              color: singleVendorMode ? ACCOUNTS_TOKENS.accent : "var(--muted)",
+              boxShadow: singleVendorMode ? ACCOUNTS_TOKENS.shadow : "none",
+            }}
+            aria-pressed={singleVendorMode}
+            title="Pick only one bill per vendor in a batch"
+          >
+            🔒 1 / vendor
+          </button>
+          <button
+            type="button"
+            onClick={() => setSingleVendorMode(false)}
+            style={{
+              padding: "5px 12px",
+              fontSize: 12,
+              fontWeight: 700,
+              border: "none",
+              borderRadius: 5,
+              cursor: "pointer",
+              background: !singleVendorMode ? "#fff" : "transparent",
+              color: !singleVendorMode ? ACCOUNTS_TOKENS.accent : "var(--muted)",
+              boxShadow: !singleVendorMode ? ACCOUNTS_TOKENS.shadow : "none",
+            }}
+            aria-pressed={!singleVendorMode}
+            title="Allow multiple bills per vendor in the same batch"
+          >
+            📋 Any bill
+          </button>
+        </div>
         {quickFilter && (
           <span
             style={{
@@ -530,7 +660,12 @@ export function DueBillsClient({
                       type="checkbox"
                       checked={
                         filteredRows.length > 0 &&
-                        filteredRows.every((r) => r.hasOpenPayment || selected.has(r.id))
+                        filteredRows.every(
+                          (r) =>
+                            r.hasOpenPayment ||
+                            isRowVendorLocked(r) ||
+                            selected.has(r.id),
+                        )
                       }
                       onChange={(e) =>
                         e.currentTarget.checked ? selectAllVisible() : clearAll()
@@ -575,6 +710,15 @@ export function DueBillsClient({
               )}
               {filteredRows.map((r, idx) => {
                 const isSelected = selected.has(r.id);
+                // Daksh May 2026 — single-bill-per-vendor lock. True
+                // when the toggle is ON, this row's vendor already
+                // has another ticked bill, and THIS row isn't the
+                // ticked one. Mirrors the in-flight (hasOpenPayment)
+                // gate — same visual treatment family (dim + grey-
+                // scale + disabled checkbox + lock badge) but with
+                // a slate accent instead of purple so the two locks
+                // read as distinct reasons.
+                const isVendorLocked = isRowVendorLocked(r);
                 const display =
                   amountOverrides[r.id] != null
                     ? amountOverrides[r.id]
@@ -618,34 +762,31 @@ export function DueBillsClient({
                     <tr
                       style={{
                         background: r.hasOpenPayment
-                          // Daksh May 2026 round 2 — in-flight bills
-                          // get a distinct purple-grey tint (matches
-                          // the "Pay Today" purple Mark-paid button
-                          // up the funnel) so they read as "elsewhere
-                          // in the workflow." Beats the previous
-                          // 0.55-opacity dim which looked too much
-                          // like a normal row.
-                          ? "rgba(124,58,237,0.06)"
-                          : isSelected
-                            ? ACCOUNTS_TOKENS.accentLight
-                            : r.heldAmount > 0
-                              ? "rgba(254,243,199,0.45)"
-                              : idx % 2 === 0
-                                ? "#fff"
-                                : ACCOUNTS_TOKENS.surfaceMuted,
-                        opacity: r.hasOpenPayment ? 0.7 : 1,
-                        // Desaturate in-flight rows so the colored
-                        // chips (Pink Stone, COST HEAD) read as
-                        // muted too — drives home that this row is
-                        // not actionable right now.
-                        filter: r.hasOpenPayment
-                          ? "grayscale(0.5)"
-                          : undefined,
-                        boxShadow: r.hasOpenPayment
-                          ? "inset 4px 0 0 #7c3aed" // purple stripe on in-flight rows
-                          : r.heldAmount > 0
-                            ? "inset 4px 0 0 #d97706"
+                          ? "rgba(124,58,237,0.06)" // purple tint = in-flight
+                          : isVendorLocked
+                            ? "rgba(100,116,139,0.07)" // slate tint = vendor-locked
+                            : isSelected
+                              ? ACCOUNTS_TOKENS.accentLight
+                              : r.heldAmount > 0
+                                ? "rgba(254,243,199,0.45)"
+                                : idx % 2 === 0
+                                  ? "#fff"
+                                  : ACCOUNTS_TOKENS.surfaceMuted,
+                        opacity: r.hasOpenPayment || isVendorLocked ? 0.7 : 1,
+                        // Desaturate blocked rows (either in-flight
+                        // OR vendor-locked) so the colored chips
+                        // (Pink Stone, COST HEAD) read as muted too.
+                        filter:
+                          r.hasOpenPayment || isVendorLocked
+                            ? "grayscale(0.5)"
                             : undefined,
+                        boxShadow: r.hasOpenPayment
+                          ? "inset 4px 0 0 #7c3aed" // purple stripe = in-flight
+                          : isVendorLocked
+                            ? "inset 4px 0 0 #64748b" // slate stripe = vendor-locked
+                            : r.heldAmount > 0
+                              ? "inset 4px 0 0 #d97706"
+                              : undefined,
                         transition: "background 0.1s",
                         // Block pointer events on the entire row
                         // except the checkbox + the vendor link.
@@ -664,22 +805,45 @@ export function DueBillsClient({
                         <input
                           type="checkbox"
                           checked={isSelected}
-                          disabled={r.hasOpenPayment}
+                          disabled={r.hasOpenPayment || isVendorLocked}
                           onChange={() => toggle(r.id)}
                           title={
                             r.hasOpenPayment
                               ? "🔒 Already in Pay Today — mark paid first to act on this bill again"
-                              : undefined
+                              : isVendorLocked
+                                ? "🔒 Vendor already in this batch — untick the other bill first, or switch to 'Any bill' mode"
+                                : undefined
                           }
                           // Visually distinct disabled state — the
                           // default macOS look is barely different
                           // from enabled.
                           style={
-                            r.hasOpenPayment
+                            r.hasOpenPayment || isVendorLocked
                               ? { cursor: "not-allowed", opacity: 0.4 }
                               : undefined
                           }
                         />
+                        {!r.hasOpenPayment && isVendorLocked && (
+                          <div
+                            style={{
+                              fontSize: 9,
+                              fontWeight: 800,
+                              color: "#475569", // slate-600
+                              letterSpacing: "0.06em",
+                              marginTop: 4,
+                              padding: "2px 5px",
+                              borderRadius: 4,
+                              background: "rgba(100,116,139,0.12)",
+                              border: "1px solid rgba(100,116,139,0.32)",
+                              textTransform: "uppercase",
+                              whiteSpace: "nowrap",
+                              textAlign: "center",
+                            }}
+                            title="Single-bill-per-vendor mode — this vendor already has another bill in the batch. Switch the toggle at the top to 'Any bill' if you want to add more."
+                          >
+                            🔒 Vendor ticked
+                          </div>
+                        )}
                         {r.hasOpenPayment && (
                           <div
                             style={{
