@@ -304,28 +304,31 @@ export function DueBillsClient({
   const prematureSelected = selectedRows.filter((r) => r.prematureForPayment);
 
   function toggle(id: string) {
+    // Daksh May 2026 round 2 — refactored to NOT nest the
+    // setAmountOverrides call inside setSelected's updater.
+    // Nesting state setters inside another setter's updater is a
+    // React anti-pattern: the updater function is supposed to be
+    // pure (no side effects), and in some render paths the nested
+    // call wasn't taking effect — which is why dad still saw the
+    // stale 50000 after untick → retick even after the prior fix.
+    //
+    // New shape: two flat setter calls. Always wipe any override
+    // for this id on toggle — on untick it removes the typed value
+    // so re-tick shows the default; on tick it's a no-op (a fresh
+    // selection rarely has an override). This is the same shape
+    // clearAll() uses, which is why the bottom-bar Clear button
+    // already worked correctly.
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-        // Daksh May 2026 — when a bill is UNticked, also clear any
-        // user-typed propose override for it. Without this, dad's
-        // flow was: tick bill (default ₹1L) → type 50K → untick →
-        // re-tick → still showed 50K instead of resetting to the
-        // current ₹1L outstanding. Mirrors the behaviour of
-        // clearAll() above (which already wipes overrides). Re-tick
-        // doesn't need to do anything — a fresh selection has no
-        // override, so the display falls back to outstanding.
-        setAmountOverrides((p) => {
-          if (p[id] == null) return p;
-          const updated = { ...p };
-          delete updated[id];
-          return updated;
-        });
-      } else {
-        next.add(id);
-      }
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
+    });
+    setAmountOverrides((p) => {
+      if (p[id] == null) return p;
+      const updated = { ...p };
+      delete updated[id];
+      return updated;
     });
   }
 
