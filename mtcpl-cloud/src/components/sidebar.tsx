@@ -932,7 +932,9 @@ export function Sidebar({
           actually flips (server action → router.refresh → RSC
           reconciled), so the bar covers the full visible-transition
           window — no flash. */}
-      {switchable && switching && <DeptSwitchTopBar />}
+      {switchable && switching && (
+        <DeptSwitchTopBar targetDept={switchingTo} />
+      )}
 
       {/* User */}
       <div className="sidebar-user">
@@ -1150,8 +1152,22 @@ function CollapsibleNavGroup({
 /** Mig 058 follow-on — top-of-viewport progress bar shown during
  *  the department switch. Matches the visual language of
  *  NavigationProgress (gold gradient + glow). Lives at z-index
- *  10000 so it sits above app chrome. */
-function DeptSwitchTopBar() {
+ *  10000 so it sits above app chrome.
+ *
+ *  Daksh May 2026 round 2 — added a centered full-screen overlay
+ *  alongside the thin bar. Dad's complaint: he'd click a
+ *  department, the URL bar showed it was loading, but nothing
+ *  visible happened on the page for a few seconds — felt frozen.
+ *  The 5-px gold bar at the top was too subtle. The new overlay
+ *  blocks the rest of the page behind a soft backdrop with the
+ *  MTCPL logo + a gold spinning ring + "Switching to X…" text so
+ *  the loading state is unmistakable. Both layers render
+ *  together — the bar still gives the "progress is happening at
+ *  the top edge" cue, the overlay is the focal centerpiece. */
+function DeptSwitchTopBar({ targetDept }: { targetDept: Department | null }) {
+  const meta = targetDept
+    ? DEPARTMENTS.find((d) => d.id === targetDept)
+    : null;
   return (
     <>
       <style>{`
@@ -1164,7 +1180,26 @@ function DeptSwitchTopBar() {
           0%, 100% { opacity: 0.9; }
           50%      { opacity: 1; }
         }
+        @keyframes mtcpl-dept-overlay-in {
+          from { opacity: 0; }
+          to   { opacity: 1; }
+        }
+        @keyframes mtcpl-dept-logo-breath {
+          0%, 100% { transform: scale(1); }
+          50%      { transform: scale(1.06); }
+        }
+        @keyframes mtcpl-dept-ring-spin {
+          to { transform: rotate(360deg); }
+        }
+        @keyframes mtcpl-dept-dots {
+          0%, 20%   { content: ""; }
+          40%       { content: "."; }
+          60%       { content: ".."; }
+          80%, 100% { content: "..."; }
+        }
       `}</style>
+
+      {/* Thin top bar — same as before */}
       <div
         role="progressbar"
         aria-label="Switching department"
@@ -1175,7 +1210,7 @@ function DeptSwitchTopBar() {
           right: 0,
           height: 5,
           background: "rgba(201, 161, 74, 0.18)",
-          zIndex: 10000,
+          zIndex: 10001,
           overflow: "hidden",
           pointerEvents: "none",
           animation: "mtcpl-deptbar-glow 1.8s ease-in-out infinite",
@@ -1193,6 +1228,154 @@ function DeptSwitchTopBar() {
               "0 0 18px rgba(201, 161, 74, 0.95), 0 1px 4px rgba(164,130,58,0.6)",
           }}
         />
+      </div>
+
+      {/* Full-screen centered overlay — logo + spinning gold ring
+          + "Switching to X…" text. Blocks pointer events so dad
+          can't double-click another department mid-switch. */}
+      <div
+        aria-live="polite"
+        aria-label={meta ? `Switching to ${meta.label}` : "Switching department"}
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 10000,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 28,
+          background: "rgba(15, 23, 42, 0.55)",
+          backdropFilter: "blur(8px) saturate(140%)",
+          WebkitBackdropFilter: "blur(8px) saturate(140%)",
+          animation: "mtcpl-dept-overlay-in 0.18s ease-out both",
+        }}
+      >
+        {/* Logo + spinning ring stack. The ring rotates outside
+            the logo; the logo itself breathes (subtle scale
+            pulse) so the user knows the page is alive. */}
+        <div
+          style={{
+            position: "relative",
+            width: 132,
+            height: 132,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          {/* Outer gold ring (1 segment missing → looks like a
+              spinner). 1.2 s rotation. */}
+          <span
+            aria-hidden
+            style={{
+              position: "absolute",
+              inset: 0,
+              border: "4px solid rgba(201, 161, 74, 0.18)",
+              borderTopColor: "#c9a14a",
+              borderRightColor: "rgba(201, 161, 74, 0.55)",
+              borderRadius: "50%",
+              animation: "mtcpl-dept-ring-spin 1.2s linear infinite",
+              boxShadow: "0 0 24px rgba(201, 161, 74, 0.35)",
+            }}
+          />
+          {/* Soft glow circle behind the logo */}
+          <span
+            aria-hidden
+            style={{
+              position: "absolute",
+              inset: 14,
+              borderRadius: "50%",
+              background:
+                "radial-gradient(circle at 50% 50%, rgba(201,161,74,0.16) 0%, transparent 65%)",
+              filter: "blur(4px)",
+            }}
+          />
+          {/* The logo itself. /logo-dark.png is the gold mark on
+              dark-overlay-friendly stock. Filter brightness/invert
+              brings it bright so it reads against the slate
+              backdrop. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/logo-dark.png"
+            alt="MTCPL"
+            style={{
+              width: 72,
+              height: "auto",
+              position: "relative",
+              zIndex: 1,
+              filter:
+                "brightness(0) invert(1) drop-shadow(0 2px 8px rgba(0,0,0,0.45))",
+              animation: "mtcpl-dept-logo-breath 2.2s ease-in-out infinite",
+            }}
+          />
+        </div>
+
+        {/* "Switching to {label}…" — big enough to read at a
+            glance, gold accent on the dept name. */}
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 6,
+            color: "#fff",
+            textAlign: "center",
+            textShadow: "0 1px 4px rgba(0,0,0,0.45)",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 800,
+              letterSpacing: "0.16em",
+              textTransform: "uppercase",
+              color: "rgba(255,255,255,0.65)",
+            }}
+          >
+            Switching to
+          </div>
+          <div
+            style={{
+              fontSize: 22,
+              fontWeight: 800,
+              letterSpacing: "-0.01em",
+              color: "#fde68a", // soft gold so it reads as accented
+              display: "inline-flex",
+              alignItems: "baseline",
+              gap: 8,
+            }}
+          >
+            {meta ? (
+              <>
+                <span aria-hidden style={{ fontSize: 22 }}>
+                  {meta.icon}
+                </span>
+                {meta.label}
+                <span
+                  aria-hidden
+                  style={{
+                    display: "inline-block",
+                    width: "1.4ch",
+                    textAlign: "left",
+                  }}
+                >
+                  {/* animated dots after the label */}
+                  <span
+                    style={{
+                      display: "inline-block",
+                      animation: "mtcpl-dept-dots 1.2s steps(1, end) infinite",
+                    }}
+                  >
+                    …
+                  </span>
+                </span>
+              </>
+            ) : (
+              <>Department…</>
+            )}
+          </div>
+        </div>
       </div>
     </>
   );
