@@ -3387,11 +3387,105 @@ export async function resolveMaintenanceAction(formData: FormData) {
   );
 }
 
+// ── Mig 080 — carving review storage helpers ───────────────────────
+//
+// Reason images for approve / rework / reject get uploaded into a
+// private bucket. uploadReviewImage handles validation + upload;
+// getSignedReviewMediaUrl mints a 5-min signed URL the modal can
+// drop into an <img src>. Mirrors the messenger storage pattern
+// (mig 078) so the two surfaces share an audit-able shape.
+
+const REVIEW_BUCKET = "carving_review_media";
+const REVIEW_IMAGE_MAX_BYTES = 5 * 1024 * 1024; // 5 MB — phone photos
+const REVIEW_IMAGE_MIME_ALLOW = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+]);
+
+function reviewImageExt(mime: string): string {
+  if (mime === "image/png") return "png";
+  if (mime === "image/webp") return "webp";
+  if (mime === "image/heic") return "heic";
+  if (mime === "image/heif") return "heif";
+  return "jpg";
+}
+
+/** Validate + upload a review reason image. Returns the storage
+ *  path or throws. The caller decides whether the upload is
+ *  mandatory (rework + reject) or optional (approve). */
+async function uploadReviewImage(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  jobId: string,
+  reviewerId: string,
+  file: File,
+): Promise<string> {
+  const mime = (file.type || "").toLowerCase();
+  if (!REVIEW_IMAGE_MIME_ALLOW.has(mime)) {
+    throw new Error("Unsupported image format (use JPG / PNG / WEBP / HEIC).");
+  }
+  if (file.size === 0) throw new Error("Image is empty.");
+  if (file.size > REVIEW_IMAGE_MAX_BYTES) {
+    throw new Error("Image too large (max 5 MB).");
+  }
+  const ext = reviewImageExt(mime);
+  const path = `${reviewerId}/${jobId}-${crypto.randomUUID()}.${ext}`;
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const { error: uploadErr } = await admin.storage
+    .from(REVIEW_BUCKET)
+    .upload(path, buffer, {
+      contentType: mime,
+      cacheControl: "3600",
+      upsert: false,
+    });
+  if (uploadErr) {
+    throw new Error(`Image upload failed: ${uploadErr.message}`);
+  }
+  return path;
+}
+
+/** Sign a stored review image for the modal / cockpit cards.
+ *  5-min freshness — the next router.refresh re-mints. Returns
+ *  null on missing path or sign-failure so the UI can fall back
+ *  to a "media unavailable" stub instead of crashing. */
+export async function getSignedReviewMediaUrl(
+  path: string,
+): Promise<string | null> {
+  // Anyone who can READ the table can read the image — the bucket
+  // is private but the URL is signed + short-lived.
+  await requireAuth();
+  if (!path || typeof path !== "string") return null;
+  const admin = createAdminSupabaseClient();
+  const { data, error } = await admin.storage
+    .from(REVIEW_BUCKET)
+    .createSignedUrl(path, 300);
+  if (error || !data?.signedUrl) return null;
+  return data.signedUrl;
+}
+
 export async function approveCarvingJobAction(formData: FormData) {
   const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge"]);
   const admin = createAdminSupabaseClient();
   const jobId = txt(formData, "job_id");
   const notes = txt(formData, "notes") || null;
+  // Mig 080 — optional image upload on approve (mandatory on the
+  // rework + reject paths; see below). If the caller attached a
+  // file, upload it before we write the row so the DB always
+  // points at a real storage object.
+  const imageFile = formData.get("review_image");
+  let reviewImagePath: string | null = null;
+  if (imageFile instanceof File && imageFile.size > 0) {
+    try {
+      reviewImagePath = await uploadReviewImage(admin, jobId, profile.id, imageFile);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      const stay = txt(formData, "stay") === "1";
+      if (stay) throw new Error(msg);
+      redirect(`/carving/${jobId}?toast=${encodeURIComponent(msg)}`);
+    }
+  }
   // When the action is called from the JobDetailPeek modal we don't
   // want to redirect — the modal closes itself + parent revalidates
   // in place. Set `stay=1` from the form to opt out of the redirect.
@@ -3449,6 +3543,12 @@ export async function approveCarvingJobAction(formData: FormData) {
       review_approved_at: now,
       review_approved_by: profile.id,
       review_notes: notes,
+      // Mig 080 — tag the action explicitly. Old approvals (pre-080)
+      // stay at NULL on this field; new ones are stamped 'approved'
+      // so analytics can tell apart "I clicked approve" from "this
+      // row's status happens to be 'completed' for other reasons."
+      review_decision: "approved",
+      review_image_path: reviewImagePath,
       status: "completed",
       location: finalLocation,
       ready_to_dispatch_at: now,
@@ -3553,33 +3653,195 @@ export async function updateCarvingLocationAction(formData: FormData) {
   redirect(`/carving/${jobId}?toast=Location+saved`);
 }
 
-export async function rejectCarvingJobAction(formData: FormData) {
+// ── Mig 080 — Rework Needed (NEW, replaces the old soft "reject") ─
+//
+// Daksh's three-outcome split: between Approve (everything's fine)
+// and Reject (this carving is unsalvageable) sits Rework Needed —
+// "fix this, then re-submit." Image + reason are MANDATORY (you're
+// telling the vendor what to fix; "do it better" isn't actionable).
+//
+// State machine on the carving_item:
+//   completed_at        → cleared (vendor must re-mark complete)
+//   status              → 'carving_in_progress' (back on the floor)
+//   review_decision     → 'rework_needed'
+//   review_reworked_at  → now (distinguishes from pre-080 rejects)
+//   review_reworked_by  → profile.id
+//   review_image_path   → uploaded photo
+//   review_notes        → reason text
+//   review_approved_at  → cleared (the carving_in_progress check on
+//                         load expects no prior approval)
+//
+// Vendor cockpit gets a new "Rework Pending" window that filters
+// on review_reworked_at + review_decision so old-style soft rejects
+// don't accidentally show up here.
+export async function reworkCarvingJobAction(formData: FormData) {
   const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge"]);
   const admin = createAdminSupabaseClient();
   const jobId = txt(formData, "job_id");
-  const notes = txt(formData, "notes");
+  const notes = txt(formData, "notes").trim();
   const stay = txt(formData, "stay") === "1";
 
   if (!jobId || !notes) {
-    if (stay) throw new Error("Rejection notes required");
-    redirect(`/carving/${jobId}?toast=Rejection+notes+required`);
+    const msg = "Rework reason is required.";
+    if (stay) throw new Error(msg);
+    redirect(`/carving/${jobId}?toast=${encodeURIComponent(msg)}`);
+  }
+  // Mandatory image upload.
+  const imageFile = formData.get("review_image");
+  if (!(imageFile instanceof File) || imageFile.size === 0) {
+    const msg = "Photo of the problem is required for Rework.";
+    if (stay) throw new Error(msg);
+    redirect(`/carving/${jobId}?toast=${encodeURIComponent(msg)}`);
+  }
+  let reviewImagePath: string;
+  try {
+    reviewImagePath = await uploadReviewImage(admin, jobId, profile.id, imageFile);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (stay) throw new Error(msg);
+    redirect(`/carving/${jobId}?toast=${encodeURIComponent(msg)}`);
   }
 
-  await admin
+  const now = new Date().toISOString();
+  const { error: updateErr } = await admin
     .from("carving_items")
     .update({
       completed_at: null,
       review_notes: notes,
+      review_decision: "rework_needed",
+      review_reworked_at: now,
+      review_reworked_by: profile.id,
+      review_image_path: reviewImagePath,
+      // Clear any prior approval flags so the load-time guard
+      // doesn't think this slab has already been signed off.
+      review_approved_at: null,
+      review_approved_by: null,
       status: "carving_in_progress",
     })
     .eq("id", jobId);
+  if (updateErr) {
+    const msg = `Rework save failed: ${updateErr.message}`;
+    if (stay) throw new Error(msg);
+    redirect(`/carving/${jobId}?toast=${encodeURIComponent(msg)}`);
+  }
 
-  await recordEvent(jobId, "rejected", profile.id, notes);
-  await logAudit(profile.id, "carving_rejected", "carving_item", jobId, { notes });
+  await recordEvent(jobId, "rework_needed", profile.id, notes);
+  await logAudit(profile.id, "carving_rework_needed", "carving_item", jobId, {
+    notes,
+    image_path: reviewImagePath,
+  });
 
   refreshAll();
   if (stay) return;
-  redirect(`/carving/${jobId}?toast=Rejected+-+sent+back+to+vendor`);
+  redirect(`/carving/${jobId}?toast=${encodeURIComponent("Rework requested — sent back to vendor")}`);
+}
+
+// ── Mig 080 — Reject (NEW, hard version, replaces the old soft one) ─
+//
+// "This carving cannot be salvaged." The slab leaves the active
+// loop entirely:
+//   status → 'carving_rejected' (new enum value, mig 080)
+//   review_decision → 'rejected'
+//   review_rejected_at + by → stamped
+//   review_image_path → mandatory
+//   review_notes → mandatory
+//
+// The /vendor cockpit gets a read-only "Rejected" window. The
+// owner / dev / carving_head / senior_incharge get a "Carving
+// Rejected" tasks badge so the rare-but-critical events surface
+// at the top of the app.
+//
+// The CLIENT enforces two-step confirmation (Daksh's spec —
+// "reject is very hard in our operation, we try to use it
+// anyhow"). The server doesn't double-confirm; that's purely UX.
+// But the server-side image + reason requirements ensure no
+// half-completed reject ever lands.
+//
+// Old pre-080 callers that hit this action without an image will
+// fail with a clear error rather than silently degrading to the
+// pre-080 soft-reject behaviour. If we want to allow the legacy
+// shape in a future migration we can add a back-compat fallback,
+// but for now Daksh's spec is "image is mandatory" and we honor it.
+export async function rejectCarvingJobAction(formData: FormData) {
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge"]);
+  const admin = createAdminSupabaseClient();
+  const jobId = txt(formData, "job_id");
+  const notes = txt(formData, "notes").trim();
+  const stay = txt(formData, "stay") === "1";
+
+  if (!jobId || !notes) {
+    const msg = "Rejection reason is required.";
+    if (stay) throw new Error(msg);
+    redirect(`/carving/${jobId}?toast=${encodeURIComponent(msg)}`);
+  }
+  const imageFile = formData.get("review_image");
+  if (!(imageFile instanceof File) || imageFile.size === 0) {
+    const msg = "Photo of the problem is required for Reject.";
+    if (stay) throw new Error(msg);
+    redirect(`/carving/${jobId}?toast=${encodeURIComponent(msg)}`);
+  }
+  let reviewImagePath: string;
+  try {
+    reviewImagePath = await uploadReviewImage(admin, jobId, profile.id, imageFile);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (stay) throw new Error(msg);
+    redirect(`/carving/${jobId}?toast=${encodeURIComponent(msg)}`);
+  }
+
+  // Need the slab_requirement_id so we can flip the source slab's
+  // status too — the slab is out of the carving loop entirely.
+  const { data: jobRow } = await admin
+    .from("carving_items")
+    .select("slab_requirement_id")
+    .eq("id", jobId)
+    .maybeSingle();
+
+  const now = new Date().toISOString();
+  const { error: updateErr } = await admin
+    .from("carving_items")
+    .update({
+      completed_at: null,
+      review_notes: notes,
+      review_decision: "rejected",
+      review_rejected_at: now,
+      review_rejected_by: profile.id,
+      review_image_path: reviewImagePath,
+      // A rejected job's prior approval flags should NOT persist —
+      // the row is fully out of the active loop.
+      review_approved_at: null,
+      review_approved_by: null,
+      status: "carving_rejected",
+    })
+    .eq("id", jobId);
+  if (updateErr) {
+    const msg = `Reject save failed: ${updateErr.message}`;
+    if (stay) throw new Error(msg);
+    redirect(`/carving/${jobId}?toast=${encodeURIComponent(msg)}`);
+  }
+
+  // Also flip the source slab's status so it doesn't keep showing
+  // up in the Ready Sizes / Carving Jobs Active boards.
+  if (jobRow?.slab_requirement_id) {
+    await admin
+      .from("slab_requirements")
+      .update({
+        status: "carving_rejected",
+        updated_by: profile.id,
+        updated_at: now,
+      })
+      .eq("id", jobRow.slab_requirement_id);
+  }
+
+  await recordEvent(jobId, "rejected", profile.id, notes);
+  await logAudit(profile.id, "carving_rejected", "carving_item", jobId, {
+    notes,
+    image_path: reviewImagePath,
+  });
+
+  refreshAll();
+  if (stay) return;
+  redirect(`/carving/${jobId}?toast=${encodeURIComponent("Rejected — slab is out of the carving loop")}`);
 }
 
 // dispatchCarvingJobAction was removed — carved slabs now flow through

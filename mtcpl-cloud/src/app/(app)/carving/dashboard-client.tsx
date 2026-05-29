@@ -24,6 +24,7 @@ import { BulkAssignModal } from "./bulk-assign-modal";
 import {
   approveCarvingJobAction,
   rejectCarvingJobAction,
+  reworkCarvingJobAction,
   markCarvingStartedManuallyAction,
   markCarvingCompleteManuallyAction,
   getJobEvents,
@@ -3015,6 +3016,29 @@ function JobDetailPeek({
                 {job.slab_label}
               </div>
             )}
+            {/* Mig 080 — slab location bumped to the header so the
+                reviewer doesn't have to scroll past the timeline
+                to find it. Only renders when set. */}
+            {job.location && (
+              <div
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  marginTop: 8,
+                  padding: "4px 10px",
+                  background: "rgba(22,163,74,0.08)",
+                  border: "1px solid rgba(22,163,74,0.28)",
+                  borderRadius: 999,
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: "#15803d",
+                }}
+                title={`Slab location: ${job.location}`}
+              >
+                📍 {job.location}
+              </div>
+            )}
             {/* Link to the full detail page — that's where the
                 Workflow card lives (✅ Mark received, ↔ Transfer,
                 Re-tag work type, Manual start/complete). The peek
@@ -3025,6 +3049,7 @@ function JobDetailPeek({
               style={{
                 display: "inline-block",
                 marginTop: 8,
+                marginLeft: job.location ? 8 : 0,
                 fontSize: 12,
                 fontWeight: 600,
                 color: "var(--gold-dark)",
@@ -3133,11 +3158,9 @@ function JobDetailPeek({
             {job.review_approved_at && (
               <Field label="Approved">{fmtDateTime(job.review_approved_at)}</Field>
             )}
-            {job.location && (
-              <Field label="Location">
-                <span style={{ color: "#15803d", fontWeight: 600 }}>📍 {job.location}</span>
-              </Field>
-            )}
+            {/* Mig 080 — Location moved to the header pill (above
+                the Assignment section). The reviewer's eye now lands
+                on it immediately. */}
           </section>
 
           {/* Status banner — context-specific */}
@@ -3193,31 +3216,178 @@ function JobDetailPeek({
 // Awaiting Review tab instead of bouncing them to the detail page.
 function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => void }) {
   const router = useRouter();
-  const [pending, setPending] = useState<{ kind: "approve" | "reject" | null; err: string | null }>({ kind: null, err: null });
+  // Mig 080 — three outcomes. The selected mode drives which form
+  // is open and which server action gets called on submit. Image
+  // upload is OPTIONAL on approve, MANDATORY on rework + reject.
+  type Mode = "approve" | "rework" | "reject";
+  const [mode, setMode] = useState<Mode>("approve");
+  const [notes, setNotes] = useState("");
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  // Reject = two-step confirmation. confirmStage 0 → big "× Reject"
+  // button is the trigger; clicking takes us to stage 1 "are you
+  // sure?"; clicking that takes us to stage 2 "REALLY sure?";
+  // clicking that fires the server action. Any click on any other
+  // mode resets confirmStage to 0.
+  const [confirmStage, setConfirmStage] = useState<0 | 1 | 2>(0);
 
-  function submit(kind: "approve" | "reject", e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setPending({ kind, err: null });
-    const fd = new FormData(e.currentTarget);
+  // Reset state when the user flips between modes so a half-typed
+  // reason doesn't leak across (e.g. typing Approve notes then
+  // flipping to Reject shouldn't pre-fill Reject with the approve
+  // notes — those are different intents).
+  function switchMode(next: Mode) {
+    if (next === mode) return;
+    setMode(next);
+    setNotes("");
+    setImageFile(null);
+    setImagePreview(null);
+    setErr(null);
+    setConfirmStage(0);
+  }
+
+  function handleFile(file: File | null) {
+    setImageFile(file);
+    if (!file) {
+      setImagePreview(null);
+      return;
+    }
+    // Local object URL for the small preview thumb — cleaned up
+    // implicitly when the component unmounts / the file changes.
+    const url = URL.createObjectURL(file);
+    setImagePreview(url);
+  }
+
+  function doSubmit() {
+    setPending(true);
+    setErr(null);
+    const fd = new FormData();
+    fd.set("job_id", jobId);
     fd.set("stay", "1");
-    const action = kind === "approve" ? approveCarvingJobAction : rejectCarvingJobAction;
+    fd.set("notes", notes);
+    if (imageFile) fd.set("review_image", imageFile);
+    const action =
+      mode === "approve"
+        ? approveCarvingJobAction
+        : mode === "rework"
+          ? reworkCarvingJobAction
+          : rejectCarvingJobAction;
     action(fd)
       .then(() => {
-        // Close the modal first so the user sees the list refresh
-        // beneath them. router.refresh re-runs server data fetching
-        // for the current route — the row leaves Awaiting Review.
         onDone();
         router.refresh();
       })
-      .catch((err: unknown) => {
-        const msg = err instanceof Error ? err.message : String(err);
-        setPending({ kind: null, err: msg });
+      .catch((e: unknown) => {
+        const msg = e instanceof Error ? e.message : String(e);
+        setErr(msg);
+        setPending(false);
+        setConfirmStage(0); // re-arm if the failure was on the server side
       });
   }
 
+  function onSubmitClick(e: React.FormEvent) {
+    e.preventDefault();
+    if (pending) return;
+    // Client-side guards mirror the server's validation so the
+    // user gets immediate feedback (and so the file actually leaves
+    // the browser when expected).
+    if (mode === "rework" || mode === "reject") {
+      if (!notes.trim()) {
+        setErr(`${mode === "rework" ? "Rework" : "Rejection"} reason is required.`);
+        return;
+      }
+      if (!imageFile) {
+        setErr("Photo of the problem is required.");
+        return;
+      }
+    }
+    if (mode === "reject") {
+      // Two-step confirmation. Stage 0 → ask once. Stage 1 → ask
+      // again. Stage 2 → actually fire.
+      if (confirmStage === 0) {
+        setConfirmStage(1);
+        return;
+      }
+      if (confirmStage === 1) {
+        setConfirmStage(2);
+        return;
+      }
+    }
+    doSubmit();
+  }
+
+  const isMandatoryImage = mode === "rework" || mode === "reject";
+  const accent =
+    mode === "approve"
+      ? "var(--gold-dark)"
+      : mode === "rework"
+        ? "#b45309" // amber-700 — warning / try-again
+        : "#b91c1c"; // red-700 — critical / hard reject
+  const placeholder =
+    mode === "approve"
+      ? "Approval notes (optional)"
+      : mode === "rework"
+        ? "What needs to be fixed? (required)"
+        : "Why is this rejected? (required)";
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      {pending.err && (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {/* Three-up segmented control for the outcome */}
+      <div
+        role="tablist"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr 1fr",
+          gap: 6,
+          padding: 4,
+          background: "var(--bg)",
+          border: "1px solid var(--border)",
+          borderRadius: 10,
+        }}
+      >
+        {(
+          [
+            { key: "approve", icon: "✓", label: "Approve" },
+            { key: "rework", icon: "↻", label: "Rework needed" },
+            { key: "reject", icon: "✕", label: "Reject" },
+          ] as Array<{ key: Mode; icon: string; label: string }>
+        ).map((opt) => {
+          const active = mode === opt.key;
+          const tone =
+            opt.key === "approve"
+              ? "var(--gold-dark)"
+              : opt.key === "rework"
+                ? "#b45309"
+                : "#b91c1c";
+          return (
+            <button
+              key={opt.key}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => switchMode(opt.key)}
+              style={{
+                padding: "9px 10px",
+                fontSize: 13,
+                fontWeight: 700,
+                background: active ? "var(--surface)" : "transparent",
+                color: active ? tone : "var(--muted)",
+                border: `1.5px solid ${active ? tone : "transparent"}`,
+                borderRadius: 8,
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+                transition: "background 0.12s ease, border 0.12s ease",
+              }}
+            >
+              <span aria-hidden style={{ marginRight: 4 }}>{opt.icon}</span>
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {err && (
         <div
           role="alert"
           style={{
@@ -3229,79 +3399,185 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
             fontSize: 12,
           }}
         >
-          ⚠ {pending.err}
+          ⚠ {err}
         </div>
       )}
+
       <form
-        onSubmit={(e) => submit("approve", e)}
-        style={{ display: "flex", gap: 8, alignItems: "stretch" }}
+        onSubmit={onSubmitClick}
+        style={{ display: "flex", flexDirection: "column", gap: 10 }}
       >
-        <input type="hidden" name="job_id" value={jobId} />
-        <input type="hidden" name="stay" value="1" />
-        <input
-          type="text"
+        {/* Reason — textarea so multi-line explanations are easy
+            (Daksh: the carving head writes paragraphs sometimes). */}
+        <textarea
           name="notes"
-          placeholder="Approval notes (optional)"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          required={mode !== "approve"}
+          placeholder={placeholder}
+          rows={mode === "approve" ? 2 : 3}
           style={{
-            flex: 1,
             fontSize: 13,
             padding: "10px 12px",
             border: "1px solid var(--border)",
-            borderRadius: 6,
+            borderRadius: 8,
             background: "var(--bg)",
             color: "var(--text)",
+            resize: "vertical",
+            fontFamily: "inherit",
           }}
         />
-        <button
-          type="submit"
-          disabled={pending.kind !== null}
-          className="primary-button"
+
+        {/* Image picker — optional on approve, mandatory on the
+            other two. Shows a small preview when a file is chosen. */}
+        <div
           style={{
-            fontSize: 14,
-            padding: "10px 22px",
-            fontWeight: 700,
-            whiteSpace: "nowrap",
-            opacity: pending.kind !== null ? 0.6 : 1,
-          }}
-        >
-          {pending.kind === "approve" ? "Approving…" : "✔ Approve"}
-        </button>
-      </form>
-      <form
-        onSubmit={(e) => submit("reject", e)}
-        style={{ display: "flex", gap: 8, alignItems: "stretch" }}
-      >
-        <input type="hidden" name="job_id" value={jobId} />
-        <input type="hidden" name="stay" value="1" />
-        <input
-          type="text"
-          name="notes"
-          required
-          placeholder="Rejection reason (required)"
-          style={{
-            flex: 1,
-            fontSize: 13,
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
             padding: "10px 12px",
-            border: "1px solid var(--border)",
-            borderRadius: 6,
             background: "var(--bg)",
-            color: "var(--text)",
-          }}
-        />
-        <button
-          type="submit"
-          disabled={pending.kind !== null}
-          className="ghost-button danger-ghost"
-          style={{
-            fontSize: 14,
-            padding: "10px 22px",
-            fontWeight: 700,
-            whiteSpace: "nowrap",
-            opacity: pending.kind !== null ? 0.6 : 1,
+            border: `1px dashed ${imageFile ? accent : "var(--border)"}`,
+            borderRadius: 8,
           }}
         >
-          {pending.kind === "reject" ? "Rejecting…" : "✗ Reject"}
-        </button>
+          {imagePreview ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={imagePreview}
+              alt="Selected"
+              style={{
+                width: 56,
+                height: 56,
+                objectFit: "cover",
+                borderRadius: 6,
+                border: "1px solid var(--border)",
+              }}
+            />
+          ) : (
+            <div
+              style={{
+                width: 56,
+                height: 56,
+                background: "var(--surface)",
+                border: "1px dashed var(--border)",
+                borderRadius: 6,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 22,
+                color: "var(--muted)",
+              }}
+            >
+              📷
+            </div>
+          )}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>
+              {isMandatoryImage ? "Photo (required)" : "Photo (optional)"}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+              {imageFile
+                ? `${imageFile.name} · ${(imageFile.size / 1024).toFixed(0)} KB`
+                : "JPG / PNG / HEIC up to 5 MB"}
+            </div>
+          </div>
+          <label
+            style={{
+              padding: "7px 12px",
+              fontSize: 12,
+              fontWeight: 700,
+              background: "var(--surface)",
+              color: accent,
+              border: `1px solid ${accent}`,
+              borderRadius: 6,
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {imageFile ? "Change" : "Pick photo"}
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+              capture="environment"
+              onChange={(e) => handleFile(e.target.files?.[0] ?? null)}
+              style={{ display: "none" }}
+            />
+          </label>
+        </div>
+
+        {/* Reject two-step confirmation banner — only renders when
+            confirmStage > 0. Stage 1 = "are you sure?", stage 2 =
+            "REALLY sure?". Submit button text changes in step with
+            the stage. */}
+        {mode === "reject" && confirmStage > 0 && (
+          <div
+            role="alert"
+            style={{
+              padding: "10px 12px",
+              background: "rgba(185,28,28,0.10)",
+              border: "1.5px solid #b91c1c",
+              borderRadius: 8,
+              fontSize: 12.5,
+              color: "#7f1d1d",
+              fontWeight: 600,
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+            }}
+          >
+            <div>
+              {confirmStage === 1
+                ? "⚠ Are you sure? Rejecting removes the slab from the carving loop entirely."
+                : "🛑 Final check — REALLY reject? This cannot be undone from here. The slab moves to the Rejected bucket and the owner gets a tasks alert."}
+            </div>
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          {mode === "reject" && confirmStage > 0 && (
+            <button
+              type="button"
+              onClick={() => setConfirmStage(0)}
+              disabled={pending}
+              className="ghost-button"
+              style={{ fontSize: 13, padding: "10px 16px" }}
+            >
+              Cancel
+            </button>
+          )}
+          <button
+            type="submit"
+            disabled={pending}
+            className={mode === "approve" ? "primary-button" : "ghost-button"}
+            style={{
+              fontSize: 14,
+              padding: "10px 22px",
+              fontWeight: 700,
+              whiteSpace: "nowrap",
+              opacity: pending ? 0.6 : 1,
+              background: mode === "approve" ? undefined : "transparent",
+              border: `1.5px solid ${accent}`,
+              color: mode === "approve" ? undefined : accent,
+            }}
+          >
+            {pending
+              ? mode === "approve"
+                ? "Approving…"
+                : mode === "rework"
+                  ? "Sending back…"
+                  : "Rejecting…"
+              : mode === "approve"
+                ? "✓ Approve"
+                : mode === "rework"
+                  ? "↻ Send back for rework"
+                  : confirmStage === 0
+                    ? "✕ Reject"
+                    : confirmStage === 1
+                      ? "✕ Yes, reject"
+                      : "🛑 REALLY reject"}
+          </button>
+        </div>
       </form>
     </div>
   );
