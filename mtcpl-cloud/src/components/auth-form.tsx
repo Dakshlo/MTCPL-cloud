@@ -89,16 +89,18 @@ export function AuthForm() {
         type: "sms",
       });
       if (err) throw err;
-      // Daksh May 2026 — show the success flourish before redirect.
-      // Pending → false, succeeded → true triggers the overlay; the
-      // hard navigation fires 1100 ms later so the user actually
-      // sees the rainbow-check animation. Auth cookie is already
-      // set by verifyOtp so the delay is purely cosmetic.
+      // Daksh May 2026 round 2 — full-card success takeover. The
+      // form swaps out entirely: OTP inputs disappear, a centered
+      // "Verified successfully" sits above a pulsing orange-glow
+      // rounded square with a white spinning circle inside. Holds
+      // for 2000 ms so dad clearly sees the flourish before the
+      // page navigates. Auth cookie was already set by verifyOtp
+      // so the delay is purely cosmetic.
       setPending(false);
       setSucceeded(true);
       setTimeout(() => {
         window.location.href = "/";
-      }, 1100);
+      }, 2000);
       return;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Invalid or expired code. Try again.");
@@ -125,28 +127,38 @@ export function AuthForm() {
         @keyframes mtcpl-spin {
           to { transform: rotate(360deg); }
         }
-        @keyframes mtcpl-rainbow-sweep {
-          0%   { background-position: 0% 50%; }
-          100% { background-position: 200% 50%; }
-        }
-        @keyframes mtcpl-check-pop {
-          0%   { transform: scale(0) rotate(-45deg); opacity: 0; }
-          50%  { transform: scale(1.25) rotate(0deg); opacity: 1; }
-          80%  { transform: scale(0.92) rotate(0deg); opacity: 1; }
-          100% { transform: scale(1) rotate(0deg); opacity: 1; }
-        }
         @keyframes mtcpl-fade-up {
           from { transform: translateY(8px); opacity: 0; }
           to   { transform: translateY(0); opacity: 1; }
         }
-        @keyframes mtcpl-card-pulse {
-          0%, 100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0); }
-          50%      { box-shadow: 0 0 0 8px rgba(99, 102, 241, 0.18); }
+        @keyframes mtcpl-success-pop {
+          0%   { transform: scale(0.4); opacity: 0; }
+          60%  { transform: scale(1.08); opacity: 1; }
+          100% { transform: scale(1); opacity: 1; }
         }
-        @keyframes mtcpl-digit-collide {
-          0%   { transform: translateX(0); opacity: 1; }
-          60%  { transform: translateX(var(--collide-dx, 0)); opacity: 0.4; }
-          100% { transform: translateX(var(--collide-dx, 0)); opacity: 0; }
+        /* Daksh May 2026 round 2 — the success-glow box. Pulses an
+         * orange-red shadow outward while a white loader spins
+         * inside. Matches the Instagram reel dad referenced:
+         * "verified successfully" sits above, a glowing rounded
+         * square with a spinner is the focal point. */
+        @keyframes mtcpl-success-glow {
+          0%, 100% {
+            box-shadow:
+              0 0 32px 8px rgba(249, 115, 22, 0.45),
+              0 0 64px 16px rgba(220, 38, 38, 0.25),
+              inset 0 0 24px 4px rgba(249, 115, 22, 0.30);
+            transform: scale(1);
+          }
+          50% {
+            box-shadow:
+              0 0 48px 12px rgba(249, 115, 22, 0.65),
+              0 0 96px 24px rgba(220, 38, 38, 0.40),
+              inset 0 0 32px 6px rgba(249, 115, 22, 0.45);
+            transform: scale(1.04);
+          }
+        }
+        @keyframes mtcpl-aura-rotate {
+          to { transform: rotate(360deg); }
         }
         .mtcpl-spinner {
           display: inline-block;
@@ -159,24 +171,89 @@ export function AuthForm() {
           vertical-align: -2px;
           margin-right: 8px;
         }
-        .mtcpl-otp-input--success {
-          background: linear-gradient(
-            90deg,
-            #f87171,
-            #fbbf24,
-            #34d399,
-            #60a5fa,
-            #c084fc,
-            #f87171
-          );
-          background-size: 200% 100%;
-          color: transparent !important;
-          -webkit-text-fill-color: transparent;
-          animation: mtcpl-rainbow-sweep 1.1s linear;
-          border-color: transparent !important;
-          transition: background 0.18s ease;
-        }
       `}</style>
+
+      {/* ── Full-card success takeover ─────────────────────────── */}
+      {succeeded && (
+        <div
+          aria-live="polite"
+          aria-label="Verified successfully — taking you in"
+          style={{
+            position: "absolute",
+            inset: -36, // cancel the card's 36-px padding so the
+                        // takeover fills the whole form-card area
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 28,
+            padding: "60px 36px",
+            background: "var(--surface, #fff)",
+            borderRadius: 16,
+            zIndex: 10,
+            animation: "mtcpl-fade-up 0.32s ease-out both",
+          }}
+        >
+          <h2
+            style={{
+              fontSize: 22,
+              fontWeight: 800,
+              color: "var(--text)",
+              letterSpacing: "-0.01em",
+              margin: 0,
+              textAlign: "center",
+              animation: "mtcpl-fade-up 0.4s 0.06s both",
+            }}
+          >
+            Verified successfully
+          </h2>
+          {/* The glowing focal box. Rounded square, orange-red
+              pulsing aura, white loader spinning inside. */}
+          <div
+            style={{
+              position: "relative",
+              width: 96,
+              height: 96,
+              borderRadius: 22,
+              background:
+                "linear-gradient(135deg, #f97316 0%, #ea580c 50%, #dc2626 100%)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              animation:
+                "mtcpl-success-pop 0.48s cubic-bezier(0.34, 1.56, 0.64, 1) both, mtcpl-success-glow 1.8s ease-in-out 0.5s infinite",
+            }}
+          >
+            {/* Inner spinning loader — chunky white ring with one
+                missing segment, rotates 0.8 s/cycle. */}
+            <span
+              aria-hidden
+              style={{
+                display: "block",
+                width: 44,
+                height: 44,
+                border: "4px solid rgba(255, 255, 255, 0.92)",
+                borderTopColor: "transparent",
+                borderRadius: "50%",
+                animation: "mtcpl-aura-rotate 0.8s linear infinite",
+              }}
+            />
+          </div>
+          <p
+            style={{
+              fontSize: 12.5,
+              color: "var(--muted)",
+              margin: 0,
+              letterSpacing: "0.04em",
+              textTransform: "uppercase",
+              fontWeight: 600,
+              animation: "mtcpl-fade-up 0.4s 0.12s both",
+            }}
+          >
+            Taking you in…
+          </p>
+        </div>
+      )}
 
       <h2 style={{ marginBottom: 6, fontSize: 22, fontWeight: 800, letterSpacing: "-0.01em" }}>
         Sign in to MTCPL
@@ -288,7 +365,7 @@ export function AuthForm() {
             </button>
           </div>
 
-          <label className="stack" style={{ position: "relative" }}>
+          <label className="stack">
             <span>6-digit OTP</span>
             <input
               type="text"
@@ -300,7 +377,6 @@ export function AuthForm() {
               inputMode="numeric"
               pattern="[0-9]*"
               disabled={succeeded}
-              className={succeeded ? "mtcpl-otp-input--success" : undefined}
               style={{
                 letterSpacing: 12,
                 fontSize: 24,
@@ -314,49 +390,6 @@ export function AuthForm() {
               }}
               autoFocus
             />
-            {/* Success-state overlay — sits above the input, shows
-                the big check pop + welcome message. Pointer events
-                pass through so a screen reader still sees the input
-                underneath. */}
-            {succeeded && (
-              <div
-                aria-live="polite"
-                style={{
-                  position: "absolute",
-                  inset: "26px 0 0 0",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 12,
-                  pointerEvents: "none",
-                  fontWeight: 800,
-                  fontSize: 18,
-                  color: "#fff",
-                  textShadow: "0 1px 2px rgba(0,0,0,0.18)",
-                }}
-              >
-                <span
-                  aria-hidden
-                  style={{
-                    display: "inline-flex",
-                    width: 28,
-                    height: 28,
-                    borderRadius: "50%",
-                    background: "rgba(255,255,255,0.95)",
-                    color: "#16a34a",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: 18,
-                    animation: "mtcpl-check-pop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both",
-                  }}
-                >
-                  ✓
-                </span>
-                <span style={{ animation: "mtcpl-fade-up 0.4s 0.18s both" }}>
-                  Welcome back!
-                </span>
-              </div>
-            )}
           </label>
 
           <button
@@ -368,13 +401,10 @@ export function AuthForm() {
               padding: "11px 16px",
               fontSize: 14,
               fontWeight: 700,
-              background: succeeded ? "#16a34a" : undefined,
               transition: "background 0.2s ease, opacity 0.15s ease",
             }}
           >
-            {succeeded ? (
-              <>✓ Signed in — taking you in…</>
-            ) : pending ? (
+            {pending ? (
               <>
                 <span className="mtcpl-spinner" />
                 Verifying…

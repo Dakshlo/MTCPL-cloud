@@ -24,7 +24,10 @@ export default async function LoginPage({
 
   return (
     <main className="login-shell">
-      {/* Left panel — dark branded */}
+      {/* Left panel — dark branded. Daksh May 2026 — refreshed
+          copy + per-department cards now that we run four
+          departments end-to-end (Production / Finance / Inventory
+          / Invoicing). */}
       <div className="login-left">
         <img
           src="/logo-dark.png"
@@ -33,22 +36,60 @@ export default async function LoginPage({
         />
 
         <div className="login-left-copy">
-          <h2>Stone Management,<br />Brought Online</h2>
+          <h2>Four departments.<br />One platform.</h2>
           <p>
-            Track every block from yard to slab. Generate cutting plans, manage workflow, and keep your team in sync.
+            From yard intake to dispatch, billing to inventory — every
+            team works from the same source of truth, on phone,
+            tablet, or desktop.
           </p>
         </div>
 
-        <div className="login-features">
+        <div className="login-departments">
           {[
-            "Block inventory with CFT tracking",
-            "Automated cut plan generation",
-            "Real-time cutting workflow",
-            "Role-based access for your team"
-          ].map(f => (
-            <div key={f} className="login-feature">
-              <span className="login-feature-dot" />
-              {f}
+            {
+              key: "production",
+              icon: "🏭",
+              name: "Production",
+              tone: "#c9a14a",
+              copy: "Blocks · Cutting · Carving · Dispatch",
+            },
+            {
+              key: "finance",
+              icon: "💰",
+              name: "Finance",
+              tone: "#5e8c4e",
+              copy: "Bills · Vendor advances · Pay Today · Audits",
+            },
+            {
+              key: "inventory",
+              icon: "📦",
+              name: "Inventory",
+              tone: "#c87850",
+              copy: "Scaffolding · Sites · Stock movements",
+            },
+            {
+              key: "invoicing",
+              icon: "📄",
+              name: "Invoicing",
+              tone: "#7c3aed",
+              copy: "Generate · Track · GST-ready",
+            },
+          ].map((d) => (
+            <div key={d.key} className="login-dept-card">
+              <span
+                className="login-dept-icon"
+                style={{
+                  background: `${d.tone}22`,
+                  color: d.tone,
+                }}
+                aria-hidden
+              >
+                {d.icon}
+              </span>
+              <div className="login-dept-text">
+                <div className="login-dept-name">{d.name}</div>
+                <div className="login-dept-copy">{d.copy}</div>
+              </div>
             </div>
           ))}
         </div>
