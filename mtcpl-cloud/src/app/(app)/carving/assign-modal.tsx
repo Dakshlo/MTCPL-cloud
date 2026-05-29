@@ -297,6 +297,28 @@ export function AssignModal({
   // stored as empty string (NULL on server) so we don't pin
   // existing assigns to 3-axis silently. 4 / 5 are stored as-is.
   const requiresCncAxesForm = cncAxesReq === 0 ? "" : String(cncAxesReq);
+  // Mig 079 — does the currently-selected vendor still satisfy the
+  // (workType, axes) gate? Used to disable the Assign button so
+  // a stale selection (e.g. user picked Alkesh under "Any", then
+  // flipped to "4-axis") can't be submitted to the server.
+  const selectedVendorOk = selectedVendor
+    ? selectedVendor.vendor_type === "Manual" ||
+      vendorMatchesReq(selectedVendor, workType, cncAxesReq).hasAtAll
+    : false;
+  // When the (workType, axes) gate changes and the currently
+  // selected vendor no longer qualifies, drop the selection so the
+  // user can't keep a stale tick into submit. The auto-recommend
+  // effect above will then move them to a qualifying vendor (or
+  // leave the picker empty if none qualify).
+  useEffect(() => {
+    if (selectedVendor && !selectedVendorOk) {
+      setVendorId("");
+    }
+    // Intentionally don't depend on `selectedVendor` itself — that
+    // re-renders on every selection change. We only care about the
+    // gate flipping (workType / cncAxesReq / vendors list).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workType, cncAxesReq, vendors]);
 
   return (
     <div
@@ -612,9 +634,22 @@ export function AssignModal({
                     // Now the badge persists so you can see "yes,
                     // you picked the recommended one".
                     const isRecommended = recommendation.vendorId === v.id;
+                    // Mig 079 — short reason why this vendor is
+                    // blocked (used for tooltip + tiny inline label
+                    // beside the name).
+                    const blockReason = !hasTypeInFleet
+                      ? workType === "lathe"
+                        ? "No lathe in this vendor's fleet"
+                        : cncAxesReq === 4
+                          ? "No 4-axis CNC in this vendor's fleet"
+                          : cncAxesReq === 5
+                            ? "No 5-axis CNC in this vendor's fleet"
+                            : "No CNC in this vendor's fleet"
+                      : null;
                     return (
                       <label
                         key={v.id}
+                        title={blockReason ?? undefined}
                         style={{
                           display: "flex",
                           alignItems: "center",
@@ -634,8 +669,15 @@ export function AssignModal({
                                 : "var(--border)"
                           }`,
                           borderRadius: 8,
-                          cursor: "pointer",
-                          opacity: hasTypeInFleet ? 1 : 0.5,
+                          // Mig 079 — vendors without a matching
+                          // machine are visually grayscaled AND
+                          // unselectable (cursor: not-allowed +
+                          // disabled radio below). Picks like dad
+                          // describing the bug (4-axis to Alkesh)
+                          // can no longer slip through.
+                          cursor: hasTypeInFleet ? "pointer" : "not-allowed",
+                          opacity: hasTypeInFleet ? 1 : 0.45,
+                          filter: hasTypeInFleet ? undefined : "grayscale(0.5)",
                           transition: "border-color 0.12s, background 0.12s",
                         }}
                       >
@@ -645,7 +687,11 @@ export function AssignModal({
                           value={v.id}
                           checked={isSelected}
                           onChange={() => setVendorId(v.id)}
-                          style={{ cursor: "pointer", flexShrink: 0 }}
+                          disabled={!hasTypeInFleet}
+                          style={{
+                            cursor: hasTypeInFleet ? "pointer" : "not-allowed",
+                            flexShrink: 0,
+                          }}
                         />
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div
@@ -1053,8 +1099,19 @@ export function AssignModal({
               <button
                 type="submit"
                 className="primary-button"
-                disabled={!vendorId}
+                // Mig 079 — also block when the picked vendor doesn't
+                // satisfy the (workType, axes) gate; server-side
+                // validation would catch it but blocking here saves
+                // a round-trip + keeps the slab state clean.
+                disabled={!vendorId || !selectedVendorOk}
                 style={{ flex: 1 }}
+                title={
+                  !vendorId
+                    ? "Pick a vendor first"
+                    : !selectedVendorOk
+                      ? "This vendor doesn't have a matching machine — pick another vendor or change the CNC axes requirement"
+                      : undefined
+                }
               >
                 Assign &amp; queue
               </button>

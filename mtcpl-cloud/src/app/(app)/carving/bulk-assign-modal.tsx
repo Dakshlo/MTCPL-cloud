@@ -224,6 +224,19 @@ export function BulkAssignModal({
   const requiresMachineType = workType === "lathe" ? "lathe" : "";
   // Mig 079 — requires_cnc_axes hidden form value (mirrors assign-modal).
   const requiresCncAxesForm = cncAxesReq === 0 ? "" : String(cncAxesReq);
+  // Mig 079 — does the currently selected vendor still satisfy the
+  // gate? Mirrors the single-slab modal so a stale tick can't slip
+  // into submit. Manual vendors skip the gate (no machines).
+  const selectedVendorOk = selectedVendor
+    ? selectedVendor.vendor_type === "Manual" ||
+      vendorMatchesReq(selectedVendor, workType, cncAxesReq).hasAtAll
+    : false;
+  useEffect(() => {
+    if (selectedVendor && !selectedVendorOk) {
+      setVendorId("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workType, cncAxesReq, vendors]);
 
   // Detect mirror-pairs in the selection — same label + L×W×T means
   // these slabs are pair-eligible, which gives the carving head
@@ -516,6 +529,7 @@ export function BulkAssignModal({
                             isManual
                             onSelect={() => setVendorId(v.id)}
                             workType={workType}
+                            cncAxesReq={cncAxesReq}
                           />
                         </Fragment>
                       );
@@ -527,6 +541,7 @@ export function BulkAssignModal({
                         isSelected={isSelected}
                         onSelect={() => setVendorId(v.id)}
                         workType={workType}
+                        cncAxesReq={cncAxesReq}
                         isRecommended={recommendation.vendorId === v.id}
                         recommendationReason={recommendation.reason}
                       />
@@ -815,7 +830,16 @@ export function BulkAssignModal({
               <button
                 type="submit"
                 className="primary-button"
-                disabled={!vendorId}
+                // Mig 079 — also block when the picked vendor doesn't
+                // satisfy the (workType, axes) gate.
+                disabled={!vendorId || !selectedVendorOk}
+                title={
+                  !vendorId
+                    ? "Pick a vendor first"
+                    : !selectedVendorOk
+                      ? "This vendor doesn't have a matching machine — pick another vendor or change the CNC axes requirement"
+                      : undefined
+                }
                 style={{ flex: 1, fontSize: 14, padding: "12px 16px", fontWeight: 700 }}
               >
                 📦 Assign {slabs.length} slab{slabs.length !== 1 ? "s" : ""}
@@ -837,6 +861,7 @@ function VendorRow({
   isManual,
   onSelect,
   workType,
+  cncAxesReq,
   isRecommended,
   recommendationReason,
 }: {
@@ -845,6 +870,7 @@ function VendorRow({
   isManual?: boolean;
   onSelect: () => void;
   workType: WorkType;
+  cncAxesReq: CncAxesReq;
   isRecommended?: boolean;
   recommendationReason?: string;
 }) {
@@ -897,10 +923,23 @@ function VendorRow({
       </label>
     );
   }
+  // Mig 079 — honor the (workType, axes) gate. Vendor without a
+  // matching machine is grayscaled AND not selectable. Keep `br`
+  // around for the fleet-summary "🏭 N CNC · M Lathe" line below.
   const br = typeBreakdown(v);
-  const hasTypeInFleet = (workType === "lathe" ? br.latheTotal : br.multiTotal) > 0;
+  const hasTypeInFleet = vendorMatchesReq(v, workType, cncAxesReq).hasAtAll;
+  const blockReason = !hasTypeInFleet
+    ? workType === "lathe"
+      ? "No lathe in this vendor's fleet"
+      : cncAxesReq === 4
+        ? "No 4-axis CNC in this vendor's fleet"
+        : cncAxesReq === 5
+          ? "No 5-axis CNC in this vendor's fleet"
+          : "No CNC in this vendor's fleet"
+    : null;
   return (
     <label
+      title={blockReason ?? undefined}
       style={{
         display: "flex",
         alignItems: "center",
@@ -919,8 +958,9 @@ function VendorRow({
               : "var(--border)"
         }`,
         borderRadius: 8,
-        cursor: "pointer",
-        opacity: hasTypeInFleet ? 1 : 0.5,
+        cursor: hasTypeInFleet ? "pointer" : "not-allowed",
+        opacity: hasTypeInFleet ? 1 : 0.45,
+        filter: hasTypeInFleet ? undefined : "grayscale(0.5)",
       }}
     >
       <input
@@ -929,7 +969,11 @@ function VendorRow({
         value={v.id}
         checked={isSelected}
         onChange={onSelect}
-        style={{ cursor: "pointer", flexShrink: 0 }}
+        disabled={!hasTypeInFleet}
+        style={{
+          cursor: hasTypeInFleet ? "pointer" : "not-allowed",
+          flexShrink: 0,
+        }}
       />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>

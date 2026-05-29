@@ -826,6 +826,28 @@ export async function assignCarvingJobAction(formData: FormData) {
       finalRequiresMachineType === "single_head");
   const finalRequiresCncAxes = isCncFlat ? requiresCncAxes : null;
 
+  // Mig 079 — vendor capability gate. If the assigner picked a
+  // specific axis, the vendor MUST have at least one active CNC
+  // machine of that axis count. Without this, dad's flow was
+  // "pick 4-axis → assign to Alkesh → load action rejects". Now
+  // we refuse the assignment up-front so the slab never moves and
+  // the toast is on the assign surface where the assigner is
+  // looking, not the cockpit they don't see.
+  if (finalRequiresCncAxes != null) {
+    const { data: matchingMachines } = await admin
+      .from("cnc_machines")
+      .select("id")
+      .eq("vendor_id", vendorId)
+      .eq("is_active", true)
+      .eq("cnc_axes", finalRequiresCncAxes)
+      .limit(1);
+    if (!matchingMachines || matchingMachines.length === 0) {
+      const vendorName = (vendor as { name: string }).name;
+      const friendly = `${vendorName} has no ${finalRequiresCncAxes}-axis CNC. Pick a different vendor or change the CNC axes requirement to "Any".`;
+      redirect(`/carving?toast=${encodeURIComponent(friendly)}`);
+    }
+  }
+
   // Race guard: slab must currently be cut_done
   const { data: slabRow, error: slabErr } = await admin
     .from("slab_requirements")
@@ -996,6 +1018,25 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
       finalRequiresMachineType === "multi_head_2" ||
       finalRequiresMachineType === "single_head");
   const finalRequiresCncAxesBatch = isCncFlatBatch ? requiresCncAxesBatch : null;
+
+  // Mig 079 — same vendor-capability gate as the single-slab action.
+  // Refuses the whole batch up-front if the vendor doesn't have a
+  // matching axis machine; the toast surfaces on /carving where
+  // the assigner is looking.
+  if (finalRequiresCncAxesBatch != null) {
+    const { data: matchingMachines } = await admin
+      .from("cnc_machines")
+      .select("id")
+      .eq("vendor_id", vendorId)
+      .eq("is_active", true)
+      .eq("cnc_axes", finalRequiresCncAxesBatch)
+      .limit(1);
+    if (!matchingMachines || matchingMachines.length === 0) {
+      const vendorName = (vendor as { name: string }).name;
+      const friendly = `${vendorName} has no ${finalRequiresCncAxesBatch}-axis CNC. Pick a different vendor or change the CNC axes requirement to "Any".`;
+      redirect(`/carving?toast=${encodeURIComponent(friendly)}`);
+    }
+  }
 
   // One batch_id for every slab in this assignment. Downstream UIs
   // group slabs sharing a batch_id with the same colour stripe.
