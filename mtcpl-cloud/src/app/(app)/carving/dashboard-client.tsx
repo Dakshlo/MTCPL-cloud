@@ -95,6 +95,8 @@ type JobRow = {
   /** Migration 024 — work-type tag for CNC jobs. 'lathe' = must go
    *  on a lathe machine. NULL = flat-panel default (multi-head). */
   requires_machine_type?: string | null;
+  /** Mig 079 — axis requirement on CNC jobs. NULL = "Any CNC". */
+  requires_cnc_axes?: number | null;
   /** Migration 020 — last known physical location set by the cutter
    *  operator at finish-block time (e.g. "Yard 2"). Shown next to the
    *  🚚 IN TRANSIT pill so people know where to fetch the slab. */
@@ -2523,6 +2525,28 @@ function JobsByTemple({
                           🌀 LATHE
                         </span>
                       )}
+                      {/* Mig 079 — 4-axis / 5-axis badges. Only
+                          show on non-lathe jobs with an explicit
+                          axis requirement. NULL ("Any CNC") gets
+                          no badge — that's the default and would
+                          clutter every card. */}
+                      {j.requires_machine_type !== "lathe" &&
+                        (j.requires_cnc_axes === 4 || j.requires_cnc_axes === 5) && (
+                          <span
+                            style={{
+                              fontSize: 9,
+                              padding: "1px 6px",
+                              borderRadius: 3,
+                              background: "rgba(180,115,51,0.18)",
+                              color: "#7c4a1f",
+                              fontWeight: 800,
+                              letterSpacing: "0.05em",
+                            }}
+                            title={`Must be loaded on a ${j.requires_cnc_axes}-axis CNC`}
+                          >
+                            {j.requires_cnc_axes}-AXIS
+                          </span>
+                        )}
                       {j.vendor_type === "Manual" && (
                         <span
                           style={{
