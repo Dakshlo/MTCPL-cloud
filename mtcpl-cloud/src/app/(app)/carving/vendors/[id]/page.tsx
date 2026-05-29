@@ -14,7 +14,7 @@ export default async function VendorDetailPage({ params }: { params: Promise<{ i
 
   const [{ data: vendor }, { data: machines }, { data: jobs }] = await Promise.all([
     admin.from("vendors").select("id, name, vendor_type, is_active, dropoff_location").eq("id", id).single(),
-    admin.from("cnc_machines").select("id, machine_code, operator_name, is_active, machine_type, max_length_in, max_width_in, max_thickness_in, purchase_price, purchase_date, current_book_value, book_value_as_of, depreciation_rate_pct, salvage_value").eq("vendor_id", id).order("machine_code"),
+    admin.from("cnc_machines").select("id, machine_code, operator_name, is_active, machine_type, cnc_axes, max_length_in, max_width_in, max_thickness_in, purchase_price, purchase_date, current_book_value, book_value_as_of, depreciation_rate_pct, salvage_value").eq("vendor_id", id).order("machine_code"),
     admin.from("carving_items").select("id, status, assigned_at, due_at, slab_requirement_id").eq("vendor_id", id).order("assigned_at", { ascending: false }).limit(50),
   ]);
 

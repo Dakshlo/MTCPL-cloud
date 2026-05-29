@@ -473,33 +473,43 @@ export async function createVendorAction(formData: FormData) {
         machine_code: string;
         operator_name?: string;
         machine_type?: "single_head" | "multi_head_2" | "lathe";
+        cnc_axes?: number | null;
         max_length_in?: number | string | null;
         max_width_in?: number | string | null;
         max_thickness_in?: number | string | null;
       }>;
       const rows = machines
         .filter((m) => m.machine_code.trim())
-        .map((m) => ({
-          // Belt-and-suspenders: generate the UUID app-side so the
-          // insert succeeds even if the cnc_machines.id column is
-          // missing its gen_random_uuid() default on the target DB.
-          // Migration 022 also restores the default — this is just a
-          // second line of defence.
-          id: crypto.randomUUID(),
-          vendor_id: vendor.id,
-          machine_code: m.machine_code.trim(),
-          operator_name: m.operator_name?.trim() || null,
-          // Default new machines to multi_head_2 — the fleet has no
-          // single_head machines in real use. Migration 024 keeps
-          // single_head as a legal enum value for any legacy rows.
-          machine_type: m.machine_type ?? "multi_head_2",
-          // Per-machine dimension caps from migration 024. Empty
-          // string / undefined / null → NULL (no limit).
-          max_length_in: parseDim(m.max_length_in),
-          max_width_in: parseDim(m.max_width_in),
-          max_thickness_in: parseDim(m.max_thickness_in),
-          is_active: true,
-        }));
+        .map((m) => {
+          const type = m.machine_type ?? "multi_head_2";
+          // Mig 079 — Lathe never carries cnc_axes (axis count
+          // doesn't apply). CNC types default to 3-axis if the
+          // form didn't send a value, to match the existing fleet's
+          // backfilled behaviour.
+          const axes =
+            type === "lathe"
+              ? null
+              : m.cnc_axes === 4 || m.cnc_axes === 5
+                ? m.cnc_axes
+                : 3;
+          return {
+            // Belt-and-suspenders: generate the UUID app-side so the
+            // insert succeeds even if the cnc_machines.id column is
+            // missing its gen_random_uuid() default on the target DB.
+            id: crypto.randomUUID(),
+            vendor_id: vendor.id,
+            machine_code: m.machine_code.trim(),
+            operator_name: m.operator_name?.trim() || null,
+            machine_type: type,
+            cnc_axes: axes,
+            // Per-machine dimension caps from migration 024. Empty
+            // string / undefined / null → NULL (no limit).
+            max_length_in: parseDim(m.max_length_in),
+            max_width_in: parseDim(m.max_width_in),
+            max_thickness_in: parseDim(m.max_thickness_in),
+            is_active: true,
+          };
+        });
       if (rows.length > 0) {
         const { error: mErr } = await admin.from("cnc_machines").insert(rows);
         if (mErr) throw new Error(mErr.message);
@@ -570,6 +580,7 @@ export async function updateVendorAction(formData: FormData) {
         machine_code: string;
         operator_name?: string;
         machine_type?: "single_head" | "multi_head_2" | "lathe";
+        cnc_axes?: number | null;
         max_length_in?: number | string | null;
         max_width_in?: number | string | null;
         max_thickness_in?: number | string | null;
@@ -615,14 +626,24 @@ export async function updateVendorAction(formData: FormData) {
         .map((m) => {
           const code = m.machine_code.trim();
           const id = m.id || codeToExistingId.get(code) || crypto.randomUUID();
+          const type = m.machine_type ?? "multi_head_2";
+          // Mig 079 — same axis logic as createVendorAction. Lathes
+          // get NULL; CNCs default to 3-axis if the form didn't
+          // send a valid value. Stays in sync with the row's
+          // machine_type even if a user flips between CNC ↔ Lathe.
+          const axes =
+            type === "lathe"
+              ? null
+              : m.cnc_axes === 4 || m.cnc_axes === 5
+                ? m.cnc_axes
+                : 3;
           return {
             id,
             vendor_id: vendorId,
             machine_code: code,
             operator_name: m.operator_name?.trim() || null,
-            // Default new machines to multi_head_2 — the fleet only
-            // has multi_head_2 + lathe in real use.
-            machine_type: m.machine_type ?? "multi_head_2",
+            machine_type: type,
+            cnc_axes: axes,
             // Per-machine dimension caps (migration 024).
             max_length_in: parseDim(m.max_length_in),
             max_width_in: parseDim(m.max_width_in),

@@ -5,6 +5,8 @@ import { createVendorAction, updateVendorAction } from "../actions";
 
 type MachineType = "single_head" | "multi_head_2" | "lathe";
 
+type CncAxes = 3 | 4 | 5;
+
 type Machine = {
   id?: string;
   machine_code: string;
@@ -14,6 +16,13 @@ type Machine = {
    *  multi_head_2 (couples two heads on identical slabs — DEFAULT),
    *  or lathe (turning machines for cylindrical work). */
   machine_type?: MachineType;
+  /** Migration 079 — CNC axis subtype: 3-axis (default), 4-axis,
+   *  or 5-axis. Stays NULL for Lathe (axis count doesn't apply).
+   *  All three CNC axis counts share the multi_head_2 pairing
+   *  logic — they're all 2-head, the cnc_axes column is just a
+   *  capability facet that gates which slabs land on which
+   *  machine at load time. */
+  cnc_axes?: CncAxes | null;
   /** Migration 024 — per-machine workable-area envelope in inches.
    *  Empty / null → no limit. Slab beyond any cap can't load. */
   max_length_in?: number | string | null;
@@ -63,6 +72,10 @@ export function VendorForm({
         operator_name: "",
         is_active: true,
         machine_type: "multi_head_2",
+        // Mig 079 — new CNC machines default to 3-axis (the
+        // overwhelming majority of the fleet). Lathes get NULL
+        // automatically when their machine_type flips below.
+        cnc_axes: 3,
         max_length_in: null,
         max_width_in: null,
         max_thickness_in: null,
@@ -223,7 +236,21 @@ export function VendorForm({
                       <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Type</span>
                       <select
                         value={m.machine_type ?? "multi_head_2"}
-                        onChange={(e) => updateMachine(idx, { machine_type: e.target.value as MachineType })}
+                        onChange={(e) => {
+                          const nextType = e.target.value as MachineType;
+                          // Mig 079 — keep cnc_axes consistent
+                          // with machine_type. Flipping to lathe
+                          // clears the axis count (NULL), flipping
+                          // back to a CNC type re-applies 3-axis
+                          // as the default.
+                          const patch: Partial<Machine> = { machine_type: nextType };
+                          if (nextType === "lathe") {
+                            patch.cnc_axes = null;
+                          } else if (m.cnc_axes == null) {
+                            patch.cnc_axes = 3;
+                          }
+                          updateMachine(idx, patch);
+                        }}
                         style={{ fontSize: 12, padding: "5px 7px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--surface)", color: "var(--text)" }}
                         title="2-head: two heads on identical slabs (also runs solo with one head off). Lathe: turning machine for cylindrical work."
                       >
@@ -239,6 +266,32 @@ export function VendorForm({
                         )}
                       </select>
                     </label>
+                    {/* Mig 079 — CNC axes dropdown. Hidden when the
+                        machine is a lathe (axis count doesn't
+                        apply). 3-axis is the default for every
+                        existing CNC; 4 and 5 are new options Daksh
+                        added for the new generation machines. */}
+                    {(m.machine_type ?? "multi_head_2") !== "lathe" && (
+                      <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                        <span
+                          style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}
+                          title="Axis count of this CNC. Slabs assigned with a specific axis requirement can only load on a matching machine."
+                        >
+                          Axes
+                        </span>
+                        <select
+                          value={String(m.cnc_axes ?? 3)}
+                          onChange={(e) =>
+                            updateMachine(idx, { cnc_axes: Number(e.target.value) as CncAxes })
+                          }
+                          style={{ fontSize: 12, padding: "5px 7px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--surface)", color: "var(--text)" }}
+                        >
+                          <option value="3">3-axis (default)</option>
+                          <option value="4">4-axis</option>
+                          <option value="5">5-axis</option>
+                        </select>
+                      </label>
+                    )}
                     <label style={{ display: "flex", flexDirection: "column", gap: 3, flex: "0 0 60px" }}>
                       <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }} title="Slab length larger than this can't fit. Leave blank for no limit.">
                         Max L ″
