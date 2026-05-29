@@ -778,6 +778,14 @@ export async function assignCarvingJobAction(formData: FormData) {
     requiresMachineTypeRaw === "single_head"
       ? requiresMachineTypeRaw
       : null;
+  // Mig 079 — CNC axis requirement. Empty / unknown → NULL ("Any
+  // CNC"); 4 or 5 → strict match enforced at load time. Only
+  // meaningful when the assignment is to a CNC vendor + work-type
+  // is flat-panel; we still pass NULL on lathe / Manual to keep
+  // the behaviour byte-identical to before mig 079.
+  const requiresCncAxesRaw = txt(formData, "requires_cnc_axes");
+  const requiresCncAxes: number | null =
+    requiresCncAxesRaw === "4" ? 4 : requiresCncAxesRaw === "5" ? 5 : null;
 
   if (!slabId || !vendorId) {
     redirect("/carving?toast=Missing+slab+or+vendor");
@@ -808,6 +816,15 @@ export async function assignCarvingJobAction(formData: FormData) {
   // to match).
   const finalRequiresMachineType =
     vendorType === "CNC" ? requiresMachineType : null;
+  // Mig 079 — axis requirement also applies only to CNC + flat-panel
+  // (multi_head_2 / single_head). On Manual or Lathe assigns it's
+  // meaningless; store NULL.
+  const isCncFlat =
+    vendorType === "CNC" &&
+    (finalRequiresMachineType === null ||
+      finalRequiresMachineType === "multi_head_2" ||
+      finalRequiresMachineType === "single_head");
+  const finalRequiresCncAxes = isCncFlat ? requiresCncAxes : null;
 
   // Race guard: slab must currently be cut_done
   const { data: slabRow, error: slabErr } = await admin
@@ -847,6 +864,7 @@ export async function assignCarvingJobAction(formData: FormData) {
       urgency,
       estimated_minutes: estimatedMinutes || null,
       requires_machine_type: finalRequiresMachineType,
+      requires_cnc_axes: finalRequiresCncAxes,
       assigned_by: profile.id,
       ...autoReceipt,
     })
@@ -925,6 +943,14 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
     requiresMachineTypeRaw === "single_head"
       ? requiresMachineTypeRaw
       : null;
+  // Mig 079 — bulk axis requirement (same shape as single-slab).
+  const requiresCncAxesBatchRaw = txt(formData, "requires_cnc_axes");
+  const requiresCncAxesBatch: number | null =
+    requiresCncAxesBatchRaw === "4"
+      ? 4
+      : requiresCncAxesBatchRaw === "5"
+        ? 5
+        : null;
 
   let slabIds: string[] = [];
   try {
@@ -963,6 +989,13 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
     redirect("/carving?toast=Vendor+is+inactive");
   }
   const finalRequiresMachineType = vendorType === "CNC" ? requiresMachineType : null;
+  // Mig 079 — axis requirement applies only to CNC + flat-panel.
+  const isCncFlatBatch =
+    vendorType === "CNC" &&
+    (finalRequiresMachineType === null ||
+      finalRequiresMachineType === "multi_head_2" ||
+      finalRequiresMachineType === "single_head");
+  const finalRequiresCncAxesBatch = isCncFlatBatch ? requiresCncAxesBatch : null;
 
   // One batch_id for every slab in this assignment. Downstream UIs
   // group slabs sharing a batch_id with the same colour stripe.
@@ -1009,6 +1042,7 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
         urgency,
         estimated_minutes: estimatedMinutes || null,
         requires_machine_type: finalRequiresMachineType,
+        requires_cnc_axes: finalRequiresCncAxesBatch,
         batch_id: batchId,
         assigned_by: profile.id,
         ...autoReceiptBatch,
@@ -1105,14 +1139,14 @@ export async function loadSlabOnMachineAction(formData: FormData) {
     admin
       .from("carving_items")
       .select(
-        "id, vendor_id, status, cnc_machine_id, slab_requirement_id, estimated_minutes, requires_machine_type, received_at_vendor_at",
+        "id, vendor_id, status, cnc_machine_id, slab_requirement_id, estimated_minutes, requires_machine_type, requires_cnc_axes, received_at_vendor_at",
       )
       .eq("id", carvingItemId)
       .maybeSingle(),
     admin
       .from("cnc_machines")
       .select(
-        "id, vendor_id, status, is_active, machine_type, machine_code, max_length_in, max_width_in, max_thickness_in",
+        "id, vendor_id, status, is_active, machine_type, cnc_axes, machine_code, max_length_in, max_width_in, max_thickness_in",
       )
       .eq("id", machineId)
       .maybeSingle(),
@@ -1128,6 +1162,7 @@ export async function loadSlabOnMachineAction(formData: FormData) {
     slab_requirement_id: string;
     estimated_minutes: number | null;
     requires_machine_type: string | null;
+    requires_cnc_axes: number | null;
     received_at_vendor_at: string | null;
   };
   const machine = mc as {
@@ -1136,6 +1171,7 @@ export async function loadSlabOnMachineAction(formData: FormData) {
     status: string;
     is_active: boolean;
     machine_type: string | null;
+    cnc_axes: number | null;
     machine_code: string | null;
     max_length_in: number | string | null;
     max_width_in: number | string | null;
@@ -1167,6 +1203,29 @@ export async function loadSlabOnMachineAction(formData: FormData) {
           ? "This is a flat-panel slab — it cannot be loaded onto a lathe machine."
           : `This job is tagged for ${requiredType}. Pick a ${requiredType} machine.`;
     redirect(`/vendor?toast=${encodeURIComponent(friendly)}`);
+  }
+
+  // ── Mig 079 — Strict CNC axis match ─────────────────────────────
+  // Daksh's spec: "if the slab is selected 4-axis, he cannot load
+  // it to a 5-axis." So this is strict equality, NOT >= semantics.
+  // requires_cnc_axes = NULL  → any axis is fine (current default;
+  //                              backward-compatible with mig 079
+  //                              backfill).
+  // requires_cnc_axes = 4     → machine.cnc_axes MUST = 4.
+  // requires_cnc_axes = 5     → machine.cnc_axes MUST = 5.
+  // Skipped on Lathe assignments (the machine_type guard above
+  // already rules them out).
+  if (
+    item.requires_cnc_axes != null &&
+    (machine.cnc_axes ?? 3) !== item.requires_cnc_axes
+  ) {
+    const slabAxis = item.requires_cnc_axes;
+    const machineAxis = machine.cnc_axes ?? 3;
+    const friendly =
+      `This slab needs a ${slabAxis}-axis CNC. ` +
+      `Machine ${machine.machine_code ?? ""} is ${machineAxis}-axis. ` +
+      `Pick a ${slabAxis}-axis machine.`;
+    redirect(`/vendor?toast=${encodeURIComponent(friendly.trim())}`);
   }
 
   // ── Dimension check (migration 024) ─────────────────────────────

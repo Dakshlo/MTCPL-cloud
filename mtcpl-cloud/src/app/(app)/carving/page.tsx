@@ -129,7 +129,7 @@ export default async function CarvingDashboardPage({
     // surfaces in the per-machine pills (single / 2-head / lathe).
     admin
       .from("cnc_machines")
-      .select("id, vendor_id, machine_code, is_active, status, machine_type")
+      .select("id, vendor_id, machine_code, is_active, status, machine_type, cnc_axes")
       .eq("is_active", true),
     // Stone palettes for 3D slab thumbnails on the cards
     admin
@@ -345,6 +345,11 @@ export default async function CarvingDashboardPage({
           .map((m) => {
             const st = (m as { status?: string }).status ?? "idle";
             const mt = (m as { machine_type?: string }).machine_type ?? "single_head";
+            // Mig 079 — pass cnc_axes through. NULL on lathes,
+            // 3/4/5 on CNCs.
+            const rawAxes = (m as { cnc_axes?: number | null }).cnc_axes;
+            const axes =
+              rawAxes === 4 || rawAxes === 5 || rawAxes === 3 ? rawAxes : null;
             return {
               id: m.id,
               machine_code: m.machine_code,
@@ -356,6 +361,7 @@ export default async function CarvingDashboardPage({
                 mt === "multi_head_2" || mt === "lathe"
                   ? (mt as "multi_head_2" | "lathe")
                   : ("single_head" as const),
+              cnc_axes: axes,
             };
           }),
         live: {

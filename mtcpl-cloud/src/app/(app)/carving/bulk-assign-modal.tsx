@@ -27,7 +27,12 @@ type Machine = {
   machine_code: string;
   status: "idle" | "carving" | "maintenance" | "inactive";
   machine_type?: "single_head" | "multi_head_2" | "lathe";
+  /** Mig 079 — axis count on CNC machines (3/4/5). */
+  cnc_axes?: number | null;
 };
+
+/** Mig 079 — same shape as in assign-modal.tsx. 0 = "Any CNC". */
+type CncAxesReq = 0 | 4 | 5;
 
 type Vendor = {
   id: string;
@@ -68,19 +73,26 @@ const MACHINE_TINT: Record<
 function recommendVendor(
   vendors: Vendor[],
   workType: WorkType,
+  axesReq: CncAxesReq,
 ): { vendorId: string | null; reason: string } {
   let best: { id: string; name: string; score: number; reason: string } | null = null;
   for (const v of vendors) {
     if (v.vendor_type !== "CNC") continue;
-    const br = typeBreakdown(v);
-    const free = workType === "lathe" ? br.latheFree : br.multiFree;
-    const total = workType === "lathe" ? br.latheTotal : br.multiTotal;
-    if (total === 0) continue;
+    const match = vendorMatchesReq(v, workType, axesReq);
+    if (!match.hasAtAll) continue;
     const queued = v.live?.queued ?? 0;
-    const score = (free > 0 ? 100 : 50) + free * 5 - queued * 5;
+    const score = (match.freeNow > 0 ? 100 : 50) + match.freeNow * 5 - queued * 5;
+    const typeLabel =
+      workType === "lathe"
+        ? "lathe"
+        : axesReq === 4
+          ? "4-axis CNC"
+          : axesReq === 5
+            ? "5-axis CNC"
+            : "CNC";
     const reason =
-      free > 0
-        ? `${free} free ${workType === "lathe" ? "lathe" : "CNC"}${queued > 0 ? ` · ${queued} pending` : ""}`
+      match.freeNow > 0
+        ? `${match.freeNow} free ${typeLabel}${queued > 0 ? ` · ${queued} pending` : ""}`
         : `will go to stock pending · ${queued} ahead`;
     if (!best || score > best.score || (score === best.score && v.name < best.name)) {
       best = { id: v.id, name: v.name, score, reason };
@@ -90,7 +102,19 @@ function recommendVendor(
 }
 
 function typeBreakdown(v: Vendor) {
-  const out = { multiFree: 0, multiTotal: 0, latheFree: 0, latheTotal: 0 };
+  const out = {
+    multiFree: 0,
+    multiTotal: 0,
+    latheFree: 0,
+    latheTotal: 0,
+    // Mig 079 — per-axis tallies (mirror assign-modal.tsx).
+    axes3Total: 0,
+    axes3Free: 0,
+    axes4Total: 0,
+    axes4Free: 0,
+    axes5Total: 0,
+    axes5Free: 0,
+  };
   for (const m of v.machines) {
     if (m.machine_type === "lathe") {
       out.latheTotal += 1;
@@ -98,9 +122,36 @@ function typeBreakdown(v: Vendor) {
     } else {
       out.multiTotal += 1;
       if (m.status === "idle") out.multiFree += 1;
+      const axes = m.cnc_axes ?? 3;
+      if (axes === 5) {
+        out.axes5Total += 1;
+        if (m.status === "idle") out.axes5Free += 1;
+      } else if (axes === 4) {
+        out.axes4Total += 1;
+        if (m.status === "idle") out.axes4Free += 1;
+      } else {
+        out.axes3Total += 1;
+        if (m.status === "idle") out.axes3Free += 1;
+      }
     }
   }
   return out;
+}
+
+/** Same shape as in assign-modal.tsx — does this vendor have a
+ *  machine that matches (workType, axesReq)? */
+function vendorMatchesReq(
+  v: Vendor,
+  workType: WorkType,
+  axesReq: CncAxesReq,
+): { hasAtAll: boolean; freeNow: number } {
+  const br = typeBreakdown(v);
+  if (workType === "lathe") {
+    return { hasAtAll: br.latheTotal > 0, freeNow: br.latheFree };
+  }
+  if (axesReq === 4) return { hasAtAll: br.axes4Total > 0, freeNow: br.axes4Free };
+  if (axesReq === 5) return { hasAtAll: br.axes5Total > 0, freeNow: br.axes5Free };
+  return { hasAtAll: br.multiTotal > 0, freeNow: br.multiFree };
 }
 
 export function BulkAssignModal({
@@ -116,6 +167,12 @@ export function BulkAssignModal({
 }) {
   const [vendorId, setVendorId] = useState("");
   const [workType, setWorkType] = useState<WorkType>("flat");
+  // Mig 079 — CNC axis requirement (0 = Any). Same shape as
+  // assign-modal.tsx; flipping to lathe resets it.
+  const [cncAxesReq, setCncAxesReq] = useState<CncAxesReq>(0);
+  useEffect(() => {
+    if (workType === "lathe" && cncAxesReq !== 0) setCncAxesReq(0);
+  }, [workType, cncAxesReq]);
   const [urgency, setUrgency] = useState<"normal" | "urgent">("normal");
   const [days, setDays] = useState("");
   const [hours, setHours] = useState("");
@@ -140,8 +197,8 @@ export function BulkAssignModal({
   // whenever work-type flips. User can override by clicking another
   // vendor row.
   const recommendation = useMemo(
-    () => recommendVendor(vendors, workType),
-    [vendors, workType],
+    () => recommendVendor(vendors, workType, cncAxesReq),
+    [vendors, workType, cncAxesReq],
   );
   useEffect(() => {
     if (recommendation.vendorId) setVendorId(recommendation.vendorId);
@@ -153,17 +210,20 @@ export function BulkAssignModal({
       if (a.vendor_type === "Manual" && b.vendor_type === "Manual") {
         return a.name.localeCompare(b.name);
       }
-      const ab = typeBreakdown(a);
-      const bb = typeBreakdown(b);
-      const aFree = workType === "lathe" ? ab.latheFree : ab.multiFree;
-      const bFree = workType === "lathe" ? bb.latheFree : bb.multiFree;
-      if (aFree !== bFree) return bFree - aFree;
+      const am = vendorMatchesReq(a, workType, cncAxesReq);
+      const bm = vendorMatchesReq(b, workType, cncAxesReq);
+      if (am.freeNow !== bm.freeNow) return bm.freeNow - am.freeNow;
+      const ah = am.hasAtAll ? 1 : 0;
+      const bh = bm.hasAtAll ? 1 : 0;
+      if (ah !== bh) return bh - ah;
       return a.name.localeCompare(b.name);
     });
-  }, [vendors, workType]);
+  }, [vendors, workType, cncAxesReq]);
 
   const totalMinutes = (Number(days) || 0) * 60 * 24 + (Number(hours) || 0) * 60;
   const requiresMachineType = workType === "lathe" ? "lathe" : "";
+  // Mig 079 — requires_cnc_axes hidden form value (mirrors assign-modal).
+  const requiresCncAxesForm = cncAxesReq === 0 ? "" : String(cncAxesReq);
 
   // Detect mirror-pairs in the selection — same label + L×W×T means
   // these slabs are pair-eligible, which gives the carving head
@@ -337,6 +397,8 @@ export function BulkAssignModal({
           >
             <input type="hidden" name="slab_ids" value={JSON.stringify(slabs.map((s) => s.id))} />
             <input type="hidden" name="requires_machine_type" value={requiresMachineType} />
+            {/* Mig 079 — requires_cnc_axes ("" = Any, "4", "5"). */}
+            <input type="hidden" name="requires_cnc_axes" value={requiresCncAxesForm} />
 
             {/* Work type */}
             {!isManual && (
@@ -378,6 +440,42 @@ export function BulkAssignModal({
                     🌀 Lathe (cylindrical)
                   </button>
                 </div>
+                {/* Mig 079 — CNC axes sub-picker. Mirrors the
+                    single-slab modal. Only renders for Flat panel. */}
+                {workType === "flat" && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+                    <Label>CNC axes</Label>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      {[
+                        { v: 0 as CncAxesReq, label: "Any CNC" },
+                        { v: 4 as CncAxesReq, label: "4-axis only" },
+                        { v: 5 as CncAxesReq, label: "5-axis only" },
+                      ].map((opt) => {
+                        const active = cncAxesReq === opt.v;
+                        return (
+                          <button
+                            key={opt.v}
+                            type="button"
+                            onClick={() => setCncAxesReq(opt.v)}
+                            style={{
+                              flex: 1,
+                              padding: "8px 10px",
+                              fontSize: 12,
+                              fontWeight: 700,
+                              border: `1.5px solid ${active ? "var(--gold-dark)" : "var(--border)"}`,
+                              background: active ? "rgba(180,115,51,0.08)" : "var(--surface)",
+                              color: active ? "#7c4a1f" : "var(--muted)",
+                              borderRadius: 8,
+                              cursor: "pointer",
+                            }}
+                          >
+                            {opt.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

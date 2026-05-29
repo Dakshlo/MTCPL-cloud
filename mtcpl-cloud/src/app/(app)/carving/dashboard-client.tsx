@@ -118,6 +118,8 @@ type Vendor = {
     machine_code: string;
     status: "idle" | "carving" | "maintenance" | "inactive";
     machine_type?: "single_head" | "multi_head_2" | "lathe";
+    /** Mig 079 — CNC axis count (3/4/5). NULL on lathes. */
+    cnc_axes?: number | null;
   }>;
   /** Live machine status counts + queue depth, surfaced in the
    *  Assign modal so the carving head can pick a vendor with idle

@@ -43,7 +43,16 @@ type Machine = {
   status: "idle" | "carving" | "maintenance" | "inactive";
   /** Migration 021: 'single_head' | 'multi_head_2' | 'lathe'. */
   machine_type?: "single_head" | "multi_head_2" | "lathe";
+  /** Migration 079 — axis count for CNC machines (3/4/5). NULL on
+   *  lathes. */
+  cnc_axes?: number | null;
 };
+
+/** Mig 079 — axis requirement for a CNC assignment.
+ *  0 = "Any CNC" (default, current behaviour)
+ *  4 = "Must be 4-axis"
+ *  5 = "Must be 5-axis" */
+type CncAxesReq = 0 | 4 | 5;
 
 type Vendor = {
   id: string;
@@ -83,7 +92,8 @@ const MACHINE_TINT: Record<Machine["status"], { bg: string; border: string; fg: 
 
 // Compute per-vendor machine type breakdown. Multi-head + legacy
 // single-head are merged into the "CNC" bucket (Daksh: include both
-// in CNC only). Lathe is its own bucket.
+// in CNC only). Lathe is its own bucket. Mig 079 added axis-keyed
+// counts so the assign modal can also gate vendors by axis.
 function vendorTypeBreakdown(v: Vendor) {
   const out = {
     multiFree: 0,
@@ -92,6 +102,16 @@ function vendorTypeBreakdown(v: Vendor) {
     latheFree: 0,
     latheBusy: 0,
     latheTotal: 0,
+    // Mig 079 — counts of CNC machines by axis. axesTotal[N] = how
+    // many machines of axis N this vendor has. NULL-axis CNCs (rare,
+    // shouldn't exist after backfill) count under axes_3 as a
+    // safe default.
+    axes3Total: 0,
+    axes3Free: 0,
+    axes4Total: 0,
+    axes4Free: 0,
+    axes5Total: 0,
+    axes5Free: 0,
   };
   for (const m of v.machines) {
     if (!m) continue;
@@ -100,15 +120,42 @@ function vendorTypeBreakdown(v: Vendor) {
       if (m.status === "idle") out.latheFree += 1;
       else if (m.status === "carving") out.latheBusy += 1;
     } else {
-      // multi_head_2 + legacy single_head → "CNC" bucket. The fleet
-      // has no real single-head machines today, but the type stays
-      // in the schema as legacy.
+      // multi_head_2 + legacy single_head → "CNC" bucket.
       out.multiTotal += 1;
       if (m.status === "idle") out.multiFree += 1;
       else if (m.status === "carving") out.multiBusy += 1;
+      // Per-axis tally. NULL → treated as 3-axis (backfill default).
+      const axes = m.cnc_axes ?? 3;
+      if (axes === 5) {
+        out.axes5Total += 1;
+        if (m.status === "idle") out.axes5Free += 1;
+      } else if (axes === 4) {
+        out.axes4Total += 1;
+        if (m.status === "idle") out.axes4Free += 1;
+      } else {
+        out.axes3Total += 1;
+        if (m.status === "idle") out.axes3Free += 1;
+      }
     }
   }
   return out;
+}
+
+/** Mig 079 — does this vendor have at least one machine that
+ *  satisfies the (workType, axes) requirement? */
+function vendorMatchesReq(
+  v: Vendor,
+  workType: WorkType,
+  axesReq: CncAxesReq,
+): { hasAtAll: boolean; freeNow: number } {
+  const br = vendorTypeBreakdown(v);
+  if (workType === "lathe") {
+    return { hasAtAll: br.latheTotal > 0, freeNow: br.latheFree };
+  }
+  // CNC. "Any" → any CNC machine counts; 4 → only 4-axis; 5 → only 5-axis.
+  if (axesReq === 4) return { hasAtAll: br.axes4Total > 0, freeNow: br.axes4Free };
+  if (axesReq === 5) return { hasAtAll: br.axes5Total > 0, freeNow: br.axes5Free };
+  return { hasAtAll: br.multiTotal > 0, freeNow: br.multiFree };
 }
 
 // Rule-based recommender: score each vendor against the work type
@@ -128,19 +175,26 @@ function vendorTypeBreakdown(v: Vendor) {
 function recommendVendor(
   vendors: Vendor[],
   workType: WorkType,
+  axesReq: CncAxesReq,
 ): { vendorId: string | null; reason: string } {
   let best: { id: string; score: number; reason: string } | null = null;
   for (const v of vendors) {
     if (v.vendor_type !== "CNC") continue; // recommender is CNC-only
-    const br = vendorTypeBreakdown(v);
-    const free = workType === "lathe" ? br.latheFree : br.multiFree;
-    const total = workType === "lathe" ? br.latheTotal : br.multiTotal;
-    if (total === 0) continue; // no matching machine in fleet
+    const match = vendorMatchesReq(v, workType, axesReq);
+    if (!match.hasAtAll) continue; // no machine matches the (workType, axes) gate
     const queued = v.live?.queued ?? 0;
-    let score = (free > 0 ? 100 : 50) + free * 5 - queued * 5;
+    let score = (match.freeNow > 0 ? 100 : 50) + match.freeNow * 5 - queued * 5;
+    const typeLabel =
+      workType === "lathe"
+        ? "lathe"
+        : axesReq === 4
+          ? "4-axis CNC"
+          : axesReq === 5
+            ? "5-axis CNC"
+            : "CNC";
     const reason =
-      free > 0
-        ? `${free} free ${workType === "lathe" ? "lathe" : "CNC"}${queued > 0 ? ` · ${queued} pending` : ""}`
+      match.freeNow > 0
+        ? `${match.freeNow} free ${typeLabel}${queued > 0 ? ` · ${queued} pending` : ""}`
         : `will queue · ${queued} ahead`;
     if (!best || score > best.score || (score === best.score && v.name < (vendors.find((x) => x.id === best!.id)?.name ?? ""))) {
       best = { id: v.id, score, reason };
@@ -160,6 +214,13 @@ export function AssignModal({
 }) {
   const [vendorId, setVendorId] = useState<string>("");
   const [workType, setWorkType] = useState<WorkType>("flat");
+  // Mig 079 — CNC axis requirement. Only meaningful when workType
+  // is "flat" (CNC); flipping to lathe resets it to 0 ("Any") so
+  // it doesn't leak into the lathe assignment.
+  const [cncAxesReq, setCncAxesReq] = useState<CncAxesReq>(0);
+  useEffect(() => {
+    if (workType === "lathe" && cncAxesReq !== 0) setCncAxesReq(0);
+  }, [workType, cncAxesReq]);
   const [urgency, setUrgency] = useState<"normal" | "urgent">("normal");
   const [days, setDays] = useState<string>("");
   const [hours, setHours] = useState<string>("");
@@ -185,8 +246,8 @@ export function AssignModal({
   // vendor fleet changes. Powers the ✨ Best fit badge on one
   // vendor row + auto-selects that vendor when the modal opens.
   const recommendation = useMemo(
-    () => recommendVendor(vendors, workType),
-    [vendors, workType],
+    () => recommendVendor(vendors, workType, cncAxesReq),
+    [vendors, workType, cncAxesReq],
   );
 
   // Auto-select the recommended vendor on mount + whenever the
@@ -211,22 +272,20 @@ export function AssignModal({
       if (a.vendor_type === "Manual" && b.vendor_type === "Manual") {
         return a.name.localeCompare(b.name);
       }
-      const aBreak = vendorTypeBreakdown(a);
-      const bBreak = vendorTypeBreakdown(b);
-      const aFree = workType === "lathe" ? aBreak.latheFree : aBreak.multiFree;
-      const bFree = workType === "lathe" ? bBreak.latheFree : bBreak.multiFree;
-      if (aFree !== bFree) return bFree - aFree;
+      const aMatch = vendorMatchesReq(a, workType, cncAxesReq);
+      const bMatch = vendorMatchesReq(b, workType, cncAxesReq);
+      if (aMatch.freeNow !== bMatch.freeNow) return bMatch.freeNow - aMatch.freeNow;
       // Tier 2: have-the-type-at-all (capacity 0 right now) ahead of
-      // vendors that don't have that type in the fleet at all.
-      const aHasType = workType === "lathe" ? aBreak.latheTotal : aBreak.multiTotal;
-      const bHasType = workType === "lathe" ? bBreak.latheTotal : bBreak.multiTotal;
-      if (aHasType !== bHasType) return bHasType - aHasType;
+      // vendors that don't have a matching machine at all.
+      const aHas = aMatch.hasAtAll ? 1 : 0;
+      const bHas = bMatch.hasAtAll ? 1 : 0;
+      if (aHas !== bHas) return bHas - aHas;
       const aQ = a.live?.queued ?? 0;
       const bQ = b.live?.queued ?? 0;
       if (aQ !== bQ) return aQ - bQ;
       return a.name.localeCompare(b.name);
     });
-  }, [vendors, workType]);
+  }, [vendors, workType, cncAxesReq]);
 
   // Compute total minutes from days + hours inputs.
   const totalMinutes = (Number(days) || 0) * 60 * 24 + (Number(hours) || 0) * 60;
@@ -234,6 +293,10 @@ export function AssignModal({
   // Map workType → requires_machine_type form value. Flat panel is
   // the default and stores NULL on the server side (empty string).
   const requiresMachineType = workType === "lathe" ? "lathe" : "";
+  // Mig 079 — requires_cnc_axes hidden form value. 0 ("Any") is
+  // stored as empty string (NULL on server) so we don't pin
+  // existing assigns to 3-axis silently. 4 / 5 are stored as-is.
+  const requiresCncAxesForm = cncAxesReq === 0 ? "" : String(cncAxesReq);
 
   return (
     <div
@@ -318,6 +381,8 @@ export function AssignModal({
             <FormPendingOverlay label="Assigning to vendor…" />
             <input type="hidden" name="slab_id" value={slab.id} />
             <input type="hidden" name="requires_machine_type" value={requiresMachineType} />
+            {/* Mig 079 — requires_cnc_axes ("" = Any, "4", "5"). */}
+            <input type="hidden" name="requires_cnc_axes" value={requiresCncAxesForm} />
 
             {/* Work type picker — drives vendor sort + load-time
                 validation. Hidden when the selected vendor is Manual
@@ -363,6 +428,48 @@ export function AssignModal({
                     🌀 Lathe (cylindrical)
                   </button>
                 </div>
+                {/* Mig 079 — CNC axis sub-picker. Only renders for
+                    Flat panel work (CNC). Three options:
+                      Any   — default; any CNC machine can take it
+                      4-axis only — vendor must have a 4-axis CNC
+                      5-axis only — vendor must have a 5-axis CNC
+                    Picks here drive vendor grayscaling + the
+                    server-side strict-axis-match guard on load. */}
+                {workType === "flat" && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+                    <Label>CNC axes</Label>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      {[
+                        { v: 0 as CncAxesReq, label: "Any CNC", hint: "Default — any CNC (3, 4, or 5-axis)" },
+                        { v: 4 as CncAxesReq, label: "4-axis only", hint: "Slab must be loaded on a 4-axis machine" },
+                        { v: 5 as CncAxesReq, label: "5-axis only", hint: "Slab must be loaded on a 5-axis machine" },
+                      ].map((opt) => {
+                        const active = cncAxesReq === opt.v;
+                        return (
+                          <button
+                            key={opt.v}
+                            type="button"
+                            onClick={() => setCncAxesReq(opt.v)}
+                            title={opt.hint}
+                            style={{
+                              flex: 1,
+                              padding: "8px 10px",
+                              fontSize: 12,
+                              fontWeight: 700,
+                              border: `1.5px solid ${active ? "var(--gold-dark)" : "var(--border)"}`,
+                              background: active ? "rgba(180,115,51,0.08)" : "var(--surface)",
+                              color: active ? "#7c4a1f" : "var(--muted)",
+                              borderRadius: 8,
+                              cursor: "pointer",
+                            }}
+                          >
+                            {opt.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -491,8 +598,13 @@ export function AssignModal({
                     // free/busy details — that's in the cockpit
                     // panel below when this row is selected).
                     const br = vendorTypeBreakdown(v);
-                    const hasTypeInFleet =
-                      (workType === "lathe" ? br.latheTotal : br.multiTotal) > 0;
+                    // Mig 079 — vendor matches the (workType, axes)
+                    // requirement? Grayscales the row when not.
+                    const hasTypeInFleet = vendorMatchesReq(
+                      v,
+                      workType,
+                      cncAxesReq,
+                    ).hasAtAll;
                     // ✨ Best Fit chip stays visible even when the
                     // user selects this vendor — Daksh noticed the
                     // badge disappearing on click felt confusing
