@@ -32,6 +32,9 @@ import {
 } from "./actions";
 import { SlabThumb } from "@/components/slab-thumb";
 import type { StoneTypeDef } from "@/lib/stone-utils";
+// Daksh May 2026 — live camera capture only (no gallery / file
+// picker). MediaRecorder-style getUserMedia + canvas snapshot.
+import { CameraCaptureModal } from "@/components/camera-capture-modal";
 
 type UnassignedSlab = {
   id: string;
@@ -3224,6 +3227,10 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
   const [notes, setNotes] = useState("");
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  // Mig 080 follow-on (Daksh) — camera capture only (no file/gallery
+  // pick). Opens the CameraCaptureModal which does getUserMedia +
+  // canvas snapshot. Captured File comes back via handleFile().
+  const [cameraOpen, setCameraOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   // Reject = two-step confirmation. confirmStage 0 → big "× Reject"
@@ -3482,7 +3489,14 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
                 : "JPG / PNG / HEIC up to 5 MB"}
             </div>
           </div>
-          <label
+          {/* Daksh May 2026 — camera-only capture per "i want capture
+              image and uploade like live capturing". The button opens
+              CameraCaptureModal (getUserMedia → canvas snapshot →
+              File) so there's no gallery/file-chooser path. Works
+              the same on Android, iOS, and desktop browsers. */}
+          <button
+            type="button"
+            onClick={() => setCameraOpen(true)}
             style={{
               padding: "7px 12px",
               fontSize: 12,
@@ -3495,16 +3509,19 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
               whiteSpace: "nowrap",
             }}
           >
-            {imageFile ? "Change" : "Pick photo"}
-            <input
-              type="file"
-              accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
-              capture="environment"
-              onChange={(e) => handleFile(e.target.files?.[0] ?? null)}
-              style={{ display: "none" }}
-            />
-          </label>
+            {imageFile ? "📸 Retake" : "📸 Take photo"}
+          </button>
         </div>
+        {cameraOpen && (
+          <CameraCaptureModal
+            filenamePrefix="carving-review"
+            onCapture={(file) => {
+              handleFile(file);
+              setCameraOpen(false);
+            }}
+            onClose={() => setCameraOpen(false)}
+          />
+        )}
 
         {/* Reject two-step confirmation banner — only renders when
             confirmStage > 0. Stage 1 = "are you sure?", stage 2 =
