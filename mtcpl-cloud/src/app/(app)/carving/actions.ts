@@ -3568,11 +3568,48 @@ export async function getSignedReviewMediaUrl(
   return data.signedUrl;
 }
 
+// Mig 081 — preset quality flags the Approve dropdown can post.
+// Anything else gets rejected as "invalid quality flag" so a
+// future client typo doesn't quietly land a garbage value.
+const APPROVE_QUALITY_FLAGS = new Set([
+  "carving_not_good",
+  "too_many_cracks",
+  "color_variation",
+  "minor_chips",
+  "other",
+]);
+
 export async function approveCarvingJobAction(formData: FormData) {
   const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge"]);
   const admin = createAdminSupabaseClient();
   const jobId = txt(formData, "job_id");
   const notes = txt(formData, "notes") || null;
+  // Mig 081 — structured quality flag. Optional (NULL = reviewer
+  // didn't pick anything, slab was fine). When 'other' is selected
+  // the freeform notes textarea is shown + the typed text rides in
+  // on the existing `notes` field. For any of the 4 preset flags
+  // the notes field is suppressed in the UI; if a stale client
+  // still posts notes alongside a preset we accept both so the
+  // round-trip is lossless.
+  const qualityFlagRaw = txt(formData, "quality_flag");
+  let qualityFlag: string | null = null;
+  if (qualityFlagRaw) {
+    if (!APPROVE_QUALITY_FLAGS.has(qualityFlagRaw)) {
+      const msg = `Invalid quality flag: ${qualityFlagRaw}`;
+      const stay = txt(formData, "stay") === "1";
+      if (stay) throw new Error(msg);
+      redirect(`/carving/${jobId}?toast=${encodeURIComponent(msg)}`);
+    }
+    qualityFlag = qualityFlagRaw;
+  }
+  // "Other" selected but no notes typed → fail. Otherwise the
+  // analytics row would be tagged 'other' with no detail (useless).
+  if (qualityFlag === "other" && !notes) {
+    const msg = "Please describe the issue when selecting 'Other'.";
+    const stay = txt(formData, "stay") === "1";
+    if (stay) throw new Error(msg);
+    redirect(`/carving/${jobId}?toast=${encodeURIComponent(msg)}`);
+  }
   // Mig 080 — optional image upload on approve (mandatory on the
   // rework + reject paths; see below). If the caller attached a
   // file, upload it before we write the row so the DB always
@@ -3652,6 +3689,11 @@ export async function approveCarvingJobAction(formData: FormData) {
       // row's status happens to be 'completed' for other reasons."
       review_decision: "approved",
       review_image_path: reviewImagePath,
+      // Mig 081 — structured quality flag (NULL or one of the five
+      // values whitelisted above). The reviewer's drop-down maps
+      // 1:1 to these keys; analytics will GROUP BY this column to
+      // surface vendor mistake patterns.
+      review_quality_flag: qualityFlag,
       status: "completed",
       location: finalLocation,
       ready_to_dispatch_at: now,
@@ -3674,10 +3716,31 @@ export async function approveCarvingJobAction(formData: FormData) {
       .eq("id", j.slab_requirement_id);
   }
 
-  await recordEvent(jobId, "approved", profile.id, `Approved + ready for dispatch · ${finalLocation}${notes ? ` · ${notes}` : ""}`);
+  // Mig 081 — human-readable label for the quality flag, used in
+  // both the event timeline string + the audit log payload. Maps
+  // the column key back to the dropdown's display label so the
+  // event log reads naturally instead of in machine-speak.
+  const QUALITY_FLAG_LABEL: Record<string, string> = {
+    carving_not_good: "carving quality not great",
+    too_many_cracks: "too many cracks",
+    color_variation: "color variation",
+    minor_chips: "minor chips / rough edges",
+    other: "other",
+  };
+  const qualityLabel = qualityFlag ? QUALITY_FLAG_LABEL[qualityFlag] : null;
+  const eventDetail = [
+    `Approved + ready for dispatch · ${finalLocation}`,
+    qualityLabel ? `flag: ${qualityLabel}` : null,
+    notes ? `note: ${notes}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  await recordEvent(jobId, "approved", profile.id, eventDetail);
   await logAudit(profile.id, "carving_approved", "carving_item", jobId, {
     slab_id: j.slab_requirement_id,
     location: finalLocation,
+    quality_flag: qualityFlag,
+    quality_label: qualityLabel,
   });
 
   refreshAll();

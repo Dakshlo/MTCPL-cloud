@@ -3471,6 +3471,19 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
   // pick). Opens the CameraCaptureModal which does getUserMedia +
   // canvas snapshot. Captured File comes back via handleFile().
   const [cameraOpen, setCameraOpen] = useState(false);
+  // Mig 081 — Approve mode's freeform Notes was replaced with a
+  // structured dropdown so analytics can group by issue type later.
+  // Empty string = no flag picked (slab was fine). When "other" is
+  // picked, the freeform `notes` textarea reappears and is required.
+  // Reset when the user flips modes (in switchMode below).
+  const [qualityFlag, setQualityFlag] = useState<string>("");
+  const QUALITY_OPTIONS: Array<{ value: string; label: string }> = [
+    { value: "carving_not_good", label: "Approved but carving quality not great" },
+    { value: "too_many_cracks", label: "Approved but too many cracks" },
+    { value: "color_variation", label: "Approved but color variation" },
+    { value: "minor_chips", label: "Approved but minor chips / rough edges" },
+    { value: "other", label: "Other (write a note)" },
+  ];
   const [pending, setPending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   // Reject = two-step confirmation. confirmStage 0 → big "× Reject"
@@ -3492,6 +3505,9 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
     setImagePreview(null);
     setErr(null);
     setConfirmStage(0);
+    // Mig 081 — reset the quality flag too. The dropdown only
+    // applies to Approve; rework/reject use the freeform textarea.
+    setQualityFlag("");
   }
 
   function handleFile(file: File | null) {
@@ -3514,6 +3530,11 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
     fd.set("stay", "1");
     fd.set("notes", notes);
     if (imageFile) fd.set("review_image", imageFile);
+    // Mig 081 — Approve mode only. Server validates against the
+    // whitelist; passing it empty = no flag (slab was fine).
+    if (mode === "approve" && qualityFlag) {
+      fd.set("quality_flag", qualityFlag);
+    }
     const action =
       mode === "approve"
         ? approveCarvingJobAction
@@ -3548,6 +3569,14 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
         setErr("Photo of the problem is required.");
         return;
       }
+    }
+    // Mig 081 — when Approve mode picks "Other" the notes textarea
+    // is mandatory (otherwise we'd save a useless 'other' tag with
+    // no detail). Server enforces too, but the client guard avoids
+    // the round-trip.
+    if (mode === "approve" && qualityFlag === "other" && !notes.trim()) {
+      setErr("Please describe the issue when selecting 'Other'.");
+      return;
     }
     if (mode === "reject") {
       // Two-step confirmation. Stage 0 → ask once. Stage 1 → ask
@@ -3793,31 +3822,173 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
         onSubmit={onSubmitClick}
         style={{ display: "flex", flexDirection: "column", gap: 12 }}
       >
-        {/* Reason — floating-label-ish field with focus glow in the
-            mode's accent. The label sits above so it's always
-            readable even when typed in. */}
-        <div>
-          <label
-            htmlFor="review-notes"
-            style={{
-              fontSize: 10.5,
-              fontWeight: 800,
-              color: "var(--muted)",
-              textTransform: "uppercase",
-              letterSpacing: "0.07em",
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              marginBottom: 6,
-            }}
-          >
-            <span aria-hidden>📝</span>
-            {mode === "approve"
-              ? "Notes (optional)"
-              : mode === "rework"
+        {/* Mig 081 — Approve mode now has a structured quality flag
+            dropdown instead of a freeform Notes textarea. The
+            textarea reappears below only when "Other" is picked.
+            Rework + Reject keep their freeform textarea (their
+            reason text IS the analytics signal — a dropdown there
+            would add no value). */}
+        {mode === "approve" ? (
+          <div>
+            <label
+              htmlFor="review-quality-flag"
+              style={{
+                fontSize: 10.5,
+                fontWeight: 800,
+                color: "var(--muted)",
+                textTransform: "uppercase",
+                letterSpacing: "0.07em",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                marginBottom: 6,
+              }}
+            >
+              <span aria-hidden>🏷</span>
+              Quality flag (optional)
+            </label>
+            <select
+              id="review-quality-flag"
+              name="quality_flag"
+              value={qualityFlag}
+              onChange={(e) => setQualityFlag(e.target.value)}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor = tintPack.accentSolid;
+                e.currentTarget.style.boxShadow = "0 0 0 3px rgba(202,138,4,0.18)";
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = "var(--border)";
+                e.currentTarget.style.boxShadow = "none";
+              }}
+              style={{
+                width: "100%",
+                fontSize: 13.5,
+                padding: "12px 14px",
+                border: "1.5px solid var(--border)",
+                borderRadius: 10,
+                background: "var(--surface)",
+                color: qualityFlag ? "var(--text)" : "var(--muted)",
+                fontFamily: "inherit",
+                lineHeight: 1.4,
+                transition: "border-color 0.15s ease, box-shadow 0.15s ease",
+                outline: "none",
+                boxSizing: "border-box",
+                cursor: "pointer",
+                appearance: "auto",
+              }}
+            >
+              <option value="" style={{ color: "var(--muted)" }}>
+                — Slab was fine, nothing to flag —
+              </option>
+              {QUALITY_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value} style={{ color: "#000" }}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            <div
+              style={{
+                fontSize: 10.5,
+                color: "var(--muted)",
+                marginTop: 6,
+                lineHeight: 1.4,
+              }}
+            >
+              Tracks common quality issues so we can spot vendor
+              patterns over time. Leave on the default if the slab
+              was clean.
+            </div>
+
+            {/* When "Other" is picked, surface the freeform textarea
+                so the reviewer can write the actual issue. Required
+                in this state — both client + server validate. */}
+            {qualityFlag === "other" && (
+              <div style={{ marginTop: 12 }}>
+                <label
+                  htmlFor="review-other-notes"
+                  style={{
+                    fontSize: 10.5,
+                    fontWeight: 800,
+                    color: "var(--muted)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.07em",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    marginBottom: 6,
+                  }}
+                >
+                  <span aria-hidden>📝</span>
+                  Describe the issue
+                  <span
+                    style={{
+                      fontSize: 9,
+                      fontWeight: 800,
+                      padding: "2px 6px",
+                      borderRadius: 999,
+                      background: tintPack.accentSolid,
+                      color: "#fff",
+                      letterSpacing: "0.05em",
+                    }}
+                  >
+                    REQUIRED
+                  </span>
+                </label>
+                <textarea
+                  id="review-other-notes"
+                  name="notes"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  required
+                  placeholder="What was the issue with this carving?"
+                  rows={3}
+                  onFocus={(e) => {
+                    e.currentTarget.style.borderColor = tintPack.accentSolid;
+                    e.currentTarget.style.boxShadow = "0 0 0 3px rgba(202,138,4,0.18)";
+                  }}
+                  onBlur={(e) => {
+                    e.currentTarget.style.borderColor = "var(--border)";
+                    e.currentTarget.style.boxShadow = "none";
+                  }}
+                  style={{
+                    width: "100%",
+                    fontSize: 13.5,
+                    padding: "12px 14px",
+                    border: "1.5px solid var(--border)",
+                    borderRadius: 10,
+                    background: "var(--surface)",
+                    color: "var(--text)",
+                    resize: "vertical",
+                    fontFamily: "inherit",
+                    lineHeight: 1.5,
+                    transition: "border-color 0.15s ease, box-shadow 0.15s ease",
+                    outline: "none",
+                    boxSizing: "border-box",
+                  }}
+                />
+              </div>
+            )}
+          </div>
+        ) : (
+          <div>
+            <label
+              htmlFor="review-notes"
+              style={{
+                fontSize: 10.5,
+                fontWeight: 800,
+                color: "var(--muted)",
+                textTransform: "uppercase",
+                letterSpacing: "0.07em",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                marginBottom: 6,
+              }}
+            >
+              <span aria-hidden>📝</span>
+              {mode === "rework"
                 ? "Reason for rework"
                 : "Reason for rejection"}
-            {mode !== "approve" && (
               <span
                 style={{
                   fontSize: 9,
@@ -3831,47 +4002,45 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
               >
                 REQUIRED
               </span>
-            )}
-          </label>
-          <textarea
-            id="review-notes"
-            name="notes"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            required={mode !== "approve"}
-            placeholder={placeholder}
-            rows={mode === "approve" ? 2 : 3}
-            onFocus={(e) => {
-              e.currentTarget.style.borderColor = tintPack.accentSolid;
-              e.currentTarget.style.boxShadow = `0 0 0 3px ${
-                mode === "approve"
-                  ? "rgba(202,138,4,0.18)"
-                  : mode === "rework"
+            </label>
+            <textarea
+              id="review-notes"
+              name="notes"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              required
+              placeholder={placeholder}
+              rows={3}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor = tintPack.accentSolid;
+                e.currentTarget.style.boxShadow = `0 0 0 3px ${
+                  mode === "rework"
                     ? "rgba(217,119,6,0.18)"
                     : "rgba(220,38,38,0.18)"
-              }`;
-            }}
-            onBlur={(e) => {
-              e.currentTarget.style.borderColor = "var(--border)";
-              e.currentTarget.style.boxShadow = "none";
-            }}
-            style={{
-              width: "100%",
-              fontSize: 13.5,
-              padding: "12px 14px",
-              border: "1.5px solid var(--border)",
-              borderRadius: 10,
-              background: "var(--surface)",
-              color: "var(--text)",
-              resize: "vertical",
-              fontFamily: "inherit",
-              lineHeight: 1.5,
-              transition: "border-color 0.15s ease, box-shadow 0.15s ease",
-              outline: "none",
-              boxSizing: "border-box",
-            }}
-          />
-        </div>
+                }`;
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = "var(--border)";
+                e.currentTarget.style.boxShadow = "none";
+              }}
+              style={{
+                width: "100%",
+                fontSize: 13.5,
+                padding: "12px 14px",
+                border: "1.5px solid var(--border)",
+                borderRadius: 10,
+                background: "var(--surface)",
+                color: "var(--text)",
+                resize: "vertical",
+                fontFamily: "inherit",
+                lineHeight: 1.5,
+                transition: "border-color 0.15s ease, box-shadow 0.15s ease",
+                outline: "none",
+                boxSizing: "border-box",
+              }}
+            />
+          </div>
+        )}
 
         {/* ── Photo capture — hero block when empty, big preview
             when captured. No file-picker fallback by design (Daksh:
