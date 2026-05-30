@@ -3116,54 +3116,294 @@ function JobDetailPeek({
             </div>
           </section>
 
-          {/* Assignment */}
+          {/* Mig 080 round 2 — Assignment redesigned as a journey
+              card. Vendor avatar + machine chip on the top row; the
+              three milestone timestamps (Assigned → Vendor completed
+              → Approved) lay out as a horizontal step-timeline with
+              filled/unfilled dots so the reviewer can read progress
+              at a glance instead of parsing a flat Field stack. */}
           <section
             style={{
-              padding: "12px 14px",
-              background: "var(--bg)",
+              padding: "14px 16px",
+              background: "linear-gradient(180deg, var(--surface) 0%, var(--bg) 100%)",
               border: "1px solid var(--border)",
-              borderRadius: 8,
+              borderRadius: 12,
               display: "flex",
               flexDirection: "column",
-              gap: 6,
+              gap: 14,
               fontSize: 13,
+              boxShadow: "0 1px 0 rgba(0,0,0,0.03)",
             }}
           >
-            <div
-              style={{
-                fontSize: 10,
-                fontWeight: 700,
-                color: "var(--muted)",
-                textTransform: "uppercase",
-                letterSpacing: "0.07em",
-                marginBottom: 2,
-              }}
-            >
-              Assignment
+            {/* Vendor row — avatar circle + name + (vendor_type) +
+                machine pill on the right when one is loaded. */}
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div
+                aria-hidden
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: "50%",
+                  background:
+                    "linear-gradient(135deg, var(--gold) 0%, var(--gold-dark) 100%)",
+                  color: "#fff",
+                  fontSize: 16,
+                  fontWeight: 800,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  letterSpacing: "0.02em",
+                  flexShrink: 0,
+                  boxShadow: "0 2px 6px rgba(180,128,11,0.28)",
+                }}
+                title={`Vendor ${job.vendor_name}`}
+              >
+                {job.vendor_name.charAt(0).toUpperCase()}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
+                  style={{
+                    fontSize: 10.5,
+                    fontWeight: 800,
+                    color: "var(--muted)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.07em",
+                  }}
+                >
+                  Vendor
+                </div>
+                <div
+                  style={{
+                    fontSize: 15,
+                    fontWeight: 800,
+                    color: "var(--text)",
+                    marginTop: 1,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <span>{job.vendor_name}</span>
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      padding: "2px 7px",
+                      borderRadius: 999,
+                      background: "rgba(180,128,11,0.10)",
+                      color: "var(--gold-dark)",
+                      border: "1px solid rgba(180,128,11,0.22)",
+                      letterSpacing: "0.04em",
+                    }}
+                  >
+                    {job.vendor_type}
+                  </span>
+                </div>
+              </div>
+              {machineCode && (
+                <div
+                  style={{
+                    padding: "6px 10px",
+                    background: "var(--bg)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 8,
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: "var(--text)",
+                    fontFamily: "ui-monospace, monospace",
+                  }}
+                  title="CNC machine"
+                >
+                  🏭 {machineCode}
+                </div>
+              )}
             </div>
-            <Field label="Vendor">
-              <strong>{job.vendor_name}</strong>
-              <span className="muted" style={{ marginLeft: 6, fontSize: 11 }}>
-                ({job.vendor_type})
-              </span>
-            </Field>
-            {machineCode && (
-              <Field label="Machine">
-                <span style={{ fontFamily: "ui-monospace, monospace" }}>{machineCode}</span>
-              </Field>
+
+            {/* Step timeline — three milestones. Each step has an
+                indicator dot (filled = reached, hollow = future) +
+                the label + the timestamp. Connecting line behind
+                the dots fills to match progress. */}
+            {(() => {
+              const steps = [
+                {
+                  key: "assigned",
+                  label: "Assigned",
+                  value: fmtDate(job.assigned_at),
+                  reached: !!job.assigned_at,
+                },
+                {
+                  key: "completed",
+                  label: "Vendor completed",
+                  value: job.completed_at ? fmtDateTime(job.completed_at) : "Pending",
+                  reached: !!job.completed_at,
+                },
+                {
+                  key: "approved",
+                  label: job.review_approved_at ? "Approved" : "Awaiting review",
+                  value: job.review_approved_at ? fmtDateTime(job.review_approved_at) : "Pending",
+                  reached: !!job.review_approved_at,
+                },
+              ];
+              const reachedCount = steps.filter((s) => s.reached).length;
+              return (
+                <div style={{ position: "relative", paddingTop: 4 }}>
+                  {/* Background line */}
+                  <div
+                    aria-hidden
+                    style={{
+                      position: "absolute",
+                      left: "calc(16.66% + 4px)",
+                      right: "calc(16.66% + 4px)",
+                      top: 12,
+                      height: 2,
+                      background: "var(--border)",
+                      borderRadius: 1,
+                    }}
+                  />
+                  {/* Progress fill — width tracks reachedCount */}
+                  <div
+                    aria-hidden
+                    style={{
+                      position: "absolute",
+                      left: "calc(16.66% + 4px)",
+                      top: 12,
+                      height: 2,
+                      width:
+                        reachedCount === 0
+                          ? 0
+                          : reachedCount === 1
+                            ? 0
+                            : reachedCount === 2
+                              ? "calc(33.33% - 8px)"
+                              : "calc(66.66% - 8px)",
+                      background:
+                        "linear-gradient(90deg, var(--gold) 0%, var(--gold-dark) 100%)",
+                      borderRadius: 1,
+                      transition: "width 0.3s ease",
+                    }}
+                  />
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr 1fr",
+                      position: "relative",
+                    }}
+                  >
+                    {steps.map((step, i) => {
+                      const isLast = i === steps.length - 1;
+                      return (
+                        <div
+                          key={step.key}
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "center",
+                            textAlign: "center",
+                            gap: 6,
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: 26,
+                              height: 26,
+                              borderRadius: "50%",
+                              background: step.reached
+                                ? "linear-gradient(135deg, var(--gold) 0%, var(--gold-dark) 100%)"
+                                : "var(--surface)",
+                              border: `2px solid ${step.reached ? "var(--gold-dark)" : "var(--border)"}`,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontSize: 12,
+                              fontWeight: 800,
+                              color: step.reached ? "#fff" : "var(--muted)",
+                              boxShadow: step.reached
+                                ? "0 2px 6px rgba(180,128,11,0.3)"
+                                : "none",
+                              flexShrink: 0,
+                            }}
+                          >
+                            {step.reached ? "✓" : i + 1}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: 10,
+                              fontWeight: 800,
+                              color: step.reached ? "var(--text)" : "var(--muted)",
+                              textTransform: "uppercase",
+                              letterSpacing: "0.05em",
+                            }}
+                          >
+                            {step.label}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 600,
+                              color: step.reached ? "var(--text)" : "var(--muted)",
+                              fontFamily: step.reached ? "ui-monospace, monospace" : "inherit",
+                              fontStyle: step.reached ? "normal" : "italic",
+                            }}
+                          >
+                            {step.value}
+                          </div>
+                          {/* Hidden hack to silence the unused isLast var */}
+                          <span style={{ display: "none" }}>{isLast ? "" : ""}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Secondary facts (due / phase) — only when set, so the
+                card doesn't grow when there's nothing to show. */}
+            {(job.due_at || job.progress_phase) && (
+              <div
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  flexWrap: "wrap",
+                  paddingTop: 8,
+                  borderTop: "1px dashed var(--border)",
+                }}
+              >
+                {job.due_at && (
+                  <div
+                    style={{
+                      padding: "5px 10px",
+                      background: "var(--bg)",
+                      border: "1px solid var(--border)",
+                      borderRadius: 999,
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: "var(--text)",
+                    }}
+                    title="Due date"
+                  >
+                    📅 Due {fmtDate(job.due_at)}
+                  </div>
+                )}
+                {job.progress_phase && (
+                  <div
+                    style={{
+                      padding: "5px 10px",
+                      background: "var(--bg)",
+                      border: "1px solid var(--border)",
+                      borderRadius: 999,
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: "var(--text)",
+                    }}
+                    title="Current phase"
+                  >
+                    🔄 {job.progress_phase}
+                  </div>
+                )}
+              </div>
             )}
-            <Field label="Assigned">{fmtDate(job.assigned_at)}</Field>
-            {job.due_at && <Field label="Due">{fmtDate(job.due_at)}</Field>}
-            {job.progress_phase && <Field label="Phase">{job.progress_phase}</Field>}
-            {job.completed_at && (
-              <Field label="Vendor completed">{fmtDateTime(job.completed_at)}</Field>
-            )}
-            {job.review_approved_at && (
-              <Field label="Approved">{fmtDateTime(job.review_approved_at)}</Field>
-            )}
-            {/* Mig 080 — Location moved to the header pill (above
-                the Assignment section). The reviewer's eye now lands
-                on it immediately. */}
           </section>
 
           {/* Status banner — context-specific */}
@@ -3325,48 +3565,111 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
   }
 
   const isMandatoryImage = mode === "rework" || mode === "reject";
-  const accent =
-    mode === "approve"
-      ? "var(--gold-dark)"
-      : mode === "rework"
-        ? "#b45309" // amber-700 — warning / try-again
-        : "#b91c1c"; // red-700 — critical / hard reject
+  // Mig 080 follow-on (Daksh round 2) — full visual rebrand. Three
+  // mode-aware tint packs let one component switch entire colour
+  // languages (gold/approve, amber/rework, red/reject) without
+  // littering the JSX with conditional style props.
+  const tintPack = {
+    approve: {
+      accent: "var(--gold-dark)",
+      accentSolid: "#a16207",
+      tintBg: "linear-gradient(180deg, rgba(180,128,11,0.05) 0%, rgba(180,128,11,0) 80%)",
+      tintBorder: "rgba(180,128,11,0.22)",
+      label: "Approve",
+      icon: "✓",
+      tagline: "Sign off + send to Dispatch",
+      submitGradient: "linear-gradient(180deg, #ca8a04 0%, #a16207 100%)",
+      shadow: "0 6px 18px rgba(202,138,4,0.35)",
+    },
+    rework: {
+      accent: "#b45309",
+      accentSolid: "#b45309",
+      tintBg: "linear-gradient(180deg, rgba(180,83,9,0.06) 0%, rgba(180,83,9,0) 80%)",
+      tintBorder: "rgba(180,83,9,0.28)",
+      label: "Rework",
+      icon: "↻",
+      tagline: "Send back — vendor redoes the carve",
+      submitGradient: "linear-gradient(180deg, #d97706 0%, #b45309 100%)",
+      shadow: "0 6px 18px rgba(180,83,9,0.35)",
+    },
+    reject: {
+      accent: "#b91c1c",
+      accentSolid: "#b91c1c",
+      tintBg: "linear-gradient(180deg, rgba(185,28,28,0.06) 0%, rgba(185,28,28,0) 80%)",
+      tintBorder: "rgba(185,28,28,0.32)",
+      label: "Reject",
+      icon: "✕",
+      tagline: "Hard reject — out of the active loop",
+      submitGradient: "linear-gradient(180deg, #dc2626 0%, #991b1b 100%)",
+      shadow: "0 6px 18px rgba(185,28,28,0.4)",
+    },
+  }[mode];
+  const accent = tintPack.accent;
   const placeholder =
     mode === "approve"
-      ? "Approval notes (optional)"
+      ? "Approval notes (optional) — anything worth recording?"
       : mode === "rework"
-        ? "What needs to be fixed? (required)"
-        : "Why is this rejected? (required)";
+        ? "What exactly needs to be fixed? (required)"
+        : "Why is this slab being rejected? (required)";
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      {/* Three-up segmented control for the outcome */}
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 14,
+        padding: 16,
+        background: tintPack.tintBg,
+        border: `1px solid ${tintPack.tintBorder}`,
+        borderRadius: 14,
+        transition: "background 0.2s ease, border-color 0.2s ease",
+      }}
+    >
+      {/* ── Three-way decision picker (card style) ───────────── */}
       <div
         role="tablist"
+        aria-label="Review outcome"
         style={{
           display: "grid",
           gridTemplateColumns: "1fr 1fr 1fr",
-          gap: 6,
-          padding: 4,
-          background: "var(--bg)",
-          border: "1px solid var(--border)",
-          borderRadius: 10,
+          gap: 8,
         }}
       >
         {(
           [
-            { key: "approve", icon: "✓", label: "Approve" },
-            { key: "rework", icon: "↻", label: "Rework needed" },
-            { key: "reject", icon: "✕", label: "Reject" },
-          ] as Array<{ key: Mode; icon: string; label: string }>
+            {
+              key: "approve" as const,
+              icon: "✓",
+              label: "Approve",
+              sub: "Sign off",
+              tone: "var(--gold-dark)",
+              toneSolid: "#a16207",
+              activeBg:
+                "linear-gradient(180deg, rgba(202,138,4,0.18) 0%, rgba(161,98,7,0.08) 100%)",
+            },
+            {
+              key: "rework" as const,
+              icon: "↻",
+              label: "Rework",
+              sub: "Send back",
+              tone: "#b45309",
+              toneSolid: "#b45309",
+              activeBg:
+                "linear-gradient(180deg, rgba(217,119,6,0.18) 0%, rgba(180,83,9,0.08) 100%)",
+            },
+            {
+              key: "reject" as const,
+              icon: "✕",
+              label: "Reject",
+              sub: "Hard stop",
+              tone: "#b91c1c",
+              toneSolid: "#b91c1c",
+              activeBg:
+                "linear-gradient(180deg, rgba(220,38,38,0.18) 0%, rgba(153,27,27,0.10) 100%)",
+            },
+          ]
         ).map((opt) => {
           const active = mode === opt.key;
-          const tone =
-            opt.key === "approve"
-              ? "var(--gold-dark)"
-              : opt.key === "rework"
-                ? "#b45309"
-                : "#b91c1c";
           return (
             <button
               key={opt.key}
@@ -3375,143 +3678,335 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
               aria-selected={active}
               onClick={() => switchMode(opt.key)}
               style={{
-                padding: "9px 10px",
-                fontSize: 13,
-                fontWeight: 700,
-                background: active ? "var(--surface)" : "transparent",
-                color: active ? tone : "var(--muted)",
-                border: `1.5px solid ${active ? tone : "transparent"}`,
-                borderRadius: 8,
+                position: "relative",
+                padding: "14px 8px 12px",
+                background: active ? opt.activeBg : "var(--surface)",
+                color: active ? opt.toneSolid : "var(--text)",
+                border: `2px solid ${active ? opt.toneSolid : "var(--border)"}`,
+                borderRadius: 12,
                 cursor: "pointer",
-                whiteSpace: "nowrap",
-                transition: "background 0.12s ease, border 0.12s ease",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 4,
+                fontWeight: 700,
+                transition: "transform 0.15s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease",
+                boxShadow: active
+                  ? `0 4px 14px ${opt.tone === "var(--gold-dark)" ? "rgba(202,138,4,0.28)" : opt.tone === "#b45309" ? "rgba(217,119,6,0.28)" : "rgba(220,38,38,0.28)"}`
+                  : "0 1px 0 rgba(0,0,0,0.04)",
+                transform: active ? "translateY(-1px)" : "translateY(0)",
+              }}
+              onMouseEnter={(e) => {
+                if (!active) e.currentTarget.style.transform = "translateY(-1px)";
+              }}
+              onMouseLeave={(e) => {
+                if (!active) e.currentTarget.style.transform = "translateY(0)";
               }}
             >
-              <span aria-hidden style={{ marginRight: 4 }}>{opt.icon}</span>
-              {opt.label}
+              {active && (
+                <span
+                  aria-hidden
+                  style={{
+                    position: "absolute",
+                    top: 6,
+                    right: 8,
+                    width: 8,
+                    height: 8,
+                    borderRadius: "50%",
+                    background: opt.toneSolid,
+                    boxShadow: `0 0 0 3px ${opt.tone === "var(--gold-dark)" ? "rgba(202,138,4,0.25)" : opt.tone === "#b45309" ? "rgba(217,119,6,0.25)" : "rgba(220,38,38,0.25)"}`,
+                  }}
+                />
+              )}
+              <span
+                aria-hidden
+                style={{
+                  fontSize: 22,
+                  lineHeight: 1,
+                  color: active ? opt.toneSolid : "var(--muted)",
+                }}
+              >
+                {opt.icon}
+              </span>
+              <span style={{ fontSize: 13, fontWeight: 800, marginTop: 2 }}>
+                {opt.label}
+              </span>
+              <span
+                style={{
+                  fontSize: 10,
+                  color: active ? opt.toneSolid : "var(--muted)",
+                  opacity: active ? 0.9 : 0.7,
+                  fontWeight: 600,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.04em",
+                }}
+              >
+                {opt.sub}
+              </span>
             </button>
           );
         })}
+      </div>
+
+      {/* Mode tagline — confirms what the selected mode does so the
+          reviewer is never surprised by the outcome */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "6px 4px 0",
+          fontSize: 11.5,
+          fontWeight: 600,
+          color: tintPack.accentSolid,
+          letterSpacing: "0.02em",
+        }}
+      >
+        <span aria-hidden style={{ fontSize: 13 }}>
+          {tintPack.icon}
+        </span>
+        {tintPack.tagline}
       </div>
 
       {err && (
         <div
           role="alert"
           style={{
-            padding: "8px 12px",
+            padding: "10px 12px",
             background: "rgba(220,38,38,0.08)",
-            border: "1px solid rgba(220,38,38,0.25)",
+            border: "1px solid rgba(220,38,38,0.32)",
             color: "#991b1b",
             borderRadius: 8,
-            fontSize: 12,
+            fontSize: 12.5,
+            fontWeight: 600,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
           }}
         >
-          ⚠ {err}
+          <span aria-hidden style={{ fontSize: 14 }}>⚠</span>
+          {err}
         </div>
       )}
 
       <form
         onSubmit={onSubmitClick}
-        style={{ display: "flex", flexDirection: "column", gap: 10 }}
+        style={{ display: "flex", flexDirection: "column", gap: 12 }}
       >
-        {/* Reason — textarea so multi-line explanations are easy
-            (Daksh: the carving head writes paragraphs sometimes). */}
-        <textarea
-          name="notes"
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          required={mode !== "approve"}
-          placeholder={placeholder}
-          rows={mode === "approve" ? 2 : 3}
-          style={{
-            fontSize: 13,
-            padding: "10px 12px",
-            border: "1px solid var(--border)",
-            borderRadius: 8,
-            background: "var(--bg)",
-            color: "var(--text)",
-            resize: "vertical",
-            fontFamily: "inherit",
-          }}
-        />
+        {/* Reason — floating-label-ish field with focus glow in the
+            mode's accent. The label sits above so it's always
+            readable even when typed in. */}
+        <div>
+          <label
+            htmlFor="review-notes"
+            style={{
+              fontSize: 10.5,
+              fontWeight: 800,
+              color: "var(--muted)",
+              textTransform: "uppercase",
+              letterSpacing: "0.07em",
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              marginBottom: 6,
+            }}
+          >
+            <span aria-hidden>📝</span>
+            {mode === "approve"
+              ? "Notes (optional)"
+              : mode === "rework"
+                ? "Reason for rework"
+                : "Reason for rejection"}
+            {mode !== "approve" && (
+              <span
+                style={{
+                  fontSize: 9,
+                  fontWeight: 800,
+                  padding: "2px 6px",
+                  borderRadius: 999,
+                  background: tintPack.accentSolid,
+                  color: "#fff",
+                  letterSpacing: "0.05em",
+                }}
+              >
+                REQUIRED
+              </span>
+            )}
+          </label>
+          <textarea
+            id="review-notes"
+            name="notes"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            required={mode !== "approve"}
+            placeholder={placeholder}
+            rows={mode === "approve" ? 2 : 3}
+            onFocus={(e) => {
+              e.currentTarget.style.borderColor = tintPack.accentSolid;
+              e.currentTarget.style.boxShadow = `0 0 0 3px ${
+                mode === "approve"
+                  ? "rgba(202,138,4,0.18)"
+                  : mode === "rework"
+                    ? "rgba(217,119,6,0.18)"
+                    : "rgba(220,38,38,0.18)"
+              }`;
+            }}
+            onBlur={(e) => {
+              e.currentTarget.style.borderColor = "var(--border)";
+              e.currentTarget.style.boxShadow = "none";
+            }}
+            style={{
+              width: "100%",
+              fontSize: 13.5,
+              padding: "12px 14px",
+              border: "1.5px solid var(--border)",
+              borderRadius: 10,
+              background: "var(--surface)",
+              color: "var(--text)",
+              resize: "vertical",
+              fontFamily: "inherit",
+              lineHeight: 1.5,
+              transition: "border-color 0.15s ease, box-shadow 0.15s ease",
+              outline: "none",
+              boxSizing: "border-box",
+            }}
+          />
+        </div>
 
-        {/* Image picker — optional on approve, mandatory on the
-            other two. Shows a small preview when a file is chosen. */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            padding: "10px 12px",
-            background: "var(--bg)",
-            border: `1px dashed ${imageFile ? accent : "var(--border)"}`,
-            borderRadius: 8,
-          }}
-        >
-          {imagePreview ? (
-            /* eslint-disable-next-line @next/next/no-img-element */
+        {/* ── Photo capture — hero block when empty, big preview
+            when captured. No file-picker fallback by design (Daksh:
+            live capture only). ── */}
+        {imagePreview ? (
+          <div
+            style={{
+              position: "relative",
+              borderRadius: 12,
+              overflow: "hidden",
+              border: `2px solid ${accent}`,
+              background: "var(--surface)",
+              boxShadow: tintPack.shadow,
+            }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={imagePreview}
-              alt="Selected"
+              alt="Captured"
               style={{
-                width: 56,
-                height: 56,
+                width: "100%",
+                maxHeight: 260,
                 objectFit: "cover",
-                borderRadius: 6,
-                border: "1px solid var(--border)",
+                display: "block",
               }}
             />
-          ) : (
+            {/* Overlay strip with file info + Retake button */}
             <div
               style={{
-                width: 56,
-                height: 56,
-                background: "var(--surface)",
-                border: "1px dashed var(--border)",
-                borderRadius: 6,
+                position: "absolute",
+                left: 0,
+                right: 0,
+                bottom: 0,
+                padding: "10px 12px",
+                background: "linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.72) 100%)",
+                color: "#fff",
                 display: "flex",
                 alignItems: "center",
-                justifyContent: "center",
-                fontSize: 22,
-                color: "var(--muted)",
+                justifyContent: "space-between",
+                gap: 10,
               }}
             >
-              📷
-            </div>
-          )}
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>
-              {isMandatoryImage ? "Photo (required)" : "Photo (optional)"}
-            </div>
-            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
-              {imageFile
-                ? `${imageFile.name} · ${(imageFile.size / 1024).toFixed(0)} KB`
-                : "JPG / PNG / HEIC up to 5 MB"}
+              <div style={{ fontSize: 11, fontWeight: 600, opacity: 0.9 }}>
+                <span aria-hidden style={{ marginRight: 4 }}>📸</span>
+                {imageFile
+                  ? `Live capture · ${(imageFile.size / 1024).toFixed(0)} KB`
+                  : "Live capture"}
+              </div>
+              <button
+                type="button"
+                onClick={() => setCameraOpen(true)}
+                style={{
+                  padding: "6px 12px",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  background: "rgba(255,255,255,0.18)",
+                  color: "#fff",
+                  border: "1px solid rgba(255,255,255,0.32)",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                  backdropFilter: "blur(2px)",
+                }}
+              >
+                ↺ Retake
+              </button>
             </div>
           </div>
-          {/* Daksh May 2026 — camera-only capture per "i want capture
-              image and uploade like live capturing". The button opens
-              CameraCaptureModal (getUserMedia → canvas snapshot →
-              File) so there's no gallery/file-chooser path. Works
-              the same on Android, iOS, and desktop browsers. */}
+        ) : (
           <button
             type="button"
             onClick={() => setCameraOpen(true)}
             style={{
-              padding: "7px 12px",
-              fontSize: 12,
-              fontWeight: 700,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 12,
+              padding: "18px 16px",
               background: "var(--surface)",
-              color: accent,
-              border: `1px solid ${accent}`,
-              borderRadius: 6,
+              border: `2px dashed ${
+                isMandatoryImage
+                  ? accent
+                  : "var(--border)"
+              }`,
+              borderRadius: 12,
               cursor: "pointer",
-              whiteSpace: "nowrap",
+              fontSize: 14,
+              fontWeight: 700,
+              color: isMandatoryImage ? accent : "var(--text)",
+              transition: "transform 0.15s ease, background 0.15s ease, border-color 0.15s ease",
+              touchAction: "manipulation",
+              width: "100%",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = "translateY(-1px)";
+              e.currentTarget.style.background = tintPack.tintBg;
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = "translateY(0)";
+              e.currentTarget.style.background = "var(--surface)";
             }}
           >
-            {imageFile ? "📸 Retake" : "📸 Take photo"}
+            <span
+              aria-hidden
+              style={{
+                fontSize: 28,
+                width: 48,
+                height: 48,
+                borderRadius: "50%",
+                background: tintPack.tintBg,
+                border: `1.5px solid ${tintPack.tintBorder}`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              📸
+            </span>
+            <div style={{ textAlign: "left" }}>
+              <div style={{ fontSize: 14, fontWeight: 800 }}>
+                {isMandatoryImage ? "Take photo (required)" : "Take photo (optional)"}
+              </div>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: "var(--muted)",
+                  marginTop: 2,
+                  letterSpacing: "0.02em",
+                }}
+              >
+                Live camera capture · no gallery
+              </div>
+            </div>
           </button>
-        </div>
+        )}
         {cameraOpen && (
           <CameraCaptureModal
             filenamePrefix="carving-review"
@@ -3525,57 +4020,87 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
 
         {/* Reject two-step confirmation banner — only renders when
             confirmStage > 0. Stage 1 = "are you sure?", stage 2 =
-            "REALLY sure?". Submit button text changes in step with
-            the stage. */}
+            "REALLY sure?". Banner pulses on stage 2 to draw the eye. */}
         {mode === "reject" && confirmStage > 0 && (
           <div
             role="alert"
             style={{
-              padding: "10px 12px",
-              background: "rgba(185,28,28,0.10)",
-              border: "1.5px solid #b91c1c",
-              borderRadius: 8,
+              padding: "12px 14px",
+              background:
+                confirmStage === 2
+                  ? "linear-gradient(180deg, rgba(220,38,38,0.18) 0%, rgba(153,27,27,0.10) 100%)"
+                  : "rgba(185,28,28,0.10)",
+              border: `1.5px solid ${confirmStage === 2 ? "#dc2626" : "#b91c1c"}`,
+              borderRadius: 10,
               fontSize: 12.5,
               color: "#7f1d1d",
               fontWeight: 600,
               display: "flex",
-              flexDirection: "column",
-              gap: 4,
+              gap: 10,
+              alignItems: "flex-start",
+              boxShadow: confirmStage === 2 ? "0 4px 14px rgba(220,38,38,0.25)" : undefined,
+              animation: confirmStage === 2 ? "rejectPulse 1.4s ease-in-out infinite" : undefined,
             }}
           >
-            <div>
+            <span
+              aria-hidden
+              style={{ fontSize: 18, lineHeight: 1, flexShrink: 0 }}
+            >
+              {confirmStage === 1 ? "⚠" : "🛑"}
+            </span>
+            <div style={{ flex: 1, lineHeight: 1.45 }}>
               {confirmStage === 1
-                ? "⚠ Are you sure? Rejecting removes the slab from the carving loop entirely."
-                : "🛑 Final check — REALLY reject? This cannot be undone from here. The slab moves to the Rejected bucket and the owner gets a tasks alert."}
+                ? "Are you sure? Rejecting removes the slab from the carving loop entirely."
+                : "Final check — REALLY reject? This cannot be undone from here. The slab moves to the Rejected bucket and the owner / carving head get a Tasks alert."}
             </div>
           </div>
         )}
 
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 4 }}>
           {mode === "reject" && confirmStage > 0 && (
             <button
               type="button"
               onClick={() => setConfirmStage(0)}
               disabled={pending}
-              className="ghost-button"
-              style={{ fontSize: 13, padding: "10px 16px" }}
+              style={{
+                fontSize: 13,
+                fontWeight: 700,
+                padding: "12px 18px",
+                background: "var(--surface)",
+                color: "var(--text)",
+                border: "1.5px solid var(--border)",
+                borderRadius: 10,
+                cursor: pending ? "not-allowed" : "pointer",
+                opacity: pending ? 0.6 : 1,
+                transition: "background 0.15s ease",
+              }}
             >
-              Cancel
+              ← Cancel
             </button>
           )}
           <button
             type="submit"
             disabled={pending}
-            className={mode === "approve" ? "primary-button" : "ghost-button"}
             style={{
-              fontSize: 14,
-              padding: "10px 22px",
-              fontWeight: 700,
+              fontSize: 14.5,
+              padding: "13px 24px",
+              fontWeight: 800,
               whiteSpace: "nowrap",
-              opacity: pending ? 0.6 : 1,
-              background: mode === "approve" ? undefined : "transparent",
-              border: `1.5px solid ${accent}`,
-              color: mode === "approve" ? undefined : accent,
+              opacity: pending ? 0.7 : 1,
+              background: tintPack.submitGradient,
+              border: `1px solid ${tintPack.accentSolid}`,
+              borderRadius: 10,
+              color: "#fff",
+              cursor: pending ? "not-allowed" : "pointer",
+              boxShadow: tintPack.shadow,
+              letterSpacing: "0.02em",
+              transition: "transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease",
+            }}
+            onMouseEnter={(e) => {
+              if (!pending) e.currentTarget.style.transform = "translateY(-1px)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = "translateY(0)";
             }}
           >
             {pending
@@ -3585,17 +4110,28 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
                   ? "Sending back…"
                   : "Rejecting…"
               : mode === "approve"
-                ? "✓ Approve"
+                ? "✓ Approve & dispatch"
                 : mode === "rework"
                   ? "↻ Send back for rework"
                   : confirmStage === 0
-                    ? "✕ Reject"
+                    ? "✕ Reject slab"
                     : confirmStage === 1
                       ? "✕ Yes, reject"
                       : "🛑 REALLY reject"}
           </button>
         </div>
       </form>
+      {/* Inline keyframes for the stage-2 reject pulse. Plain
+          <style> tag (not styled-jsx) so it doesn't depend on
+          compiler config — vanilla DOM CSS works everywhere. */}
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `@keyframes rejectPulse {
+            0%, 100% { box-shadow: 0 4px 14px rgba(220,38,38,0.25); }
+            50% { box-shadow: 0 4px 24px rgba(220,38,38,0.6); }
+          }`,
+        }}
+      />
     </div>
   );
 }
