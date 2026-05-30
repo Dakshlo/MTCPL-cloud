@@ -3471,18 +3471,90 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
   // pick). Opens the CameraCaptureModal which does getUserMedia +
   // canvas snapshot. Captured File comes back via handleFile().
   const [cameraOpen, setCameraOpen] = useState(false);
+  // Mig 081 follow-on — custom popover state for the quality-flag
+  // picker. We replaced the native <select> with a styled card
+  // dropdown to match the rest of the modal's visual language. Esc
+  // + outside-click close the popup; ref used for the click-outside
+  // detection below.
+  const [qualityOpen, setQualityOpen] = useState(false);
+  const qualityRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!qualityOpen) return;
+    function onDocClick(e: MouseEvent) {
+      if (qualityRef.current && !qualityRef.current.contains(e.target as Node)) {
+        setQualityOpen(false);
+      }
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setQualityOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [qualityOpen]);
   // Mig 081 — Approve mode's freeform Notes was replaced with a
   // structured dropdown so analytics can group by issue type later.
   // Empty string = no flag picked (slab was fine). When "other" is
   // picked, the freeform `notes` textarea reappears and is required.
   // Reset when the user flips modes (in switchMode below).
   const [qualityFlag, setQualityFlag] = useState<string>("");
-  const QUALITY_OPTIONS: Array<{ value: string; label: string }> = [
-    { value: "carving_not_good", label: "Approved but carving quality not great" },
-    { value: "too_many_cracks", label: "Approved but too many cracks" },
-    { value: "color_variation", label: "Approved but color variation" },
-    { value: "minor_chips", label: "Approved but minor chips / rough edges" },
-    { value: "other", label: "Other (write a note)" },
+  // Mig 081 follow-on — option metadata for the custom picker.
+  // Each row drives icon + label + subtitle + accent tint on the
+  // popup card. Keep the value strings in lock-step with the
+  // server-side APPROVE_QUALITY_FLAGS whitelist + the migration's
+  // CHECK constraint.
+  const QUALITY_OPTIONS: Array<{
+    value: string;
+    label: string;
+    sub: string;
+    icon: string;
+    tone: string;
+  }> = [
+    {
+      value: "",
+      label: "Slab was fine",
+      sub: "Clean approval — nothing to flag",
+      icon: "✨",
+      tone: "#16a34a", // emerald — quality OK
+    },
+    {
+      value: "carving_not_good",
+      label: "Carving quality not great",
+      sub: "Workmanship issue — finish, depth, sharpness",
+      icon: "🪨",
+      tone: "#b45309", // amber — soft warning
+    },
+    {
+      value: "too_many_cracks",
+      label: "Too many cracks",
+      sub: "Material flaw — pattern or natural cracks",
+      icon: "⚡",
+      tone: "#dc2626", // red — visible defect
+    },
+    {
+      value: "color_variation",
+      label: "Color variation",
+      sub: "Stone tone mismatch within or across slabs",
+      icon: "🎨",
+      tone: "#7c3aed", // violet — visual issue
+    },
+    {
+      value: "minor_chips",
+      label: "Minor chips / rough edges",
+      sub: "Finishing detail — small but worth flagging",
+      icon: "⚒",
+      tone: "#d97706", // orange — minor
+    },
+    {
+      value: "other",
+      label: "Other",
+      sub: "Write a custom note below",
+      icon: "✏",
+      tone: "var(--gold-dark)", // brand gold — freeform
+    },
   ];
   const [pending, setPending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -3831,7 +3903,6 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
         {mode === "approve" ? (
           <div>
             <label
-              htmlFor="review-quality-flag"
               style={{
                 fontSize: 10.5,
                 fontWeight: 800,
@@ -3847,45 +3918,240 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
               <span aria-hidden>🏷</span>
               Quality flag (optional)
             </label>
-            <select
-              id="review-quality-flag"
-              name="quality_flag"
-              value={qualityFlag}
-              onChange={(e) => setQualityFlag(e.target.value)}
-              onFocus={(e) => {
-                e.currentTarget.style.borderColor = tintPack.accentSolid;
-                e.currentTarget.style.boxShadow = "0 0 0 3px rgba(202,138,4,0.18)";
-              }}
-              onBlur={(e) => {
-                e.currentTarget.style.borderColor = "var(--border)";
-                e.currentTarget.style.boxShadow = "none";
-              }}
-              style={{
-                width: "100%",
-                fontSize: 13.5,
-                padding: "12px 14px",
-                border: "1.5px solid var(--border)",
-                borderRadius: 10,
-                background: "var(--surface)",
-                color: qualityFlag ? "var(--text)" : "var(--muted)",
-                fontFamily: "inherit",
-                lineHeight: 1.4,
-                transition: "border-color 0.15s ease, box-shadow 0.15s ease",
-                outline: "none",
-                boxSizing: "border-box",
-                cursor: "pointer",
-                appearance: "auto",
-              }}
-            >
-              <option value="" style={{ color: "var(--muted)" }}>
-                — Slab was fine, nothing to flag —
-              </option>
-              {QUALITY_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value} style={{ color: "#000" }}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
+            {/* Mig 081 follow-on — custom card-style picker. Replaces
+                the native <select> so it matches the rest of the
+                modal's gold/card visual language. Hidden <input> at
+                the end keeps the FormData shape unchanged
+                (quality_flag still rides through doSubmit's manual
+                fd.set so this hidden input is belt + suspenders). */}
+            <div ref={qualityRef} style={{ position: "relative" }}>
+              {(() => {
+                const selected =
+                  QUALITY_OPTIONS.find((o) => o.value === qualityFlag) ??
+                  QUALITY_OPTIONS[0]; // index 0 is "Slab was fine" (value="")
+                return (
+                  <button
+                    type="button"
+                    aria-haspopup="listbox"
+                    aria-expanded={qualityOpen}
+                    onClick={() => setQualityOpen((o) => !o)}
+                    style={{
+                      width: "100%",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                      padding: "12px 14px",
+                      background: "var(--surface)",
+                      border: `1.5px solid ${qualityOpen ? tintPack.accentSolid : "var(--border)"}`,
+                      borderRadius: 10,
+                      cursor: "pointer",
+                      transition: "border-color 0.15s ease, box-shadow 0.15s ease, transform 0.12s ease",
+                      boxShadow: qualityOpen
+                        ? "0 0 0 3px rgba(202,138,4,0.18)"
+                        : "0 1px 0 rgba(0,0,0,0.04)",
+                      fontFamily: "inherit",
+                      color: "var(--text)",
+                      textAlign: "left",
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!qualityOpen)
+                        e.currentTarget.style.borderColor = "rgba(180,128,11,0.45)";
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!qualityOpen)
+                        e.currentTarget.style.borderColor = "var(--border)";
+                    }}
+                  >
+                    <span
+                      aria-hidden
+                      style={{
+                        width: 34,
+                        height: 34,
+                        borderRadius: 8,
+                        background: `${selected.tone}1a`,
+                        color: selected.tone,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 18,
+                        flexShrink: 0,
+                        border: `1px solid ${selected.tone}33`,
+                      }}
+                    >
+                      {selected.icon}
+                    </span>
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span
+                        style={{
+                          display: "block",
+                          fontSize: 13.5,
+                          fontWeight: 700,
+                          color: "var(--text)",
+                          lineHeight: 1.2,
+                        }}
+                      >
+                        {selected.label}
+                      </span>
+                      <span
+                        style={{
+                          display: "block",
+                          fontSize: 11,
+                          color: "var(--muted)",
+                          marginTop: 2,
+                          lineHeight: 1.3,
+                        }}
+                      >
+                        {selected.sub}
+                      </span>
+                    </span>
+                    <span
+                      aria-hidden
+                      style={{
+                        fontSize: 14,
+                        color: "var(--muted)",
+                        transition: "transform 0.2s ease",
+                        transform: qualityOpen ? "rotate(180deg)" : "rotate(0)",
+                        flexShrink: 0,
+                      }}
+                    >
+                      ▾
+                    </span>
+                  </button>
+                );
+              })()}
+
+              {qualityOpen && (
+                <div
+                  role="listbox"
+                  aria-label="Quality flag options"
+                  style={{
+                    position: "absolute",
+                    top: "calc(100% + 6px)",
+                    left: 0,
+                    right: 0,
+                    zIndex: 30,
+                    background: "var(--surface)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 12,
+                    boxShadow: "0 12px 36px rgba(0,0,0,0.18)",
+                    padding: 4,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 2,
+                    maxHeight: 400,
+                    overflowY: "auto",
+                    animation: "qualityFlagOpen 0.16s ease-out both",
+                  }}
+                >
+                  {QUALITY_OPTIONS.map((opt) => {
+                    const isSelected = qualityFlag === opt.value;
+                    return (
+                      <button
+                        key={opt.value || "none"}
+                        type="button"
+                        role="option"
+                        aria-selected={isSelected}
+                        onClick={() => {
+                          setQualityFlag(opt.value);
+                          setQualityOpen(false);
+                          // Drop any "Other" textarea content when
+                          // switching away from Other so a stale
+                          // freeform note doesn't ride along with
+                          // a preset on submit.
+                          if (opt.value !== "other") setNotes("");
+                        }}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 12,
+                          padding: "10px 12px",
+                          background: isSelected ? `${opt.tone}14` : "transparent",
+                          border: "none",
+                          borderLeft: `3px solid ${isSelected ? opt.tone : "transparent"}`,
+                          borderRadius: 8,
+                          cursor: "pointer",
+                          textAlign: "left",
+                          fontFamily: "inherit",
+                          color: "var(--text)",
+                          transition: "background 0.12s ease",
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!isSelected)
+                            e.currentTarget.style.background = "rgba(0,0,0,0.04)";
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!isSelected)
+                            e.currentTarget.style.background = "transparent";
+                        }}
+                      >
+                        <span
+                          aria-hidden
+                          style={{
+                            width: 30,
+                            height: 30,
+                            borderRadius: 7,
+                            background: `${opt.tone}1a`,
+                            color: opt.tone,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontSize: 16,
+                            flexShrink: 0,
+                            border: `1px solid ${opt.tone}33`,
+                          }}
+                        >
+                          {opt.icon}
+                        </span>
+                        <span style={{ flex: 1, minWidth: 0 }}>
+                          <span
+                            style={{
+                              display: "block",
+                              fontSize: 13,
+                              fontWeight: 700,
+                              color: "var(--text)",
+                              lineHeight: 1.2,
+                            }}
+                          >
+                            {opt.label}
+                          </span>
+                          <span
+                            style={{
+                              display: "block",
+                              fontSize: 11,
+                              color: "var(--muted)",
+                              marginTop: 2,
+                              lineHeight: 1.3,
+                            }}
+                          >
+                            {opt.sub}
+                          </span>
+                        </span>
+                        {isSelected && (
+                          <span
+                            aria-hidden
+                            style={{
+                              fontSize: 14,
+                              color: opt.tone,
+                              fontWeight: 800,
+                              flexShrink: 0,
+                            }}
+                          >
+                            ✓
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Hidden input keeps the form-data shape standard
+                  in case any future caller posts the form directly
+                  instead of going through doSubmit's manual
+                  fd.set("quality_flag", …). */}
+              <input type="hidden" name="quality_flag" value={qualityFlag} />
+            </div>
+
             <div
               style={{
                 fontSize: 10.5,
@@ -3898,6 +4164,16 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
               patterns over time. Leave on the default if the slab
               was clean.
             </div>
+            {/* Inline keyframes for the popup fade/slide. Plain
+                <style> tag so it doesn't depend on styled-jsx. */}
+            <style
+              dangerouslySetInnerHTML={{
+                __html: `@keyframes qualityFlagOpen {
+                  from { opacity: 0; transform: translateY(-4px); }
+                  to   { opacity: 1; transform: translateY(0); }
+                }`,
+              }}
+            />
 
             {/* When "Other" is picked, surface the freeform textarea
                 so the reviewer can write the actual issue. Required
