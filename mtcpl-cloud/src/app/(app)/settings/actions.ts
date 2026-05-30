@@ -3,7 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+// Mig 081 follow-on — createServerSupabaseClient (user-context)
+// removed. Every action in this file now goes through the admin
+// client so RLS doesn't block writes; requireAuth() is the
+// security gate.
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 
 function text(fd: FormData, key: string) {
@@ -21,9 +24,17 @@ function adjustHex(hex: string, factor: number): string {
   return "#" + [r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("");
 }
 
+// Daksh May 2026 (mig 081 follow-on) — same latent RLS bug as the
+// temple actions below: stone_types has RLS enabled without an
+// INSERT/UPDATE/DELETE policy for `authenticated`, so the
+// user-context client (createServerSupabaseClient) was failing on
+// every write. Hasn't surfaced because production stone types
+// (PinkStone, WhiteStone, etc.) are stable — but the next time
+// someone added a stone type it would have hit the same error
+// Daksh just saw on temples. Pre-emptive fix while we're here.
 export async function addStoneTypeAction(formData: FormData) {
   await requireAuth(["owner", "team_head", "senior_incharge", "developer"]);
-  const supabase = await createServerSupabaseClient();
+  const admin = createAdminSupabaseClient();
 
   const name = text(formData, "name").replace(/\s+/g, "");
   const base = text(formData, "color") || "#C87A60";
@@ -37,7 +48,7 @@ export async function addStoneTypeAction(formData: FormData) {
 
   if (!name) redirect("/settings?toast=Stone+type+name+required");
 
-  const { error } = await supabase
+  const { error } = await admin
     .from("stone_types")
     .insert({ name, color_top, color_front, color_side, stone_category });
   if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
@@ -57,7 +68,9 @@ export async function addStoneTypeAction(formData: FormData) {
  *  in case of a direct POST. */
 export async function setStoneCategoryAction(formData: FormData) {
   await requireAuth(["owner", "team_head", "senior_incharge", "developer"]);
-  const supabase = await createServerSupabaseClient();
+  // Admin client throughout — RLS bypass needed for the update path
+  // (mig 081 follow-on fix; see addStoneTypeAction note above).
+  const admin = createAdminSupabaseClient();
 
   const id = text(formData, "id");
   const rawCategory = text(formData, "stone_category").toLowerCase();
@@ -66,7 +79,6 @@ export async function setStoneCategoryAction(formData: FormData) {
   if (!id) redirect("/settings?toast=Stone+id+required");
 
   // Look up the stone so we can sanity-check by name.
-  const admin = createAdminSupabaseClient();
   const { data: stoneRow } = await admin
     .from("stone_types")
     .select("name")
@@ -88,7 +100,7 @@ export async function setStoneCategoryAction(formData: FormData) {
     );
   }
 
-  const { error } = await supabase
+  const { error } = await admin
     .from("stone_types")
     .update({ stone_category })
     .eq("id", id);
@@ -102,7 +114,9 @@ export async function setStoneCategoryAction(formData: FormData) {
 
 export async function deleteStoneTypeAction(formData: FormData) {
   await requireAuth(["owner", "team_head", "senior_incharge", "developer"]);
-  const supabase = await createServerSupabaseClient();
+  // Admin client throughout — RLS bypass needed for the delete path
+  // (mig 081 follow-on fix; see addStoneTypeAction note above).
+  const admin = createAdminSupabaseClient();
 
   const id = text(formData, "id");
   const name = text(formData, "name");
@@ -113,7 +127,6 @@ export async function deleteStoneTypeAction(formData: FormData) {
   }
 
   // Block deletion if any blocks or slabs still use this stone type
-  const admin = createAdminSupabaseClient();
   const [{ count: blockCount }, { count: slabCount }] = await Promise.all([
     admin.from("blocks").select("id", { count: "exact", head: true }).eq("stone", name),
     admin.from("slab_requirements").select("id", { count: "exact", head: true }).eq("stone", name),
@@ -123,7 +136,7 @@ export async function deleteStoneTypeAction(formData: FormData) {
     redirect(`/settings?toast=${encodeURIComponent(`Cannot delete — ${blockCount ?? 0} block(s) and ${slabCount ?? 0} slab(s) still use "${name}". Change their stone type first.`)}`);
   }
 
-  const { error } = await supabase.from("stone_types").delete().eq("id", id);
+  const { error } = await admin.from("stone_types").delete().eq("id", id);
   if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
 
   revalidatePath("/settings");
@@ -132,10 +145,29 @@ export async function deleteStoneTypeAction(formData: FormData) {
 }
 
 // ── Temple Actions ───────────────────────────────────────────────────────────
+//
+// Daksh May 2026 (mig 081 follow-on) — these three actions used to
+// instantiate the user-context Supabase client (createServerSupabase-
+// Client). The `temples` table has RLS enabled but no INSERT/UPDATE/
+// DELETE policy for the `authenticated` role, so every write through
+// the user client was getting:
+//   "new row violates row-level security policy for table 'temples'"
+// Daksh hit this trying to add a temple — first hit since RLS landed
+// because nobody had added a temple between then and now.
+//
+// Fix: switch to createAdminSupabaseClient() to bypass RLS. This is
+// the same pattern every other write in the codebase uses (bills,
+// vendors, messenger, carving review, stone-types operations
+// elsewhere in this file, etc.). requireAuth() is the security gate;
+// the database doesn't need its own write policy because writes only
+// happen through these auth-gated server actions.
+//
+// Also added "developer" to the role allowlist — every other action
+// in this file includes it; temple actions were the odd one out.
 
 export async function addTempleAction(formData: FormData) {
-  await requireAuth(["owner", "team_head", "senior_incharge"]);
-  const supabase = await createServerSupabaseClient();
+  await requireAuth(["owner", "team_head", "senior_incharge", "developer"]);
+  const admin = createAdminSupabaseClient();
 
   const name = text(formData, "name");
   const code_prefix = text(formData, "code_prefix").toUpperCase();
@@ -143,7 +175,7 @@ export async function addTempleAction(formData: FormData) {
 
   if (!name || !code_prefix) redirect("/settings?toast=Name+and+prefix+required");
 
-  const { error } = await supabase.from("temples").insert({ name, code_prefix, default_stone });
+  const { error } = await admin.from("temples").insert({ name, code_prefix, default_stone });
   if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
 
   revalidatePath("/settings");
@@ -152,8 +184,8 @@ export async function addTempleAction(formData: FormData) {
 }
 
 export async function updateTempleAction(formData: FormData) {
-  await requireAuth(["owner", "team_head", "senior_incharge"]);
-  const supabase = await createServerSupabaseClient();
+  await requireAuth(["owner", "team_head", "senior_incharge", "developer"]);
+  const admin = createAdminSupabaseClient();
 
   const id = text(formData, "id");
   // Daksh follow-on: temple name, code_prefix and default_stone
@@ -167,7 +199,7 @@ export async function updateTempleAction(formData: FormData) {
 
   if (!id) redirect("/settings?toast=Missing+ID");
 
-  const { error } = await supabase
+  const { error } = await admin
     .from("temples")
     .update({ is_active })
     .eq("id", id);
@@ -179,15 +211,14 @@ export async function updateTempleAction(formData: FormData) {
 }
 
 export async function deleteTempleAction(formData: FormData) {
-  await requireAuth(["owner", "team_head", "senior_incharge"]);
-  const supabase = await createServerSupabaseClient();
+  await requireAuth(["owner", "team_head", "senior_incharge", "developer"]);
+  const admin = createAdminSupabaseClient();
 
   const id = text(formData, "id");
   const name = text(formData, "temple_name");
 
   // Block deletion if any slabs still reference this temple
   if (name) {
-    const admin = createAdminSupabaseClient();
     const { count } = await admin
       .from("slab_requirements")
       .select("id", { count: "exact", head: true })
@@ -197,7 +228,7 @@ export async function deleteTempleAction(formData: FormData) {
     }
   }
 
-  const { error } = await supabase.from("temples").delete().eq("id", id);
+  const { error } = await admin.from("temples").delete().eq("id", id);
   if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
 
   revalidatePath("/settings");
