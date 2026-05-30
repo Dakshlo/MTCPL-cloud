@@ -13,6 +13,8 @@ import {
 } from "@/lib/departments";
 import { setActiveDepartmentAction } from "@/app/(app)/department-actions";
 import { ThemeToggle } from "./theme-toggle";
+// Mig 080 follow-on (Daksh) — shared sign-out flourish hook.
+import { useSignOut } from "./sign-out-overlay";
 
 type NavItem = {
   type?: "item";
@@ -540,6 +542,10 @@ export function Sidebar({
 }) {
   const pathname = usePathname();
   const router = useRouter();
+  // Mig 080 follow-on (Daksh) — shared sign-out flourish hook. Same
+  // visual treatment as the topbar Sign out button (gold-pulsing
+  // focal box → ✓ done → hard redirect to /login).
+  const triggerSignOut = useSignOut();
   // Daksh (Mig 058 follow-on): dept-switch feedback is a thin gold
   // progress bar pinned to the very top of the viewport (the
   // earlier FinanceLoadingOverlay variant felt too heavy and was
@@ -1021,11 +1027,17 @@ export function Sidebar({
       {/* Footer */}
       <div className="sidebar-footer">
         <ThemeToggle initialFromDB={themePreference ?? null} />
-        <form action="/api/auth/signout" method="post">
-          <button className="logout-btn" type="submit">
-            Sign out
-          </button>
-        </form>
+        {/* Mig 080 follow-on — was a form POST to /api/auth/signout
+            (no such route existed, so it silently failed). Now uses
+            the shared useSignOut() hook for the gold-pulse flourish
+            + reliable client-side supabase.auth.signOut() call. */}
+        <button
+          className="logout-btn"
+          type="button"
+          onClick={triggerSignOut}
+        >
+          Sign out
+        </button>
       </div>
     </aside>
     </>

@@ -15,6 +15,10 @@ import { TopbarIdLookup } from "@/components/topbar-id-lookup";
 import { Toast } from "@/components/toast";
 import { Heartbeat } from "@/components/heartbeat";
 import { LoginLocationProbe } from "@/components/login-location-probe";
+// Mig 080 follow-on (Daksh) — host for the shared sign-out flourish.
+// Mounted once at the (app) layout root so every Sign out button
+// (topbar + sidebar) can trigger the same gold-pulse overlay.
+import { SignOutOverlayHost } from "@/components/sign-out-overlay";
 import { requireAuth } from "@/lib/auth";
 import { canApproveCuts, canSeeAwaitingReview } from "@/lib/cutting-permissions";
 import { canUseMessenger } from "@/lib/messenger-permissions";
@@ -350,6 +354,11 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           fire-and-forget; never blocks anything. Visible in the Live
           Users panel on /settings (developer + owner). */}
       <LoginLocationProbe />
+      {/* Mig 080 follow-on — sign-out flourish host. Renders the
+          full-viewport gold-pulse overlay when any Sign out button
+          fires useSignOut(). Mounts as a portal off document.body
+          so it sits above every page surface. */}
+      <SignOutOverlayHost />
       <Sidebar
         displayName={displayName}
         role={profile.role}
