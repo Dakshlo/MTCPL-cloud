@@ -5,6 +5,9 @@ import {
   addExternalCutSlabAction,
   deleteExternalCutSlabAction,
   updateExternalCutSlabAction,
+  // Mig 081 follow-on — batch edit/delete for multi-add groups.
+  bulkUpdateExternalCutSlabsAction,
+  bulkDeleteExternalCutSlabsAction,
 } from "./actions";
 import { StyledSelect } from "@/components/styled-select";
 
@@ -43,6 +46,10 @@ export type ExternalSlab = {
   stock_location: string | null;
   quality: string | null;
   priority: boolean;
+  /** Mig 081 follow-on — non-null when this slab was added as part
+   *  of a multi-add. All slabs sharing a batch_id render as a single
+   *  group in the panel with batch-level Edit / Delete affordances. */
+  batch_id: string | null;
 };
 
 export function ExternalCutSlabsPanel({
@@ -328,6 +335,34 @@ function TempleGroup({
   temples: Temple[];
   stoneTypes: StoneType[];
 }) {
+  // Mig 081 follow-on — split into singletons + batches. A batch =
+  // 2+ slabs sharing the same batch_id (added in one multi-add). All
+  // batch members render together with batch-level Edit/Delete; one-
+  // off external slabs render individually with the existing
+  // single-slab affordances.
+  const batches = new Map<string, ExternalSlab[]>();
+  const singletons: ExternalSlab[] = [];
+  for (const s of slabs) {
+    if (s.batch_id) {
+      const arr = batches.get(s.batch_id) ?? [];
+      arr.push(s);
+      batches.set(s.batch_id, arr);
+    } else {
+      singletons.push(s);
+    }
+  }
+  // A "batch" of one is still a singleton from the user's POV — fold
+  // it back. Happens if someone deletes all-but-one from a batch.
+  for (const [bId, arr] of batches.entries()) {
+    if (arr.length === 1) {
+      singletons.push(arr[0]);
+      batches.delete(bId);
+    }
+  }
+  const batchEntries = [...batches.entries()].sort(([, aArr], [, bArr]) =>
+    aArr[0].id.localeCompare(bArr[0].id),
+  );
+
   return (
     <div
       style={{
@@ -362,7 +397,16 @@ function TempleGroup({
         </span>
       </div>
       <div style={{ display: "flex", flexDirection: "column" }}>
-        {slabs.map((s) => (
+        {batchEntries.map(([batchId, batchSlabs]) => (
+          <BatchGroup
+            key={batchId}
+            batchId={batchId}
+            slabs={batchSlabs}
+            temples={temples}
+            stoneTypes={stoneTypes}
+          />
+        ))}
+        {singletons.map((s) => (
           <SlabRow
             key={s.id}
             slab={s}
@@ -371,6 +415,275 @@ function TempleGroup({
           />
         ))}
       </div>
+    </div>
+  );
+}
+
+/** Mig 081 follow-on — renders a multi-add batch as a single
+ *  collapsible card with batch-level Edit + Delete buttons. The
+ *  default is collapsed (just the summary + actions); click the
+ *  header to expand and see each slab id in the batch. */
+function BatchGroup({
+  batchId,
+  slabs,
+  temples,
+  stoneTypes,
+}: {
+  batchId: string;
+  slabs: ExternalSlab[];
+  temples: Temple[];
+  stoneTypes: StoneType[];
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [editing, setEditing] = useState(false);
+  // All members of the batch share their metadata at creation time,
+  // so picking [0] as the representative is correct. The bulk-update
+  // server action re-resolves the set anyway.
+  const rep = slabs[0];
+  const dims = `${rep.length_ft}×${rep.width_ft}×${rep.thickness_ft}″`;
+
+  if (editing) {
+    return (
+      <div
+        style={{
+          padding: 14,
+          background: "rgba(217,119,6,0.04)",
+          borderTop: "1px solid var(--border)",
+        }}
+      >
+        <div
+          style={{
+            fontSize: 11,
+            fontWeight: 800,
+            color: "var(--gold-dark)",
+            textTransform: "uppercase",
+            letterSpacing: "0.06em",
+            marginBottom: 10,
+          }}
+        >
+          ✎ Editing batch of {slabs.length} — every change applies to all
+          {" "}slabs in this batch
+        </div>
+        <AddOrEditForm
+          mode="batchEdit"
+          existing={rep}
+          batchId={batchId}
+          batchSize={slabs.length}
+          temples={temples}
+          stoneTypes={stoneTypes}
+          onCancel={() => setEditing(false)}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        borderTop: "1px solid var(--border)",
+        background: "rgba(217,119,6,0.04)",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: "10px 14px",
+          flexWrap: "wrap",
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          style={{
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
+            padding: 0,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            flex: "1 1 220px",
+            minWidth: 0,
+            color: "inherit",
+            textAlign: "left",
+          }}
+          aria-expanded={expanded}
+        >
+          <span
+            aria-hidden
+            style={{
+              fontSize: 11,
+              color: "var(--muted)",
+              transition: "transform 0.18s ease",
+              transform: expanded ? "rotate(90deg)" : "rotate(0)",
+              display: "inline-block",
+            }}
+          >
+            ▶
+          </span>
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 800,
+              padding: "2px 8px",
+              borderRadius: 999,
+              background: "var(--gold-dark)",
+              color: "#fff",
+              letterSpacing: "0.05em",
+              flexShrink: 0,
+            }}
+          >
+            📦 BATCH OF {slabs.length}
+          </span>
+          <span
+            style={{
+              fontFamily: "ui-monospace, monospace",
+              fontWeight: 700,
+              fontSize: 13,
+              color: "var(--text)",
+              flex: 1,
+              minWidth: 0,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {rep.id}
+            {slabs.length > 1
+              ? ` … ${slabs[slabs.length - 1].id}`
+              : ""}
+          </span>
+          {rep.priority && (
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 800,
+                padding: "1px 7px",
+                borderRadius: 999,
+                background: "#dc2626",
+                color: "#fff",
+                letterSpacing: "0.05em",
+                flexShrink: 0,
+              }}
+            >
+              ⚡ PRIORITY
+            </span>
+          )}
+        </button>
+        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            style={{
+              padding: "6px 12px",
+              fontSize: 12,
+              fontWeight: 700,
+              background: "transparent",
+              color: "var(--gold-dark)",
+              border: "1px solid var(--gold-dark)",
+              borderRadius: 6,
+              cursor: "pointer",
+            }}
+            title="Edit every slab in this batch with the same values"
+          >
+            ✎ Edit batch
+          </button>
+          <form
+            action={bulkDeleteExternalCutSlabsAction}
+            onSubmit={(e) => {
+              if (
+                !window.confirm(
+                  `Delete this entire batch of ${slabs.length} slabs?\n\nIDs: ${slabs.map((s) => s.id).join(", ")}\n\nThis cannot be undone.`,
+                )
+              ) {
+                e.preventDefault();
+              }
+            }}
+          >
+            <input type="hidden" name="batch_id" value={batchId} />
+            <input type="hidden" name="redirect_to" value="/carving" />
+            <button
+              type="submit"
+              style={{
+                padding: "6px 12px",
+                fontSize: 12,
+                fontWeight: 700,
+                background: "transparent",
+                color: "#b91c1c",
+                border: "1px solid rgba(220,38,38,0.5)",
+                borderRadius: 6,
+                cursor: "pointer",
+              }}
+              title="Delete every slab in this batch"
+            >
+              🗑 Delete batch
+            </button>
+          </form>
+        </div>
+      </div>
+      {/* Slab summary line — same compact metadata as a single row */}
+      <div
+        style={{
+          padding: "0 14px 8px 38px",
+          fontSize: 11,
+          color: "var(--muted)",
+        }}
+      >
+        {dims} · {rep.stone}
+        {rep.stock_location && ` · 📍 ${rep.stock_location}`}
+        {rep.label && ` · 🏷 ${rep.label}`}
+      </div>
+      {rep.description && (
+        <div
+          style={{
+            padding: "0 14px 10px 38px",
+            fontSize: 11,
+            color: "var(--text)",
+            fontStyle: "italic",
+          }}
+        >
+          {rep.description}
+        </div>
+      )}
+      {expanded && (
+        <div
+          style={{
+            padding: "8px 14px 12px 38px",
+            borderTop: "1px dashed var(--border)",
+            background: "var(--bg)",
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 10,
+              fontWeight: 800,
+              color: "var(--muted)",
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+              marginBottom: 4,
+            }}
+          >
+            All {slabs.length} ids in this batch:
+          </div>
+          {slabs.map((s) => (
+            <div
+              key={s.id}
+              style={{
+                fontFamily: "ui-monospace, monospace",
+                fontSize: 12,
+                color: "var(--text)",
+              }}
+            >
+              · {s.id}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -537,19 +850,34 @@ function SlabRow({
   );
 }
 
-/** Shared form for both Add and Edit. Mode controls the target server
- *  action + whether the id hidden input is rendered. Fields mirror
- *  the existing Required Sizes AddSlabForm so the carving-side data
- *  entry feels consistent. */
+/** Shared form for Add / single-Edit / batch-Edit. Mode controls
+ *  which server action is hit + which hidden inputs ride along
+ *  (single edit posts `id`; batch edit posts `batch_id` + `batchSize`
+ *  is shown in the heading). Fields mirror the existing Required
+ *  Sizes AddSlabForm so the carving-side data entry feels consistent.
+ *
+ *  Mig 081 follow-on:
+ *  • Add mode now has a Quantity stepper (1-100) — multi-add
+ *    creates a batch with shared metadata.
+ *  • Label / Description / Stock location are now REQUIRED (with
+ *    visible badges + server enforcement).
+ *  • New "batchEdit" mode reuses the same form to edit every slab
+ *    in a batch with one submission. */
 function AddOrEditForm({
   mode,
   existing,
+  batchId,
+  batchSize,
   temples,
   stoneTypes,
   onCancel,
 }: {
-  mode: "add" | "edit";
+  mode: "add" | "edit" | "batchEdit";
   existing?: ExternalSlab;
+  /** Only for batchEdit. Posts as the hidden batch_id input. */
+  batchId?: string;
+  /** Only for batchEdit. Drives the submit button label. */
+  batchSize?: number;
   temples: Temple[];
   stoneTypes: StoneType[];
   onCancel: () => void;
@@ -583,13 +911,26 @@ function AddOrEditForm({
     (existing?.quality as "" | "A" | "B") ?? "",
   );
   const [priority, setPriority] = useState(existing?.priority ?? false);
+  // Mig 081 — quantity stepper, only active in add mode. Mirrors the
+  // pattern from /slabs Required Sizes add form.
+  const [qty, setQty] = useState<number>(1);
 
   const dimsOk =
     Number(length) > 0 && Number(width) > 0 && Number(thickness) > 0;
-  const canSubmit = !!selectedTemple && !!stone && dimsOk;
+  // Mandatory metadata — block submit when any are blank. Server
+  // enforces too, but failing client-side is faster + clearer.
+  const metadataOk =
+    label.trim().length > 0 &&
+    description.trim().length > 0 &&
+    stockLocation.trim().length > 0;
+  const canSubmit = !!selectedTemple && !!stone && dimsOk && metadataOk;
 
   const action =
-    mode === "edit" ? updateExternalCutSlabAction : addExternalCutSlabAction;
+    mode === "batchEdit"
+      ? bulkUpdateExternalCutSlabsAction
+      : mode === "edit"
+        ? updateExternalCutSlabAction
+        : addExternalCutSlabAction;
 
   return (
     <form
@@ -599,6 +940,12 @@ function AddOrEditForm({
       <input type="hidden" name="redirect_to" value="/carving" />
       {mode === "edit" && existing && (
         <input type="hidden" name="id" value={existing.id} />
+      )}
+      {mode === "batchEdit" && batchId && (
+        <input type="hidden" name="batch_id" value={batchId} />
+      )}
+      {mode === "add" && (
+        <input type="hidden" name="quantity" value={String(qty)} />
       )}
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -678,7 +1025,11 @@ function AddOrEditForm({
         </Field>
       </div>
 
-      <Field label="Label (optional — defaults to temple name)">
+      {/* Mig 081 follow-on — label / description / stock_location
+          are now mandatory (server enforces too). REQUIRED badge +
+          required attribute on the inputs so the browser blocks
+          submit before the round-trip. */}
+      <Field label="Label *">
         <input
           type="text"
           name="label"
@@ -686,10 +1037,11 @@ function AddOrEditForm({
           onChange={(e) => setLabel(e.target.value)}
           maxLength={80}
           placeholder={selectedTemple?.name ?? "Slab label"}
+          required
           style={inputStyle}
         />
       </Field>
-      <Field label="Description (optional)">
+      <Field label="Description *">
         <input
           type="text"
           name="description"
@@ -697,10 +1049,11 @@ function AddOrEditForm({
           onChange={(e) => setDescription(e.target.value)}
           maxLength={200}
           placeholder="e.g. corner piece, top row"
+          required
           style={inputStyle}
         />
       </Field>
-      <Field label="Stock location (optional)">
+      <Field label="Stock location *">
         <input
           type="text"
           name="stock_location"
@@ -708,6 +1061,7 @@ function AddOrEditForm({
           onChange={(e) => setStockLocation(e.target.value)}
           maxLength={60}
           placeholder="e.g. Yard A · row 3"
+          required
           style={inputStyle}
         />
       </Field>
@@ -752,6 +1106,104 @@ function AddOrEditForm({
         </Field>
       </div>
 
+      {/* Mig 081 follow-on — quantity stepper. Add-mode only; the
+          edit/batchEdit paths operate on existing rows. Up to 100,
+          matching the /slabs Required Sizes add form. */}
+      {mode === "add" && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 14,
+            padding: "10px 12px",
+            background: "var(--bg)",
+            border: "1px dashed var(--border)",
+            borderRadius: 8,
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: "var(--muted)",
+                textTransform: "uppercase",
+                letterSpacing: "0.04em",
+              }}
+            >
+              Quantity
+            </div>
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--muted)",
+                marginTop: 2,
+                lineHeight: 1.4,
+              }}
+            >
+              {qty === 1
+                ? "Adds one slab. Use the +/− buttons to add a batch (e.g. 5 identical slabs)."
+                : `Adds ${qty} slabs as a single batch — all share these dimensions + metadata and can be edited / deleted together later.`}
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <button
+              type="button"
+              onClick={() => setQty((q) => Math.max(1, q - 1))}
+              disabled={qty <= 1}
+              style={{
+                width: 32,
+                height: 32,
+                fontSize: 16,
+                fontWeight: 800,
+                background: "var(--surface)",
+                color: qty > 1 ? "var(--text)" : "var(--muted)",
+                border: "1px solid var(--border)",
+                borderRadius: 6,
+                cursor: qty > 1 ? "pointer" : "not-allowed",
+                lineHeight: 1,
+              }}
+              aria-label="Decrease quantity"
+            >
+              −
+            </button>
+            <div
+              style={{
+                minWidth: 50,
+                textAlign: "center",
+                fontSize: 18,
+                fontWeight: 800,
+                fontFamily: "ui-monospace, monospace",
+                color: "var(--text)",
+              }}
+            >
+              {qty}
+            </div>
+            <button
+              type="button"
+              onClick={() => setQty((q) => Math.min(100, q + 1))}
+              disabled={qty >= 100}
+              style={{
+                width: 32,
+                height: 32,
+                fontSize: 16,
+                fontWeight: 800,
+                background: "var(--surface)",
+                color: qty < 100 ? "var(--text)" : "var(--muted)",
+                border: "1px solid var(--border)",
+                borderRadius: 6,
+                cursor: qty < 100 ? "pointer" : "not-allowed",
+                lineHeight: 1,
+              }}
+              aria-label="Increase quantity"
+            >
+              +
+            </button>
+          </div>
+        </div>
+      )}
+
       <div
         style={{
           display: "flex",
@@ -782,7 +1234,13 @@ function AddOrEditForm({
             cursor: canSubmit ? "pointer" : "not-allowed",
           }}
         >
-          {mode === "edit" ? "Save changes" : "Add to Unassigned"}
+          {mode === "batchEdit"
+            ? `Save batch of ${batchSize ?? "?"}`
+            : mode === "edit"
+              ? "Save changes"
+              : qty > 1
+                ? `Add ${qty} slabs to Unassigned`
+                : "Add to Unassigned"}
         </button>
       </div>
     </form>

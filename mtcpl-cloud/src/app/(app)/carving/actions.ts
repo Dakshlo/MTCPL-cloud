@@ -150,6 +150,19 @@ function refreshAll() {
 // cutting reports + cutter costing stay clean. The lack of
 // source_block_id is the marker for "this came from outside".
 
+// Mig 081 follow-on (Daksh) — extended to support multi-add (quantity
+// field, 1-100, mirrors the /slabs Required Sizes add form). When
+// qty > 1 we generate a shared batch_id (slab_requirements.batch_id
+// already exists from mig 026) so the panel can render the group as
+// a single "batch of N" card and the new
+// bulkUpdate/Delete-ExternalCutSlabs actions can edit/delete them
+// together.
+//
+// Also: label / description / stock_location are now MANDATORY at
+// the server. Daksh wants every externally-sourced slab to carry
+// proper identifying metadata so vendors aren't guessing what's in
+// front of them. The client form also marks the fields required, but
+// the server is the authoritative gate.
 export async function addExternalCutSlabAction(formData: FormData) {
   const { profile } = await requireAuth();
   if (!canAddExternalCutSlab(profile)) {
@@ -170,11 +183,27 @@ export async function addExternalCutSlabAction(formData: FormData) {
     redirect(`${redirectTo}?toast=Length+%2F+width+%2F+thickness+must+be+positive`);
   }
 
-  const label = txt(formData, "label") || temple;
-  const description = txt(formData, "description") || null;
-  const stockLocation = txt(formData, "stock_location") || null;
+  // Mig 081 follow-on — mandatory metadata. Each is its own toast so
+  // the user knows exactly which field they skipped.
+  const label = txt(formData, "label");
+  if (!label) redirect(`${redirectTo}?toast=${encodeURIComponent("Label is required")}`);
+  const description = txt(formData, "description");
+  if (!description) {
+    redirect(`${redirectTo}?toast=${encodeURIComponent("Description is required")}`);
+  }
+  const stockLocation = txt(formData, "stock_location");
+  if (!stockLocation) {
+    redirect(`${redirectTo}?toast=${encodeURIComponent("Stock location is required")}`);
+  }
   const quality = txt(formData, "quality") || null;
   const priority = txt(formData, "priority") === "true";
+
+  // Quantity (default 1, clamp 1-100). On qty > 1 we mint a batch_id
+  // and insert N rows under shared metadata; on qty = 1 batch_id stays
+  // null so single-slab edit/delete still flows through the existing
+  // single-slab paths.
+  const qty = Math.min(100, Math.max(1, parseInt(txt(formData, "quantity") || "1", 10) || 1));
+  const batchId = qty > 1 ? crypto.randomUUID() : null;
 
   // Look up the temple's code_prefix so the new ID slots into the same
   // numbering as in-system slabs from that temple.
@@ -185,9 +214,11 @@ export async function addExternalCutSlabAction(formData: FormData) {
     .maybeSingle();
   const prefix = (templeRow as { code_prefix?: string } | null)?.code_prefix ?? "SLB";
 
-  // ID allocation: copy the addSlabAction pattern. Highest-existing-ID
-  // lookup + collision retry handles concurrent inserts cleanly.
+  // ID allocation: copy the addSlabAction batch pattern. Highest-
+  // existing-ID lookup + collision retry handles concurrent inserts.
+  // Batch IDs are: baseId, baseId-1, baseId-2, ... baseId-(qty-1).
   let baseId = "";
+  let insertedIds: string[] = [];
   let lastError: { message: string; code?: string } | null = null;
   for (let attempt = 0; attempt < 5; attempt++) {
     const { data: maxRow } = await admin
@@ -202,8 +233,7 @@ export async function addExternalCutSlabAction(formData: FormData) {
       prefix,
     );
 
-    const row = {
-      id: baseId,
+    const common = {
       label,
       description,
       temple,
@@ -219,13 +249,20 @@ export async function addExternalCutSlabAction(formData: FormData) {
       // No block — the slab never went through our cutting.
       source_block_id: null,
       stock_location: stockLocation,
+      batch_id: batchId,
       created_by: profile.id,
       updated_by: profile.id,
     };
 
-    const { error } = await admin.from("slab_requirements").insert(row);
+    const rows = Array.from({ length: qty }, (_, i) => ({
+      ...common,
+      id: i === 0 ? baseId : `${baseId}-${i}`,
+    }));
+
+    const { error } = await admin.from("slab_requirements").insert(rows);
     if (!error) {
       lastError = null;
+      insertedIds = rows.map((r) => r.id);
       break;
     }
     lastError = { message: error.message, code: error.code };
@@ -250,12 +287,19 @@ export async function addExternalCutSlabAction(formData: FormData) {
       width_in: widthIn,
       thickness_in: thicknessIn,
       stock_location: stockLocation,
+      qty,
+      batch_id: batchId,
+      ids: insertedIds,
     },
   );
 
   refreshAll();
+  const toastMsg =
+    qty > 1
+      ? `${qty} external slabs added (${baseId} … ${insertedIds[insertedIds.length - 1]})`
+      : `External slab ${baseId} added`;
   redirect(
-    `${redirectTo}?tab=unassigned&toast=${encodeURIComponent(`External slab ${baseId} added`)}`,
+    `${redirectTo}?tab=unassigned&toast=${encodeURIComponent(toastMsg)}`,
   );
 }
 
@@ -310,9 +354,18 @@ export async function updateExternalCutSlabAction(formData: FormData) {
     redirect(`${redirectTo}?toast=Length+%2F+width+%2F+thickness+must+be+positive`);
   }
 
-  const label = txt(formData, "label") || temple;
-  const description = txt(formData, "description") || null;
-  const stockLocation = txt(formData, "stock_location") || null;
+  // Mig 081 follow-on — same mandatory metadata as the add action.
+  // Each field gets its own toast so the user knows what they missed.
+  const label = txt(formData, "label");
+  if (!label) redirect(`${redirectTo}?toast=${encodeURIComponent("Label is required")}`);
+  const description = txt(formData, "description");
+  if (!description) {
+    redirect(`${redirectTo}?toast=${encodeURIComponent("Description is required")}`);
+  }
+  const stockLocation = txt(formData, "stock_location");
+  if (!stockLocation) {
+    redirect(`${redirectTo}?toast=${encodeURIComponent("Stock location is required")}`);
+  }
   const quality = txt(formData, "quality") || null;
   const priority = txt(formData, "priority") === "true";
 
@@ -426,6 +479,164 @@ export async function deleteExternalCutSlabAction(formData: FormData) {
   refreshAll();
   redirect(
     `${redirectTo}?tab=unassigned&toast=${encodeURIComponent(`Slab ${id} deleted`)}`,
+  );
+}
+
+// ── Mig 081 follow-on — bulk edit/delete for external-cut-slab batches
+//
+// When the reviewer added multiple external slabs at once
+// (addExternalCutSlabAction with quantity > 1), every row shares a
+// batch_id. These two actions let the user edit or delete the
+// entire batch in one go without ticking checkboxes.
+//
+// Guards mirror the single-slab paths:
+//   • source_block_id IS NULL  — externals only
+//   • status = 'cut_done'      — only unassigned slabs (anything
+//     already on a CNC must stay frozen so the vendor isn't
+//     pulled out from under)
+// Plus an explicit batch_id presence + non-empty match check so a
+// stray client can't trigger a no-op or mass-update.
+//
+// The form sends only the batch_id; we resolve all matching slab
+// ids server-side, then apply the same payload to every one.
+
+export async function bulkUpdateExternalCutSlabsAction(formData: FormData) {
+  const { profile } = await requireAuth();
+  if (!canAddExternalCutSlab(profile)) {
+    redirect("/carving?toast=Not+authorised+to+edit+external+slabs");
+  }
+  const admin = createAdminSupabaseClient();
+  const redirectTo = txt(formData, "redirect_to") || "/carving";
+
+  const batchId = txt(formData, "batch_id");
+  if (!batchId) redirect(`${redirectTo}?toast=${encodeURIComponent("Missing batch id")}`);
+
+  const temple = txt(formData, "temple");
+  if (!temple) redirect(`${redirectTo}?toast=Temple+is+required`);
+  const stone = txt(formData, "stone");
+  if (!stone) redirect(`${redirectTo}?toast=Stone+type+is+required`);
+  const lengthIn = num(formData, "length_in");
+  const widthIn = num(formData, "width_in");
+  const thicknessIn = num(formData, "thickness_in");
+  if (lengthIn <= 0 || widthIn <= 0 || thicknessIn <= 0) {
+    redirect(`${redirectTo}?toast=Length+%2F+width+%2F+thickness+must+be+positive`);
+  }
+
+  // Mandatory metadata (same as single-slab paths).
+  const label = txt(formData, "label");
+  if (!label) redirect(`${redirectTo}?toast=${encodeURIComponent("Label is required")}`);
+  const description = txt(formData, "description");
+  if (!description) {
+    redirect(`${redirectTo}?toast=${encodeURIComponent("Description is required")}`);
+  }
+  const stockLocation = txt(formData, "stock_location");
+  if (!stockLocation) {
+    redirect(`${redirectTo}?toast=${encodeURIComponent("Stock location is required")}`);
+  }
+  const quality = txt(formData, "quality") || null;
+  const priority = txt(formData, "priority") === "true";
+
+  // Resolve targets server-side so the caller can't smuggle in ids
+  // from a different batch.
+  const { data: targets } = await admin
+    .from("slab_requirements")
+    .select("id")
+    .eq("batch_id", batchId)
+    .is("source_block_id", null)
+    .eq("status", "cut_done");
+  if (!targets || targets.length === 0) {
+    redirect(
+      `${redirectTo}?toast=${encodeURIComponent("Batch is empty or already assigned — nothing to edit")}`,
+    );
+  }
+  const targetIds = (targets as Array<{ id: string }>).map((t) => t.id);
+
+  const { error } = await admin
+    .from("slab_requirements")
+    .update({
+      label,
+      description,
+      temple,
+      stone,
+      quality,
+      length_ft: lengthIn,
+      width_ft: widthIn,
+      thickness_ft: thicknessIn,
+      priority,
+      stock_location: stockLocation,
+      updated_by: profile.id,
+    })
+    .in("id", targetIds)
+    .eq("batch_id", batchId)
+    .is("source_block_id", null)
+    .eq("status", "cut_done");
+  if (error) {
+    redirect(`${redirectTo}?toast=${encodeURIComponent(error.message)}`);
+  }
+
+  await logAudit(
+    profile.id,
+    "external_cut_slab_batch_updated",
+    "slab",
+    batchId,
+    { ids: targetIds, qty: targetIds.length, temple, stone },
+  );
+
+  refreshAll();
+  redirect(
+    `${redirectTo}?tab=unassigned&toast=${encodeURIComponent(`${targetIds.length} slabs updated`)}`,
+  );
+}
+
+export async function bulkDeleteExternalCutSlabsAction(formData: FormData) {
+  const { profile } = await requireAuth();
+  if (!canAddExternalCutSlab(profile)) {
+    redirect("/carving?toast=Not+authorised+to+delete+external+slabs");
+  }
+  const admin = createAdminSupabaseClient();
+  const redirectTo = txt(formData, "redirect_to") || "/carving";
+
+  const batchId = txt(formData, "batch_id");
+  if (!batchId) redirect(`${redirectTo}?toast=${encodeURIComponent("Missing batch id")}`);
+
+  // Pull the target rows first — we need (a) the count for the
+  // toast, (b) ids for the audit log, (c) the temple for logging.
+  const { data: targets } = await admin
+    .from("slab_requirements")
+    .select("id, temple")
+    .eq("batch_id", batchId)
+    .is("source_block_id", null)
+    .eq("status", "cut_done");
+  if (!targets || targets.length === 0) {
+    redirect(
+      `${redirectTo}?toast=${encodeURIComponent("Batch is empty or already assigned — nothing to delete")}`,
+    );
+  }
+  const targetIds = (targets as Array<{ id: string; temple: string }>).map((t) => t.id);
+  const temple = (targets[0] as { temple?: string } | undefined)?.temple ?? "";
+
+  const { error } = await admin
+    .from("slab_requirements")
+    .delete()
+    .in("id", targetIds)
+    .eq("batch_id", batchId)
+    .is("source_block_id", null)
+    .eq("status", "cut_done");
+  if (error) {
+    redirect(`${redirectTo}?toast=${encodeURIComponent(error.message)}`);
+  }
+
+  await logAudit(
+    profile.id,
+    "external_cut_slab_batch_deleted",
+    "slab",
+    batchId,
+    { ids: targetIds, qty: targetIds.length, temple },
+  );
+
+  refreshAll();
+  redirect(
+    `${redirectTo}?tab=unassigned&toast=${encodeURIComponent(`${targetIds.length} slabs deleted`)}`,
   );
 }
 
