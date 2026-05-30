@@ -18,7 +18,7 @@
 import { cookies } from "next/headers";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { VendorCockpitClient, type CarvingJobLite, type CncMachineLive, type SlabLite, type HeldSlabLite } from "./cockpit-client";
+import { VendorCockpitClient, type CarvingJobLite, type CncMachineLive, type SlabLite, type HeldSlabLite, type ReworkPendingItem, type RejectedItem } from "./cockpit-client";
 
 type SearchParams = Promise<{ vendor_id?: string; toast?: string }>;
 
@@ -120,6 +120,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
     { data: machines },
     { data: queueAndActive },
     { data: completedRecent },
+    { data: rejectedRows },
     { data: vendorPickerRows },
     { data: stoneTypes },
   ] = await Promise.all([
@@ -144,7 +145,11 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
     admin
       .from("carving_items")
       .select(
-        "id, slab_requirement_id, status, urgency, estimated_minutes, vendor_estimated_minutes, cnc_machine_id, loaded_at, assigned_at, note, received_at_vendor_at, requires_machine_type, batch_id, held_at, held_reason, held_from_machine_id, transferred_from_vendor_id, transferred_from_vendor_name, transferred_at",
+        // Mig 080 — also pull review_decision / review_reworked_at /
+        // review_image_path / review_notes so we can split rework
+        // slabs into the new "Rework pending" window (separate from
+        // the regular ready-to-load queue).
+        "id, slab_requirement_id, status, urgency, estimated_minutes, vendor_estimated_minutes, cnc_machine_id, loaded_at, assigned_at, note, received_at_vendor_at, requires_machine_type, batch_id, held_at, held_reason, held_from_machine_id, transferred_from_vendor_id, transferred_from_vendor_name, transferred_at, review_decision, review_reworked_at, review_image_path, review_notes",
       )
       .eq("vendor_id", vendorId)
       .in("status", ["carving_assigned", "carving_in_progress", "carving_on_hold"])
@@ -166,6 +171,21 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
       .not("completed_at", "is", null)
       .order("completed_at", { ascending: false })
       .limit(10),
+    // Mig 080 — rejected items (status='carving_rejected'). Separate
+    // query because the main carving_items fetch above is scoped to
+    // ('carving_assigned', 'carving_in_progress', 'carving_on_hold').
+    // The cockpit shows these in a read-only "Rejected" window with
+    // image + reason; the vendor can't act on them, just look at
+    // why so they can avoid the same issue next time.
+    admin
+      .from("carving_items")
+      .select(
+        "id, slab_requirement_id, review_decision, review_rejected_at, review_image_path, review_notes",
+      )
+      .eq("vendor_id", vendorId)
+      .eq("status", "carving_rejected")
+      .order("review_rejected_at", { ascending: false })
+      .limit(50),
     // All active CNC + Manual vendors. Used for two purposes:
     //   1. Vendor picker for non-vendor roles (cockpit-switcher).
     //   2. Transfer-destination dropdown on the per-slab Problem
@@ -195,10 +215,14 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
     );
   }
 
-  // Hydrate slab info for everything we'll display.
+  // Hydrate slab info for everything we'll display — including the
+  // new mig-080 rejected rows so the read-only Rejected window can
+  // print "1.2 × 0.8 ft · Black Granite · Temple X" alongside the
+  // reason + image.
   const slabIds = [
     ...(queueAndActive ?? []).map((j) => (j as { slab_requirement_id: string }).slab_requirement_id),
     ...(completedRecent ?? []).map((j) => (j as { slab_requirement_id: string }).slab_requirement_id),
+    ...(rejectedRows ?? []).map((j) => (j as { slab_requirement_id: string }).slab_requirement_id),
   ];
   const uniqueSlabIds = [...new Set(slabIds)];
   const slabById = new Map<string, SlabLite>();
@@ -243,6 +267,17 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
   // own peek modal in the cockpit; the slab keeps its vendor + its
   // held_from_machine so the reload modal can default back.
   const held: HeldSlabLite[] = [];
+  // Mig 080 — Rework Pending bucket. When the carving reviewer hits
+  // "Rework Needed" the slab flips back to carving_in_progress with
+  // cnc_machine_id cleared (returning it to the vendor) AND
+  // review_decision='rework_needed' + review_reworked_at stamped. We
+  // pull those out of the regular queue so the vendor sees them in a
+  // dedicated window with the reviewer's image + reason. From there
+  // they can reload onto a CNC (same Load flow) or re-mark complete.
+  // Pre-080 rejects (carving_in_progress with review_notes but no
+  // review_reworked_at) keep their old behaviour — they fall back
+  // into the regular queue.
+  const reworkPending: ReworkPendingItem[] = [];
   for (const row of (queueAndActive ?? []) as Array<{
     id: string;
     slab_requirement_id: string;
@@ -263,6 +298,10 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
     transferred_from_vendor_id?: string | null;
     transferred_from_vendor_name?: string | null;
     transferred_at?: string | null;
+    review_decision?: string | null;
+    review_reworked_at?: string | null;
+    review_image_path?: string | null;
+    review_notes?: string | null;
   }>) {
     const slab = slabById.get(row.slab_requirement_id) ?? null;
     const job: CarvingJobLite = {
@@ -297,6 +336,30 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
       });
       continue;
     }
+    // Mig 080 — Rework Pending. Reviewer hit "Rework Needed" → slab
+    // is back at status='carving_assigned' with no machine (so the
+    // existing Load flow accepts it), BUT review_decision='rework_needed'
+    // + review_reworked_at stamped. We branch on the rework tags
+    // BEFORE the regular queue.push below so the slab doesn't show
+    // up in BOTH Ready to Load and Rework Pending at the same time.
+    if (
+      row.status === "carving_assigned" &&
+      !row.cnc_machine_id &&
+      row.review_decision === "rework_needed" &&
+      row.review_reworked_at
+    ) {
+      reworkPending.push({
+        id: row.id,
+        slab_id: row.slab_requirement_id,
+        urgency: job.urgency,
+        requires_machine_type: row.requires_machine_type ?? null,
+        review_reworked_at: row.review_reworked_at ?? null,
+        review_image_path: row.review_image_path ?? null,
+        review_notes: row.review_notes ?? null,
+        slab,
+      });
+      continue;
+    }
     if (row.status === "carving_assigned") queue.push(job);
     else if (row.cnc_machine_id) {
       const arr = activeByMachine.get(row.cnc_machine_id) ?? [];
@@ -309,6 +372,12 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
   held.sort((a, b) => {
     const aT = a.held_at ? new Date(a.held_at).getTime() : 0;
     const bT = b.held_at ? new Date(b.held_at).getTime() : 0;
+    return bT - aT;
+  });
+  // Mig 080 — sort rework: most-recently-sent-back first.
+  reworkPending.sort((a, b) => {
+    const aT = a.review_reworked_at ? new Date(a.review_reworked_at).getTime() : 0;
+    const bT = b.review_reworked_at ? new Date(b.review_reworked_at).getTime() : 0;
     return bT - aT;
   });
   // Sort the queue: urgent first, then oldest assigned first.
@@ -388,6 +457,26 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
     slab: slabById.get(r.slab_requirement_id) ?? null,
   }));
 
+  // Mig 080 — Rejected window. Read-only on the vendor cockpit; the
+  // vendor sees what they got rejected for + the reviewer's photo
+  // so they can avoid the same issue on future slabs. No action
+  // buttons — the slab is out of the active loop entirely.
+  const rejected: RejectedItem[] = ((rejectedRows ?? []) as Array<{
+    id: string;
+    slab_requirement_id: string;
+    review_decision: string | null;
+    review_rejected_at: string | null;
+    review_image_path: string | null;
+    review_notes: string | null;
+  }>).map((r) => ({
+    id: r.id,
+    slab_id: r.slab_requirement_id,
+    review_rejected_at: r.review_rejected_at,
+    review_image_path: r.review_image_path,
+    review_notes: r.review_notes,
+    slab: slabById.get(r.slab_requirement_id) ?? null,
+  }));
+
   const vendorRow = vendor as { id: string; name: string };
   // Drop the current vendor + ensure shape matches client type.
   //
@@ -420,6 +509,8 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
       machines={machineCards}
       queue={queue}
       held={held}
+      reworkPending={reworkPending}
+      rejected={rejected}
       recent={recent}
       otherVendors={otherVendors}
       isStaffView={profile.role !== "vendor" || hasManagedVendors}

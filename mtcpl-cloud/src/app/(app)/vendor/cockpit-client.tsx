@@ -20,6 +20,13 @@ import {
   flagTransferIssueAction,
   transferReadySlabAction,
   getMachineHistory,
+  // Mig 080 — Rework Pending window helpers. The signed-URL helper
+  // mints a 5-min URL for the reviewer's photo (private bucket).
+  // completeReworkSlabAction lets the vendor mark a rework slab done
+  // from the bench (no CNC re-load) — sends it straight back to the
+  // review queue.
+  getSignedReviewMediaUrl,
+  completeReworkSlabAction,
   type MachineHistory,
 } from "../carving/actions";
 import { SlabThumb } from "@/components/slab-thumb";
@@ -76,6 +83,43 @@ export type HeldSlabLite = {
    *  here; vendor can override to any compatible idle CNC. NULL
    *  if the held row pre-dates mig 069. */
   held_from_machine_id: string | null;
+  slab: SlabLite | null;
+};
+
+/** Mig 080 — a slab the reviewer hit "Rework Needed" on. Status
+ *  reverts to carving_in_progress + cnc_machine_id is cleared, so it
+ *  would otherwise be invisible in the cockpit (not assigned, not on
+ *  a machine, not on hold). Surfaced in a dedicated tray with the
+ *  reviewer's image + reason; vendor can reload it onto a CNC (same
+ *  Load flow as the regular Ready-to-load queue) or, less commonly,
+ *  re-mark it complete from a stash bench. */
+export type ReworkPendingItem = {
+  id: string;
+  slab_id: string;
+  urgency: "normal" | "urgent";
+  requires_machine_type: string | null;
+  review_reworked_at: string | null;
+  /** Storage key in the carving_review_media private bucket. The
+   *  cockpit mints a 5-min signed URL via getSignedReviewMediaUrl
+   *  to render the thumbnail. NULL only if a future flow lets the
+   *  reviewer skip the photo — today the action enforces mandatory. */
+  review_image_path: string | null;
+  /** Reviewer's free-form reason. Mandatory on rework + reject. */
+  review_notes: string | null;
+  slab: SlabLite | null;
+};
+
+/** Mig 080 — a slab the reviewer hit "Reject" on. Slab status is
+ *  flipped to 'carving_rejected' (new enum value) so it's out of the
+ *  active loop entirely. Read-only on the vendor cockpit — the
+ *  vendor sees what they got rejected for + the photo so they can
+ *  avoid the same issue on future slabs. No action buttons. */
+export type RejectedItem = {
+  id: string;
+  slab_id: string;
+  review_rejected_at: string | null;
+  review_image_path: string | null;
+  review_notes: string | null;
   slab: SlabLite | null;
 };
 
@@ -224,6 +268,8 @@ export function VendorCockpitClient({
   machines,
   queue,
   held,
+  reworkPending,
+  rejected,
   recent,
   otherVendors,
   isStaffView,
@@ -238,6 +284,16 @@ export function VendorCockpitClient({
    *  dedicated tray (header launcher tile + center-peek modal).
    *  Empty array when no slabs are held. */
   held: HeldSlabLite[];
+  /** Mig 080 — slabs the reviewer sent back for rework. Status is
+   *  carving_assigned with cnc_machine_id null, so the existing Load
+   *  flow accepts them — we route them out of the regular Ready-to-
+   *  load tray and into their own window with the reviewer's photo
+   *  + reason. Empty array when no rework slabs exist. */
+  reworkPending: ReworkPendingItem[];
+  /** Mig 080 — read-only "look what you got rejected for" window.
+   *  Empty array when the vendor has no rejections; tile is hidden
+   *  in that case too. */
+  rejected: RejectedItem[];
   recent: Array<{
     id: string;
     slab_id: string;
@@ -294,7 +350,7 @@ export function VendorCockpitClient({
   // completed" to see the last 10 with approval status. Single state
   // covers all three because only one peek is open at a time.
   const [peekOpen, setPeekOpen] = useState<
-    null | "pending" | "ready" | "recent" | "hold"
+    null | "pending" | "ready" | "recent" | "hold" | "rework" | "rejected"
   >(null);
   // Mig 069 — which held slab is being reloaded right now? When set,
   // we render a small picker modal showing the default machine
@@ -384,6 +440,40 @@ export function VendorCockpitClient({
     }
     return { pendingStock: pending, readyToLoad: ready };
   }, [queue]);
+
+  // Mig 080 — slabs the LoadModal can offer. ReadyToLoad is the
+  // primary list (fresh assignments physically here); we ALSO merge
+  // rework-pending slabs in so the vendor can load a rework piece on
+  // a CNC from the standard machine-card → Load flow. Each rework
+  // item is mapped to a minimal CarvingJobLite shape because that's
+  // what the LoadModal + QueueRow expect. We keep them out of the
+  // Ready-to-load peek (count stays clean) but they appear inside
+  // the LoadModal picker with a 🔁 REWORK tag so the operator can
+  // tell them apart.
+  const loadable = useMemo<CarvingJobLite[]>(() => {
+    const reworkAsJobs: CarvingJobLite[] = reworkPending.map((r) => ({
+      id: r.id,
+      slab_id: r.slab_id,
+      status: "carving_assigned",
+      urgency: r.urgency,
+      estimated_minutes: null,
+      vendor_estimated_minutes: null,
+      cnc_machine_id: null,
+      loaded_at: null,
+      // assigned_at fallback — use review_reworked_at so the sort
+      // by oldest-assigned-first puts the slab in a sensible spot.
+      assigned_at: r.review_reworked_at ?? new Date().toISOString(),
+      note: r.review_notes,
+      slab: r.slab,
+      received_at_vendor_at: r.review_reworked_at,
+      requires_machine_type: r.requires_machine_type,
+      batch_id: null,
+      transferred_from_vendor_id: null,
+      transferred_from_vendor_name: null,
+      transferred_at: null,
+    }));
+    return [...readyToLoad, ...reworkAsJobs];
+  }, [readyToLoad, reworkPending]);
 
   return (
     <div
@@ -575,6 +665,32 @@ export function VendorCockpitClient({
               title="Slabs parked mid-carve — reload onto a CNC or mark done"
               emphasize={held.length > 0}
             />
+            {/* Mig 080 — Rework Pending launcher. Amber-700 accent so
+                it reads as "needs attention" without screaming red.
+                Pulses when there are slabs because the reviewer sent
+                them back expecting a re-do, not a parking spot. */}
+            <StatButton
+              label="Rework pending"
+              value={reworkPending.length}
+              fg="#f59e0b"
+              onClick={() => setPeekOpen("rework")}
+              title="Reviewer sent these slabs back for rework — reload onto a CNC or mark done"
+              emphasize={reworkPending.length > 0}
+            />
+            {/* Mig 080 — Rejected launcher. Read-only window; we still
+                surface it so the vendor can see what they got
+                rejected for + the photo, to avoid the same issue
+                next time. Hidden when there are no rejections so
+                the tile doesn't clutter the header. */}
+            {rejected.length > 0 && (
+              <StatButton
+                label="Rejected"
+                value={rejected.length}
+                fg="#dc2626"
+                onClick={() => setPeekOpen("rejected")}
+                title="Slabs rejected by the reviewer — read-only, for reference"
+              />
+            )}
           </div>
         </div>
       </div>
@@ -806,7 +922,11 @@ export function VendorCockpitClient({
                 ? "Ready to load"
                 : peekOpen === "hold"
                   ? "⏸ On hold"
-                  : "Recently completed"
+                  : peekOpen === "rework"
+                    ? "🔁 Rework pending"
+                    : peekOpen === "rejected"
+                      ? "✗ Rejected"
+                      : "Recently completed"
           }
           subtitle={
             peekOpen === "pending"
@@ -815,7 +935,11 @@ export function VendorCockpitClient({
                 ? `${readyToLoad.length} slab${readyToLoad.length !== 1 ? "s" : ""} physically here, ready to load`
                 : peekOpen === "hold"
                   ? `${held.length} slab${held.length !== 1 ? "s" : ""} parked — reload onto a CNC or mark done`
-                  : `Last ${recent.length} unloaded — awaiting team review unless approved`
+                  : peekOpen === "rework"
+                    ? `${reworkPending.length} slab${reworkPending.length !== 1 ? "s" : ""} sent back by reviewer — reload onto a CNC or mark done`
+                    : peekOpen === "rejected"
+                      ? `${rejected.length} slab${rejected.length !== 1 ? "s" : ""} rejected by reviewer — read only, for reference`
+                      : `Last ${recent.length} unloaded — awaiting team review unless approved`
           }
           onClose={() => setPeekOpen(null)}
         >
@@ -876,6 +1000,45 @@ export function VendorCockpitClient({
                         temporary_location: r.temporary_location,
                       })
                     }
+                  />
+                ))}
+              </div>
+            ))}
+          {peekOpen === "rework" &&
+            (reworkPending.length === 0 ? (
+              <Empty text="No slabs sent back for rework. When the reviewer hits 'Rework needed' on a finished slab it lands here with the reason + photo." />
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {reworkPending.map((r) => (
+                  <ReworkSlabRow
+                    key={r.id}
+                    item={r}
+                    stoneTypes={stoneTypes}
+                    hasIdleMachine={totals.idle > 0}
+                    onReload={() => {
+                      // Pick first idle compatible machine, same as
+                      // the Ready-to-load button does. Close peek so
+                      // LoadModal isn't stacked on top.
+                      const firstIdle = machines.find((m) => m.status === "idle");
+                      if (firstIdle) {
+                        setLoadFor({ machine: firstIdle });
+                        setPeekOpen(null);
+                      }
+                    }}
+                  />
+                ))}
+              </div>
+            ))}
+          {peekOpen === "rejected" &&
+            (rejected.length === 0 ? (
+              <Empty text="No rejected slabs — great." />
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {rejected.map((r) => (
+                  <RejectedSlabRow
+                    key={r.id}
+                    item={r}
+                    stoneTypes={stoneTypes}
                   />
                 ))}
               </div>
@@ -963,9 +1126,11 @@ export function VendorCockpitClient({
         <LoadModal
           machine={loadFor.machine}
           machines={machines}
-          /* Only "ready to load" rows can actually be loaded — pending
-             stock is in transit. Phase 4 follow-up. */
-          queue={readyToLoad}
+          /* Mig 080 — pass `loadable` (readyToLoad + rework slabs)
+             not just readyToLoad, so a rework slab can be picked
+             from the standard Load flow. Rework rows are tagged in
+             the picker with a 🔁 REWORK badge. */
+          queue={loadable}
           stoneTypes={stoneTypes}
           onClose={() => setLoadFor(null)}
         />
@@ -1778,6 +1943,476 @@ function HeldSlabRow({
           ✅ Mark done
         </button>
       </div>
+    </div>
+  );
+}
+
+/** Mig 080 — shared component to render the reviewer's photo for a
+ *  rework / rejected slab. Fetches a 5-min signed URL on mount
+ *  (private bucket, no public access). Falls back to a "📷 no photo"
+ *  pill when the path is missing (legacy rows / future flows). */
+function ReviewMediaImage({
+  path,
+  alt,
+  maxHeight = 160,
+}: {
+  path: string | null;
+  alt: string;
+  maxHeight?: number;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!path) return;
+    (async () => {
+      try {
+        const signed = await getSignedReviewMediaUrl(path);
+        if (!cancelled) setUrl(signed);
+      } catch (e) {
+        if (!cancelled) setErr(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [path]);
+  if (!path) {
+    return (
+      <span
+        style={{
+          fontSize: 11,
+          padding: "3px 8px",
+          borderRadius: 999,
+          background: "var(--surface)",
+          border: "1px solid var(--border)",
+          color: "var(--muted)",
+        }}
+      >
+        📷 no photo
+      </span>
+    );
+  }
+  if (err) {
+    return (
+      <span
+        style={{
+          fontSize: 11,
+          padding: "3px 8px",
+          borderRadius: 999,
+          background: "rgba(220,38,38,0.1)",
+          border: "1px solid rgba(220,38,38,0.4)",
+          color: "#b91c1c",
+        }}
+        title={err}
+      >
+        ⚠ photo load failed
+      </span>
+    );
+  }
+  if (!url) {
+    return (
+      <span
+        style={{
+          fontSize: 11,
+          padding: "3px 8px",
+          borderRadius: 999,
+          background: "var(--surface)",
+          border: "1px solid var(--border)",
+          color: "var(--muted)",
+        }}
+      >
+        Loading photo…
+      </span>
+    );
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={url}
+      alt={alt}
+      style={{
+        maxWidth: "100%",
+        maxHeight,
+        borderRadius: 8,
+        border: "1px solid var(--border)",
+        objectFit: "contain",
+        background: "rgba(0,0,0,0.04)",
+      }}
+    />
+  );
+}
+
+/** Mig 080 — Rework Pending row. Amber accent so it reads as "needs
+ *  attention" but not panic-red. Two actions: Reload (pulls the
+ *  vendor into the regular Load flow — slab is already at
+ *  status='carving_assigned' so the Load modal accepts it directly),
+ *  or Mark done from bench (calls completeReworkSlabAction). */
+function ReworkSlabRow({
+  item,
+  stoneTypes,
+  hasIdleMachine,
+  onReload,
+}: {
+  item: ReworkPendingItem;
+  stoneTypes: StoneTypeDef[];
+  hasIdleMachine: boolean;
+  onReload: () => void;
+}) {
+  const isUrgent = item.urgency === "urgent";
+  const isLathe = item.requires_machine_type === "lathe";
+  return (
+    <div
+      style={{
+        padding: 12,
+        background: "rgba(245,158,11,0.06)",
+        border: "1.5px solid rgba(245,158,11,0.45)",
+        borderRadius: 12,
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+      }}
+    >
+      {/* Top row — slab identity */}
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+        {item.slab && (
+          <SlabThumb
+            stone={item.slab.stone}
+            l={item.slab.length_in}
+            w={item.slab.width_in}
+            t={item.slab.thickness_in}
+            stoneTypes={stoneTypes}
+            size={48}
+            height={48}
+          />
+        )}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            {isUrgent && (
+              <span
+                style={{
+                  fontSize: 9,
+                  fontWeight: 800,
+                  padding: "1px 6px",
+                  borderRadius: 999,
+                  background: "#dc2626",
+                  color: "#fff",
+                  letterSpacing: "0.05em",
+                }}
+              >
+                ⚡ URGENT
+              </span>
+            )}
+            {isLathe && (
+              <span
+                style={{
+                  fontSize: 9,
+                  fontWeight: 800,
+                  padding: "1px 6px",
+                  borderRadius: 3,
+                  background: "rgba(124,58,237,0.15)",
+                  color: "#7c3aed",
+                }}
+              >
+                🌀 LATHE
+              </span>
+            )}
+            <span
+              style={{
+                fontFamily: "ui-monospace, monospace",
+                fontWeight: 700,
+                fontSize: 14,
+              }}
+            >
+              {item.slab_id}
+            </span>
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 800,
+                padding: "2px 7px",
+                borderRadius: 999,
+                background: "rgba(245,158,11,0.18)",
+                color: "#b45309",
+                border: "1px solid rgba(245,158,11,0.45)",
+                letterSpacing: "0.05em",
+              }}
+            >
+              🔁 REWORK
+            </span>
+          </div>
+          {item.slab && (
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
+              {item.slab.temple} · {dimStr(item.slab)}
+            </div>
+          )}
+          {item.slab?.label && (
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--text)",
+                marginTop: 3,
+                fontWeight: 600,
+                wordBreak: "break-word",
+              }}
+              title="Slab label (set at cut time)"
+            >
+              🏷 {item.slab.label}
+            </div>
+          )}
+        </div>
+        {item.review_reworked_at && (
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: "#b45309",
+              background: "rgba(245,158,11,0.18)",
+              border: "1px solid rgba(245,158,11,0.5)",
+              padding: "4px 8px",
+              borderRadius: 999,
+              whiteSpace: "nowrap",
+              fontFamily: "ui-monospace, monospace",
+            }}
+            title="Sent back at"
+          >
+            ⏱ {new Date(item.review_reworked_at).toLocaleString()}
+          </div>
+        )}
+      </div>
+
+      {/* Reviewer's reason */}
+      {item.review_notes && (
+        <div
+          style={{
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+            padding: "8px 10px",
+            borderRadius: 8,
+            fontSize: 12,
+            color: "var(--text)",
+            lineHeight: 1.4,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 10,
+              fontWeight: 800,
+              color: "var(--muted)",
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+              marginBottom: 4,
+            }}
+          >
+            Reviewer's reason
+          </div>
+          {item.review_notes}
+        </div>
+      )}
+
+      {/* Reviewer's photo */}
+      <ReviewMediaImage path={item.review_image_path} alt="Rework reason photo" />
+
+      {/* Actions — Reload (amber primary) + Mark done (ghost). The
+          Reload button just hands off to onReload(); the parent picks
+          the first idle CNC and opens the standard LoadModal. */}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button
+          type="button"
+          onClick={onReload}
+          disabled={!hasIdleMachine}
+          style={{
+            flex: "1 1 180px",
+            padding: "10px 14px",
+            fontSize: 14,
+            fontWeight: 700,
+            background: hasIdleMachine ? "#b45309" : "var(--surface-alt)",
+            color: hasIdleMachine ? "#fff" : "var(--muted)",
+            border: `1px solid ${hasIdleMachine ? "#92400e" : "var(--border)"}`,
+            borderRadius: 8,
+            cursor: hasIdleMachine ? "pointer" : "not-allowed",
+            minHeight: 44,
+            touchAction: "manipulation",
+          }}
+          title={
+            hasIdleMachine
+              ? "Open the Load picker with this slab pre-selected"
+              : "No idle CNC available — wait for one to free up"
+          }
+        >
+          ▶ Reload on CNC
+        </button>
+        {/* Mark done from bench. Tiny inline form so we don't need
+            a second modal. Vendor-side confirm to avoid accidental
+            taps (this skips the CNC step, which is a meaningful call). */}
+        <form
+          action={completeReworkSlabAction}
+          onSubmit={(e) => {
+            const msg = [
+              `Mark ${item.slab_id} done from bench?`,
+              "",
+              "The slab leaves the Rework Pending tray and goes",
+              "straight back to the review queue without re-loading",
+              "on a CNC. Use this when the bench fix was enough.",
+            ].join("\n");
+            if (!window.confirm(msg)) e.preventDefault();
+          }}
+          style={{ margin: 0 }}
+        >
+          <FormPendingOverlay label="Marking complete…" />
+          <input type="hidden" name="carving_item_id" value={item.id} />
+          <input type="hidden" name="redirect_to" value="/vendor" />
+          <button
+            type="submit"
+            className="ghost-button"
+            style={{
+              padding: "10px 14px",
+              fontSize: 13,
+              minHeight: 44,
+              touchAction: "manipulation",
+            }}
+            title="Skip the CNC step — send straight back to review queue"
+          >
+            ✅ Mark done
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/** Mig 080 — Rejected row. Read-only: photo + reason + slab info.
+ *  No action buttons. Red tint to mirror the reviewer's intent
+ *  ("this carving cannot be salvaged") without screaming. */
+function RejectedSlabRow({
+  item,
+  stoneTypes,
+}: {
+  item: RejectedItem;
+  stoneTypes: StoneTypeDef[];
+}) {
+  return (
+    <div
+      style={{
+        padding: 12,
+        background: "rgba(220,38,38,0.06)",
+        border: "1.5px solid rgba(220,38,38,0.45)",
+        borderRadius: 12,
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+      }}
+    >
+      {/* Top row — slab identity */}
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+        {item.slab && (
+          <SlabThumb
+            stone={item.slab.stone}
+            l={item.slab.length_in}
+            w={item.slab.width_in}
+            t={item.slab.thickness_in}
+            stoneTypes={stoneTypes}
+            size={48}
+            height={48}
+          />
+        )}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            <span
+              style={{
+                fontFamily: "ui-monospace, monospace",
+                fontWeight: 700,
+                fontSize: 14,
+              }}
+            >
+              {item.slab_id}
+            </span>
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 800,
+                padding: "2px 7px",
+                borderRadius: 999,
+                background: "rgba(220,38,38,0.18)",
+                color: "#b91c1c",
+                border: "1px solid rgba(220,38,38,0.45)",
+                letterSpacing: "0.05em",
+              }}
+            >
+              ✗ REJECTED
+            </span>
+          </div>
+          {item.slab && (
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
+              {item.slab.temple} · {dimStr(item.slab)}
+            </div>
+          )}
+          {item.slab?.label && (
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--text)",
+                marginTop: 3,
+                fontWeight: 600,
+                wordBreak: "break-word",
+              }}
+              title="Slab label (set at cut time)"
+            >
+              🏷 {item.slab.label}
+            </div>
+          )}
+        </div>
+        {item.review_rejected_at && (
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: "#b91c1c",
+              background: "rgba(220,38,38,0.18)",
+              border: "1px solid rgba(220,38,38,0.5)",
+              padding: "4px 8px",
+              borderRadius: 999,
+              whiteSpace: "nowrap",
+              fontFamily: "ui-monospace, monospace",
+            }}
+            title="Rejected at"
+          >
+            ⏱ {new Date(item.review_rejected_at).toLocaleString()}
+          </div>
+        )}
+      </div>
+
+      {/* Reviewer's reason */}
+      {item.review_notes && (
+        <div
+          style={{
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+            padding: "8px 10px",
+            borderRadius: 8,
+            fontSize: 12,
+            color: "var(--text)",
+            lineHeight: 1.4,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 10,
+              fontWeight: 800,
+              color: "var(--muted)",
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+              marginBottom: 4,
+            }}
+          >
+            Reviewer's reason
+          </div>
+          {item.review_notes}
+        </div>
+      )}
+
+      {/* Reviewer's photo */}
+      <ReviewMediaImage path={item.review_image_path} alt="Rejection reason photo" />
     </div>
   );
 }

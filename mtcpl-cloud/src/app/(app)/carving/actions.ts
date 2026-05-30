@@ -3176,6 +3176,109 @@ export async function completeHeldSlabAction(formData: FormData) {
   );
 }
 
+// ── Mig 080 — complete a rework slab from the bench ─────────────────
+// Sibling of completeHeldSlabAction, but the precondition is "this
+// slab is in the Rework Pending tray" (status='carving_assigned' +
+// review_decision='rework_needed' + review_reworked_at IS NOT NULL),
+// not "this slab is on hold". Used when the vendor looks at the
+// rework photo + reason, decides the slab was fine after all (or
+// they fixed it on a bench), and wants to bounce it straight back
+// to the review queue without re-loading it onto a CNC.
+//
+// Sets completed_on_cnc_machine_id = NULL because there is no CNC
+// involvement on the redo — the rework either happened on a bench
+// or was a no-op. The CNC monthly report ignores rows with this
+// field NULL, so the original carving CNC stays attributed via the
+// pre-rework completed_on_cnc_machine_id which we DON'T clear.
+//
+// Permission: same as completeHeldSlabAction (vendor + managed
+// vendors + dev/owner/carving_head).
+export async function completeReworkSlabAction(formData: FormData) {
+  const { profile } = await requireAuth([
+    "developer",
+    "owner",
+    "carving_head",
+    "vendor",
+  ]);
+  const admin = createAdminSupabaseClient();
+
+  const carvingItemId = txt(formData, "carving_item_id");
+  const temporaryLocation = txt(formData, "temporary_location") || null;
+  const redirectTo = txt(formData, "redirect_to") || "/vendor";
+
+  if (!carvingItemId) redirect(`${redirectTo}?toast=Missing+job+id`);
+
+  const { data: ci } = await admin
+    .from("carving_items")
+    .select(
+      "id, vendor_id, status, slab_requirement_id, review_decision, review_reworked_at, completed_on_cnc_machine_id",
+    )
+    .eq("id", carvingItemId)
+    .maybeSingle();
+  if (!ci) redirect(`${redirectTo}?toast=Job+not+found`);
+  const item = ci as {
+    id: string;
+    vendor_id: string;
+    status: string;
+    slab_requirement_id: string;
+    review_decision: string | null;
+    review_reworked_at: string | null;
+    completed_on_cnc_machine_id: string | null;
+  };
+
+  if (profile.role === "vendor") {
+    const managedVendorIds = profile.managed_vendor_ids ?? [];
+    const ownsOrManages =
+      !!profile.vendor_id &&
+      (profile.vendor_id === item.vendor_id ||
+        managedVendorIds.includes(item.vendor_id));
+    if (!ownsOrManages) {
+      redirect(`${redirectTo}?toast=Not+your+slab`);
+    }
+  }
+  if (
+    item.status !== "carving_assigned" ||
+    item.review_decision !== "rework_needed" ||
+    !item.review_reworked_at
+  ) {
+    redirect(`${redirectTo}?toast=Slab+is+not+in+rework+state`);
+  }
+
+  const now = new Date().toISOString();
+
+  await admin
+    .from("carving_items")
+    .update({
+      status: "carving_complete",
+      completed_at: now,
+      unloaded_at: now,
+      unloaded_by: profile.id,
+      temporary_location: temporaryLocation,
+      // Don't touch completed_on_cnc_machine_id — the original CNC
+      // attribution from the first carve stays valid for reporting.
+    })
+    .eq("id", carvingItemId);
+
+  await recordEvent(
+    carvingItemId,
+    "completed_from_rework",
+    profile.id,
+    `Marked complete from Rework Pending tray${temporaryLocation ? ` · 📍 ${temporaryLocation}` : ""}`,
+  );
+  await logAudit(
+    profile.id,
+    "carving_completed_from_rework",
+    "carving_item",
+    carvingItemId,
+    { temporary_location: temporaryLocation },
+  );
+
+  refreshAll();
+  redirect(
+    `${redirectTo}?toast=${encodeURIComponent("Marked complete — back in review queue")}`,
+  );
+}
+
 // Update temporary location after unload (e.g., slab moved across
 // the yard).
 export async function updateTemporaryLocationAction(formData: FormData) {
@@ -3716,7 +3819,17 @@ export async function reworkCarvingJobAction(formData: FormData) {
       // doesn't think this slab has already been signed off.
       review_approved_at: null,
       review_approved_by: null,
-      status: "carving_in_progress",
+      // Mig 080 — drop status back to carving_assigned (NOT
+      // carving_in_progress) so the existing loadSlabOnMachineAction
+      // accepts it without a special-case branch — that action
+      // requires status='carving_assigned' + cnc_machine_id IS NULL
+      // (line 1226). The review_decision='rework_needed' tag +
+      // review_reworked_at timestamp are what mark this slab as
+      // rework so the vendor cockpit can route it into the Rework
+      // Pending tray instead of the regular Ready-to-load queue.
+      // cnc_machine_id was already cleared by completeAndUnloadAction
+      // before review, so we don't have to touch it here.
+      status: "carving_assigned",
     })
     .eq("id", jobId);
   if (updateErr) {

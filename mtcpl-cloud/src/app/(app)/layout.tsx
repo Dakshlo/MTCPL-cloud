@@ -276,6 +276,21 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     if (reviewErr) return null;
     return count ?? 0;
   }
+  // Mig 080 — Carving Rejected queue. Rare but critical: the
+  // reviewer hit Reject on a slab (hard reject — out of the active
+  // loop entirely, status='carving_rejected'). Same audience as
+  // Carving Done Approval. Surface lives at /carving/rejected; it's
+  // read-only for now ("we don't know yet what we'll do when reject
+  // is there" — Daksh).
+  async function fetchCarvingRejectedBadge(): Promise<number | null> {
+    if (!canSeeAwaitingReview(profile)) return null;
+    const { count, error: rejErr } = await supabase
+      .from("carving_items")
+      .select("*", { count: "exact", head: true })
+      .eq("status", "carving_rejected");
+    if (rejErr) return null;
+    return count ?? 0;
+  }
 
   const [
     approvalsBadge,
@@ -286,6 +301,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     finalAuditBadge,
     royaltyApprovalBadge,
     awaitingReviewBadge,
+    carvingRejectedBadge,
   ] = await Promise.all([
     fetchApprovalsBadge(),
     fetchBillsAuditBadge(),
@@ -295,6 +311,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     fetchFinalAuditBadge(),
     fetchRoyaltyApprovalBadge(),
     fetchAwaitingReviewBadge(),
+    fetchCarvingRejectedBadge(),
   ]);
 
   return (
@@ -487,6 +504,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               finalAuditBadge,
               royaltyApprovalBadge,
               awaitingReviewBadge,
+              carvingRejectedBadge,
             })} />
 
             {/* Mig 078 — Messenger pilot. canUseMessenger is locked
@@ -592,6 +610,10 @@ function buildTopbarTaskItems(counts: {
   finalAuditBadge: number | null;
   royaltyApprovalBadge: number | null;
   awaitingReviewBadge: number | null;
+  /** Mig 080 — count of carving_items with status='carving_rejected'.
+   *  Audience same as awaitingReviewBadge (dev/owner/carving_head/
+   *  senior_incharge); null when role isn't permitted. */
+  carvingRejectedBadge: number | null;
 }): TopbarTask[] {
   const items: TopbarTask[] = [];
   // Mig 058 follow-on (Daksh) — per-user rejected-bills item.
@@ -640,6 +662,21 @@ function buildTopbarTaskItems(counts: {
       description: "Completed carvings awaiting sign-off",
       count: counts.awaitingReviewBadge,
       icon: "🎨",
+      department: "production",
+    });
+  }
+  // Mig 080 — Carving Rejected queue. Rare but critical: surfaced
+  // as its own item so the count doesn't get lost inside the
+  // Carving Done Approval pile. Read-only landing for now per
+  // Daksh's "we'll figure out what to do with rejects later".
+  if (counts.carvingRejectedBadge !== null) {
+    items.push({
+      id: "carving-rejected",
+      href: "/carving/rejected",
+      label: "Carving Rejected",
+      description: "Slabs the reviewer rejected — read-only, for reference",
+      count: counts.carvingRejectedBadge,
+      icon: "✗",
       department: "production",
     });
   }
