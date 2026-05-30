@@ -43,7 +43,14 @@ import { SystemDownScreen } from "@/components/system-down-screen";
 import { DEV_BYPASS_COOKIE } from "@/lib/dev-bypass";
 import { disableDevMaintenanceBypassAction } from "@/app/(app)/settings/system-status-actions";
 
-const SETTINGS_ROLES = ["developer", "owner", "team_head"];
+// Mig 081 follow-on (Daksh) — senior_incharge added. The settings
+// page itself already permits the role via requireAuth, and the
+// sensitive sections (Users / Live Users / Screen Time / Audit Log /
+// Backup / Maintenance) gate themselves on developer+owner. So
+// dropping senior_incharge into this list surfaces ONLY the
+// ungated sections — Stone Types + Temple Codes — which is exactly
+// what Rajesh needs.
+const SETTINGS_ROLES = ["developer", "owner", "team_head", "senior_incharge"];
 // Mig 058 follow-on (Daksh, second pass): the generic notification
 // bell was too cluttered for the accountant context. Reverted to
 // developer-only — the bell stays an internal-debugging surface.

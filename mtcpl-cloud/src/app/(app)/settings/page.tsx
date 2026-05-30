@@ -619,7 +619,12 @@ export default async function SettingsPage() {
         </PeekSection>
       )}
 
-      {/* Stone Type Configuration — developer, owner, team_head */}
+      {/* Stone Type Configuration — visible to everyone who can hit
+          /settings (developer / owner / team_head / senior_incharge).
+          No role gate intentionally — Rajesh-tier (senior_incharge)
+          needs to add new stone types as new yards come online.
+          The destructive sub-actions (recategorise, delete) have
+          their own data-presence guards inside the server actions. */}
       <PeekSection
         icon="🪨"
         title="Stone Types"
@@ -789,7 +794,11 @@ export default async function SettingsPage() {
         </div>
       </PeekSection>
 
-      {/* Temple Code Configuration */}
+      {/* Temple Code Configuration — visible to everyone who can hit
+          /settings (developer / owner / team_head / senior_incharge).
+          Same posture as Stone Types: Rajesh-tier needs to add a
+          temple when a new contract comes in. Deletion is guarded
+          server-side by the slab-count check. */}
       <PeekSection
         icon="🛕"
         title="Temple Codes"
