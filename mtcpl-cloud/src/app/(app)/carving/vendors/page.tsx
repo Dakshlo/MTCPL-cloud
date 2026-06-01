@@ -4,7 +4,11 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { VendorForm } from "./vendor-form";
 
 export default async function VendorDirectoryPage() {
-  await requireAuth(["developer", "owner"]);
+  // Mig 081 follow-on (Daksh) — added carving_head + senior_incharge.
+  // They legitimately add / edit / view CNC vendors as part of their
+  // floor responsibility. Mohit (role='vendor') still can't reach
+  // here — keeping him out of vendor administration entirely.
+  await requireAuth(["developer", "owner", "carving_head", "senior_incharge"]);
   const admin = createAdminSupabaseClient();
 
   const [

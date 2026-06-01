@@ -427,7 +427,18 @@ export default async function CarvingDashboardPage({
               externalSlabs={externalSlabsForPanel}
             />
           )}
-          <VendorsManagerPeek vendors={vendorsForPeek} />
+          {/* Mig 081 follow-on (Daksh) — Manage Vendors button gated.
+              Mohit (role='vendor' + can_assign_carving) was seeing
+              this button on the topbar; he should only assign /
+              monitor, never edit the vendor roster. The four roles
+              that legitimately add or rename vendors: owner / dev /
+              carving_head / senior_incharge. */}
+          {(profile.role === "developer" ||
+            profile.role === "owner" ||
+            profile.role === "carving_head" ||
+            profile.role === "senior_incharge") && (
+            <VendorsManagerPeek vendors={vendorsForPeek} />
+          )}
         </div>
       </div>
 

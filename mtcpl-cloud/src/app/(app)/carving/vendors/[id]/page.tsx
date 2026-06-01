@@ -8,7 +8,12 @@ import { deactivateVendorAction } from "../../actions";
 import { updateMachineAssetFormAction } from "../../expenses/actions";
 
 export default async function VendorDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireAuth(["developer", "owner"]);
+  // Mig 081 follow-on (Daksh) — opens to carving_head + senior_incharge
+  // so the "⚙ Machines" link on the Manage Vendors peek works for
+  // them (was redirecting because the role guard rejected). Mohit
+  // (role='vendor') stays out — the Manage Vendors button itself is
+  // also gated on the parent carving page.
+  await requireAuth(["developer", "owner", "carving_head", "senior_incharge"]);
   const { id } = await params;
   const admin = createAdminSupabaseClient();
 

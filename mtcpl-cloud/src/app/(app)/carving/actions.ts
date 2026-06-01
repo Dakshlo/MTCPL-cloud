@@ -642,8 +642,22 @@ export async function bulkDeleteExternalCutSlabsAction(formData: FormData) {
 
 // ── Vendor CRUD (team-side) ─────────────────────────────────────────
 
+// Mig 081 follow-on (Daksh) — vendor CRUD allowlist widened to
+// include carving_head + senior_incharge. The Manage Vendors peek
+// surfaces to those roles now (gated on the carving page) so the
+// actions they hit from there must accept the role too. Mohit
+// (role='vendor') is still excluded — the parent button isn't
+// rendered for him, and the action would reject him if he tried to
+// post directly.
+const VENDOR_CRUD_ROLES = [
+  "developer",
+  "owner",
+  "carving_head",
+  "senior_incharge",
+] as const;
+
 export async function createVendorAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner"]);
+  const { profile } = await requireAuth([...VENDOR_CRUD_ROLES]);
   const admin = createAdminSupabaseClient();
 
   const name = txt(formData, "name");
@@ -744,7 +758,7 @@ export async function createVendorAction(formData: FormData) {
 }
 
 export async function updateVendorAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner"]);
+  const { profile } = await requireAuth([...VENDOR_CRUD_ROLES]);
   const admin = createAdminSupabaseClient();
 
   const vendorId = txt(formData, "vendor_id");
@@ -884,7 +898,7 @@ export async function updateVendorAction(formData: FormData) {
 }
 
 export async function deactivateVendorAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner"]);
+  const { profile } = await requireAuth([...VENDOR_CRUD_ROLES]);
   const admin = createAdminSupabaseClient();
   const vendorId = txt(formData, "vendor_id");
   const redirectTo = txt(formData, "redirect_to") || "/carving/vendors";
@@ -896,7 +910,7 @@ export async function deactivateVendorAction(formData: FormData) {
 }
 
 export async function reactivateVendorAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner"]);
+  const { profile } = await requireAuth([...VENDOR_CRUD_ROLES]);
   const admin = createAdminSupabaseClient();
   const vendorId = txt(formData, "vendor_id");
   const redirectTo = txt(formData, "redirect_to") || "/carving/vendors";
@@ -908,53 +922,85 @@ export async function reactivateVendorAction(formData: FormData) {
 }
 
 // Hard-delete a vendor. Only allowed when the vendor has no carving
-// items referencing it AND no machines (cascading delete on machines
-// would lose history we want to keep). If either guard fails, falls
-// back to a deactivate so the carving head doesn't have to think
-// about which command to run.
+// items referencing it AND no machines.
+//
+// Mig 081 follow-on (Daksh) — hardened from "silent soft-delete
+// fallback" to a HARD BLOCK with a clear toast. Daksh: "create a
+// protective lock if with that vendor any slab or cnc is there it
+// should be locked to delete." Silent fallback was confusing — the
+// user clicked Delete + got a vague "deactivated instead" toast and
+// didn't realise the vendor was still around. The new posture:
+//   • Any cnc_machines row referencing this vendor → REFUSE delete.
+//     Show count + tell the user to remove the machines first
+//     (vendor detail page → Machines).
+//   • Any carving_items row referencing this vendor (any status,
+//     past or present) → REFUSE delete. Show count + tell the user
+//     to use Deactivate instead (preserves history).
+//   • Clean — no machines, no items → HARD DELETE proceeds.
+// Deactivate is still available as a separate button in the UI for
+// the "I just want this off the active list" case, so this gate
+// doesn't close off any legitimate workflow.
 export async function deleteVendorAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner"]);
+  const { profile } = await requireAuth([...VENDOR_CRUD_ROLES]);
   const admin = createAdminSupabaseClient();
   const vendorId = txt(formData, "vendor_id");
   const redirectTo = txt(formData, "redirect_to") || "/carving/vendors";
 
   if (!vendorId) redirect(`${redirectTo}?toast=Missing+vendor+id`);
 
-  const [{ count: itemCount }, { count: machineCount }] = await Promise.all([
-    admin
-      .from("carving_items")
-      .select("id", { count: "exact", head: true })
-      .eq("vendor_id", vendorId),
-    admin
-      .from("cnc_machines")
-      .select("id", { count: "exact", head: true })
-      .eq("vendor_id", vendorId),
-  ]);
+  // Fetch the name + reference counts in parallel.
+  const [{ data: vendorRow }, { count: itemCount }, { count: machineCount }] =
+    await Promise.all([
+      admin.from("vendors").select("name").eq("id", vendorId).maybeSingle(),
+      admin
+        .from("carving_items")
+        .select("id", { count: "exact", head: true })
+        .eq("vendor_id", vendorId),
+      admin
+        .from("cnc_machines")
+        .select("id", { count: "exact", head: true })
+        .eq("vendor_id", vendorId),
+    ]);
+  const vendorName = (vendorRow as { name?: string } | null)?.name ?? "Vendor";
 
+  // HARD BLOCK if anything references the vendor. Audit-log the
+  // attempt so we have a trail of who tried to delete what (useful
+  // if a junior staff member is poking at the UI).
   if ((itemCount ?? 0) > 0 || (machineCount ?? 0) > 0) {
-    // Has history — soft-delete instead so audit trails stay intact.
-    await admin.from("vendors").update({ is_active: false }).eq("id", vendorId);
-    await logAudit(profile.id, "vendor_soft_deleted", "vendor", vendorId, {
-      reason: "has_history",
+    await logAudit(profile.id, "vendor_delete_blocked", "vendor", vendorId, {
+      reason: "has_references",
       carving_items: itemCount ?? 0,
       machines: machineCount ?? 0,
     });
-    refreshAll();
+    const parts: string[] = [];
+    if ((machineCount ?? 0) > 0) {
+      parts.push(`${machineCount} machine${machineCount === 1 ? "" : "s"}`);
+    }
+    if ((itemCount ?? 0) > 0) {
+      parts.push(`${itemCount} slab${itemCount === 1 ? "" : "s"}`);
+    }
+    const detail = parts.join(" + ");
+    const hint =
+      (machineCount ?? 0) > 0
+        ? "Remove the machines first (vendor → Machines), or use Deactivate."
+        : "Use Deactivate instead to keep the audit trail.";
     redirect(
       `${redirectTo}?toast=${encodeURIComponent(
-        `Vendor has ${itemCount} job(s) and ${machineCount} machine(s) — deactivated instead`,
+        `Cannot delete ${vendorName} — has ${detail}. ${hint}`,
       )}`,
     );
   }
 
-  // Truly no history — safe to hard delete.
+  // Clean — safe to hard delete.
   const { error } = await admin.from("vendors").delete().eq("id", vendorId);
   if (error) {
     redirect(`${redirectTo}?toast=${encodeURIComponent(error.message)}`);
   }
-  await logAudit(profile.id, "vendor_deleted", "vendor", vendorId, {});
+  await logAudit(profile.id, "vendor_deleted", "vendor", vendorId, {
+    name: vendorName,
+  });
   refreshAll();
-  redirect(`${redirectTo}?toast=Vendor+deleted`);
+  redirect(`${redirectTo}?toast=${encodeURIComponent(`${vendorName} deleted`)}`);
 }
 
 // ── Carving job lifecycle ───────────────────────────────────────────

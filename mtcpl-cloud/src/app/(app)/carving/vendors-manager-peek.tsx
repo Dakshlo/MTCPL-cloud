@@ -259,7 +259,22 @@ function AddVendorRow() {
 function VendorRowCard({ v }: { v: VendorRow }) {
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(v.name);
+  // Mig 081 follow-on (Daksh) — protective lock on Delete. Locks if
+  // the vendor has ANY machines OR ANY active jobs (slabs currently
+  // assigned). The server enforces the same gate; the UI just
+  // surfaces the lock visually so the user can see why the button
+  // is disabled before clicking.
   const canHardDelete = v.machines === 0 && v.active_jobs === 0;
+  const lockParts: string[] = [];
+  if (v.machines > 0) {
+    lockParts.push(`${v.machines} machine${v.machines === 1 ? "" : "s"}`);
+  }
+  if (v.active_jobs > 0) {
+    lockParts.push(`${v.active_jobs} active slab${v.active_jobs === 1 ? "" : "s"}`);
+  }
+  const lockReason = lockParts.length > 0
+    ? `Locked — vendor has ${lockParts.join(" + ")}. Use Deactivate instead to keep history.`
+    : null;
 
   return (
     <div
@@ -364,23 +379,55 @@ function VendorRowCard({ v }: { v: VendorRow }) {
                 </button>
               </form>
             )}
-            <form action={deleteVendorAction} style={{ display: "inline" }}>
-              <input type="hidden" name="vendor_id" value={v.id} />
-              <input type="hidden" name="redirect_to" value="/carving" />
+            {/* Mig 081 follow-on (Daksh) — visual lock. When the
+                vendor has machines or active slabs we disable the
+                button + show the lock reason on hover. Saves a
+                round-trip to the server only to get the same
+                "cannot delete" toast back. */}
+            {canHardDelete ? (
+              <form action={deleteVendorAction} style={{ display: "inline" }}>
+                <input type="hidden" name="vendor_id" value={v.id} />
+                <input type="hidden" name="redirect_to" value="/carving" />
+                <button
+                  type="submit"
+                  onClick={(e) => {
+                    if (
+                      !confirm(
+                        `Delete ${v.name} permanently? This cannot be undone.`,
+                      )
+                    ) {
+                      e.preventDefault();
+                    }
+                  }}
+                  className="ghost-button danger-ghost"
+                  style={{ fontSize: 11, padding: "5px 10px" }}
+                >
+                  🗑 Delete
+                </button>
+              </form>
+            ) : (
               <button
-                type="submit"
-                onClick={(e) => {
-                  const msg = canHardDelete
-                    ? `Delete ${v.name} permanently? This cannot be undone.`
-                    : `${v.name} has machines or jobs and can't be deleted. It will be deactivated instead. Continue?`;
-                  if (!confirm(msg)) e.preventDefault();
+                type="button"
+                disabled
+                title={lockReason ?? "Locked"}
+                aria-disabled
+                style={{
+                  fontSize: 11,
+                  padding: "5px 10px",
+                  background: "var(--surface-alt)",
+                  color: "var(--muted)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                  cursor: "not-allowed",
+                  opacity: 0.7,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
                 }}
-                className="ghost-button danger-ghost"
-                style={{ fontSize: 11, padding: "5px 10px" }}
               >
-                🗑 Delete
+                🔒 Delete
               </button>
-            </form>
+            )}
           </>
         )}
       </div>
