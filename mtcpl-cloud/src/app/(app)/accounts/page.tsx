@@ -284,6 +284,50 @@ export default async function AccountsHomePage({
     return Math.floor((todayMs - new Date(dateStr).getTime()) / 86_400_000);
   }
 
+  // Mig 081 follow-on (Daksh) — per-vendor "last paid" timestamp.
+  // Dad does this manually today: when proposing a Pay-Today batch
+  // he tabs to other pages to check when each vendor was last paid
+  // and prioritises the ones who've been waiting longest. Surfacing
+  // it directly on the Due Bills row eliminates that detour.
+  //
+  // Query is READ-ONLY against bill_payments + bills (join needed
+  // because bill_payments has no bill_vendor_id of its own). Scoped
+  // to the vendors actually showing up in dueRows so we never pull
+  // the whole table. status='paid' filter excludes proposed +
+  // cancelled rows; we only want the LAST CONFIRMED payment.
+  const lastPaidByVendor = new Map<string, string>();
+  {
+    const vendorIds = [...new Set(dueRows.map((r) => r.bill_vendor_id))];
+    if (vendorIds.length > 0) {
+      const { data: paidRows, error: paidErr } = await supabase
+        .from("bill_payments")
+        .select("paid_at, bills!inner(bill_vendor_id)")
+        .eq("status", "paid")
+        .not("paid_at", "is", null)
+        .in("bills.bill_vendor_id", vendorIds)
+        .order("paid_at", { ascending: false });
+      if (!paidErr && paidRows) {
+        // Take the FIRST occurrence per vendor (the array is already
+        // sorted DESC by paid_at, so the first hit IS the latest).
+        for (const r of paidRows as Array<{
+          paid_at: string | null;
+          bills:
+            | { bill_vendor_id: string }
+            | { bill_vendor_id: string }[]
+            | null;
+        }>) {
+          if (!r.paid_at) continue;
+          const v = Array.isArray(r.bills) ? r.bills[0] : r.bills;
+          const vid = v?.bill_vendor_id;
+          if (!vid) continue;
+          if (!lastPaidByVendor.has(vid)) {
+            lastPaidByVendor.set(vid, r.paid_at);
+          }
+        }
+      }
+    }
+  }
+
   // Mig 064 follow-on (Daksh) — batch-fetch each vendor's approved
   // royalty net (paid − received) so the dashboard can render a
   // peek dot on every row next to the age pill. Only fired for
@@ -371,6 +415,12 @@ export default async function AccountsHomePage({
       vendorRoyaltyNet: canSeeRoyaltyNet
         ? royaltyNetByVendor.get(r.bill_vendor_id) ?? 0
         : null,
+      // Mig 081 follow-on — last paid_at for this vendor across ALL
+      // their bills (any amount, any bill). Drives the new "Last
+      // paid" column. NULL = never paid before, which the UI shows
+      // as "—" so dad can tell at a glance which vendors are first-
+      // timers vs. long-standing.
+      lastPaidAtForVendor: lastPaidByVendor.get(r.bill_vendor_id) ?? null,
     };
   });
 

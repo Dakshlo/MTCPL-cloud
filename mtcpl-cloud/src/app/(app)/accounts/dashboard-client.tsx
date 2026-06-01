@@ -90,6 +90,13 @@ export type DueBillRow = {
    *  received, approved entries only). NULL when the role can't
    *  see royalty data — the dot doesn't render then. */
   vendorRoyaltyNet: number | null;
+  /** Mig 081 follow-on (Daksh) — last paid_at across ALL of this
+   *  vendor's bills (any amount, any bill, status='paid' only). Lets
+   *  dad see how long ago this vendor was last paid without leaving
+   *  the Due Bills page. NULL = never paid (new vendor or all
+   *  prior bills cancelled). Read-only display; the surrounding
+   *  page never writes to this. */
+  lastPaidAtForVendor: string | null;
 };
 
 /** Legacy global default — kept for back-compat with code paths that
@@ -737,13 +744,18 @@ export function DueBillsClient({
                     column) drops to last. */}
                 {canPropose && <th style={TABLE_STYLES.thRight}>Propose</th>}
                 <th style={TABLE_STYLES.th}>Age / Verified</th>
+                {/* Mig 081 follow-on (Daksh) — last time we paid this
+                    vendor anything, on any bill. Read-only signal,
+                    no checkbox or action. Helps dad triage who's
+                    been waiting longest without leaving the page. */}
+                <th style={TABLE_STYLES.th}>Last paid</th>
               </tr>
             </thead>
             <tbody>
               {filteredRows.length === 0 && quickFilter.trim() !== "" && (
                 <tr>
                   <td
-                    colSpan={canPropose ? 11 : 10}
+                    colSpan={canPropose ? 12 : 11}
                     style={{
                       padding: "20px",
                       textAlign: "center",
@@ -788,7 +800,7 @@ export function DueBillsClient({
                     {showDivider && (
                       <tr aria-hidden style={{ background: "transparent" }}>
                         <td
-                          colSpan={canPropose ? 11 : 10}
+                          colSpan={canPropose ? 12 : 11}
                           style={{
                             padding: "6px 14px 4px",
                             fontSize: 10,
@@ -1213,6 +1225,15 @@ export function DueBillsClient({
                         </div>
                       )}
                     </td>
+                    {/* Mig 081 follow-on (Daksh) — last time this
+                        vendor was paid anything, across all their
+                        bills. Read-only triage signal: dad uses it
+                        to prioritise who's been waiting longest.
+                        "—" when this is the vendor's first bill in
+                        the system. The colour intensifies as the gap
+                        gets larger (green ≤ 30d, amber 30-90d,
+                        red > 90d, slate when never). */}
+                    <LastPaidCell isoDate={r.lastPaidAtForVendor} />
                     </tr>
                   </Fragment>
                 );
@@ -1343,6 +1364,100 @@ export function DueBillsClient({
         </>
       )}
     </div>
+  );
+}
+
+/** Mig 081 follow-on (Daksh) — small read-only cell that summarises
+ *  how long ago this vendor was last paid. Three states:
+ *    • "—" + slate     when isoDate is null (vendor has never been
+ *                      paid; the system has no record).
+ *    • "Today" / "2d ago" / "31 May" formatted compactly, plus
+ *      a coloured gap pill (green ≤30d, amber 30-90d, red >90d)
+ *      so dad can scan the column and spot the long-waiters.
+ *  Pure presentation — no callbacks, no writes. */
+function LastPaidCell({ isoDate }: { isoDate: string | null }) {
+  if (!isoDate) {
+    return (
+      <td style={{ ...TABLE_STYLES.td }}>
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 4,
+            padding: "3px 8px",
+            borderRadius: 999,
+            fontSize: 10.5,
+            fontWeight: 700,
+            background: "var(--surface-alt)",
+            color: "var(--muted)",
+            border: "1px solid var(--border)",
+            letterSpacing: "0.04em",
+            whiteSpace: "nowrap",
+          }}
+          title="No prior payment recorded for this vendor"
+        >
+          — never paid
+        </span>
+      </td>
+    );
+  }
+  const paidMs = new Date(isoDate).getTime();
+  const days = Math.max(0, Math.floor((Date.now() - paidMs) / 86_400_000));
+  const dateLabel = new Date(isoDate).toLocaleDateString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    day: "numeric",
+    month: "short",
+    year: "2-digit",
+  });
+  const tone =
+    days <= 30
+      ? { bg: "rgba(22,163,74,0.10)", fg: "#15803d", border: "rgba(22,163,74,0.32)" }
+      : days <= 90
+        ? { bg: "rgba(217,119,6,0.10)", fg: "#b45309", border: "rgba(217,119,6,0.32)" }
+        : { bg: "rgba(220,38,38,0.10)", fg: "#b91c1c", border: "rgba(220,38,38,0.4)" };
+  const gapLabel =
+    days === 0 ? "today" : days === 1 ? "1d ago" : `${days}d ago`;
+  return (
+    <td style={{ ...TABLE_STYLES.td }}>
+      <div
+        style={{
+          display: "inline-flex",
+          flexDirection: "column",
+          alignItems: "flex-start",
+          gap: 3,
+        }}
+      >
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 4,
+            padding: "3px 8px",
+            borderRadius: 999,
+            fontSize: 10.5,
+            fontWeight: 800,
+            background: tone.bg,
+            color: tone.fg,
+            border: `1px solid ${tone.border}`,
+            letterSpacing: "0.03em",
+            whiteSpace: "nowrap",
+          }}
+          title={`Last paid ${new Date(isoDate).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}`}
+        >
+          💸 {gapLabel}
+        </span>
+        <span
+          style={{
+            fontSize: 10,
+            color: "var(--muted)",
+            fontFamily: "ui-monospace, monospace",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {dateLabel}
+        </span>
+      </div>
+    </td>
   );
 }
 
