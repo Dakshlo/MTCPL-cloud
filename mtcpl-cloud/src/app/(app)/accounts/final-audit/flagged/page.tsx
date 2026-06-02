@@ -14,7 +14,7 @@ import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
-import { canFinalAudit } from "@/lib/accounts-permissions";
+import { canFinalAudit, canSettleWithDebit } from "@/lib/accounts-permissions";
 import {
   AccountsHero,
   BUTTON_STYLES,
@@ -34,7 +34,7 @@ export default async function FlaggedAuditPage() {
   const { data: raw } = await supabase
     .from("bill_payments")
     .select(
-      "id, bill_id, status, final_audit_status, paid_amount, payment_method, payment_reference, payment_note, paid_by, paid_at, final_audit_at, final_audit_by, final_audit_flag_reason, final_audit_flag_note, bills(id, token, vendor_bill_no, bill_vendor_id, bill_vendors(id, name))",
+      "id, bill_id, status, final_audit_status, paid_amount, payment_method, payment_reference, payment_note, paid_by, paid_at, final_audit_at, final_audit_by, final_audit_flag_reason, final_audit_flag_note, debit_settled_at, bills(id, token, vendor_bill_no, bill_vendor_id, bill_vendors(id, name))",
     )
     .eq("status", "paid")
     .eq("final_audit_status", "flagged")
@@ -55,6 +55,7 @@ export default async function FlaggedAuditPage() {
     final_audit_by: string | null;
     final_audit_flag_reason: string | null;
     final_audit_flag_note: string | null;
+    debit_settled_at: string | null;
     bills:
       | {
           id: string;
@@ -99,6 +100,7 @@ export default async function FlaggedAuditPage() {
       flagNote: r.final_audit_flag_note,
       vendorTotalOutstanding: 0,
       vendorId: b?.bill_vendor_id ?? null,
+      debitSettledAt: r.debit_settled_at,
     };
   });
 
@@ -113,7 +115,11 @@ export default async function FlaggedAuditPage() {
           </Link>
         }
       />
-      <AuditHistoryClient rows={rows} variant="flagged" />
+      <AuditHistoryClient
+        rows={rows}
+        variant="flagged"
+        canSettle={canSettleWithDebit(profile)}
+      />
     </section>
   );
 }

@@ -60,6 +60,11 @@ export type FinalAuditRow = {
    *  open bill). Lets the auditor sanity-check a paid amount
    *  against the vendor's total exposure. */
   vendorTotalOutstanding: number;
+  /** Mig 085 — when set, this flagged payment has been settled with a
+   *  debit (owner approved). Drives the "Settled" group on the
+   *  Flagged Payments page; open flags (null) get the "Settle with
+   *  debit" button. */
+  debitSettledAt?: string | null;
 };
 
 type ServerResult = { ok: true } | { ok: false; error: string };

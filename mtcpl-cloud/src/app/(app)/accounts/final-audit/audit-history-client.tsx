@@ -31,11 +31,15 @@ function startOfDayIstMs(d: Date): number {
 export function AuditHistoryClient({
   rows,
   variant,
+  canSettle = false,
 }: {
   rows: FinalAuditRow[];
   /** Drives the heading + the empty-state copy + the row pill colour.
    *  Same data shape either way; just different intent. */
   variant: "verified" | "flagged";
+  /** Mig 085 — when true (auditor / owner / dev on the flagged list),
+   *  open flagged cards get a "Settle with debit" button. */
+  canSettle?: boolean;
 }) {
   const [range, setRange] = useState<DateRange>("today");
 
@@ -172,16 +176,74 @@ export function AuditHistoryClient({
         </div>
       )}
 
-      {/* Card list — same shape as FinalAuditClient's audited rows
-          but read-only (no Verify / Flag buttons). */}
-      {filteredRows.map((row) => (
-        <AuditHistoryRow
-          key={row.id}
-          row={row}
-          accent={accent}
-          accentBg={accentBg}
-        />
-      ))}
+      {/* Card list. On the flagged variant we split OPEN (still needs
+          the owner to act / be settled) from SETTLED (resolved with a
+          debit, mig 085) so the queue the owner works stays clean. */}
+      {(() => {
+        const openRows =
+          variant === "flagged"
+            ? filteredRows.filter((r) => !r.debitSettledAt)
+            : filteredRows;
+        const settledRows =
+          variant === "flagged"
+            ? filteredRows.filter((r) => r.debitSettledAt)
+            : [];
+        return (
+          <>
+            {openRows.map((row) => (
+              <AuditHistoryRow
+                key={row.id}
+                row={row}
+                accent={accent}
+                accentBg={accentBg}
+                canSettle={canSettle}
+                settled={false}
+              />
+            ))}
+            {settledRows.length > 0 && (
+              <>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    margin: "6px 2px 0",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 800,
+                      color: "#15803d",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.06em",
+                    }}
+                  >
+                    ✓ Settled with debit ({settledRows.length})
+                  </span>
+                  <span
+                    style={{
+                      flex: 1,
+                      height: 1,
+                      background: ACCOUNTS_TOKENS.border,
+                    }}
+                  />
+                </div>
+                {settledRows.map((row) => (
+                  <AuditHistoryRow
+                    key={row.id}
+                    row={row}
+                    accent={accent}
+                    accentBg={accentBg}
+                    canSettle={canSettle}
+                    settled
+                  />
+                ))}
+              </>
+            )}
+          </>
+        );
+      })()}
     </div>
   );
 }
@@ -203,10 +265,14 @@ function AuditHistoryRow({
   row,
   accent,
   accentBg,
+  canSettle,
+  settled,
 }: {
   row: FinalAuditRow;
   accent: string;
   accentBg: string;
+  canSettle: boolean;
+  settled: boolean;
 }) {
   const auditedAtLabel = row.auditedAt
     ? new Date(row.auditedAt).toLocaleString("en-IN", {
@@ -346,6 +412,56 @@ function AuditHistoryRow({
             statement to the paise, same posture as the main audit
             queue card. */}
         <Money value={row.paidAmount} size="large" tone="success" precise />
+
+        {/* Mig 085 — settle-with-debit affordance. Open flagged rows
+            (the auditor can act) get the button; settled ones show a
+            green confirmation chip instead. */}
+        {settled ? (
+          <div
+            style={{
+              marginTop: 10,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 5,
+              fontSize: 11,
+              fontWeight: 700,
+              padding: "4px 10px",
+              borderRadius: 999,
+              background: "#dcfce7",
+              color: "#15803d",
+            }}
+            title={
+              row.debitSettledAt
+                ? `Settled ${new Date(row.debitSettledAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`
+                : "Settled with debit"
+            }
+          >
+            ✓ Settled with debit
+          </div>
+        ) : (
+          canSettle && (
+            <div style={{ marginTop: 10 }}>
+              <Link
+                href={`/accounts/final-audit/flagged/${row.id}/settle`}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: 12,
+                  fontWeight: 800,
+                  padding: "8px 14px",
+                  borderRadius: 8,
+                  background: ACCOUNTS_TOKENS.accent,
+                  color: "#fff",
+                  textDecoration: "none",
+                  boxShadow: ACCOUNTS_TOKENS.shadow,
+                }}
+              >
+                ⇄ Settle with debit
+              </Link>
+            </div>
+          )
+        )}
       </div>
     </div>
   );
