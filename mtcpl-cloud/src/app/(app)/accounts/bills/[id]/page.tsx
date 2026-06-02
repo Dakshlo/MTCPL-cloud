@@ -166,7 +166,7 @@ export default async function BillDetailPage({
       // Mig 053 follow-on: pull final-audit metadata so the bill
       // header can show the PAID + VERIFIED tag once all paid
       // payments are verified.
-      "id, status, proposed_amount, proposed_by, proposed_at, confirmed_by, confirmed_at, paid_amount, payment_method, payment_reference, payment_note, paid_by, paid_at, cancelled_by, cancelled_at, cancel_reason, bank_rejected_at, bank_rejected_by, bank_rejection_reason, previous_payment_id, final_audit_status, final_audit_at, final_audit_by, final_audit_flag_reason, final_audit_flag_note",
+      "id, status, proposed_amount, proposed_by, proposed_at, confirmed_by, confirmed_at, paid_amount, payment_method, payment_reference, payment_note, paid_by, paid_at, cancelled_by, cancelled_at, cancel_reason, bank_rejected_at, bank_rejected_by, bank_rejection_reason, previous_payment_id, final_audit_status, final_audit_at, final_audit_by, final_audit_flag_reason, final_audit_flag_note, is_debit_settlement",
     )
     .eq("bill_id", id)
     .order("proposed_at", { ascending: false });
@@ -196,6 +196,7 @@ export default async function BillDetailPage({
     final_audit_by: string | null;
     final_audit_flag_reason: string | null;
     final_audit_flag_note: string | null;
+    is_debit_settlement: boolean | null;
   }>;
 
   // Mig 053 — bill-level "PAID + VERIFIED" derivation.
@@ -290,11 +291,19 @@ export default async function BillDetailPage({
   }
   for (const p of payments) {
     if (p.paid_at) {
+      // Mig 085 — a debit-settlement row is NOT a bank payment; the
+      // money already moved (it was the overpayment). Label it as a
+      // debit so the audit trail reads honestly + ties to the
+      // outstanding drop, rather than looking like a second payout.
       timeline.push({
         at: p.paid_at,
-        label: `Paid ₹${Number(p.paid_amount ?? 0).toLocaleString("en-IN")} · ${p.payment_method?.toUpperCase() ?? "—"}`,
+        label: p.is_debit_settlement
+          ? `Debit ₹${Number(p.paid_amount ?? 0).toLocaleString("en-IN")} — overpayment settled`
+          : `Paid ₹${Number(p.paid_amount ?? 0).toLocaleString("en-IN")} · ${p.payment_method?.toUpperCase() ?? "—"}`,
         by: p.paid_by ? profilesMap[p.paid_by] ?? null : null,
-        tone: ACCOUNTS_TOKENS.success,
+        tone: p.is_debit_settlement
+          ? ACCOUNTS_TOKENS.accent
+          : ACCOUNTS_TOKENS.success,
       });
     } else if (p.confirmed_at) {
       timeline.push({

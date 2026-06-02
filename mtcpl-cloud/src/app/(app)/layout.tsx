@@ -24,6 +24,7 @@ import { canApproveCuts, canSeeAwaitingReview } from "@/lib/cutting-permissions"
 import { canUseMessenger } from "@/lib/messenger-permissions";
 import {
   canApproveBills,
+  canApproveDebit,
   canConfirmPayments,
   canFinalAudit,
   canSubmitBills,
@@ -261,6 +262,18 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     if (finalAuditErr) return null;
     return count ?? 0;
   }
+  // Mig 085 — Debit approval queue. Owner / developer only — the
+  // gate that actually moves money (applies a flagged overpayment as
+  // a debit against another bill). Counts pending settlements.
+  async function fetchDebitApprovalBadge(): Promise<number | null> {
+    if (!canApproveDebit(profile)) return null;
+    const { count, error: debitErr } = await supabase
+      .from("bill_debit_settlements")
+      .select("*", { count: "exact", head: true })
+      .eq("status", "pending_approval");
+    if (debitErr) return null;
+    return count ?? 0;
+  }
   // Mig 064 — Royalty Approval queue. Owner / developer only.
   async function fetchRoyaltyApprovalBadge(): Promise<number | null> {
     if (profile.role !== "owner" && profile.role !== "developer") return null;
@@ -313,6 +326,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     royaltyApprovalBadge,
     awaitingReviewBadge,
     carvingRejectedBadge,
+    debitApprovalBadge,
   ] = await Promise.all([
     fetchApprovalsBadge(),
     fetchBillsAuditBadge(),
@@ -323,6 +337,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     fetchRoyaltyApprovalBadge(),
     fetchAwaitingReviewBadge(),
     fetchCarvingRejectedBadge(),
+    fetchDebitApprovalBadge(),
   ]);
 
   return (
@@ -521,6 +536,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               royaltyApprovalBadge,
               awaitingReviewBadge,
               carvingRejectedBadge,
+              debitApprovalBadge,
             })} />
 
             {/* Mig 078 — Messenger pilot. canUseMessenger is locked
@@ -630,6 +646,9 @@ function buildTopbarTaskItems(counts: {
    *  Audience same as awaitingReviewBadge (dev/owner/carving_head/
    *  senior_incharge); null when role isn't permitted. */
   carvingRejectedBadge: number | null;
+  /** Mig 085 — pending debit settlements awaiting owner approval.
+   *  Owner / developer only; null otherwise. */
+  debitApprovalBadge: number | null;
 }): TopbarTask[] {
   const items: TopbarTask[] = [];
   // Mig 058 follow-on (Daksh) — per-user rejected-bills item.
@@ -726,6 +745,22 @@ function buildTopbarTaskItems(counts: {
       description: "Paid payments awaiting UTR recheck",
       count: counts.finalAuditBadge,
       icon: "🧾",
+      department: "finance",
+    });
+  }
+  // Mig 085 — Debit approval (owner / developer only). Flagged
+  // overpayments the auditor settled with a debit, waiting for the
+  // owner's sign-off before the chosen bill's outstanding drops.
+  // Links to /accounts/approvals where the "Debit approvals" section
+  // lives at the top.
+  if (counts.debitApprovalBadge !== null) {
+    items.push({
+      id: "debit-approval",
+      href: "/accounts/approvals",
+      label: "Debit approval",
+      description: "Overpayment debits awaiting your sign-off",
+      count: counts.debitApprovalBadge,
+      icon: "⇄",
       department: "finance",
     });
   }
