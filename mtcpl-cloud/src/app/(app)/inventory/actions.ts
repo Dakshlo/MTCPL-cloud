@@ -40,6 +40,27 @@ import {
 
 type ActionResult = { ok: true } | { ok: false; error: string };
 
+// Mig 083 follow-on (Daksh, June 2026) — server-side mirror of
+// labelForComponentType (component-icon.tsx). Lives here so the
+// "use server" action can auto-derive a component's name from its
+// type + size without importing a client module. Keep in sync
+// with the client switch; both reference the same enum values.
+const COMPONENT_TYPE_LABELS: Record<string, string> = {
+  standard: "Standard",
+  ledger: "Ledger",
+  transom: "Transom",
+  jali: "Jali",
+  brace: "Brace",
+  jack_base: "Jack Base",
+  u_head: "U-Head",
+  coupler: "Coupler",
+  plank: "Plank",
+  ladder: "Ladder",
+  toe_board: "Toe Board",
+  tie_rod: "Tie Rod",
+  other: "Other",
+};
+
 async function refreshInventoryPaths() {
   revalidatePath("/inventory");
   revalidatePath("/inventory/scaffolding");
@@ -659,10 +680,25 @@ export async function upsertComponentAction(
   }
 
   const id = String(formData.get("id") || "").trim() || null;
-  const name = String(formData.get("name") || "").trim();
   const componentType = String(formData.get("component_type") || "").trim();
   const sizeSpec = String(formData.get("size_spec") || "").trim() || null;
   const unit = String(formData.get("unit") || "pcs").trim() || "pcs";
+  // Mig 083 follow-on (Daksh, June 2026) — the standalone "Display
+  // name" field is gone. Daksh: "remove display name. name of
+  // complent is what type is and the size is that will be name."
+  // We auto-derive `name` from the type label + the size spec:
+  //   type=standard + size=2.5m → "Standard 2.5m"
+  //   type=jali     + size=100×50 → "Jali 100×50"
+  //   type=coupler  + size=(blank) → "Coupler"
+  // The form may still POST a name (legacy / future callers) — if it
+  // does we honour it; otherwise we build it here. componentType is
+  // resolved to its human label via COMPONENT_TYPE_LABELS so the
+  // stored name reads naturally.
+  const postedName = String(formData.get("name") || "").trim();
+  const typeLabel = COMPONENT_TYPE_LABELS[componentType] ?? componentType;
+  const name =
+    postedName ||
+    (sizeSpec ? `${typeLabel} ${sizeSpec}` : typeLabel);
   const description = String(formData.get("description") || "").trim() || null;
   const displayOrderRaw = String(formData.get("display_order") || "0").trim();
   const displayOrder = Number(displayOrderRaw);
@@ -689,8 +725,11 @@ export async function upsertComponentAction(
     }
   }
 
-  if (!name) return { ok: false, error: "Component name is required." };
   if (!componentType) return { ok: false, error: "Pick a component type." };
+  // name is now auto-derived; the only way it's empty is if the
+  // type label itself resolved blank, which can't happen for a
+  // valid enum value. Belt-and-suspenders guard anyway.
+  if (!name) return { ok: false, error: "Could not derive a component name — pick a valid type." };
   if (!Number.isFinite(displayOrder)) {
     return { ok: false, error: "Display order must be a number." };
   }

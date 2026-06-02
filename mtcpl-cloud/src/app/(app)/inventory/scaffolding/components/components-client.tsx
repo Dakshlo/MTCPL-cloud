@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import {
   upsertComponentAction,
   archiveComponentAction,
-  unarchiveComponentAction,
 } from "../../actions";
 import {
   ComponentIcon,
@@ -29,7 +28,6 @@ export function ComponentsClient({
   const [editingId, setEditingId] = useState<string | "new" | null>(null);
 
   const active = components.filter((c) => c.is_active);
-  const archived = components.filter((c) => !c.is_active);
 
   // Group active by type for display.
   const byType = new Map<ScaffoldingComponentType, ScaffoldingComponent[]>();
@@ -147,44 +145,29 @@ export function ComponentsClient({
         </section>
       ))}
 
-      {/* Archived */}
-      {archived.length > 0 && (
-        <section
+      {/* Mig 083 follow-on (Daksh) — the Archived section is gone.
+          Daksh: "remove those archive too. ill add my self." The
+          mig-083 soft wipe archived every legacy component, so
+          showing a 38-row Archived list was pure noise. Archived
+          rows still exist in the DB (recoverable via a manual
+          is_active flip if ever needed) but the catalog screen no
+          longer surfaces them. Empty-state hint when there are no
+          active components yet. */}
+      {typeOrder.length === 0 && editingId !== "new" && (
+        <div
           style={{
             background: INV_THEME.paper,
-            border: `1px solid ${INV_THEME.parchment}`,
+            border: `1px dashed ${INV_THEME.parchment}`,
             borderRadius: 10,
-            padding: 14,
+            padding: "28px 18px",
+            textAlign: "center",
+            color: INV_THEME.steelLight,
+            fontSize: 13,
           }}
         >
-          <h3
-            style={{
-              margin: "0 0 10px",
-              fontSize: 12,
-              fontWeight: 800,
-              color: INV_THEME.steelLight,
-              textTransform: "uppercase",
-              letterSpacing: "0.1em",
-            }}
-          >
-            Archived ({archived.length})
-          </h3>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {archived.map((c) => (
-              <ComponentRow
-                key={c.id}
-                component={c}
-                archived
-                onUnarchive={async () => {
-                  const fd = new FormData();
-                  fd.append("id", c.id);
-                  await unarchiveComponentAction(fd);
-                  router.refresh();
-                }}
-              />
-            ))}
-          </div>
-        </section>
+          No components yet. Tap <strong>+ Add component</strong> to
+          start building the catalog.
+        </div>
       )}
     </div>
   );
@@ -278,6 +261,13 @@ function ComponentForm({
   const [type, setType] = useState<ScaffoldingComponentType>(
     component?.component_type ?? "standard",
   );
+  // Mig 083 follow-on — size is now controlled so the auto-name
+  // preview updates live. Name = "<type label> <size>" (or just
+  // the type label when size is blank).
+  const [size, setSize] = useState<string>(component?.size_spec ?? "");
+  const derivedName = size.trim()
+    ? `${labelForComponentType(type)} ${size.trim()}`
+    : labelForComponentType(type);
   // Mig 044 — image upload. The user picks a PNG (transparent
   // recommended); we read it into a data URL and store the full
   // string in scaffolding_components.image_data_url. Tiny files
@@ -369,22 +359,35 @@ function ComponentForm({
           ))}
         </select>
       </Field>
-      <Field label="Display name">
+      {/* Mig 083 follow-on (Daksh) — the standalone Display Name
+          field is gone. The name is auto-built from Type + Size:
+          "Standard" + "2.5m" → "Standard 2.5m". This preview shows
+          the user exactly what the saved name will be as they type
+          the size. The server re-derives it the same way, so the
+          two never drift. */}
+      <Field label="Size">
         <input
-          name="name"
-          defaultValue={component?.name ?? ""}
-          required
-          placeholder="Standard 2.5m"
+          name="size_spec"
+          value={size}
+          onChange={(e) => setSize(e.target.value)}
+          placeholder="2.5m / 100×50 / blank"
           style={inputStyle}
         />
       </Field>
-      <Field label="Size spec">
-        <input
-          name="size_spec"
-          defaultValue={component?.size_spec ?? ""}
-          placeholder="2.5m or blank"
-          style={inputStyle}
-        />
+      <Field label="Name (auto)" wide>
+        <div
+          style={{
+            padding: "8px 10px",
+            fontSize: 14,
+            fontWeight: 800,
+            border: `1px solid ${INV_THEME.parchment}`,
+            borderRadius: 6,
+            background: "#fff",
+            color: INV_THEME.steel,
+          }}
+        >
+          {derivedName}
+        </div>
       </Field>
       <Field label="Unit">
         <input
