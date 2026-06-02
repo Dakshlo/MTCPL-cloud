@@ -414,48 +414,103 @@ export function ReconcileClient({ bills }: { bills: ReconcileBillRow[] }) {
         >
           Bill date
         </div>
-        {(
-          [
-            { v: "today", label: "Today" },
-            { v: "yesterday", label: "Yesterday" },
-            { v: "last_7d", label: "Last 7 days" },
-            { v: "last_30d", label: "Last 30 days" },
-            { v: "all", label: "All" },
-          ] as Array<{ v: DateRange; label: string }>
-        ).map((opt) => {
-          const active = opt.v === dateRange;
-          return (
-            <button
-              key={opt.v}
-              type="button"
-              onClick={() => {
-                setDateRange(opt.v);
-                // Picking a preset clears the custom inputs so the
-                // user doesn't see stale "Custom Jan 1 → Jan 31"
-                // text + a different preset highlighted together.
-                setCustomFrom("");
-                setCustomTo("");
-                setVendorIdx(0);
-                setBillIdx(0);
-                setActivePane("vendors");
-              }}
-              style={{
-                padding: "5px 12px",
-                fontSize: 12,
-                fontWeight: 700,
-                background: active ? ACCOUNTS_TOKENS.accent : "#fff",
-                color: active ? "#fff" : "var(--text)",
-                border: `1px solid ${active ? ACCOUNTS_TOKENS.accent : ACCOUNTS_TOKENS.border}`,
-                borderRadius: 999,
-                cursor: "pointer",
-                letterSpacing: "0.02em",
-                fontFamily: "inherit",
-              }}
-            >
-              {opt.label}
-            </button>
-          );
-        })}
+        {/* Mig 082 follow-on (Daksh round 4) — preset filter row
+            is now keyboard-navigable. Behaviour:
+              • Tab moves focus INTO the preset group.
+              • ← / → cycle between the 5 preset buttons (roving
+                tab-index pattern — only the currently focused
+                button is tab-stoppable).
+              • Enter / Space activates the focused preset.
+              • Tab again leaves the group toward the next field
+                (custom from/to date inputs).
+            Each button is a standard <button> with an explicit
+            tabIndex toggle + an onKeyDown that moves focus to the
+            sibling via querySelector. */}
+        <div
+          role="radiogroup"
+          aria-label="Bill-date preset"
+          style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}
+        >
+          {(
+            [
+              { v: "today", label: "Today" },
+              { v: "yesterday", label: "Yesterday" },
+              { v: "last_7d", label: "Last 7 days" },
+              { v: "last_30d", label: "Last 30 days" },
+              { v: "all", label: "All" },
+            ] as Array<{ v: DateRange; label: string }>
+          ).map((opt, idx, all) => {
+            const active = opt.v === dateRange;
+            return (
+              <button
+                key={opt.v}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                // Roving tab-index: only the active preset is
+                // tab-stoppable; the rest are still arrow-key
+                // reachable but skipped by Tab.
+                tabIndex={active ? 0 : -1}
+                onClick={() => {
+                  setDateRange(opt.v);
+                  // Picking a preset clears the custom inputs so
+                  // the user doesn't see stale "Custom Jan 1 →
+                  // Jan 31" + a different preset highlighted.
+                  setCustomFrom("");
+                  setCustomTo("");
+                  setVendorIdx(0);
+                  setBillIdx(0);
+                  setActivePane("vendors");
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+                    e.preventDefault();
+                    const dir = e.key === "ArrowRight" ? 1 : -1;
+                    const nextIdx = (idx + dir + all.length) % all.length;
+                    const nextV = all[nextIdx].v;
+                    setDateRange(nextV);
+                    setCustomFrom("");
+                    setCustomTo("");
+                    setVendorIdx(0);
+                    setBillIdx(0);
+                    setActivePane("vendors");
+                    // Move physical focus to the new active button so
+                    // the next press of ← / → continues to work +
+                    // the visible focus ring follows.
+                    requestAnimationFrame(() => {
+                      const parent = (e.target as HTMLElement).parentElement;
+                      const buttons =
+                        parent?.querySelectorAll<HTMLButtonElement>(
+                          'button[role="radio"]',
+                        ) ?? [];
+                      buttons[nextIdx]?.focus();
+                    });
+                  } else if (e.key === "ArrowDown") {
+                    // Jump from preset row into the table.
+                    e.preventDefault();
+                    (e.target as HTMLElement).blur();
+                    setActivePane("vendors");
+                    setVendorIdx(0);
+                  }
+                }}
+                style={{
+                  padding: "5px 12px",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  background: active ? ACCOUNTS_TOKENS.accent : "#fff",
+                  color: active ? "#fff" : "var(--text)",
+                  border: `1px solid ${active ? ACCOUNTS_TOKENS.accent : ACCOUNTS_TOKENS.border}`,
+                  borderRadius: 999,
+                  cursor: "pointer",
+                  letterSpacing: "0.02em",
+                  fontFamily: "inherit",
+                }}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
         {/* Mig 082 follow-on (Daksh round 3) — custom date range
             inputs alongside the presets. Typing in either box
             auto-switches the filter to "custom"; clearing both
@@ -687,9 +742,21 @@ export function ReconcileClient({ bills }: { bills: ReconcileBillRow[] }) {
             if (e.key === "Escape") {
               setQuery("");
               (e.target as HTMLInputElement).blur();
+            } else if (e.key === "ArrowDown" || e.key === "Enter") {
+              // Mig 082 follow-on (Daksh round 4) — pressing
+              // ArrowDown (or Enter) from the search input jumps
+              // the focus straight into the vendor table. Without
+              // this, the user typed a query → had to take their
+              // hand off the keyboard, click into the table, then
+              // start arrow-keying. Now: type → ↓ → already on
+              // the first matching vendor.
+              e.preventDefault();
+              (e.target as HTMLInputElement).blur();
+              setActivePane("vendors");
+              setVendorIdx(0);
             }
           }}
-          placeholder="Search vendor / nickname / category — press / from anywhere"
+          placeholder="Search vendor / nickname / category — press / from anywhere · ↓ to jump to table"
           style={{
             flex: "1 1 320px",
             minWidth: 240,
@@ -883,6 +950,12 @@ export function ReconcileClient({ bills }: { bills: ReconcileBillRow[] }) {
               flex: 1,
               overflowY: "auto",
               minHeight: 0,
+              // Mig 082 follow-on (Daksh round 4) — the cap was
+              // 600 when the totals lived inside the table as a
+              // sticky tfoot. Now totals sit OUTSIDE this scroll
+              // container as a separate flex child, so the
+              // container is free to grow to the full pane height
+              // without hiding the footer.
               maxHeight: 600,
             }}
           >
@@ -989,80 +1062,86 @@ export function ReconcileClient({ bills }: { bills: ReconcileBillRow[] }) {
                     );
                   })}
                 </tbody>
-                {/* Mig 082 follow-on (Daksh round 2) — footer now
-                    sums all three money columns (Total billed,
-                    Paid, Outstanding) so the auditor can tie out
-                    each column independently against external
-                    books. Outstanding = Total − Paid; we render
-                    each footer cell beneath its matching column. */}
-                <tfoot
-                  style={{
-                    position: "sticky",
-                    bottom: 0,
-                    background: ACCOUNTS_TOKENS.surfaceMuted,
-                  }}
-                >
-                  {(() => {
-                    const sumTotal = focusedVendor.bills.reduce(
-                      (s, b) => s + b.amountTotal,
-                      0,
-                    );
-                    const sumPaid = focusedVendor.bills.reduce(
-                      (s, b) => s + b.amountPaid,
-                      0,
-                    );
-                    const sumOutstanding = focusedVendor.totalOutstanding;
-                    return (
-                      <tr>
-                        <td
-                          colSpan={4}
-                          style={{
-                            ...td,
-                            textAlign: "right",
-                            fontWeight: 800,
-                          }}
-                        >
-                          Total
-                        </td>
-                        <td
-                          style={{
-                            ...td,
-                            textAlign: "right",
-                            fontWeight: 800,
-                            color: "var(--text)",
-                          }}
-                        >
-                          ₹{Math.round(sumTotal).toLocaleString("en-IN")}
-                        </td>
-                        <td
-                          style={{
-                            ...td,
-                            textAlign: "right",
-                            fontWeight: 800,
-                            color: sumPaid > 0 ? "#15803d" : "var(--muted)",
-                          }}
-                        >
-                          {sumPaid > 0
-                            ? `₹${Math.round(sumPaid).toLocaleString("en-IN")}`
-                            : "—"}
-                        </td>
-                        <td
-                          style={{
-                            ...td,
-                            textAlign: "right",
-                            fontWeight: 800,
-                            color: "#b91c1c",
-                          }}
-                        >
-                          ₹{Math.round(sumOutstanding).toLocaleString("en-IN")}
-                        </td>
-                      </tr>
-                    );
-                  })()}
-                </tfoot>
               </table>
             )}
           </div>
+          {/* Mig 082 follow-on (Daksh round 4) — totals row moved
+              OUTSIDE the scroll container so it's ALWAYS visible
+              at the bottom of the pane, regardless of how many
+              bills the vendor has. Daksh: "the down row of total,
+              total outstaing and paid hsoudl always visble no
+              matter how many bill are there." Old <tfoot
+              position:sticky> approach didn't survive in some
+              browsers when the table got tall; pulling it into a
+              separate flex child of the pane is bulletproof.
+              Three monospace right-aligned columns mirror the
+              table's last three columns (Total / Paid /
+              Outstanding) so the eye reads straight down from
+              header → body → footer. */}
+          {focusedVendor && (
+            (() => {
+              const sumTotal = focusedVendor.bills.reduce(
+                (s, b) => s + b.amountTotal,
+                0,
+              );
+              const sumPaid = focusedVendor.bills.reduce(
+                (s, b) => s + b.amountPaid,
+                0,
+              );
+              const sumOutstanding = focusedVendor.totalOutstanding;
+              return (
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr auto auto auto",
+                    gap: 18,
+                    alignItems: "center",
+                    padding: "10px 12px",
+                    background: ACCOUNTS_TOKENS.surfaceMuted,
+                    borderTop: `2px solid ${ACCOUNTS_TOKENS.border}`,
+                    fontFamily: "ui-monospace, monospace",
+                    fontSize: 13,
+                    fontWeight: 800,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: 11,
+                      color: "var(--muted)",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.06em",
+                    }}
+                  >
+                    Total · {focusedVendor.bills.length} bill
+                    {focusedVendor.bills.length === 1 ? "" : "s"}
+                  </span>
+                  <span
+                    title="Sum of bill totals"
+                    style={{ textAlign: "right", color: "var(--text)" }}
+                  >
+                    ₹{Math.round(sumTotal).toLocaleString("en-IN")}
+                  </span>
+                  <span
+                    title="Sum of paid"
+                    style={{
+                      textAlign: "right",
+                      color: sumPaid > 0 ? "#15803d" : "var(--muted)",
+                    }}
+                  >
+                    {sumPaid > 0
+                      ? `₹${Math.round(sumPaid).toLocaleString("en-IN")}`
+                      : "—"}
+                  </span>
+                  <span
+                    title="Sum of outstanding"
+                    style={{ textAlign: "right", color: "#b91c1c" }}
+                  >
+                    ₹{Math.round(sumOutstanding).toLocaleString("en-IN")}
+                  </span>
+                </div>
+              );
+            })()
+          )}
         </div>
       </div>
     </div>
