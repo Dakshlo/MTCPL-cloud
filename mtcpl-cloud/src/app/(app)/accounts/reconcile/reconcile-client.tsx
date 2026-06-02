@@ -925,12 +925,23 @@ export function ReconcileClient({ bills }: { bills: ReconcileBillRow[] }) {
           </div>
         </div>
 
-        {/* ── Bills pane ── */}
+        {/* ── Bills pane ──
+            Mig 082 follow-on (Daksh round 5) — switched from flex
+            column to CSS grid with rows: auto 1fr auto. The third
+            row (totals) is ALWAYS rendered at the bottom of the
+            pane regardless of how tall the table is + regardless
+            of how deep the user scrolls inside the body. The body
+            row has overflow:auto + min-height:0 so its scroll
+            stays internal; the totals don't scroll with the body
+            because they're a sibling grid row, not a table
+            element inside it. */}
         <div
           style={{
-            display: "flex",
-            flexDirection: "column",
+            display: "grid",
+            gridTemplateRows: "auto 1fr auto",
             minWidth: 0,
+            minHeight: 0,
+            maxHeight: 700,
             background:
               activePane === "bills" ? "#fff" : "#fafafa",
           }}
@@ -947,16 +958,8 @@ export function ReconcileClient({ bills }: { bills: ReconcileBillRow[] }) {
           <div
             ref={billScrollRef}
             style={{
-              flex: 1,
               overflowY: "auto",
               minHeight: 0,
-              // Mig 082 follow-on (Daksh round 4) — the cap was
-              // 600 when the totals lived inside the table as a
-              // sticky tfoot. Now totals sit OUTSIDE this scroll
-              // container as a separate flex child, so the
-              // container is free to grow to the full pane height
-              // without hiding the footer.
-              maxHeight: 600,
             }}
           >
             {!focusedVendor ? (
