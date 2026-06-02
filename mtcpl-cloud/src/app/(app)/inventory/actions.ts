@@ -720,10 +720,47 @@ export async function upsertComponentAction(
         }
         return { ok: false, error: error.message };
       }
+      // Mig 083 follow-on (Daksh, June 2026) — image is shared
+      // across every component row of the same type. Daksh: "in
+      // jali there are 3-4 types in so i want you to show them
+      // in group. like i upload image to jali that same jali
+      // image will show in all size jali."
+      // When the user uploads / changes the image on ANY row, we
+      // propagate the new image_data_url to every active row that
+      // shares the component_type. NULL image clears them all
+      // too (so the user can wipe a wrong image from one place +
+      // have it disappear from every size variant).
+      if (imageDataUrl !== undefined) {
+        await supabase
+          .from("scaffolding_components")
+          .update({
+            image_data_url: imageDataUrl,
+            updated_by: profile.id,
+          })
+          .eq("component_type", componentType)
+          .neq("id", id);
+      }
       void logAudit(profile.id, "scaffolding_component_updated", "scaffolding_component", id, { name }).catch(() => {});
       await refreshInventoryPaths();
       return { ok: true, componentId: id };
     } else {
+      // Mig 083 — when inserting a new size variant, inherit the
+      // image already attached to any sibling row of the same
+      // type (so the user doesn't have to upload it again for
+      // every "Jali 100×50 / 100×100 / 100×200" row). Only does
+      // the lookup when the form didn't supply its own image.
+      let inheritedImage: string | null = imageDataUrl;
+      if (!inheritedImage) {
+        const { data: sibling } = await supabase
+          .from("scaffolding_components")
+          .select("image_data_url")
+          .eq("component_type", componentType)
+          .eq("is_active", true)
+          .not("image_data_url", "is", null)
+          .limit(1)
+          .maybeSingle();
+        inheritedImage = (sibling as { image_data_url?: string | null } | null)?.image_data_url ?? null;
+      }
       const { data, error } = await supabase
         .from("scaffolding_components")
         .insert({
@@ -733,7 +770,7 @@ export async function upsertComponentAction(
           unit,
           description,
           display_order: displayOrder,
-          image_data_url: imageDataUrl,
+          image_data_url: inheritedImage,
           is_active: true,
           created_by: profile.id,
         })

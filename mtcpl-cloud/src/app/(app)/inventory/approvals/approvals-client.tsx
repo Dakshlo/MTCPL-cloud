@@ -279,7 +279,8 @@ export function ApprovalsClient({
                           marginTop: 2,
                         }}
                       >
-                        {Number(r.qty).toLocaleString("en-IN")}{" "}
+                        {/* Mig 083 — integer pcs display only. */}
+                        {Math.round(Number(r.qty)).toLocaleString("en-IN")}{" "}
                         <span
                           style={{
                             fontSize: 10,

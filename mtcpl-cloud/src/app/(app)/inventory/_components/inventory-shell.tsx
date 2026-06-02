@@ -34,13 +34,26 @@ type SubNavItem = {
 // Daksh-renamed labels (was Receive / Write-off / Audit Queue /
 // Catalog). The underlying movement-type enum values and URLs are
 // unchanged — only what the user sees.
-const SUB_NAV: SubNavItem[] = [
+// Mig 083 follow-on (Daksh, June 2026) — "Approval List" entry
+// now gated on showApprovals; defaults to false so storekeepers
+// (who shouldn't approve their own work) don't see it. The
+// /inventory/approvals route is still reachable for crosscheck /
+// owner via the global sidebar's Audit Queue link.
+type ShellRole = "storekeeper" | "crosscheck" | "owner" | "developer" | "other";
+
+const APPROVAL_NAV_ITEM: SubNavItem = {
+  href: "/inventory/approvals",
+  label: "Approval List",
+  icon: "✓",
+  title: "Pending movements awaiting crosscheck / owner sign-off",
+};
+
+const SUB_NAV_BASE: SubNavItem[] = [
   { href: "/inventory/scaffolding", label: "Board", icon: "▦" },
   { href: "/inventory/scaffolding/issue", label: "Issue", icon: "→", title: "Send stock to a project site" },
   { href: "/inventory/scaffolding/return", label: "Return", icon: "←", title: "Site returns stock to the plant" },
   { href: "/inventory/scaffolding/receive", label: "Buy", icon: "⤓", title: "Buy / receive new stock at the plant" },
   { href: "/inventory/scaffolding/writeoff", label: "Destroyed", icon: "✕", title: "Mark stock as destroyed / damaged / lost" },
-  { href: "/inventory/approvals", label: "Approval List", icon: "✓", title: "Pending movements awaiting crosscheck / owner sign-off" },
   { href: "/inventory/scaffolding/history", label: "History", icon: "⊟" },
   { href: "/inventory/scaffolding/sites", label: "Sites", icon: "⌂" },
   { href: "/inventory/scaffolding/components", label: "Add Component Type", icon: "⊞", title: "Add, edit, or archive scaffolding component types" },
@@ -52,6 +65,7 @@ export function InventoryShell({
   pathname,
   children,
   actions,
+  showApprovals = false,
 }: {
   title: string;
   subtitle?: string;
@@ -60,7 +74,22 @@ export function InventoryShell({
   children: ReactNode;
   /** Optional right-aligned action area on the header row. */
   actions?: ReactNode;
+  /** Mig 083 — when TRUE the "Approval List" tab is included in
+   *  the sub-nav. Pages call this with the result of
+   *  canApproveInventoryMovements(profile) so storekeepers don't
+   *  see the approval surface (they propose; they don't sign off
+   *  on their own work). */
+  showApprovals?: boolean;
 }) {
+  const SUB_NAV: SubNavItem[] = showApprovals
+    ? [
+        ...SUB_NAV_BASE.slice(0, 5),
+        APPROVAL_NAV_ITEM,
+        ...SUB_NAV_BASE.slice(5),
+      ]
+    : SUB_NAV_BASE;
+  // Silence eslint-no-unused for the type we exported for callers.
+  void ({} as ShellRole);
   return (
     <div className="inv-shell" style={inventoryPageWrapper}>
       {/* Pre-paint hydration script — reads the saved

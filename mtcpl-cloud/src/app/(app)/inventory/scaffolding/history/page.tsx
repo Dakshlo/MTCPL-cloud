@@ -457,7 +457,10 @@ export default async function HistoryPage({
                               fontFeatureSettings: '"tnum"',
                             }}
                           >
-                            {Number(r.qty).toLocaleString("en-IN")}
+                            {/* Mig 083 — round to whole pieces; legacy
+                                fractional values stay in the DB but
+                                display as integers. */}
+                            {Math.round(Number(r.qty)).toLocaleString("en-IN")}
                           </div>
                         </div>
                       </div>

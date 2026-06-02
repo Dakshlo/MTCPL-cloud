@@ -4359,6 +4359,9 @@ export async function acknowledgeReceiptAction(formData: FormData) {
     "senior_incharge",
     "vendor",
     "slab_transfer",
+    // Mig 083 — storekeeper is the same human as the slab-transfer
+    // runner today (Daksh's call), so they share every auth gate.
+    "storekeeper",
   ]);
   const admin = createAdminSupabaseClient();
 
@@ -4400,7 +4403,7 @@ export async function acknowledgeReceiptAction(formData: FormData) {
   }
   // slab_transfer role: if the slab is claimed by someone ELSE,
   // refuse — they need to coordinate with the claimant.
-  if (profile.role === "slab_transfer" && item.claimed_by && item.claimed_by !== profile.id) {
+  if ((profile.role === "slab_transfer" || profile.role === "storekeeper") && item.claimed_by && item.claimed_by !== profile.id) {
     redirect(`${redirectTo}?toast=Claimed+by+another+runner`);
   }
 
@@ -4452,6 +4455,9 @@ export async function claimSlabTransferAction(formData: FormData) {
     "owner",
     "carving_head",
     "slab_transfer",
+    // Mig 083 — storekeeper is the same human as the slab-transfer
+    // runner today (Daksh's call), so they share every auth gate.
+    "storekeeper",
   ]);
   const admin = createAdminSupabaseClient();
 
@@ -4541,6 +4547,9 @@ export async function claimSlabTransferBatchAction(formData: FormData) {
     "owner",
     "carving_head",
     "slab_transfer",
+    // Mig 083 — storekeeper is the same human as the slab-transfer
+    // runner today (Daksh's call), so they share every auth gate.
+    "storekeeper",
   ]);
   const admin = createAdminSupabaseClient();
 
@@ -4676,6 +4685,9 @@ export async function unclaimSlabTransferAction(formData: FormData) {
     "owner",
     "carving_head",
     "slab_transfer",
+    // Mig 083 — storekeeper is the same human as the slab-transfer
+    // runner today (Daksh's call), so they share every auth gate.
+    "storekeeper",
   ]);
   const admin = createAdminSupabaseClient();
 
@@ -4696,7 +4708,7 @@ export async function unclaimSlabTransferAction(formData: FormData) {
 
   // slab_transfer can only unclaim their own. Higher roles can
   // unclaim anyone's (useful when a runner goes off shift).
-  if (profile.role === "slab_transfer" && item.claimed_by !== profile.id) {
+  if ((profile.role === "slab_transfer" || profile.role === "storekeeper") && item.claimed_by !== profile.id) {
     redirect(`${redirectTo}?toast=Not+your+claim`);
   }
 
@@ -4723,6 +4735,9 @@ export async function unclaimSlabTransferBatchAction(formData: FormData) {
     "owner",
     "carving_head",
     "slab_transfer",
+    // Mig 083 — storekeeper is the same human as the slab-transfer
+    // runner today (Daksh's call), so they share every auth gate.
+    "storekeeper",
   ]);
   const admin = createAdminSupabaseClient();
 
@@ -4742,7 +4757,7 @@ export async function unclaimSlabTransferBatchAction(formData: FormData) {
   if (rows.length === 0) {
     redirect(`${redirectTo}?toast=${encodeURIComponent("Nothing to release in that batch.")}`);
   }
-  if (profile.role === "slab_transfer") {
+  if (profile.role === "slab_transfer" || profile.role === "storekeeper") {
     const anyForeign = rows.some((r) => r.claimed_by && r.claimed_by !== profile.id);
     if (anyForeign) {
       redirect(`${redirectTo}?toast=${encodeURIComponent("Not your batch to release.")}`);
@@ -4780,6 +4795,9 @@ export async function acknowledgeReceiptBatchAction(formData: FormData) {
     "owner",
     "carving_head",
     "slab_transfer",
+    // Mig 083 — storekeeper is the same human as the slab-transfer
+    // runner today (Daksh's call), so they share every auth gate.
+    "storekeeper",
   ]);
   const admin = createAdminSupabaseClient();
 
@@ -4808,7 +4826,7 @@ export async function acknowledgeReceiptBatchAction(formData: FormData) {
   if (rows.some((r) => r.vendor_type !== "CNC")) {
     redirect(`${redirectTo}?toast=${encodeURIComponent("Batch contains non-CNC slabs — deliver individually.")}`);
   }
-  if (profile.role === "slab_transfer") {
+  if (profile.role === "slab_transfer" || profile.role === "storekeeper") {
     const anyForeign = rows.some((r) => r.claimed_by && r.claimed_by !== profile.id);
     if (anyForeign) {
       redirect(`${redirectTo}?toast=${encodeURIComponent("Not your batch to deliver.")}`);

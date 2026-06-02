@@ -37,6 +37,8 @@ export default async function SlabTransferPage({
     "owner",
     "carving_head",
     "slab_transfer",
+    // Mig 083 — storekeeper merged with slab_transfer.
+    "storekeeper",
   ]);
   const admin = createAdminSupabaseClient();
   const params = await searchParams;

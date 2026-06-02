@@ -485,10 +485,16 @@ const navEntries: NavEntry[] = [
     department: "inventory",
   },
   {
+    // Mig 083 follow-on (Daksh, June 2026) — Approval List was
+    // also surfaced inside InventoryShell's sub-nav for every
+    // role. Storekeeper shouldn't see it (segregation of duties),
+    // so the sub-nav now defaults to hidden + the sidebar entry
+    // widens to owner / developer too so they can still reach
+    // the queue when they need to step in for crosscheck.
     href: "/inventory/approvals",
     label: "Audit Queue",
     icon: "✅",
-    roles: ["crosscheck"],
+    roles: ["crosscheck", "owner", "developer"],
     department: "inventory",
   },
 ];

@@ -303,6 +303,12 @@ export function labelForComponentType(t: ScaffoldingComponentType): string {
   }
 }
 
+// Mig 083 follow-on (Daksh, June 2026) — "Other" is OFF the picker.
+// Daksh: "and on add compent there is option other which is wrong
+// it dont create proper." Existing rows tagged 'other' are
+// soft-deleted by mig 083; new components must pick a real type.
+// (Postgres can't easily drop an enum value, so the value still
+// exists in the DB type — we just stop offering it in the UI.)
 export const COMPONENT_TYPE_OPTIONS: ScaffoldingComponentType[] = [
   "standard",
   "ledger",
@@ -316,5 +322,4 @@ export const COMPONENT_TYPE_OPTIONS: ScaffoldingComponentType[] = [
   "ladder",
   "toe_board",
   "tie_rod",
-  "other",
 ];

@@ -151,7 +151,12 @@ export async function loadInventorySnapshotOrSetup(): Promise<InventorySnapshotR
     supabase
       .from("inventory_movements")
       .select("*")
-      .in("status", ["approved", "pending_approval"]),
+      .in("status", ["approved", "pending_approval"])
+      // Mig 083 — skip soft-voided rows. Pre-mig-083 inventory was
+      // bulk-voided as part of the fresh-start rework; those rows
+      // stay in the table for audit but contribute zero to on-hand
+      // balances.
+      .eq("is_voided", false),
   ]);
 
   // Check each query individually so we can name the missing table.

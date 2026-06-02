@@ -114,7 +114,9 @@ export function SiteSwitcher({
                 fontFeatureSettings: '"tnum"',
               }}
             >
-              {qty.toLocaleString("en-IN")} pcs
+              {/* Mig 083 — round to whole pieces; matches the
+                  display rule in component-card. */}
+              {Math.round(qty).toLocaleString("en-IN")} pcs
             </span>
             {active && (
               <span
