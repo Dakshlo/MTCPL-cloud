@@ -5924,11 +5924,19 @@ function EditLocationModal({
 
 /** Mig 081 follow-on (Daksh) — used by the LoadModal's Pair card
  *  to reveal the hidden Mismatch mode tile on long-press. Falls
- *  through to onTap on a normal click (release before 600ms).
+ *  through to onTap on a normal click (release before LONG_PRESS_MS).
  *  Cancels the long-press if the user moves their pointer out of
  *  the button before the timer fires — same behaviour as native
  *  long-press on iOS / Android.
+ *
+ *  Mig 081 round 2 (Daksh) — bumped to 4-second hold + added an
+ *  inline progress bar so the user gets visible feedback while the
+ *  timer is running. Without that affordance a 4-second press felt
+ *  broken; with it, the bar reads as "the system is registering my
+ *  press, keep holding" and the dangerous flow stays deliberate.
  */
+const LONG_PRESS_MS = 4000;
+
 function LongPressableModeButton({
   onTap,
   onLongPress,
@@ -5950,12 +5958,37 @@ function LongPressableModeButton({
 }) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longFiredRef = useRef(false);
+  // Progress driver — rAF loop. progress in [0..1]. null = not
+  // pressing, just resting state.
+  const [progress, setProgress] = useState<number | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const pressStartRef = useRef<number>(0);
+
   const cancel = () => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
     }
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    setProgress(null);
   };
+
+  const startProgressLoop = () => {
+    pressStartRef.current = performance.now();
+    const tick = () => {
+      const elapsed = performance.now() - pressStartRef.current;
+      const pct = Math.min(1, elapsed / LONG_PRESS_MS);
+      setProgress(pct);
+      if (pct < 1) {
+        rafRef.current = requestAnimationFrame(tick);
+      }
+    };
+    rafRef.current = requestAnimationFrame(tick);
+  };
+
   return (
     <button
       type="button"
@@ -5963,10 +5996,16 @@ function LongPressableModeButton({
       onPointerDown={() => {
         longFiredRef.current = false;
         cancel();
+        startProgressLoop();
         timerRef.current = setTimeout(() => {
           longFiredRef.current = true;
+          if (rafRef.current !== null) {
+            cancelAnimationFrame(rafRef.current);
+            rafRef.current = null;
+          }
+          setProgress(null);
           onLongPress();
-        }, 600);
+        }, LONG_PRESS_MS);
       }}
       onPointerUp={() => {
         // If the long-press timer didn't fire, treat as a tap.
@@ -5982,6 +6021,7 @@ function LongPressableModeButton({
         e.preventDefault();
       }}
       style={{
+        position: "relative",
         flex: "1 1 200px",
         padding: "10px 14px",
         fontSize: 13,
@@ -5995,9 +6035,53 @@ function LongPressableModeButton({
         userSelect: "none",
         WebkitUserSelect: "none",
         WebkitTouchCallout: "none",
+        overflow: "hidden",
       }}
     >
       {children}
+      {/* Hold-progress overlay — shown only during an in-flight
+          press. Fills bottom-to-top in a red wash so it can't be
+          confused with the active-state tints (blue / gold). The
+          remaining-seconds counter sits in the top-right corner so
+          the vendor can pace the hold. */}
+      {progress !== null && progress < 1 && (
+        <>
+          <div
+            aria-hidden
+            style={{
+              position: "absolute",
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: `${Math.round(progress * 100)}%`,
+              background:
+                "linear-gradient(0deg, rgba(220,38,38,0.22) 0%, rgba(220,38,38,0.06) 100%)",
+              pointerEvents: "none",
+              transition: "height 0.05s linear",
+            }}
+          />
+          <div
+            aria-hidden
+            style={{
+              position: "absolute",
+              top: 6,
+              right: 8,
+              fontSize: 10,
+              fontWeight: 800,
+              color: "#b91c1c",
+              fontFamily: "ui-monospace, monospace",
+              padding: "1px 6px",
+              borderRadius: 999,
+              background: "rgba(255,255,255,0.85)",
+              border: "1px solid rgba(220,38,38,0.35)",
+              letterSpacing: "0.05em",
+              pointerEvents: "none",
+            }}
+          >
+            HOLD · {Math.max(0, Math.ceil((1 - progress) * (LONG_PRESS_MS / 1000)))}s
+          </div>
+        </>
+      )}
     </button>
   );
 }
