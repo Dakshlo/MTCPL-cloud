@@ -232,6 +232,9 @@ export default async function FinalAuditPage() {
       vendorTotalOutstanding: b?.bill_vendor_id
         ? vendorOutstandingMap.get(b.bill_vendor_id) ?? 0
         : 0,
+      // Mig 082 follow-on — vendorId surfaced so the audit card's
+      // vendor-name link routes to /accounts/vendors/[id].
+      vendorId: b?.bill_vendor_id ?? null,
     };
   });
 
@@ -266,6 +269,10 @@ export default async function FinalAuditPage() {
       vendorTotalOutstanding: b?.bill_vendor_id
         ? vendorOutstandingMap.get(b.bill_vendor_id) ?? 0
         : 0,
+      // Mig 082 follow-on — same vendorId pass-through for audited
+      // rows so the same vendor-name link works in the recently-
+      // audited section + the new /verified and /flagged sub-pages.
+      vendorId: b?.bill_vendor_id ?? null,
     };
   });
 
@@ -307,17 +314,26 @@ export default async function FinalAuditPage() {
           }
           tint="#b45309"
         />
+        {/* Mig 082 follow-on (Daksh) — Verified + Flagged tiles
+            became clickable links to dedicated list pages with
+            their own date filter. The list-only views give the
+            auditor a focused surface to review history without
+            the noise of the pending queue. */}
         <StatChip
           label="Verified (24h)"
           value={`${verifiedTodayCount}`}
-          subline="last day"
+          subline="last day · view all →"
           tint="#15803d"
+          href="/accounts/final-audit/verified"
         />
         <StatChip
           label="Flagged (14d)"
           value={`${flaggedCount}`}
-          subline={flaggedCount > 0 ? "owner attention" : "none open"}
+          subline={
+            flaggedCount > 0 ? "owner attention · view all →" : "none open · view all →"
+          }
           tint={flaggedCount > 0 ? "#b91c1c" : "var(--muted)"}
+          href="/accounts/final-audit/flagged"
         />
       </div>
 
@@ -344,27 +360,20 @@ function StatChip({
   value,
   subline,
   tint,
+  href,
 }: {
   label: string;
   value: string;
   subline: string;
   tint: string;
+  /** Mig 082 follow-on (Daksh) — when set, the chip renders as a
+   *  Link instead of a static div. Used to navigate from the
+   *  Final Audit summary into the dedicated /verified or
+   *  /flagged list pages. */
+  href?: string;
 }) {
-  return (
-    <div
-      style={{
-        flex: "1 1 180px",
-        display: "flex",
-        flexDirection: "column",
-        gap: 2,
-        padding: "10px 14px",
-        background: "#fff",
-        border: `1px solid ${ACCOUNTS_TOKENS.border}`,
-        borderLeft: `4px solid ${tint}`,
-        borderRadius: 8,
-        boxShadow: ACCOUNTS_TOKENS.shadow,
-      }}
-    >
+  const inner = (
+    <>
       <span
         style={{
           fontSize: 10,
@@ -380,7 +389,35 @@ function StatChip({
         {value}
       </span>
       <span style={{ fontSize: 11, color: "var(--muted)" }}>{subline}</span>
-    </div>
+    </>
+  );
+  const baseStyle = {
+    flex: "1 1 180px",
+    display: "flex",
+    flexDirection: "column",
+    gap: 2,
+    padding: "10px 14px",
+    background: "#fff",
+    border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+    borderLeft: `4px solid ${tint}`,
+    borderRadius: 8,
+    boxShadow: ACCOUNTS_TOKENS.shadow,
+  } as const;
+  if (!href) {
+    return <div style={baseStyle}>{inner}</div>;
+  }
+  return (
+    <Link
+      href={href}
+      style={{
+        ...baseStyle,
+        textDecoration: "none",
+        color: "inherit",
+        transition: "transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease",
+      }}
+    >
+      {inner}
+    </Link>
   );
 }
 

@@ -23,11 +23,19 @@ import {
 } from "../../_ui/components";
 
 type Params = Promise<{ id: string }>;
+// Mig 082 follow-on (Daksh) — `?from=...` query param tells the
+// page where the user came from. Used to render a context-aware
+// back button at the top, e.g. "← Back to Final Audit" when the
+// auditor pivoted in from /accounts/final-audit. Recognised
+// values: "final-audit" (more can be added later).
+type SearchParams = Promise<{ from?: string }>;
 
 export default async function BillVendorDetailPage({
   params,
+  searchParams,
 }: {
   params: Params;
+  searchParams?: SearchParams;
 }) {
   const { profile } = await requireAuth();
   if (!canViewBillVendors(profile)) {
@@ -35,6 +43,7 @@ export default async function BillVendorDetailPage({
   }
   const canEdit = canManageBillVendors(profile);
   const { id } = await params;
+  const fromContext = (await searchParams)?.from ?? null;
   const supabase = createAdminSupabaseClient();
 
   const { data: vendor } = await supabase
@@ -187,7 +196,7 @@ export default async function BillVendorDetailPage({
 
   return (
     <section className="page-card">
-      <div style={{ marginBottom: 14 }}>
+      <div style={{ marginBottom: 14, display: "flex", gap: 12, flexWrap: "wrap" }}>
         <Link
           href="/accounts/vendors"
           style={{
@@ -199,6 +208,34 @@ export default async function BillVendorDetailPage({
         >
           ← All vendors profile (bill)
         </Link>
+        {/* Mig 082 follow-on (Daksh) — context-aware back link.
+            When the auditor pivots in from Final Audit
+            (`?from=final-audit`), we surface a prominent button
+            that takes them back to the same audit page. The
+            browser preserves scroll on history.back-style
+            navigation; we use a plain Link to /accounts/final-
+            audit so the page reloads with the latest queue. */}
+        {fromContext === "final-audit" && (
+          <Link
+            href="/accounts/final-audit"
+            style={{
+              padding: "5px 12px",
+              background: "rgba(180, 83, 9, 0.10)",
+              border: "1px solid rgba(180, 83, 9, 0.35)",
+              borderRadius: 999,
+              color: "#b45309",
+              textDecoration: "none",
+              fontSize: 12,
+              fontWeight: 700,
+              letterSpacing: "0.02em",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            ← Back to Final Audit
+          </Link>
+        )}
       </div>
 
       {/* Hero */}

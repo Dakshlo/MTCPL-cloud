@@ -34,6 +34,12 @@ export type FinalAuditRow = {
   billToken: string;
   vendorBillNo: string;
   vendorName: string;
+  /** Mig 082 follow-on (Daksh) — bill_vendor_id so the audit card's
+   *  vendor name can link straight to /accounts/vendors/[id]
+   *  instead of the bill page. Owner asked for this — when
+   *  auditing a payment they want the vendor's full bill history
+   *  + open balances at a glance, not just the single bill. */
+  vendorId: string | null;
   vendorBankName: string | null;
   vendorBankAccount: string | null;
   vendorIfsc: string | null;
@@ -318,17 +324,38 @@ function PendingCard({
                 marginBottom: 4,
               }}
             >
-              <Link
-                href={`/accounts/bills/${row.billId}`}
-                style={{
-                  fontSize: 14,
-                  fontWeight: 700,
-                  color: "var(--text)",
-                  textDecoration: "none",
-                }}
-              >
-                {row.vendorName}
-              </Link>
+              {/* Mig 082 follow-on (Daksh) — vendor name now links
+                  to the vendor detail page (full bill history +
+                  open balances) instead of just this one bill.
+                  Auditor can pivot from "verify this payment" to
+                  "what else is open with this vendor" in one tap.
+                  The bill token chip on the right still routes to
+                  the single-bill view; the bill ID below the
+                  vendor name is unchanged. The `from=final-audit`
+                  query param tells the vendor page to render a
+                  "← Back to Final Audit" button. */}
+              {row.vendorId ? (
+                <Link
+                  href={`/accounts/vendors/${row.vendorId}?from=final-audit`}
+                  style={{
+                    fontSize: 14,
+                    fontWeight: 700,
+                    color: "var(--text)",
+                    textDecoration: "none",
+                  }}
+                >
+                  {row.vendorName}
+                </Link>
+              ) : (
+                // Legacy rows with no bill_vendor_id (shouldn't
+                // happen — bills always carry one) fall back to a
+                // non-linked label so the row still renders.
+                <span
+                  style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}
+                >
+                  {row.vendorName}
+                </span>
+              )}
               <code
                 style={{
                   fontSize: 11,
