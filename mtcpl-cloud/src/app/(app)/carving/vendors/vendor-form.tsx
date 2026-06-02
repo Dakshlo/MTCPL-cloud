@@ -1,7 +1,49 @@
 "use client";
 
 import { useState } from "react";
+import { useFormStatus } from "react-dom";
 import { createVendorAction, updateVendorAction } from "../actions";
+
+// Daksh (June 2026) — Save button with a live "Saving…" spinner.
+// useFormStatus must be called from a child of the <form>, so this
+// lives as its own component rendered inside VendorForm's form. The
+// spinner keyframe (mtcpl-spin) is injected once near the top of the
+// form below.
+function SaveButton({ editing }: { editing: boolean }) {
+  const { pending } = useFormStatus();
+  return (
+    <button
+      type="submit"
+      className="primary-button"
+      disabled={pending}
+      style={{
+        flex: 1,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 8,
+        opacity: pending ? 0.9 : 1,
+        cursor: pending ? "wait" : "pointer",
+      }}
+    >
+      {pending && (
+        <span
+          aria-hidden
+          style={{
+            width: 15,
+            height: 15,
+            borderRadius: "50%",
+            border: "2px solid rgba(255,255,255,0.45)",
+            borderTopColor: "#fff",
+            display: "inline-block",
+            animation: "mtcpl-spin 0.7s linear infinite",
+          }}
+        />
+      )}
+      {pending ? "Saving…" : editing ? "Save changes" : "Create vendor"}
+    </button>
+  );
+}
 
 type MachineType = "single_head" | "multi_head_2" | "lathe";
 
@@ -103,6 +145,8 @@ export function VendorForm({
 
   return (
     <form action={editing ? updateVendorAction : createVendorAction} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* Spinner keyframe for the SaveButton (Daksh). */}
+      <style>{"@keyframes mtcpl-spin{to{transform:rotate(360deg)}}"}</style>
       {editing && <input type="hidden" name="vendor_id" value={initial?.id} />}
       <input type="hidden" name="machines_json" value={JSON.stringify(machines)} />
 
@@ -347,7 +391,23 @@ export function VendorForm({
                     </label>
                     <button
                       type="button"
-                      onClick={() => removeMachine(idx)}
+                      onClick={() => {
+                        // Daksh — confirm before removing a machine.
+                        // Existing machines are deleted on Save; new
+                        // unsaved rows vanish immediately. Cancel
+                        // leaves the machine untouched.
+                        const label = m.machine_code
+                          ? `machine "${m.machine_code}"`
+                          : "this machine";
+                        if (
+                          window.confirm(
+                            `Remove ${label}? ${m.id ? "It will be permanently deleted when you press Save changes." : "This row will be removed."}`,
+                          )
+                        ) {
+                          removeMachine(idx);
+                        }
+                      }}
+                      title="Remove this machine"
                       style={{ fontSize: 13, padding: "5px 10px", border: "1px solid #fca5a5", borderRadius: 5, background: "#fef2f2", color: "#dc2626", cursor: "pointer", marginBottom: 1 }}
                     >
                       ×
@@ -361,13 +421,7 @@ export function VendorForm({
       )}
 
       <div style={{ display: "flex", gap: 8 }}>
-        <button
-          type="submit"
-          className="primary-button"
-          style={{ flex: 1 }}
-        >
-          {editing ? "Save changes" : "Create vendor"}
-        </button>
+        <SaveButton editing={editing} />
         {onCancel && (
           <button type="button" className="ghost-button" onClick={onCancel}>
             Cancel
