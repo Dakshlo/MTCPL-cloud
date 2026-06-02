@@ -28,6 +28,7 @@ import {
   markCarvingStartedManuallyAction,
   markCarvingCompleteManuallyAction,
   getJobEvents,
+  getSignedReviewMediaUrl,
   type JobEvent,
 } from "./actions";
 import { SlabThumb } from "@/components/slab-thumb";
@@ -85,8 +86,21 @@ type JobRow = {
   review_approved_at?: string | null;
   progress_phase?: string | null;
   cnc_machine_id?: string | null;
+  /** Mig 075 — the CNC machine that actually carved the slab,
+   *  preserved at unload (cnc_machine_id is nulled once the slab
+   *  comes off the bed). Used to show which machine produced a slab
+   *  on the Carving Done Approval + Carving Done cards, since by
+   *  then cnc_machine_id is gone. NULL for Manual vendors. */
+  completed_on_cnc_machine_id?: string | null;
   location?: string | null;
   ready_to_dispatch_at?: string | null;
+  /** Mig 080/081 — reviewer's sign-off attachment + structured
+   *  quality flag + freeform notes captured at Approve. Surface the
+   *  photo on the Carving Done card + peek so the team can see what
+   *  the reviewer saw. Only populated on approved slabs. */
+  review_image_path?: string | null;
+  review_quality_flag?: string | null;
+  review_notes?: string | null;
   /** Live timer fields for the Active tab card. loaded_at is set by
    *  loadSlabOnMachineAction; minutes prefer the vendor's tighter
    *  estimate, fall back to the carving head's rough one. */
@@ -988,6 +1002,10 @@ export function CarvingDashboardClient({
             fmtDate={fmtDate}
             daysUntil={daysUntil}
             onOpenJob={(j) => setPeekJob(j)}
+            // Daksh — start every vendor/temple section minimized
+            // here so the lower vendors aren't buried under expanded
+            // lists. Active + Approval tabs keep their open default.
+            collapseByDefault
           />
         </>
       )}
@@ -1953,6 +1971,163 @@ function TempleSlabsPeek({
 
 // ─── Jobs (active / review / done) — grouped by temple ──────────────────
 
+// ── Review photo + quality flag (Daksh, June 2026) ──────────────
+// The reviewer can attach a photo + structured quality flag when
+// approving a carved slab (mig 080/081). Those were written to the
+// row but never SHOWN back on Carving Done — this surfaces them.
+//
+// The image lives in a PRIVATE storage bucket, so we mint a 5-min
+// signed URL on mount via getSignedReviewMediaUrl (same pattern the
+// vendor cockpit uses for rework/reject photos). Renders nothing
+// until a path resolves so slabs without a photo reserve no space.
+function ReviewPhoto({
+  path,
+  alt,
+  maxHeight = 160,
+  rounded = 10,
+  fit = "cover",
+}: {
+  path: string | null | undefined;
+  alt: string;
+  maxHeight?: number;
+  rounded?: number;
+  /** 'cover' crops to a tidy tile (compact card); 'contain' shows
+   *  the whole frame letterboxed (the peek, where detail matters). */
+  fit?: "cover" | "contain";
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [err, setErr] = useState(false);
+  const [visible, setVisible] = useState(false);
+  const holderRef = useRef<HTMLDivElement | null>(null);
+
+  // Lazy load — only mint the signed URL once the element scrolls
+  // into view. Content inside a COLLAPSED <details> is display:none,
+  // so it never intersects → no fetch until the user expands that
+  // vendor section. This keeps Carving Done from signing every
+  // card's photo on page load (the tab can hold up to 200 rows and
+  // groups start collapsed). The peek, always visible, fetches at
+  // once. Falls back to eager load where IO is unavailable.
+  useEffect(() => {
+    if (!path || visible) return;
+    const el = holderRef.current;
+    if (!el) return;
+    if (typeof IntersectionObserver === "undefined") {
+      setVisible(true);
+      return;
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setVisible(true);
+          io.disconnect();
+        }
+      },
+      { rootMargin: "200px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [path, visible]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!path || !visible) return;
+    (async () => {
+      try {
+        const signed = await getSignedReviewMediaUrl(path);
+        if (!cancelled) setUrl(signed);
+      } catch {
+        if (!cancelled) setErr(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [path, visible]);
+
+  if (!path) return null;
+  if (err) {
+    return (
+      <div ref={holderRef}>
+        <span style={{ fontSize: 11, color: "#b91c1c" }}>⚠ photo unavailable</span>
+      </div>
+    );
+  }
+  if (!url) {
+    // Same-footprint placeholder the observer watches; also the
+    // visible state while the signed URL is in flight.
+    return (
+      <div
+        ref={holderRef}
+        style={{
+          height: Math.min(maxHeight, 120),
+          borderRadius: rounded,
+          border: "1px dashed var(--border)",
+          background: "var(--bg)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 11,
+          color: "var(--muted)",
+        }}
+      >
+        📷 {visible ? "loading…" : "photo"}
+      </div>
+    );
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={url}
+      alt={alt}
+      style={{
+        width: "100%",
+        maxHeight,
+        objectFit: fit,
+        background: fit === "contain" ? "var(--bg)" : undefined,
+        borderRadius: rounded,
+        border: "1px solid var(--border)",
+        display: "block",
+      }}
+    />
+  );
+}
+
+// Mig 081 quality-flag presets → display metadata. Mirrors the
+// option list inside ApproveRejectForms; kept here so the Carving
+// Done card + peek can render a labeled chip for whatever the
+// reviewer flagged at sign-off.
+const QUALITY_FLAG_META: Record<string, { label: string; icon: string; tone: string }> = {
+  carving_not_good: { label: "Carving quality not great", icon: "🪨", tone: "#b45309" },
+  too_many_cracks: { label: "Too many cracks", icon: "⚡", tone: "#dc2626" },
+  color_variation: { label: "Color variation", icon: "🎨", tone: "#7c3aed" },
+  minor_chips: { label: "Minor chips / rough edges", icon: "⚒", tone: "#d97706" },
+  other: { label: "Other (see note)", icon: "✏", tone: "#b8860b" },
+};
+
+function QualityFlagChip({ flag }: { flag: string }) {
+  const meta =
+    QUALITY_FLAG_META[flag] ?? { label: flag, icon: "🏷", tone: "var(--muted)" };
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
+        fontSize: 11,
+        fontWeight: 700,
+        padding: "3px 9px",
+        borderRadius: 999,
+        color: meta.tone,
+        background: "var(--surface)",
+        border: `1px solid ${meta.tone}`,
+      }}
+      title="Quality flag set by the reviewer at approval"
+    >
+      {meta.icon} {meta.label}
+    </span>
+  );
+}
+
 function JobsByTemple({
   jobs,
   machineCodeById,
@@ -1963,6 +2138,7 @@ function JobsByTemple({
   fmtDate,
   daysUntil,
   onOpenJob,
+  collapseByDefault = false,
 }: {
   jobs: JobRow[];
   machineCodeById: Record<string, string>;
@@ -1979,6 +2155,12 @@ function JobsByTemple({
   /** Click handler — opens the JobDetailPeek modal. The card is
    *  no longer a navigation target; clicking opens the peek. */
   onOpenJob: (job: JobRow) => void;
+  /** Daksh (June 2026) — when true, every group renders collapsed
+   *  on first paint regardless of group count. Set on Carving Done
+   *  where the per-vendor sections were all expanded by default,
+   *  making lower vendors hard to reach. The user can still expand
+   *  any section; the choice persists across the 30s re-render. */
+  collapseByDefault?: boolean;
 }) {
   // 30-second tick so the "waiting since" timer in the Awaiting
   // Review tab updates without a full reload.
@@ -2046,7 +2228,10 @@ function JobsByTemple({
     );
   }
 
-  const openByDefault = groups.length <= 3;
+  // Daksh — Carving Done passes collapseByDefault so all vendor
+  // sections start minimized (easier to locate a specific vendor);
+  // other tabs keep the "open when ≤3 groups" convenience.
+  const openByDefault = collapseByDefault ? false : groups.length <= 3;
 
   return (
     <>
@@ -2688,7 +2873,19 @@ function JobsByTemple({
                         flexShrink: 0,
                       }}
                     >
-                      {j.cnc_machine_id ? machineCodeById[j.cnc_machine_id] ?? "" : ""}
+                      {(() => {
+                        // Daksh — show which CNC produced the slab.
+                        // On Active the slab is still on the bed
+                        // (cnc_machine_id). On Carving Done Approval +
+                        // Carving Done that's been nulled at unload,
+                        // so fall back to completed_on_cnc_machine_id
+                        // (mig 075, "which machine did the work").
+                        const mid =
+                          j.cnc_machine_id ?? j.completed_on_cnc_machine_id ?? null;
+                        const code = mid ? machineCodeById[mid] ?? null : null;
+                        if (!code) return null;
+                        return <span title="Carving machine">🏭 {code}</span>;
+                      })()}
                     </div>
                   </div>
 
@@ -2774,6 +2971,40 @@ function JobsByTemple({
                       ) : (
                         <span style={{ color: "#D97706", fontWeight: 600 }}>Awaiting location</span>
                       )}
+                    </div>
+                  )}
+
+                  {/* Daksh (June 2026) — reviewer's approve photo on
+                      the Carving Done card. Before this the photo was
+                      saved at sign-off but never shown back here. Only
+                      on the Done tab (fields has 'approved') and only
+                      when a photo exists. The signed URL lazy-loads on
+                      mount; since Done groups collapse by default this
+                      only fires for the vendor section the user opens.
+                      The quality flag (if the reviewer set one) shows
+                      above it so the card carries the "why" too. */}
+                  {fields.includes("approved") && j.review_image_path && (
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 6,
+                        marginTop: 2,
+                        paddingTop: 6,
+                        borderTop: "1px dashed var(--border-light)",
+                      }}
+                    >
+                      {j.review_quality_flag && (
+                        <div>
+                          <QualityFlagChip flag={j.review_quality_flag} />
+                        </div>
+                      )}
+                      <ReviewPhoto
+                        path={j.review_image_path}
+                        alt="Reviewer's approval photo"
+                        maxHeight={120}
+                        rounded={8}
+                      />
                     </div>
                   )}
 
@@ -2931,7 +3162,11 @@ function JobDetailPeek({
   const inReview = !!job.completed_at && !job.review_approved_at;
   const approved = !!job.review_approved_at;
   const dispatched = job.status === "dispatched";
-  const machineCode = job.cnc_machine_id ? machineCodeById[job.cnc_machine_id] ?? null : null;
+  // Live machine while on the bed; once unloaded that's nulled, so
+  // fall back to the carving machine (mig 075) — the peek's 🏭 pill
+  // then shows which CNC produced an approved/awaiting-review slab.
+  const machineId = job.cnc_machine_id ?? job.completed_on_cnc_machine_id ?? null;
+  const machineCode = machineId ? machineCodeById[machineId] ?? null : null;
 
   const fmtDate = (iso: string | null | undefined) =>
     iso ? new Date(iso).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" }) : "—";
@@ -3405,6 +3640,63 @@ function JobDetailPeek({
               </div>
             )}
           </section>
+
+          {/* Daksh (June 2026) — reviewer's approval photo. The
+              Approve sign-off can attach a photo + quality flag (mig
+              080/081); it was written to the row but never shown back
+              when re-opening an approved slab. This block surfaces it
+              inside the peek the user opens from Carving Done. Only
+              renders once a photo exists (approved slabs). */}
+          {job.review_image_path && (
+            <section
+              style={{
+                padding: "14px 16px",
+                background: "var(--surface)",
+                border: "1px solid var(--border)",
+                borderRadius: 12,
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 10.5,
+                  fontWeight: 800,
+                  color: "var(--muted)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.07em",
+                }}
+              >
+                📷 Approval photo
+              </div>
+              {job.review_quality_flag && (
+                <div>
+                  <QualityFlagChip flag={job.review_quality_flag} />
+                </div>
+              )}
+              <ReviewPhoto
+                path={job.review_image_path}
+                alt="Reviewer's approval photo"
+                maxHeight={320}
+                rounded={10}
+                fit="contain"
+              />
+              {job.review_notes && (
+                <div
+                  style={{
+                    fontSize: 13,
+                    color: "var(--text)",
+                    fontStyle: "italic",
+                    borderLeft: "3px solid var(--border)",
+                    paddingLeft: 10,
+                  }}
+                >
+                  “{job.review_notes}”
+                </div>
+              )}
+            </section>
+          )}
 
           {/* Status banner — context-specific */}
           {inReview && (
