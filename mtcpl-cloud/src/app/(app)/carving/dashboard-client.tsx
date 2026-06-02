@@ -36,6 +36,10 @@ import type { StoneTypeDef } from "@/lib/stone-utils";
 // Daksh May 2026 — live camera capture only (no gallery / file
 // picker). MediaRecorder-style getUserMedia + canvas snapshot.
 import { CameraCaptureModal } from "@/components/camera-capture-modal";
+// Daksh (June 2026) — highlight / colour-mark the review photo. Marks
+// are baked into the uploaded image so they show on every surface
+// (Carving Done card + peek, rework cockpit, Carving Rejected page).
+import { ImageAnnotateModal } from "@/components/image-annotate-modal";
 
 type UnassignedSlab = {
   id: string;
@@ -3763,6 +3767,10 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
   // pick). Opens the CameraCaptureModal which does getUserMedia +
   // canvas snapshot. Captured File comes back via handleFile().
   const [cameraOpen, setCameraOpen] = useState(false);
+  // Daksh (June 2026) — when set, the ImageAnnotateModal is open on
+  // this file so the reviewer can highlight the problem area. On
+  // save the marked-up file replaces imageFile (marks baked in).
+  const [annotateFile, setAnnotateFile] = useState<File | null>(null);
   // Mig 081 follow-on — custom popover state for the quality-flag
   // picker. We replaced the native <select> with a styled card
   // dropdown to match the rest of the modal's visual language. Esc
@@ -4657,23 +4665,47 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
                   ? `Live capture · ${(imageFile.size / 1024).toFixed(0)} KB`
                   : "Live capture"}
               </div>
-              <button
-                type="button"
-                onClick={() => setCameraOpen(true)}
-                style={{
-                  padding: "6px 12px",
-                  fontSize: 12,
-                  fontWeight: 700,
-                  background: "rgba(255,255,255,0.18)",
-                  color: "#fff",
-                  border: "1px solid rgba(255,255,255,0.32)",
-                  borderRadius: 6,
-                  cursor: "pointer",
-                  backdropFilter: "blur(2px)",
-                }}
-              >
-                ↺ Retake
-              </button>
+              <div style={{ display: "flex", gap: 8 }}>
+                {/* Daksh — highlight / colour-mark the captured photo
+                    so the problem area is obvious on every later
+                    surface. Marks bake into the uploaded image. */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (imageFile) setAnnotateFile(imageFile);
+                  }}
+                  style={{
+                    padding: "6px 12px",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    background: "rgba(255,255,255,0.18)",
+                    color: "#fff",
+                    border: "1px solid rgba(255,255,255,0.32)",
+                    borderRadius: 6,
+                    cursor: "pointer",
+                    backdropFilter: "blur(2px)",
+                  }}
+                >
+                  ✏️ Mark
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCameraOpen(true)}
+                  style={{
+                    padding: "6px 12px",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    background: "rgba(255,255,255,0.18)",
+                    color: "#fff",
+                    border: "1px solid rgba(255,255,255,0.32)",
+                    borderRadius: 6,
+                    cursor: "pointer",
+                    backdropFilter: "blur(2px)",
+                  }}
+                >
+                  ↺ Retake
+                </button>
+              </div>
             </div>
           </div>
         ) : (
@@ -4752,6 +4784,18 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
               setCameraOpen(false);
             }}
             onClose={() => setCameraOpen(false)}
+          />
+        )}
+        {annotateFile && (
+          <ImageAnnotateModal
+            file={annotateFile}
+            onDone={(marked) => {
+              // Replace the captured photo with the marked-up one —
+              // the marks are now part of the image that uploads.
+              handleFile(marked);
+              setAnnotateFile(null);
+            }}
+            onCancel={() => setAnnotateFile(null)}
           />
         )}
 
