@@ -694,8 +694,16 @@ export async function upsertComponentAction(
   // does we honour it; otherwise we build it here. componentType is
   // resolved to its human label via COMPONENT_TYPE_LABELS so the
   // stored name reads naturally.
+  // Mig 084 — the form now also POSTs `type_label` (the human label
+  // of the picked type, straight from scaffolding_component_types).
+  // We prefer that for the derived name; fall back to the built-in
+  // label map, then the raw slug. This keeps custom-type names
+  // reading naturally ("Special Jali 100×50") without a DB round
+  // trip here.
   const postedName = String(formData.get("name") || "").trim();
-  const typeLabel = COMPONENT_TYPE_LABELS[componentType] ?? componentType;
+  const postedTypeLabel = String(formData.get("type_label") || "").trim();
+  const typeLabel =
+    postedTypeLabel || COMPONENT_TYPE_LABELS[componentType] || componentType;
   const name =
     postedName ||
     (sizeSpec ? `${typeLabel} ${sizeSpec}` : typeLabel);
@@ -832,6 +840,74 @@ export async function upsertComponentAction(
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, error: msg };
   }
+}
+
+// Mig 084 (Daksh, June 2026) — create a user-defined component
+// type. Slugifies the label, picks a display_order at the end of
+// the current list, inserts. Returns the new {value,label} so the
+// client can optimistically add it to the Type picker + select it.
+function slugifyComponentTypeLabel(label: string): string {
+  return (
+    "custom_" +
+    label
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 50)
+  );
+}
+
+export async function createComponentTypeAction(
+  formData: FormData,
+): Promise<
+  | { ok: true; value: string; label: string }
+  | { ok: false; error: string }
+> {
+  const { profile } = await requireAuth();
+  if (!canManageScaffoldingComponents(profile)) {
+    return { ok: false, error: "Not authorised to manage component types." };
+  }
+  const label = String(formData.get("label") || "").trim();
+  if (!label) return { ok: false, error: "Type name is required." };
+  if (label.length > 60) {
+    return { ok: false, error: "Type name must be 60 characters or fewer." };
+  }
+  const value = slugifyComponentTypeLabel(label);
+  if (value.length <= "custom_".length + 1) {
+    return { ok: false, error: "Use letters / numbers in the type name." };
+  }
+
+  const supabase = createAdminSupabaseClient();
+  // Append at the end of the current ordering.
+  const { data: maxRow } = await supabase
+    .from("scaffolding_component_types")
+    .select("display_order")
+    .order("display_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const nextOrder =
+    ((maxRow as { display_order?: number } | null)?.display_order ?? 0) + 10;
+
+  const { error } = await supabase
+    .from("scaffolding_component_types")
+    .insert({
+      value,
+      label,
+      display_order: nextOrder,
+      is_active: true,
+      created_by: profile.id,
+    });
+  if (error) {
+    if (error.code === PG_UNIQUE_VIOLATION) {
+      return { ok: false, error: "A type with that name already exists." };
+    }
+    return { ok: false, error: error.message };
+  }
+
+  void logAudit(profile.id, "scaffolding_component_type_created", "scaffolding_component_type", value, { label }).catch(() => {});
+  await refreshInventoryPaths();
+  return { ok: true, value, label };
 }
 
 export async function archiveComponentAction(formData: FormData): Promise<void> {

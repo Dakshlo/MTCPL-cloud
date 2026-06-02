@@ -5,10 +5,10 @@ import { useRouter } from "next/navigation";
 import {
   upsertComponentAction,
   archiveComponentAction,
+  createComponentTypeAction,
 } from "../../actions";
 import {
   ComponentIcon,
-  COMPONENT_TYPE_OPTIONS,
   labelForComponentType,
   type ScaffoldingComponentType,
 } from "../../_components/component-icon";
@@ -19,13 +19,24 @@ import {
 } from "../../_components/theme";
 import type { ScaffoldingComponent } from "../../_components/stock";
 
+// Mig 084 — user-defined component types passed from the page.
+type ComponentTypeOption = { value: string; label: string };
+
 export function ComponentsClient({
   components,
+  componentTypes,
 }: {
   components: ScaffoldingComponent[];
+  /** Mig 084 — the user-created type catalog. Feeds the Type
+   *  picker in the Add Component form. Empty until the storekeeper
+   *  adds their first type. */
+  componentTypes: ComponentTypeOption[];
 }) {
   const router = useRouter();
   const [editingId, setEditingId] = useState<string | "new" | null>(null);
+  // Local mirror so a newly-created type appears immediately in the
+  // picker without a full refresh.
+  const [localTypes, setLocalTypes] = useState<ComponentTypeOption[]>(componentTypes);
 
   const active = components.filter((c) => c.is_active);
 
@@ -62,6 +73,8 @@ export function ComponentsClient({
       {editingId === "new" && (
         <ComponentForm
           mode="create"
+          types={localTypes}
+          onTypeCreated={(t) => setLocalTypes((prev) => [...prev, t])}
           onCancel={() => setEditingId(null)}
           onSaved={() => {
             setEditingId(null);
@@ -120,6 +133,8 @@ export function ComponentsClient({
                   key={c.id}
                   mode="edit"
                   component={c}
+                  types={localTypes}
+                  onTypeCreated={(nt) => setLocalTypes((prev) => [...prev, nt])}
                   onCancel={() => setEditingId(null)}
                   onSaved={() => {
                     setEditingId(null);
@@ -250,24 +265,72 @@ function ComponentRow({
 function ComponentForm({
   mode,
   component,
+  types,
+  onTypeCreated,
   onCancel,
   onSaved,
 }: {
   mode: "create" | "edit";
   component?: ScaffoldingComponent;
+  /** Mig 084 — user-defined types for the picker. */
+  types: ComponentTypeOption[];
+  /** Called after a new type is created so the parent can mirror
+   *  it into its localTypes state. */
+  onTypeCreated: (t: ComponentTypeOption) => void;
   onCancel: () => void;
   onSaved: () => void;
 }) {
-  const [type, setType] = useState<ScaffoldingComponentType>(
-    component?.component_type ?? "standard",
+  // Mig 084 — the picked type. Defaults to the component's existing
+  // type on edit, else the first available type, else "" (no types
+  // exist yet — the user must create one first).
+  const [type, setType] = useState<string>(
+    component?.component_type ?? types[0]?.value ?? "",
   );
-  // Mig 083 follow-on — size is now controlled so the auto-name
-  // preview updates live. Name = "<type label> <size>" (or just
-  // the type label when size is blank).
+  // Inline "+ Add component type" form state.
+  const [creatingType, setCreatingType] = useState(false);
+  const [newTypeLabel, setNewTypeLabel] = useState("");
+  const [typeError, setTypeError] = useState<string | null>(null);
+  const [typePending, setTypePending] = useState(false);
+
+  // Resolve the human label for the currently-picked type. Prefer
+  // the live types list (covers custom types); fall back to the
+  // built-in label helper for legacy/edit rows whose type isn't in
+  // the active list.
+  const typeLabel =
+    types.find((t) => t.value === type)?.label ??
+    (type ? labelForComponentType(type) : "");
+
+  // Mig 083 follow-on — size is controlled so the auto-name preview
+  // updates live. Name = "<type label> <size>" (or just the type
+  // label when size is blank).
   const [size, setSize] = useState<string>(component?.size_spec ?? "");
-  const derivedName = size.trim()
-    ? `${labelForComponentType(type)} ${size.trim()}`
-    : labelForComponentType(type);
+  const derivedName = type
+    ? size.trim()
+      ? `${typeLabel} ${size.trim()}`
+      : typeLabel
+    : "";
+
+  async function handleCreateType() {
+    const label = newTypeLabel.trim();
+    if (!label) {
+      setTypeError("Enter a type name.");
+      return;
+    }
+    setTypePending(true);
+    setTypeError(null);
+    const fd = new FormData();
+    fd.set("label", label);
+    const res = await createComponentTypeAction(fd);
+    setTypePending(false);
+    if (!res.ok) {
+      setTypeError(res.error);
+      return;
+    }
+    onTypeCreated({ value: res.value, label: res.label });
+    setType(res.value);
+    setNewTypeLabel("");
+    setCreatingType(false);
+  }
   // Mig 044 — image upload. The user picks a PNG (transparent
   // recommended); we read it into a data URL and store the full
   // string in scaffolding_components.image_data_url. Tiny files
@@ -309,6 +372,12 @@ function ComponentForm({
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
+    // Mig 084 — guard: a type must be picked. When the catalog has
+    // zero types yet, the user has to create one first.
+    if (!type) {
+      setError("Pick or create a component type first.");
+      return;
+    }
     setSubmitting(true);
     const fd = new FormData(e.currentTarget);
     if (mode === "edit" && component) fd.append("id", component.id);
@@ -345,19 +414,109 @@ function ComponentForm({
           imageDataUrl={imageDataUrl ?? undefined}
         />
       </div>
-      <Field label="Type">
-        <select
-          name="component_type"
-          value={type}
-          onChange={(e) => setType(e.target.value as ScaffoldingComponentType)}
-          style={inputStyle}
-        >
-          {COMPONENT_TYPE_OPTIONS.map((t) => (
-            <option key={t} value={t}>
-              {labelForComponentType(t)}
-            </option>
-          ))}
-        </select>
+      {/* Mig 084 (Daksh) — Type is now user-defined. The dropdown
+          is fed by the live scaffolding_component_types list (no
+          more hardcoded 12-option enum). "+ Add component type"
+          reveals an inline create form so the storekeeper builds
+          their own type list. The hidden inputs carry the picked
+          slug + its label so the server can derive the component
+          name without a DB round-trip. */}
+      <Field label="Type" wide>
+        <input type="hidden" name="component_type" value={type} />
+        <input type="hidden" name="type_label" value={typeLabel} />
+        {creatingType ? (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+              padding: 10,
+              background: INV_THEME.cream,
+              border: `1px solid ${INV_THEME.steel}`,
+              borderRadius: 8,
+            }}
+          >
+            <input
+              type="text"
+              autoFocus
+              maxLength={60}
+              value={newTypeLabel}
+              onChange={(e) => {
+                setNewTypeLabel(e.target.value);
+                if (typeError) setTypeError(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void handleCreateType();
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  setCreatingType(false);
+                  setNewTypeLabel("");
+                  setTypeError(null);
+                }
+              }}
+              placeholder="New type name (e.g. Cuplock, Prop)"
+              style={inputStyle}
+            />
+            {typeError && (
+              <span
+                style={{ fontSize: 11, color: INV_THEME.stockOut, fontWeight: 600 }}
+              >
+                {typeError}
+              </span>
+            )}
+            <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setCreatingType(false);
+                  setNewTypeLabel("");
+                  setTypeError(null);
+                }}
+                disabled={typePending}
+                style={secondaryButton}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleCreateType}
+                disabled={typePending || !newTypeLabel.trim()}
+                style={{
+                  ...primaryButton,
+                  opacity: typePending || !newTypeLabel.trim() ? 0.6 : 1,
+                }}
+              >
+                {typePending ? "Adding…" : "+ Add type"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <select
+              value={type}
+              onChange={(e) => setType(e.target.value)}
+              style={{ ...inputStyle, flex: 1 }}
+            >
+              {types.length === 0 && (
+                <option value="">— No types yet —</option>
+              )}
+              {types.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => setCreatingType(true)}
+              style={{ ...secondaryButton, whiteSpace: "nowrap" }}
+            >
+              + Add component type
+            </button>
+          </div>
+        )}
       </Field>
       {/* Mig 083 follow-on (Daksh) — the standalone Display Name
           field is gone. The name is auto-built from Type + Size:

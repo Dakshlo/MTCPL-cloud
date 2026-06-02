@@ -17,14 +17,18 @@
 
 import type { CSSProperties, ReactElement } from "react";
 
-export type ScaffoldingComponentType =
+// Mig 084 (Daksh, June 2026) — component types are now USER-DEFINED
+// (scaffolding_component_types table) rather than a fixed enum, so
+// the type is a plain string. The known built-in slugs are kept as
+// a separate union (KnownComponentType) only for the icon glyph
+// lookup; anything else (a user-created type) falls back to the
+// generic "Other" crate glyph in ComponentIcon below.
+export type ScaffoldingComponentType = string;
+
+type KnownComponentType =
   | "standard"
   | "ledger"
   | "transom"
-  // Mig 044 — perforated screen panel. Catalog collapsed to four
-  // top-level types: Standard / Ledger / Transom / Jali. The other
-  // historical types stay in the union so legacy inventory_movements
-  // rows that point at them keep deserializing cleanly.
   | "jali"
   | "brace"
   | "jack_base"
@@ -216,7 +220,7 @@ function Other({ size = 64, style }: IconProps) {
   );
 }
 
-const ICONS: Record<ScaffoldingComponentType, (p: IconProps) => ReactElement> = {
+const ICONS: Record<KnownComponentType, (p: IconProps) => ReactElement> = {
   standard: Standard,
   ledger: Ledger,
   transom: Transom,
@@ -267,59 +271,48 @@ export function ComponentIcon({
       />
     );
   }
-  const Glyph = ICONS[type] ?? Other;
+  const Glyph = ICONS[type as KnownComponentType] ?? Other;
   return <Glyph size={size} style={style} />;
 }
 
-/** Human-readable label for a component type (for headings, dropdowns). */
+/** Human-readable label for a component type (for headings, dropdowns).
+ *  Mig 084 — known built-in slugs map to their canonical label; any
+ *  user-created slug ("custom_special_jali") gets title-cased
+ *  ("Custom Special Jali"). Callers that have the real label from
+ *  the types table should prefer that; this is the fallback. */
 export function labelForComponentType(t: ScaffoldingComponentType): string {
-  switch (t) {
-    case "standard":
-      return "Standard";
-    case "ledger":
-      return "Ledger";
-    case "transom":
-      return "Transom";
-    case "jali":
-      return "Jali";
-    case "brace":
-      return "Brace";
-    case "jack_base":
-      return "Jack Base";
-    case "u_head":
-      return "U-Head";
-    case "coupler":
-      return "Coupler";
-    case "plank":
-      return "Plank";
-    case "ladder":
-      return "Ladder";
-    case "toe_board":
-      return "Toe Board";
-    case "tie_rod":
-      return "Tie Rod";
-    case "other":
-      return "Other";
-  }
+  const known: Record<KnownComponentType, string> = {
+    standard: "Standard",
+    ledger: "Ledger",
+    transom: "Transom",
+    jali: "Jali",
+    brace: "Brace",
+    jack_base: "Jack Base",
+    u_head: "U-Head",
+    coupler: "Coupler",
+    plank: "Plank",
+    ladder: "Ladder",
+    toe_board: "Toe Board",
+    tie_rod: "Tie Rod",
+    other: "Other",
+  };
+  if (t in known) return known[t as KnownComponentType];
+  // User-created slug → strip a leading "custom_", split on
+  // underscores, Title Case each word.
+  return t
+    .replace(/^custom_/, "")
+    .split(/[_\s]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
 }
 
 // Mig 083 follow-on (Daksh, June 2026) — "Other" is OFF the picker.
 // Daksh: "and on add compent there is option other which is wrong
-// it dont create proper." Existing rows tagged 'other' are
-// soft-deleted by mig 083; new components must pick a real type.
-// (Postgres can't easily drop an enum value, so the value still
-// exists in the DB type — we just stop offering it in the UI.)
-export const COMPONENT_TYPE_OPTIONS: ScaffoldingComponentType[] = [
-  "standard",
-  "ledger",
-  "transom",
-  "jali",
-  "brace",
-  "jack_base",
-  "u_head",
-  "coupler",
-  "plank",
-  "ladder",
-  "toe_board",
-  "tie_rod",
-];
+// Mig 084 (Daksh, June 2026) — component types are USER-DEFINED now.
+// The hardcoded COMPONENT_TYPE_OPTIONS list is gone; the Add
+// Component form reads the live types from scaffolding_component_types
+// + offers a "+ Add component type" button. This empty export is
+// kept only so any stray import doesn't break the build during the
+// transition; nothing should rely on it anymore.
+export const COMPONENT_TYPE_OPTIONS: ScaffoldingComponentType[] = [];

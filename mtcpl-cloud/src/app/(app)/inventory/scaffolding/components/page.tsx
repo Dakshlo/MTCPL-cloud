@@ -23,11 +23,22 @@ export default async function ComponentsPage() {
   const pathname = h.get("x-pathname") ?? "/inventory/scaffolding/components";
 
   const supabase = createAdminSupabaseClient();
-  const { data, error } = await supabase
-    .from("scaffolding_components")
-    .select("*")
-    .order("component_type", { ascending: true })
-    .order("display_order", { ascending: true });
+  const [{ data, error }, { data: typeRows }] = await Promise.all([
+    supabase
+      .from("scaffolding_components")
+      .select("*")
+      .order("component_type", { ascending: true })
+      .order("display_order", { ascending: true }),
+    // Mig 084 — user-defined component types feed the Add Component
+    // form's Type picker. Active only; sorted by the order they
+    // were created (display_order). Empty on a fresh deploy until
+    // the storekeeper adds their first type.
+    supabase
+      .from("scaffolding_component_types")
+      .select("value, label")
+      .eq("is_active", true)
+      .order("display_order", { ascending: true }),
+  ]);
 
   if (error?.code === PG_UNDEFINED_TABLE) {
     return (
@@ -38,6 +49,10 @@ export default async function ComponentsPage() {
   }
 
   const components = ((data ?? []) as unknown) as ScaffoldingComponent[];
+  const componentTypes = ((typeRows ?? []) as Array<{
+    value: string;
+    label: string;
+  }>);
 
   return (
     <InventoryShell
@@ -58,7 +73,7 @@ export default async function ComponentsPage() {
         is free text (e.g. "2.5m" or "1.2m × 18ga"). Archive removes a part
         from new-movement pickers without losing history.
       </div>
-      <ComponentsClient components={components} />
+      <ComponentsClient components={components} componentTypes={componentTypes} />
     </InventoryShell>
   );
 }
