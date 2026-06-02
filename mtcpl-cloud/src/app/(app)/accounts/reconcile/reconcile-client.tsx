@@ -54,11 +54,47 @@ type VendorAgg = {
 
 type Pane = "vendors" | "bills";
 
+// Mig 082 follow-on (Daksh round 2) — date filter type. Bill-date
+// scoped; "All" = no filter. The filter cascades downward — bills
+// outside the window are dropped, so vendor aggregates + grand
+// total recompute against the filtered set automatically.
+type DateRange = "today" | "yesterday" | "last_7d" | "last_30d" | "all";
+
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+const DAY_MS = 86_400_000;
+function startOfDayIstMs(d: Date): number {
+  const ist = d.getTime() + IST_OFFSET_MS;
+  return Math.floor(ist / DAY_MS) * DAY_MS - IST_OFFSET_MS;
+}
+
 export function ReconcileClient({ bills }: { bills: ReconcileBillRow[] }) {
+  // ── Date filter state — cascades into vendor list + grand total ─
+  const [dateRange, setDateRange] = useState<DateRange>("all");
+
+  const filteredBills = useMemo(() => {
+    if (dateRange === "all") return bills;
+    const todayStart = startOfDayIstMs(new Date());
+    const yesterdayStart = todayStart - DAY_MS;
+    const sevenAgoStart = todayStart - 7 * DAY_MS;
+    const thirtyAgoStart = todayStart - 30 * DAY_MS;
+    return bills.filter((b) => {
+      const t = new Date(b.billDate).getTime();
+      if (dateRange === "today") return t >= todayStart;
+      if (dateRange === "yesterday")
+        return t >= yesterdayStart && t < todayStart;
+      if (dateRange === "last_7d") return t >= sevenAgoStart;
+      // last_30d
+      return t >= thirtyAgoStart;
+    });
+  }, [bills, dateRange]);
+
   // ── Aggregate by vendor (memoised) ────────────────────────────────
+  // Reads from filteredBills, so when the date range changes the
+  // vendor list, grand total, bill counts — every downstream value —
+  // recompute against just the bills in the window.
   const vendorList: VendorAgg[] = useMemo(() => {
     const m = new Map<string, VendorAgg>();
-    for (const b of bills) {
+    for (const b of filteredBills) {
       const cur = m.get(b.vendorId) ?? {
         id: b.vendorId,
         name: b.vendorName,
@@ -82,12 +118,40 @@ export function ReconcileClient({ bills }: { bills: ReconcileBillRow[] }) {
       }
       return a.name.localeCompare(b.name);
     });
-  }, [bills]);
+  }, [filteredBills]);
 
   const grandTotal = useMemo(
     () => vendorList.reduce((s, v) => s + v.totalOutstanding, 0),
     [vendorList],
   );
+
+  // ── Blur grand total (sensitive number) ──────────────────────────
+  // Daksh: "blur it and give button to unblur it for 10 sec".
+  // Defaults to blurred on every page load. Pressing the reveal
+  // button starts a 10-second timer; expires automatically.
+  const [grandTotalRevealed, setGrandTotalRevealed] = useState(false);
+  useEffect(() => {
+    if (!grandTotalRevealed) return;
+    const t = setTimeout(() => setGrandTotalRevealed(false), 10000);
+    return () => clearTimeout(t);
+  }, [grandTotalRevealed]);
+
+  // ── Full-screen toggle ────────────────────────────────────────────
+  // CSS-only — we apply position:fixed on the outer wrapper so it
+  // covers the sidebar + topbar. Esc exits. No fullscreen API
+  // because we want the in-app chrome controls (Exit button)
+  // visible, not the browser's escape banner.
+  const [fullScreen, setFullScreen] = useState(false);
+  useEffect(() => {
+    if (!fullScreen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape" && document.activeElement?.tagName !== "INPUT") {
+        setFullScreen(false);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fullScreen]);
 
   // ── Search + filtered list ────────────────────────────────────────
   const [query, setQuery] = useState("");
@@ -250,12 +314,124 @@ export function ReconcileClient({ bills }: { bills: ReconcileBillRow[] }) {
     setActivePane("bills");
   };
 
-  const totalBills = bills.length;
+  // Mig 082 follow-on (Daksh round 2) — counts derive from the
+  // FILTERED set so when the date range narrows, the tiles + the
+  // grand total move together. Used to be `bills.length` which
+  // ignored the filter.
+  const totalBills = filteredBills.length;
   const totalVendors = vendorList.length;
   const heldGrand = vendorList.reduce((s, v) => s + v.totalHeld, 0);
 
+  // Outer wrapper — when full-screen, fix-position over the whole
+  // viewport so the sidebar + topbar disappear. Otherwise it's
+  // an in-flow flex column like before.
+  const outerStyle: React.CSSProperties = fullScreen
+    ? {
+        position: "fixed",
+        inset: 0,
+        zIndex: 9999,
+        background: "var(--bg, #faf7ef)",
+        padding: "16px 18px",
+        overflow: "auto",
+        display: "flex",
+        flexDirection: "column",
+        gap: 14,
+      }
+    : { display: "flex", flexDirection: "column", gap: 14 };
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+    <div style={outerStyle}>
+      {/* ── Date filter + full-screen + page controls ─────────────
+          Mig 082 follow-on (Daksh round 2). Date filter cascades
+          into every count + total below; the full-screen toggle
+          covers the sidebar so the spreadsheet uses the whole
+          viewport (cleaner for desktop-with-tally workflows). */}
+      <div
+        style={{
+          display: "flex",
+          gap: 10,
+          alignItems: "center",
+          flexWrap: "wrap",
+          padding: "10px 12px",
+          background: "#fff",
+          border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+          borderRadius: 10,
+        }}
+      >
+        <div
+          style={{
+            fontSize: 10,
+            fontWeight: 800,
+            color: "var(--muted)",
+            textTransform: "uppercase",
+            letterSpacing: "0.06em",
+            marginRight: 6,
+          }}
+        >
+          Bill date
+        </div>
+        {(
+          [
+            { v: "today", label: "Today" },
+            { v: "yesterday", label: "Yesterday" },
+            { v: "last_7d", label: "Last 7 days" },
+            { v: "last_30d", label: "Last 30 days" },
+            { v: "all", label: "All" },
+          ] as Array<{ v: DateRange; label: string }>
+        ).map((opt) => {
+          const active = opt.v === dateRange;
+          return (
+            <button
+              key={opt.v}
+              type="button"
+              onClick={() => {
+                setDateRange(opt.v);
+                setVendorIdx(0);
+                setBillIdx(0);
+                setActivePane("vendors");
+              }}
+              style={{
+                padding: "5px 12px",
+                fontSize: 12,
+                fontWeight: 700,
+                background: active ? ACCOUNTS_TOKENS.accent : "#fff",
+                color: active ? "#fff" : "var(--text)",
+                border: `1px solid ${active ? ACCOUNTS_TOKENS.accent : ACCOUNTS_TOKENS.border}`,
+                borderRadius: 999,
+                cursor: "pointer",
+                letterSpacing: "0.02em",
+                fontFamily: "inherit",
+              }}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+        <div style={{ flex: 1 }} />
+        <button
+          type="button"
+          onClick={() => setFullScreen((f) => !f)}
+          title={
+            fullScreen
+              ? "Exit full screen (also: Esc)"
+              : "Hide sidebar — use the full viewport"
+          }
+          style={{
+            padding: "5px 12px",
+            fontSize: 12,
+            fontWeight: 700,
+            background: fullScreen ? ACCOUNTS_TOKENS.accent : "#fff",
+            color: fullScreen ? "#fff" : ACCOUNTS_TOKENS.accent,
+            border: `1px solid ${ACCOUNTS_TOKENS.accent}`,
+            borderRadius: 999,
+            cursor: "pointer",
+            letterSpacing: "0.02em",
+          }}
+        >
+          {fullScreen ? "✕ Exit full screen" : "⛶ Full screen"}
+        </button>
+      </div>
+
       {/* Summary strip — grand total + counts */}
       <div
         style={{
@@ -264,9 +440,56 @@ export function ReconcileClient({ bills }: { bills: ReconcileBillRow[] }) {
           gap: 10,
         }}
       >
+        {/* Mig 082 follow-on (Daksh round 2) — Total outstanding
+            blurred by default. Reveal button unblurs for 10s
+            (the useEffect upstream auto-flips it back). Sensitive
+            number; the accountant sees it on demand only. */}
         <SummaryTile
           label="Total outstanding"
-          value={<Money value={grandTotal} size="large" tone="danger" />}
+          value={
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                flexWrap: "wrap",
+              }}
+            >
+              <span
+                style={{
+                  filter: grandTotalRevealed ? "none" : "blur(8px)",
+                  transition: "filter 0.2s ease",
+                  userSelect: grandTotalRevealed ? "auto" : "none",
+                  pointerEvents: grandTotalRevealed ? "auto" : "none",
+                }}
+              >
+                <Money value={grandTotal} size="large" tone="danger" />
+              </span>
+              <button
+                type="button"
+                onClick={() => setGrandTotalRevealed((v) => !v)}
+                title={
+                  grandTotalRevealed
+                    ? "Re-hide the number"
+                    : "Reveal for 10 seconds"
+                }
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  padding: "3px 10px",
+                  background: grandTotalRevealed ? "#fff" : "#b91c1c",
+                  color: grandTotalRevealed ? "#b91c1c" : "#fff",
+                  border: "1px solid #b91c1c",
+                  borderRadius: 999,
+                  cursor: "pointer",
+                  letterSpacing: "0.02em",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {grandTotalRevealed ? "🔒 Hide" : "👁 Reveal 10s"}
+              </button>
+            </div>
+          }
           tint="#b91c1c"
         />
         <SummaryTile
@@ -624,6 +847,12 @@ export function ReconcileClient({ bills }: { bills: ReconcileBillRow[] }) {
                     );
                   })}
                 </tbody>
+                {/* Mig 082 follow-on (Daksh round 2) — footer now
+                    sums all three money columns (Total billed,
+                    Paid, Outstanding) so the auditor can tie out
+                    each column independently against external
+                    books. Outstanding = Total − Paid; we render
+                    each footer cell beneath its matching column. */}
                 <tfoot
                   style={{
                     position: "sticky",
@@ -631,21 +860,63 @@ export function ReconcileClient({ bills }: { bills: ReconcileBillRow[] }) {
                     background: ACCOUNTS_TOKENS.surfaceMuted,
                   }}
                 >
-                  <tr>
-                    <td colSpan={6} style={{ ...td, textAlign: "right", fontWeight: 800 }}>
-                      Total
-                    </td>
-                    <td
-                      style={{
-                        ...td,
-                        textAlign: "right",
-                        fontWeight: 800,
-                        color: "#b91c1c",
-                      }}
-                    >
-                      ₹{Math.round(focusedVendor.totalOutstanding).toLocaleString("en-IN")}
-                    </td>
-                  </tr>
+                  {(() => {
+                    const sumTotal = focusedVendor.bills.reduce(
+                      (s, b) => s + b.amountTotal,
+                      0,
+                    );
+                    const sumPaid = focusedVendor.bills.reduce(
+                      (s, b) => s + b.amountPaid,
+                      0,
+                    );
+                    const sumOutstanding = focusedVendor.totalOutstanding;
+                    return (
+                      <tr>
+                        <td
+                          colSpan={4}
+                          style={{
+                            ...td,
+                            textAlign: "right",
+                            fontWeight: 800,
+                          }}
+                        >
+                          Total
+                        </td>
+                        <td
+                          style={{
+                            ...td,
+                            textAlign: "right",
+                            fontWeight: 800,
+                            color: "var(--text)",
+                          }}
+                        >
+                          ₹{Math.round(sumTotal).toLocaleString("en-IN")}
+                        </td>
+                        <td
+                          style={{
+                            ...td,
+                            textAlign: "right",
+                            fontWeight: 800,
+                            color: sumPaid > 0 ? "#15803d" : "var(--muted)",
+                          }}
+                        >
+                          {sumPaid > 0
+                            ? `₹${Math.round(sumPaid).toLocaleString("en-IN")}`
+                            : "—"}
+                        </td>
+                        <td
+                          style={{
+                            ...td,
+                            textAlign: "right",
+                            fontWeight: 800,
+                            color: "#b91c1c",
+                          }}
+                        >
+                          ₹{Math.round(sumOutstanding).toLocaleString("en-IN")}
+                        </td>
+                      </tr>
+                    );
+                  })()}
                 </tfoot>
               </table>
             )}
