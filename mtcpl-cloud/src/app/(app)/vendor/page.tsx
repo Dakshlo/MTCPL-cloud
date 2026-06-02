@@ -68,8 +68,41 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
     // Mig 077 — vendor users with managed_vendor_ids can drop into
     // those other cockpits via ?vendor_id=. Any other id (including
     // none) means stay on their own.
+    //
+    // Mig 082 follow-on (Daksh, June 2026) — also honour the sticky
+    // pick cookie for managed-vendor users. Without this, every
+    // server action (Load / Hold / Mark complete) redirects back
+    // to /vendor with no query string, falls through to
+    // profile.vendor_id, and snaps the cockpit back to the
+    // operator's own view — even though they were just working on
+    // Alkesh's. Bug: "for cnc operator manthan he have two vendor
+    // cockpit view his own and alkesh which is correct but the
+    // thing is when he do anyting on any like alkesh he rediret
+    // back to mohit." Fix: same cookie tier the staff branch uses,
+    // gated on the cookie value actually being in the user's
+    // managed_vendor_ids so they can't sticky into a cockpit they
+    // shouldn't see.
     if (params.vendor_id && managedVendorIds.includes(params.vendor_id)) {
       vendorId = params.vendor_id;
+    } else if (managedVendorIds.length > 0) {
+      const cookieStore = await cookies();
+      const stickyPick = cookieStore.get("mtcpl_vendor_pick")?.value ?? null;
+      if (
+        stickyPick &&
+        (stickyPick === profile.vendor_id ||
+          managedVendorIds.includes(stickyPick))
+      ) {
+        // Validate the sticky pick still resolves to an active
+        // vendor (managed list could in theory drift). Drop back
+        // to the user's own vendor if not.
+        const { data: pickRow } = await admin
+          .from("vendors")
+          .select("id")
+          .eq("id", stickyPick)
+          .eq("is_active", true)
+          .maybeSingle();
+        if (pickRow) vendorId = stickyPick;
+      }
     }
   } else {
     if (params.vendor_id) {
