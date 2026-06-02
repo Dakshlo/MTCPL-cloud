@@ -55,10 +55,17 @@ type VendorAgg = {
 type Pane = "vendors" | "bills";
 
 // Mig 082 follow-on (Daksh round 2) — date filter type. Bill-date
-// scoped; "All" = no filter. The filter cascades downward — bills
-// outside the window are dropped, so vendor aggregates + grand
-// total recompute against the filtered set automatically.
-type DateRange = "today" | "yesterday" | "last_7d" | "last_30d" | "all";
+// scoped; "All" = no filter, "custom" = use the custom from/to
+// date inputs below. The filter cascades downward — bills outside
+// the window are dropped, so vendor aggregates + grand total
+// recompute against the filtered set automatically.
+type DateRange =
+  | "today"
+  | "yesterday"
+  | "last_7d"
+  | "last_30d"
+  | "all"
+  | "custom";
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 const DAY_MS = 86_400_000;
@@ -67,12 +74,49 @@ function startOfDayIstMs(d: Date): number {
   return Math.floor(ist / DAY_MS) * DAY_MS - IST_OFFSET_MS;
 }
 
+/** Parse a YYYY-MM-DD string as IST midnight. Empty / invalid →
+ *  null, which the filter treats as "no bound on that side". */
+function istMidnightFromIsoDate(yyyyMmDd: string): number | null {
+  if (!yyyyMmDd) return null;
+  // Treat the picked date as a calendar day in IST. Build a UTC
+  // timestamp that corresponds to 00:00 IST on that date.
+  const parts = yyyyMmDd.split("-");
+  if (parts.length !== 3) return null;
+  const y = Number(parts[0]);
+  const m = Number(parts[1]);
+  const d = Number(parts[2]);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) {
+    return null;
+  }
+  // Date.UTC gives UTC-midnight; subtract IST_OFFSET to get the UTC
+  // instant that corresponds to IST-midnight.
+  return Date.UTC(y, m - 1, d) - IST_OFFSET_MS;
+}
+
 export function ReconcileClient({ bills }: { bills: ReconcileBillRow[] }) {
   // ── Date filter state — cascades into vendor list + grand total ─
+  // dateRange picks one of the preset windows; when it's "custom",
+  // the from / to date inputs below take over.
   const [dateRange, setDateRange] = useState<DateRange>("all");
+  const [customFrom, setCustomFrom] = useState<string>(""); // YYYY-MM-DD
+  const [customTo, setCustomTo] = useState<string>(""); // YYYY-MM-DD
 
   const filteredBills = useMemo(() => {
     if (dateRange === "all") return bills;
+    if (dateRange === "custom") {
+      const fromMs = istMidnightFromIsoDate(customFrom);
+      // "to" is inclusive — end of day. Add a day's worth of ms
+      // to the IST midnight so a bill dated yyyy-mm-dd is included.
+      const toMidnight = istMidnightFromIsoDate(customTo);
+      const toMs = toMidnight !== null ? toMidnight + DAY_MS : null;
+      if (fromMs === null && toMs === null) return bills;
+      return bills.filter((b) => {
+        const t = new Date(b.billDate).getTime();
+        if (fromMs !== null && t < fromMs) return false;
+        if (toMs !== null && t >= toMs) return false;
+        return true;
+      });
+    }
     const todayStart = startOfDayIstMs(new Date());
     const yesterdayStart = todayStart - DAY_MS;
     const sevenAgoStart = todayStart - 7 * DAY_MS;
@@ -86,7 +130,7 @@ export function ReconcileClient({ bills }: { bills: ReconcileBillRow[] }) {
       // last_30d
       return t >= thirtyAgoStart;
     });
-  }, [bills, dateRange]);
+  }, [bills, dateRange, customFrom, customTo]);
 
   // ── Aggregate by vendor (memoised) ────────────────────────────────
   // Reads from filteredBills, so when the date range changes the
@@ -386,6 +430,11 @@ export function ReconcileClient({ bills }: { bills: ReconcileBillRow[] }) {
               type="button"
               onClick={() => {
                 setDateRange(opt.v);
+                // Picking a preset clears the custom inputs so the
+                // user doesn't see stale "Custom Jan 1 → Jan 31"
+                // text + a different preset highlighted together.
+                setCustomFrom("");
+                setCustomTo("");
                 setVendorIdx(0);
                 setBillIdx(0);
                 setActivePane("vendors");
@@ -407,6 +456,99 @@ export function ReconcileClient({ bills }: { bills: ReconcileBillRow[] }) {
             </button>
           );
         })}
+        {/* Mig 082 follow-on (Daksh round 3) — custom date range
+            inputs alongside the presets. Typing in either box
+            auto-switches the filter to "custom"; clearing both
+            falls back to "All". The same cascade applies — vendor
+            list + grand total recompute against the custom window
+            the moment a date lands in either input. */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            flexWrap: "wrap",
+            paddingLeft: 8,
+            marginLeft: 4,
+            borderLeft: `1px dashed ${ACCOUNTS_TOKENS.border}`,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 800,
+              color:
+                dateRange === "custom" ? ACCOUNTS_TOKENS.accent : "var(--muted)",
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+            }}
+          >
+            Custom
+          </span>
+          <input
+            type="date"
+            value={customFrom}
+            onChange={(e) => {
+              const next = e.target.value;
+              setCustomFrom(next);
+              if (next || customTo) {
+                setDateRange("custom");
+              } else if (!next && !customTo) {
+                setDateRange("all");
+              }
+              setVendorIdx(0);
+              setBillIdx(0);
+              setActivePane("vendors");
+            }}
+            style={dateInputStyle(dateRange === "custom")}
+            title="Filter from this date (inclusive)"
+          />
+          <span style={{ fontSize: 12, color: "var(--muted)" }}>→</span>
+          <input
+            type="date"
+            value={customTo}
+            onChange={(e) => {
+              const next = e.target.value;
+              setCustomTo(next);
+              if (next || customFrom) {
+                setDateRange("custom");
+              } else if (!next && !customFrom) {
+                setDateRange("all");
+              }
+              setVendorIdx(0);
+              setBillIdx(0);
+              setActivePane("vendors");
+            }}
+            style={dateInputStyle(dateRange === "custom")}
+            title="Filter to this date (inclusive)"
+          />
+          {(customFrom || customTo) && (
+            <button
+              type="button"
+              onClick={() => {
+                setCustomFrom("");
+                setCustomTo("");
+                setDateRange("all");
+                setVendorIdx(0);
+                setBillIdx(0);
+                setActivePane("vendors");
+              }}
+              title="Clear custom range"
+              style={{
+                padding: "4px 9px",
+                fontSize: 11,
+                fontWeight: 700,
+                background: "transparent",
+                color: "var(--muted)",
+                border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+                borderRadius: 999,
+                cursor: "pointer",
+              }}
+            >
+              ✕ Clear
+            </button>
+          )}
+        </div>
         <div style={{ flex: 1 }} />
         <button
           type="button"
@@ -928,6 +1070,18 @@ export function ReconcileClient({ bills }: { bills: ReconcileBillRow[] }) {
 }
 
 // ── Small presentation helpers ─────────────────────────────────────
+
+function dateInputStyle(active: boolean): React.CSSProperties {
+  return {
+    padding: "4px 8px",
+    fontSize: 12,
+    fontFamily: "ui-monospace, monospace",
+    border: `1px solid ${active ? ACCOUNTS_TOKENS.accent : ACCOUNTS_TOKENS.border}`,
+    borderRadius: 6,
+    background: "#fff",
+    color: "var(--text)",
+  };
+}
 
 const th: React.CSSProperties = {
   fontSize: 10,
