@@ -407,6 +407,20 @@ const navEntries: NavEntry[] = [
     roles: ["developer", "owner", "accountant_star"],
     department: "finance",
   },
+  {
+    // Mig 082 follow-on (Daksh, June 2026) — accountant_star's
+    // read-only verification page. Tally-style two-pane spreadsheet
+    // of outstanding bills (vendor-wise + bill-wise) for
+    // cross-checking against the external accounting software.
+    // Sits right under Final Audit because it's the same persona
+    // (Govind) doing the same kind of cross-checking — just
+    // against books instead of against the bank statement.
+    href: "/accounts/reconcile",
+    label: "Reconcile",
+    icon: "📒",
+    roles: ["developer", "owner", "accountant_star"],
+    department: "finance",
+  },
   // ── INVOICING section (Mig 038 → Mig 058 — party → challan →
   // invoice restructure). Widened from dev/owner-only to also
   // include final_auditor (the starred accountant — Govind today).
