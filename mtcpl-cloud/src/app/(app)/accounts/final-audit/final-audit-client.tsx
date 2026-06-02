@@ -49,6 +49,11 @@ export type FinalAuditRow = {
   auditedByName: string | null;
   flagReason: string | null;
   flagNote: string | null;
+  /** Mig 081 follow-on — sum of amount_outstanding across ALL of
+   *  this vendor's bills (the one being audited + every other
+   *  open bill). Lets the auditor sanity-check a paid amount
+   *  against the vendor's total exposure. */
+  vendorTotalOutstanding: number;
 };
 
 type ServerResult = { ok: true } | { ok: false; error: string };
@@ -351,6 +356,34 @@ function PendingCard({
               >
                 Awaiting verify
               </span>
+              {/* Mig 081 follow-on (Daksh) — vendor's total
+                  outstanding across all their bills. Renders only
+                  when > 0 so a brand-new vendor doesn't get a "₹0
+                  outstanding" pill. Money used in precise=false
+                  (default, integer round-half-up) — the chip is a
+                  scan signal, not a paise-level match. */}
+              {row.vendorTotalOutstanding > 0 && (
+                <span
+                  title={`Sum of every open bill for ${row.vendorName}`}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                    fontSize: 10,
+                    fontWeight: 700,
+                    padding: "2px 8px",
+                    borderRadius: 999,
+                    background: "rgba(37, 99, 235, 0.10)",
+                    color: "#1d4ed8",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.04em",
+                    fontFamily: "ui-monospace, monospace",
+                  }}
+                >
+                  Vendor open:{" "}
+                  <Money value={row.vendorTotalOutstanding} size="small" />
+                </span>
+              )}
             </div>
             <p style={{ margin: "0 0 8px", fontSize: 12, color: "var(--muted)" }}>
               Bill{" "}
@@ -474,7 +507,13 @@ function PendingCard({
           >
             Paid amount
           </div>
-          <Money value={row.paidAmount} size="large" tone="success" />
+          {/* Mig 081 follow-on — `precise` keeps the .paise visible
+              so the auditor can match this number exactly against
+              the bank statement (where the credit landed to the
+              rupee + paise). Money's default rounds; we opt out
+              here because rounding would mask a paise-level
+              mismatch and defeat the whole point of the audit. */}
+          <Money value={row.paidAmount} size="large" tone="success" precise />
         </div>
         <button
           type="button"

@@ -143,7 +143,19 @@ export async function submitBillAction(
   const tdsPercent = Number(formData.get("tds_percent") || 0);
   const tcsPercent = Number(formData.get("tcs_percent") || 0);
 
-  const amountSubtotal = Number(amountSubtotalRaw);
+  // Mig 081 follow-on (Daksh) — round amount_subtotal to integer
+  // rupees at write time. Daksh: "from now onward new data will
+  // be in round-offs. If number is 100.3 then 100, if 100.7 then
+  // 101." Math.round = round half away from zero, matching the
+  // spec. Old rows are not touched — only the subtotal of the
+  // bill being inserted right now gets rounded. The generated
+  // amount_gst / amount_total columns in Postgres will still be
+  // computed by % math and may carry a paise tail; the display
+  // layer's Money component rounds those at render time. Two
+  // layers of defence — stored entries are clean, and stale
+  // .paise tails (from pre-mig-081 rows or GST % math) display
+  // as integers anyway.
+  const amountSubtotal = Math.round(Number(amountSubtotalRaw) || 0);
   const taxOk = (n: number) => Number.isFinite(n) && n >= 0 && n <= 100;
   const gstPercent =
     Number.isFinite(cgstPercent) && Number.isFinite(sgstPercent) && Number.isFinite(igstPercent)
@@ -534,7 +546,11 @@ export async function editBillAction(
   const billDate = String(formData.get("bill_date") || "").trim();
   const description = String(formData.get("description") || "").trim();
   const costHead = String(formData.get("cost_head") || "").trim() || null;
-  const amountSubtotal = Number(formData.get("amount_subtotal") || 0);
+  // Mig 081 follow-on (Daksh) — same rounding rule on edit as on
+  // insert. Keeps the "from now onward" promise: if a user edits
+  // a bill and types 4374.55 in the subtotal field, we silently
+  // round to 4375 instead of preserving the paise.
+  const amountSubtotal = Math.round(Number(formData.get("amount_subtotal") || 0));
   const billVendorId = String(formData.get("bill_vendor_id") || "").trim();
 
   // Mig 062 — block CFT (only set for block-purchase bills).

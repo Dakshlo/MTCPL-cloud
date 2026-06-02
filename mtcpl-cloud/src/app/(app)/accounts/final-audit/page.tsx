@@ -159,6 +159,45 @@ export default async function FinalAuditPage() {
       | null;
   };
 
+  // Mig 081 follow-on (Daksh) — per-vendor total outstanding chip on
+  // every audit card. Daksh: "show vendor total outstanding so our
+  // accountant can get help to audit the bills". The auditor uses
+  // it to sanity-check the magnitude — a ₹50,000 payment to a
+  // vendor with ₹17L outstanding reads completely differently from
+  // a ₹50,000 payment to a vendor with ₹50,000 outstanding.
+  //
+  // Read-only — sums every bill's amount_outstanding for vendors
+  // that show up on the page, scoped to vendor ids actually in the
+  // queue + recent audited set so we never pull the whole table.
+  const vendorIdsForAudit = [
+    ...new Set([
+      ...((pendingRaw ?? []) as unknown as RawPending[])
+        .map((r) => r.bills?.bill_vendor_id)
+        .filter((v): v is string => Boolean(v)),
+      ...((auditedRaw ?? []) as unknown as RawAudited[])
+        .map((r) => r.bills?.bill_vendor_id)
+        .filter((v): v is string => Boolean(v)),
+    ]),
+  ];
+  const vendorOutstandingMap = new Map<string, number>();
+  if (vendorIdsForAudit.length > 0) {
+    const { data: outRows } = await supabase
+      .from("bills")
+      .select("bill_vendor_id, amount_outstanding")
+      .in("bill_vendor_id", vendorIdsForAudit)
+      .gt("amount_outstanding", 0);
+    for (const r of (outRows ?? []) as Array<{
+      bill_vendor_id: string;
+      amount_outstanding: number | string;
+    }>) {
+      const cur = vendorOutstandingMap.get(r.bill_vendor_id) ?? 0;
+      vendorOutstandingMap.set(
+        r.bill_vendor_id,
+        cur + Number(r.amount_outstanding ?? 0),
+      );
+    }
+  }
+
   const pendingRows: FinalAuditRow[] = ((pendingRaw ?? []) as unknown as RawPending[]).map((r) => {
     const b = r.bills;
     const v = b
@@ -187,6 +226,12 @@ export default async function FinalAuditPage() {
       auditedByName: null,
       flagReason: null,
       flagNote: null,
+      // Mig 081 follow-on — total still-outstanding across ALL of
+      // this vendor's bills. NULL when zero / no other bills, so
+      // the chip can hide rather than render a "₹0 outstanding".
+      vendorTotalOutstanding: b?.bill_vendor_id
+        ? vendorOutstandingMap.get(b.bill_vendor_id) ?? 0
+        : 0,
     };
   });
 
@@ -218,6 +263,9 @@ export default async function FinalAuditPage() {
       auditedByName: r.final_audit_by ? profilesMap[r.final_audit_by] ?? "Unknown" : null,
       flagReason: r.final_audit_flag_reason,
       flagNote: r.final_audit_flag_note,
+      vendorTotalOutstanding: b?.bill_vendor_id
+        ? vendorOutstandingMap.get(b.bill_vendor_id) ?? 0
+        : 0,
     };
   });
 

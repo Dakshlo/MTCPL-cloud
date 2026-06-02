@@ -52,17 +52,32 @@ export const SECTION_COLORS = {
 // ── Money display ──────────────────────────────────────────────────
 
 /** Indian-locale currency display. Default size 14px, mono font.
- *  Use `size="hero"` for big numbers on hero blocks and KPI cards. */
+ *  Use `size="hero"` for big numbers on hero blocks and KPI cards.
+ *
+ *  Mig 081 follow-on (Daksh) — DISPLAY rounding to integer rupees by
+ *  default. Daksh: "if number is 100.3 then 100, if 100.7 then 101.
+ *  Make sure you don't touch real data — sensitive — but from now
+ *  onward new data will be in round-offs." We only change what shows
+ *  on screen; the underlying numeric value stored in Postgres is
+ *  untouched. Callers that NEED the actual paise (Final Audit
+ *  cross-check against bank statement, voucher PDF) pass
+ *  `precise={true}` to opt out and get up to 2 fraction digits back. */
 export function Money({
   value,
   size = "normal",
   tone,
   prefix = "₹",
+  precise = false,
 }: {
   value: number;
   size?: "hero" | "large" | "normal" | "small";
   tone?: "success" | "warning" | "danger" | "muted" | "accent";
   prefix?: string;
+  /** Show up to 2 fraction digits (the original behaviour). Use
+   *  when the displayed value MUST tie out to a paise-level source
+   *  (bank statement, audit voucher). Default false → integer
+   *  rupees, round half-up. */
+  precise?: boolean;
 }) {
   const sizes: Record<string, { fontSize: number; fontWeight: number }> = {
     // Mig 058 follow-on (Daksh): hero was 30 — too big once the
@@ -94,7 +109,13 @@ export function Money({
       }}
     >
       {prefix}
-      {value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+      {precise
+        ? value.toLocaleString("en-IN", { maximumFractionDigits: 2 })
+        : // Math.round explicitly so half values round AWAY from
+          // zero (4.5 → 5), matching Daksh's spec. Some browsers'
+          // toLocaleString with maximumFractionDigits:0 use banker's
+          // rounding which would give 4.5 → 4 — not what we want.
+          Math.round(value).toLocaleString("en-IN", { maximumFractionDigits: 0 })}
     </span>
   );
 }
