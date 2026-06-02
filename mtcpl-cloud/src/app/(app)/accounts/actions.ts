@@ -2282,6 +2282,121 @@ export async function upsertBillVendorAction(formData: FormData): Promise<
   }
 }
 
+// ── Mig 082 — user-creatable bill-vendor categories ────────────────
+//
+// Auth gate: same posture as createBillVendorAction (anyone who can
+// add a vendor can also add a category — the picker surfaces the
+// "+ Create new category" button alongside the vendor add form).
+//
+// Auto-pick a pill colour from a rotating 12-tone palette so a fresh
+// custom category never collides visually with another. The slug
+// ("custom_my_category") is derived from the label so existing
+// vendor.category rows tagged with it survive a label rename.
+
+const CUSTOM_CATEGORY_PALETTE: Array<{ fg: string; bg: string }> = [
+  { fg: "#1d4ed8", bg: "#dbeafe" }, // blue
+  { fg: "#6d28d9", bg: "#ede9fe" }, // violet
+  { fg: "#0e7490", bg: "#cffafe" }, // cyan
+  { fg: "#15803d", bg: "#dcfce7" }, // green
+  { fg: "#b45309", bg: "#fef3c7" }, // amber
+  { fg: "#b91c1c", bg: "#fee2e2" }, // red
+  { fg: "#9d174d", bg: "#fce7f3" }, // pink
+  { fg: "#a16207", bg: "#fef9c3" }, // yellow
+  { fg: "#7c2d12", bg: "#ffedd5" }, // orange
+  { fg: "#5b21b6", bg: "#ede9fe" }, // deep violet
+  { fg: "#065f46", bg: "#d1fae5" }, // emerald
+  { fg: "#4b5563", bg: "#e5e7eb" }, // slate (fallback)
+];
+
+function slugifyCategoryLabel(label: string): string {
+  return (
+    "custom_" +
+    label
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 50)
+  );
+}
+
+export async function createBillVendorCustomCategoryAction(
+  formData: FormData,
+): Promise<
+  | { ok: true; value: string; label: string; pill_fg: string; pill_bg: string }
+  | { ok: false; error: string }
+> {
+  const { profile } = await requireAuth();
+  if (!canAddBillVendors(profile)) {
+    return {
+      ok: false,
+      error: "You do not have permission to add bill-vendor categories.",
+    };
+  }
+  const label = String(formData.get("label") || "").trim();
+  if (!label) return { ok: false, error: "Category name is required." };
+  if (label.length > 60) {
+    return { ok: false, error: "Category name must be 60 characters or fewer." };
+  }
+  const slug = slugifyCategoryLabel(label);
+  if (slug.length <= "custom_".length + 1) {
+    return {
+      ok: false,
+      error: "Use letters / numbers — the slug came out empty.",
+    };
+  }
+
+  const admin = createAdminSupabaseClient();
+
+  // Pick a colour deterministically from the palette based on how
+  // many custom categories already exist — so the next-created
+  // category visually differs from the most-recent one.
+  const { count: existingCount } = await admin
+    .from("bill_vendor_custom_categories")
+    .select("value", { count: "exact", head: true });
+  const palette =
+    CUSTOM_CATEGORY_PALETTE[
+      (existingCount ?? 0) % CUSTOM_CATEGORY_PALETTE.length
+    ];
+
+  const { error } = await admin
+    .from("bill_vendor_custom_categories")
+    .insert({
+      value: slug,
+      label,
+      pill_fg: palette.fg,
+      pill_bg: palette.bg,
+      created_by: profile.id,
+      is_active: true,
+    });
+  if (error) {
+    if (error.code === PG_UNIQUE_VIOLATION) {
+      return {
+        ok: false,
+        error: "A category with that name already exists.",
+      };
+    }
+    return { ok: false, error: error.message };
+  }
+
+  void logAudit(
+    profile.id,
+    "bill_vendor_custom_category_created",
+    "bill_vendor_custom_category",
+    slug,
+    { label, pill_fg: palette.fg, pill_bg: palette.bg },
+  );
+
+  await refreshAccountsPaths();
+  return {
+    ok: true,
+    value: slug,
+    label,
+    pill_fg: palette.fg,
+    pill_bg: palette.bg,
+  };
+}
+
 export async function archiveBillVendorAction(formData: FormData): Promise<ActionResult> {
   const { profile } = await requireAuth();
   if (!canManageBillVendors(profile)) {

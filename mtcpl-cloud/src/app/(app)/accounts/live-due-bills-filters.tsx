@@ -31,6 +31,8 @@ import { useEffect, useRef, useState } from "react";
 import {
   BILL_VENDOR_CATEGORIES,
   billVendorCategoryDisplay,
+  mergeBillVendorCategories,
+  type CustomBillVendorCategory,
 } from "@/lib/bill-vendor-categories";
 
 export function LiveDueBillsFilters({
@@ -41,6 +43,7 @@ export function LiveDueBillsFilters({
   initialDateFrom,
   initialDateTo,
   initialAge,
+  customCategories = [],
   tokens: { borderStrong, border, shadow, surface },
 }: {
   vendors: Array<{ id: string; name: string }>;
@@ -50,6 +53,10 @@ export function LiveDueBillsFilters({
   initialDateFrom: string;
   initialDateTo: string;
   initialAge: string;
+  /** Mig 082 — user-created categories. Merged with the canonical
+   *  list so the filter dropdown surfaces them too. Page fetches
+   *  the array once on render. */
+  customCategories?: CustomBillVendorCategory[];
   /** Reuse the page's existing colour palette so the controls
    *  look identical to the rest of the Accounts surface. */
   tokens: { borderStrong: string; border: string; shadow: string; surface: string };
@@ -267,9 +274,14 @@ export function LiveDueBillsFilters({
           }}
         >
           <option value="">All categories</option>
-          {BILL_VENDOR_CATEGORIES.map((c) => (
+          {/* Mig 082 — merged canonical + custom. Display label
+              picked from the merged record so a custom category
+              ("Office Supplies") shows under "Custom — Office
+              Supplies" in the dropdown, matching the picker's
+              optgroup grouping. */}
+          {mergeBillVendorCategories(customCategories).map((c) => (
             <option key={c.value} value={c.value}>
-              {billVendorCategoryDisplay(c.value)}
+              {c.group ? `${c.group} — ${c.label}` : c.label}
             </option>
           ))}
         </select>

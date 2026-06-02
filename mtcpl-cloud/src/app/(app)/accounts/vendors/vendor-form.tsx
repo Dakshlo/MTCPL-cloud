@@ -27,9 +27,20 @@ export function VendorForm({
   vendorId,
   trigger,
   nameLocked = false,
+  customCategories = [],
 }: {
   action: (formData: FormData) => Promise<UpsertResult>;
   mode: "create" | "edit";
+  // Mig 082 — user-created categories from
+  // bill_vendor_custom_categories. Parent page (vendors/[id]
+  // or vendors/page) fetches + passes; the picker merges them
+  // with the canonical list.
+  customCategories?: Array<{
+    value: string;
+    label: string;
+    pill_fg: string;
+    pill_bg: string;
+  }>;
   initialValues?: {
     name?: string;
     /** Mig 066 — short human-friendly handle (usually the owner's
@@ -232,6 +243,7 @@ export function VendorForm({
           <CategoryPicker
             value={form.category}
             onChange={(next) => setForm({ ...form, category: next })}
+            customCategories={customCategories}
           />
         </Field>
         <Field label="GSTIN">

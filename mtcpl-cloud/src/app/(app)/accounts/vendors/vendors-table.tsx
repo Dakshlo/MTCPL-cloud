@@ -18,7 +18,10 @@ import {
   VendorIdentity,
 } from "../_ui/components";
 import { archiveBillVendorFormAction } from "../actions";
-import { getBillVendorCategory } from "@/lib/bill-vendor-categories";
+import {
+  getBillVendorCategory,
+  type CustomBillVendorCategory,
+} from "@/lib/bill-vendor-categories";
 
 export type VendorRow = {
   id: string;
@@ -37,12 +40,16 @@ export function VendorsTable({
   vendors,
   outstandingByVendor,
   canEdit = true,
+  customCategories = [],
 }: {
   vendors: VendorRow[];
   outstandingByVendor: Record<string, number>;
   /** When false, hides Archive/Reactivate buttons. Read-only roles
    *  like crosscheck get the table without the mutating controls. */
   canEdit?: boolean;
+  /** Mig 082 — passed to getBillVendorCategory so custom slugs
+   *  resolve to their proper label + pill colour on each row. */
+  customCategories?: CustomBillVendorCategory[];
 }) {
   const [query, setQuery] = useState("");
 
@@ -57,7 +64,7 @@ export function VendorsTable({
       if (v.category?.toLowerCase().includes(q)) return true;
       // Mig 061 — also search against the resolved category LABEL
       // so "marble" finds "block_purchase_marble" vendors etc.
-      if (getBillVendorCategory(v.category).label.toLowerCase().includes(q)) return true;
+      if (getBillVendorCategory(v.category, customCategories).label.toLowerCase().includes(q)) return true;
       if (v.gstin?.toLowerCase().includes(q)) return true;
       if (v.phone?.toLowerCase().includes(q)) return true;
       if (v.email?.toLowerCase().includes(q)) return true;
@@ -149,7 +156,7 @@ export function VendorsTable({
                             text values render in the muted fallback
                             colours (still visible, just neutral). */}
                         {v.category ? (() => {
-                          const cat = getBillVendorCategory(v.category);
+                          const cat = getBillVendorCategory(v.category, customCategories);
                           return (
                             <span
                               style={{

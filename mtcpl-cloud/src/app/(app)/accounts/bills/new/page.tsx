@@ -34,6 +34,21 @@ export default async function NewBillPage({
 
   const vendors: BillVendorOption[] = (vendorRows ?? []) as BillVendorOption[];
 
+  // Mig 082 — load user-created categories so they show up in the
+  // Add Vendor picker's dropdown. Active only — soft-deleted
+  // categories stay hidden from new vendor entry.
+  const { data: customCategoriesRaw } = await supabase
+    .from("bill_vendor_custom_categories")
+    .select("value, label, pill_fg, pill_bg")
+    .eq("is_active", true)
+    .order("label");
+  const customCategories = (customCategoriesRaw ?? []) as Array<{
+    value: string;
+    label: string;
+    pill_fg: string;
+    pill_bg: string;
+  }>;
+
   return (
     <section className="page-card">
       <AccountsHero
@@ -41,7 +56,10 @@ export default async function NewBillPage({
         description="Fill in the supplier's bill details. We'll auto-tag with a unique token and send it to the owner for audit."
         actions={
           <>
-            <AddVendorButton action={upsertBillVendorAction} />
+            <AddVendorButton
+              action={upsertBillVendorAction}
+              customCategories={customCategories}
+            />
             <Link href="/accounts/bills" style={BUTTON_STYLES.secondary}>
               ← All bills
             </Link>

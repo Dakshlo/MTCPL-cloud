@@ -29,7 +29,10 @@ import {
   TABLE_STYLES,
   VendorIdentity,
 } from "./_ui/components";
-import { getBillVendorCategory } from "@/lib/bill-vendor-categories";
+import {
+  getBillVendorCategory,
+  type CustomBillVendorCategory,
+} from "@/lib/bill-vendor-categories";
 import { RoyaltyNetPeek } from "./vendors/[id]/royalty-net-peek";
 
 export type DueBillRow = {
@@ -112,10 +115,16 @@ export function DueBillsClient({
   rows,
   canPropose,
   proposeAction,
+  customCategories = [],
 }: {
   rows: DueBillRow[];
   canPropose: boolean;
   proposeAction: (formData: FormData) => Promise<ProposeResult>;
+  /** Mig 082 — user-created categories from
+   *  bill_vendor_custom_categories. Passed to getBillVendorCategory
+   *  so custom slugs render with their proper label + pill instead
+   *  of falling through to the "legacy free-text" branch. */
+  customCategories?: CustomBillVendorCategory[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -957,7 +966,7 @@ export function DueBillsClient({
                           identity. Uncategorised renders muted so
                           legacy vendors don't shout for attention. */}
                       {(() => {
-                        const cat = getBillVendorCategory(r.vendorCategory);
+                        const cat = getBillVendorCategory(r.vendorCategory, customCategories);
                         return (
                           <div style={{ marginTop: 4 }}>
                             <span

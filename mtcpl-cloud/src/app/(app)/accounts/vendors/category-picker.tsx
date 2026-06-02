@@ -28,29 +28,60 @@ import { useEffect, useId, useRef, useState } from "react";
 import {
   BILL_VENDOR_CATEGORIES,
   getBillVendorCategory,
+  mergeBillVendorCategories,
   type BillVendorCategory,
+  type CustomBillVendorCategory,
 } from "@/lib/bill-vendor-categories";
 import { ACCOUNTS_TOKENS, INPUT_STYLE } from "../_ui/components";
+import { createBillVendorCustomCategoryAction } from "../actions";
 
 export function CategoryPicker({
   value,
   onChange,
   placeholder = "— Pick a category —",
   disabled,
+  customCategories = [],
 }: {
   value: string;
   onChange: (next: string) => void;
   placeholder?: string;
   disabled?: boolean;
+  /** Mig 082 — user-created categories. Caller fetches from the
+   *  page's server component and passes the array in. The picker
+   *  merges them under a "Custom" group at the bottom of the list
+   *  and exposes a "+ Create new category" inline form so a user
+   *  can mint a new one without leaving the vendor / due-bills
+   *  screen. Defaults to empty for legacy callers. */
+  customCategories?: CustomBillVendorCategory[];
 }) {
   const [open, setOpen] = useState(false);
+  // Local mirror of the prop so a newly-created category appears
+  // immediately, without waiting for a full router.refresh round
+  // trip. Server-side state still updates via the action's
+  // revalidatePath chain.
+  const [localCustom, setLocalCustom] = useState<CustomBillVendorCategory[]>(
+    customCategories,
+  );
+  // Keep local in sync if the parent fetches a fresh list.
+  useEffect(() => {
+    setLocalCustom(customCategories);
+  }, [customCategories]);
+  // "+ Create new" inline form state. Inputs are revealed below
+  // the list; submitting calls the server action + adds the new
+  // category to local state.
+  const [creating, setCreating] = useState(false);
+  const [newLabel, setNewLabel] = useState("");
+  const [createErr, setCreateErr] = useState<string | null>(null);
+  const [createPending, setCreatePending] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const listId = useId();
 
-  // Group the master list once per render — cheap; the list is ~10 items.
+  // Group the master list once per render — cheap; canonical list
+  // is ~10 items + however many custom rows the user has created.
+  const merged = mergeBillVendorCategories(localCustom);
   const groups = new Map<string, BillVendorCategory[]>();
   const flat: BillVendorCategory[] = [];
-  for (const c of BILL_VENDOR_CATEGORIES) {
+  for (const c of merged) {
     if (c.group) {
       const list = groups.get(c.group) ?? [];
       list.push(c);
@@ -60,9 +91,42 @@ export function CategoryPicker({
     }
   }
 
-  const selected = value ? getBillVendorCategory(value) : null;
+  const selected = value
+    ? getBillVendorCategory(value, localCustom)
+    : null;
   const isLegacy =
-    value && !BILL_VENDOR_CATEGORIES.some((c) => c.value === value);
+    value && !merged.some((c) => c.value === value);
+
+  async function handleCreate() {
+    const label = newLabel.trim();
+    if (!label) {
+      setCreateErr("Enter a category name.");
+      return;
+    }
+    setCreatePending(true);
+    setCreateErr(null);
+    const fd = new FormData();
+    fd.set("label", label);
+    const res = await createBillVendorCustomCategoryAction(fd);
+    setCreatePending(false);
+    if (!res.ok) {
+      setCreateErr(res.error);
+      return;
+    }
+    // Optimistically add the new row + auto-select it so the user's
+    // next action (save vendor) carries the slug.
+    const newRow: CustomBillVendorCategory = {
+      value: res.value,
+      label: res.label,
+      pill_fg: res.pill_fg,
+      pill_bg: res.pill_bg,
+    };
+    setLocalCustom((prev) => [...prev, newRow]);
+    onChange(res.value);
+    setNewLabel("");
+    setCreating(false);
+    setOpen(false);
+  }
 
   // Close on outside click + Escape
   useEffect(() => {
@@ -247,6 +311,163 @@ export function CategoryPicker({
                 canonical list — pick a replacement above.
               </div>
             </>
+          )}
+
+          {/* Mig 082 follow-on (Daksh) — "+ Create new category" tile
+              at the foot of the dropdown. Default state is a single
+              compact button; tapping it expands to an inline input
+              + save / cancel. The server-side
+              createBillVendorCustomCategoryAction validates +
+              persists, returns the new slug + pill, and we
+              optimistically push it into localCustom so the picker
+              re-renders with the new row visible + selected. */}
+          <div
+            aria-hidden
+            style={{
+              height: 1,
+              margin: "6px 8px",
+              background: ACCOUNTS_TOKENS.border,
+            }}
+          />
+          {creating ? (
+            <div
+              style={{
+                padding: 8,
+                display: "flex",
+                flexDirection: "column",
+                gap: 6,
+                background: ACCOUNTS_TOKENS.accentLight,
+                borderRadius: 8,
+                border: `1px solid ${ACCOUNTS_TOKENS.accent}`,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 10,
+                  fontWeight: 800,
+                  letterSpacing: "0.08em",
+                  color: ACCOUNTS_TOKENS.accent,
+                  textTransform: "uppercase",
+                }}
+              >
+                New category
+              </div>
+              <input
+                type="text"
+                autoFocus
+                maxLength={60}
+                value={newLabel}
+                onChange={(e) => {
+                  setNewLabel(e.target.value);
+                  if (createErr) setCreateErr(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void handleCreate();
+                  } else if (e.key === "Escape") {
+                    e.preventDefault();
+                    setCreating(false);
+                    setNewLabel("");
+                    setCreateErr(null);
+                  }
+                }}
+                placeholder="e.g. Office Supplies"
+                style={{
+                  ...INPUT_STYLE,
+                  fontSize: 13,
+                  padding: "8px 10px",
+                  background: "#fff",
+                }}
+              />
+              {createErr && (
+                <div
+                  role="alert"
+                  style={{
+                    fontSize: 11,
+                    color: ACCOUNTS_TOKENS.danger,
+                    fontWeight: 600,
+                  }}
+                >
+                  ⚠ {createErr}
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCreating(false);
+                    setNewLabel("");
+                    setCreateErr(null);
+                  }}
+                  disabled={createPending}
+                  style={{
+                    fontSize: 11,
+                    padding: "5px 10px",
+                    background: "transparent",
+                    border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+                    borderRadius: 6,
+                    color: "var(--muted)",
+                    cursor: "pointer",
+                    fontWeight: 600,
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCreate}
+                  disabled={createPending || !newLabel.trim()}
+                  style={{
+                    fontSize: 11,
+                    padding: "5px 12px",
+                    background: ACCOUNTS_TOKENS.accent,
+                    color: "#fff",
+                    border: `1px solid ${ACCOUNTS_TOKENS.accent}`,
+                    borderRadius: 6,
+                    cursor:
+                      createPending || !newLabel.trim()
+                        ? "not-allowed"
+                        : "pointer",
+                    fontWeight: 700,
+                    opacity:
+                      createPending || !newLabel.trim() ? 0.6 : 1,
+                  }}
+                >
+                  {createPending ? "Saving…" : "+ Create"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setCreating(true)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                width: "100%",
+                padding: "8px 10px",
+                background: "transparent",
+                border: `1px dashed ${ACCOUNTS_TOKENS.accent}`,
+                borderRadius: 6,
+                cursor: "pointer",
+                fontSize: 12.5,
+                fontWeight: 700,
+                color: ACCOUNTS_TOKENS.accent,
+                textAlign: "left",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background =
+                  ACCOUNTS_TOKENS.accentLight;
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "transparent";
+              }}
+            >
+              <span aria-hidden style={{ fontSize: 14 }}>＋</span>
+              Create new category
+            </button>
           )}
         </div>
       )}

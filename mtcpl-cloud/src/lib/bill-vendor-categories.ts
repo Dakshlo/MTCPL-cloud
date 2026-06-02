@@ -59,10 +59,46 @@ export const BILL_VENDOR_CATEGORIES: ReadonlyArray<BillVendorCategory> = [
 
 const BY_VALUE = new Map(BILL_VENDOR_CATEGORIES.map((c) => [c.value, c]));
 
+/** Mig 082 — user-created categories from
+ *  bill_vendor_custom_categories. Same shape as the canonical
+ *  list. Server pages fetch the list once on render and pass it
+ *  via mergeBillVendorCategories(); callers downstream of that
+ *  merge see one combined array indistinguishable from the
+ *  canonical one. The standalone helpers (getBillVendorCategory /
+ *  isBlockPurchaseCategory) accept the merged list as a 2nd arg
+ *  so they keep working on custom values too. */
+export type CustomBillVendorCategory = {
+  value: string;
+  label: string;
+  pill_fg: string;
+  pill_bg: string;
+};
+
+/** Merge canonical + custom categories into one display list.
+ *  Custom rows render under a "Custom" group at the end of the
+ *  picker so the canonical ordering stays predictable. */
+export function mergeBillVendorCategories(
+  custom: CustomBillVendorCategory[],
+): BillVendorCategory[] {
+  const customMapped: BillVendorCategory[] = custom.map((c) => ({
+    value: c.value,
+    label: c.label,
+    group: "Custom",
+    pill: { fg: c.pill_fg, bg: c.pill_bg },
+  }));
+  return [...BILL_VENDOR_CATEGORIES, ...customMapped];
+}
+
 /** Lookup the full category record by stored value. Unknown values
  *  (legacy free-text like "TOOLS" / "SAND" / null) fall back to a
- *  generic "Uncategorised" pill so the row still renders. */
-export function getBillVendorCategory(value: string | null | undefined): {
+ *  generic "Uncategorised" pill so the row still renders.
+ *  Mig 082 — accepts an optional `customCategories` array so
+ *  custom slugs (custom_xyz) resolve to their proper label + pill
+ *  instead of falling through to the legacy branch. */
+export function getBillVendorCategory(
+  value: string | null | undefined,
+  customCategories: CustomBillVendorCategory[] = [],
+): {
   value: string | null;
   label: string;
   pill: { fg: string; bg: string };
@@ -72,6 +108,15 @@ export function getBillVendorCategory(value: string | null | undefined): {
   }
   const c = BY_VALUE.get(value);
   if (c) return { value: c.value, label: c.label, pill: c.pill };
+  // Mig 082 — custom category lookup before the legacy fallback.
+  const cc = customCategories.find((x) => x.value === value);
+  if (cc) {
+    return {
+      value: cc.value,
+      label: cc.label,
+      pill: { fg: cc.pill_fg, bg: cc.pill_bg },
+    };
+  }
   // Legacy free-text — show the raw value but in muted pill colours.
   return { value, label: value, pill: { fg: "#6b7280", bg: "#f3f4f6" } };
 }

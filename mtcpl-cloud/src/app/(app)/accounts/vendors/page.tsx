@@ -36,6 +36,20 @@ export default async function BillVendorsPage() {
     created_at: string;
   }>;
 
+  // Mig 082 — user-created categories so the create-vendor form +
+  // the table pills resolve them with proper labels + colours.
+  const { data: customCategoriesRaw } = await supabase
+    .from("bill_vendor_custom_categories")
+    .select("value, label, pill_fg, pill_bg")
+    .eq("is_active", true)
+    .order("label");
+  const customCategories = (customCategoriesRaw ?? []) as Array<{
+    value: string;
+    label: string;
+    pill_fg: string;
+    pill_bg: string;
+  }>;
+
   const { data: outstandingRaw } = await supabase
     .from("bills")
     .select("bill_vendor_id, amount_outstanding")
@@ -72,7 +86,7 @@ export default async function BillVendorsPage() {
             {activeCount} active · {archivedCount} archived
           </span>
         }
-        actions={canEdit ? <VendorForm action={upsertBillVendorAction} mode="create" /> : null}
+        actions={canEdit ? <VendorForm action={upsertBillVendorAction} mode="create" customCategories={customCategories} /> : null}
       />
 
       {vendors.length === 0 ? (
@@ -80,7 +94,7 @@ export default async function BillVendorsPage() {
           icon="🏢"
           title="No bill vendors yet"
           description="Add your suppliers (cement / steel / scaffolding / tools / etc) here so they show up in the bill-entry form."
-          action={canEdit ? <VendorForm action={upsertBillVendorAction} mode="create" /> : undefined}
+          action={canEdit ? <VendorForm action={upsertBillVendorAction} mode="create" customCategories={customCategories} /> : undefined}
         />
       ) : (
         <VendorsTable
@@ -98,6 +112,7 @@ export default async function BillVendorsPage() {
           }
           outstandingByVendor={Object.fromEntries(outstandingByVendor)}
           canEdit={canEdit}
+          customCategories={customCategories}
         />
       )}
 

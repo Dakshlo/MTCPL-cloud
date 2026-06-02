@@ -471,6 +471,24 @@ export default async function AccountsHomePage({
   const { data: advanceBalanceRows } = await supabase
     .from("vendor_advance_balance")
     .select("available_balance, open_advance_count");
+
+  // Mig 082 — user-created bill-vendor categories. Surfaces in the
+  // category filter dropdown + as pill chips on rows so the
+  // accountant sees them right next to the canonical list. Active
+  // rows only — soft-deleted categories stay hidden from the
+  // picker (legacy vendor.category values still resolve via the
+  // lookup helper's fallback branch).
+  const { data: customCategoriesRaw } = await supabase
+    .from("bill_vendor_custom_categories")
+    .select("value, label, pill_fg, pill_bg")
+    .eq("is_active", true)
+    .order("label");
+  const customCategories = (customCategoriesRaw ?? []) as Array<{
+    value: string;
+    label: string;
+    pill_fg: string;
+    pill_bg: string;
+  }>;
   type AdvBalRow = { available_balance: number | string; open_advance_count: number };
   const totalAdvanceCredit = ((advanceBalanceRows ?? []) as AdvBalRow[])
     .reduce((s, r) => s + Number(r.available_balance ?? 0), 0);
@@ -820,6 +838,7 @@ export default async function AccountsHomePage({
         initialDateFrom={dateFromFilter}
         initialDateTo={dateToFilter}
         initialAge={ageFilter}
+        customCategories={customCategories}
         tokens={{
           borderStrong: ACCOUNTS_TOKENS.borderStrong,
           border: ACCOUNTS_TOKENS.border,
@@ -847,6 +866,7 @@ export default async function AccountsHomePage({
           rows={filteredDue}
           canPropose={isAccountManager}
           proposeAction={proposePaymentsAction}
+          customCategories={customCategories}
         />
       )}
 

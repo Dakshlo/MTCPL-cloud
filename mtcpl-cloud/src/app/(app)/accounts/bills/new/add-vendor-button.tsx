@@ -26,8 +26,20 @@ type UpsertResult =
 
 export function AddVendorButton({
   action,
+  customCategories = [],
 }: {
   action: (formData: FormData) => Promise<UpsertResult>;
+  /** Mig 082 — pre-existing user-created categories. Threaded
+   *  through to CategoryPicker so they're visible in the dropdown
+   *  alongside the canonical Block Purchase / Equipment / Jobwork
+   *  / etc. The "+ Create new category" button inside the picker
+   *  uses the server action to mint additional ones. */
+  customCategories?: Array<{
+    value: string;
+    label: string;
+    pill_fg: string;
+    pill_bg: string;
+  }>;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -250,7 +262,11 @@ export function AddVendorButton({
                 that matches the Finance form chrome. Picking a Block
                 Purchase sub-type here flips on the CFT field on the
                 bill form the moment this vendor is selected. */}
-            <CategoryPicker value={category} onChange={setCategory} />
+            <CategoryPicker
+              value={category}
+              onChange={setCategory}
+              customCategories={customCategories}
+            />
           </Field>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <Field label="GSTIN">
