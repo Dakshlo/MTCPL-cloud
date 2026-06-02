@@ -67,6 +67,30 @@ export function HoldBillForm({
       return;
     }
 
+    // Mig 082 follow-on (Daksh) — explicit confirmation step before
+    // the hold writes. Hold freezes money in Pay Today, so an
+    // accidental click here can silently delay a real payment.
+    // Confirm summarises the bill ID, the amount, the reason, and
+    // (when editing) the delta vs. the existing hold so the owner
+    // can pace the click.
+    const deltaLine =
+      isEdit && currentAmount !== n
+        ? `\nDelta: ${n > currentAmount ? "+" : ""}₹${(n - currentAmount).toLocaleString("en-IN")} vs current ₹${currentAmount.toLocaleString("en-IN")}`
+        : "";
+    const msg = [
+      isEdit ? "ADJUST HOLD on this bill?" : "APPLY HOLD on this bill?",
+      "",
+      `Amount: ₹${n.toLocaleString("en-IN")}`,
+      `Reason: ${reason.trim()}`,
+      deltaLine,
+      "",
+      "This freezes the amount from Pay Today proposals until the",
+      "hold is released. Bill total + audit are unchanged.",
+    ]
+      .filter((s) => s !== "")
+      .join("\n");
+    if (!window.confirm(msg)) return;
+
     startTransition(async () => {
       const fd = new FormData();
       fd.set("bill_id", billId);

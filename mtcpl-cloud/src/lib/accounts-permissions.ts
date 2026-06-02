@@ -178,12 +178,20 @@ export function canRenameBillVendor(p: Pick<Profile, "role">): boolean {
  *  bills + watching outstanding move, so giving them the hold lever
  *  cuts the loop where they have to ask the owner every time a
  *  partial-pay dispute comes up. Owner still sees + can release
- *  via the same panel. */
+ *  via the same panel.
+ *
+ *  Mig 082 follow-on (Daksh, June 2026) — CLOSED BACK DOWN to
+ *  owner / developer only. Daksh: "rn accounts and accountant plus
+ *  is also can do that. Set the hold this way only owner and
+ *  developer can set hold, remove hold or adjust." Reasoning: hold
+ *  freezes money from being proposed in Pay Today; it's a
+ *  policy-level intervention that the owner wants to gate himself,
+ *  not delegate to data-entry roles. Accountants still SEE the
+ *  hold + the held amount on the bill detail page; they just
+ *  can't write it. */
 export function canHoldBill(p: Pick<Profile, "role">): boolean {
   if (p.role === "developer") return true;
   if (p.role === "owner") return true;
-  if (p.role === "accountant") return true;
-  if (p.role === "accountant_star") return true;
   return false;
 }
 

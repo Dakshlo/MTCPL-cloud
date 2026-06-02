@@ -23,6 +23,7 @@ import { BillBackLink } from "./bill-back-link";
 import { PartialRejectionForm } from "./partial-rejection-form";
 import { CancelBillButton } from "./cancel-bill-button";
 import { HoldBillForm } from "./hold-bill-form";
+import { ReleaseHoldButton } from "./release-hold-button";
 import { ApplyAdvanceButton } from "./apply-advance-button";
 import {
   ACCOUNTS_TOKENS,
@@ -1061,20 +1062,15 @@ export default async function BillDetailPage({
                       currentReason={bill.held_reason ?? null}
                     />
                     {heldAmt > 0 && (
-                      <form action={releaseBillHoldFormAction}>
-                        <input type="hidden" name="bill_id" value={bill.id} />
-                        <button
-                          type="submit"
-                          style={{
-                            ...BUTTON_STYLES.ghost,
-                            color: "#15803d",
-                            borderColor: "#15803d",
-                          }}
-                          title="Release the hold — full outstanding becomes proposable again"
-                        >
-                          🔓 Release hold
-                        </button>
-                      </form>
+                      // Mig 082 follow-on — extracted into a client
+                      // wrapper so we can confirm before firing the
+                      // server action. Same submit target; just an
+                      // intercepting window.confirm in between.
+                      <ReleaseHoldButton
+                        billId={bill.id}
+                        heldAmount={heldAmt}
+                        reason={bill.held_reason ?? null}
+                      />
                     )}
                   </div>
                 )}
