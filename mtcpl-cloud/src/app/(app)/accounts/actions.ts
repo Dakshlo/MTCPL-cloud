@@ -21,6 +21,7 @@ import {
   canAddBillVendors,
   canApplyAdvanceToBill,
   canApproveBills,
+  canApproveDebit,
   canConfirmPayments,
   canFinalAudit,
   canHoldBill,
@@ -29,6 +30,7 @@ import {
   canMarkPaid,
   canRecordAdvance,
   canRenameBillVendor,
+  canSettleWithDebit,
   canSubmitBills,
   canUnapplyAdvance,
 } from "@/lib/accounts-permissions";
@@ -4307,4 +4309,438 @@ export async function unapplyAdvanceFormAction(formData: FormData) {
     redirect(`/accounts/bills/${billId}?error=${encodeURIComponent(res.error)}`);
   }
   redirect(`/accounts/bills/${billId}?toast=Advance+unapplied`);
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Mig 085 — "Settle with debit" on a flagged overpayment.
+//
+// Flow: auditor (accountant_star) opens a flagged payment, picks an
+// OPEN bill of the SAME vendor, types the debit amount → a PENDING
+// bill_debit_settlements row. Owner approves → a synthetic, pre-paid
+// bill_payments row lands on the TARGET bill (is_debit_settlement),
+// the recalc trigger drops its outstanding, and the flagged payment is
+// stamped debit_settled_at (moves to "Settled"). Owner rejects →
+// nothing changes. Owner can reverse an approved one later.
+//
+// The original overpaid bill's real bank-payment row is NEVER touched
+// (no money moved back) — this is the paper reallocation of the excess
+// the vendor already holds.
+// ────────────────────────────────────────────────────────────────────
+
+/** Auditor starts a debit settlement (PENDING — owner must approve). */
+export async function createDebitSettlementAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canSettleWithDebit(profile)) {
+    return { ok: false, error: "You can't settle a flagged payment with a debit." };
+  }
+  const supabase = createAdminSupabaseClient();
+
+  const sourcePaymentId = String(formData.get("source_payment_id") ?? "").trim();
+  const targetBillId = String(formData.get("target_bill_id") ?? "").trim();
+  const amountRaw = String(formData.get("amount") ?? "").trim();
+  const note = String(formData.get("note") ?? "").trim() || null;
+  if (!sourcePaymentId) return { ok: false, error: "Missing flagged payment id." };
+  if (!targetBillId) return { ok: false, error: "Pick a bill to apply the debit to." };
+  const amount = Number(amountRaw);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { ok: false, error: "Debit amount must be greater than zero." };
+  }
+
+  // The flagged payment + its (overpaid) bill.
+  const { data: pay, error: payErr } = await supabase
+    .from("bill_payments")
+    .select("id, bill_id, status, final_audit_status, debit_settled_at")
+    .eq("id", sourcePaymentId)
+    .maybeSingle();
+  if (payErr) return { ok: false, error: payErr.message };
+  if (!pay) return { ok: false, error: "Flagged payment not found." };
+  const p = pay as {
+    id: string;
+    bill_id: string;
+    status: string;
+    final_audit_status: string;
+    debit_settled_at: string | null;
+  };
+  if (p.final_audit_status !== "flagged") {
+    return { ok: false, error: "Only a flagged payment can be settled with a debit." };
+  }
+  if (p.debit_settled_at) {
+    return { ok: false, error: "This flagged payment is already settled." };
+  }
+
+  const { data: srcBill } = await supabase
+    .from("bills")
+    .select("id, token, bill_vendor_id")
+    .eq("id", p.bill_id)
+    .maybeSingle();
+  if (!srcBill) return { ok: false, error: "Flagged payment's bill not found." };
+  const sb = srcBill as { id: string; token: string; bill_vendor_id: string };
+  if (targetBillId === sb.id) {
+    return { ok: false, error: "Pick a DIFFERENT bill to apply the debit to." };
+  }
+
+  const { data: target, error: tErr } = await supabase
+    .from("bills")
+    .select("id, token, bill_vendor_id, amount_outstanding, status, cancelled_at")
+    .eq("id", targetBillId)
+    .maybeSingle();
+  if (tErr) return { ok: false, error: tErr.message };
+  if (!target) return { ok: false, error: "Target bill not found." };
+  const t = target as {
+    id: string;
+    token: string;
+    bill_vendor_id: string;
+    amount_outstanding: number | string;
+    status: string;
+    cancelled_at: string | null;
+  };
+  if (t.bill_vendor_id !== sb.bill_vendor_id) {
+    return { ok: false, error: "Target bill belongs to a different vendor." };
+  }
+  if (t.cancelled_at || t.status === "cancelled" || t.status === "rejected") {
+    return { ok: false, error: "Target bill is cancelled / rejected." };
+  }
+  const outstanding = Number(t.amount_outstanding ?? 0);
+  if (outstanding <= 0) {
+    return { ok: false, error: "Target bill has no outstanding amount." };
+  }
+  if (amount > outstanding + 0.005) {
+    return {
+      ok: false,
+      error: `Debit can't exceed the bill's outstanding (₹${outstanding.toLocaleString("en-IN")}).`,
+    };
+  }
+
+  // One ACTIVE settlement per flagged payment (DB partial-unique index
+  // is the hard guard; this gives a friendly message first).
+  const { data: existing } = await supabase
+    .from("bill_debit_settlements")
+    .select("id")
+    .eq("source_payment_id", sourcePaymentId)
+    .in("status", ["pending_approval", "approved"])
+    .limit(1);
+  if (existing && existing.length > 0) {
+    return { ok: false, error: "This flagged payment already has an active debit." };
+  }
+
+  const now = new Date().toISOString();
+  const { data: row, error: insErr } = await supabase
+    .from("bill_debit_settlements")
+    .insert({
+      source_payment_id: sourcePaymentId,
+      source_bill_id: sb.id,
+      vendor_id: sb.bill_vendor_id,
+      target_bill_id: t.id,
+      amount,
+      note,
+      status: "pending_approval",
+      created_by: profile.id,
+      created_at: now,
+    })
+    .select("id")
+    .single();
+  if (insErr) return { ok: false, error: insErr.message };
+
+  await logAudit(
+    profile.id,
+    "debit_settlement_created",
+    "bill_debit_settlement",
+    row.id,
+    {
+      source_payment_id: sourcePaymentId,
+      source_bill_token: sb.token,
+      target_bill_token: t.token,
+      amount,
+    },
+  );
+  await refreshAccountsPaths();
+  revalidatePath("/accounts/final-audit/flagged");
+  return { ok: true };
+}
+
+/** Owner approves a pending debit → applies it to the target bill. */
+export async function approveDebitSettlementAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canApproveDebit(profile)) {
+    return { ok: false, error: "Only owner / developer can approve a debit." };
+  }
+  const supabase = createAdminSupabaseClient();
+  const settlementId = String(formData.get("settlement_id") ?? "").trim();
+  if (!settlementId) return { ok: false, error: "Missing settlement id." };
+
+  const { data: sRow, error: sErr } = await supabase
+    .from("bill_debit_settlements")
+    .select(
+      "id, source_payment_id, source_bill_id, vendor_id, target_bill_id, amount, note, status",
+    )
+    .eq("id", settlementId)
+    .maybeSingle();
+  if (sErr) return { ok: false, error: sErr.message };
+  if (!sRow) return { ok: false, error: "Debit settlement not found." };
+  const s = sRow as {
+    id: string;
+    source_payment_id: string;
+    source_bill_id: string;
+    vendor_id: string;
+    target_bill_id: string;
+    amount: number | string;
+    note: string | null;
+    status: string;
+  };
+  if (s.status !== "pending_approval") {
+    return { ok: false, error: `Debit is already ${s.status.replace(/_/g, " ")}.` };
+  }
+  const amount = Number(s.amount);
+
+  // Re-validate the target bill still has room (time has passed).
+  const { data: target } = await supabase
+    .from("bills")
+    .select("id, token, amount_outstanding, status, cancelled_at")
+    .eq("id", s.target_bill_id)
+    .maybeSingle();
+  if (!target) return { ok: false, error: "Target bill not found." };
+  const t = target as {
+    id: string;
+    token: string;
+    amount_outstanding: number | string;
+    status: string;
+    cancelled_at: string | null;
+  };
+  if (t.cancelled_at || t.status === "cancelled" || t.status === "rejected") {
+    return { ok: false, error: "Target bill is no longer payable." };
+  }
+  const outstanding = Number(t.amount_outstanding ?? 0);
+  if (amount > outstanding + 0.005) {
+    return {
+      ok: false,
+      error: `Target bill outstanding is now ₹${outstanding.toLocaleString("en-IN")} — can't apply ₹${amount.toLocaleString("en-IN")}.`,
+    };
+  }
+
+  const { data: srcBill } = await supabase
+    .from("bills")
+    .select("token")
+    .eq("id", s.source_bill_id)
+    .maybeSingle();
+  const srcToken = (srcBill as { token: string } | null)?.token ?? "?";
+
+  const now = new Date().toISOString();
+
+  // 1. Synthetic, pre-paid payment row on the TARGET bill — the recalc
+  //    trigger drops its outstanding. Tagged is_debit_settlement so it
+  //    is filtered out of HDFC CSV + the Final Audit queue (no NEW
+  //    money moved). payment_method='other' (non-bank transfer).
+  const { data: paymentRow, error: payErr } = await supabase
+    .from("bill_payments")
+    .insert({
+      bill_id: s.target_bill_id,
+      status: "paid",
+      proposed_amount: amount,
+      paid_amount: amount,
+      payment_method: "other",
+      payment_reference: `DEBIT-LINK:${srcToken}`,
+      payment_note: s.note,
+      proposed_by: profile.id,
+      proposed_at: now,
+      confirmed_by: profile.id,
+      confirmed_at: now,
+      paid_by: profile.id,
+      paid_at: now,
+      is_debit_settlement: true,
+      debit_settlement_id: s.id,
+      updated_at: now,
+    })
+    .select("id")
+    .single();
+  if (payErr) return { ok: false, error: payErr.message };
+
+  // 2. Mark the settlement approved + link the synthetic row.
+  const { error: updErr } = await supabase
+    .from("bill_debit_settlements")
+    .update({
+      status: "approved",
+      payment_row_id: paymentRow.id,
+      approved_by: profile.id,
+      approved_at: now,
+    })
+    .eq("id", s.id);
+  if (updErr) {
+    // Roll back the synthetic payment so it isn't left dangling.
+    await supabase
+      .from("bill_payments")
+      .update({
+        status: "cancelled",
+        cancelled_at: now,
+        cancelled_by: profile.id,
+        cancel_reason: "debit_settlement_rollback",
+        updated_at: now,
+      })
+      .eq("id", paymentRow.id);
+    return { ok: false, error: updErr.message };
+  }
+
+  // 3. Stamp the flagged payment → moves it to the "Settled" group.
+  await supabase
+    .from("bill_payments")
+    .update({ debit_settled_at: now, debit_settlement_id: s.id })
+    .eq("id", s.source_payment_id);
+
+  await logAudit(
+    profile.id,
+    "debit_settlement_approved",
+    "bill_debit_settlement",
+    s.id,
+    { target_bill_token: t.token, amount, payment_row_id: paymentRow.id },
+  );
+  await refreshAccountsPaths();
+  revalidatePath("/accounts/final-audit/flagged");
+  return { ok: true };
+}
+
+/** Owner rejects a pending debit → nothing changes, flag stays open. */
+export async function rejectDebitSettlementAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canApproveDebit(profile)) {
+    return { ok: false, error: "Only owner / developer can reject a debit." };
+  }
+  const supabase = createAdminSupabaseClient();
+  const settlementId = String(formData.get("settlement_id") ?? "").trim();
+  const reason = String(formData.get("reject_reason") ?? "").trim() || null;
+  if (!settlementId) return { ok: false, error: "Missing settlement id." };
+
+  const { data: sRow } = await supabase
+    .from("bill_debit_settlements")
+    .select("id, status")
+    .eq("id", settlementId)
+    .maybeSingle();
+  if (!sRow) return { ok: false, error: "Debit settlement not found." };
+  if ((sRow as { status: string }).status !== "pending_approval") {
+    return { ok: false, error: "Only a pending debit can be rejected." };
+  }
+
+  const now = new Date().toISOString();
+  const { error } = await supabase
+    .from("bill_debit_settlements")
+    .update({
+      status: "rejected",
+      rejected_by: profile.id,
+      rejected_at: now,
+      reject_reason: reason,
+    })
+    .eq("id", settlementId);
+  if (error) return { ok: false, error: error.message };
+
+  await logAudit(
+    profile.id,
+    "debit_settlement_rejected",
+    "bill_debit_settlement",
+    settlementId,
+    { reason },
+  );
+  await refreshAccountsPaths();
+  revalidatePath("/accounts/final-audit/flagged");
+  return { ok: true };
+}
+
+/** Owner reverses an APPROVED debit — soft-cancels the synthetic
+ *  payment (target outstanding goes back up via the recalc trigger)
+ *  and re-opens the flag. */
+export async function reverseDebitSettlementAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canApproveDebit(profile)) {
+    return { ok: false, error: "Only owner / developer can reverse a debit." };
+  }
+  const supabase = createAdminSupabaseClient();
+  const settlementId = String(formData.get("settlement_id") ?? "").trim();
+  if (!settlementId) return { ok: false, error: "Missing settlement id." };
+
+  const { data: sRow } = await supabase
+    .from("bill_debit_settlements")
+    .select("id, status, payment_row_id, source_payment_id")
+    .eq("id", settlementId)
+    .maybeSingle();
+  if (!sRow) return { ok: false, error: "Debit settlement not found." };
+  const s = sRow as {
+    id: string;
+    status: string;
+    payment_row_id: string | null;
+    source_payment_id: string;
+  };
+  if (s.status !== "approved") {
+    return { ok: false, error: "Only an approved debit can be reversed." };
+  }
+
+  const now = new Date().toISOString();
+  if (s.payment_row_id) {
+    await supabase
+      .from("bill_payments")
+      .update({
+        status: "cancelled",
+        cancelled_at: now,
+        cancelled_by: profile.id,
+        cancel_reason: "debit_settlement_reversed",
+        updated_at: now,
+      })
+      .eq("id", s.payment_row_id);
+  }
+  // Re-open the flag.
+  await supabase
+    .from("bill_payments")
+    .update({ debit_settled_at: null, debit_settlement_id: null })
+    .eq("id", s.source_payment_id);
+
+  const { error } = await supabase
+    .from("bill_debit_settlements")
+    .update({ status: "reversed", reversed_by: profile.id, reversed_at: now })
+    .eq("id", settlementId);
+  if (error) return { ok: false, error: error.message };
+
+  await logAudit(
+    profile.id,
+    "debit_settlement_reversed",
+    "bill_debit_settlement",
+    settlementId,
+    {},
+  );
+  await refreshAccountsPaths();
+  revalidatePath("/accounts/final-audit/flagged");
+  return { ok: true };
+}
+
+// Form-action wrappers (void → redirect) for the UI <form>s.
+export async function createDebitSettlementFormAction(formData: FormData) {
+  const res = await createDebitSettlementAction(formData);
+  const sourcePaymentId = String(formData.get("source_payment_id") ?? "");
+  if (!res.ok) {
+    redirect(
+      `/accounts/final-audit/flagged/${sourcePaymentId}/settle?error=${encodeURIComponent(res.error)}`,
+    );
+  }
+  redirect(
+    `/accounts/final-audit/flagged?toast=${encodeURIComponent("Debit sent for owner approval")}`,
+  );
+}
+
+export async function approveDebitSettlementFormAction(formData: FormData) {
+  const res = await approveDebitSettlementAction(formData);
+  if (!res.ok) {
+    redirect(`/accounts/approvals?error=${encodeURIComponent(res.error)}`);
+  }
+  redirect(`/accounts/approvals?toast=${encodeURIComponent("Debit approved")}`);
+}
+
+export async function rejectDebitSettlementFormAction(formData: FormData) {
+  const res = await rejectDebitSettlementAction(formData);
+  if (!res.ok) {
+    redirect(`/accounts/approvals?error=${encodeURIComponent(res.error)}`);
+  }
+  redirect(`/accounts/approvals?toast=${encodeURIComponent("Debit rejected")}`);
 }

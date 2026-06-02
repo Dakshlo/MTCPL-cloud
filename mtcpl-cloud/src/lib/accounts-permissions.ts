@@ -223,3 +223,27 @@ export function canUnapplyAdvance(p: Pick<Profile, "role">): boolean {
   if (p.role === "owner") return true;
   return false;
 }
+
+/** Mig 085 — "Settle with debit" on a flagged overpayment. The
+ *  AUDITOR who works Final Audit (accountant_star / Account Plus)
+ *  initiates the debit: picks an open bill of the same vendor and
+ *  applies the excess against it. Owner + developer can initiate too.
+ *  Same gate as canFinalAudit (the people who see flagged payments).
+ *  The application itself does nothing until the OWNER approves it
+ *  (canApproveDebit below). */
+export function canSettleWithDebit(p: Pick<Profile, "role">): boolean {
+  if (p.role === "developer") return true;
+  if (p.role === "owner") return true;
+  if (p.role === "accountant_star") return true;
+  return false;
+}
+
+/** Mig 085 — approve (or reject / reverse) a pending debit
+ *  settlement. This is the gate that actually moves a bill's
+ *  outstanding, so it's OWNER-only (Daksh: "it will ask approval
+ *  from owner"). Developer included as the superuser fallback. */
+export function canApproveDebit(p: Pick<Profile, "role">): boolean {
+  if (p.role === "developer") return true;
+  if (p.role === "owner") return true;
+  return false;
+}

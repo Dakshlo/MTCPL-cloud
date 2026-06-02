@@ -99,6 +99,9 @@ export async function GET(_req: NextRequest) {
         )
         .eq("status", "confirmed")
         .eq("is_advance_application", false)
+        // Mig 085 — synthetic debit-settlement rows never carry real
+        // bank money, so they must never enter the HDFC payment file.
+        .eq("is_debit_settlement", false)
         .order("confirmed_at", { ascending: true }),
       // Vendor advances ride the same CSV. Include confirmed ones
       // that haven't been picked up by a previous export.

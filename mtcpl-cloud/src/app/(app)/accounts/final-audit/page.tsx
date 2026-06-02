@@ -60,8 +60,10 @@ export default async function FinalAuditPage() {
     .eq("final_audit_status", "pending")
     // Mig 073 — synthetic advance-application rows are NOT real bank
     // payments (the cash moved when the original advance was paid),
-    // so they shouldn't appear in Final Audit's queue.
+    // so they shouldn't appear in Final Audit's queue. Mig 085 — same
+    // for synthetic debit-settlement rows (the excess already moved).
     .eq("is_advance_application", false)
+    .eq("is_debit_settlement", false)
     .order("paid_at", { ascending: false })
     .limit(200);
 
@@ -82,6 +84,7 @@ export default async function FinalAuditPage() {
     )
     .eq("status", "paid")
     .eq("is_advance_application", false)
+    .eq("is_debit_settlement", false)
     .in("final_audit_status", ["verified", "flagged"])
     .not("final_audit_at", "is", null)
     .gte("final_audit_at", cutoffIso)
