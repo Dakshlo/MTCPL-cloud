@@ -185,7 +185,17 @@ export default async function FinalAuditPage() {
       .from("bills")
       .select("bill_vendor_id, amount_outstanding")
       .in("bill_vendor_id", vendorIdsForAudit)
-      .gt("amount_outstanding", 0);
+      .gt("amount_outstanding", 0)
+      // Mig 084 follow-on (Daksh) — exclude cancelled bills from the
+      // vendor-outstanding chip. The chip was summing raw
+      // amount_outstanding with no status filter, so a cancelled
+      // bill (status='cancelled', cancelled_at stamped, but
+      // amount_outstanding left as-is by cancelBillAction) inflated
+      // the total. Match the canonical Due Bills filter:
+      // status='approved' + not cancelled. Display-only fix — no
+      // bill data is touched.
+      .eq("status", "approved")
+      .is("cancelled_at", null);
     for (const r of (outRows ?? []) as Array<{
       bill_vendor_id: string;
       amount_outstanding: number | string;

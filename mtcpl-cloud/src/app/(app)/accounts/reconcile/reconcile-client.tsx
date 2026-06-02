@@ -787,7 +787,18 @@ export function ReconcileClient({ bills }: { bills: ReconcileBillRow[] }) {
         </div>
       </div>
 
-      {/* Main two-pane table */}
+      {/* Main two-pane table.
+          Mig 084 follow-on (Daksh) — in full-screen the outer wrapper
+          is a fixed, inset:0 flex column (a definite 100vh tall), so
+          this block claims the leftover height with flex:1 + minHeight:0
+          (everything below the toolbar + tiles). Each pane then fills
+          that height and scrolls its body internally. Previously the
+          panes were capped at maxHeight 700 while the whole fixed
+          wrapper scrolled, which pushed the bills-pane footer
+          (Total / Paid / Outstanding) below the fold in full-screen.
+          flex:1 (rather than a calc() magic number) auto-adapts to the
+          real toolbar/tiles height. Non-full-screen keeps the
+          minHeight: 480 in-flow behaviour. */}
       <div
         style={{
           display: "grid",
@@ -797,7 +808,9 @@ export function ReconcileClient({ bills }: { bills: ReconcileBillRow[] }) {
           border: `1px solid ${ACCOUNTS_TOKENS.border}`,
           borderRadius: 10,
           overflow: "hidden",
-          minHeight: 480,
+          ...(fullScreen
+            ? { flex: 1, minHeight: 0 }
+            : { minHeight: 480 }),
         }}
       >
         {/* ── Vendors pane ── */}
@@ -822,7 +835,10 @@ export function ReconcileClient({ bills }: { bills: ReconcileBillRow[] }) {
               flex: 1,
               overflowY: "auto",
               minHeight: 0,
-              maxHeight: 600,
+              // In full-screen the parent block has a definite height,
+              // so flex:1 fills it and the cap must lift; otherwise
+              // keep the 600px cap for the in-flow page layout.
+              maxHeight: fullScreen ? "none" : 600,
             }}
           >
             <table
@@ -941,7 +957,13 @@ export function ReconcileClient({ bills }: { bills: ReconcileBillRow[] }) {
             gridTemplateRows: "auto 1fr auto",
             minWidth: 0,
             minHeight: 0,
-            maxHeight: 700,
+            // In full-screen the parent block supplies a definite
+            // height, so the pane fills it (height:100%) and the body
+            // row (1fr) scrolls internally — keeping the totals row
+            // (auto, row 3) pinned to the bottom of the visible area.
+            // The old fixed 700px cap pushed those totals below the
+            // fold once the fixed wrapper itself started scrolling.
+            ...(fullScreen ? { height: "100%" } : { maxHeight: 700 }),
             background:
               activePane === "bills" ? "#fff" : "#fafafa",
           }}
