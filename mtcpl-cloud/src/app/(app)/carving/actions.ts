@@ -1712,8 +1712,17 @@ export async function loadTwoSlabsOnMultiHeadAction(formData: FormData) {
     }
   }
 
-  // Validate identical slab geometry. Two cylinders on a 2-head CNC
-  // must have matching L/W/T or they won't sit in the jig together.
+  // Mig 081 follow-on (Daksh) — opt-in "force mismatched" flag for
+  // the rare case where the vendor needs to load two DIFFERENT
+  // slabs on one 2-head CNC. Default behaviour (no flag) keeps the
+  // identical-pair guard exactly as before. With the flag set, the
+  // L×W×T + temple + label match is skipped, but EVERY other guard
+  // (status, machine type, lathe filter, machine bed dims for each
+  // slab independently) still runs.
+  const forceMismatched = txt(formData, "force_mismatched") === "true";
+
+  // Load both slabs' geometry — needed both for the identity check
+  // (when not forcing) AND for the per-slab bed-fit check (always).
   const { data: slabRows } = await admin
     .from("slab_requirements")
     .select("id, label, temple, length_ft, width_ft, thickness_ft")
@@ -1730,24 +1739,36 @@ export async function loadTwoSlabsOnMultiHeadAction(formData: FormData) {
     length_ft: number | string; width_ft: number | string; thickness_ft: number | string;
   }>).find((s) => s.id === b.slab_requirement_id)!;
 
-  const dimsMatch =
-    Number(slabA.length_ft) === Number(slabB.length_ft) &&
-    Number(slabA.width_ft) === Number(slabB.width_ft) &&
-    Number(slabA.thickness_ft) === Number(slabB.thickness_ft);
-  const labelMatch = (slabA.label ?? "") === (slabB.label ?? "");
-  const templeMatch = (slabA.temple ?? "") === (slabB.temple ?? "");
-  if (!dimsMatch || !labelMatch || !templeMatch) {
-    redirect(
-      `/vendor?toast=${encodeURIComponent(
-        "2-head load needs IDENTICAL slabs (same L×W×T + temple + label). Pick a matching pair from the queue.",
-      )}`,
-    );
+  if (!forceMismatched) {
+    // Default path — strict identity check.
+    const dimsMatch =
+      Number(slabA.length_ft) === Number(slabB.length_ft) &&
+      Number(slabA.width_ft) === Number(slabB.width_ft) &&
+      Number(slabA.thickness_ft) === Number(slabB.thickness_ft);
+    const labelMatch = (slabA.label ?? "") === (slabB.label ?? "");
+    const templeMatch = (slabA.temple ?? "") === (slabB.temple ?? "");
+    if (!dimsMatch || !labelMatch || !templeMatch) {
+      redirect(
+        `/vendor?toast=${encodeURIComponent(
+          "2-head load needs IDENTICAL slabs (same L×W×T + temple + label). Pick a matching pair from the queue.",
+        )}`,
+      );
+    }
   }
 
-  // Migration 024: dim check vs the machine's bed envelope.
-  // Both slabs are identical so a single check covers both.
-  const dimErr = checkSlabFits(slabA, m);
-  if (dimErr) redirect(`/vendor?toast=${encodeURIComponent(dimErr)}`);
+  // Mig 024 — machine bed-envelope check. Always runs; with
+  // forceMismatched the slabs differ so we check EACH one against
+  // the machine bed, not just one. Either failing kills the load.
+  const dimErrA = checkSlabFits(slabA, m);
+  if (dimErrA) {
+    redirect(`/vendor?toast=${encodeURIComponent(`Slab A: ${dimErrA}`)}`);
+  }
+  if (forceMismatched) {
+    const dimErrB = checkSlabFits(slabB, m);
+    if (dimErrB) {
+      redirect(`/vendor?toast=${encodeURIComponent(`Slab B: ${dimErrB}`)}`);
+    }
+  }
 
   const now = new Date().toISOString();
   const finalEst = vendorEstMinutes || a.estimated_minutes || b.estimated_minutes || null;
@@ -1823,22 +1844,29 @@ export async function loadTwoSlabsOnMultiHeadAction(formData: FormData) {
     .update({ status: "carving_in_progress", updated_by: profile.id, updated_at: now })
     .in("id", [a.slab_requirement_id, b.slab_requirement_id]);
 
-  // Audit on both items + the machine.
+  // Audit on both items + the machine. Mig 081 follow-on — when the
+  // load was mismatched (vendor used the "load any 2 slabs" mode)
+  // we tag every event with [MISMATCHED] so anyone reading the
+  // timeline + audit later can tell it apart from a normal pair.
+  const mismatchTag = forceMismatched ? " · [MISMATCHED PAIR]" : "";
   await Promise.all([
-    recordEvent(a.id, "loaded", profile.id, `2-head load (paired with ${b.id}) · ETA ${finalEst ?? "?"}min`),
-    recordEvent(b.id, "loaded", profile.id, `2-head load (paired with ${a.id}) · ETA ${finalEst ?? "?"}min`),
+    recordEvent(a.id, "loaded", profile.id, `2-head load (paired with ${b.id}) · ETA ${finalEst ?? "?"}min${mismatchTag}`),
+    recordEvent(b.id, "loaded", profile.id, `2-head load (paired with ${a.id}) · ETA ${finalEst ?? "?"}min${mismatchTag}`),
   ]);
   await admin.from("cnc_machine_events").insert({
     cnc_machine_id: machineId,
     event_type: "loaded",
     carving_item_id: a.id,
     user_id: profile.id,
-    message: `2-head load · pair ${a.id} + ${b.id} · ETA ${finalEst ?? "?"}min`,
+    message: `2-head load · pair ${a.id} + ${b.id} · ETA ${finalEst ?? "?"}min${mismatchTag}`,
   });
   await logAudit(profile.id, "carving_loaded_pair", "carving_item", a.id, {
     machine_id: machineId,
     paired_with: b.id,
     vendor_estimated_minutes: finalEst,
+    // Mig 081 follow-on — explicit so analytics queries can filter
+    // by mismatched vs identical loads later.
+    mismatched: forceMismatched,
   });
 
   refreshAll();

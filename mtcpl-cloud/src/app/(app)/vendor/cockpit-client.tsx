@@ -4788,8 +4788,20 @@ function LoadModal({
   // head loaded, second turned off — rare but real). Single mode
   // routes through loadSlabOnMachineAction, pair mode through
   // loadTwoSlabsOnMultiHeadAction.
-  const [loadMode, setLoadMode] = useState<"pair" | "single">("pair");
+  // Mig 081 follow-on (Daksh) — third mode added: "mismatch". For
+  // the rare case the vendor needs to load 2 different slabs on a
+  // 2-head CNC (different dims / temple / label). Hidden behind a
+  // long-press on the Pair card so it never becomes the default
+  // path; revealed mode keeps showing for the rest of the session
+  // so the user can flip in + out while picking slabs.
+  const [loadMode, setLoadMode] = useState<"pair" | "single" | "mismatch">("pair");
+  const [mismatchRevealed, setMismatchRevealed] = useState(false);
   const effectiveIsPair = machineIsTwoHead && loadMode === "pair";
+  // "Two-column slab picker" cases — pair (matched) AND mismatch
+  // (anything-goes). Single mode is the only one that uses the
+  // wide single-slab grid below.
+  const effectiveIsTwoCol = machineIsTwoHead && (loadMode === "pair" || loadMode === "mismatch");
+  const isMismatchMode = machineIsTwoHead && loadMode === "mismatch";
 
   // Daksh May 2026 — filter the slab queue to JUST those compatible
   // with the currently-selected machine type. Was unfiltered, which
@@ -4837,11 +4849,19 @@ function LoadModal({
       )
     : [];
 
+  // Mig 081 follow-on — mismatch mode picker. Same compatible queue
+  // (lathe / non-lathe filter still respected) but with NO geometry
+  // / temple / label match required. Anything except the slab
+  // already picked for head 1 is fair game.
+  const anyCompatibleForB = isMismatchMode
+    ? compatibleQueue.filter((q) => q.id !== carvingItemId)
+    : [];
+
   // Reset pair selection when primary changes, machine type changes,
   // or the vendor switches between pair and single mode.
   useEffect(() => {
     setCarvingItemBId("");
-  }, [carvingItemId, effectiveIsPair]);
+  }, [carvingItemId, effectiveIsPair, isMismatchMode]);
 
   // Switching to a non-2-head machine forces single mode.
   useEffect(() => {
@@ -4879,28 +4899,31 @@ function LoadModal({
       title={
         effectiveIsPair
           ? "Load 2 identical slabs (2-head CNC)"
-          : machineIsTwoHead
-            ? "Load 1 slab onto 2-head CNC (single mode)"
-            : machineIsLathe
-              ? "Load slab onto lathe"
-              : "Load slab onto CNC"
+          : isMismatchMode
+            ? "⚠ Load 2 MISMATCHED slabs (2-head CNC)"
+            : machineIsTwoHead
+              ? "Load 1 slab onto 2-head CNC (single mode)"
+              : machineIsLathe
+                ? "Load slab onto lathe"
+                : "Load slab onto CNC"
       }
       subtitle={
         effectiveIsPair
           ? "Both heads carve the same shape — pick two slabs with identical L×W×T + temple + label."
-          : machineIsTwoHead
-            ? "Second head will be turned off. Pick the slab to load on head 1."
-            : machineIsLathe
-              ? "Only lathe-tagged (cylindrical) slabs are loadable here."
-              : "Pick the slab and machine, then enter your tighter ETA."
+          : isMismatchMode
+            ? "Heads will carve different shapes. Use only when no matching pair exists. Two confirmations required."
+            : machineIsTwoHead
+              ? "Second head will be turned off. Pick the slab to load on head 1."
+              : machineIsLathe
+                ? "Only lathe-tagged (cylindrical) slabs are loadable here."
+                : "Pick the slab and machine, then enter your tighter ETA."
       }
       onClose={onClose}
       // Daksh May 2026 round 2 — single mode at 560 was still too
       // narrow on tablet/desktop (lots of scroll, Load button below
-      // fold). Both modes now open wide: pair at 920 (room for two
-      // grids), single at 760 so the slab cards lay out 3-4 across
-      // with no vertical chase.
-      maxWidth={effectiveIsPair ? 920 : 760}
+      // fold). Both two-column modes (pair + mismatch) open at 920;
+      // single mode at 760.
+      maxWidth={effectiveIsTwoCol ? 920 : 760}
     >
       {compatibleQueue.length === 0 ? (
         <Empty
@@ -4914,12 +4937,56 @@ function LoadModal({
         />
       ) : (
         <form
-          action={effectiveIsPair ? loadTwoSlabsOnMultiHeadAction : loadSlabOnMachineAction}
+          action={effectiveIsTwoCol ? loadTwoSlabsOnMultiHeadAction : loadSlabOnMachineAction}
+          onSubmit={(e) => {
+            // Mig 081 follow-on — mismatch mode requires DOUBLE
+            // confirmation before the form actually fires (Daksh's
+            // spec: "give 2 confirmation when long pressed going
+            // for manual 2 head non mirror"). Pair + single modes
+            // submit immediately.
+            if (!isMismatchMode) return;
+            const aId = carvingItemId || "(no slab A)";
+            const bId = carvingItemBId || "(no slab B)";
+            const first = window.confirm(
+              [
+                "⚠  MISMATCHED PAIR — both heads will carve DIFFERENT shapes.",
+                "",
+                `Head 1: ${aId}`,
+                `Head 2: ${bId}`,
+                "",
+                "Are you sure you want to load two non-matching slabs?",
+              ].join("\n"),
+            );
+            if (!first) {
+              e.preventDefault();
+              return;
+            }
+            const second = window.confirm(
+              [
+                "🛑  FINAL CHECK — REALLY load mismatched slabs?",
+                "",
+                "The two heads will run different toolpaths. This is",
+                "the same flow as a normal pair load but the dimension",
+                "match guard is bypassed. There is no undo from the",
+                "machine — once carving starts you must finish or",
+                "unload-with-problem each slab independently.",
+              ].join("\n"),
+            );
+            if (!second) {
+              e.preventDefault();
+            }
+          }}
           style={{ display: "flex", flexDirection: "column", gap: 14 }}
         >
           <FormPendingOverlay
-            label={effectiveIsPair ? "Loading both slabs…" : "Loading slab…"}
+            label={effectiveIsTwoCol ? "Loading both slabs…" : "Loading slab…"}
           />
+          {/* Mig 081 follow-on — sentinel for the server to bypass
+              the identity check on this submit. Only present in
+              mismatch mode; default pair loads omit it entirely. */}
+          {isMismatchMode && (
+            <input type="hidden" name="force_mismatched" value="true" />
+          )}
           {/* Machine picker — first so the form layout reflects what
               the vendor's about to load onto. Switching to a 2-head
               machine swaps the slab picker into pair mode. */}
@@ -4981,32 +5048,38 @@ function LoadModal({
           {/* Pair/Single mode toggle — only on 2-head machines.
               99.9% of loads are pair mode; single mode is for the
               rare case where one head is broken or you only have
-              one matching slab. */}
+              one matching slab.
+              Mig 081 follow-on (Daksh) — a third "Mismatch" mode is
+              hidden by default; long-press (600ms) on the Pair card
+              reveals it. From then on the third card stays visible
+              while the modal is open. */}
           {machineIsTwoHead && (
             <div>
               <Label>Mode</Label>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                <button
-                  type="button"
-                  onClick={() => setLoadMode("pair")}
-                  style={{
-                    flex: "1 1 200px",
-                    padding: "10px 14px",
-                    fontSize: 13,
-                    fontWeight: 700,
-                    background: loadMode === "pair" ? "rgba(37,99,235,0.10)" : "var(--surface)",
-                    border: `1.5px solid ${loadMode === "pair" ? "#2563eb" : "var(--border)"}`,
-                    color: loadMode === "pair" ? "#1d4ed8" : "var(--text)",
-                    borderRadius: 6,
-                    cursor: "pointer",
-                    textAlign: "left",
+                {/* Pair — primary CTA. doubles as the long-press
+                    trigger for revealing the mismatch tile. We use
+                    a ref + setTimeout so that a normal click
+                    (release before 600ms) still works as a regular
+                    setLoadMode("pair") tap. */}
+                <LongPressableModeButton
+                  onTap={() => setLoadMode("pair")}
+                  onLongPress={() => {
+                    setMismatchRevealed(true);
+                    setLoadMode("mismatch");
                   }}
+                  active={loadMode === "pair"}
+                  activeBg="rgba(37,99,235,0.10)"
+                  activeBorder="#2563eb"
+                  activeFg="#1d4ed8"
+                  ariaLabel="Pair mode (long-press for mismatch)"
                 >
                   ▶▶ Pair mode (2 slabs, both heads)
                   <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2, fontWeight: 400 }}>
                     Default. Both heads carve identical slabs.
+                    {!mismatchRevealed && " Long-press for advanced."}
                   </div>
-                </button>
+                </LongPressableModeButton>
                 <button
                   type="button"
                   onClick={() => setLoadMode("single")}
@@ -5028,17 +5101,64 @@ function LoadModal({
                     Use when you don&apos;t have a matching pair.
                   </div>
                 </button>
+                {/* Mismatch — only visible after long-press */}
+                {mismatchRevealed && (
+                  <button
+                    type="button"
+                    onClick={() => setLoadMode("mismatch")}
+                    style={{
+                      flex: "1 1 200px",
+                      padding: "10px 14px",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      background: loadMode === "mismatch" ? "rgba(220,38,38,0.10)" : "var(--surface)",
+                      border: `1.5px solid ${loadMode === "mismatch" ? "#b91c1c" : "rgba(220,38,38,0.35)"}`,
+                      color: loadMode === "mismatch" ? "#991b1b" : "#b91c1c",
+                      borderRadius: 6,
+                      cursor: "pointer",
+                      textAlign: "left",
+                    }}
+                  >
+                    ⚠ Mismatch mode (advanced)
+                    <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2, fontWeight: 400 }}>
+                      Load 2 different slabs on the same CNC. Rare.
+                    </div>
+                  </button>
+                )}
               </div>
+              {/* Mig 081 — once mismatch mode is active, anchor a
+                  prominent red warning above the slab pickers so the
+                  vendor can never forget what they just opted into. */}
+              {isMismatchMode && (
+                <div
+                  role="alert"
+                  style={{
+                    marginTop: 10,
+                    padding: "10px 12px",
+                    background: "rgba(220,38,38,0.08)",
+                    border: "1.5px solid #b91c1c",
+                    borderRadius: 8,
+                    fontSize: 12.5,
+                    color: "#7f1d1d",
+                    lineHeight: 1.45,
+                  }}
+                >
+                  <strong>⚠ Mismatched pair load.</strong> Head 1 and
+                  Head 2 will carve different shapes. Use this only
+                  when you genuinely have no matching pair and the
+                  CNC would otherwise sit idle. You&apos;ll get two
+                  confirmation prompts before the load fires.
+                </div>
+              )}
             </div>
           )}
 
-          {/* Slab picker(s). Pair mode lays Slab A and Slab B in two
-              columns (side-by-side) on tablet/desktop so the head can
-              compare them at a glance and the Load button doesn't get
-              pushed off-screen. Single mode is a single full-width
-              grid. Each grid is independently scrollable, capped at
-              ~360px so neither hogs the modal height. */}
-          {effectiveIsPair ? (
+          {/* Slab picker(s). Pair + mismatch modes lay Slab A and
+              Slab B in two columns (side-by-side) on tablet/desktop;
+              single mode is a single full-width grid. Each grid is
+              independently scrollable, capped at ~360px so neither
+              hogs the modal height. */}
+          {effectiveIsTwoCol ? (
             <div
               style={{
                 display: "grid",
@@ -5081,58 +5201,72 @@ function LoadModal({
                   ))}
                 </div>
               </div>
-              {/* Slab B column — only the matching-geometry subset */}
+              {/* Slab B column — matching-geometry subset in pair
+                  mode; anything-goes (lathe filter still applies)
+                  in mismatch mode. */}
               <div>
-                <Label>Slab B (head 2 — must match A)</Label>
+                <Label>
+                  {isMismatchMode
+                    ? "Slab B (head 2 — ANY compatible slab) ⚠"
+                    : "Slab B (head 2 — must match A)"}
+                </Label>
                 <input
                   type="hidden"
                   name="carving_item_b_id"
                   value={carvingItemBId}
                 />
-                {matchingPair.length === 0 ? (
-                  <div
-                    style={{
-                      padding: "12px 14px",
-                      background: "rgba(217,119,6,0.06)",
-                      border: "1px solid rgba(217,119,6,0.25)",
-                      borderRadius: 8,
-                      fontSize: 12,
-                      color: "#b45309",
-                      minHeight: 360,
-                      display: "flex",
-                      alignItems: "center",
-                    }}
-                  >
-                    No matching slab in the queue. 2-head loads need a
-                    second slab with the same dimensions, temple, and
-                    label.
-                  </div>
-                ) : (
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns:
-                        "repeat(auto-fill, minmax(120px, 1fr))",
-                      gap: 8,
-                      maxHeight: 360,
-                      overflowY: "auto",
-                      padding: 4,
-                      border: "1px solid var(--border)",
-                      borderRadius: 8,
-                      background: "var(--surface-alt, #fafaf7)",
-                    }}
-                  >
-                    {matchingPair.map((q) => (
-                      <SlabPickerCard
-                        key={q.id}
-                        job={q}
-                        selected={q.id === carvingItemBId}
-                        onSelect={() => setCarvingItemBId(q.id)}
-                        stoneTypes={stoneTypes}
-                      />
-                    ))}
-                  </div>
-                )}
+                {(() => {
+                  const bList = isMismatchMode ? anyCompatibleForB : matchingPair;
+                  if (bList.length === 0) {
+                    return (
+                      <div
+                        style={{
+                          padding: "12px 14px",
+                          background: "rgba(217,119,6,0.06)",
+                          border: "1px solid rgba(217,119,6,0.25)",
+                          borderRadius: 8,
+                          fontSize: 12,
+                          color: "#b45309",
+                          minHeight: 360,
+                          display: "flex",
+                          alignItems: "center",
+                        }}
+                      >
+                        {isMismatchMode
+                          ? "No other compatible slab in the queue — pick a different machine or wait for more slabs."
+                          : "No matching slab in the queue. 2-head loads need a second slab with the same dimensions, temple, and label."}
+                      </div>
+                    );
+                  }
+                  return (
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns:
+                          "repeat(auto-fill, minmax(120px, 1fr))",
+                        gap: 8,
+                        maxHeight: 360,
+                        overflowY: "auto",
+                        padding: 4,
+                        border: `1px solid ${isMismatchMode ? "rgba(220,38,38,0.35)" : "var(--border)"}`,
+                        borderRadius: 8,
+                        background: isMismatchMode
+                          ? "rgba(220,38,38,0.04)"
+                          : "var(--surface-alt, #fafaf7)",
+                      }}
+                    >
+                      {bList.map((q) => (
+                        <SlabPickerCard
+                          key={q.id}
+                          job={q}
+                          selected={q.id === carvingItemBId}
+                          onSelect={() => setCarvingItemBId(q.id)}
+                          stoneTypes={stoneTypes}
+                        />
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           ) : (
@@ -5787,6 +5921,86 @@ function EditLocationModal({
 }
 
 // ── Tiny presentational helpers ────────────────────────────────────
+
+/** Mig 081 follow-on (Daksh) — used by the LoadModal's Pair card
+ *  to reveal the hidden Mismatch mode tile on long-press. Falls
+ *  through to onTap on a normal click (release before 600ms).
+ *  Cancels the long-press if the user moves their pointer out of
+ *  the button before the timer fires — same behaviour as native
+ *  long-press on iOS / Android.
+ */
+function LongPressableModeButton({
+  onTap,
+  onLongPress,
+  active,
+  activeBg,
+  activeBorder,
+  activeFg,
+  ariaLabel,
+  children,
+}: {
+  onTap: () => void;
+  onLongPress: () => void;
+  active: boolean;
+  activeBg: string;
+  activeBorder: string;
+  activeFg: string;
+  ariaLabel: string;
+  children: React.ReactNode;
+}) {
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longFiredRef = useRef(false);
+  const cancel = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+  return (
+    <button
+      type="button"
+      aria-label={ariaLabel}
+      onPointerDown={() => {
+        longFiredRef.current = false;
+        cancel();
+        timerRef.current = setTimeout(() => {
+          longFiredRef.current = true;
+          onLongPress();
+        }, 600);
+      }}
+      onPointerUp={() => {
+        // If the long-press timer didn't fire, treat as a tap.
+        const wasLong = longFiredRef.current;
+        cancel();
+        if (!wasLong) onTap();
+      }}
+      onPointerLeave={cancel}
+      onPointerCancel={cancel}
+      onContextMenu={(e) => {
+        // Suppress the iOS / mobile long-press context menu so it
+        // doesn't fight with our handler.
+        e.preventDefault();
+      }}
+      style={{
+        flex: "1 1 200px",
+        padding: "10px 14px",
+        fontSize: 13,
+        fontWeight: 700,
+        background: active ? activeBg : "var(--surface)",
+        border: `1.5px solid ${active ? activeBorder : "var(--border)"}`,
+        color: active ? activeFg : "var(--text)",
+        borderRadius: 6,
+        cursor: "pointer",
+        textAlign: "left",
+        userSelect: "none",
+        WebkitUserSelect: "none",
+        WebkitTouchCallout: "none",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
 
 function Label({ children }: { children: React.ReactNode }) {
   return (
