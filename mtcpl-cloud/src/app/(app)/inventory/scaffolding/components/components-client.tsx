@@ -399,20 +399,77 @@ function ComponentForm({
       style={{
         background: INV_THEME.paper,
         border: `1.5px solid ${INV_THEME.steel}`,
-        borderRadius: 10,
-        padding: 14,
-        display: "grid",
-        gridTemplateColumns: "auto repeat(auto-fit, minmax(140px, 1fr))",
-        gap: 10,
-        alignItems: "center",
+        borderRadius: 14,
+        padding: 18,
+        display: "flex",
+        flexDirection: "column",
+        gap: 16,
+        boxShadow: "0 8px 28px rgba(28, 52, 69, 0.10)",
       }}
     >
-      <div style={{ color: INV_THEME.steel }}>
-        <ComponentIcon
-          type={type}
-          size={48}
-          imageDataUrl={imageDataUrl ?? undefined}
-        />
+      {/* Mig 084 follow-on (Daksh) — form redesigned from a cramped
+          auto-fit grid into a clean vertical card. Header shows a
+          big live preview of the icon + the auto-derived name so
+          the user sees exactly what they're building as they fill
+          the form. The fields below flow top-to-bottom with
+          generous spacing instead of being squeezed onto one row. */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 14,
+          paddingBottom: 14,
+          borderBottom: `1px solid ${INV_THEME.parchment}`,
+        }}
+      >
+        <div
+          style={{
+            width: 56,
+            height: 56,
+            flexShrink: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: INV_THEME.cream,
+            border: `1px solid ${INV_THEME.parchment}`,
+            borderRadius: 10,
+            color: INV_THEME.steel,
+          }}
+        >
+          <ComponentIcon
+            type={type}
+            size={42}
+            imageDataUrl={imageDataUrl ?? undefined}
+          />
+        </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div
+            style={{
+              fontSize: 10,
+              fontWeight: 800,
+              color: INV_THEME.steelLight,
+              textTransform: "uppercase",
+              letterSpacing: "0.1em",
+            }}
+          >
+            {mode === "create" ? "New component" : "Edit component"}
+          </div>
+          <div
+            style={{
+              fontSize: 18,
+              fontWeight: 800,
+              color: INV_THEME.steel,
+              marginTop: 2,
+              lineHeight: 1.2,
+            }}
+          >
+            {derivedName || (
+              <span style={{ color: INV_THEME.steelLight, fontWeight: 600, fontSize: 14 }}>
+                Pick a type + size to name this part…
+              </span>
+            )}
+          </div>
+        </div>
       </div>
       {/* Mig 084 (Daksh) — Type is now user-defined. The dropdown
           is fed by the live scaffolding_component_types list (no
@@ -519,54 +576,46 @@ function ComponentForm({
         )}
       </Field>
       {/* Mig 083 follow-on (Daksh) — the standalone Display Name
-          field is gone. The name is auto-built from Type + Size:
-          "Standard" + "2.5m" → "Standard 2.5m". This preview shows
-          the user exactly what the saved name will be as they type
-          the size. The server re-derives it the same way, so the
-          two never drift. */}
+          field is gone. The name auto-builds from Type + Size and
+          shows in the header preview above; the server re-derives
+          it the same way so the two never drift. */}
       <Field label="Size">
         <input
           name="size_spec"
           value={size}
           onChange={(e) => setSize(e.target.value)}
-          placeholder="2.5m / 100×50 / blank"
+          placeholder="e.g. 2.5m · 100×50 · 18ga — or leave blank"
           style={inputStyle}
         />
       </Field>
-      <Field label="Name (auto)" wide>
-        <div
-          style={{
-            padding: "8px 10px",
-            fontSize: 14,
-            fontWeight: 800,
-            border: `1px solid ${INV_THEME.parchment}`,
-            borderRadius: 6,
-            background: "#fff",
-            color: INV_THEME.steel,
-          }}
-        >
-          {derivedName}
+      {/* Secondary row — Unit + Sort order sit side by side; they're
+          lower-priority than Type/Size so they share one compact
+          line instead of each taking a full row. */}
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ flex: "1 1 120px", minWidth: 0 }}>
+          <Field label="Unit">
+            <input
+              name="unit"
+              defaultValue={component?.unit ?? "pcs"}
+              required
+              placeholder="pcs / kg / m"
+              style={inputStyle}
+            />
+          </Field>
         </div>
-      </Field>
-      <Field label="Unit">
-        <input
-          name="unit"
-          defaultValue={component?.unit ?? "pcs"}
-          required
-          placeholder="pcs / kg / m"
-          style={inputStyle}
-        />
-      </Field>
-      <Field label="Sort order">
-        <input
-          name="display_order"
-          type="number"
-          step="1"
-          defaultValue={component?.display_order ?? 0}
-          style={inputStyle}
-        />
-      </Field>
-      <Field label="Description" wide>
+        <div style={{ flex: "1 1 120px", minWidth: 0 }}>
+          <Field label="Sort order">
+            <input
+              name="display_order"
+              type="number"
+              step="1"
+              defaultValue={component?.display_order ?? 0}
+              style={inputStyle}
+            />
+          </Field>
+        </div>
+      </div>
+      <Field label="Description (optional)">
         <input
           name="description"
           defaultValue={component?.description ?? ""}
@@ -670,7 +719,6 @@ function ComponentForm({
         <div
           role="alert"
           style={{
-            gridColumn: "1 / -1",
             padding: "8px 10px",
             background: "rgba(193, 68, 46, 0.1)",
             color: INV_THEME.stockOut,
@@ -685,10 +733,12 @@ function ComponentForm({
       )}
       <div
         style={{
-          gridColumn: "1 / -1",
           display: "flex",
           gap: 8,
           justifyContent: "flex-end",
+          paddingTop: 4,
+          borderTop: `1px solid ${INV_THEME.parchment}`,
+          marginTop: 2,
         }}
       >
         <button type="button" onClick={onCancel} style={secondaryButton}>
@@ -705,7 +755,10 @@ function ComponentForm({
 function Field({
   label,
   children,
-  wide,
+  // Mig 084 follow-on — `wide` is a no-op now that the form is a
+  // flex column (every field is full-width by default). Kept in the
+  // signature so existing call sites with `wide` don't error.
+  wide: _wide,
 }: {
   label: string;
   children: React.ReactNode;
@@ -716,8 +769,8 @@ function Field({
       style={{
         display: "flex",
         flexDirection: "column",
-        gap: 4,
-        gridColumn: wide ? "1 / -1" : undefined,
+        gap: 5,
+        width: "100%",
       }}
     >
       <span
@@ -737,10 +790,12 @@ function Field({
 }
 
 const inputStyle: React.CSSProperties = {
-  padding: "8px 10px",
-  fontSize: 13,
+  padding: "9px 12px",
+  fontSize: 13.5,
   border: `1px solid ${INV_THEME.parchment}`,
-  borderRadius: 6,
+  borderRadius: 8,
   background: INV_THEME.cream,
   color: INV_THEME.steel,
+  width: "100%",
+  boxSizing: "border-box",
 };
