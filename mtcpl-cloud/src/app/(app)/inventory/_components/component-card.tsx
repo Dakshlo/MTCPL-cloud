@@ -11,16 +11,9 @@
 // names), what's out at each site, and pending movements.
 // ──────────────────────────────────────────────────────────────────
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ComponentIcon, type ScaffoldingComponentType } from "./component-icon";
 import { INV_THEME } from "./theme";
-
-// Daksh (June 2026) — cards open on a short HOLD, not a single tap (a
-// tap on a tablet was opening the detail by accident). 300ms: long
-// enough that a quick tap won't trigger it, short enough to fire
-// BEFORE the OS long-press text-selection / clipboard popup (~500ms)
-// which was otherwise stealing the gesture.
-const HOLD_MS = 300;
 
 // Inlined (was imported from ./stock, which pulls server-only code —
 // can't live in a "use client" module). Pure qty → level mapping.
@@ -76,56 +69,17 @@ export function ComponentCard({
   interactive?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const [holding, setHolding] = useState(false);
-  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const holdStart = useRef<{ x: number; y: number } | null>(null);
   const level = stockLevel(qty);
   const muted = emphasis === "muted";
   const displayQty = Math.round(qty);
   const isClickable = interactive && !href;
 
-  function cancelHold() {
-    if (holdTimer.current) {
-      clearTimeout(holdTimer.current);
-      holdTimer.current = null;
-    }
-    holdStart.current = null;
-    setHolding(false);
-  }
-  function startHold(e: React.PointerEvent) {
-    holdStart.current = { x: e.clientX, y: e.clientY };
-    setHolding(true);
-    holdTimer.current = setTimeout(() => {
-      holdTimer.current = null;
-      setHolding(false);
-      setOpen(true);
-    }, HOLD_MS);
-  }
-  function moveHold(e: React.PointerEvent) {
-    // Drift > 12px = the user is scrolling, not holding → cancel.
-    if (!holdStart.current) return;
-    const dx = e.clientX - holdStart.current.x;
-    const dy = e.clientY - holdStart.current.y;
-    if (dx * dx + dy * dy > 144) cancelHold();
-  }
-  useEffect(
-    () => () => {
-      if (holdTimer.current) clearTimeout(holdTimer.current);
-    },
-    [],
-  );
-
   const card = (
     <div
-      onPointerDown={isClickable ? startHold : undefined}
-      onPointerMove={isClickable ? moveHold : undefined}
-      onPointerUp={isClickable ? cancelHold : undefined}
-      onPointerLeave={isClickable ? cancelHold : undefined}
-      onPointerCancel={isClickable ? cancelHold : undefined}
-      onContextMenu={isClickable ? (e) => e.preventDefault() : undefined}
+      onClick={isClickable ? () => setOpen(true) : undefined}
       role={isClickable ? "button" : undefined}
       tabIndex={isClickable ? 0 : undefined}
-      aria-label={isClickable ? `${name} — hold to view details` : undefined}
+      aria-label={isClickable ? `${name} — view details` : undefined}
       onKeyDown={
         isClickable
           ? (e) => {
@@ -139,7 +93,7 @@ export function ComponentCard({
       style={{
         position: "relative",
         background: tint ?? INV_THEME.paper,
-        border: `1px solid ${holding ? INV_THEME.copper : INV_THEME.parchment}`,
+        border: `1px solid ${INV_THEME.parchment}`,
         borderRadius: 10,
         padding: "12px 12px 10px",
         display: "flex",
@@ -148,35 +102,11 @@ export function ComponentCard({
         boxShadow: "0 1px 0 rgba(28, 52, 69, 0.04)",
         minHeight: 172,
         opacity: muted ? 0.7 : 1,
-        transition:
-          "transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease",
-        transform: holding ? "scale(0.97)" : "scale(1)",
+        transition: "transform 0.12s ease, box-shadow 0.12s ease",
         cursor: isClickable || href ? "pointer" : "default",
         touchAction: "manipulation",
-        userSelect: "none",
-        WebkitUserSelect: "none",
-        WebkitTouchCallout: "none",
-        overflow: "hidden",
       }}
     >
-      {/* Hold-to-open progress bar — fills over HOLD_MS while pressed. */}
-      {holding && (
-        <>
-          <style>{`@keyframes invHoldFill{from{width:0%}to{width:100%}}`}</style>
-          <span
-            aria-hidden
-            style={{
-              position: "absolute",
-              left: 0,
-              bottom: 0,
-              height: 3,
-              background: INV_THEME.copper,
-              borderRadius: "0 2px 0 0",
-              animation: `invHoldFill ${HOLD_MS}ms linear forwards`,
-            }}
-          />
-        </>
-      )}
       {typeLabel && (
         <span
           style={{
