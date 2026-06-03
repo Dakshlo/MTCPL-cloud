@@ -16,10 +16,10 @@
  * the rest of the app's gold-spinner pattern.
  */
 
-import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
+import { ExpenseMonthBar } from "@/components/expense-month-bar";
 
 export type CutterCategory =
   | "electricity"
@@ -63,11 +63,6 @@ const CATEGORIES: { value: CutterCategory; label: string; icon: string }[] = [
   { value: "other",              label: "Other",              icon: "•" },
 ];
 
-const MONTH_NAMES = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
-
 function fmtINR(n: number): string {
   if (!isFinite(n)) return "—";
   return `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
@@ -85,11 +80,11 @@ export function CutterExpensesClient({
   monthLabel,
   year,
   month,
+  currentYear,
+  currentMonth,
   expenses,
   bookValues,
   canEditBookValue,
-  prevHref,
-  nextHref,
   addAction,
   editAction,
   cancelAction,
@@ -99,11 +94,11 @@ export function CutterExpensesClient({
   monthLabel: string;
   year: number;
   month: number;
+  currentYear: number;
+  currentMonth: number;
   expenses: CutterExpenseRow[];
   bookValues: CutterBookValueRow[];
   canEditBookValue: boolean;
-  prevHref: string;
-  nextHref: string;
   addAction: (formData: FormData) => Promise<ActionResult>;
   editAction: (formData: FormData) => Promise<ActionResult>;
   cancelAction: (formData: FormData) => Promise<ActionResult>;
@@ -111,8 +106,6 @@ export function CutterExpensesClient({
   cancelBookValueAction: (formData: FormData) => Promise<ActionResult>;
 }) {
   const grandTotal = expenses.reduce((s, e) => s + e.amount, 0);
-  const today = new Date();
-  const years = [today.getFullYear() - 1, today.getFullYear(), today.getFullYear() + 1];
 
   // Group expenses by category for category-tiles row
   const totalsByCat = new Map<CutterCategory, number>();
@@ -144,71 +137,17 @@ export function CutterExpensesClient({
   })();
 
   return (
-    <section style={{ paddingBottom: 96 }}>
-      <header
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          alignItems: "center",
-          gap: 14,
-          padding: "16px 18px",
-          marginBottom: 16,
-          background: "var(--surface)",
-          border: "1px solid var(--border)",
-          borderRadius: 12,
-        }}
-      >
-        <div>
-          <div
-            style={{
-              fontSize: 11,
-              fontWeight: 700,
-              color: "var(--muted)",
-              textTransform: "uppercase",
-              letterSpacing: "0.07em",
-            }}
-          >
-            Cutter Operational Expenses
-          </div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: "var(--text)", letterSpacing: "-0.01em" }}>
-            {monthLabel}
-          </div>
-          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
-            Aggregate cutting-machine costs · feeds the Various Costing → Cutter report
-          </div>
-        </div>
-        <form
-          method="get"
-          action="/cutting/expenses"
-          style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: "auto" }}
-        >
-          <select name="month" defaultValue={month} style={selectStyle()}>
-            {MONTH_NAMES.map((m, i) => (
-              <option key={i + 1} value={i + 1}>{m}</option>
-            ))}
-          </select>
-          <select name="year" defaultValue={year} style={selectStyle()}>
-            {years.map((y) => (
-              <option key={y} value={y}>{y}</option>
-            ))}
-          </select>
-          <button
-            type="submit"
-            style={{
-              padding: "8px 16px",
-              fontSize: 13,
-              fontWeight: 700,
-              background: "var(--gold)",
-              color: "#fff",
-              border: "1px solid var(--gold-dark)",
-              borderRadius: 8,
-              cursor: "pointer",
-            }}
-          >
-            View
-          </button>
-        </form>
-      </header>
+    <section style={{ paddingBottom: 28 }}>
+      <ExpenseMonthBar
+        basePath="/cutting/expenses"
+        kicker="Cutter Operational Expenses"
+        year={year}
+        month={month}
+        currentYear={currentYear}
+        currentMonth={currentMonth}
+        total={grandTotal}
+        totalCaption="feeds the Cutter report"
+      />
 
       <BookValuePanel
         latest={latestBv}
@@ -280,7 +219,12 @@ export function CutterExpensesClient({
           </div>
         )}
 
-        <AddExpenseRow year={year} month={month} addAction={addAction} />
+        <AddExpenseRow
+          year={year}
+          month={month}
+          monthLabel={monthLabel}
+          addAction={addAction}
+        />
 
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
           {expenses.map((e) => (
@@ -291,35 +235,6 @@ export function CutterExpensesClient({
               cancelAction={cancelAction}
             />
           ))}
-        </div>
-      </div>
-
-      {/* Sticky footer */}
-      <div
-        style={{
-          position: "fixed",
-          bottom: 0,
-          left: 0,
-          right: 0,
-          background: "var(--surface)",
-          borderTop: "1px solid var(--border)",
-          padding: "12px 24px",
-          display: "flex",
-          alignItems: "center",
-          gap: 14,
-          boxShadow: "0 -2px 8px rgba(0,0,0,0.04)",
-          zIndex: 10,
-        }}
-      >
-        <Link href={prevHref} style={navBtn()}>← Prev</Link>
-        <Link href={nextHref} style={navBtn()}>Next →</Link>
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "baseline", gap: 10 }}>
-          <span style={{ fontSize: 12, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700 }}>
-            {monthLabel} Total
-          </span>
-          <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 18, fontWeight: 800 }}>
-            {fmtINR(grandTotal)}
-          </span>
         </div>
       </div>
     </section>
@@ -614,10 +529,12 @@ function SetBookValueForm({
 function AddExpenseRow({
   year,
   month,
+  monthLabel,
   addAction,
 }: {
   year: number;
   month: number;
+  monthLabel: string;
   addAction: (formData: FormData) => Promise<ActionResult>;
 }) {
   const router = useRouter();
@@ -627,6 +544,20 @@ function AddExpenseRow({
   return (
     <>
       <FinanceLoadingOverlay show={pending} label="Adding expense…" />
+      {/* Caption restates the target month right at the entry point. */}
+      <div
+        style={{
+          fontSize: 12,
+          fontWeight: 600,
+          color: "var(--muted)",
+          marginBottom: 6,
+        }}
+      >
+        ＋ Add expense to{" "}
+        <span style={{ color: "var(--gold-dark)", fontWeight: 800 }}>
+          {monthLabel}
+        </span>
+      </div>
       <form
         action={(fd) => {
           setError(null);
@@ -907,18 +838,5 @@ function iconBtn(color = "var(--muted)"): React.CSSProperties {
     border: `1px solid ${color === "var(--muted)" ? "var(--border)" : color}`,
     borderRadius: 6,
     cursor: "pointer",
-  };
-}
-
-function navBtn(): React.CSSProperties {
-  return {
-    padding: "8px 14px",
-    fontSize: 13,
-    fontWeight: 600,
-    background: "var(--bg)",
-    color: "var(--text)",
-    border: "1px solid var(--border)",
-    borderRadius: 8,
-    textDecoration: "none",
   };
 }

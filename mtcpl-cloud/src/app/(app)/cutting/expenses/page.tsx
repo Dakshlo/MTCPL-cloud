@@ -53,10 +53,6 @@ function istTodayParts(): { year: number; month: number } {
   return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1 };
 }
 
-function pad2(n: number): string {
-  return n < 10 ? `0${n}` : String(n);
-}
-
 export default async function CutterExpensesPage({ searchParams }: { searchParams: Search }) {
   const { profile } = await requireAuth();
   if (!canEnterCutterExpenses(profile)) {
@@ -141,21 +137,17 @@ export default async function CutterExpensesPage({ searchParams }: { searchParam
   }));
 
   const monthLabel = `${MONTH_NAMES[month - 1]} ${year}`;
-  const prevMonth = month === 1 ? { y: year - 1, m: 12 } : { y: year, m: month - 1 };
-  const nextMonth = month === 12 ? { y: year + 1, m: 1 } : { y: year, m: month + 1 };
-  const prevHref = `/cutting/expenses?year=${prevMonth.y}&month=${pad2(prevMonth.m)}`;
-  const nextHref = `/cutting/expenses?year=${nextMonth.y}&month=${pad2(nextMonth.m)}`;
 
   return (
     <CutterExpensesClient
       monthLabel={monthLabel}
       year={year}
       month={month}
+      currentYear={today.year}
+      currentMonth={today.month}
       expenses={expenses}
       bookValues={bookValues}
       canEditBookValue={canEditCutterBookValue(profile)}
-      prevHref={prevHref}
-      nextHref={nextHref}
       addAction={addCutterExpenseAction}
       editAction={editCutterExpenseAction}
       cancelAction={cancelCutterExpenseAction}

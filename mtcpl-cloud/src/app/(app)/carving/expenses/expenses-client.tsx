@@ -12,10 +12,10 @@
  * so the UX matches the rest of the app (gold spinning logo).
  */
 
-import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
+import { ExpenseMonthBar } from "@/components/expense-month-bar";
 
 export type CncVendorOption = {
   id: string;
@@ -85,11 +85,6 @@ const ALL_CATEGORIES_DISPLAY: { value: ExpenseCategory; label: string; icon: str
   { value: "other",       label: "Other",        icon: "•" },
 ];
 
-const MONTH_NAMES = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
-
 function fmtINR(n: number): string {
   if (!isFinite(n)) return "—";
   return `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
@@ -107,11 +102,11 @@ export function CncExpensesClient({
   monthLabel,
   year,
   month,
+  currentYear,
+  currentMonth,
   vendors,
   expenses,
   plantElectricity,
-  prevHref,
-  nextHref,
   addAction,
   editAction,
   cancelAction,
@@ -121,11 +116,11 @@ export function CncExpensesClient({
   monthLabel: string;
   year: number;
   month: number;
+  currentYear: number;
+  currentMonth: number;
   vendors: CncVendorOption[];
   expenses: CncExpenseRow[];
   plantElectricity: PlantElectricityRow | null;
-  prevHref: string;
-  nextHref: string;
   addAction: (formData: FormData) => Promise<ActionResult>;
   editAction: (formData: FormData) => Promise<ActionResult>;
   cancelAction: (formData: FormData) => Promise<ActionResult>;
@@ -144,83 +139,21 @@ export function CncExpensesClient({
   }, [expenses]);
 
   const grandTotal = expenses.reduce((s, e) => s + e.amount, 0);
-  const today = new Date();
-  const years = [today.getFullYear() - 1, today.getFullYear(), today.getFullYear() + 1];
 
   return (
-    <section style={{ paddingBottom: 96 }}>
-      <header
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          alignItems: "center",
-          gap: 14,
-          padding: "16px 18px",
-          marginBottom: 16,
-          background: "var(--surface)",
-          border: "1px solid var(--border)",
-          borderRadius: 12,
-        }}
-      >
-        <div>
-          <div
-            style={{
-              fontSize: 11,
-              fontWeight: 700,
-              color: "var(--muted)",
-              textTransform: "uppercase",
-              letterSpacing: "0.07em",
-            }}
-          >
-            CNC Operational Expenses
-          </div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: "var(--text)", letterSpacing: "-0.01em" }}>
-            {monthLabel}
-          </div>
-          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
-            Enter each expense as a line item · sums flow into the carving monthly report
-          </div>
-        </div>
-        <form
-          method="get"
-          action="/carving/expenses"
-          style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: "auto" }}
-        >
-          <select
-            name="month"
-            defaultValue={month}
-            style={selectStyle()}
-          >
-            {MONTH_NAMES.map((m, i) => (
-              <option key={i + 1} value={i + 1}>{m}</option>
-            ))}
-          </select>
-          <select
-            name="year"
-            defaultValue={year}
-            style={selectStyle()}
-          >
-            {years.map((y) => (
-              <option key={y} value={y}>{y}</option>
-            ))}
-          </select>
-          <button
-            type="submit"
-            style={{
-              padding: "8px 16px",
-              fontSize: 13,
-              fontWeight: 700,
-              background: "var(--gold)",
-              color: "#fff",
-              border: "1px solid var(--gold-dark)",
-              borderRadius: 8,
-              cursor: "pointer",
-            }}
-          >
-            View
-          </button>
-        </form>
-      </header>
+    <section style={{ paddingBottom: 28 }}>
+      <ExpenseMonthBar
+        basePath="/carving/expenses"
+        kicker="CNC Operational Expenses"
+        year={year}
+        month={month}
+        currentYear={currentYear}
+        currentMonth={currentMonth}
+        total={grandTotal}
+        totalCaption={`across ${vendors.length} CNC operator${
+          vendors.length === 1 ? "" : "s"
+        }`}
+      />
 
       {vendors.length === 0 && (
         <div
@@ -260,6 +193,7 @@ export function CncExpensesClient({
               vendor={v}
               year={year}
               month={month}
+              monthLabel={monthLabel}
               rows={rows}
               total={total}
               addAction={addAction}
@@ -269,72 +203,6 @@ export function CncExpensesClient({
           );
         })}
       </div>
-
-      {/* Sticky grand-total footer with prev/next month nav.
-          Mig 054 follow-on (Daksh): the bar was originally
-          position: fixed; left: 0 — that overlapped the 240px
-          sidebar. Now it uses `left: var(--content-left)` so the
-          bar starts where the content area starts (the same
-          variable the topbar + main-shell use). At <900px (mobile)
-          the sidebar collapses and the variable resolves to 0,
-          letting the bar span the full width again. */}
-      <div
-        style={{
-          position: "fixed",
-          bottom: 0,
-          left: "var(--content-left, 240px)",
-          right: 0,
-          background: "rgba(26, 26, 26, 0.94)",
-          backdropFilter: "blur(8px)",
-          WebkitBackdropFilter: "blur(8px)",
-          color: "#fff",
-          padding: "12px 24px",
-          display: "flex",
-          alignItems: "center",
-          gap: 16,
-          zIndex: 50,
-        }}
-      >
-        <Link
-          href={prevHref}
-          style={{
-            color: "rgba(255, 255, 255, 0.85)",
-            textDecoration: "none",
-            fontSize: 13,
-            fontWeight: 600,
-            padding: "6px 12px",
-            border: "1px solid rgba(255, 255, 255, 0.25)",
-            borderRadius: 7,
-          }}
-        >
-          ← Prev month
-        </Link>
-        <div style={{ flex: 1, display: "flex", alignItems: "baseline", gap: 14 }}>
-          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.55)" }}>
-            {monthLabel} · grand total
-          </span>
-          <strong style={{ fontSize: 22, fontFamily: "ui-monospace, monospace", color: "#facc15" }}>
-            {fmtINR(grandTotal)}
-          </strong>
-          <span style={{ fontSize: 11, color: "rgba(255,255,255,0.55)" }}>
-            across {vendors.length} CNC operator{vendors.length === 1 ? "" : "s"}
-          </span>
-        </div>
-        <Link
-          href={nextHref}
-          style={{
-            color: "rgba(255, 255, 255, 0.85)",
-            textDecoration: "none",
-            fontSize: 13,
-            fontWeight: 600,
-            padding: "6px 12px",
-            border: "1px solid rgba(255, 255, 255, 0.25)",
-            borderRadius: 7,
-          }}
-        >
-          Next month →
-        </Link>
-      </div>
     </section>
   );
 }
@@ -343,6 +211,7 @@ function VendorCard({
   vendor,
   year,
   month,
+  monthLabel,
   rows,
   total,
   addAction,
@@ -352,6 +221,7 @@ function VendorCard({
   vendor: CncVendorOption;
   year: number;
   month: number;
+  monthLabel: string;
   rows: CncExpenseRow[];
   total: number;
   addAction: (formData: FormData) => Promise<ActionResult>;
@@ -435,7 +305,14 @@ function VendorCard({
           </div>
         </div>
 
-        {/* Add form */}
+        {/* Add form — caption restates the target month right where
+            the amount is typed, so nobody adds into the wrong month. */}
+        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)" }}>
+          ＋ Add expense to{" "}
+          <span style={{ color: "var(--gold-dark)", fontWeight: 800 }}>
+            {monthLabel}
+          </span>
+        </div>
         <form
           onSubmit={handleAdd}
           style={{

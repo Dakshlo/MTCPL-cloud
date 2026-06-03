@@ -48,10 +48,6 @@ function istTodayParts(): { year: number; month: number } {
   return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1 };
 }
 
-function pad2(n: number): string {
-  return n < 10 ? `0${n}` : String(n);
-}
-
 export default async function CncExpensesPage({ searchParams }: { searchParams: Search }) {
   const { profile } = await requireAuth();
   if (!canEnterCncExpenses(profile)) {
@@ -159,22 +155,17 @@ export default async function CncExpensesPage({ searchParams }: { searchParams: 
     : null;
 
   const monthLabel = `${MONTH_NAMES[month - 1]} ${year}`;
-  // Prev / next month for the sticky-footer quick-nav.
-  const prevMonth = month === 1 ? { y: year - 1, m: 12 } : { y: year, m: month - 1 };
-  const nextMonth = month === 12 ? { y: year + 1, m: 1 } : { y: year, m: month + 1 };
-  const prevHref = `/carving/expenses?year=${prevMonth.y}&month=${pad2(prevMonth.m)}`;
-  const nextHref = `/carving/expenses?year=${nextMonth.y}&month=${pad2(nextMonth.m)}`;
 
   return (
     <CncExpensesClient
       monthLabel={monthLabel}
       year={year}
       month={month}
+      currentYear={today.year}
+      currentMonth={today.month}
       vendors={vendors}
       expenses={expenses}
       plantElectricity={plantElectricity}
-      prevHref={prevHref}
-      nextHref={nextHref}
       addAction={addCncExpenseAction}
       editAction={editCncExpenseAction}
       cancelAction={cancelCncExpenseAction}
