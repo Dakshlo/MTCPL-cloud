@@ -271,6 +271,7 @@ export function VendorCockpitClient({
   reworkPending,
   rejected,
   recent,
+  carved30,
   otherVendors,
   transferVendors,
   isStaffView,
@@ -304,6 +305,10 @@ export function VendorCockpitClient({
     review_notes: string | null;
     slab: SlabLite | null;
   }>;
+  /** Daksh June 2026 — this vendor's APPROVED carved output over the
+   *  last 30 days (sft + cft + slab count). Approval-only: reworked /
+   *  rejected slabs are excluded. Shown as a small header strip. */
+  carved30: { sft: number; cft: number; slabs: number };
   otherVendors: Vendor[];
   /** Daksh June 2026 — full list of every active CNC + Manual vendor
    *  (except the one being viewed) for the Problem/transfer
@@ -700,6 +705,57 @@ export function VendorCockpitClient({
               />
             )}
           </div>
+        </div>
+
+        {/* Daksh June 2026 — per-vendor "Carved · last 30 days" strip.
+            APPROVAL-ONLY: counts slabs whose review was approved
+            (review_approved_at), so unloaded-but-pending, reworked, or
+            rejected slabs never inflate it. Same sft/cft basis as the
+            CNC cost report. Shows on every vendor's own cockpit (and
+            when staff tour a vendor). */}
+        <div
+          style={{
+            marginTop: 12,
+            display: "flex",
+            alignItems: "center",
+            gap: 14,
+            flexWrap: "wrap",
+            padding: "10px 14px",
+            background: "rgba(74,222,128,0.10)",
+            border: "1px solid rgba(74,222,128,0.28)",
+            borderRadius: 10,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 800,
+              color: "#86efac",
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+            }}
+          >
+            ✅ Carved · last 30 days
+          </span>
+          <span style={{ display: "inline-flex", alignItems: "baseline", gap: 5 }}>
+            <strong
+              style={{ fontSize: 19, fontFamily: "ui-monospace, monospace", color: "#fff" }}
+            >
+              {carved30.sft.toLocaleString("en-IN", { maximumFractionDigits: 1 })}
+            </strong>
+            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.7)" }}>sft</span>
+          </span>
+          <span style={{ display: "inline-flex", alignItems: "baseline", gap: 5 }}>
+            <strong
+              style={{ fontSize: 19, fontFamily: "ui-monospace, monospace", color: "#fff" }}
+            >
+              {carved30.cft.toLocaleString("en-IN", { maximumFractionDigits: 1 })}
+            </strong>
+            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.7)" }}>cft</span>
+          </span>
+          <span style={{ fontSize: 11, color: "rgba(255,255,255,0.55)" }}>
+            {carved30.slabs} slab{carved30.slabs === 1 ? "" : "s"} approved · approved work only
+          </span>
         </div>
       </div>
 

@@ -510,6 +510,53 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
     slab: slabById.get(r.slab_requirement_id) ?? null,
   }));
 
+  // Daksh June 2026 — per-vendor "Carved · last 30 days" stat for the
+  // cockpit header. Counts ONLY slabs the reviewer APPROVED
+  // (review_approved_at is set on approve, and CLEARED again on
+  // rework / reject — actions.ts), so unloaded-but-not-approved,
+  // reworked, or rejected slabs never inflate it. SFT/CFT use the
+  // exact same formulas as the CNC cost report (dims are in inches:
+  // sft = l·w/144, cft = l·w·t/1728) so the number ties out.
+  const carved30 = await (async () => {
+    const sinceIso = new Date(Date.now() - 30 * 86_400_000).toISOString();
+    const { data: appr } = await admin
+      .from("carving_items")
+      .select("slab_requirement_id, review_approved_at")
+      .eq("vendor_id", vendorId)
+      .not("review_approved_at", "is", null)
+      .gte("review_approved_at", sinceIso);
+    const rowsAppr = (appr ?? []) as Array<{ slab_requirement_id: string }>;
+    const ids = [...new Set(rowsAppr.map((r) => r.slab_requirement_id))];
+    let sft = 0;
+    let cft = 0;
+    if (ids.length > 0) {
+      const { data: dims } = await admin
+        .from("slab_requirements")
+        .select("id, length_ft, width_ft, thickness_ft")
+        .in("id", ids);
+      const dimById = new Map<string, { l: number; w: number; t: number }>();
+      for (const d of (dims ?? []) as Array<{
+        id: string;
+        length_ft: number | string;
+        width_ft: number | string;
+        thickness_ft: number | string;
+      }>) {
+        dimById.set(d.id, {
+          l: Number(d.length_ft) || 0,
+          w: Number(d.width_ft) || 0,
+          t: Number(d.thickness_ft) || 0,
+        });
+      }
+      for (const r of rowsAppr) {
+        const d = dimById.get(r.slab_requirement_id);
+        if (!d) continue;
+        sft += (d.l * d.w) / 144;
+        cft += (d.l * d.w * d.t) / 1728;
+      }
+    }
+    return { sft, cft, slabs: rowsAppr.length };
+  })();
+
   const vendorRow = vendor as { id: string; name: string };
   // Drop the current vendor + ensure shape matches client type.
   //
@@ -560,6 +607,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
       reworkPending={reworkPending}
       rejected={rejected}
       recent={recent}
+      carved30={carved30}
       otherVendors={otherVendors}
       transferVendors={transferVendors}
       isStaffView={profile.role !== "vendor" || hasManagedVendors}
