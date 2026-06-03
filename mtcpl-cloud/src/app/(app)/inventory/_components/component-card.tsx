@@ -15,9 +15,12 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ComponentIcon, type ScaffoldingComponentType } from "./component-icon";
 import { INV_THEME } from "./theme";
 
-// Daksh (June 2026) — cards open on a deliberate 1-second HOLD, not a
-// single tap (a tap on a tablet was opening the detail by accident).
-const HOLD_MS = 1000;
+// Daksh (June 2026) — cards open on a short HOLD, not a single tap (a
+// tap on a tablet was opening the detail by accident). 300ms: long
+// enough that a quick tap won't trigger it, short enough to fire
+// BEFORE the OS long-press text-selection / clipboard popup (~500ms)
+// which was otherwise stealing the gesture.
+const HOLD_MS = 300;
 
 // Inlined (was imported from ./stock, which pulls server-only code —
 // can't live in a "use client" module). Pure qty → level mapping.
@@ -119,6 +122,7 @@ export function ComponentCard({
       onPointerUp={isClickable ? cancelHold : undefined}
       onPointerLeave={isClickable ? cancelHold : undefined}
       onPointerCancel={isClickable ? cancelHold : undefined}
+      onContextMenu={isClickable ? (e) => e.preventDefault() : undefined}
       role={isClickable ? "button" : undefined}
       tabIndex={isClickable ? 0 : undefined}
       aria-label={isClickable ? `${name} — hold to view details` : undefined}
@@ -150,6 +154,8 @@ export function ComponentCard({
         cursor: isClickable || href ? "pointer" : "default",
         touchAction: "manipulation",
         userSelect: "none",
+        WebkitUserSelect: "none",
+        WebkitTouchCallout: "none",
         overflow: "hidden",
       }}
     >
