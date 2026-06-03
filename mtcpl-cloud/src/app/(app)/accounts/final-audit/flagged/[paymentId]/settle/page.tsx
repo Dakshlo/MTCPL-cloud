@@ -62,6 +62,22 @@ export default async function SettleWithDebitPage({
   if (p.debit_settled_at) {
     redirect("/accounts/final-audit/flagged?toast=Already+settled");
   }
+  // Mig 085 follow-on (Daksh, June 2026) — block drafting a SECOND
+  // debit while one is already awaiting approval. The list hides the
+  // Settle button for pending rows, but someone could still reach this
+  // page via the back button or a stale link. The DB partial-unique
+  // index is the hard stop; this is the friendly one.
+  const { data: activeSettle } = await supabase
+    .from("bill_debit_settlements")
+    .select("id")
+    .eq("source_payment_id", paymentId)
+    .in("status", ["pending_approval", "approved"])
+    .limit(1);
+  if (activeSettle && activeSettle.length > 0) {
+    redirect(
+      "/accounts/final-audit/flagged?toast=A+debit+is+already+in+approval+for+this+bill",
+    );
+  }
 
   const { data: srcBill } = await supabase
     .from("bills")

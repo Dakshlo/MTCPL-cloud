@@ -65,6 +65,18 @@ export type FinalAuditRow = {
    *  Flagged Payments page; open flags (null) get the "Settle with
    *  debit" button. */
   debitSettledAt?: string | null;
+  /** Mig 085 follow-on (Daksh, June 2026) — the live state of this
+   *  flagged payment's debit settlement, so the Flagged Payments
+   *  list can show the right affordance:
+   *    • "pending"  → a debit is awaiting owner approval. Show an
+   *      "in approval" chip, NOT the Settle button (prevents a second
+   *      accidental request).
+   *    • "settled"  → approved; lives in the Settled tab.
+   *    • null       → no active debit; show the Settle button.
+   *  Derived server-side from bill_debit_settlements. */
+  debitState?: "pending" | "settled" | null;
+  /** Amount of the active (pending or approved) debit, for the chip. */
+  debitAmount?: number | null;
 };
 
 type ServerResult = { ok: true } | { ok: false; error: string };

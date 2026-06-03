@@ -104,6 +104,41 @@ export default async function FlaggedAuditPage() {
     };
   });
 
+  // Mig 085 follow-on (Daksh, June 2026) — attach each flagged
+  // payment's ACTIVE debit-settlement state so the list shows the
+  // right thing:
+  //   • pending_approval → "Debit in approval" chip (no Settle button,
+  //     so the same flag can't be sent for a second debit by mistake).
+  //   • approved         → moves to the "Settled with debit" tab.
+  // There can be at most one active row per source payment (DB partial-
+  // unique index bds_one_active_per_source_idx), so a 1:1 map is safe.
+  const paymentIds = rows.map((r) => r.id);
+  if (paymentIds.length > 0) {
+    const { data: settles } = await supabase
+      .from("bill_debit_settlements")
+      .select("source_payment_id, status, amount")
+      .in("source_payment_id", paymentIds)
+      .in("status", ["pending_approval", "approved"]);
+    const byPayment = new Map<string, { status: string; amount: number }>();
+    for (const s of (settles ?? []) as Array<{
+      source_payment_id: string;
+      status: string;
+      amount: number | string;
+    }>) {
+      byPayment.set(s.source_payment_id, {
+        status: s.status,
+        amount: Number(s.amount ?? 0),
+      });
+    }
+    for (const r of rows) {
+      const d = byPayment.get(r.id);
+      if (d) {
+        r.debitState = d.status === "approved" ? "settled" : "pending";
+        r.debitAmount = d.amount;
+      }
+    }
+  }
+
   return (
     <section className="page-card">
       <AccountsHero

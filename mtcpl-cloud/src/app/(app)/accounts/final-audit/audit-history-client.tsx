@@ -42,6 +42,11 @@ export function AuditHistoryClient({
   canSettle?: boolean;
 }) {
   const [range, setRange] = useState<DateRange>("today");
+  // Mig 085 follow-on (Daksh, June 2026) — the flagged variant gets a
+  // Flagged / Settled tab split. Approved debits leave the working
+  // queue and live under their own "Settled with debit" tab so the
+  // owner can keep track without them cluttering the action list.
+  const [tab, setTab] = useState<"flagged" | "settled">("flagged");
 
   // Filter rows by audited_at against the selected IST date window.
   const filteredRows = useMemo(() => {
@@ -59,16 +64,91 @@ export function AuditHistoryClient({
     });
   }, [rows, range]);
 
-  const totalAmount = filteredRows.reduce(
+  // A flagged payment is "settled" once its debit is APPROVED
+  // (debit_settled_at stamped / settlement approved). A "pending"
+  // debit (awaiting owner approval) stays in the working list but
+  // shows an "in approval" chip instead of the Settle button.
+  const isSettled = (r: FinalAuditRow) =>
+    r.debitState === "settled" || !!r.debitSettledAt;
+  const settledRows =
+    variant === "flagged" ? filteredRows.filter(isSettled) : [];
+  const workingRows =
+    variant === "flagged"
+      ? filteredRows.filter((r) => !isSettled(r))
+      : filteredRows;
+  const displayRows =
+    variant === "flagged" && tab === "settled" ? settledRows : workingRows;
+
+  const totalAmount = displayRows.reduce(
     (sum, r) => sum + (r.paidAmount ?? 0),
     0,
   );
 
   const accent = variant === "verified" ? "#15803d" : "#b91c1c";
   const accentBg = variant === "verified" ? "#dcfce7" : "#fee2e2";
+  // On the flagged → Settled tab the tile/count turn green so the two
+  // tabs read differently at a glance.
+  const onSettledTab = variant === "flagged" && tab === "settled";
+  const tileAccent = onSettledTab ? "#15803d" : accent;
+  const headingLabel =
+    variant === "verified"
+      ? "Verified bills"
+      : onSettledTab
+        ? "Settled with debit"
+        : "Flagged bills";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* Flagged / Settled tab switch — flagged variant only. Keeps the
+          approved-debit list out of the owner's working queue. */}
+      {variant === "flagged" && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {(
+            [
+              { v: "flagged", label: `🚩 Flagged`, count: workingRows.length, color: "#b91c1c" },
+              { v: "settled", label: `✓ Settled with debit`, count: settledRows.length, color: "#15803d" },
+            ] as Array<{ v: "flagged" | "settled"; label: string; count: number; color: string }>
+          ).map((opt) => {
+            const active = opt.v === tab;
+            return (
+              <button
+                key={opt.v}
+                type="button"
+                onClick={() => setTab(opt.v)}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 7,
+                  padding: "9px 16px",
+                  fontSize: 13,
+                  fontWeight: 800,
+                  background: active ? opt.color : "#fff",
+                  color: active ? "#fff" : "var(--text)",
+                  border: `1.5px solid ${active ? opt.color : ACCOUNTS_TOKENS.border}`,
+                  borderRadius: 10,
+                  cursor: "pointer",
+                }}
+              >
+                {opt.label}
+                <span
+                  style={{
+                    fontFamily: "ui-monospace, monospace",
+                    fontSize: 12,
+                    fontWeight: 800,
+                    padding: "1px 7px",
+                    borderRadius: 999,
+                    background: active ? "rgba(255,255,255,0.25)" : opt.color,
+                    color: active ? "#fff" : "#fff",
+                  }}
+                >
+                  {opt.count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* Total + date filter row */}
       <div
         style={{
@@ -79,7 +159,7 @@ export function AuditHistoryClient({
           padding: "14px 16px",
           background: "#fff",
           border: `1px solid ${ACCOUNTS_TOKENS.border}`,
-          borderLeft: `4px solid ${accent}`,
+          borderLeft: `4px solid ${tileAccent}`,
           borderRadius: 10,
           boxShadow: ACCOUNTS_TOKENS.shadow,
         }}
@@ -94,19 +174,18 @@ export function AuditHistoryClient({
               letterSpacing: "0.06em",
             }}
           >
-            {variant === "verified" ? "Verified bills" : "Flagged bills"} ·{" "}
-            {dateRangeLabel(range)}
+            {headingLabel} · {dateRangeLabel(range)}
           </div>
           <div
             style={{
               fontSize: 22,
               fontWeight: 800,
-              color: accent,
+              color: tileAccent,
               fontFamily: "ui-monospace, monospace",
               marginTop: 2,
             }}
           >
-            {filteredRows.length} bill{filteredRows.length === 1 ? "" : "s"}
+            {displayRows.length} bill{displayRows.length === 1 ? "" : "s"}
           </div>
           <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 2 }}>
             Total amount:{" "}
@@ -158,8 +237,8 @@ export function AuditHistoryClient({
         </div>
       </div>
 
-      {/* Empty state */}
-      {filteredRows.length === 0 && (
+      {/* List for the active tab (rows already bucketed above). */}
+      {displayRows.length === 0 ? (
         <div
           style={{
             padding: "28px 18px",
@@ -171,79 +250,30 @@ export function AuditHistoryClient({
             fontSize: 13,
           }}
         >
-          No {variant === "verified" ? "verified" : "flagged"} payments in this
-          window.
+          {variant === "flagged"
+            ? onSettledTab
+              ? "No debits settled in this window."
+              : "No flagged payments in this window."
+            : "No verified payments in this window."}
         </div>
+      ) : (
+        displayRows.map((row) => (
+          <AuditHistoryRow
+            key={row.id}
+            row={row}
+            accent={onSettledTab ? "#15803d" : accent}
+            accentBg={onSettledTab ? "#dcfce7" : accentBg}
+            canSettle={canSettle}
+            debitState={
+              isSettled(row)
+                ? "settled"
+                : row.debitState === "pending"
+                  ? "pending"
+                  : "open"
+            }
+          />
+        ))
       )}
-
-      {/* Card list. On the flagged variant we split OPEN (still needs
-          the owner to act / be settled) from SETTLED (resolved with a
-          debit, mig 085) so the queue the owner works stays clean. */}
-      {(() => {
-        const openRows =
-          variant === "flagged"
-            ? filteredRows.filter((r) => !r.debitSettledAt)
-            : filteredRows;
-        const settledRows =
-          variant === "flagged"
-            ? filteredRows.filter((r) => r.debitSettledAt)
-            : [];
-        return (
-          <>
-            {openRows.map((row) => (
-              <AuditHistoryRow
-                key={row.id}
-                row={row}
-                accent={accent}
-                accentBg={accentBg}
-                canSettle={canSettle}
-                settled={false}
-              />
-            ))}
-            {settledRows.length > 0 && (
-              <>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                    margin: "6px 2px 0",
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 800,
-                      color: "#15803d",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.06em",
-                    }}
-                  >
-                    ✓ Settled with debit ({settledRows.length})
-                  </span>
-                  <span
-                    style={{
-                      flex: 1,
-                      height: 1,
-                      background: ACCOUNTS_TOKENS.border,
-                    }}
-                  />
-                </div>
-                {settledRows.map((row) => (
-                  <AuditHistoryRow
-                    key={row.id}
-                    row={row}
-                    accent={accent}
-                    accentBg={accentBg}
-                    canSettle={canSettle}
-                    settled
-                  />
-                ))}
-              </>
-            )}
-          </>
-        );
-      })()}
     </div>
   );
 }
@@ -266,13 +296,16 @@ function AuditHistoryRow({
   accent,
   accentBg,
   canSettle,
-  settled,
+  debitState,
 }: {
   row: FinalAuditRow;
   accent: string;
   accentBg: string;
   canSettle: boolean;
-  settled: boolean;
+  /** "open" → show the Settle button. "pending" → a debit is awaiting
+   *  owner approval, show an "in approval" chip (no button — blocks a
+   *  second accidental request). "settled" → approved, green chip. */
+  debitState: "open" | "pending" | "settled";
 }) {
   const auditedAtLabel = row.auditedAt
     ? new Date(row.auditedAt).toLocaleString("en-IN", {
@@ -413,10 +446,11 @@ function AuditHistoryRow({
             queue card. */}
         <Money value={row.paidAmount} size="large" tone="success" precise />
 
-        {/* Mig 085 — settle-with-debit affordance. Open flagged rows
-            (the auditor can act) get the button; settled ones show a
-            green confirmation chip instead. */}
-        {settled ? (
+        {/* Mig 085 — settle-with-debit affordance. Open rows get the
+            button; a debit "in approval" shows an amber chip (no button,
+            so the same flag can't be sent for a second debit); settled
+            rows show the green confirmation chip. */}
+        {debitState === "settled" ? (
           <div
             style={{
               marginTop: 10,
@@ -437,6 +471,30 @@ function AuditHistoryRow({
             }
           >
             ✓ Settled with debit
+          </div>
+        ) : debitState === "pending" ? (
+          <div
+            style={{
+              marginTop: 10,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 5,
+              fontSize: 11,
+              fontWeight: 800,
+              padding: "5px 10px",
+              borderRadius: 999,
+              background: "#fef3c7",
+              color: "#92400e",
+              border: "1px solid #f59e0b",
+            }}
+            title="A debit for this bill is waiting for owner approval — you can't start another one until it's approved or rejected."
+          >
+            ⏳ Debit in approval
+            {typeof row.debitAmount === "number" && row.debitAmount > 0 && (
+              <span style={{ fontFamily: "ui-monospace, monospace" }}>
+                · ₹{Math.round(row.debitAmount).toLocaleString("en-IN")}
+              </span>
+            )}
           </div>
         ) : (
           canSettle && (
