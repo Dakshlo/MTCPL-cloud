@@ -133,6 +133,40 @@ function available(b: StockBucket): number {
   return onHand(b) - b.pending_out;
 }
 
+// Mig 086 — same bucket math, but on the yard legs (from_yard_id /
+// to_yard_id). Used to stop an issue / write-off / yard-move from
+// overdrawing a single yard within the plant.
+async function getStockForComponentAtYard(
+  componentId: string,
+  yardId: string,
+): Promise<StockBucket> {
+  const supabase = createAdminSupabaseClient();
+  const { data, error } = await supabase
+    .from("inventory_movements")
+    .select("qty, status, from_yard_id, to_yard_id, is_voided")
+    .eq("component_id", componentId)
+    .eq("is_voided", false)
+    .in("status", ["approved", "pending_approval"])
+    .or(`from_yard_id.eq.${yardId},to_yard_id.eq.${yardId}`);
+  if (error) throw new Error(`yard stock query failed: ${error.message}`);
+
+  let approved_in = 0;
+  let approved_out = 0;
+  let pending_out = 0;
+  for (const row of data ?? []) {
+    const qty = Number(row.qty ?? 0);
+    const toMe = row.to_yard_id === yardId;
+    const fromMe = row.from_yard_id === yardId;
+    if (row.status === "approved") {
+      if (toMe) approved_in += qty;
+      if (fromMe) approved_out += qty;
+    } else if (row.status === "pending_approval") {
+      if (fromMe) pending_out += qty;
+    }
+  }
+  return { approved_in, approved_out, pending_out };
+}
+
 async function getPlantSiteId(): Promise<string> {
   const supabase = createAdminSupabaseClient();
   const { data, error } = await supabase
@@ -182,6 +216,8 @@ export async function proposeMovementAction(
 
   const projectSiteId = String(formData.get("site_id") || "").trim() || null;
   const batchNote = String(formData.get("batch_note") || "").trim() || null;
+  // Mig 086 — which warehouse yard the plant-side leg touches.
+  const yardId = String(formData.get("yard_id") || "").trim() || null;
 
   const componentIds = formData.getAll("component_ids[]").map((v) => String(v));
   const qtys = formData.getAll("qtys[]").map((v) => Number(v));
@@ -254,6 +290,41 @@ export async function proposeMovementAction(
       break;
   }
 
+  // Mig 086 — resolve the warehouse yard for the plant-side leg.
+  // Stock landing at the plant (receive / return) goes INTO a yard;
+  // stock leaving the plant (issue / write-off-from-plant) comes FROM
+  // a yard. A write-off from a project site has no yard.
+  let fromYardId: string | null = null;
+  let toYardId: string | null = null;
+  const plantLegIsTo = toSiteId === plantId; // receive, return
+  const plantLegIsFrom = fromSiteId === plantId; // issue, writeoff-from-plant
+  if (plantLegIsTo || plantLegIsFrom) {
+    if (!yardId) {
+      return {
+        ok: false,
+        error: "Pick which yard this stock is in (A / B / C).",
+      };
+    }
+    if (plantLegIsTo) toYardId = yardId;
+    if (plantLegIsFrom) fromYardId = yardId;
+  }
+
+  // Per-yard overdraw guard for stock leaving a plant yard.
+  if (plantLegIsFrom && fromYardId) {
+    for (let i = 0; i < componentIds.length; i++) {
+      const yb = await getStockForComponentAtYard(componentIds[i], fromYardId);
+      const yavail = available(yb);
+      if (qtys[i] > yavail) {
+        return {
+          ok: false,
+          error:
+            `Component #${i + 1}: the chosen yard only has ${yavail} available ` +
+            `(requested ${qtys[i]}). Pick another yard or a smaller quantity.`,
+        };
+      }
+    }
+  }
+
   // Validate qty against available stock for outgoing movements
   // (issue/return/writeoff). For receive, anything goes — we're
   // adding to plant inventory.
@@ -283,6 +354,8 @@ export async function proposeMovementAction(
     status: "pending_approval" as const,
     from_site_id: fromSiteId,
     to_site_id: toSiteId,
+    from_yard_id: fromYardId,
+    to_yard_id: toYardId,
     component_id: cid,
     qty: qtys[i],
     proposed_by: profile.id,

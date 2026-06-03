@@ -25,6 +25,7 @@ import {
 import {
   loadInventorySnapshotOrSetup,
   stockKey,
+  yardStockKey,
   totalOutAtSites,
 } from "../_components/stock";
 import { InventorySetupBanner } from "../_components/setup-banner";
@@ -74,7 +75,8 @@ export default async function ScaffoldingBoardPage({
       </InventoryShell>
     );
   }
-  const { sites, components, stock, plant } = snapshotResult.snapshot;
+  const { sites, components, stock, plant, yards, yardStock } =
+    snapshotResult.snapshot;
 
   if (!plant) {
     return (
@@ -83,6 +85,9 @@ export default async function ScaffoldingBoardPage({
       </InventoryShell>
     );
   }
+
+  // Mig 086 — short yard labels for the per-card breakdown ("YARD_A" → "A").
+  const yardShort = (code: string) => code.replace(/^YARD[_-]?/i, "") || code;
 
   // Pick which site to display. Default to plant.
   const activeSite = sites.find((s) => s.id === siteParam) ?? plant;
@@ -222,6 +227,15 @@ export default async function ScaffoldingBoardPage({
             const outAtSites = showPlant
               ? totalOutAtSites(c.id, sites, stock)
               : 0;
+            // Mig 086 — per-yard split of the plant on-hand. Only on
+            // the plant view + only when yards exist.
+            const yardBreakdown =
+              showPlant && yards.length > 0
+                ? yards.map((y) => ({
+                    label: yardShort(y.code),
+                    qty: yardStock.get(yardStockKey(c.id, y.id))?.onHand ?? 0,
+                  }))
+                : undefined;
             return (
               <ComponentCard
                 key={c.id}
@@ -233,6 +247,7 @@ export default async function ScaffoldingBoardPage({
                 qty={qty}
                 pendingOut={pending}
                 imageDataUrl={c.image_data_url}
+                yardBreakdown={yardBreakdown}
                 secondaryLine={
                   showPlant && outAtSites > 0
                     ? `+${outAtSites.toLocaleString("en-IN")} out at sites`

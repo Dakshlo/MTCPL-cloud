@@ -46,6 +46,12 @@ type StockEntry = { onHand: number; pendingOut: number };
 
 type StockLookup = Record<string, StockEntry>; // key = `${componentId}::${siteId}`
 
+type YardLite = {
+  id: string;
+  code: string;
+  name: string;
+};
+
 type CartItem = {
   component_id: string;
   qty: string; // string so blank field is editable; converted on submit
@@ -59,6 +65,8 @@ export function MovementForm({
   stockLookup,
   plantId,
   defaultSiteId,
+  yards = [],
+  yardStockLookup = {},
 }: {
   mode: MovementMode;
   sites: SiteLite[];
@@ -66,6 +74,9 @@ export function MovementForm({
   stockLookup: StockLookup;
   plantId: string;
   defaultSiteId?: string;
+  /** Mig 086 — warehouse yards + per-(component × yard) balances. */
+  yards?: YardLite[];
+  yardStockLookup?: StockLookup; // key = `${componentId}::${yardId}`
 }) {
   const router = useRouter();
 
@@ -92,6 +103,8 @@ export function MovementForm({
   const [cart, setCart] = useState<CartItem[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Mig 086 — selected warehouse yard for the plant-side leg.
+  const [yardId, setYardId] = useState<string>(yards[0]?.id ?? "");
 
   // Which site's stock is shown in the left pane?
   //   issue    : plant (source of stock)
@@ -105,7 +118,29 @@ export function MovementForm({
         ? null
         : siteId; // return + writeoff
 
+  // Mig 086 — does this movement touch a plant YARD, and is that yard
+  // the SOURCE (so availability must be read per-yard)?
+  //   receive / return → lands in a yard (to-yard, not a source)
+  //   issue            → leaves a plant yard (source)
+  //   writeoff         → source yard only when written off FROM the plant
+  const plantYardIsSource =
+    mode === "issue" || (mode === "writeoff" && siteId === plantId);
+  const needsYard =
+    yards.length > 0 &&
+    (mode === "receive" ||
+      mode === "return" ||
+      mode === "issue" ||
+      (mode === "writeoff" && siteId === plantId));
+
   function getAvailable(componentId: string): number | null {
+    // When stock leaves a specific plant yard, availability is that
+    // yard's balance — not the plant total.
+    if (plantYardIsSource) {
+      if (!yardId) return 0;
+      const e = yardStockLookup[`${componentId}::${yardId}`];
+      if (!e) return 0;
+      return Math.max(0, e.onHand - e.pendingOut);
+    }
     if (!sourceSiteId) return null; // receive mode
     const e = stockLookup[`${componentId}::${sourceSiteId}`];
     if (!e) return 0;
@@ -120,7 +155,7 @@ export function MovementForm({
     if (mode === "receive") return components;
     return components.filter((c) => (getAvailable(c.id) ?? 0) > 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [components, mode, sourceSiteId, stockLookup]);
+  }, [components, mode, sourceSiteId, stockLookup, yardId, yardStockLookup]);
 
   function addToCart(component_id: string) {
     setCart((prev) => {
@@ -172,9 +207,15 @@ export function MovementForm({
       }
     }
 
+    if (needsYard && !yardId) {
+      setError("Pick which yard (A / B / C) this stock is in.");
+      return;
+    }
+
     const fd = new FormData();
     fd.append("movement_type", mode);
     if (mode !== "receive") fd.append("site_id", siteId);
+    if (needsYard) fd.append("yard_id", yardId);
     fd.append("batch_note", batchNote);
     for (const it of cart) {
       fd.append("component_ids[]", it.component_id);
@@ -284,6 +325,64 @@ export function MovementForm({
                   Source: Plant — destination is the site you pick above.
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Mig 086 — warehouse yard for the plant-side leg. Required
+              in strict mode. For issue / write-off-from-plant it's the
+              SOURCE yard (drives the available qty shown on each card);
+              for receive / return it's where the stock lands. */}
+          {needsYard && (
+            <div style={{ marginTop: 10 }}>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 800,
+                  color: INV_THEME.steel,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.08em",
+                  marginBottom: 4,
+                }}
+              >
+                {plantYardIsSource ? "From yard" : "Into yard"}
+              </div>
+              <select
+                value={yardId}
+                onChange={(e) => {
+                  setYardId(e.target.value);
+                  // Source-yard change alters availability → clear cart.
+                  if (plantYardIsSource) setCart([]);
+                }}
+                style={{
+                  width: "100%",
+                  maxWidth: 380,
+                  padding: "8px 10px",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  border: `1px solid ${INV_THEME.parchment}`,
+                  borderRadius: 8,
+                  background: INV_THEME.cream,
+                  color: INV_THEME.steel,
+                }}
+              >
+                {yards.length === 0 && <option value="">No yards</option>}
+                {yards.map((y) => (
+                  <option key={y.id} value={y.id}>
+                    {y.name} · {y.code}
+                  </option>
+                ))}
+              </select>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: INV_THEME.steelLight,
+                  marginTop: 4,
+                }}
+              >
+                {plantYardIsSource
+                  ? "Stock is taken from this yard."
+                  : "Stock is placed in this yard."}
+              </div>
             </div>
           )}
         </div>

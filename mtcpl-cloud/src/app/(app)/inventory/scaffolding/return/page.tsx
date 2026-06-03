@@ -33,7 +33,8 @@ export default async function ReturnScaffoldingPage() {
       </InventoryShell>
     );
   }
-  const { sites, components, stock, plant } = snapshotResult.snapshot;
+  const { sites, components, stock, plant, yards, yardStock } =
+    snapshotResult.snapshot;
 
   if (!plant) {
     return (
@@ -45,6 +46,8 @@ export default async function ReturnScaffoldingPage() {
 
   const stockLookup: Record<string, { onHand: number; pendingOut: number }> = {};
   for (const [k, v] of stock.entries()) stockLookup[k] = v;
+  const yardStockLookup: Record<string, { onHand: number; pendingOut: number }> = {};
+  for (const [k, v] of yardStock.entries()) yardStockLookup[k] = v;
 
   return (
     <InventoryShell
@@ -58,6 +61,8 @@ export default async function ReturnScaffoldingPage() {
         components={components.filter((c) => c.is_active)}
         stockLookup={stockLookup}
         plantId={plant.id}
+        yards={yards}
+        yardStockLookup={yardStockLookup}
       />
     </InventoryShell>
   );

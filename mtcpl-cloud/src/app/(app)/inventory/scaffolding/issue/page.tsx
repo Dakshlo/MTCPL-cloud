@@ -35,7 +35,8 @@ export default async function IssueScaffoldingPage() {
       </InventoryShell>
     );
   }
-  const { sites, components, stock, plant } = snapshotResult.snapshot;
+  const { sites, components, stock, plant, yards, yardStock } =
+    snapshotResult.snapshot;
 
   if (!plant) {
     return (
@@ -53,6 +54,9 @@ export default async function IssueScaffoldingPage() {
     const k = stockKey(c.id, plant.id);
     if (!stockLookup[k]) stockLookup[k] = { onHand: 0, pendingOut: 0 };
   }
+  // Mig 086 — per-yard balances for the "From yard" availability.
+  const yardStockLookup: Record<string, { onHand: number; pendingOut: number }> = {};
+  for (const [k, v] of yardStock.entries()) yardStockLookup[k] = v;
 
   return (
     <InventoryShell
@@ -66,6 +70,8 @@ export default async function IssueScaffoldingPage() {
         components={components.filter((c) => c.is_active)}
         stockLookup={stockLookup}
         plantId={plant.id}
+        yards={yards}
+        yardStockLookup={yardStockLookup}
       />
     </InventoryShell>
   );

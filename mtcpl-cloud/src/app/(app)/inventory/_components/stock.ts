@@ -55,6 +55,11 @@ export type MovementRow = {
   status: "pending_approval" | "approved" | "rejected" | "cancelled";
   from_site_id: string | null;
   to_site_id: string | null;
+  /** Mig 086 — yard within the plant warehouse. A receive/return
+   *  lands stock in to_yard_id; an issue/writeoff/yard-move takes it
+   *  from from_yard_id. NULL on the leg that isn't at the plant. */
+  from_yard_id: string | null;
+  to_yard_id: string | null;
   component_id: string;
   qty: number;
   proposed_by: string;
@@ -79,6 +84,55 @@ export type StockMap = Map<StockKey, { onHand: number; pendingOut: number }>;
 
 export function stockKey(componentId: string, siteId: string): StockKey {
   return `${componentId}::${siteId}`;
+}
+
+// ── Mig 086 — yard-level stock (within the plant warehouse) ─────────
+export type Yard = {
+  id: string;
+  code: string;
+  name: string;
+  display_order: number;
+  is_active: boolean;
+};
+
+export type YardStockKey = `${string}::${string}`; // `${componentId}::${yardId}`
+export type YardStockMap = Map<
+  YardStockKey,
+  { onHand: number; pendingOut: number }
+>;
+
+export function yardStockKey(componentId: string, yardId: string): YardStockKey {
+  return `${componentId}::${yardId}`;
+}
+
+/** Per-(component × yard) balance, mirroring buildStockMap but on the
+ *  from_yard_id / to_yard_id legs. Approved receive/return adds to
+ *  to_yard; approved issue/writeoff/yard-move subtracts from from_yard.
+ *  Pending issues count as pendingOut on their from_yard. */
+export function buildYardStockMap(movements: MovementRow[]): YardStockMap {
+  const map: YardStockMap = new Map();
+  for (const m of movements) {
+    const qty = Number(m.qty ?? 0);
+    if (m.status === "approved") {
+      if (m.to_yard_id) {
+        const key = yardStockKey(m.component_id, m.to_yard_id);
+        const prev = map.get(key) ?? { onHand: 0, pendingOut: 0 };
+        map.set(key, { ...prev, onHand: prev.onHand + qty });
+      }
+      if (m.from_yard_id) {
+        const key = yardStockKey(m.component_id, m.from_yard_id);
+        const prev = map.get(key) ?? { onHand: 0, pendingOut: 0 };
+        map.set(key, { ...prev, onHand: prev.onHand - qty });
+      }
+    } else if (m.status === "pending_approval") {
+      if (m.from_yard_id) {
+        const key = yardStockKey(m.component_id, m.from_yard_id);
+        const prev = map.get(key) ?? { onHand: 0, pendingOut: 0 };
+        map.set(key, { ...prev, pendingOut: prev.pendingOut + qty });
+      }
+    }
+  }
+  return map;
 }
 
 /** Build the (component × site) stock lookup from the full movement
@@ -124,6 +178,10 @@ export type InventorySnapshot = {
   movements: MovementRow[];
   stock: StockMap;
   plant: Site | null;
+  /** Mig 086 — warehouse yards + per-(component × yard) balances.
+   *  yards is empty if the yards table isn't present yet (graceful). */
+  yards: Yard[];
+  yardStock: YardStockMap;
 };
 
 export type InventorySnapshotResult =
@@ -182,9 +240,20 @@ export async function loadInventorySnapshotOrSetup(): Promise<InventorySnapshotR
   const stock = buildStockMap(movements);
   const plant = sites.find((s) => s.is_plant) ?? null;
 
+  // Mig 086 — warehouse yards. Loaded separately + non-fatally: an
+  // environment that hasn't run mig 083/086 yet just gets no yards
+  // (the yard UI hides itself) rather than crashing the whole board.
+  const yardsRes = await supabase
+    .from("scaffolding_yards")
+    .select("id, code, name, display_order, is_active")
+    .eq("is_active", true)
+    .order("display_order", { ascending: true });
+  const yards = ((yardsRes.error ? [] : yardsRes.data ?? []) as unknown) as Yard[];
+  const yardStock = buildYardStockMap(movements);
+
   return {
     kind: "ok",
-    snapshot: { sites, components, movements, stock, plant },
+    snapshot: { sites, components, movements, stock, plant, yards, yardStock },
   };
 }
 

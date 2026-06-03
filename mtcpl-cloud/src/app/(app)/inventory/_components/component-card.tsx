@@ -23,6 +23,7 @@ export function ComponentCard({
   href,
   emphasis,
   imageDataUrl,
+  yardBreakdown,
 }: {
   name: string;
   componentType: ScaffoldingComponentType;
@@ -45,6 +46,9 @@ export function ComponentCard({
   /** Mig 044 — uploaded PNG (data URL) for the component. When
    *  present the card shows the real image instead of the SVG. */
   imageDataUrl?: string | null;
+  /** Mig 086 — per-yard split of the plant on-hand, e.g.
+   *  [{label:"A", qty:50}, …]. Shown only on the plant board. */
+  yardBreakdown?: { label: string; qty: number }[];
 }) {
   const level = stockLevel(qty);
   const muted = emphasis === "muted";
@@ -216,6 +220,29 @@ export function ComponentCard({
           </span>
         )}
       </div>
+      {/* Mig 086 — per-yard split (plant board only). */}
+      {yardBreakdown && yardBreakdown.length > 0 && (
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+          {yardBreakdown.map((y) => (
+            <span
+              key={y.label}
+              title={`Yard ${y.label}`}
+              style={{
+                fontSize: 8.5,
+                fontWeight: 700,
+                color: y.qty > 0 ? INV_THEME.steel : INV_THEME.steelLight,
+                background: INV_THEME.cream,
+                border: `1px solid ${INV_THEME.parchment}`,
+                borderRadius: 3,
+                padding: "1px 4px",
+                letterSpacing: "0.02em",
+              }}
+            >
+              {y.label} {Math.round(y.qty).toLocaleString("en-IN")}
+            </span>
+          ))}
+        </div>
+      )}
       {secondaryLine && (
         <div
           style={{
