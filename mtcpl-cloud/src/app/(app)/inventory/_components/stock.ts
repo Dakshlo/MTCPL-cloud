@@ -203,7 +203,13 @@ export async function loadInventorySnapshotOrSetup(): Promise<InventorySnapshotR
       .order("name", { ascending: true }),
     supabase
       .from("scaffolding_components")
-      .select("*")
+      // Mig 087 — metadata ONLY. The base64 photo (image_data_url) is
+      // deliberately NOT pulled here; it was bloating every inventory
+      // page's HTML by 1-2 MB. Photos now load from the cached
+      // /api/inventory/component-image route instead.
+      .select(
+        "id, name, component_type, size_spec, unit, description, display_order, is_active, created_at, updated_at",
+      )
       .order("component_type", { ascending: true })
       .order("display_order", { ascending: true }),
     supabase
@@ -235,21 +241,51 @@ export async function loadInventorySnapshotOrSetup(): Promise<InventorySnapshotR
   }
 
   const sites = ((sitesRes.data ?? []) as unknown) as Site[];
-  const components = ((componentsRes.data ?? []) as unknown) as ScaffoldingComponent[];
   const movements = ((movementsRes.data ?? []) as unknown) as MovementRow[];
   const stock = buildStockMap(movements);
   const plant = sites.find((s) => s.is_plant) ?? null;
 
-  // Mig 086 — warehouse yards. Loaded separately + non-fatally: an
-  // environment that hasn't run mig 083/086 yet just gets no yards
-  // (the yard UI hides itself) rather than crashing the whole board.
-  const yardsRes = await supabase
-    .from("scaffolding_yards")
-    .select("id, code, name, display_order, is_active")
-    .eq("is_active", true)
-    .order("display_order", { ascending: true });
+  // Mig 086 + 087 — both loaded separately + NON-fatally so an
+  // environment that hasn't run those migrations yet degrades
+  // gracefully (no yards / SVG-only icons) instead of crashing:
+  //   • yards         — the warehouse yards (mig 086).
+  //   • has_image map — which components have a photo (mig 087), a
+  //     tiny boolean query (NOT the base64).
+  const [yardsRes, hasImageRes] = await Promise.all([
+    supabase
+      .from("scaffolding_yards")
+      .select("id, code, name, display_order, is_active")
+      .eq("is_active", true)
+      .order("display_order", { ascending: true }),
+    supabase.from("scaffolding_components").select("id, has_image"),
+  ]);
   const yards = ((yardsRes.error ? [] : yardsRes.data ?? []) as unknown) as Yard[];
   const yardStock = buildYardStockMap(movements);
+
+  const hasImageById = new Map<string, boolean>();
+  if (!hasImageRes.error) {
+    for (const r of (hasImageRes.data ?? []) as Array<{
+      id: string;
+      has_image: boolean | null;
+    }>) {
+      if (r.has_image) hasImageById.set(r.id, true);
+    }
+  }
+
+  // Build components with a route URL for the photo (mig 087) instead
+  // of base64 — the browser caches the image file by URL; the ?v=
+  // (updated_at) busts the cache when the photo changes.
+  const componentsRaw = (componentsRes.data ?? []) as Array<
+    Omit<ScaffoldingComponent, "image_data_url">
+  >;
+  const components: ScaffoldingComponent[] = componentsRaw.map((c) => ({
+    ...c,
+    image_data_url: hasImageById.get(c.id)
+      ? `/api/inventory/component-image/${c.id}?v=${encodeURIComponent(
+          c.updated_at ?? "",
+        )}`
+      : null,
+  }));
 
   return {
     kind: "ok",
