@@ -272,6 +272,7 @@ export function VendorCockpitClient({
   rejected,
   recent,
   otherVendors,
+  transferVendors,
   isStaffView,
   readOnly = false,
   toast,
@@ -304,6 +305,13 @@ export function VendorCockpitClient({
     slab: SlabLite | null;
   }>;
   otherVendors: Vendor[];
+  /** Daksh June 2026 — full list of every active CNC + Manual vendor
+   *  (except the one being viewed) for the Problem/transfer
+   *  destination dropdown. Separate from `otherVendors`, which is
+   *  narrowed to the cockpit-switcher allow-list: a vendor user with
+   *  managed access (e.g. Manthan → Alkesh) could otherwise only
+   *  transfer to their managed vendors, not everyone. */
+  transferVendors: Vendor[];
   isStaffView: boolean;
   /** Mig 076 — TRUE when carving_head / senior_incharge is viewing as
    *  a "Global My Jobs" oversight tour. Hides every action button (Load,
@@ -979,7 +987,7 @@ export function VendorCockpitClient({
                         setPeekOpen(null);
                       }
                     }}
-                    otherVendorsForTransfer={otherVendors}
+                    otherVendorsForTransfer={transferVendors}
                   />
                 ))}
               </div>
@@ -1159,7 +1167,7 @@ export function VendorCockpitClient({
       {problemFor && !readOnly && (
         <ProblemModal
           job={problemFor}
-          otherVendorsForTransfer={otherVendors}
+          otherVendorsForTransfer={transferVendors}
           currentVendorId={vendor.id}
           onClose={() => setProblemFor(null)}
         />

@@ -531,6 +531,21 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
     .filter((v) => v.id !== vendorId && allowedSwitchIds.has(v.id))
     .map((v) => ({ id: v.id, name: v.name, vendor_type: v.vendor_type }));
 
+  // Daksh June 2026 — the transfer-destination dropdown (Problem /
+  // transfer, from a Ready-to-load or running slab) must list EVERY
+  // active CNC + Manual vendor, NOT just the ones this user can
+  // switch into. Bug: Manthan (a vendor with managed access to
+  // Alkesh) saw only his own + managed vendors as transfer targets,
+  // while staff saw all of them. `otherVendors` above is deliberately
+  // narrowed to the cockpit-switcher allow-list, so the transfer
+  // picker needs its own full list — the same complete CNC + Manual
+  // set every other role already gets.
+  const transferVendors = (
+    (vendorPickerRows as { id: string; name: string; vendor_type: string }[] | null) ?? []
+  )
+    .filter((v) => v.id !== vendorId)
+    .map((v) => ({ id: v.id, name: v.name, vendor_type: v.vendor_type }));
+
   // Mig 077 — show the switcher to managed-vendor users too, even
   // though their role is "vendor". The list above is already
   // scoped to vendors they can act on.
@@ -546,6 +561,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
       rejected={rejected}
       recent={recent}
       otherVendors={otherVendors}
+      transferVendors={transferVendors}
       isStaffView={profile.role !== "vendor" || hasManagedVendors}
       readOnly={readOnlyCockpit}
       toast={params.toast ?? null}
