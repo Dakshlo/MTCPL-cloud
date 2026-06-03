@@ -407,6 +407,85 @@ function labelForType(t: MovementType): string {
 }
 
 // ──────────────────────────────────────────────────────────────────
+// Mig 086 — Move stock between warehouse yards.
+// ──────────────────────────────────────────────────────────────────
+// An internal warehouse re-shuffle: take N of a component out of one
+// yard and into another. Both legs are at the plant, so it nets to
+// zero at the site level (stock stays at the plant) and −from +to at
+// the yard level. Applied IMMEDIATELY (status='approved') — it's a
+// low-stakes internal move, not money or stock leaving the building.
+export async function moveBetweenYardsAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canManageInventory(profile)) {
+    return { ok: false, error: "You don't have permission to manage inventory." };
+  }
+
+  const componentId = String(formData.get("component_id") || "").trim();
+  const fromYardId = String(formData.get("from_yard_id") || "").trim();
+  const toYardId = String(formData.get("to_yard_id") || "").trim();
+  const qty = Number(formData.get("qty"));
+  const note = String(formData.get("note") || "").trim() || null;
+
+  if (!componentId) return { ok: false, error: "Pick a component." };
+  if (!fromYardId || !toYardId) {
+    return { ok: false, error: "Pick both the From and To yard." };
+  }
+  if (fromYardId === toYardId) {
+    return { ok: false, error: "From and To yards must be different." };
+  }
+  if (!Number.isFinite(qty) || qty <= 0 || !Number.isInteger(qty)) {
+    return {
+      ok: false,
+      error: "Quantity must be a whole number greater than zero.",
+    };
+  }
+
+  const yb = await getStockForComponentAtYard(componentId, fromYardId);
+  const yavail = available(yb);
+  if (qty > yavail) {
+    return {
+      ok: false,
+      error: `The From yard only has ${yavail} available (requested ${qty}).`,
+    };
+  }
+
+  const plantId = await getPlantSiteId();
+  const now = new Date().toISOString();
+  const supabase = createAdminSupabaseClient();
+  const batchId = randomUUID();
+
+  const { error } = await supabase.from("inventory_movements").insert({
+    batch_id: batchId,
+    movement_type: "transfer",
+    status: "approved", // internal yard move — applied immediately
+    from_site_id: plantId,
+    to_site_id: plantId,
+    from_yard_id: fromYardId,
+    to_yard_id: toYardId,
+    component_id: componentId,
+    qty,
+    proposed_by: profile.id,
+    proposed_at: now,
+    proposed_note: note,
+    approved_by: profile.id,
+    approved_at: now,
+    batch_note: note,
+  });
+  if (error) return { ok: false, error: error.message };
+
+  void logAudit(profile.id, "inventory_yard_move", "inventory_batch", batchId, {
+    component_id: componentId,
+    from_yard_id: fromYardId,
+    to_yard_id: toYardId,
+    qty,
+  });
+  await refreshInventoryPaths();
+  return { ok: true };
+}
+
+// ──────────────────────────────────────────────────────────────────
 // Approve / Reject / Cancel a batch
 // ──────────────────────────────────────────────────────────────────
 

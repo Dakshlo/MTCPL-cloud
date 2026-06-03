@@ -137,6 +137,11 @@ export default async function ScaffoldingBoardPage({
             <Link href="/inventory/scaffolding/receive" style={secondaryButton}>
               ⤓ Receive
             </Link>
+            {yards.length >= 2 && (
+              <Link href="/inventory/scaffolding/move-yard" style={secondaryButton}>
+                ⇄ Move yard
+              </Link>
+            )}
           </>
         ) : null
       }
