@@ -147,6 +147,8 @@ export function CutterExpensesClient({
         currentMonth={currentMonth}
         total={grandTotal}
         totalCaption="feeds the Cutter report"
+        backHref="/reports/various-costing/cutter"
+        backLabel="Cutter Costing"
       />
 
       <BookValuePanel

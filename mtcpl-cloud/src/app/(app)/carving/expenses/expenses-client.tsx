@@ -153,6 +153,8 @@ export function CncExpensesClient({
         totalCaption={`across ${vendors.length} CNC operator${
           vendors.length === 1 ? "" : "s"
         }`}
+        backHref="/reports/various-costing/cnc"
+        backLabel="CNC Costing"
       />
 
       {vendors.length === 0 && (

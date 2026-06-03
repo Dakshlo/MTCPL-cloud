@@ -25,6 +25,7 @@
  * data/server-action plumbing is untouched.
  */
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 const MONTH_NAMES = [
@@ -52,6 +53,8 @@ export function ExpenseMonthBar({
   currentMonth,
   total,
   totalCaption,
+  backHref,
+  backLabel,
 }: {
   /** Route the month nav rewrites, e.g. "/carving/expenses". */
   basePath: string;
@@ -66,6 +69,13 @@ export function ExpenseMonthBar({
   /** Running total shown on the right of the bar. */
   total: number;
   totalCaption?: string;
+  /** Optional "go back" target — the report this page was opened from
+   *  (e.g. the Various-Costing CNC/Cutter report). Rendered as a back
+   *  button at the far left of the (sticky) bar so it's always reachable.
+   *  A plain history-back wouldn't work: month switching uses router
+   *  navigation, so "back" would just undo a month change. */
+  backHref?: string;
+  backLabel?: string;
 }) {
   const router = useRouter();
   const go = (y: number, m: number) =>
@@ -118,6 +128,18 @@ export function ExpenseMonthBar({
           boxShadow: "0 6px 18px rgba(0,0,0,0.07)",
         }}
       >
+        {/* Back to the report this page was opened from */}
+        {backHref && (
+          <Link
+            href={backHref}
+            title={backLabel ? `Back to ${backLabel}` : "Back"}
+            style={backBtn()}
+          >
+            <span style={{ fontSize: 16, lineHeight: 1 }}>←</span>
+            {backLabel ? `Back to ${backLabel}` : "Back"}
+          </Link>
+        )}
+
         {/* Prev · MONTH · Next */}
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button
@@ -312,6 +334,24 @@ export function ExpenseMonthBar({
       )}
     </>
   );
+}
+
+function backBtn(): React.CSSProperties {
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "8px 13px",
+    fontSize: 13,
+    fontWeight: 700,
+    background: "var(--bg)",
+    color: "var(--text)",
+    border: "1px solid var(--border)",
+    borderRadius: 9,
+    textDecoration: "none",
+    whiteSpace: "nowrap",
+    flexShrink: 0,
+  };
 }
 
 function chevBtn(): React.CSSProperties {
