@@ -9,7 +9,9 @@
  *
  * Math:
  *   carved_cft_in_period = Σ slab CFT for carving_items where
- *                          completed_at ∈ period
+ *                          review_approved_at ∈ period (output counts
+ *                          at APPROVAL, not unload — rejected/reworked
+ *                          slabs are excluded; see §1 below)
  *   carved_sft_in_period = Σ slab SFT for the same set
  *                          (length × width / 144)
  *   operational_cost     = Σ cnc_vendor_expenses (vendor_id, year, month)
@@ -320,21 +322,30 @@ export async function buildCncVariousCostReport(
 ): Promise<CncVariousCostReport> {
   const admin = createAdminSupabaseClient();
 
-  // Period bounds in IST. completed_at is TIMESTAMPTZ.
+  // Period bounds in IST. review_approved_at is TIMESTAMPTZ.
   const startIso = new Date(`${period.startDate}T00:00:00+05:30`).toISOString();
   const endParts = parseDateKey(period.endDate);
   const exclusiveEndMs = isoUtcMidnight(endParts) + 86_400_000 - 5.5 * 60 * 60 * 1000;
   const endIso = new Date(exclusiveEndMs).toISOString();
 
-  // ── 1. Carving completed within the window ────────────────────
+  // ── 1. Carving APPROVED within the window ─────────────────────
+  // Daksh (June 2026) — output is counted at REVIEW APPROVAL, not at
+  // unload. review_approved_at is stamped when the reviewer approves a
+  // slab and CLEARED again on rework / reject, so a slab only counts
+  // once it's genuinely accepted: unloaded-but-pending, reworked, and
+  // rejected slabs never inflate carved output (or the cost-per-unit).
+  // Matches the vendor cockpit "Carved · last 30 days" stat. We filter
+  // on review_approved_at IS NOT NULL (rather than review_decision =
+  // 'approved') so pre-mig-080 approvals — which carry a null decision
+  // — still count.
   // Each row joins to slab_requirements for the dimensions. Per
   // earlier embedded-join issues, do two queries + a lookup map.
   const { data: items, error: itemsErr } = await admin
     .from("carving_items")
-    .select("vendor_id, vendor_name, slab_requirement_id, completed_at")
-    .gte("completed_at", startIso)
-    .lt("completed_at", endIso)
-    .not("completed_at", "is", null);
+    .select("vendor_id, vendor_name, slab_requirement_id, review_approved_at")
+    .gte("review_approved_at", startIso)
+    .lt("review_approved_at", endIso)
+    .not("review_approved_at", "is", null);
   if (itemsErr) throw new Error(`carving_items query failed: ${itemsErr.message}`);
 
   const slabIds = Array.from(

@@ -8,8 +8,10 @@
  * machines only show CFT (round work — SQFT is meaningless).
  *
  * The numbers come from carving_items joined to slab_requirements:
- *   • A row counts toward (machine, day) if completed_at falls on
- *     that day in IST and cnc_machine_id is set.
+ *   • A row counts toward (machine, day) if review_approved_at falls
+ *     on that day in IST and completed_on_cnc_machine_id is set —
+ *     i.e. output is counted at REVIEW APPROVAL, not at unload, so
+ *     reworked / rejected slabs never count (Daksh, June 2026).
  *   • Thin slab (thickness ≤ 12") → SFT = (length × width) / 144
  *   • Thick slab (thickness > 12") → CFT = (length × width × thickness) / 1728
  *
@@ -463,13 +465,20 @@ export async function buildCncReport(period: CncReportPeriod): Promise<CncMonthl
   // added some CNCs". Backfill in mig 075 covers historical rows
   // (copies from cnc_machine_id where still set; falls back to
   // cnc_machine_events.unloaded and then held_from_machine_id).
+  // Daksh (June 2026) — output counts at REVIEW APPROVAL, not at
+  // unload. We window + day-bucket on review_approved_at (stamped on
+  // approve, cleared on rework / reject) so reworked / rejected slabs
+  // never count, matching the Various-Costing CNC report + the vendor
+  // cockpit stat. The carving machine (completed_on_cnc_machine_id)
+  // persists through approval, so the per-machine attribution is
+  // unchanged.
   const { data: items, error: itemsErr } = await admin
     .from("carving_items")
-    .select("id, completed_on_cnc_machine_id, completed_at, slab_requirement_id")
-    .gte("completed_at", startIso)
-    .lt("completed_at", endIso)
+    .select("id, completed_on_cnc_machine_id, review_approved_at, slab_requirement_id")
+    .gte("review_approved_at", startIso)
+    .lt("review_approved_at", endIso)
     .not("completed_on_cnc_machine_id", "is", null)
-    .not("completed_at", "is", null);
+    .not("review_approved_at", "is", null);
   if (itemsErr) throw new Error(`carving_items: ${itemsErr.message}`);
 
   const slabIds = [
@@ -522,7 +531,7 @@ export async function buildCncReport(period: CncReportPeriod): Promise<CncMonthl
   // given cell, so the visual is "this work was measured in SFT"
   // or "in CFT" but never both for the same slab.
   for (const it of (items ?? []) as Array<{
-    completed_on_cnc_machine_id: string | null; completed_at: string; slab_requirement_id: string;
+    completed_on_cnc_machine_id: string | null; review_approved_at: string; slab_requirement_id: string;
   }>) {
     const machineId = it.completed_on_cnc_machine_id;
     if (!machineId) continue;
@@ -530,7 +539,7 @@ export async function buildCncReport(period: CncReportPeriod): Promise<CncMonthl
     if (!dim) continue;
     const sqft = (dim.l * dim.w) / 144;
     const cft = (dim.l * dim.w * dim.t) / 1728;
-    const dateKey = istDateKey(it.completed_at);
+    const dateKey = istDateKey(it.review_approved_at);
     const row = rowByDate.get(dateKey);
     if (!row) continue;
     const cell = row.values[machineId] ?? { sqft: 0, cft: 0 };
