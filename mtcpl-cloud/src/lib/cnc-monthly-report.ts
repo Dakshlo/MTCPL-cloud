@@ -569,13 +569,47 @@ export async function buildCncReport(period: CncReportPeriod): Promise<CncMonthl
     const pm = prevMonthOf(p.year, p.month);
     yearMonthPairs.add(`${pm.year}|${pm.month}`);
   }
-  // Two lookups: non-electricity (same-month) + electricity (shifted).
+  const yearList = [...new Set([...yearMonthPairs].map((k) => Number(k.split("|")[0])))];
+  const monthList = [...new Set([...yearMonthPairs].map((k) => Number(k.split("|")[1])))];
+
+  // Mig 071 fix (Daksh, June 2026) — plant-wide electricity lives in
+  // its OWN table (cnc_plant_electricity: one bill per month). The
+  // report used to read electricity from cnc_vendor_expenses
+  // (per-vendor), which is empty for it since mig 071 — so operational
+  // showed ₹0 even after the May bill was entered. Pull the plant bill
+  // here; it's prorated over the period + allocated to vendors by
+  // output share below, on the SAME one-month-back shift (utility
+  // bills arrive late, so June's report uses May's bill).
+  const plantElectricByMonth = new Map<string, number>(); // "year|month" → amount
+  if (yearMonthPairs.size > 0) {
+    const { data: peRaw, error: peErr } = await admin
+      .from("cnc_plant_electricity")
+      .select("year, month, amount")
+      .in("year", yearList)
+      .in("month", monthList)
+      .is("cancelled_at", null);
+    if (!peErr) {
+      for (const r of (peRaw ?? []) as Array<{
+        year: number;
+        month: number;
+        amount: number | string;
+      }>) {
+        const k = `${r.year}|${r.month}`;
+        plantElectricByMonth.set(
+          k,
+          (plantElectricByMonth.get(k) ?? 0) + Number(r.amount ?? 0),
+        );
+      }
+    }
+  }
+
+  // Two lookups: non-electricity (same-month) + LEGACY per-vendor
+  // electricity (shifted) — only matters for months entered before
+  // mig 071 moved electricity to the plant-wide table above.
   const nonElectricByVendorMonth = new Map<string, number>(); // vendor|year|month
   const electricByVendorMonth = new Map<string, number>();    // vendor|year|month
   if (yearMonthPairs.size > 0 && machineCols.length > 0) {
     const distinctVendorIds = [...new Set(machineCols.map((m) => m.vendor_id))];
-    const yearList = [...new Set([...yearMonthPairs].map((k) => Number(k.split("|")[0])))];
-    const monthList = [...new Set([...yearMonthPairs].map((k) => Number(k.split("|")[1])))];
 
     // Over-fetch by (years × months) and filter in-memory — the
     // (year, month) grid is at most 2×12 = 24 cells, and the
@@ -637,6 +671,20 @@ export async function buildCncReport(period: CncReportPeriod): Promise<CncMonthl
   const grandTotalCft = Object.values(perMachine).reduce((acc, p) => acc + p.cftTotal, 0);
   const grandTotalCombined = grandTotalSqft + grandTotalCft;
 
+  // Mig 071 fix — prorate the plant electricity across the report
+  // period (one-month-back shift). A full monthly view of June picks
+  // up ALL of May's bill (Σ 1/daysInMonth over the month = 1); a
+  // weekly / partial view gets the matching daily slice. Allocated to
+  // vendors by output share inside the loop below.
+  let plantElectricForPeriod = 0;
+  for (let ms = startMs; ms <= endMs; ms += 86_400_000) {
+    const p = parseDateKeyMs(ms);
+    const dim = daysInMonth(p.year, p.month);
+    const em = prevMonthOf(p.year, p.month);
+    plantElectricForPeriod +=
+      (plantElectricByMonth.get(`${em.year}|${em.month}`) ?? 0) / dim;
+  }
+
   // Per-vendor (CNC operator) aggregation. Walk vendorGroups so the
   // order matches the on-screen header grouping.
   //
@@ -694,6 +742,20 @@ export async function buildCncReport(period: CncReportPeriod): Promise<CncMonthl
         depreciationForPeriod += monthlyDep / dim;
       }
     }
+    // Mig 071 fix — add this vendor's share of the plant-wide
+    // electricity, split by output (SFT+CFT). The shares sum to the
+    // full plant bill, so grandTotalOperational (= Σ per-vendor)
+    // includes it. If there was no output at all, split it evenly so
+    // the bill isn't lost.
+    const vendorCombined = sqftTotal + cftTotal;
+    const electricShare =
+      grandTotalCombined > 0
+        ? plantElectricForPeriod * (vendorCombined / grandTotalCombined)
+        : vendorGroups.length > 0
+          ? plantElectricForPeriod / vendorGroups.length
+          : 0;
+    operationalForPeriod += electricShare;
+
     const totalCostForPeriod = operationalForPeriod + depreciationForPeriod;
     const costPerSft = sqftTotal > 0 ? totalCostForPeriod / sqftTotal : NaN;
     const costPerCft = cftTotal > 0 ? totalCostForPeriod / cftTotal : NaN;

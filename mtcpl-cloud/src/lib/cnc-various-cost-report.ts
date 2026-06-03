@@ -462,6 +462,44 @@ export async function buildCncVariousCostReport(
     }
   }
 
+  // ── 2a. Plant-wide electricity (mig 071 fix, Daksh June 2026) ──
+  // Electricity now lives in its OWN table (cnc_plant_electricity,
+  // one bill per month). This report read electricity only from
+  // cnc_vendor_expenses (per-vendor), which is empty for it since
+  // mig 071 — so operational showed ₹0 even after the May bill was
+  // entered. Pull the plant bill on a one-month-BACK shift (utility
+  // bills arrive late, so June's report uses May's bill), prorate it
+  // to the window, and fold it into the electricity category + total.
+  // It's split across vendors by output share when the per-vendor
+  // rows are composed below.
+  function prevMonthOf(y: number, m: number): { year: number; month: number } {
+    return m === 1 ? { year: y - 1, month: 12 } : { year: y, month: m - 1 };
+  }
+  let plantElectricForPeriod = 0;
+  for (const { year, month } of yearMonthPairs) {
+    const em = prevMonthOf(year, month);
+    const { data: peRows } = await admin
+      .from("cnc_plant_electricity")
+      .select("amount")
+      .eq("year", em.year)
+      .eq("month", em.month)
+      .is("cancelled_at", null);
+    const monthLen = daysInMonth(year, month);
+    const daysInWindow = daysOfWindowInMonth(
+      period.startDate,
+      period.endDate,
+      year,
+      month,
+    );
+    const shareFactor = monthLen > 0 ? daysInWindow / monthLen : 0;
+    for (const r of peRows ?? []) {
+      plantElectricForPeriod +=
+        Number((r as { amount: number | string }).amount ?? 0) * shareFactor;
+    }
+  }
+  aggregateByCategory.byCategory.electricity += plantElectricForPeriod;
+  aggregateByCategory.cost += plantElectricForPeriod;
+
   const operationalForPeriod = aggregateByCategory.cost;
 
   // ── 2b. Depreciation per vendor (prorated to the window) ──────
@@ -535,13 +573,24 @@ export async function buildCncVariousCostReport(
   }
 
   // ── 4. Compose per-vendor rows ────────────────────────────────
+  const totalCombinedOutput = totalSft + totalCft;
   const perVendor: CncVendorRow[] = Array.from(allVendorIds).map((vendorId) => {
     const carved = carvedByVendor.get(vendorId);
     const exp = expensesByVendor.get(vendorId);
     const cft = carved?.cft ?? 0;
     const sft = carved?.sft ?? 0;
     const slabsCount = carved?.slabsCount ?? 0;
-    const operationalCost = exp?.cost ?? 0;
+    // Mig 071 fix — plant electricity is plant-wide; allocate this
+    // vendor's share by output (SFT+CFT). The shares sum to the full
+    // plant bill, so the per-vendor operational totals tie out to
+    // operationalForPeriod above. Even split if there was no output.
+    const electricShare =
+      totalCombinedOutput > 0
+        ? plantElectricForPeriod * ((sft + cft) / totalCombinedOutput)
+        : allVendorIds.size > 0
+          ? plantElectricForPeriod / allVendorIds.size
+          : 0;
+    const operationalCost = (exp?.cost ?? 0) + electricShare;
     const depreciationCost = depreciationByVendor.get(vendorId) ?? 0;
     const totalCost = operationalCost + depreciationCost;
     return {

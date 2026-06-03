@@ -132,6 +132,13 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
     };
   })();
 
+  // Daksh (June 2026) — the Output + Cost-per-Unit cards now show ONE
+  // combined figure (SFT + CFT summed) instead of two separate lines.
+  // (Total Cost + Daily Average cards are left as-is.)
+  const combinedOutput = report.totalSft + report.totalCft;
+  const costPerCombined =
+    combinedOutput > 0 ? report.totalCostForPeriod / combinedOutput : NaN;
+
   return (
     <section style={{ paddingBottom: 24 }}>
       {/* ── Header ───────────────────────────────────────────── */}
@@ -260,15 +267,15 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
       >
         <DualKpiTile
           label="Cost per Unit"
-          primary={`${fmtINR(report.costPerSft)} / SFT`}
-          secondary={`${fmtINR(report.costPerCft)} / CFT`}
+          primary={`${fmtINR(costPerCombined)} / unit`}
+          secondary="SFT + CFT combined"
           hint="Operational + depreciation ÷ output"
           tone="accent"
         />
         <DualKpiTile
           label="Output"
-          primary={`${fmtNum(report.totalSft)} SFT`}
-          secondary={`${fmtNum(report.totalCft)} CFT`}
+          primary={`${fmtNum(combinedOutput)} units`}
+          secondary="SFT + CFT combined"
           hint={`${report.slabsCount} slabs counted`}
           tone="success"
         />
