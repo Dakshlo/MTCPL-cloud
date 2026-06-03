@@ -12,6 +12,7 @@
 // ──────────────────────────────────────────────────────────────────
 
 import { headers } from "next/headers";
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { requireAuth } from "@/lib/auth";
 import { canViewInventory, canManageInventory } from "@/lib/inventory-permissions";
@@ -218,83 +219,82 @@ export default async function ScaffoldingBoardPage({
         hrefBase="/inventory/scaffolding"
       />
 
-      {/* Component grid — flat (Daksh May 2026).
-       *
-       *  Previously: one <section> per component_type with its own
-       *  header row + its own internal grid. With most fleets having
-       *  1 variant per type, each section rendered a single card
-       *  followed by empty row → cards looked like they were
-       *  stacked one per row even though the inner grid was 4-wide.
-       *
-       *  Now: one big flat grid of every visible component. Cards
-       *  are sorted by type → display_order so same-type variants
-       *  still cluster next to each other; the type is already
-       *  visible from the component name + icon on each card so no
-       *  section header is needed. */}
-      <ComponentCardGrid>
-        {types.flatMap((t) => {
+      {/* Component groups — one coloured PANEL per component type
+       *  (Daksh, June 2026: "all of a group on one shared background
+       *  so they look grouped"). Each type is a tinted panel with a
+       *  header + count; the cards inside are plain white so they read
+       *  as one block sitting on the group's colour. */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        {types.map((t) => {
           const list = byType.get(t)!;
-          // Filter per-site visibility same as before: at the plant
-          // we show everything; at a project site we only show what's
-          // actually present (qty or pending > 0).
+          // Plant view shows every component; a project-site view only
+          // shows what's actually present there.
           const visible = showPlant
             ? list
             : list.filter((c) => {
                 const e = stock.get(stockKey(c.id, activeSite.id));
                 return e && (e.onHand > 0 || e.pendingOut > 0);
               });
-          return visible.map((c) => {
-            const entry = stock.get(stockKey(c.id, activeSite.id));
-            const qty = entry?.onHand ?? 0;
-            const pending = entry?.pendingOut ?? 0;
-            const outAtSites = showPlant
-              ? totalOutAtSites(c.id, sites, stock)
-              : 0;
-            // Mig 086 — per-yard split of the plant on-hand. Only on
-            // the plant view + only when yards exist.
-            const yardBreakdown =
-              showPlant && yards.length > 0
-                ? yards.map((y) => ({
-                    label: y.name,
-                    qty: yardStock.get(yardStockKey(c.id, y.id))?.onHand ?? 0,
-                  }))
-                : undefined;
-            // Per-site deployment for the detail modal (plant view).
-            const siteBreakdown = showPlant
-              ? sites
-                  .filter((s) => !s.is_plant)
-                  .map((s) => ({
-                    name: s.name,
-                    qty: stock.get(stockKey(c.id, s.id))?.onHand ?? 0,
-                  }))
-                  .filter((s) => s.qty > 0)
-              : undefined;
-            return (
-              <ComponentCard
-                key={c.id}
-                name={c.name}
-                componentType={c.component_type}
-                typeLabel={labelForComponentType(t)}
-                sizeSpec={c.size_spec}
-                unit={c.unit}
-                qty={qty}
-                pendingOut={pending}
-                imageDataUrl={c.image_data_url}
-                tint={typeTint.get(t)}
-                yardBreakdown={yardBreakdown}
-                siteBreakdown={siteBreakdown}
-                outAtSitesTotal={outAtSites}
-                interactive={showPlant}
-                secondaryLine={
-                  showPlant && outAtSites > 0
-                    ? `+${outAtSites.toLocaleString("en-IN")} out at sites`
-                    : null
-                }
-              />
-            );
-          });
+          if (visible.length === 0) return null;
+          return (
+            <TypeGroupPanel
+              key={t}
+              label={labelForComponentType(t)}
+              tint={typeTint.get(t)}
+              count={visible.length}
+            >
+              <ComponentCardGrid>
+                {visible.map((c) => {
+                  const entry = stock.get(stockKey(c.id, activeSite.id));
+                  const qty = entry?.onHand ?? 0;
+                  const pending = entry?.pendingOut ?? 0;
+                  const outAtSites = showPlant
+                    ? totalOutAtSites(c.id, sites, stock)
+                    : 0;
+                  const yardBreakdown =
+                    showPlant && yards.length > 0
+                      ? yards.map((y) => ({
+                          label: y.name,
+                          qty:
+                            yardStock.get(yardStockKey(c.id, y.id))?.onHand ?? 0,
+                        }))
+                      : undefined;
+                  const siteBreakdown = showPlant
+                    ? sites
+                        .filter((s) => !s.is_plant)
+                        .map((s) => ({
+                          name: s.name,
+                          qty: stock.get(stockKey(c.id, s.id))?.onHand ?? 0,
+                        }))
+                        .filter((s) => s.qty > 0)
+                    : undefined;
+                  return (
+                    <ComponentCard
+                      key={c.id}
+                      name={c.name}
+                      componentType={c.component_type}
+                      sizeSpec={c.size_spec}
+                      unit={c.unit}
+                      qty={qty}
+                      pendingOut={pending}
+                      imageDataUrl={c.image_data_url}
+                      yardBreakdown={yardBreakdown}
+                      siteBreakdown={siteBreakdown}
+                      outAtSitesTotal={outAtSites}
+                      interactive={showPlant}
+                      secondaryLine={
+                        showPlant && outAtSites > 0
+                          ? `+${outAtSites.toLocaleString("en-IN")} out at sites`
+                          : null
+                      }
+                    />
+                  );
+                })}
+              </ComponentCardGrid>
+            </TypeGroupPanel>
+          );
         })}
-      </ComponentCardGrid>
+      </div>
 
       {/* Empty-fleet hint */}
       {activeComponents.length === 0 && (
@@ -332,6 +332,68 @@ export default async function ScaffoldingBoardPage({
         </div>
       )}
     </InventoryShell>
+  );
+}
+
+// Daksh (June 2026) — coloured group panel: one shared background per
+// component type, holding all that type's (white) cards so the group
+// reads as a single block.
+function TypeGroupPanel({
+  label,
+  tint,
+  count,
+  children,
+}: {
+  label: string;
+  tint?: string;
+  count: number;
+  children: ReactNode;
+}) {
+  return (
+    <section
+      style={{
+        background: tint ?? INV_THEME.paper,
+        border: `1px solid ${INV_THEME.parchment}`,
+        borderRadius: 14,
+        padding: "12px 14px 14px",
+        boxShadow: "0 1px 0 rgba(28, 52, 69, 0.04)",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          margin: "0 2px 10px",
+        }}
+      >
+        <span
+          style={{
+            fontSize: 12.5,
+            fontWeight: 800,
+            color: INV_THEME.steel,
+            textTransform: "uppercase",
+            letterSpacing: "0.08em",
+          }}
+        >
+          {label}
+        </span>
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 700,
+            color: INV_THEME.steelLight,
+            background: INV_THEME.paper,
+            border: `1px solid ${INV_THEME.parchment}`,
+            borderRadius: 999,
+            padding: "1px 8px",
+          }}
+        >
+          {count}
+        </span>
+      </div>
+      {children}
+    </section>
   );
 }
 
