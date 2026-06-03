@@ -102,8 +102,6 @@ export default async function ScaffoldingBoardPage({
     );
   }
 
-  // Mig 086 — short yard labels for the per-card breakdown ("YARD_A" → "A").
-  const yardShort = (code: string) => code.replace(/^YARD[_-]?/i, "") || code;
 
   // Pick which site to display. Default to plant.
   const activeSite = sites.find((s) => s.id === siteParam) ?? plant;
@@ -257,10 +255,20 @@ export default async function ScaffoldingBoardPage({
             const yardBreakdown =
               showPlant && yards.length > 0
                 ? yards.map((y) => ({
-                    label: yardShort(y.code),
+                    label: y.name,
                     qty: yardStock.get(yardStockKey(c.id, y.id))?.onHand ?? 0,
                   }))
                 : undefined;
+            // Per-site deployment for the detail modal (plant view).
+            const siteBreakdown = showPlant
+              ? sites
+                  .filter((s) => !s.is_plant)
+                  .map((s) => ({
+                    name: s.name,
+                    qty: stock.get(stockKey(c.id, s.id))?.onHand ?? 0,
+                  }))
+                  .filter((s) => s.qty > 0)
+              : undefined;
             return (
               <ComponentCard
                 key={c.id}
@@ -274,6 +282,9 @@ export default async function ScaffoldingBoardPage({
                 imageDataUrl={c.image_data_url}
                 tint={typeTint.get(t)}
                 yardBreakdown={yardBreakdown}
+                siteBreakdown={siteBreakdown}
+                outAtSitesTotal={outAtSites}
+                interactive={showPlant}
                 secondaryLine={
                   showPlant && outAtSites > 0
                     ? `+${outAtSites.toLocaleString("en-IN")} out at sites`

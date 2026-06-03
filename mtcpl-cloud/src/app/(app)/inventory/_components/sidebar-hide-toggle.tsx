@@ -100,8 +100,10 @@ export function SidebarHideToggle() {
       title={title}
       aria-pressed={isHidden}
       style={{
-        padding: "7px 12px",
-        fontSize: 12,
+        // Daksh (June 2026) — matched to the inventory action buttons
+        // so "Show menu" lines up uniformly with Issue / Buy / Move.
+        padding: "9px 16px",
+        fontSize: 13,
         fontWeight: 700,
         background: isHidden ? INV_THEME.steel : INV_THEME.paper,
         color: isHidden ? "#fff" : INV_THEME.steel,

@@ -1,15 +1,30 @@
+"use client";
+
 // ──────────────────────────────────────────────────────────────────
-// Migration 041 — Component card
+// Migration 041 — Component card  (Daksh, June 2026: click → detail)
 // ──────────────────────────────────────────────────────────────────
-// One card per (scaffolding_component × selected site) tuple on the
-// main inventory board. Big icon, dominant qty number, stock-level
-// dot row, optional secondary line (e.g. "+12 out at sites").
+// One card per (scaffolding_component × selected site) on the board.
+// Big icon, dominant qty, stock dots, per-yard split chips.
+//
+// Clicking a card (board mode — no href) opens a centred detail
+// modal with the full picture: total at plant, per-yard counts (full
+// names), what's out at each site, and pending movements.
 // ──────────────────────────────────────────────────────────────────
 
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ComponentIcon, type ScaffoldingComponentType } from "./component-icon";
 import { INV_THEME } from "./theme";
-import { stockLevel } from "./stock";
+
+// Inlined (was imported from ./stock, which pulls server-only code —
+// can't live in a "use client" module). Pure qty → level mapping.
+function stockLevel(qty: number): "healthy" | "low" | "out" {
+  if (qty <= 0) return "out";
+  if (qty < 10) return "low";
+  return "healthy";
+}
+
+type YardCount = { label: string; qty: number };
+type SiteCount = { name: string; qty: number };
 
 export function ComponentCard({
   name,
@@ -24,46 +39,56 @@ export function ComponentCard({
   emphasis,
   imageDataUrl,
   yardBreakdown,
+  siteBreakdown,
+  outAtSitesTotal,
   tint,
+  interactive = true,
 }: {
   name: string;
   componentType: ScaffoldingComponentType;
-  /** Daksh May 2026 — short human label for the component type
-   *  (Standards / Ledgers / Transoms / etc). Rendered as a small
-   *  chip in the top-right of the card so the user can still tell
-   *  same-name variants apart at a glance now that we render one
-   *  flat grid instead of per-type sections. Defaults to nothing
-   *  (chip hidden) for callers that don't want it. */
   typeLabel?: string;
   sizeSpec: string | null;
   unit: string;
   qty: number;
   pendingOut?: number;
-  /** Optional secondary line below the qty (e.g. "+312 out at sites"). */
   secondaryLine?: ReactNode;
-  /** If provided, the card wraps in an <a>. */
+  /** If provided, the card is a link (no detail modal). */
   href?: string;
   emphasis?: "default" | "muted";
-  /** Mig 044 — uploaded PNG (data URL) for the component. When
-   *  present the card shows the real image instead of the SVG. */
   imageDataUrl?: string | null;
-  /** Mig 086 — per-yard split of the plant on-hand, e.g.
-   *  [{label:"A", qty:50}, …]. Shown only on the plant board. */
-  yardBreakdown?: { label: string; qty: number }[];
-  /** Daksh (June 2026) — soft background tint shared by every card of
-   *  the same component type, so a type reads as one colour-grouped
-   *  block. Falls back to the default paper background. */
+  /** Mig 086 — per-yard split of the plant on-hand. label = full
+   *  yard name ("Yard A"). Shown on the plant board + modal. */
+  yardBreakdown?: YardCount[];
+  /** Mig 086 — what's out at each project site (modal only). */
+  siteBreakdown?: SiteCount[];
+  outAtSitesTotal?: number;
+  /** Soft per-type background tint so a type reads as one group. */
   tint?: string;
+  /** When false, the card is a plain (non-clickable) tile — used on
+   *  project-site views where the yard/site detail doesn't apply. */
+  interactive?: boolean;
 }) {
+  const [open, setOpen] = useState(false);
   const level = stockLevel(qty);
   const muted = emphasis === "muted";
-  // Daksh — scaffolding ships in whole pieces. Display Math.round
-  // so legacy fractional values (e.g. 25.01 pcs from before the
-  // integer-only rule landed) show as a clean integer in the UI.
-  // The underlying value is unchanged; this is display-only.
   const displayQty = Math.round(qty);
+  const isClickable = interactive && !href;
+
   const card = (
     <div
+      onClick={isClickable ? () => setOpen(true) : undefined}
+      role={isClickable ? "button" : undefined}
+      tabIndex={isClickable ? 0 : undefined}
+      onKeyDown={
+        isClickable
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setOpen(true);
+              }
+            }
+          : undefined
+      }
       style={{
         position: "relative",
         background: tint ?? INV_THEME.paper,
@@ -76,17 +101,11 @@ export function ComponentCard({
         boxShadow: "0 1px 0 rgba(28, 52, 69, 0.04)",
         minHeight: 172,
         opacity: muted ? 0.7 : 1,
-        transition: "transform 0.15s ease, box-shadow 0.15s ease",
-        cursor: href ? "pointer" : "default",
-        // Removes the 300ms tap delay on touch devices and stops
-        // accidental double-tap zooms when the storekeeper is
-        // tapping cards quickly on a tablet.
+        transition: "transform 0.12s ease, box-shadow 0.12s ease",
+        cursor: isClickable || href ? "pointer" : "default",
         touchAction: "manipulation",
       }}
     >
-      {/* Type chip — top-right. Absolutely positioned so it doesn't
-          push the icon down. Only renders when typeLabel is passed
-          (per-type-grouped views can omit it). */}
       {typeLabel && (
         <span
           style={{
@@ -109,8 +128,6 @@ export function ComponentCard({
           {typeLabel}
         </span>
       )}
-      {/* Icon block — shrunk from 88 → 56 to fit 4-per-row on
-          portrait tablets and 6-per-row on landscape. */}
       <div
         style={{
           flex: "0 0 auto",
@@ -128,11 +145,10 @@ export function ComponentCard({
         />
       </div>
 
-      {/* Name + size */}
       <div style={{ textAlign: "center" }}>
         <div
           style={{
-            fontSize: 10,
+            fontSize: 11,
             fontWeight: 700,
             color: INV_THEME.steel,
             textTransform: "uppercase",
@@ -156,8 +172,6 @@ export function ComponentCard({
         )}
       </div>
 
-      {/* Quantity block — auto-grows so the bottom row pins to the
-          card edge. */}
       <div
         style={{
           background: INV_THEME.cream,
@@ -193,7 +207,6 @@ export function ComponentCard({
         </div>
       </div>
 
-      {/* Status + secondary line — compact single row */}
       <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
         <StockDots level={level} />
         <span
@@ -225,25 +238,26 @@ export function ComponentCard({
           </span>
         )}
       </div>
-      {/* Mig 086 — per-yard split (plant board only). */}
+
+      {/* Mig 086 — per-yard split, full names + readable font. */}
       {yardBreakdown && yardBreakdown.length > 0 && (
-        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
           {yardBreakdown.map((y) => (
             <span
               key={y.label}
-              title={`Yard ${y.label}`}
               style={{
-                fontSize: 8.5,
+                fontSize: 10.5,
                 fontWeight: 700,
                 color: y.qty > 0 ? INV_THEME.steel : INV_THEME.steelLight,
                 background: INV_THEME.cream,
                 border: `1px solid ${INV_THEME.parchment}`,
-                borderRadius: 3,
-                padding: "1px 4px",
-                letterSpacing: "0.02em",
+                borderRadius: 5,
+                padding: "2px 8px",
+                letterSpacing: "0.01em",
+                fontFeatureSettings: '"tnum"',
               }}
             >
-              {y.label} {Math.round(y.qty).toLocaleString("en-IN")}
+              {y.label}: {Math.round(y.qty).toLocaleString("en-IN")}
             </span>
           ))}
         </div>
@@ -270,7 +284,359 @@ export function ComponentCard({
       </a>
     );
   }
-  return card;
+
+  return (
+    <>
+      {card}
+      {open && (
+        <ComponentDetailModal
+          onClose={() => setOpen(false)}
+          name={name}
+          componentType={componentType}
+          typeLabel={typeLabel}
+          sizeSpec={sizeSpec}
+          unit={unit}
+          qty={displayQty}
+          level={level}
+          pendingOut={pendingOut ?? 0}
+          imageDataUrl={imageDataUrl}
+          yardBreakdown={yardBreakdown ?? []}
+          siteBreakdown={siteBreakdown ?? []}
+          outAtSitesTotal={outAtSitesTotal ?? 0}
+          tint={tint}
+        />
+      )}
+    </>
+  );
+}
+
+function ComponentDetailModal({
+  onClose,
+  name,
+  componentType,
+  typeLabel,
+  sizeSpec,
+  unit,
+  qty,
+  level,
+  pendingOut,
+  imageDataUrl,
+  yardBreakdown,
+  siteBreakdown,
+  outAtSitesTotal,
+  tint,
+}: {
+  onClose: () => void;
+  name: string;
+  componentType: ScaffoldingComponentType;
+  typeLabel?: string;
+  sizeSpec: string | null;
+  unit: string;
+  qty: number;
+  level: "healthy" | "low" | "out";
+  pendingOut: number;
+  imageDataUrl?: string | null;
+  yardBreakdown: YardCount[];
+  siteBreakdown: SiteCount[];
+  outAtSitesTotal: number;
+  tint?: string;
+}) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const fmt = (n: number) => Math.round(n).toLocaleString("en-IN");
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 1000,
+        background: "rgba(28, 52, 69, 0.5)",
+        backdropFilter: "blur(2px)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+      }}
+    >
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 460,
+          maxHeight: "88vh",
+          overflowY: "auto",
+          background: INV_THEME.cream,
+          border: `1px solid ${INV_THEME.parchment}`,
+          borderRadius: 16,
+          boxShadow: "0 24px 60px rgba(0,0,0,0.35)",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        {/* Header */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 14,
+            padding: "18px 20px",
+            background: tint ?? INV_THEME.paper,
+            borderBottom: `1px solid ${INV_THEME.parchment}`,
+            borderRadius: "16px 16px 0 0",
+          }}
+        >
+          <div
+            style={{
+              width: 72,
+              height: 72,
+              flexShrink: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: INV_THEME.steel,
+              background: INV_THEME.paper,
+              border: `1px solid ${INV_THEME.parchment}`,
+              borderRadius: 12,
+            }}
+          >
+            <ComponentIcon
+              type={componentType}
+              size={56}
+              imageDataUrl={imageDataUrl ?? undefined}
+            />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {typeLabel && (
+              <div
+                style={{
+                  fontSize: 10,
+                  fontWeight: 800,
+                  color: INV_THEME.steelLight,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.08em",
+                }}
+              >
+                {typeLabel}
+              </div>
+            )}
+            <div
+              style={{
+                fontSize: 19,
+                fontWeight: 800,
+                color: INV_THEME.steel,
+                lineHeight: 1.15,
+                marginTop: 2,
+              }}
+            >
+              {name}
+            </div>
+            {sizeSpec && (
+              <div style={{ fontSize: 12, color: INV_THEME.steelLight, marginTop: 2 }}>
+                {sizeSpec}
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              border: "none",
+              background: "transparent",
+              fontSize: 20,
+              color: INV_THEME.steelLight,
+              cursor: "pointer",
+              padding: 4,
+              alignSelf: "flex-start",
+            }}
+          >
+            ✕
+          </button>
+        </div>
+
+        <div style={{ padding: "16px 20px 20px", display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* Total at plant */}
+          <div
+            style={{
+              background: INV_THEME.paper,
+              border: `1px solid ${INV_THEME.parchment}`,
+              borderRadius: 12,
+              padding: "14px 16px",
+              display: "flex",
+              alignItems: "baseline",
+              justifyContent: "space-between",
+              gap: 10,
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  fontSize: 10,
+                  fontWeight: 800,
+                  color: INV_THEME.steelLight,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.08em",
+                }}
+              >
+                At plant (total)
+              </div>
+              <div
+                style={{
+                  fontSize: 34,
+                  fontWeight: 800,
+                  color: qty > 0 ? INV_THEME.steel : INV_THEME.stockOut,
+                  lineHeight: 1.05,
+                  fontFeatureSettings: '"tnum"',
+                  marginTop: 2,
+                }}
+              >
+                {fmt(qty)}{" "}
+                <span style={{ fontSize: 13, fontWeight: 700, color: INV_THEME.steelLight }}>
+                  {unit}
+                </span>
+              </div>
+            </div>
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 800,
+                textTransform: "uppercase",
+                letterSpacing: "0.05em",
+                padding: "4px 10px",
+                borderRadius: 999,
+                color:
+                  level === "healthy"
+                    ? INV_THEME.stockHealthy
+                    : level === "low"
+                      ? INV_THEME.stockLow
+                      : INV_THEME.stockOut,
+                background:
+                  level === "healthy"
+                    ? "rgba(94,140,78,0.12)"
+                    : level === "low"
+                      ? "rgba(212,146,58,0.14)"
+                      : "rgba(193,68,46,0.12)",
+              }}
+            >
+              {level === "healthy" ? "In stock" : level === "low" ? "Low" : "Empty"}
+            </span>
+          </div>
+
+          {/* Per-yard breakdown */}
+          <Section title="By yard (warehouse)">
+            {yardBreakdown.length === 0 ? (
+              <Muted>No yards configured.</Muted>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {yardBreakdown.map((y) => (
+                  <Row key={y.label} label={y.label} value={`${fmt(y.qty)} ${unit}`} dim={y.qty <= 0} />
+                ))}
+              </div>
+            )}
+          </Section>
+
+          {/* Out at sites */}
+          <Section title={`Out at sites${outAtSitesTotal > 0 ? ` · ${fmt(outAtSitesTotal)} ${unit}` : ""}`}>
+            {siteBreakdown.length === 0 ? (
+              <Muted>Nothing deployed to a project site.</Muted>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {siteBreakdown.map((s) => (
+                  <Row key={s.name} label={s.name} value={`${fmt(s.qty)} ${unit}`} />
+                ))}
+              </div>
+            )}
+          </Section>
+
+          {/* Pending */}
+          {pendingOut > 0 && (
+            <div
+              style={{
+                fontSize: 12,
+                fontWeight: 700,
+                color: INV_THEME.pending,
+                background: "rgba(212, 146, 58, 0.12)",
+                border: `1px solid ${INV_THEME.pending}`,
+                borderRadius: 8,
+                padding: "8px 12px",
+              }}
+            >
+              ⏳ {fmt(pendingOut)} {unit} pending approval (movement in flight)
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div>
+      <div
+        style={{
+          fontSize: 10,
+          fontWeight: 800,
+          color: INV_THEME.steelLight,
+          textTransform: "uppercase",
+          letterSpacing: "0.08em",
+          marginBottom: 7,
+        }}
+      >
+        {title}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Row({ label, value, dim }: { label: string; value: string; dim?: boolean }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 10,
+        padding: "9px 12px",
+        background: INV_THEME.paper,
+        border: `1px solid ${INV_THEME.parchment}`,
+        borderRadius: 8,
+        opacity: dim ? 0.6 : 1,
+      }}
+    >
+      <span style={{ fontSize: 13, fontWeight: 700, color: INV_THEME.steel }}>{label}</span>
+      <span
+        style={{
+          fontSize: 14,
+          fontWeight: 800,
+          color: INV_THEME.steel,
+          fontFeatureSettings: '"tnum"',
+        }}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function Muted({ children }: { children: ReactNode }) {
+  return (
+    <div style={{ fontSize: 12, color: INV_THEME.steelLight, fontStyle: "italic" }}>
+      {children}
+    </div>
+  );
 }
 
 function StockDots({ level }: { level: "healthy" | "low" | "out" }) {
@@ -284,22 +650,15 @@ function StockDots({ level }: { level: "healthy" | "low" | "out" }) {
       {colors.map((c, i) => (
         <span
           key={i}
-          style={{
-            width: 6,
-            height: 6,
-            borderRadius: "50%",
-            background: c,
-          }}
+          style={{ width: 6, height: 6, borderRadius: "50%", background: c }}
         />
       ))}
     </span>
   );
 }
 
-/** A "card grid" container — responsive. Daksh (June 2026): bumped
- *  the minmax floor 140px → 200px. At 140 a wide tablet packed 8
- *  cramped cards per row; 200 lands ~5-6 bigger, readable cards on a
- *  landscape tablet and still collapses to 2-3 on a phone. */
+/** Responsive card grid. Floor 200px → ~5-6 bigger cards per row on a
+ *  landscape tablet (Daksh, June 2026). */
 export function ComponentCardGrid({ children }: { children: ReactNode }) {
   return (
     <div

@@ -86,8 +86,11 @@ export const primaryButton: React.CSSProperties = {
 };
 
 export const secondaryButton: React.CSSProperties = {
-  padding: "8px 14px",
-  fontSize: 12,
+  // Daksh (June 2026) — matched to primaryButton's size so the header
+  // action row reads as one uniform button set (fill vs outline is
+  // the only difference).
+  padding: "9px 16px",
+  fontSize: 13,
   fontWeight: 700,
   background: INV_THEME.paper,
   color: INV_THEME.steel,
