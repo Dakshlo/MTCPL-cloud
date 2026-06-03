@@ -24,6 +24,7 @@ export function ComponentCard({
   emphasis,
   imageDataUrl,
   yardBreakdown,
+  tint,
 }: {
   name: string;
   componentType: ScaffoldingComponentType;
@@ -49,6 +50,10 @@ export function ComponentCard({
   /** Mig 086 — per-yard split of the plant on-hand, e.g.
    *  [{label:"A", qty:50}, …]. Shown only on the plant board. */
   yardBreakdown?: { label: string; qty: number }[];
+  /** Daksh (June 2026) — soft background tint shared by every card of
+   *  the same component type, so a type reads as one colour-grouped
+   *  block. Falls back to the default paper background. */
+  tint?: string;
 }) {
   const level = stockLevel(qty);
   const muted = emphasis === "muted";
@@ -61,15 +66,15 @@ export function ComponentCard({
     <div
       style={{
         position: "relative",
-        background: INV_THEME.paper,
+        background: tint ?? INV_THEME.paper,
         border: `1px solid ${INV_THEME.parchment}`,
         borderRadius: 10,
-        padding: "10px 10px 9px",
+        padding: "12px 12px 10px",
         display: "flex",
         flexDirection: "column",
         gap: 6,
         boxShadow: "0 1px 0 rgba(28, 52, 69, 0.04)",
-        minHeight: 158,
+        minHeight: 172,
         opacity: muted ? 0.7 : 1,
         transition: "transform 0.15s ease, box-shadow 0.15s ease",
         cursor: href ? "pointer" : "default",
@@ -113,12 +118,12 @@ export function ComponentCard({
           alignItems: "center",
           justifyContent: "center",
           color: INV_THEME.steel,
-          minHeight: 56,
+          minHeight: 66,
         }}
       >
         <ComponentIcon
           type={componentType}
-          size={56}
+          size={66}
           imageDataUrl={imageDataUrl ?? undefined}
         />
       </div>
@@ -291,18 +296,17 @@ function StockDots({ level }: { level: "healthy" | "low" | "out" }) {
   );
 }
 
-/** A "card grid" container — responsive. Daksh May 2026: shrunk
- *  the minmax floor from 170px → 140px so a portrait tablet
- *  (~768px wide minus the sidebar) lands on 4 cards per row instead
- *  of 1. Landscape tablets get 5-6 per row. Phones still collapse
- *  to 2-3 because the floor is below half-width. */
+/** A "card grid" container — responsive. Daksh (June 2026): bumped
+ *  the minmax floor 140px → 200px. At 140 a wide tablet packed 8
+ *  cramped cards per row; 200 lands ~5-6 bigger, readable cards on a
+ *  landscape tablet and still collapses to 2-3 on a phone. */
 export function ComponentCardGrid({ children }: { children: ReactNode }) {
   return (
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
-        gap: 10,
+        gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+        gap: 12,
       }}
     >
       {children}

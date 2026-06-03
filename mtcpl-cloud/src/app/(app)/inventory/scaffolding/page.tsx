@@ -35,6 +35,22 @@ import {
 } from "../_components/component-icon";
 import { INV_THEME, primaryButton, secondaryButton } from "../_components/theme";
 
+// Daksh (June 2026) — soft background tints so every card of the same
+// component type shares one colour and reads as a group. Assigned by
+// the order types appear, so adjacent groups always differ; the
+// palette cycles for fleets with many types. Kept very light so the
+// dark card text stays readable.
+const TYPE_TINTS = [
+  "#eaf2fb", // blue
+  "#eaf6ec", // green
+  "#fcf3e3", // amber
+  "#f3ecfb", // violet
+  "#fbecec", // rose
+  "#e8f5f3", // teal
+  "#f6efe5", // tan
+  "#fdeef6", // pink
+];
+
 export default async function ScaffoldingBoardPage({
   searchParams,
 }: {
@@ -104,6 +120,10 @@ export default async function ScaffoldingBoardPage({
     }
     byType.get(c.component_type)!.push(c);
   }
+
+  // One shared tint per component type (by appearance order).
+  const typeTint = new Map<ScaffoldingComponentType, string>();
+  types.forEach((t, i) => typeTint.set(t, TYPE_TINTS[i % TYPE_TINTS.length]));
 
   // Quick totals for the header KPIs (plant only).
   let totalAtPlant = 0;
@@ -252,6 +272,7 @@ export default async function ScaffoldingBoardPage({
                 qty={qty}
                 pendingOut={pending}
                 imageDataUrl={c.image_data_url}
+                tint={typeTint.get(t)}
                 yardBreakdown={yardBreakdown}
                 secondaryLine={
                   showPlant && outAtSites > 0
