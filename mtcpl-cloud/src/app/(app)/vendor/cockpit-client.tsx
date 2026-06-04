@@ -350,6 +350,9 @@ export function VendorCockpitClient({
   // Daksh June 2026 — header carved-output stat shows the current month
   // by default; this flips it to last month.
   const [statsShowLast, setStatsShowLast] = useState(false);
+  // Daksh June 2026 — custom (non-browser) confirm dialog for the
+  // power-cut "pause all" action.
+  const [powerCutConfirm, setPowerCutConfirm] = useState(false);
 
   // Tick every 30s so countdown timers refresh without a page reload.
   // 30s is plenty — these are real-world hours-long carves, not seconds.
@@ -797,115 +800,37 @@ export function VendorCockpitClient({
           );
         })()}
 
-        {/* Daksh June 2026 — Power-cut control. One button downs every
-            running/idle machine (loaded slabs' timers freeze); when
-            power's back, one button resumes them (timers continue from
-            where they stopped). Hidden in read-only oversight view. */}
-        {!readOnly &&
-          (powerCutActive ? (
-            <div
+        {/* Daksh June 2026 — Power-cut DOWN control only (top-right,
+            compact, confirm-modal gated so it can't be hit by accident).
+            The ACTIVE state is shown as a single big red cover over the
+            whole machine grid below — not here. Hidden in read-only. */}
+        {!readOnly && !powerCutActive && (
+          <div
+            style={{ marginTop: 10, display: "flex", justifyContent: "flex-end" }}
+          >
+            <button
+              type="button"
+              onClick={() => setPowerCutConfirm(true)}
+              title="Power cut / breakdown — pause every machine at once (loaded slab timers freeze). Resume them all when power's back."
               style={{
-                marginTop: 10,
-                display: "flex",
+                display: "inline-flex",
                 alignItems: "center",
-                gap: 12,
-                flexWrap: "wrap",
-                padding: "10px 14px",
-                background: "rgba(248,113,113,0.14)",
-                border: "1px solid rgba(248,113,113,0.5)",
-                borderRadius: 10,
+                gap: 6,
+                padding: "6px 12px",
+                fontSize: 11.5,
+                fontWeight: 700,
+                background: "rgba(255,255,255,0.06)",
+                color: "rgba(252,165,165,0.92)",
+                border: "1px solid rgba(248,113,113,0.4)",
+                borderRadius: 999,
+                cursor: "pointer",
+                whiteSpace: "nowrap",
               }}
             >
-              <span style={{ fontSize: 13, fontWeight: 800, color: "#fca5a5" }}>
-                ⚡ Power cut — all machines paused
-                {powerCutSince && (
-                  <span
-                    style={{
-                      fontWeight: 600,
-                      color: "rgba(255,255,255,0.7)",
-                      marginLeft: 6,
-                    }}
-                  >
-                    since{" "}
-                    {new Date(powerCutSince).toLocaleString("en-IN", {
-                      timeZone: "Asia/Kolkata",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      day: "numeric",
-                      month: "short",
-                    })}
-                  </span>
-                )}
-              </span>
-              <form action={resolvePowerCutAction} style={{ marginLeft: "auto" }}>
-                <input type="hidden" name="vendor_id" value={vendor.id} />
-                <button
-                  type="submit"
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 7,
-                    padding: "9px 16px",
-                    fontSize: 13,
-                    fontWeight: 800,
-                    background: "#16a34a",
-                    color: "#fff",
-                    border: "1px solid #15803d",
-                    borderRadius: 10,
-                    cursor: "pointer",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  🔌 Power&apos;s back — resume all
-                </button>
-              </form>
-            </div>
-          ) : (
-            // Compact + corner-tucked (top-right) + confirm-gated so it
-            // can't be hit by accident in the middle of the cockpit.
-            <div
-              style={{
-                marginTop: 10,
-                display: "flex",
-                justifyContent: "flex-end",
-              }}
-            >
-              <form
-                action={flagPowerCutAction}
-                onSubmit={(e) => {
-                  if (
-                    !window.confirm(
-                      "Power cut / breakdown — pause ALL machines?\n\nEvery loaded slab's timer will freeze until you press “Power's back — resume all”.",
-                    )
-                  ) {
-                    e.preventDefault();
-                  }
-                }}
-              >
-                <input type="hidden" name="vendor_id" value={vendor.id} />
-                <button
-                  type="submit"
-                  title="Power cut / breakdown — pause every machine at once (loaded slab timers freeze). Resume them all when power's back."
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                    padding: "6px 12px",
-                    fontSize: 11.5,
-                    fontWeight: 700,
-                    background: "rgba(255,255,255,0.06)",
-                    color: "rgba(252,165,165,0.92)",
-                    border: "1px solid rgba(248,113,113,0.4)",
-                    borderRadius: 999,
-                    cursor: "pointer",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  ⚡ Power cut — pause all
-                </button>
-              </form>
-            </div>
-          ))}
+              ⚡ Power cut — pause all
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Daksh May 2026 — Pending stock / Ready to load lists moved
@@ -952,6 +877,21 @@ export function VendorCockpitClient({
             ))}
           </div>
         );
+
+        // Daksh June 2026 — during a power cut ONE big red cover takes
+        // the place of all the machine cards (reads as a single global
+        // outage, not N separate red cards). The resume button lives in
+        // it; hidden for read-only oversight viewers.
+        if (powerCutActive) {
+          return (
+            <PowerCutCover
+              machines={machines}
+              since={powerCutSince}
+              vendorId={vendor.id}
+              canResume={!readOnly}
+            />
+          );
+        }
 
         if (machines.length === 0) {
           return (
@@ -1379,6 +1319,66 @@ export function VendorCockpitClient({
       )}
       {holdFor && !readOnly && (
         <HoldModal job={holdFor} onClose={() => setHoldFor(null)} />
+      )}
+
+      {/* Daksh June 2026 — custom (non-browser) confirm for "pause all
+          machines". Submitting the form runs flagPowerCutAction and the
+          gold spinner shows while it's in flight. */}
+      {powerCutConfirm && !readOnly && (
+        <ModalShell
+          title="⚡ Power cut — pause all machines?"
+          subtitle="Use this when the power's gone or the whole shop has stopped."
+          onClose={() => setPowerCutConfirm(false)}
+          maxWidth={460}
+        >
+          <form action={flagPowerCutAction}>
+            <FormPendingOverlay label="Pausing all machines…" />
+            <input type="hidden" name="vendor_id" value={vendor.id} />
+            <p style={{ margin: "0 0 16px", fontSize: 13, color: "var(--text)", lineHeight: 1.5 }}>
+              Every running and idle machine will be paused, and{" "}
+              <strong>every loaded slab&apos;s timer will freeze</strong>. They
+              all stay paused until you press{" "}
+              <strong>“Power&apos;s back — resume all”</strong>, which resumes
+              each slab from exactly where it stopped.
+            </p>
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                onClick={() => setPowerCutConfirm(false)}
+                style={{
+                  padding: "10px 16px",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  background: "var(--bg)",
+                  color: "var(--text)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 9,
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "10px 16px",
+                  fontSize: 13,
+                  fontWeight: 800,
+                  background: "#dc2626",
+                  color: "#fff",
+                  border: "1px solid #b91c1c",
+                  borderRadius: 9,
+                  cursor: "pointer",
+                }}
+              >
+                ⚡ Yes, pause all machines
+              </button>
+            </div>
+          </form>
+        </ModalShell>
       )}
     </div>
   );
@@ -4853,6 +4853,169 @@ function MachineCard({
             Machine deactivated
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ── Power-cut cover (Daksh June 2026) ───────────────────────────────
+// One big red panel that REPLACES the whole machine grid while a power
+// cut is on, so the cockpit reads as a single global outage instead of
+// N separate red maintenance cards. Lists each machine + its frozen
+// slab(s); the green "resume all" button (gold spinner while it runs)
+// lives here for whoever can act (hidden for read-only viewers).
+function PowerCutCover({
+  machines,
+  since,
+  vendorId,
+  canResume,
+}: {
+  machines: CncMachineLive[];
+  since: string | null;
+  vendorId: string;
+  canResume: boolean;
+}) {
+  const sinceMs = since ? new Date(since).getTime() : null;
+  const sinceLabel = since
+    ? new Date(since).toLocaleString("en-IN", {
+        timeZone: "Asia/Kolkata",
+        hour: "2-digit",
+        minute: "2-digit",
+        day: "numeric",
+        month: "short",
+      })
+    : null;
+  const frozenSlabs = machines.reduce((n, m) => n + m.current_jobs.length, 0);
+  return (
+    <div
+      style={{
+        marginTop: 4,
+        padding: "20px 18px",
+        borderRadius: 16,
+        background:
+          "linear-gradient(180deg, rgba(220,38,38,0.18) 0%, rgba(220,38,38,0.07) 100%)",
+        border: "2px solid rgba(248,113,113,0.6)",
+        boxShadow: "0 6px 24px rgba(220,38,38,0.15)",
+        display: "flex",
+        flexDirection: "column",
+        gap: 16,
+      }}
+    >
+      <div
+        style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}
+      >
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <div
+            style={{
+              fontSize: 22,
+              fontWeight: 800,
+              color: "#fca5a5",
+              letterSpacing: "-0.01em",
+            }}
+          >
+            ⚡ Power cut — all machines paused
+          </div>
+          <div
+            style={{ fontSize: 12.5, color: "rgba(255,255,255,0.75)", marginTop: 4 }}
+          >
+            {machines.length} machine{machines.length === 1 ? "" : "s"} down ·{" "}
+            {frozenSlabs} slab{frozenSlabs === 1 ? "" : "s"} frozen
+            {sinceLabel ? ` · since ${sinceLabel}` : ""}. Each slab timer
+            resumes from where it stopped.
+          </div>
+        </div>
+        {canResume && (
+          <form action={resolvePowerCutAction}>
+            <FormPendingOverlay label="Power back — resuming all machines…" />
+            <input type="hidden" name="vendor_id" value={vendorId} />
+            <button
+              type="submit"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "13px 22px",
+                fontSize: 15,
+                fontWeight: 800,
+                background: "#16a34a",
+                color: "#fff",
+                border: "1px solid #15803d",
+                borderRadius: 12,
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+                boxShadow: "0 2px 10px rgba(22,163,74,0.4)",
+              }}
+            >
+              🔌 Power&apos;s back — resume all
+            </button>
+          </form>
+        )}
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
+          gap: 8,
+        }}
+      >
+        {machines.map((m) => (
+          <div
+            key={m.id}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 9,
+              background: "rgba(0,0,0,0.22)",
+              border: "1px solid rgba(255,255,255,0.08)",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 12,
+                fontWeight: 800,
+                fontFamily: "ui-monospace, monospace",
+                color: "#fff",
+              }}
+            >
+              {m.machine_code}
+            </div>
+            {m.current_jobs.length === 0 ? (
+              <div
+                style={{
+                  fontSize: 10,
+                  color: "rgba(255,255,255,0.45)",
+                  marginTop: 2,
+                }}
+              >
+                idle
+              </div>
+            ) : (
+              m.current_jobs.map((j) => {
+                const loadedAt = j.loaded_at
+                  ? new Date(j.loaded_at).getTime()
+                  : null;
+                const pausedMin =
+                  loadedAt && sinceMs && sinceMs > loadedAt
+                    ? (sinceMs - loadedAt) / 60_000
+                    : null;
+                return (
+                  <div
+                    key={j.id}
+                    style={{
+                      fontSize: 10,
+                      color: "rgba(255,255,255,0.8)",
+                      fontFamily: "ui-monospace, monospace",
+                      marginTop: 2,
+                    }}
+                  >
+                    ⏸ {j.slab_id}
+                    {pausedMin != null ? ` · ${fmtDuration(pausedMin)}` : ""}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        ))}
       </div>
     </div>
   );
