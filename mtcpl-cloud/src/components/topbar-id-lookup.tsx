@@ -64,6 +64,20 @@ function fmtDate(iso: string | null): string {
   });
 }
 
+// Date + time (IST) — used where the exact moment matters, e.g. when a
+// carving was completed / approved in Find ID.
+function fmtDateTime(iso: string | null): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function fmtNum(n: number, digits = 1): string {
   return n.toLocaleString("en-IN", {
     minimumFractionDigits: digits,
@@ -1252,8 +1266,25 @@ function SlabResultPanel({ result }: { result: Extract<LookupResult, { kind: "sl
             {result.carving.due_at && (
               <Field k="Due" v={fmtDate(result.carving.due_at)} />
             )}
+            {/* Daksh June 2026 — for a carving-done slab, show which CNC
+                carved it, when it was completed/approved, and by whom. */}
+            {result.carving.machine_code && (
+              <Field k="Carved on" v={result.carving.machine_code} mono />
+            )}
             {result.carving.completed_at && (
-              <Field k="Completed" v={fmtDate(result.carving.completed_at)} />
+              <Field
+                k="Completed (unloaded)"
+                v={fmtDateTime(result.carving.completed_at)}
+              />
+            )}
+            {result.carving.review_approved_at && (
+              <Field
+                k="Approved"
+                v={fmtDateTime(result.carving.review_approved_at)}
+              />
+            )}
+            {result.carving.approved_by_name && (
+              <Field k="Approved by" v={result.carving.approved_by_name} />
             )}
             {result.carving.ready_to_dispatch_at && (
               <Field

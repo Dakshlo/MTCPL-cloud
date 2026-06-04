@@ -57,6 +57,20 @@ function fmtDate(iso: string | null) {
   });
 }
 
+// Date + time (IST) — for moments that matter, e.g. carving
+// completed / approved in Find ID.
+function fmtDateTime(iso: string | null) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export function IdSearchEntryCard() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -649,7 +663,18 @@ function SlabPanel({ data }: { data: Extract<LookupResult, { kind: "slab" }> }) 
             </Field>
             <Field label="Status">{statusPill(carving.status)}</Field>
             <Field label="Due">{fmtDate(carving.due_at)}</Field>
-            <Field label="Completed">{fmtDate(carving.completed_at)}</Field>
+            {/* Daksh June 2026 — which CNC carved it + when it was
+                completed / approved + who approved it. */}
+            {carving.machine_code && (
+              <Field label="Carved on">{carving.machine_code}</Field>
+            )}
+            <Field label="Completed (unloaded)">{fmtDateTime(carving.completed_at)}</Field>
+            {carving.review_approved_at && (
+              <Field label="Approved">{fmtDateTime(carving.review_approved_at)}</Field>
+            )}
+            {carving.approved_by_name && (
+              <Field label="Approved by">{carving.approved_by_name}</Field>
+            )}
             {carving.location && <Field label="Location">📍 {carving.location}</Field>}
             {carving.ready_to_dispatch_at && (
               <Field label="Ready to dispatch">{fmtDate(carving.ready_to_dispatch_at)}</Field>

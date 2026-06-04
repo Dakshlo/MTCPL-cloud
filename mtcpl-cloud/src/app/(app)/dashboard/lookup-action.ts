@@ -79,6 +79,14 @@ export type SlabResult = {
     completed_at: string | null;
     location: string | null;
     ready_to_dispatch_at: string | null;
+    /** Daksh June 2026 — for a carving-DONE (approved) slab, Find ID
+     *  shows when it was approved, by whom, and which CNC carved it.
+     *  All null until the slab's review is approved. machine_code is
+     *  resolved from completed_on_cnc_machine_id (the machine that
+     *  carved it — persists through approval). */
+    review_approved_at: string | null;
+    approved_by_name: string | null;
+    machine_code: string | null;
   } | null;
   dispatch: {
     challan_number: number | null;
@@ -531,14 +539,60 @@ async function loadSlabContext(
   const { data: cv } = await admin
     .from("carving_items")
     .select(
-      "vendor_name, vendor_type, status, due_at, completed_at, location, ready_to_dispatch_at",
+      "vendor_name, vendor_type, status, due_at, completed_at, location, ready_to_dispatch_at, review_approved_at, review_approved_by, completed_on_cnc_machine_id",
     )
     .eq("slab_requirement_id", slab.id)
     .order("assigned_at", { ascending: false })
     .limit(1)
     .maybeSingle();
   if (cv) {
-    carving = cv as SlabResult["carving"];
+    const c = cv as {
+      vendor_name: string;
+      vendor_type: string;
+      status: string;
+      due_at: string | null;
+      completed_at: string | null;
+      location: string | null;
+      ready_to_dispatch_at: string | null;
+      review_approved_at: string | null;
+      review_approved_by: string | null;
+      completed_on_cnc_machine_id: string | null;
+    };
+    // Daksh June 2026 — resolve who approved + which CNC carved it, so
+    // Find ID can answer "when was this carving done/approved, by whom,
+    // on which machine" for a carving-done slab.
+    let approvedByName: string | null = null;
+    if (c.review_approved_by) {
+      const { data: who } = await admin
+        .from("profiles")
+        .select("full_name")
+        .eq("id", c.review_approved_by)
+        .maybeSingle();
+      approvedByName =
+        (who as { full_name?: string } | null)?.full_name ?? null;
+    }
+    let machineCode: string | null = null;
+    if (c.completed_on_cnc_machine_id) {
+      const { data: mac } = await admin
+        .from("cnc_machines")
+        .select("machine_code")
+        .eq("id", c.completed_on_cnc_machine_id)
+        .maybeSingle();
+      machineCode =
+        (mac as { machine_code?: string } | null)?.machine_code ?? null;
+    }
+    carving = {
+      vendor_name: c.vendor_name,
+      vendor_type: c.vendor_type,
+      status: c.status,
+      due_at: c.due_at,
+      completed_at: c.completed_at,
+      location: c.location,
+      ready_to_dispatch_at: c.ready_to_dispatch_at,
+      review_approved_at: c.review_approved_at,
+      approved_by_name: approvedByName,
+      machine_code: machineCode,
+    };
   }
 
   // Dispatch info — find via dispatch_logs.
