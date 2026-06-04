@@ -342,7 +342,7 @@ export async function buildCncVariousCostReport(
   // earlier embedded-join issues, do two queries + a lookup map.
   const { data: items, error: itemsErr } = await admin
     .from("carving_items")
-    .select("vendor_id, vendor_name, slab_requirement_id, review_approved_at")
+    .select("vendor_id, vendor_name, slab_requirement_id, review_approved_at, carving_sides")
     .gte("review_approved_at", startIso)
     .lt("review_approved_at", endIso)
     .not("review_approved_at", "is", null);
@@ -394,8 +394,10 @@ export async function buildCncVariousCostReport(
   for (const item of items ?? []) {
     const slab = slabMap.get(item.slab_requirement_id as string);
     if (!slab) continue; // Defensive — orphan reference shouldn't happen but skip rather than crash.
-    const cft = slabCft(slab.length_ft, slab.width_ft, slab.thickness_ft);
-    const sft = slabSft(slab.length_ft, slab.width_ft);
+    // Mig 088 — double-side carving counts output x2 (twice the work).
+    const sides = Number((item as { carving_sides?: number }).carving_sides) === 2 ? 2 : 1;
+    const cft = slabCft(slab.length_ft, slab.width_ft, slab.thickness_ft) * sides;
+    const sft = slabSft(slab.length_ft, slab.width_ft) * sides;
     const vendorId = item.vendor_id as string;
     const existing = carvedByVendor.get(vendorId) ?? {
       vendorName: (item.vendor_name as string) || "Unknown",

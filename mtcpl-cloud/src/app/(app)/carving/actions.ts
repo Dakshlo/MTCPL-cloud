@@ -1026,6 +1026,9 @@ export async function assignCarvingJobAction(formData: FormData) {
   // supervisor) decides which of their machines to load it on.
   const urgency = txt(formData, "urgency") === "urgent" ? "urgent" : "normal";
   const estimatedMinutes = Math.max(0, num(formData, "estimated_minutes", 0));
+  // Mig 088 — double-side carving. 2 → output counts x2 in the CNC
+  // costing + cockpit stat. Anything but "2" collapses to 1.
+  const carvingSides = num(formData, "carving_sides", 1) === 2 ? 2 : 1;
   // Work-type tag (migration 024). Empty → NULL → flat-panel default.
   // Only "lathe" is user-selectable today; "multi_head_2" / "single_head"
   // are reserved for forward-compat.
@@ -1143,6 +1146,7 @@ export async function assignCarvingJobAction(formData: FormData) {
       status: "carving_assigned",
       urgency,
       estimated_minutes: estimatedMinutes || null,
+      carving_sides: carvingSides,
       requires_machine_type: finalRequiresMachineType,
       requires_cnc_axes: finalRequiresCncAxes,
       assigned_by: profile.id,
@@ -1216,6 +1220,8 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
   const note = txt(formData, "note") || null;
   const urgency = txt(formData, "urgency") === "urgent" ? "urgent" : "normal";
   const estimatedMinutes = Math.max(0, num(formData, "estimated_minutes", 0));
+  // Mig 088 — double-side carving; one choice applies to the whole batch.
+  const carvingSides = num(formData, "carving_sides", 1) === 2 ? 2 : 1;
   const requiresMachineTypeRaw = txt(formData, "requires_machine_type");
   const requiresMachineType: string | null =
     requiresMachineTypeRaw === "lathe" ||
@@ -1340,6 +1346,7 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
         status: "carving_assigned",
         urgency,
         estimated_minutes: estimatedMinutes || null,
+        carving_sides: carvingSides,
         requires_machine_type: finalRequiresMachineType,
         requires_cnc_axes: finalRequiresCncAxesBatch,
         batch_id: batchId,
@@ -4066,6 +4073,13 @@ export async function approveCarvingJobAction(formData: FormData) {
   const admin = createAdminSupabaseClient();
   const jobId = txt(formData, "job_id");
   const notes = txt(formData, "notes") || null;
+  // Mig 088 — the reviewer can confirm / correct carved sides (1 or 2)
+  // at approval, right before it counts in costing. Only an explicit
+  // "1"/"2" changes the column — absence leaves whatever was set at
+  // assign untouched (so other approve callers don't reset it).
+  const sidesRaw = txt(formData, "carving_sides");
+  const carvingSidesUpdate: { carving_sides?: number } =
+    sidesRaw === "2" ? { carving_sides: 2 } : sidesRaw === "1" ? { carving_sides: 1 } : {};
   // Mig 081 — structured quality flag. Optional (NULL = reviewer
   // didn't pick anything, slab was fine). When 'other' is selected
   // the freeform notes textarea is shown + the typed text rides in
@@ -4176,6 +4190,9 @@ export async function approveCarvingJobAction(formData: FormData) {
       // 1:1 to these keys; analytics will GROUP BY this column to
       // surface vendor mistake patterns.
       review_quality_flag: qualityFlag,
+      // Mig 088 — confirm/correct carved sides at approval (only when
+      // the form explicitly posted 1 or 2; otherwise untouched).
+      ...carvingSidesUpdate,
       status: "completed",
       location: finalLocation,
       ready_to_dispatch_at: now,
@@ -5135,6 +5152,64 @@ export async function updateRequiresMachineTypeAction(formData: FormData) {
 
   refreshAll();
   redirect(`${redirectTo}?toast=Work+type+updated`);
+}
+
+// ── Mig 088: change carved sides (1 ↔ 2) on a job ─────────────────
+// Staff fallback for a wrong single/double choice at assign. Output is
+// summed at read time keyed on review_approved_at, so correcting this
+// before/at approval (and even shortly after) fixes the CNC costing.
+// Staff-only — NOT the vendor role; the vendor cockpit has no control.
+export async function updateCarvingSidesAction(formData: FormData) {
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge"]);
+  const admin = createAdminSupabaseClient();
+
+  const carvingItemId = txt(formData, "carving_item_id");
+  const redirectTo = txt(formData, "redirect_to") || `/carving/${carvingItemId}`;
+  const newSides = num(formData, "carving_sides", 1) === 2 ? 2 : 1;
+  if (!carvingItemId) redirect(`${redirectTo}?toast=Missing+job+id`);
+
+  const { data: ci } = await admin
+    .from("carving_items")
+    .select("id, status, carving_sides")
+    .eq("id", carvingItemId)
+    .maybeSingle();
+  if (!ci) redirect(`${redirectTo}?toast=Job+not+found`);
+  const item = ci as { id: string; status: string; carving_sides: number | null };
+
+  // Allowed while the slab is in the active carving loop or just
+  // approved (not on rejected slabs — they're out of the loop).
+  const editable = [
+    "carving_assigned",
+    "carving_in_progress",
+    "carving_on_hold",
+    "completed",
+  ];
+  if (!editable.includes(item.status)) {
+    redirect(
+      `${redirectTo}?toast=${encodeURIComponent("Can't change carved sides for this slab's state.")}`,
+    );
+  }
+
+  await admin
+    .from("carving_items")
+    .update({ carving_sides: newSides })
+    .eq("id", carvingItemId);
+
+  await recordEvent(
+    carvingItemId,
+    "carving_sides_updated",
+    profile.id,
+    `Carved sides set to ${newSides}`,
+  );
+  await logAudit(profile.id, "carving_sides_updated", "carving_item", carvingItemId, {
+    from: item.carving_sides ?? 1,
+    to: newSides,
+  });
+
+  refreshAll();
+  redirect(
+    `${redirectTo}?toast=${encodeURIComponent(`Carved sides set to ${newSides}`)}`,
+  );
 }
 
 // ── Part D: transfer a job to another vendor ──────────────────────

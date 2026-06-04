@@ -3801,6 +3801,9 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
   // picked, the freeform `notes` textarea reappears and is required.
   // Reset when the user flips modes (in switchMode below).
   const [qualityFlag, setQualityFlag] = useState<string>("");
+  // Mig 088 — optional carved-sides correction at approval. "" = keep
+  // whatever was set at assign (post nothing); "1"/"2" = override.
+  const [sidesOverride, setSidesOverride] = useState<"" | "1" | "2">("");
   // Mig 081 follow-on — option metadata for the custom picker.
   // Each row drives icon + label + subtitle + accent tint on the
   // popup card. Keep the value strings in lock-step with the
@@ -3880,6 +3883,8 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
     // Mig 081 — reset the quality flag too. The dropdown only
     // applies to Approve; rework/reject use the freeform textarea.
     setQualityFlag("");
+    // Mig 088 — reset the carved-sides correction.
+    setSidesOverride("");
   }
 
   function handleFile(file: File | null) {
@@ -3906,6 +3911,11 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
     // whitelist; passing it empty = no flag (slab was fine).
     if (mode === "approve" && qualityFlag) {
       fd.set("quality_flag", qualityFlag);
+    }
+    // Mig 088 — only post a sides correction when the reviewer
+    // explicitly picked one; "" leaves the assign-time value intact.
+    if (mode === "approve" && sidesOverride) {
+      fd.set("carving_sides", sidesOverride);
     }
     const action =
       mode === "approve"
@@ -4202,6 +4212,60 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
             would add no value). */}
         {mode === "approve" ? (
           <div>
+            {/* Mig 088 — confirm / correct carved sides right before it
+                counts. "Keep" leaves whatever was set at assign. */}
+            <div style={{ marginBottom: 14 }}>
+              <div
+                style={{
+                  fontSize: 10.5,
+                  fontWeight: 800,
+                  color: "var(--muted)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.07em",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  marginBottom: 6,
+                }}
+              >
+                <span aria-hidden>🔁</span>
+                Carved sides
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                {(
+                  [
+                    { v: "", label: "Keep" },
+                    { v: "1", label: "1 side" },
+                    { v: "2", label: "2 sides" },
+                  ] as Array<{ v: "" | "1" | "2"; label: string }>
+                ).map((o) => {
+                  const active = sidesOverride === o.v;
+                  return (
+                    <button
+                      key={o.v || "keep"}
+                      type="button"
+                      onClick={() => setSidesOverride(o.v)}
+                      style={{
+                        flex: 1,
+                        padding: "8px 10px",
+                        fontSize: 12.5,
+                        fontWeight: 700,
+                        border: `1.5px solid ${active ? "#0f766e" : "var(--border)"}`,
+                        background: active ? "rgba(13,148,136,0.10)" : "var(--surface)",
+                        color: active ? "#0f766e" : "var(--text)",
+                        borderRadius: 8,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {o.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 4 }}>
+                “Keep” = leave what was set at assign. 2 sides counts output ×2.
+              </div>
+            </div>
             <label
               style={{
                 fontSize: 10.5,

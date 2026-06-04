@@ -67,6 +67,7 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
     location?: string | null;
     ready_to_dispatch_at?: string | null;
     requires_machine_type?: string | null;
+    carving_sides?: number | null;
     received_at_vendor_at?: string | null;
     received_at_vendor_by?: string | null;
   };
@@ -266,6 +267,7 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
                 status={jobRow.status}
                 cncMachineId={jobRow.cnc_machine_id}
                 requiresMachineType={jobRow.requires_machine_type ?? null}
+                carvingSides={jobRow.carving_sides === 2 ? 2 : 1}
                 receivedAtVendorAt={jobRow.received_at_vendor_at ?? null}
                 vendors={(transferVendors ?? []) as Array<{ id: string; name: string; vendor_type: string }>}
                 // Mig 076 round 3 — senior_incharge was missing here:

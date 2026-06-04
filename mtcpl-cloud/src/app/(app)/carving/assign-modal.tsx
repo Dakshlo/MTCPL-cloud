@@ -222,6 +222,8 @@ export function AssignModal({
     if (workType === "lathe" && cncAxesReq !== 0) setCncAxesReq(0);
   }, [workType, cncAxesReq]);
   const [urgency, setUrgency] = useState<"normal" | "urgent">("normal");
+  // Mig 088 — carved sides. 2 → output counts x2 in the CNC costing.
+  const [carvingSides, setCarvingSides] = useState<1 | 2>(1);
   const [days, setDays] = useState<string>("");
   const [hours, setHours] = useState<string>("");
   const [note, setNote] = useState("");
@@ -1046,6 +1048,48 @@ export function AssignModal({
                   }}
                 >
                   ⚡ Urgent
+                </button>
+              </div>
+            </div>
+
+            {/* Mig 088 — Carved sides. 2 = double side → output x2 in costing. */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <Label>Carved sides</Label>
+              <input type="hidden" name="carving_sides" value={carvingSides} />
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => setCarvingSides(1)}
+                  style={{
+                    flex: 1,
+                    padding: "10px 14px",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    border: `1.5px solid ${carvingSides === 1 ? "var(--gold-dark)" : "var(--border)"}`,
+                    background: carvingSides === 1 ? "rgba(180,115,51,0.08)" : "var(--surface)",
+                    color: "var(--text)",
+                    borderRadius: 8,
+                    cursor: "pointer",
+                  }}
+                >
+                  1 side
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCarvingSides(2)}
+                  style={{
+                    flex: 1,
+                    padding: "10px 14px",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    border: `1.5px solid ${carvingSides === 2 ? "#0f766e" : "var(--border)"}`,
+                    background: carvingSides === 2 ? "rgba(13,148,136,0.10)" : "var(--surface)",
+                    color: carvingSides === 2 ? "#0f766e" : "var(--text)",
+                    borderRadius: 8,
+                    cursor: "pointer",
+                  }}
+                >
+                  2 sides (×2 output)
                 </button>
               </div>
             </div>

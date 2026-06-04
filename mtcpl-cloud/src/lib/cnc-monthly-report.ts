@@ -474,7 +474,7 @@ export async function buildCncReport(period: CncReportPeriod): Promise<CncMonthl
   // unchanged.
   const { data: items, error: itemsErr } = await admin
     .from("carving_items")
-    .select("id, completed_on_cnc_machine_id, review_approved_at, slab_requirement_id")
+    .select("id, completed_on_cnc_machine_id, review_approved_at, slab_requirement_id, carving_sides")
     .gte("review_approved_at", startIso)
     .lt("review_approved_at", endIso)
     .not("completed_on_cnc_machine_id", "is", null)
@@ -531,14 +531,16 @@ export async function buildCncReport(period: CncReportPeriod): Promise<CncMonthl
   // given cell, so the visual is "this work was measured in SFT"
   // or "in CFT" but never both for the same slab.
   for (const it of (items ?? []) as Array<{
-    completed_on_cnc_machine_id: string | null; review_approved_at: string; slab_requirement_id: string;
+    completed_on_cnc_machine_id: string | null; review_approved_at: string; slab_requirement_id: string; carving_sides?: number | null;
   }>) {
     const machineId = it.completed_on_cnc_machine_id;
     if (!machineId) continue;
     const dim = slabDims.get(it.slab_requirement_id);
     if (!dim) continue;
-    const sqft = (dim.l * dim.w) / 144;
-    const cft = (dim.l * dim.w * dim.t) / 1728;
+    // Mig 088 — double-side carving counts output x2.
+    const sides = Number(it.carving_sides) === 2 ? 2 : 1;
+    const sqft = ((dim.l * dim.w) / 144) * sides;
+    const cft = ((dim.l * dim.w * dim.t) / 1728) * sides;
     const dateKey = istDateKey(it.review_approved_at);
     const row = rowByDate.get(dateKey);
     if (!row) continue;

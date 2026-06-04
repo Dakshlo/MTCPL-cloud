@@ -55,6 +55,28 @@ function FormPendingOverlay({ label }: { label: string }) {
   return <FinanceLoadingOverlay show={pending} label={label} />;
 }
 
+// Mig 088 — small "2 SIDES" chip shown on slab cards/rows for
+// double-side carving (output counts x2 in the CNC costing). Teal so
+// it reads distinct from urgent-red / lathe-purple / head-blue.
+function TwoSidesBadge() {
+  return (
+    <span
+      style={{
+        fontSize: 9,
+        fontWeight: 800,
+        padding: "2px 6px",
+        borderRadius: 3,
+        background: "rgba(13,148,136,0.15)",
+        color: "#0f766e",
+        letterSpacing: "0.05em",
+        whiteSpace: "nowrap",
+      }}
+    >
+      2 SIDES
+    </span>
+  );
+}
+
 // ── Types — kept here so server page can import them ──────────────
 
 export type SlabLite = {
@@ -86,6 +108,8 @@ export type HeldSlabLite = {
    *  here; vendor can override to any compatible idle CNC. NULL
    *  if the held row pre-dates mig 069. */
   held_from_machine_id: string | null;
+  /** Mig 088 — 2 = double-side carving (output counts x2). */
+  carving_sides?: number;
   slab: SlabLite | null;
 };
 
@@ -109,6 +133,8 @@ export type ReworkPendingItem = {
   review_image_path: string | null;
   /** Reviewer's free-form reason. Mandatory on rework + reject. */
   review_notes: string | null;
+  /** Mig 088 — 2 = double-side carving (output counts x2). */
+  carving_sides?: number;
   slab: SlabLite | null;
 };
 
@@ -143,6 +169,8 @@ export type CarvingJobLite = {
   received_at_vendor_at?: string | null;
   /** Migration 024 — work-type tag. 'lathe' = cylindrical. */
   requires_machine_type?: string | null;
+  /** Mig 088 — 2 = double-side carving (output counts x2). */
+  carving_sides?: number;
   /** Migration 026 — batch grouping when slabs were assigned
    *  together in a single bulk-assign. Shared across all slabs in
    *  the batch; drives the coloured stripe on cards. */
@@ -1978,6 +2006,7 @@ function HeldSlabRow({
                 🌀 LATHE
               </span>
             )}
+            {held.carving_sides === 2 && <TwoSidesBadge />}
             <span
               style={{
                 fontFamily: "ui-monospace, monospace",
@@ -2330,6 +2359,7 @@ function ReworkSlabRow({
                 🌀 LATHE
               </span>
             )}
+            {item.carving_sides === 2 && <TwoSidesBadge />}
             <span
               style={{
                 fontFamily: "ui-monospace, monospace",
@@ -3459,6 +3489,7 @@ function PendingStockRow({ job }: { job: CarvingJobLite }) {
               🌀 LATHE
             </span>
           )}
+          {job.carving_sides === 2 && <TwoSidesBadge />}
           {isTransfer ? (
             <span
               style={{
@@ -3842,6 +3873,7 @@ function QueueRow({
               🌀 LATHE
             </span>
           )}
+          {job.carving_sides === 2 && <TwoSidesBadge />}
           {/* Migration 023 — receipt pill: green when at-shade, amber while in transit. */}
           <span
             style={{
@@ -4503,6 +4535,7 @@ function MachineCard({
                         HEAD {idx + 1}
                       </span>
                     )}
+                    {slabJob.carving_sides === 2 && <TwoSidesBadge />}
                     <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 13 }}>
                       {slabJob.slab_id}
                     </span>

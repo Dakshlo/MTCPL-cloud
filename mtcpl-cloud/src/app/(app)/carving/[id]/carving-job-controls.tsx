@@ -31,6 +31,7 @@ import {
   acknowledgeReceiptAction,
   transferCarvingJobAction,
   updateRequiresMachineTypeAction,
+  updateCarvingSidesAction,
 } from "../actions";
 
 type Vendor = { id: string; name: string; vendor_type: string };
@@ -43,6 +44,7 @@ export function CarvingJobControls({
   status,
   cncMachineId,
   requiresMachineType,
+  carvingSides,
   receivedAtVendorAt,
   vendors,
   canManage,
@@ -54,6 +56,8 @@ export function CarvingJobControls({
   status: string;
   cncMachineId: string | null;
   requiresMachineType: string | null;
+  /** Mig 088 — current carved sides (1 or 2). */
+  carvingSides: number;
   receivedAtVendorAt: string | null;
   vendors: Vendor[];
   /** True for carving_head / owner / developer. Hides the controls
@@ -62,9 +66,15 @@ export function CarvingJobControls({
 }) {
   const [transferOpen, setTransferOpen] = useState(false);
   const [tagEditing, setTagEditing] = useState(false);
+  const [sidesEditing, setSidesEditing] = useState(false);
 
   const isCnc = vendorType === "CNC";
   const isLockedDone = ["completed", "dispatched", "rejected"].includes(status);
+  // Mig 088 — sides editable while in the active loop or just approved
+  // (matches updateCarvingSidesAction's allowed states).
+  const canShowSidesEditor =
+    canManage &&
+    ["carving_assigned", "carving_in_progress", "carving_on_hold", "completed"].includes(status);
   const canShowReceipt =
     canManage && isCnc && status === "carving_assigned" && !receivedAtVendorAt;
   const canShowTagEditor =
@@ -146,6 +156,64 @@ export function CarvingJobControls({
                     Save
                   </button>
                   <button type="button" className="ghost-button" style={{ fontSize: 12, padding: "6px 14px" }} onClick={() => setTagEditing(false)}>
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        )}
+
+        {/* Mig 088 — carved sides editor (1 ↔ 2). Staff fallback to fix
+            a wrong single/double choice; output counts ×2 for 2 sides. */}
+        {canShowSidesEditor && (
+          <div
+            style={{
+              padding: "10px 12px",
+              background: "var(--surface-alt)",
+              border: "1px dashed var(--border)",
+              borderRadius: 8,
+            }}
+          >
+            {!sidesEditing ? (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                  Carved sides:{" "}
+                  <strong style={{ color: carvingSides === 2 ? "#0f766e" : "var(--text)" }}>
+                    {carvingSides === 2 ? "2 sides (×2 output)" : "1 side"}
+                  </strong>
+                </div>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  style={{ fontSize: 11, padding: "4px 10px" }}
+                  onClick={() => setSidesEditing(true)}
+                >
+                  Change
+                </button>
+              </div>
+            ) : (
+              <form action={updateCarvingSidesAction} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <input type="hidden" name="carving_item_id" value={jobId} />
+                <input type="hidden" name="redirect_to" value={`/carving/${jobId}`} />
+                <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    Carved sides
+                  </span>
+                  <select
+                    name="carving_sides"
+                    defaultValue={carvingSides === 2 ? "2" : "1"}
+                    style={{ fontSize: 12, padding: "6px 10px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
+                  >
+                    <option value="1">1 side</option>
+                    <option value="2">2 sides (×2 output)</option>
+                  </select>
+                </label>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button type="submit" className="primary-button" style={{ fontSize: 12, padding: "6px 14px", flex: 1 }}>
+                    Save
+                  </button>
+                  <button type="button" className="ghost-button" style={{ fontSize: 12, padding: "6px 14px" }} onClick={() => setSidesEditing(false)}>
                     Cancel
                   </button>
                 </div>

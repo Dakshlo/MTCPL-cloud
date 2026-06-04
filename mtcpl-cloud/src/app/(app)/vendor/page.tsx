@@ -183,7 +183,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
         // review_image_path / review_notes so we can split rework
         // slabs into the new "Rework pending" window (separate from
         // the regular ready-to-load queue).
-        "id, slab_requirement_id, status, urgency, estimated_minutes, vendor_estimated_minutes, cnc_machine_id, loaded_at, assigned_at, note, received_at_vendor_at, requires_machine_type, batch_id, held_at, held_reason, held_from_machine_id, transferred_from_vendor_id, transferred_from_vendor_name, transferred_at, review_decision, review_reworked_at, review_image_path, review_notes",
+        "id, slab_requirement_id, status, urgency, estimated_minutes, vendor_estimated_minutes, cnc_machine_id, loaded_at, assigned_at, note, received_at_vendor_at, requires_machine_type, carving_sides, batch_id, held_at, held_reason, held_from_machine_id, transferred_from_vendor_id, transferred_from_vendor_name, transferred_at, review_decision, review_reworked_at, review_image_path, review_notes",
       )
       .eq("vendor_id", vendorId)
       .in("status", ["carving_assigned", "carving_in_progress", "carving_on_hold"])
@@ -325,6 +325,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
     note: string | null;
     received_at_vendor_at?: string | null;
     requires_machine_type?: string | null;
+    carving_sides?: number | null;
     batch_id?: string | null;
     held_at?: string | null;
     held_reason?: string | null;
@@ -352,6 +353,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
       slab,
       received_at_vendor_at: row.received_at_vendor_at ?? null,
       requires_machine_type: row.requires_machine_type ?? null,
+      carving_sides: row.carving_sides ?? 1,
       batch_id: row.batch_id ?? null,
       transferred_from_vendor_id: row.transferred_from_vendor_id ?? null,
       transferred_from_vendor_name: row.transferred_from_vendor_name ?? null,
@@ -363,6 +365,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
         slab_id: row.slab_requirement_id,
         urgency: job.urgency,
         requires_machine_type: row.requires_machine_type ?? null,
+        carving_sides: row.carving_sides ?? 1,
         held_at: row.held_at ?? null,
         held_reason: row.held_reason ?? null,
         held_from_machine_id: row.held_from_machine_id ?? null,
@@ -387,6 +390,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
         slab_id: row.slab_requirement_id,
         urgency: job.urgency,
         requires_machine_type: row.requires_machine_type ?? null,
+        carving_sides: row.carving_sides ?? 1,
         review_reworked_at: row.review_reworked_at ?? null,
         review_image_path: row.review_image_path ?? null,
         review_notes: row.review_notes ?? null,
@@ -528,12 +532,15 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
   ): Promise<{ sft: number; cft: number; slabs: number }> {
     const { data: appr } = await admin
       .from("carving_items")
-      .select("slab_requirement_id, review_approved_at")
+      .select("slab_requirement_id, review_approved_at, carving_sides")
       .eq("vendor_id", vendorId)
       .not("review_approved_at", "is", null)
       .gte("review_approved_at", startIso)
       .lt("review_approved_at", endIso);
-    const rowsAppr = (appr ?? []) as Array<{ slab_requirement_id: string }>;
+    const rowsAppr = (appr ?? []) as Array<{
+      slab_requirement_id: string;
+      carving_sides?: number | null;
+    }>;
     const ids = [...new Set(rowsAppr.map((r) => r.slab_requirement_id))];
     let sft = 0;
     let cft = 0;
@@ -558,8 +565,10 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
       for (const r of rowsAppr) {
         const dim = dimById.get(r.slab_requirement_id);
         if (!dim) continue;
-        sft += (dim.l * dim.w) / 144;
-        cft += (dim.l * dim.w * dim.t) / 1728;
+        // Mig 088 — double-side carving counts output x2.
+        const sides = Number(r.carving_sides) === 2 ? 2 : 1;
+        sft += ((dim.l * dim.w) / 144) * sides;
+        cft += ((dim.l * dim.w * dim.t) / 1728) * sides;
       }
     }
     return { sft, cft, slabs: rowsAppr.length };
