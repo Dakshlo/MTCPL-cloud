@@ -3895,10 +3895,17 @@ export async function resolvePowerCutAction(formData: FormData) {
     redirect("/vendor?toast=No+power-cut+machines+to+resume");
   }
 
+  let earliestFlagged: number | null = null;
   for (const m of rows) {
     const flaggedAt = m.maintenance_flagged_at
       ? new Date(m.maintenance_flagged_at).getTime()
       : null;
+    if (
+      flaggedAt != null &&
+      (earliestFlagged == null || flaggedAt < earliestFlagged)
+    ) {
+      earliestFlagged = flaggedAt;
+    }
     const resumeCarving = m.current_carving_item_id != null;
     if (resumeCarving && flaggedAt != null) {
       const pauseMs = Math.max(0, now - flaggedAt);
@@ -3942,14 +3949,25 @@ export async function resolvePowerCutAction(formData: FormData) {
       message: "Power back — slab timer resumed",
     });
   }
+  // Outage length for the log (future power-cut reporting). Audit rows
+  // are the persistent power-cut log: cnc_power_cut_start (machine_count)
+  // + cnc_power_cut_end (machine_count, outage_minutes), plus a
+  // maintenance_start / maintenance_end event per machine.
+  const outageMinutes =
+    earliestFlagged != null
+      ? Math.round((now - earliestFlagged) / 60_000)
+      : null;
   await logAudit(profile.id, "cnc_power_cut_end", "vendor", vendorId, {
     machine_count: rows.length,
+    outage_minutes: outageMinutes,
   });
 
   refreshAll();
   redirect(
     `/vendor?toast=${encodeURIComponent(
-      `Power back — ${rows.length} machine${rows.length === 1 ? "" : "s"} resumed`,
+      `Power back — ${rows.length} machine${rows.length === 1 ? "" : "s"} resumed${
+        outageMinutes != null ? ` (outage ${outageMinutes}m)` : ""
+      }`,
     )}`,
   );
 }

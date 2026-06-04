@@ -37,6 +37,7 @@ import { batchTint } from "@/lib/batch-colours";
 import { useFormStatus } from "react-dom";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 import { CockpitSidebarToggle } from "@/components/cockpit-sidebar-toggle";
+import { POWER_CUT_REASON } from "@/lib/carving-power-cut";
 
 /**
  * Daksh May 2026 — branded spinner overlay for vendor-cockpit form
@@ -860,39 +861,50 @@ export function VendorCockpitClient({
               </form>
             </div>
           ) : (
-            <form
-              action={flagPowerCutAction}
-              style={{ marginTop: 10 }}
-              onSubmit={(e) => {
-                if (
-                  !window.confirm(
-                    "Power cut / breakdown — pause ALL machines?\n\nEvery loaded slab's timer will freeze until you press “Power's back — resume all”.",
-                  )
-                ) {
-                  e.preventDefault();
-                }
+            // Compact + corner-tucked (top-right) + confirm-gated so it
+            // can't be hit by accident in the middle of the cockpit.
+            <div
+              style={{
+                marginTop: 10,
+                display: "flex",
+                justifyContent: "flex-end",
               }}
             >
-              <input type="hidden" name="vendor_id" value={vendor.id} />
-              <button
-                type="submit"
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 7,
-                  padding: "9px 16px",
-                  fontSize: 13,
-                  fontWeight: 800,
-                  background: "rgba(248,113,113,0.14)",
-                  color: "#fca5a5",
-                  border: "1px solid rgba(248,113,113,0.5)",
-                  borderRadius: 10,
-                  cursor: "pointer",
+              <form
+                action={flagPowerCutAction}
+                onSubmit={(e) => {
+                  if (
+                    !window.confirm(
+                      "Power cut / breakdown — pause ALL machines?\n\nEvery loaded slab's timer will freeze until you press “Power's back — resume all”.",
+                    )
+                  ) {
+                    e.preventDefault();
+                  }
                 }}
               >
-                ⚡ Power cut — pause all machines
-              </button>
-            </form>
+                <input type="hidden" name="vendor_id" value={vendor.id} />
+                <button
+                  type="submit"
+                  title="Power cut / breakdown — pause every machine at once (loaded slab timers freeze). Resume them all when power's back."
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "6px 12px",
+                    fontSize: 11.5,
+                    fontWeight: 700,
+                    background: "rgba(255,255,255,0.06)",
+                    color: "rgba(252,165,165,0.92)",
+                    border: "1px solid rgba(248,113,113,0.4)",
+                    borderRadius: 999,
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  ⚡ Power cut — pause all
+                </button>
+              </form>
+            </div>
           ))}
       </div>
 
@@ -4795,24 +4807,44 @@ function MachineCard({
               </div>
             )}
           </div>
-          <form
-            action={resolveMaintenanceAction}
-            onSubmit={(e) => {
-              if (!confirm(`Mark ${machine.machine_code} as back online?`)) {
-                e.preventDefault();
-              }
-            }}
-          >
-            <FormPendingOverlay label="Bringing back online…" />
-            <input type="hidden" name="cnc_machine_id" value={machine.id} />
-            <button
-              type="submit"
-              className="primary-button"
-              style={{ fontSize: 13, padding: "10px 14px", fontWeight: 700, width: "100%" }}
+          {/* Daksh June 2026 — machines downed by the global power cut
+              can ONLY be resumed by the "Power's back — resume all"
+              button at the top (so they all come back together). Hide
+              the per-machine "Back online" button for them; show a hint
+              instead. Individually-flagged machines keep their button. */}
+          {machine.maintenance_reason === POWER_CUT_REASON ? (
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--muted)",
+                textAlign: "center",
+                padding: "8px 4px",
+                lineHeight: 1.4,
+              }}
             >
-              ✓ Back online
-            </button>
-          </form>
+              ⚡ Paused by power cut — bring it back with{" "}
+              <strong>“Power&apos;s back — resume all”</strong> at the top.
+            </div>
+          ) : (
+            <form
+              action={resolveMaintenanceAction}
+              onSubmit={(e) => {
+                if (!confirm(`Mark ${machine.machine_code} as back online?`)) {
+                  e.preventDefault();
+                }
+              }}
+            >
+              <FormPendingOverlay label="Bringing back online…" />
+              <input type="hidden" name="cnc_machine_id" value={machine.id} />
+              <button
+                type="submit"
+                className="primary-button"
+                style={{ fontSize: 13, padding: "10px 14px", fontWeight: 700, width: "100%" }}
+              >
+                ✓ Back online
+              </button>
+            </form>
+          )}
         </>
       )}
 

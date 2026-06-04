@@ -104,6 +104,11 @@ export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
   // keyboard still types), mobile/tablet browsers suppress the
   // virtual keyboard. Auto-detect runs once on mount.
   const [keypadShown, setKeypadShown] = useState<boolean>(false);
+  // Daksh June 2026 — after a search the on-screen keypad collapses so
+  // the (often long) result has room; tapping the search box re-opens
+  // it. Separate from keypadShown (the on/off preference) so the toggle
+  // label stays correct while it's just collapsed.
+  const [keypadCollapsed, setKeypadCollapsed] = useState(false);
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
@@ -148,6 +153,7 @@ export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
   // Auto-focus the search input when the panel opens.
   useEffect(() => {
     if (open) {
+      setKeypadCollapsed(false);
       requestAnimationFrame(() => inputRef.current?.focus());
     } else {
       // Reset on close so the next open is fresh.
@@ -226,6 +232,9 @@ export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
+      // Hide the on-screen keypad so the result has room. Tapping the
+      // search box brings it back (onFocus below).
+      setKeypadCollapsed(true);
     }
   }
 
@@ -306,6 +315,14 @@ export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
               display: "flex",
               flexDirection: "column",
               gap: 10,
+              // Daksh June 2026 — keep the panel inside the viewport and
+              // let IT scroll (not the page behind it) when a result is
+              // long, e.g. a carving-done slab opened from the dashboard,
+              // which has little page scroll of its own. overscroll
+              // 'contain' stops the scroll from chaining to the page.
+              maxHeight: "calc(100vh - 84px)",
+              overflowY: "auto",
+              overscrollBehavior: "contain",
             }}
           >
             <div
@@ -356,6 +373,10 @@ export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
                 type="search"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
+                // Tapping / focusing the box re-opens the keypad after a
+                // search collapsed it.
+                onFocus={() => setKeypadCollapsed(false)}
+                onClick={() => setKeypadCollapsed(false)}
                 placeholder={domainConfig.placeholder}
                 /* Daksh May 2026 — hint mobile/tablet OSes to suggest
                    uppercase-from-the-start, no autocorrect, no
@@ -415,7 +436,11 @@ export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
               onChange={(v) => setQuery(v)}
               onSubmit={() => void runSearch()}
               shown={keypadShown}
-              onToggle={() => setKeypadShownPersisted(!keypadShown)}
+              expanded={!keypadCollapsed}
+              onToggle={() => {
+                setKeypadShownPersisted(!keypadShown);
+                setKeypadCollapsed(false);
+              }}
             />
 
             {/* Result */}
@@ -473,6 +498,7 @@ function FindIdKeypad({
   onChange,
   onSubmit,
   shown,
+  expanded,
   onToggle,
 }: {
   value: string;
@@ -482,6 +508,10 @@ function FindIdKeypad({
    *  input's inputMode based on the same flag so the device's soft
    *  keyboard can't stack on top of this one. */
   shown: boolean;
+  /** Daksh June 2026 — whether the key grid is currently expanded.
+   *  The keypad stays "on" (shown) but collapses after a search to
+   *  free room for the result; tapping the search box re-expands it. */
+  expanded: boolean;
   onToggle: () => void;
 }) {
   function append(ch: string) {
@@ -536,7 +566,22 @@ function FindIdKeypad({
         </button>
       </div>
 
-      {shown && (
+      {/* Collapsed-after-search hint — keypad is still ON, just hidden
+          to give the result room. */}
+      {shown && !expanded && (
+        <div
+          style={{
+            fontSize: 10,
+            fontWeight: 600,
+            color: "rgba(15,23,42,0.5)",
+            textAlign: "right",
+          }}
+        >
+          Keypad hidden — tap the search box to type again
+        </div>
+      )}
+
+      {shown && expanded && (
         <div
           style={{
             padding: 8,
