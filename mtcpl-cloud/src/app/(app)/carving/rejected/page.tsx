@@ -41,7 +41,7 @@ export default async function CarvingRejectedPage() {
   const { data: rejectedRows } = await admin
     .from("carving_items")
     .select(
-      "id, slab_requirement_id, vendor_id, vendor_name, review_decision, review_rejected_at, review_rejected_by, review_image_path, review_notes, completed_at, status",
+      "id, slab_requirement_id, vendor_id, vendor_name, review_decision, review_rejected_at, review_rejected_by, review_image_path, review_image_paths, review_notes, completed_at, status",
     )
     .eq("status", "carving_rejected")
     .order("review_rejected_at", { ascending: false })
@@ -56,6 +56,7 @@ export default async function CarvingRejectedPage() {
     review_rejected_at: string | null;
     review_rejected_by: string | null;
     review_image_path: string | null;
+    review_image_paths: string[] | null;
     review_notes: string | null;
     completed_at: string | null;
     status: string;
@@ -112,6 +113,7 @@ export default async function CarvingRejectedPage() {
       reviewer_name: reviewer?.full_name ?? null,
       rejected_at: r.review_rejected_at,
       image_path: r.review_image_path,
+      image_paths: r.review_image_paths,
       notes: r.review_notes,
       slab: slab
         ? {

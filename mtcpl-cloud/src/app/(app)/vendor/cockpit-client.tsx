@@ -131,6 +131,8 @@ export type ReworkPendingItem = {
    *  to render the thumbnail. NULL only if a future flow lets the
    *  reviewer skip the photo — today the action enforces mandatory. */
   review_image_path: string | null;
+  /** Mig 089 — all 1-3 reviewer photos; falls back to review_image_path. */
+  review_image_paths?: string[] | null;
   /** Reviewer's free-form reason. Mandatory on rework + reject. */
   review_notes: string | null;
   /** Mig 088 — 2 = double-side carving (output counts x2). */
@@ -148,6 +150,8 @@ export type RejectedItem = {
   slab_id: string;
   review_rejected_at: string | null;
   review_image_path: string | null;
+  /** Mig 089 — all 1-3 reviewer photos; falls back to review_image_path. */
+  review_image_paths?: string[] | null;
   review_notes: string | null;
   slab: SlabLite | null;
 };
@@ -2285,6 +2289,35 @@ function ReviewMediaImage({
   );
 }
 
+/** Mig 089 — render 1-3 reviewer photos. Single = full size (as
+ *  before); 2-3 = a thumbnail row. Resolves from review_image_paths,
+ *  falling back to the legacy single review_image_path. */
+function ReviewMediaGallery({
+  paths,
+  single,
+  alt,
+  maxHeight = 160,
+}: {
+  paths?: string[] | null;
+  single?: string | null;
+  alt: string;
+  maxHeight?: number;
+}) {
+  const list = paths && paths.length ? paths : single ? [single] : [];
+  if (list.length <= 1) {
+    return <ReviewMediaImage path={list[0] ?? null} alt={alt} maxHeight={maxHeight} />;
+  }
+  return (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      {list.map((p) => (
+        <div key={p} style={{ flex: "0 0 auto", width: 150 }}>
+          <ReviewMediaImage path={p} alt={alt} maxHeight={maxHeight} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** Mig 080 — Rework Pending row. Amber accent so it reads as "needs
  *  attention" but not panic-red. Two actions: Reload (pulls the
  *  vendor into the regular Load flow — slab is already at
@@ -2454,7 +2487,11 @@ function ReworkSlabRow({
       )}
 
       {/* Reviewer's photo */}
-      <ReviewMediaImage path={item.review_image_path} alt="Rework reason photo" />
+      <ReviewMediaGallery
+        paths={item.review_image_paths}
+        single={item.review_image_path}
+        alt="Rework reason photo"
+      />
 
       {/* Actions — Reload (amber primary) + Mark done (ghost). The
           Reload button just hands off to onReload(); the parent picks
@@ -2655,7 +2692,11 @@ function RejectedSlabRow({
       )}
 
       {/* Reviewer's photo */}
-      <ReviewMediaImage path={item.review_image_path} alt="Rejection reason photo" />
+      <ReviewMediaGallery
+        paths={item.review_image_paths}
+        single={item.review_image_path}
+        alt="Rejection reason photo"
+      />
     </div>
   );
 }

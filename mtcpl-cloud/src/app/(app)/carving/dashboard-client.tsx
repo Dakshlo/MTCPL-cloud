@@ -103,6 +103,8 @@ type JobRow = {
    *  photo on the Carving Done card + peek so the team can see what
    *  the reviewer saw. Only populated on approved slabs. */
   review_image_path?: string | null;
+  /** Mig 089 — all 1-3 review photos. Falls back to review_image_path. */
+  review_image_paths?: string[] | null;
   review_quality_flag?: string | null;
   review_notes?: string | null;
   /** Live timer fields for the Active tab card. loaded_at is set by
@@ -2096,6 +2098,45 @@ function ReviewPhoto({
   );
 }
 
+// Mig 089 — render 1-3 review photos. A single photo shows full-width
+// (as before); 2-3 show as a thumbnail row. Resolves from the new
+// review_image_paths array, falling back to the legacy single
+// review_image_path for older rows.
+function ReviewPhotoGallery({
+  paths,
+  single,
+  alt,
+  maxHeight = 120,
+  rounded = 8,
+  fit = "cover",
+  thumbWidth = 140,
+}: {
+  paths?: string[] | null;
+  single?: string | null;
+  alt: string;
+  maxHeight?: number;
+  rounded?: number;
+  fit?: "cover" | "contain";
+  thumbWidth?: number;
+}) {
+  const list = paths && paths.length ? paths : single ? [single] : [];
+  if (list.length === 0) return null;
+  if (list.length === 1) {
+    return (
+      <ReviewPhoto path={list[0]} alt={alt} maxHeight={maxHeight} rounded={rounded} fit={fit} />
+    );
+  }
+  return (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      {list.map((p) => (
+        <div key={p} style={{ flex: "0 0 auto", width: thumbWidth }}>
+          <ReviewPhoto path={p} alt={alt} maxHeight={maxHeight} rounded={rounded} fit={fit} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // Mig 081 quality-flag presets → display metadata. Mirrors the
 // option list inside ApproveRejectForms; kept here so the Carving
 // Done card + peek can render a labeled chip for whatever the
@@ -2987,7 +3028,8 @@ function JobsByTemple({
                       only fires for the vendor section the user opens.
                       The quality flag (if the reviewer set one) shows
                       above it so the card carries the "why" too. */}
-                  {fields.includes("approved") && j.review_image_path && (
+                  {fields.includes("approved") &&
+                    (j.review_image_paths?.length || j.review_image_path) && (
                     <div
                       style={{
                         display: "flex",
@@ -3003,8 +3045,9 @@ function JobsByTemple({
                           <QualityFlagChip flag={j.review_quality_flag} />
                         </div>
                       )}
-                      <ReviewPhoto
-                        path={j.review_image_path}
+                      <ReviewPhotoGallery
+                        paths={j.review_image_paths}
+                        single={j.review_image_path}
                         alt="Reviewer's approval photo"
                         maxHeight={120}
                         rounded={8}
@@ -3651,7 +3694,7 @@ function JobDetailPeek({
               when re-opening an approved slab. This block surfaces it
               inside the peek the user opens from Carving Done. Only
               renders once a photo exists (approved slabs). */}
-          {job.review_image_path && (
+          {(job.review_image_paths?.length || job.review_image_path) && (
             <section
               style={{
                 padding: "14px 16px",
@@ -3672,19 +3715,21 @@ function JobDetailPeek({
                   letterSpacing: "0.07em",
                 }}
               >
-                📷 Approval photo
+                📷 Review photo{(job.review_image_paths?.length ?? 0) > 1 ? "s" : ""}
               </div>
               {job.review_quality_flag && (
                 <div>
                   <QualityFlagChip flag={job.review_quality_flag} />
                 </div>
               )}
-              <ReviewPhoto
-                path={job.review_image_path}
-                alt="Reviewer's approval photo"
-                maxHeight={320}
+              <ReviewPhotoGallery
+                paths={job.review_image_paths}
+                single={job.review_image_path}
+                alt="Reviewer's review photo"
+                maxHeight={300}
                 rounded={10}
                 fit="contain"
+                thumbWidth={180}
               />
               {job.review_notes && (
                 <div
@@ -3761,8 +3806,10 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
   type Mode = "approve" | "rework" | "reject";
   const [mode, setMode] = useState<Mode>("approve");
   const [notes, setNotes] = useState("");
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  // Mig 089 — up to 3 review photos (was a single imageFile). Each
+  // entry keeps an object-URL for its thumbnail preview.
+  const [images, setImages] = useState<Array<{ file: File; url: string }>>([]);
+  const MAX_REVIEW_IMAGES = 3;
   // Mig 080 follow-on (Daksh) — camera capture only (no file/gallery
   // pick). Opens the CameraCaptureModal which does getUserMedia +
   // canvas snapshot. Captured File comes back via handleFile().
@@ -3770,7 +3817,8 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
   // Daksh (June 2026) — when set, the ImageAnnotateModal is open on
   // this file so the reviewer can highlight the problem area. On
   // save the marked-up file replaces imageFile (marks baked in).
-  const [annotateFile, setAnnotateFile] = useState<File | null>(null);
+  // Mig 089 — which photo (by index) the annotate modal is editing.
+  const [annotate, setAnnotate] = useState<{ idx: number; file: File } | null>(null);
   // Mig 081 follow-on — custom popover state for the quality-flag
   // picker. We replaced the native <select> with a styled card
   // dropdown to match the rest of the modal's visual language. Esc
@@ -3876,8 +3924,8 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
     if (next === mode) return;
     setMode(next);
     setNotes("");
-    setImageFile(null);
-    setImagePreview(null);
+    setImages([]);
+    setAnnotate(null);
     setErr(null);
     setConfirmStage(0);
     // Mig 081 — reset the quality flag too. The dropdown only
@@ -3887,16 +3935,17 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
     setSidesOverride("");
   }
 
+  // Mig 089 — append a captured photo (up to MAX_REVIEW_IMAGES).
   function handleFile(file: File | null) {
-    setImageFile(file);
-    if (!file) {
-      setImagePreview(null);
-      return;
-    }
-    // Local object URL for the small preview thumb — cleaned up
-    // implicitly when the component unmounts / the file changes.
-    const url = URL.createObjectURL(file);
-    setImagePreview(url);
+    if (!file) return;
+    setImages((prev) =>
+      prev.length >= MAX_REVIEW_IMAGES
+        ? prev
+        : [...prev, { file, url: URL.createObjectURL(file) }],
+    );
+  }
+  function removeImage(idx: number) {
+    setImages((prev) => prev.filter((_, i) => i !== idx));
   }
 
   function doSubmit() {
@@ -3906,7 +3955,11 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
     fd.set("job_id", jobId);
     fd.set("stay", "1");
     fd.set("notes", notes);
-    if (imageFile) fd.set("review_image", imageFile);
+    // Mig 089 — up to 3 photos under the keys the server reads.
+    const imgKeys = ["review_image", "review_image_2", "review_image_3"];
+    images.slice(0, MAX_REVIEW_IMAGES).forEach((im, i) => {
+      fd.set(imgKeys[i], im.file);
+    });
     // Mig 081 — Approve mode only. Server validates against the
     // whitelist; passing it empty = no flag (slab was fine).
     if (mode === "approve" && qualityFlag) {
@@ -3947,8 +4000,8 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
         setErr(`${mode === "rework" ? "Rework" : "Rejection"} reason is required.`);
         return;
       }
-      if (!imageFile) {
-        setErr("Photo of the problem is required.");
+      if (images.length === 0) {
+        setErr("At least one photo of the problem is required.");
         return;
       }
     }
@@ -4682,164 +4735,137 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
           </div>
         )}
 
-        {/* ── Photo capture — hero block when empty, big preview
-            when captured. No file-picker fallback by design (Daksh:
-            live capture only). ── */}
-        {imagePreview ? (
-          <div
-            style={{
-              position: "relative",
-              borderRadius: 12,
-              overflow: "hidden",
-              border: `2px solid ${accent}`,
-              background: "var(--surface)",
-              boxShadow: tintPack.shadow,
-            }}
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={imagePreview}
-              alt="Captured"
-              style={{
-                width: "100%",
-                maxHeight: 260,
-                objectFit: "cover",
-                display: "block",
-              }}
-            />
-            {/* Overlay strip with file info + Retake button */}
+        {/* ── Photo capture (mig 089 — up to 3). Thumbnail strip of
+            captured photos + an "add photo" tile. Live capture only,
+            no gallery picker. Each thumb can be marked or removed. ── */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+          {images.map((im, idx) => (
             <div
+              key={im.url}
               style={{
-                position: "absolute",
-                left: 0,
-                right: 0,
-                bottom: 0,
-                padding: "10px 12px",
-                background: "linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.72) 100%)",
-                color: "#fff",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 10,
+                position: "relative",
+                width: 132,
+                height: 110,
+                flex: "0 0 auto",
+                borderRadius: 10,
+                overflow: "hidden",
+                border: `2px solid ${accent}`,
+                background: "var(--surface)",
+                boxShadow: tintPack.shadow,
               }}
             >
-              <div style={{ fontSize: 11, fontWeight: 600, opacity: 0.9 }}>
-                <span aria-hidden style={{ marginRight: 4 }}>📸</span>
-                {imageFile
-                  ? `Live capture · ${(imageFile.size / 1024).toFixed(0)} KB`
-                  : "Live capture"}
-              </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                {/* Daksh — highlight / colour-mark the captured photo
-                    so the problem area is obvious on every later
-                    surface. Marks bake into the uploaded image. */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (imageFile) setAnnotateFile(imageFile);
-                  }}
-                  style={{
-                    padding: "6px 12px",
-                    fontSize: 12,
-                    fontWeight: 700,
-                    background: "rgba(255,255,255,0.18)",
-                    color: "#fff",
-                    border: "1px solid rgba(255,255,255,0.32)",
-                    borderRadius: 6,
-                    cursor: "pointer",
-                    backdropFilter: "blur(2px)",
-                  }}
-                >
-                  ✏️ Mark
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCameraOpen(true)}
-                  style={{
-                    padding: "6px 12px",
-                    fontSize: 12,
-                    fontWeight: 700,
-                    background: "rgba(255,255,255,0.18)",
-                    color: "#fff",
-                    border: "1px solid rgba(255,255,255,0.32)",
-                    borderRadius: 6,
-                    cursor: "pointer",
-                    backdropFilter: "blur(2px)",
-                  }}
-                >
-                  ↺ Retake
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setCameraOpen(true)}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 12,
-              padding: "18px 16px",
-              background: "var(--surface)",
-              border: `2px dashed ${
-                isMandatoryImage
-                  ? accent
-                  : "var(--border)"
-              }`,
-              borderRadius: 12,
-              cursor: "pointer",
-              fontSize: 14,
-              fontWeight: 700,
-              color: isMandatoryImage ? accent : "var(--text)",
-              transition: "transform 0.15s ease, background 0.15s ease, border-color 0.15s ease",
-              touchAction: "manipulation",
-              width: "100%",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = "translateY(-1px)";
-              e.currentTarget.style.background = tintPack.tintBg;
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = "translateY(0)";
-              e.currentTarget.style.background = "var(--surface)";
-            }}
-          >
-            <span
-              aria-hidden
-              style={{
-                fontSize: 28,
-                width: 48,
-                height: 48,
-                borderRadius: "50%",
-                background: tintPack.tintBg,
-                border: `1.5px solid ${tintPack.tintBorder}`,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              📸
-            </span>
-            <div style={{ textAlign: "left" }}>
-              <div style={{ fontSize: 14, fontWeight: 800 }}>
-                {isMandatoryImage ? "Take photo (required)" : "Take photo (optional)"}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={im.url}
+                alt={`Photo ${idx + 1}`}
+                style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+              />
+              <div
+                style={{
+                  position: "absolute",
+                  top: 4,
+                  left: 4,
+                  fontSize: 10,
+                  fontWeight: 800,
+                  color: "#fff",
+                  background: "rgba(0,0,0,0.55)",
+                  borderRadius: 999,
+                  padding: "1px 7px",
+                }}
+              >
+                {idx + 1}
               </div>
               <div
                 style={{
-                  fontSize: 11,
-                  fontWeight: 600,
-                  color: "var(--muted)",
-                  marginTop: 2,
-                  letterSpacing: "0.02em",
+                  position: "absolute",
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  padding: "4px 6px",
+                  background: "linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.72) 100%)",
+                  display: "flex",
+                  gap: 5,
+                  justifyContent: "flex-end",
                 }}
               >
-                Live camera capture · no gallery
+                <button
+                  type="button"
+                  title="Mark / highlight"
+                  onClick={() => setAnnotate({ idx, file: im.file })}
+                  style={{
+                    padding: "3px 8px",
+                    fontSize: 11,
+                    fontWeight: 700,
+                    background: "rgba(255,255,255,0.2)",
+                    color: "#fff",
+                    border: "1px solid rgba(255,255,255,0.35)",
+                    borderRadius: 5,
+                    cursor: "pointer",
+                  }}
+                >
+                  ✏️
+                </button>
+                <button
+                  type="button"
+                  title="Remove"
+                  onClick={() => removeImage(idx)}
+                  style={{
+                    padding: "3px 8px",
+                    fontSize: 11,
+                    fontWeight: 700,
+                    background: "rgba(220,38,38,0.85)",
+                    color: "#fff",
+                    border: "1px solid rgba(255,255,255,0.25)",
+                    borderRadius: 5,
+                    cursor: "pointer",
+                  }}
+                >
+                  ✕
+                </button>
               </div>
             </div>
-          </button>
-        )}
+          ))}
+
+          {images.length < MAX_REVIEW_IMAGES && (
+            <button
+              type="button"
+              onClick={() => setCameraOpen(true)}
+              style={{
+                flex: images.length === 0 ? "1 1 100%" : "0 0 auto",
+                width: images.length === 0 ? "100%" : 132,
+                minHeight: 110,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 6,
+                padding: "14px 12px",
+                background: "var(--surface)",
+                border: `2px dashed ${
+                  isMandatoryImage && images.length === 0 ? accent : "var(--border)"
+                }`,
+                borderRadius: 10,
+                cursor: "pointer",
+                color: isMandatoryImage && images.length === 0 ? accent : "var(--text)",
+                touchAction: "manipulation",
+              }}
+            >
+              <span aria-hidden style={{ fontSize: 24 }}>📸</span>
+              <div style={{ fontSize: 12.5, fontWeight: 800, textAlign: "center" }}>
+                {images.length === 0
+                  ? isMandatoryImage
+                    ? "Take photo (required)"
+                    : "Take photo (optional)"
+                  : `Add another (${images.length}/${MAX_REVIEW_IMAGES})`}
+              </div>
+              {images.length === 0 && (
+                <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)" }}>
+                  Live capture · up to {MAX_REVIEW_IMAGES} photos · no gallery
+                </div>
+              )}
+            </button>
+          )}
+        </div>
         {cameraOpen && (
           <CameraCaptureModal
             filenamePrefix="carving-review"
@@ -4850,16 +4876,22 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
             onClose={() => setCameraOpen(false)}
           />
         )}
-        {annotateFile && (
+        {annotate && (
           <ImageAnnotateModal
-            file={annotateFile}
+            file={annotate.file}
             onDone={(marked) => {
-              // Replace the captured photo with the marked-up one —
+              // Replace that photo (by index) with the marked-up one —
               // the marks are now part of the image that uploads.
-              handleFile(marked);
-              setAnnotateFile(null);
+              setImages((prev) =>
+                prev.map((im, i) =>
+                  i === annotate.idx
+                    ? { file: marked, url: URL.createObjectURL(marked) }
+                    : im,
+                ),
+              );
+              setAnnotate(null);
             }}
-            onCancel={() => setAnnotateFile(null)}
+            onCancel={() => setAnnotate(null)}
           />
         )}
 

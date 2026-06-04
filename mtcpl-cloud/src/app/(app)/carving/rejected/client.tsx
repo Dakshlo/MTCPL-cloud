@@ -17,6 +17,8 @@ export type RejectedItem = {
   reviewer_name: string | null;
   rejected_at: string | null;
   image_path: string | null;
+  /** Mig 089 — all 1-3 review photos; falls back to image_path. */
+  image_paths: string[] | null;
   notes: string | null;
   slab: {
     label: string | null;
@@ -169,7 +171,20 @@ function RejectedRow({ item }: { item: RejectedItem }) {
         </div>
       )}
 
-      <SignedImage path={item.image_path} alt="Rejection photo" />
+      {/* Mig 089 — show all 1-3 rejection photos (fallback to the
+          single legacy path). */}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {(item.image_paths?.length
+          ? item.image_paths
+          : item.image_path
+            ? [item.image_path]
+            : []
+        ).map((p) => (
+          <div key={p} style={{ flex: "0 0 auto", maxWidth: 220 }}>
+            <SignedImage path={p} alt="Rejection photo" />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

@@ -115,7 +115,7 @@ export default async function CarvingDashboardPage({
       // notes so the Carving Done card / peek can SHOW the photo the
       // reviewer took at sign-off. completed_on_cnc_machine_id is the
       // carving machine (cnc_machine_id is already nulled by now).
-      .select("id, slab_requirement_id, vendor_id, vendor_name, vendor_type, status, due_at, assigned_at, completed_at, review_approved_at, cnc_machine_id, completed_on_cnc_machine_id, location, ready_to_dispatch_at, review_image_path, review_quality_flag, review_notes")
+      .select("id, slab_requirement_id, vendor_id, vendor_name, vendor_type, status, due_at, assigned_at, completed_at, review_approved_at, cnc_machine_id, completed_on_cnc_machine_id, location, ready_to_dispatch_at, review_image_path, review_image_paths, review_quality_flag, review_notes")
       .not("review_approved_at", "is", null)
       .order("review_approved_at", { ascending: false })
       .limit(200),

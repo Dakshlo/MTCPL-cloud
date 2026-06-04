@@ -4038,6 +4038,28 @@ async function uploadReviewImage(
   return path;
 }
 
+/** Mig 089 — collect up to 3 review photos from a FormData (keys
+ *  review_image, review_image_2, review_image_3), validate + upload
+ *  each, return the storage paths in order. Empty / missing slots are
+ *  skipped. The caller decides whether ≥1 is mandatory. */
+async function uploadReviewImages(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  jobId: string,
+  reviewerId: string,
+  formData: FormData,
+): Promise<string[]> {
+  const keys = ["review_image", "review_image_2", "review_image_3"];
+  const paths: string[] = [];
+  for (const k of keys) {
+    const f = formData.get(k);
+    if (f instanceof File && f.size > 0) {
+      paths.push(await uploadReviewImage(admin, jobId, reviewerId, f));
+      if (paths.length >= 3) break;
+    }
+  }
+  return paths;
+}
+
 /** Sign a stored review image for the modal / cockpit cards.
  *  5-min freshness — the next router.refresh re-mints. Returns
  *  null on missing path or sign-failure so the UI can fall back
@@ -4106,22 +4128,21 @@ export async function approveCarvingJobAction(formData: FormData) {
     if (stay) throw new Error(msg);
     redirect(`/carving/${jobId}?toast=${encodeURIComponent(msg)}`);
   }
-  // Mig 080 — optional image upload on approve (mandatory on the
-  // rework + reject paths; see below). If the caller attached a
-  // file, upload it before we write the row so the DB always
-  // points at a real storage object.
-  const imageFile = formData.get("review_image");
-  let reviewImagePath: string | null = null;
-  if (imageFile instanceof File && imageFile.size > 0) {
-    try {
-      reviewImagePath = await uploadReviewImage(admin, jobId, profile.id, imageFile);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      const stay = txt(formData, "stay") === "1";
-      if (stay) throw new Error(msg);
-      redirect(`/carving/${jobId}?toast=${encodeURIComponent(msg)}`);
-    }
+  // Mig 080/089 — optional photo upload on approve (mandatory on the
+  // rework + reject paths; see below). Up to 3 photos. Upload before we
+  // write the row so the DB always points at real storage objects.
+  let reviewImagePaths: string[] = [];
+  try {
+    reviewImagePaths = await uploadReviewImages(admin, jobId, profile.id, formData);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const stay = txt(formData, "stay") === "1";
+    if (stay) throw new Error(msg);
+    redirect(`/carving/${jobId}?toast=${encodeURIComponent(msg)}`);
   }
+  // First photo also lands in the legacy single column so every surface
+  // that still reads review_image_path keeps showing photo #1.
+  const reviewImagePath: string | null = reviewImagePaths[0] ?? null;
   // When the action is called from the JobDetailPeek modal we don't
   // want to redirect — the modal closes itself + parent revalidates
   // in place. Set `stay=1` from the form to opt out of the redirect.
@@ -4185,6 +4206,7 @@ export async function approveCarvingJobAction(formData: FormData) {
       // row's status happens to be 'completed' for other reasons."
       review_decision: "approved",
       review_image_path: reviewImagePath,
+      review_image_paths: reviewImagePaths.length ? reviewImagePaths : null,
       // Mig 081 — structured quality flag (NULL or one of the five
       // values whitelisted above). The reviewer's drop-down maps
       // 1:1 to these keys; analytics will GROUP BY this column to
@@ -4351,21 +4373,21 @@ export async function reworkCarvingJobAction(formData: FormData) {
     if (stay) throw new Error(msg);
     redirect(`/carving/${jobId}?toast=${encodeURIComponent(msg)}`);
   }
-  // Mandatory image upload.
-  const imageFile = formData.get("review_image");
-  if (!(imageFile instanceof File) || imageFile.size === 0) {
-    const msg = "Photo of the problem is required for Rework.";
-    if (stay) throw new Error(msg);
-    redirect(`/carving/${jobId}?toast=${encodeURIComponent(msg)}`);
-  }
-  let reviewImagePath: string;
+  // Mandatory photo(s) for Rework — up to 3 (mig 089).
+  let reviewImagePaths: string[] = [];
   try {
-    reviewImagePath = await uploadReviewImage(admin, jobId, profile.id, imageFile);
+    reviewImagePaths = await uploadReviewImages(admin, jobId, profile.id, formData);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     if (stay) throw new Error(msg);
     redirect(`/carving/${jobId}?toast=${encodeURIComponent(msg)}`);
   }
+  if (reviewImagePaths.length === 0) {
+    const msg = "Photo of the problem is required for Rework.";
+    if (stay) throw new Error(msg);
+    redirect(`/carving/${jobId}?toast=${encodeURIComponent(msg)}`);
+  }
+  const reviewImagePath = reviewImagePaths[0];
 
   const now = new Date().toISOString();
   const { error: updateErr } = await admin
@@ -4377,6 +4399,7 @@ export async function reworkCarvingJobAction(formData: FormData) {
       review_reworked_at: now,
       review_reworked_by: profile.id,
       review_image_path: reviewImagePath,
+      review_image_paths: reviewImagePaths,
       // Clear any prior approval flags so the load-time guard
       // doesn't think this slab has already been signed off.
       review_approved_at: null,
@@ -4449,20 +4472,21 @@ export async function rejectCarvingJobAction(formData: FormData) {
     if (stay) throw new Error(msg);
     redirect(`/carving/${jobId}?toast=${encodeURIComponent(msg)}`);
   }
-  const imageFile = formData.get("review_image");
-  if (!(imageFile instanceof File) || imageFile.size === 0) {
-    const msg = "Photo of the problem is required for Reject.";
-    if (stay) throw new Error(msg);
-    redirect(`/carving/${jobId}?toast=${encodeURIComponent(msg)}`);
-  }
-  let reviewImagePath: string;
+  // Mandatory photo(s) for Reject — up to 3 (mig 089).
+  let reviewImagePaths: string[] = [];
   try {
-    reviewImagePath = await uploadReviewImage(admin, jobId, profile.id, imageFile);
+    reviewImagePaths = await uploadReviewImages(admin, jobId, profile.id, formData);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     if (stay) throw new Error(msg);
     redirect(`/carving/${jobId}?toast=${encodeURIComponent(msg)}`);
   }
+  if (reviewImagePaths.length === 0) {
+    const msg = "Photo of the problem is required for Reject.";
+    if (stay) throw new Error(msg);
+    redirect(`/carving/${jobId}?toast=${encodeURIComponent(msg)}`);
+  }
+  const reviewImagePath = reviewImagePaths[0];
 
   // Need the slab_requirement_id so we can flip the source slab's
   // status too — the slab is out of the carving loop entirely.
@@ -4482,6 +4506,7 @@ export async function rejectCarvingJobAction(formData: FormData) {
       review_rejected_at: now,
       review_rejected_by: profile.id,
       review_image_path: reviewImagePath,
+      review_image_paths: reviewImagePaths,
       // A rejected job's prior approval flags should NOT persist —
       // the row is fully out of the active loop.
       review_approved_at: null,

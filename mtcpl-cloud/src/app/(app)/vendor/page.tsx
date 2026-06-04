@@ -183,7 +183,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
         // review_image_path / review_notes so we can split rework
         // slabs into the new "Rework pending" window (separate from
         // the regular ready-to-load queue).
-        "id, slab_requirement_id, status, urgency, estimated_minutes, vendor_estimated_minutes, cnc_machine_id, loaded_at, assigned_at, note, received_at_vendor_at, requires_machine_type, carving_sides, batch_id, held_at, held_reason, held_from_machine_id, transferred_from_vendor_id, transferred_from_vendor_name, transferred_at, review_decision, review_reworked_at, review_image_path, review_notes",
+        "id, slab_requirement_id, status, urgency, estimated_minutes, vendor_estimated_minutes, cnc_machine_id, loaded_at, assigned_at, note, received_at_vendor_at, requires_machine_type, carving_sides, batch_id, held_at, held_reason, held_from_machine_id, transferred_from_vendor_id, transferred_from_vendor_name, transferred_at, review_decision, review_reworked_at, review_image_path, review_image_paths, review_notes",
       )
       .eq("vendor_id", vendorId)
       .in("status", ["carving_assigned", "carving_in_progress", "carving_on_hold"])
@@ -214,7 +214,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
     admin
       .from("carving_items")
       .select(
-        "id, slab_requirement_id, review_decision, review_rejected_at, review_image_path, review_notes",
+        "id, slab_requirement_id, review_decision, review_rejected_at, review_image_path, review_image_paths, review_notes",
       )
       .eq("vendor_id", vendorId)
       .eq("status", "carving_rejected")
@@ -336,6 +336,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
     review_decision?: string | null;
     review_reworked_at?: string | null;
     review_image_path?: string | null;
+    review_image_paths?: string[] | null;
     review_notes?: string | null;
   }>) {
     const slab = slabById.get(row.slab_requirement_id) ?? null;
@@ -393,6 +394,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
         carving_sides: row.carving_sides ?? 1,
         review_reworked_at: row.review_reworked_at ?? null,
         review_image_path: row.review_image_path ?? null,
+        review_image_paths: row.review_image_paths ?? null,
         review_notes: row.review_notes ?? null,
         slab,
       });
@@ -505,12 +507,14 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
     review_decision: string | null;
     review_rejected_at: string | null;
     review_image_path: string | null;
+    review_image_paths: string[] | null;
     review_notes: string | null;
   }>).map((r) => ({
     id: r.id,
     slab_id: r.slab_requirement_id,
     review_rejected_at: r.review_rejected_at,
     review_image_path: r.review_image_path,
+    review_image_paths: r.review_image_paths,
     review_notes: r.review_notes,
     slab: slabById.get(r.slab_requirement_id) ?? null,
   }));
