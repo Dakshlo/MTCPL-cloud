@@ -62,8 +62,6 @@ export default async function VariousCostingLanding() {
           icon="🛠"
           tone="#7c3aed"
           title="CNC Costing"
-          subtitle="Cost per SFT / CFT — carving department"
-          description="Focused dashboard with daily / weekly / monthly / yearly views. KPI tiles, per-vendor breakdown, expense categories. The full Excel-style report is one click away from there."
         />
         <CostingCard
           href="/reports/various-costing/cutter"
@@ -71,8 +69,6 @@ export default async function VariousCostingLanding() {
           icon="✂"
           tone="#0ea5e9"
           title="Cutter Costing"
-          subtitle="Cost per CFT — cutting department (aggregate)"
-          description="Aggregate cost-per-CFT for the cutting machines. Pulls expenses + depreciation; divides by CFT of blocks completed in the period."
         />
       </div>
     </section>
@@ -85,23 +81,22 @@ function CostingCard({
   icon,
   tone,
   title,
-  subtitle,
-  description,
 }: {
   href: string;
   enabled: boolean;
   icon: string;
   tone: string;
   title: string;
-  subtitle: string;
-  description: string;
 }) {
   const inner = (
     <div
       style={{
-        padding: "22px 22px 24px",
+        // Fixed minHeight + identical content → both cards are exactly
+        // the same size whether they sit side-by-side or wrap.
+        minHeight: 132,
+        padding: "20px 22px",
         background: enabled ? "var(--surface)" : "var(--bg)",
-        border: `1px solid ${enabled ? "var(--border)" : "var(--border)"}`,
+        border: "1px solid var(--border)",
         borderRadius: 14,
         position: "relative",
         overflow: "hidden",
@@ -110,7 +105,10 @@ function CostingCard({
         cursor: enabled ? "pointer" : "not-allowed",
         textDecoration: "none",
         color: "inherit",
-        display: "block",
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "space-between",
+        gap: 16,
       }}
     >
       <div
@@ -123,11 +121,12 @@ function CostingCard({
           background: tone,
         }}
       />
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <div
           style={{
             width: 40,
             height: 40,
+            flexShrink: 0,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -139,17 +138,12 @@ function CostingCard({
         >
           {icon}
         </div>
-        <div>
-          <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text)" }}>{title}</div>
-          <div style={{ fontSize: 12, color: "var(--muted)" }}>{subtitle}</div>
-        </div>
-      </div>
-      <div style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.5, marginBottom: 12 }}>
-        {description}
+        <div style={{ fontSize: 18, fontWeight: 800, color: "var(--text)" }}>{title}</div>
       </div>
       <div
         style={{
           display: "inline-flex",
+          alignSelf: "flex-start",
           alignItems: "center",
           gap: 6,
           padding: "6px 12px",

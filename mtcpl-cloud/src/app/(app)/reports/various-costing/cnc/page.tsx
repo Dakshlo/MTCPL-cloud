@@ -141,6 +141,26 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
 
   return (
     <section style={{ paddingBottom: 24 }}>
+      <Link
+        href="/reports/various-costing"
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+          marginBottom: 12,
+          padding: "7px 13px",
+          fontSize: 13,
+          fontWeight: 700,
+          background: "var(--surface)",
+          color: "var(--text)",
+          border: "1px solid var(--border)",
+          borderRadius: 9,
+          textDecoration: "none",
+          whiteSpace: "nowrap",
+        }}
+      >
+        ← Back to Various Costing
+      </Link>
       {/* ── Header ───────────────────────────────────────────── */}
       <header
         style={{
