@@ -8,6 +8,8 @@ import {
   completeAndUnloadAction,
   flagMaintenanceAction,
   resolveMaintenanceAction,
+  flagPowerCutAction,
+  resolvePowerCutAction,
   updateTemporaryLocationAction,
   acknowledgeReceiptAction,
   unloadWithProblemAction,
@@ -271,7 +273,12 @@ export function VendorCockpitClient({
   reworkPending,
   rejected,
   recent,
-  carved30,
+  carvedThisMonth,
+  carvedLastMonth,
+  thisMonthLabel,
+  lastMonthLabel,
+  powerCutActive,
+  powerCutSince,
   otherVendors,
   transferVendors,
   isStaffView,
@@ -305,10 +312,19 @@ export function VendorCockpitClient({
     review_notes: string | null;
     slab: SlabLite | null;
   }>;
-  /** Daksh June 2026 — this vendor's APPROVED carved output over the
-   *  last 30 days (sft + cft + slab count). Approval-only: reworked /
-   *  rejected slabs are excluded. Shown as a small header strip. */
-  carved30: { sft: number; cft: number; slabs: number };
+  /** Daksh June 2026 — this vendor's APPROVED carved output, by
+   *  calendar month. Current month shows by default; a small button
+   *  toggles to last month. Approval-only (reworked / rejected slabs
+   *  excluded). */
+  carvedThisMonth: { sft: number; cft: number; slabs: number };
+  carvedLastMonth: { sft: number; cft: number; slabs: number };
+  thisMonthLabel: string;
+  lastMonthLabel: string;
+  /** Daksh June 2026 — power-cut state. TRUE when the global "all
+   *  machines down" button has paused this vendor's machines; the
+   *  header then shows a "Power's back — resume all" control. */
+  powerCutActive: boolean;
+  powerCutSince: string | null;
   otherVendors: Vendor[];
   /** Daksh June 2026 — full list of every active CNC + Manual vendor
    *  (except the one being viewed) for the Problem/transfer
@@ -330,6 +346,9 @@ export function VendorCockpitClient({
 }) {
   const router = useRouter();
   const [now, setNow] = useState<number>(Date.now());
+  // Daksh June 2026 — header carved-output stat shows the current month
+  // by default; this flips it to last month.
+  const [statsShowLast, setStatsShowLast] = useState(false);
 
   // Tick every 30s so countdown timers refresh without a page reload.
   // 30s is plenty — these are real-world hours-long carves, not seconds.
@@ -707,56 +726,174 @@ export function VendorCockpitClient({
           </div>
         </div>
 
-        {/* Daksh June 2026 — per-vendor "Carved · last 30 days" strip.
-            APPROVAL-ONLY: counts slabs whose review was approved
-            (review_approved_at), so unloaded-but-pending, reworked, or
-            rejected slabs never inflate it. Same sft/cft basis as the
-            CNC cost report. Shows on every vendor's own cockpit (and
-            when staff tour a vendor). */}
-        <div
-          style={{
-            marginTop: 12,
-            display: "flex",
-            alignItems: "center",
-            gap: 14,
-            flexWrap: "wrap",
-            padding: "10px 14px",
-            background: "rgba(74,222,128,0.10)",
-            border: "1px solid rgba(74,222,128,0.28)",
-            borderRadius: 10,
-          }}
-        >
-          <span
-            style={{
-              fontSize: 11,
-              fontWeight: 800,
-              color: "#86efac",
-              textTransform: "uppercase",
-              letterSpacing: "0.06em",
-            }}
-          >
-            ✅ Carved · last 30 days
-          </span>
-          <span style={{ display: "inline-flex", alignItems: "baseline", gap: 5 }}>
-            <strong
-              style={{ fontSize: 19, fontFamily: "ui-monospace, monospace", color: "#fff" }}
+        {/* Daksh June 2026 — carved-output stat (calendar month, current
+            by default; button peeks last month). APPROVAL-ONLY
+            (review_approved_at; reworked/rejected slabs excluded), same
+            sft/cft basis as the CNC cost report. */}
+        {(() => {
+          const stat = statsShowLast ? carvedLastMonth : carvedThisMonth;
+          const statLabel = statsShowLast ? lastMonthLabel : thisMonthLabel;
+          return (
+            <div
+              style={{
+                marginTop: 12,
+                display: "flex",
+                alignItems: "center",
+                gap: 14,
+                flexWrap: "wrap",
+                padding: "10px 14px",
+                background: "rgba(74,222,128,0.10)",
+                border: "1px solid rgba(74,222,128,0.28)",
+                borderRadius: 10,
+              }}
             >
-              {carved30.sft.toLocaleString("en-IN", { maximumFractionDigits: 1 })}
-            </strong>
-            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.7)" }}>sft</span>
-          </span>
-          <span style={{ display: "inline-flex", alignItems: "baseline", gap: 5 }}>
-            <strong
-              style={{ fontSize: 19, fontFamily: "ui-monospace, monospace", color: "#fff" }}
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 800,
+                  color: "#86efac",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                }}
+              >
+                ✅ Carved · {statLabel}
+              </span>
+              <span style={{ display: "inline-flex", alignItems: "baseline", gap: 5 }}>
+                <strong style={{ fontSize: 19, fontFamily: "ui-monospace, monospace", color: "#fff" }}>
+                  {stat.sft.toLocaleString("en-IN", { maximumFractionDigits: 1 })}
+                </strong>
+                <span style={{ fontSize: 11, color: "rgba(255,255,255,0.7)" }}>sft</span>
+              </span>
+              <span style={{ display: "inline-flex", alignItems: "baseline", gap: 5 }}>
+                <strong style={{ fontSize: 19, fontFamily: "ui-monospace, monospace", color: "#fff" }}>
+                  {stat.cft.toLocaleString("en-IN", { maximumFractionDigits: 1 })}
+                </strong>
+                <span style={{ fontSize: 11, color: "rgba(255,255,255,0.7)" }}>cft</span>
+              </span>
+              <span style={{ fontSize: 11, color: "rgba(255,255,255,0.55)" }}>
+                {stat.slabs} slab{stat.slabs === 1 ? "" : "s"} approved
+              </span>
+              <button
+                type="button"
+                onClick={() => setStatsShowLast((v) => !v)}
+                title={statsShowLast ? "Back to this month" : "See last month"}
+                style={{
+                  marginLeft: "auto",
+                  padding: "5px 11px",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  background: "rgba(255,255,255,0.10)",
+                  color: "#86efac",
+                  border: "1px solid rgba(74,222,128,0.45)",
+                  borderRadius: 999,
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {statsShowLast ? `← ${thisMonthLabel}` : `${lastMonthLabel} →`}
+              </button>
+            </div>
+          );
+        })()}
+
+        {/* Daksh June 2026 — Power-cut control. One button downs every
+            running/idle machine (loaded slabs' timers freeze); when
+            power's back, one button resumes them (timers continue from
+            where they stopped). Hidden in read-only oversight view. */}
+        {!readOnly &&
+          (powerCutActive ? (
+            <div
+              style={{
+                marginTop: 10,
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                flexWrap: "wrap",
+                padding: "10px 14px",
+                background: "rgba(248,113,113,0.14)",
+                border: "1px solid rgba(248,113,113,0.5)",
+                borderRadius: 10,
+              }}
             >
-              {carved30.cft.toLocaleString("en-IN", { maximumFractionDigits: 1 })}
-            </strong>
-            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.7)" }}>cft</span>
-          </span>
-          <span style={{ fontSize: 11, color: "rgba(255,255,255,0.55)" }}>
-            {carved30.slabs} slab{carved30.slabs === 1 ? "" : "s"} approved · approved work only
-          </span>
-        </div>
+              <span style={{ fontSize: 13, fontWeight: 800, color: "#fca5a5" }}>
+                ⚡ Power cut — all machines paused
+                {powerCutSince && (
+                  <span
+                    style={{
+                      fontWeight: 600,
+                      color: "rgba(255,255,255,0.7)",
+                      marginLeft: 6,
+                    }}
+                  >
+                    since{" "}
+                    {new Date(powerCutSince).toLocaleString("en-IN", {
+                      timeZone: "Asia/Kolkata",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      day: "numeric",
+                      month: "short",
+                    })}
+                  </span>
+                )}
+              </span>
+              <form action={resolvePowerCutAction} style={{ marginLeft: "auto" }}>
+                <input type="hidden" name="vendor_id" value={vendor.id} />
+                <button
+                  type="submit"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 7,
+                    padding: "9px 16px",
+                    fontSize: 13,
+                    fontWeight: 800,
+                    background: "#16a34a",
+                    color: "#fff",
+                    border: "1px solid #15803d",
+                    borderRadius: 10,
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  🔌 Power&apos;s back — resume all
+                </button>
+              </form>
+            </div>
+          ) : (
+            <form
+              action={flagPowerCutAction}
+              style={{ marginTop: 10 }}
+              onSubmit={(e) => {
+                if (
+                  !window.confirm(
+                    "Power cut / breakdown — pause ALL machines?\n\nEvery loaded slab's timer will freeze until you press “Power's back — resume all”.",
+                  )
+                ) {
+                  e.preventDefault();
+                }
+              }}
+            >
+              <input type="hidden" name="vendor_id" value={vendor.id} />
+              <button
+                type="submit"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 7,
+                  padding: "9px 16px",
+                  fontSize: 13,
+                  fontWeight: 800,
+                  background: "rgba(248,113,113,0.14)",
+                  color: "#fca5a5",
+                  border: "1px solid rgba(248,113,113,0.5)",
+                  borderRadius: 10,
+                  cursor: "pointer",
+                }}
+              >
+                ⚡ Power cut — pause all machines
+              </button>
+            </form>
+          ))}
       </div>
 
       {/* Daksh May 2026 — Pending stock / Ready to load lists moved

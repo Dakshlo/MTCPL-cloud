@@ -18,6 +18,7 @@
 import { cookies } from "next/headers";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { POWER_CUT_REASON } from "@/lib/carving-power-cut";
 import { VendorCockpitClient, type CarvingJobLite, type CncMachineLive, type SlabLite, type HeldSlabLite, type ReworkPendingItem, type RejectedItem } from "./cockpit-client";
 
 type SearchParams = Promise<{ vendor_id?: string; toast?: string }>;
@@ -510,21 +511,28 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
     slab: slabById.get(r.slab_requirement_id) ?? null,
   }));
 
-  // Daksh June 2026 — per-vendor "Carved · last 30 days" stat for the
-  // cockpit header. Counts ONLY slabs the reviewer APPROVED
-  // (review_approved_at is set on approve, and CLEARED again on
-  // rework / reject — actions.ts), so unloaded-but-not-approved,
-  // reworked, or rejected slabs never inflate it. SFT/CFT use the
-  // exact same formulas as the CNC cost report (dims are in inches:
-  // sft = l·w/144, cft = l·w·t/1728) so the number ties out.
-  const carved30 = await (async () => {
-    const sinceIso = new Date(Date.now() - 30 * 86_400_000).toISOString();
+  // Daksh June 2026 — per-vendor carved output for the cockpit header,
+  // CALENDAR-MONTH based: current month by default, with a button to
+  // peek last month. APPROVAL-ONLY — counts only slabs the reviewer
+  // APPROVED (review_approved_at, set on approve + CLEARED on rework /
+  // reject), so unloaded-but-pending / reworked / rejected slabs never
+  // count. SFT/CFT use the same formulas as the CNC cost report (dims
+  // in inches: sft = l·w/144, cft = l·w·t/1728) so the numbers tie out.
+  const MONTH_NAMES = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+  ];
+  async function carvedInWindow(
+    startIso: string,
+    endIso: string,
+  ): Promise<{ sft: number; cft: number; slabs: number }> {
     const { data: appr } = await admin
       .from("carving_items")
       .select("slab_requirement_id, review_approved_at")
       .eq("vendor_id", vendorId)
       .not("review_approved_at", "is", null)
-      .gte("review_approved_at", sinceIso);
+      .gte("review_approved_at", startIso)
+      .lt("review_approved_at", endIso);
     const rowsAppr = (appr ?? []) as Array<{ slab_requirement_id: string }>;
     const ids = [...new Set(rowsAppr.map((r) => r.slab_requirement_id))];
     let sft = 0;
@@ -548,14 +556,54 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
         });
       }
       for (const r of rowsAppr) {
-        const d = dimById.get(r.slab_requirement_id);
-        if (!d) continue;
-        sft += (d.l * d.w) / 144;
-        cft += (d.l * d.w * d.t) / 1728;
+        const dim = dimById.get(r.slab_requirement_id);
+        if (!dim) continue;
+        sft += (dim.l * dim.w) / 144;
+        cft += (dim.l * dim.w * dim.t) / 1728;
       }
     }
     return { sft, cft, slabs: rowsAppr.length };
-  })();
+  }
+
+  // IST calendar-month bounds (IST = UTC+5:30). Date.UTC handles the
+  // month roll-over / under-flow for the next + previous month.
+  const IST_OFF = 5.5 * 60 * 60 * 1000;
+  const istNow = new Date(Date.now() + IST_OFF);
+  const istY = istNow.getUTCFullYear();
+  const istMo = istNow.getUTCMonth(); // 0-based
+  const thisMonthStart = new Date(Date.UTC(istY, istMo, 1) - IST_OFF).toISOString();
+  const nextMonthStart = new Date(Date.UTC(istY, istMo + 1, 1) - IST_OFF).toISOString();
+  const lastMonthStart = new Date(Date.UTC(istY, istMo - 1, 1) - IST_OFF).toISOString();
+  const [carvedThisMonth, carvedLastMonth] = await Promise.all([
+    carvedInWindow(thisMonthStart, nextMonthStart),
+    carvedInWindow(lastMonthStart, thisMonthStart),
+  ]);
+  const thisMonthLabel = `${MONTH_NAMES[istMo]} ${istY}`;
+  const lastMo = istMo === 0 ? 11 : istMo - 1;
+  const lastMonthLabel = `${MONTH_NAMES[lastMo]} ${istMo === 0 ? istY - 1 : istY}`;
+
+  // Daksh June 2026 — power-cut state. The global "all machines down"
+  // button flags every running/idle machine into maintenance tagged
+  // with POWER_CUT_REASON (carving/actions.ts). If ANY of this vendor's
+  // machines carries that tag, the cockpit shows the "Power's back —
+  // resume all" control + a banner instead of the down button.
+  let powerCutActive = false;
+  let powerCutSince: string | null = null;
+  for (const m of (machines ?? []) as Array<{
+    status: string;
+    maintenance_reason: string | null;
+    maintenance_flagged_at: string | null;
+  }>) {
+    if (m.status === "maintenance" && m.maintenance_reason === POWER_CUT_REASON) {
+      powerCutActive = true;
+      if (
+        m.maintenance_flagged_at &&
+        (!powerCutSince || m.maintenance_flagged_at < powerCutSince)
+      ) {
+        powerCutSince = m.maintenance_flagged_at;
+      }
+    }
+  }
 
   const vendorRow = vendor as { id: string; name: string };
   // Drop the current vendor + ensure shape matches client type.
@@ -607,7 +655,12 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
       reworkPending={reworkPending}
       rejected={rejected}
       recent={recent}
-      carved30={carved30}
+      carvedThisMonth={carvedThisMonth}
+      carvedLastMonth={carvedLastMonth}
+      thisMonthLabel={thisMonthLabel}
+      lastMonthLabel={lastMonthLabel}
+      powerCutActive={powerCutActive}
+      powerCutSince={powerCutSince}
       otherVendors={otherVendors}
       transferVendors={transferVendors}
       isStaffView={profile.role !== "vendor" || hasManagedVendors}

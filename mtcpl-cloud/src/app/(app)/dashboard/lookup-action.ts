@@ -539,7 +539,7 @@ async function loadSlabContext(
   const { data: cv } = await admin
     .from("carving_items")
     .select(
-      "vendor_name, vendor_type, status, due_at, completed_at, location, ready_to_dispatch_at, review_approved_at, review_approved_by, completed_on_cnc_machine_id",
+      "vendor_name, vendor_type, status, due_at, completed_at, location, ready_to_dispatch_at, review_approved_at, review_approved_by, completed_on_cnc_machine_id, cnc_machine_id",
     )
     .eq("slab_requirement_id", slab.id)
     .order("assigned_at", { ascending: false })
@@ -557,6 +557,7 @@ async function loadSlabContext(
       review_approved_at: string | null;
       review_approved_by: string | null;
       completed_on_cnc_machine_id: string | null;
+      cnc_machine_id: string | null;
     };
     // Daksh June 2026 — resolve who approved + which CNC carved it, so
     // Find ID can answer "when was this carving done/approved, by whom,
@@ -571,12 +572,17 @@ async function loadSlabContext(
       approvedByName =
         (who as { full_name?: string } | null)?.full_name ?? null;
     }
+    // Prefer completed_on_cnc_machine_id (the machine that carved it,
+    // set at unload + kept through approval). Fall back to
+    // cnc_machine_id for a still-loaded slab or any row the unload
+    // path didn't stamp.
+    const machineId = c.completed_on_cnc_machine_id ?? c.cnc_machine_id;
     let machineCode: string | null = null;
-    if (c.completed_on_cnc_machine_id) {
+    if (machineId) {
       const { data: mac } = await admin
         .from("cnc_machines")
         .select("machine_code")
-        .eq("id", c.completed_on_cnc_machine_id)
+        .eq("id", machineId)
         .maybeSingle();
       machineCode =
         (mac as { machine_code?: string } | null)?.machine_code ?? null;

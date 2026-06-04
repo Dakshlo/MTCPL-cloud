@@ -10,6 +10,7 @@ import {
   canAddExternalCutSlab,
   canSeeAwaitingReview,
 } from "@/lib/cutting-permissions";
+import { POWER_CUT_REASON } from "@/lib/carving-power-cut";
 import { nextSlabCodeFromMaxId } from "../slabs/utils";
 
 /**
@@ -3772,6 +3773,184 @@ export async function resolveMaintenanceAction(formData: FormData) {
     resumeCarving
       ? `/vendor?toast=${encodeURIComponent(`Back online — slab timer resumed (was paused ${pauseMinutes}m)`)}`
       : "/vendor?toast=Machine+back+online",
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Power cut — pause / resume EVERY machine of a vendor at once
+// ──────────────────────────────────────────────────────────────────
+// Daksh (June 2026) — when the plant loses power, every CNC stops at
+// once. Rather than flag each machine individually, the vendor hits one
+// button: every running/idle machine is pushed into the SAME
+// maintenance-pause used per-machine (so loaded slabs' timers freeze),
+// tagged with POWER_CUT_REASON. When power's back, one button resumes
+// exactly those machines — shifting each loaded slab's loaded_at forward
+// by the outage duration so its timer picks up where it stopped.
+// Machines already under a genuine individual maintenance issue are left
+// untouched (and won't be auto-resumed).
+
+function canActOnVendorCockpit(
+  profile: { role: string; vendor_id?: string | null; managed_vendor_ids?: string[] | null },
+  vendorId: string,
+): boolean {
+  if (profile.role !== "vendor") return true; // staff act on any cockpit
+  const managed = profile.managed_vendor_ids ?? [];
+  return (
+    !!profile.vendor_id &&
+    (profile.vendor_id === vendorId || managed.includes(vendorId))
+  );
+}
+
+export async function flagPowerCutAction(formData: FormData) {
+  const { profile } = await requireAuth([
+    "developer",
+    "owner",
+    "carving_head",
+    "vendor",
+    "senior_incharge",
+  ]);
+  const admin = createAdminSupabaseClient();
+
+  const vendorId = txt(formData, "vendor_id");
+  if (!vendorId) redirect("/vendor?toast=Missing+vendor");
+  if (!canActOnVendorCockpit(profile, vendorId)) {
+    redirect("/vendor?toast=Not+your+cockpit");
+  }
+
+  const now = new Date().toISOString();
+  // Down every currently running or idle machine for this vendor.
+  // Skip ones already in maintenance (real individual issue) + inactive.
+  const { data: machines } = await admin
+    .from("cnc_machines")
+    .select("id")
+    .eq("vendor_id", vendorId)
+    .eq("is_active", true)
+    .in("status", ["carving", "idle"]);
+  const ids = ((machines ?? []) as Array<{ id: string }>).map((m) => m.id);
+  if (ids.length === 0) {
+    redirect("/vendor?toast=No+running+machines+to+pause");
+  }
+
+  await admin
+    .from("cnc_machines")
+    .update({
+      status: "maintenance",
+      maintenance_reason: POWER_CUT_REASON,
+      maintenance_flagged_at: now,
+      maintenance_flagged_by: profile.id,
+    })
+    .in("id", ids);
+
+  await admin.from("cnc_machine_events").insert(
+    ids.map((id) => ({
+      cnc_machine_id: id,
+      event_type: "maintenance_start",
+      reason: "power_cut",
+      message: "Power cut — all machines paused (slab timers paused)",
+      user_id: profile.id,
+    })),
+  );
+  await logAudit(profile.id, "cnc_power_cut_start", "vendor", vendorId, {
+    machine_count: ids.length,
+  });
+
+  refreshAll();
+  redirect(
+    `/vendor?toast=${encodeURIComponent(
+      `Power cut — ${ids.length} machine${ids.length === 1 ? "" : "s"} paused, slab timers paused`,
+    )}`,
+  );
+}
+
+export async function resolvePowerCutAction(formData: FormData) {
+  const { profile } = await requireAuth([
+    "developer",
+    "owner",
+    "carving_head",
+    "vendor",
+    "senior_incharge",
+  ]);
+  const admin = createAdminSupabaseClient();
+
+  const vendorId = txt(formData, "vendor_id");
+  if (!vendorId) redirect("/vendor?toast=Missing+vendor");
+  if (!canActOnVendorCockpit(profile, vendorId)) {
+    redirect("/vendor?toast=Not+your+cockpit");
+  }
+
+  const now = Date.now();
+  // Resume ONLY the machines this power cut downed (tagged reason).
+  const { data: machines } = await admin
+    .from("cnc_machines")
+    .select("id, current_carving_item_id, maintenance_flagged_at")
+    .eq("vendor_id", vendorId)
+    .eq("status", "maintenance")
+    .eq("maintenance_reason", POWER_CUT_REASON);
+  const rows = (machines ?? []) as Array<{
+    id: string;
+    current_carving_item_id: string | null;
+    maintenance_flagged_at: string | null;
+  }>;
+  if (rows.length === 0) {
+    redirect("/vendor?toast=No+power-cut+machines+to+resume");
+  }
+
+  for (const m of rows) {
+    const flaggedAt = m.maintenance_flagged_at
+      ? new Date(m.maintenance_flagged_at).getTime()
+      : null;
+    const resumeCarving = m.current_carving_item_id != null;
+    if (resumeCarving && flaggedAt != null) {
+      const pauseMs = Math.max(0, now - flaggedAt);
+      // Shift each loaded slab's loaded_at forward by the outage so the
+      // elapsed display resumes exactly where it stopped (same trick as
+      // resolveMaintenanceAction; multi-head pairs caught via machine id).
+      const { data: items } = await admin
+        .from("carving_items")
+        .select("id, loaded_at")
+        .eq("cnc_machine_id", m.id)
+        .eq("status", "carving_in_progress");
+      if (items && items.length > 0) {
+        await Promise.all(
+          items.map((row) => {
+            const r = row as { id: string; loaded_at: string | null };
+            if (!r.loaded_at) return Promise.resolve();
+            const shifted = new Date(
+              new Date(r.loaded_at).getTime() + pauseMs,
+            ).toISOString();
+            return admin
+              .from("carving_items")
+              .update({ loaded_at: shifted })
+              .eq("id", r.id);
+          }),
+        );
+      }
+    }
+    await admin
+      .from("cnc_machines")
+      .update({
+        status: resumeCarving ? "carving" : "idle",
+        maintenance_reason: null,
+        maintenance_flagged_at: null,
+        maintenance_flagged_by: null,
+      })
+      .eq("id", m.id);
+    await admin.from("cnc_machine_events").insert({
+      cnc_machine_id: m.id,
+      event_type: "maintenance_end",
+      user_id: profile.id,
+      message: "Power back — slab timer resumed",
+    });
+  }
+  await logAudit(profile.id, "cnc_power_cut_end", "vendor", vendorId, {
+    machine_count: rows.length,
+  });
+
+  refreshAll();
+  redirect(
+    `/vendor?toast=${encodeURIComponent(
+      `Power back — ${rows.length} machine${rows.length === 1 ? "" : "s"} resumed`,
+    )}`,
   );
 }
 
