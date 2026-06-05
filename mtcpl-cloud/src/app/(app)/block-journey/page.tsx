@@ -16,6 +16,7 @@
  * Plus the cached profiles map.
  */
 
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireAuth, getDefaultRouteForRole } from "@/lib/auth";
 
@@ -192,13 +193,64 @@ export default async function BlockJourneyPage({
     .map((s: { name: string }) => s.name)
     .filter(Boolean);
 
+  // Block Purchase report — sister "intake" view to the efficiency
+  // report on this page. Strictly owner/developer (never Naresh or
+  // Rajesh — procurement spend is sensitive).
+  const canSeePurchase =
+    profile.role === "owner" || profile.role === "developer";
+
   return (
-    <BlockJourneyClient
-      lineages={lineages}
-      profilesMap={profilesMap}
-      stoneOptions={stoneOptions}
-      stoneCategoryMap={stoneCategoryMap}
-      initialMode={initialMode}
-    />
+    <>
+      {canSeePurchase && (
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            marginBottom: 10,
+          }}
+        >
+          <Link
+            href="/blocks/purchase"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "8px 14px",
+              fontSize: 12,
+              fontWeight: 700,
+              color: "#fff",
+              background: "var(--gold-dark)",
+              border: "1px solid var(--gold-dark)",
+              borderRadius: 8,
+              textDecoration: "none",
+              letterSpacing: "0.01em",
+              boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+            }}
+          >
+            📦 Block Purchase
+            <span
+              style={{
+                fontSize: 9,
+                fontWeight: 800,
+                padding: "2px 6px",
+                borderRadius: 4,
+                background: "rgba(255,255,255,0.22)",
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+              }}
+            >
+              Owner
+            </span>
+          </Link>
+        </div>
+      )}
+      <BlockJourneyClient
+        lineages={lineages}
+        profilesMap={profilesMap}
+        stoneOptions={stoneOptions}
+        stoneCategoryMap={stoneCategoryMap}
+        initialMode={initialMode}
+      />
+    </>
   );
 }
