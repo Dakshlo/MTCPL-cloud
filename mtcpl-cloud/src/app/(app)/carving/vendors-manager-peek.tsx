@@ -230,6 +230,9 @@ function AddVendorRow() {
     >
       <input type="hidden" name="vendor_type" value={vendorType} />
       <input type="hidden" name="machines_json" value="[]" />
+      {/* Land back on /carving after create so the new (esp. Manual)
+          vendor is immediately pickable in the Assign modal. */}
+      <input type="hidden" name="redirect_to" value="/carving" />
       <span
         style={{
           fontSize: 11,

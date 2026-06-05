@@ -666,10 +666,15 @@ export async function createVendorAction(formData: FormData) {
   const machinesJson = txt(formData, "machines_json");
   // Migration 025 — standard slab dropoff location for CNC vendors.
   const dropoffLocation = txt(formData, "dropoff_location") || null;
+  // Daksh June 2026 — caller can pass redirect_to so creating a vendor
+  // from the /carving Manage-Vendors peek lands back on /carving (where
+  // the new Manual carver is immediately assignable) instead of
+  // bouncing to the standalone /carving/vendors page.
+  const redirectTo = txt(formData, "redirect_to") || "/carving/vendors";
 
-  if (!name) redirect("/carving/vendors?toast=Vendor+name+is+required");
+  if (!name) redirect(`${redirectTo}?toast=Vendor+name+is+required`);
   if (!["CNC", "Manual", "Outsource"].includes(vendorType)) {
-    redirect("/carving/vendors?toast=Invalid+vendor+type");
+    redirect(`${redirectTo}?toast=Invalid+vendor+type`);
   }
 
   const { data: vendor, error } = await admin
@@ -686,7 +691,7 @@ export async function createVendorAction(formData: FormData) {
     .single();
 
   if (error || !vendor) {
-    redirect(`/carving/vendors?toast=${encodeURIComponent(error?.message ?? "Failed to create vendor")}`);
+    redirect(`${redirectTo}?toast=${encodeURIComponent(error?.message ?? "Failed to create vendor")}`);
   }
 
   // If CNC, insert machines. Surface errors via toast — silently
@@ -755,7 +760,7 @@ export async function createVendorAction(formData: FormData) {
 
   await logAudit(profile.id, "vendor_created", "vendor", vendor.id, { name, type: vendorType });
   refreshAll();
-  redirect("/carving/vendors?toast=Vendor+created");
+  redirect(`${redirectTo}?toast=Vendor+created`);
 }
 
 export async function updateVendorAction(formData: FormData) {

@@ -356,7 +356,10 @@ export function AssignModal({
           borderRadius: 12,
           boxShadow: "0 18px 60px rgba(0,0,0,0.45)",
           width: "100%",
-          maxWidth: 720,
+          // Daksh June 2026 — widened for the two-column layout
+          // (controls left, vendor cockpit right). Collapses back to
+          // a single column under 820px via the .assign-grid media query.
+          maxWidth: 1040,
           maxHeight: "88vh",
           display: "flex",
           flexDirection: "column",
@@ -401,12 +404,17 @@ export function AssignModal({
         </div>
 
         <div style={{ flex: 1, overflowY: "auto", padding: "14px 18px 18px" }}>
-          <form action={assignCarvingJobAction} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <form action={assignCarvingJobAction} style={{ position: "relative" }}>
             <FormPendingOverlay label="Assigning to vendor…" />
             <input type="hidden" name="slab_id" value={slab.id} />
             <input type="hidden" name="requires_machine_type" value={requiresMachineType} />
             {/* Mig 079 — requires_cnc_axes ("" = Any, "4", "5"). */}
             <input type="hidden" name="requires_cnc_axes" value={requiresCncAxesForm} />
+
+            {/* Daksh June 2026 — two-column grid: controls flow down
+                column 1, the vendor cockpit pins to column 2 (see
+                .assign-grid / .assign-right in globals.css). */}
+            <div className="assign-grid">
 
             {/* Work type picker — drives vendor sort + load-time
                 validation. Hidden when the selected vendor is Manual
@@ -783,6 +791,30 @@ export function AssignModal({
                   })}
                 </div>
               )}
+
+              {/* Daksh June 2026 — when no Manual carvers exist yet, the
+                  list is all CNC and the head wonders why they can't
+                  assign to an outside/manual carver. Point them at the
+                  fix: add one in Manage Vendors with the 🪚 Manual toggle. */}
+              {!sortedVendors.some((v) => v.vendor_type === "Manual") && (
+                <div
+                  style={{
+                    marginTop: 4,
+                    padding: "8px 12px",
+                    background: "rgba(120,53,15,0.05)",
+                    border: "1px dashed rgba(120,53,15,0.3)",
+                    borderRadius: 8,
+                    fontSize: 11,
+                    color: "#78350f",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  🪚 No manual / outside carvers yet. Add one in{" "}
+                  <strong>Manage Vendors</strong> (tap the{" "}
+                  <strong>🪚 Manual</strong> toggle on the “+ New vendor”
+                  row) and they’ll appear here.
+                </div>
+              )}
             </div>
 
             {/* Cockpit panel — only renders for the picked CNC
@@ -792,6 +824,7 @@ export function AssignModal({
                 free/busy counts; grid shows every machine. */}
             {selectedVendor && selectedVendor.vendor_type === "CNC" && (
               <div
+                className="assign-right"
                 style={{
                   display: "flex",
                   flexDirection: "column",
@@ -801,6 +834,8 @@ export function AssignModal({
                   border: "2px solid var(--gold-dark)",
                   borderRadius: 10,
                   boxShadow: "0 2px 12px rgba(180,115,51,0.10)",
+                  maxHeight: "70vh",
+                  overflowY: "auto",
                 }}
               >
                 <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
@@ -977,9 +1012,11 @@ export function AssignModal({
               </div>
             )}
 
-            {/* Manual-vendor empty-state panel */}
+            {/* Manual-vendor empty-state panel — sits in the right
+                column (no machine grid for manual carvers). */}
             {selectedVendor && isManual && (
               <div
+                className="assign-right"
                 style={{
                   display: "flex",
                   flexDirection: "column",
@@ -1007,6 +1044,31 @@ export function AssignModal({
                   and <strong>🎯 Mark complete</strong> on their behalf from
                   the job detail page.
                 </div>
+              </div>
+            )}
+
+            {/* Right-column placeholder when nothing is selected yet,
+                so column 2 isn't blank before a vendor is picked. */}
+            {!selectedVendor && (
+              <div
+                className="assign-right"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  textAlign: "center",
+                  padding: "28px 18px",
+                  minHeight: 160,
+                  background: "var(--surface-alt)",
+                  border: "1px dashed var(--border)",
+                  borderRadius: 10,
+                  color: "var(--muted)",
+                  fontSize: 12,
+                  lineHeight: 1.5,
+                }}
+              >
+                Pick a vendor on the left to see their machine
+                availability here.
               </div>
             )}
 
@@ -1163,6 +1225,7 @@ export function AssignModal({
                 Cancel
               </button>
             </div>
+            </div>{/* /.assign-grid */}
           </form>
         </div>
       </div>
