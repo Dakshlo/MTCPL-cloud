@@ -2383,15 +2383,22 @@ body.vendor-cockpit-fullscreen .page-card {
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
   column-gap: 18px;
-  row-gap: 16px;
+  /* Daksh June 2026 — row-gap MUST be 0. The cockpit (.assign-right)
+   * spans 99 rows so the left controls flow down column 1 beside it;
+   * with a non-zero row-gap those ~98 empty spanned rows each added a
+   * gap (~1568px of dead space → "endless scroll after Assign"). With
+   * row-gap 0 the empty rows contribute nothing; left items get their
+   * own vertical spacing from margin-bottom below. */
+  row-gap: 0;
   align-items: start;
 }
-.assign-grid > * { grid-column: 1; min-width: 0; }
+.assign-grid > * { grid-column: 1; min-width: 0; margin-bottom: 16px; }
 .assign-grid > .assign-right {
   grid-column: 2;
   /* Span every row so the left column's controls flow down column 1
    * beside it instead of wrapping under it. */
   grid-row: 1 / span 99;
+  margin-bottom: 0;
   position: sticky;
   top: 0;
 }
