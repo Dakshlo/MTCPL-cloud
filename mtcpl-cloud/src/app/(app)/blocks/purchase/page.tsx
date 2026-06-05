@@ -53,7 +53,23 @@ export type BlockRow = {
   vendor_name: string | null;
   bill_no: string | null;
   truck_entry_id: string | null;
+  /** "available" / "reserved" → still in stock. "consumed" → cut.
+   *  "discarded" → written off. */
+  status: string | null;
   created_at: string;
+};
+
+/** Stock buckets for the Compare panel — purchased vs still-on-hand. */
+export type StockTotals = {
+  purchasedBlocks: number;
+  purchasedCft: number;
+  purchasedTonnes: number;   // marble: from truck rows · sandstone: blocks
+  inStockBlocks: number;
+  inStockCft: number;
+  inStockTonnes: number;
+  consumedBlocks: number;
+  consumedCft: number;
+  consumedTonnes: number;
 };
 
 export type MarbleTruck = MarbleTruckRow & {
@@ -110,7 +126,7 @@ export default async function BlockPurchasePage() {
       const { data, error } = await admin
         .from("blocks")
         .select(
-          "id, stone, yard, quality, category, length_ft, width_ft, height_ft, tonnes, truck_no, vendor_name, bill_no, truck_entry_id, created_at",
+          "id, stone, yard, quality, category, length_ft, width_ft, height_ft, tonnes, truck_no, vendor_name, bill_no, truck_entry_id, status, created_at",
         )
         .eq("category", "Fresh")
         .order("created_at", { ascending: false })
@@ -121,6 +137,23 @@ export default async function BlockPurchasePage() {
       if (data.length < PAGE) break;
     }
     return out;
+  }
+
+  /** "available" / "reserved" → still in yard. "consumed" / "discarded"
+   *  → off the books. Used to bucket each block for the Compare view. */
+  function isInStock(s: string | null): boolean {
+    return s === "available" || s === "reserved";
+  }
+  function isConsumed(s: string | null): boolean {
+    return s === "consumed";
+  }
+  /** Sandstone CFT from inch-stored dims. */
+  function blockCft(b: BlockRow): number {
+    const l = Number(b.length_ft) || 0;
+    const w = Number(b.width_ft) || 0;
+    const h = Number(b.height_ft) || 0;
+    if (l > 0 && w > 0 && h > 0) return (l * w * h) / 1728;
+    return 0;
   }
 
   const [marbleTrucksRaw, allBlocksRaw, stoneTypesR] = await Promise.all([
@@ -193,10 +226,85 @@ export default async function BlockPurchasePage() {
     return 0;
   });
 
+  // ── Stock totals — for the Compare panel ─────────────────────────────
+  // MARBLE — "purchased" is the truck-row aggregate (authoritative tonnes
+  // from the bill of lading); "in stock / consumed" comes from the
+  // sibling blocks' status field. CFT = tonnes × 8.
+  const marbleSiblings = allBlocksRaw.filter((b) => b.truck_entry_id);
+  let marblePurchTonnes = 0;
+  let marblePurchBlocks = 0;
+  for (const t of marbleTrucksRaw) {
+    marblePurchTonnes += Number(t.total_tonnes) || 0;
+    marblePurchBlocks += Number(t.num_blocks) || 0;
+  }
+  let marbleStockTonnes = 0;
+  let marbleStockBlocks = 0;
+  let marbleConsTonnes = 0;
+  let marbleConsBlocks = 0;
+  for (const b of marbleSiblings) {
+    const t = Number(b.tonnes) || 0;
+    if (isInStock(b.status)) {
+      marbleStockTonnes += t;
+      marbleStockBlocks += 1;
+    } else if (isConsumed(b.status)) {
+      marbleConsTonnes += t;
+      marbleConsBlocks += 1;
+    }
+  }
+  const marbleTotals: StockTotals = {
+    purchasedBlocks: marblePurchBlocks,
+    purchasedCft: marblePurchTonnes * 8,
+    purchasedTonnes: marblePurchTonnes,
+    inStockBlocks: marbleStockBlocks,
+    inStockCft: marbleStockTonnes * 8,
+    inStockTonnes: marbleStockTonnes,
+    consumedBlocks: marbleConsBlocks,
+    consumedCft: marbleConsTonnes * 8,
+    consumedTonnes: marbleConsTonnes,
+  };
+
+  // SANDSTONE — every fresh sandstone block is one purchase; CFT from
+  // its dimensions; tonnes are optional metadata.
+  let sandPurchCft = 0;
+  let sandPurchTonnes = 0;
+  let sandStockCft = 0;
+  let sandStockBlocks = 0;
+  let sandStockTonnes = 0;
+  let sandConsCft = 0;
+  let sandConsBlocks = 0;
+  let sandConsTonnes = 0;
+  for (const b of sandstoneBlocks) {
+    const cft = blockCft(b);
+    sandPurchCft += cft;
+    sandPurchTonnes += Number(b.tonnes) || 0;
+    if (isInStock(b.status)) {
+      sandStockCft += cft;
+      sandStockBlocks += 1;
+      sandStockTonnes += Number(b.tonnes) || 0;
+    } else if (isConsumed(b.status)) {
+      sandConsCft += cft;
+      sandConsBlocks += 1;
+      sandConsTonnes += Number(b.tonnes) || 0;
+    }
+  }
+  const sandstoneTotals: StockTotals = {
+    purchasedBlocks: sandstoneBlocks.length,
+    purchasedCft: sandPurchCft,
+    purchasedTonnes: sandPurchTonnes,
+    inStockBlocks: sandStockBlocks,
+    inStockCft: sandStockCft,
+    inStockTonnes: sandStockTonnes,
+    consumedBlocks: sandConsBlocks,
+    consumedCft: sandConsCft,
+    consumedTonnes: sandConsTonnes,
+  };
+
   return (
     <BlockPurchaseClient
       marbleTrucks={marbleTrucks}
       sandstoneTrucks={sandstoneTrucks}
+      marbleTotals={marbleTotals}
+      sandstoneTotals={sandstoneTotals}
       stoneCategoryMap={stoneCategoryMap}
     />
   );

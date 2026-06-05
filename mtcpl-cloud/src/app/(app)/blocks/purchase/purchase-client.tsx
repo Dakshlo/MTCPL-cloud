@@ -18,11 +18,13 @@ import { stoneDisplayName } from "@/lib/stone-utils";
 import type {
   MarbleTruck,
   SandstoneTruck,
+  StockTotals,
 } from "./page";
 import type { StoneCategory } from "@/lib/stone-categories";
 
-type Tab = "marble" | "sandstone";
+type Tab = "marble" | "sandstone" | "all";
 type DateRange = "today" | "7d" | "30d" | "all" | "custom";
+type ViewMode = "logs" | "compare";
 
 /** Stable per-vendor colour for the avatar dot. Hashed off the name. */
 function vendorTone(name: string | null): string {
@@ -86,17 +88,26 @@ function isoDaysAgo(n: number): string {
 export function BlockPurchaseClient({
   marbleTrucks,
   sandstoneTrucks,
+  marbleTotals,
+  sandstoneTotals,
   stoneCategoryMap,
 }: {
   marbleTrucks: MarbleTruck[];
   sandstoneTrucks: SandstoneTruck[];
+  marbleTotals: StockTotals;
+  sandstoneTotals: StockTotals;
   stoneCategoryMap: Record<string, StoneCategory>;
 }) {
   void stoneCategoryMap;
   const [tab, setTab] = useState<Tab>(
-    // Pick whichever has data; default to marble.
-    marbleTrucks.length === 0 && sandstoneTrucks.length > 0 ? "sandstone" : "marble",
+    // Pick whichever has data; default to All so the user sees everything.
+    marbleTrucks.length === 0 && sandstoneTrucks.length > 0
+      ? "sandstone"
+      : sandstoneTrucks.length === 0 && marbleTrucks.length > 0
+        ? "marble"
+        : "all",
   );
+  const [view, setView] = useState<ViewMode>("logs");
   const [range, setRange] = useState<DateRange>("30d");
   const [customFrom, setCustomFrom] = useState<string>(isoDaysAgo(30));
   const [customTo, setCustomTo] = useState<string>(todayISO());
@@ -136,67 +147,103 @@ export function BlockPurchaseClient({
       }
       return { trucks, blocks, tonnes, cft, showTonnes: true };
     }
+    if (tab === "sandstone") {
+      let blocks = 0;
+      let cft = 0;
+      let tonnes = 0;
+      for (const t of filteredSandstone) {
+        blocks += t.blocks.length;
+        cft += t.totalCft;
+        tonnes += t.totalTonnes;
+      }
+      return {
+        trucks: filteredSandstone.length,
+        blocks,
+        tonnes,
+        cft,
+        showTonnes: false,
+      };
+    }
+    // "all" — combined totals
+    let trucks = filteredMarble.length + filteredSandstone.length;
     let blocks = 0;
-    let cft = 0;
     let tonnes = 0;
+    let cft = 0;
+    for (const t of filteredMarble) {
+      blocks += t.blocks.length || Number(t.num_blocks) || 0;
+      tonnes += Number(t.total_tonnes) || 0;
+      cft += t.totalCft;
+    }
     for (const t of filteredSandstone) {
       blocks += t.blocks.length;
       cft += t.totalCft;
       tonnes += t.totalTonnes;
     }
+    void trucks;
     return {
-      trucks: filteredSandstone.length,
+      trucks,
       blocks,
       tonnes,
       cft,
-      showTonnes: false,
+      showTonnes: true,
     };
   }, [tab, filteredMarble, filteredSandstone]);
 
   // ── Group by date for the day separators ───────────────────────────
-  type DayGroup =
-    | { date: string; kind: "marble"; trucks: MarbleTruck[]; cft: number; blocks: number }
-    | { date: string; kind: "sandstone"; trucks: SandstoneTruck[]; cft: number; blocks: number };
+  // For the "all" tab a day group can mix marble + sandstone trucks; we
+  // keep them as two parallel arrays in the same DayGroup so the day
+  // header tallies once and the cards render in two visually-distinct
+  // shapes underneath.
+  type DayGroup = {
+    date: string;
+    marbleTrucks: MarbleTruck[];
+    sandstoneTrucks: SandstoneTruck[];
+    cft: number;
+    blocks: number;
+  };
 
   const dayGroups: DayGroup[] = useMemo(() => {
-    if (tab === "marble") {
-      const m = new Map<string, MarbleTruck[]>();
-      for (const t of filteredMarble) {
-        const d = (t.created_at ?? "").slice(0, 10);
-        const arr = m.get(d) ?? [];
-        arr.push(t);
-        m.set(d, arr);
+    const m = new Map<string, DayGroup>();
+    const ensure = (date: string): DayGroup => {
+      let g = m.get(date);
+      if (!g) {
+        g = { date, marbleTrucks: [], sandstoneTrucks: [], cft: 0, blocks: 0 };
+        m.set(date, g);
       }
-      return Array.from(m.entries())
-        .sort((a, b) => (a[0] < b[0] ? 1 : -1))
-        .map(([date, trucks]) => {
-          let cft = 0;
-          let blocks = 0;
-          for (const t of trucks) {
-            cft += t.totalCft;
-            blocks += t.blocks.length || Number(t.num_blocks) || 0;
-          }
-          return { date, kind: "marble" as const, trucks, cft, blocks };
-        });
+      return g;
+    };
+    if (tab === "marble" || tab === "all") {
+      for (const t of filteredMarble) {
+        const date = (t.created_at ?? "").slice(0, 10);
+        const g = ensure(date);
+        g.marbleTrucks.push(t);
+        g.cft += t.totalCft;
+        g.blocks += t.blocks.length || Number(t.num_blocks) || 0;
+      }
     }
-    const m = new Map<string, SandstoneTruck[]>();
-    for (const t of filteredSandstone) {
-      const arr = m.get(t.date) ?? [];
-      arr.push(t);
-      m.set(t.date, arr);
+    if (tab === "sandstone" || tab === "all") {
+      for (const t of filteredSandstone) {
+        const g = ensure(t.date);
+        g.sandstoneTrucks.push(t);
+        g.cft += t.totalCft;
+        g.blocks += t.blocks.length;
+      }
     }
-    return Array.from(m.entries())
-      .sort((a, b) => (a[0] < b[0] ? 1 : -1))
-      .map(([date, trucks]) => {
-        let cft = 0;
-        let blocks = 0;
-        for (const t of trucks) {
-          cft += t.totalCft;
-          blocks += t.blocks.length;
-        }
-        return { date, kind: "sandstone" as const, trucks, cft, blocks };
-      });
+    return Array.from(m.values()).sort((a, b) => (a.date < b.date ? 1 : -1));
   }, [tab, filteredMarble, filteredSandstone]);
+
+  // ── Combined totals for the "All" tab in the Compare panel ──────────
+  const combinedTotals: StockTotals = useMemo(() => ({
+    purchasedBlocks: marbleTotals.purchasedBlocks + sandstoneTotals.purchasedBlocks,
+    purchasedCft: marbleTotals.purchasedCft + sandstoneTotals.purchasedCft,
+    purchasedTonnes: marbleTotals.purchasedTonnes + sandstoneTotals.purchasedTonnes,
+    inStockBlocks: marbleTotals.inStockBlocks + sandstoneTotals.inStockBlocks,
+    inStockCft: marbleTotals.inStockCft + sandstoneTotals.inStockCft,
+    inStockTonnes: marbleTotals.inStockTonnes + sandstoneTotals.inStockTonnes,
+    consumedBlocks: marbleTotals.consumedBlocks + sandstoneTotals.consumedBlocks,
+    consumedCft: marbleTotals.consumedCft + sandstoneTotals.consumedCft,
+    consumedTonnes: marbleTotals.consumedTonnes + sandstoneTotals.consumedTonnes,
+  }), [marbleTotals, sandstoneTotals]);
 
   return (
     <section style={{ paddingBottom: 32 }}>
@@ -262,63 +309,112 @@ export function BlockPurchaseClient({
             </div>
           </div>
 
-          {/* ── Tabs ─────────────────────────────────────────────── */}
-          <div
-            style={{
-              display: "inline-flex",
-              border: "1px solid var(--border)",
-              borderRadius: 8,
-              overflow: "hidden",
-              background: "var(--bg)",
-            }}
-          >
-            {(
-              [
-                { key: "marble", label: "Marble", count: marbleTrucks.length, tone: "#b45309" },
-                { key: "sandstone", label: "Sandstone", count: sandstoneTrucks.length, tone: "#0ea5e9" },
-              ] as const
-            ).map((t) => {
-              const active = tab === t.key;
-              return (
-                <button
-                  key={t.key}
-                  type="button"
-                  onClick={() => setTab(t.key as Tab)}
-                  style={{
-                    padding: "10px 18px",
-                    fontSize: 13,
-                    fontWeight: 700,
-                    border: "none",
-                    cursor: "pointer",
-                    background: active ? t.tone : "transparent",
-                    color: active ? "#fff" : "var(--muted)",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 8,
-                    transition: "background 0.12s",
-                  }}
-                >
-                  {t.label}
-                  <span
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            {/* ── Tabs ─────────────────────────────────────────────── */}
+            <div
+              style={{
+                display: "inline-flex",
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+                overflow: "hidden",
+                background: "var(--bg)",
+              }}
+            >
+              {(
+                [
+                  {
+                    key: "all",
+                    label: "All",
+                    count: marbleTrucks.length + sandstoneTrucks.length,
+                    tone: "var(--gold-dark)",
+                  },
+                  { key: "marble", label: "Marble", count: marbleTrucks.length, tone: "#b45309" },
+                  { key: "sandstone", label: "Sandstone", count: sandstoneTrucks.length, tone: "#0ea5e9" },
+                ] as const
+              ).map((t) => {
+                const active = tab === t.key;
+                return (
+                  <button
+                    key={t.key}
+                    type="button"
+                    onClick={() => setTab(t.key as Tab)}
                     style={{
-                      fontSize: 11,
-                      fontWeight: 800,
-                      padding: "2px 7px",
-                      borderRadius: 999,
-                      background: active ? "rgba(255,255,255,0.22)" : "var(--surface)",
-                      color: active ? "#fff" : "var(--text)",
-                      border: active ? "none" : "1px solid var(--border)",
+                      padding: "10px 16px",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      border: "none",
+                      cursor: "pointer",
+                      background: active ? t.tone : "transparent",
+                      color: active ? "#fff" : "var(--muted)",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                      transition: "background 0.12s",
                     }}
                   >
-                    {t.count}
-                  </span>
-                </button>
-              );
-            })}
+                    {t.label}
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 800,
+                        padding: "2px 7px",
+                        borderRadius: 999,
+                        background: active ? "rgba(255,255,255,0.22)" : "var(--surface)",
+                        color: active ? "#fff" : "var(--text)",
+                        border: active ? "none" : "1px solid var(--border)",
+                      }}
+                    >
+                      {t.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* ── View toggle: Logs vs Compare ─────────────────────── */}
+            <div
+              style={{
+                display: "inline-flex",
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+                overflow: "hidden",
+                background: "var(--bg)",
+              }}
+            >
+              {(
+                [
+                  { key: "logs", label: "📋 Daily logs" },
+                  { key: "compare", label: "📊 Compare with stock" },
+                ] as const
+              ).map((v) => {
+                const active = view === v.key;
+                return (
+                  <button
+                    key={v.key}
+                    type="button"
+                    onClick={() => setView(v.key as ViewMode)}
+                    style={{
+                      padding: "10px 14px",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      border: "none",
+                      cursor: "pointer",
+                      background: active ? "#475569" : "transparent",
+                      color: active ? "#fff" : "var(--muted)",
+                      transition: "background 0.12s",
+                    }}
+                  >
+                    {v.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
 
-        {/* ── Date range chips ─────────────────────────────────── */}
+        {/* ── Date range chips — hidden in Compare view since the
+              stock numbers are a now-snapshot, independent of date. */}
+        {view === "logs" && (
         <div
           style={{
             display: "flex",
@@ -408,55 +504,74 @@ export function BlockPurchaseClient({
             </div>
           )}
         </div>
+        )}
       </header>
 
-      {/* ─── Summary strip ─────────────────────────────────────── */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: `repeat(auto-fit, minmax(150px, 1fr))`,
-          gap: 10,
-          marginBottom: 16,
-        }}
-      >
-        <StatTile
-          label="Trucks"
-          value={fmtInt(summary.trucks)}
-          accent="var(--gold-dark)"
-          icon="🚚"
-        />
-        <StatTile
-          label="Blocks"
-          value={fmtInt(summary.blocks)}
-          accent={tab === "marble" ? "#b45309" : "#0ea5e9"}
-          icon="🧱"
-        />
-        {summary.showTonnes && (
-          <StatTile
-            label="Tonnes"
-            value={fmtNum(summary.tonnes, 2)}
-            accent="#475569"
-            icon="⚖️"
-          />
-        )}
-        <StatTile
-          label="CFT"
-          value={fmtNum(summary.cft, 0)}
-          accent="#10b981"
-          icon="📐"
-          subtitle={tab === "marble" ? "@ 8 CFT / tonne" : "L × W × H"}
-        />
-      </div>
+      {view === "logs" ? (
+        <>
+          {/* ─── Summary strip ───────────────────────────────────── */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: `repeat(auto-fit, minmax(150px, 1fr))`,
+              gap: 10,
+              marginBottom: 16,
+            }}
+          >
+            <StatTile
+              label="Trucks"
+              value={fmtInt(summary.trucks)}
+              accent="var(--gold-dark)"
+              icon="🚚"
+            />
+            <StatTile
+              label="Blocks"
+              value={fmtInt(summary.blocks)}
+              accent={tab === "marble" ? "#b45309" : tab === "sandstone" ? "#0ea5e9" : "var(--gold-dark)"}
+              icon="🧱"
+            />
+            {summary.showTonnes && (
+              <StatTile
+                label="Tonnes"
+                value={fmtNum(summary.tonnes, 2)}
+                accent="#475569"
+                icon="⚖️"
+                subtitle={tab === "all" ? "marble + sandstone" : undefined}
+              />
+            )}
+            <StatTile
+              label="CFT"
+              value={fmtNum(summary.cft, 0)}
+              accent="#10b981"
+              icon="📐"
+              subtitle={
+                tab === "marble"
+                  ? "@ 8 CFT / tonne"
+                  : tab === "sandstone"
+                    ? "L × W × H"
+                    : "marble (×8) + sandstone (L×W×H)"
+              }
+            />
+          </div>
 
-      {/* ─── Body — day groups ─────────────────────────────────── */}
-      {dayGroups.length === 0 ? (
-        <EmptyState tab={tab} />
+          {/* ─── Body — day groups ─────────────────────────────── */}
+          {dayGroups.length === 0 ? (
+            <EmptyState tab={tab} />
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+              {dayGroups.map((g) => (
+                <DayBlock key={g.date} group={g} showKind={tab === "all"} />
+              ))}
+            </div>
+          )}
+        </>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-          {dayGroups.map((g) => (
-            <DayBlock key={g.date} group={g} />
-          ))}
-        </div>
+        <ComparePanel
+          tab={tab}
+          marbleTotals={marbleTotals}
+          sandstoneTotals={sandstoneTotals}
+          combinedTotals={combinedTotals}
+        />
       )}
     </section>
   );
@@ -536,11 +651,20 @@ function StatTile({
 
 function DayBlock({
   group,
+  showKind,
 }: {
-  group:
-    | { date: string; kind: "marble"; trucks: MarbleTruck[]; cft: number; blocks: number }
-    | { date: string; kind: "sandstone"; trucks: SandstoneTruck[]; cft: number; blocks: number };
+  group: {
+    date: string;
+    marbleTrucks: MarbleTruck[];
+    sandstoneTrucks: SandstoneTruck[];
+    cft: number;
+    blocks: number;
+  };
+  /** When true (the "All" tab), card cluster headers split marble vs
+   *  sandstone so the viewer can tell them apart at a glance. */
+  showKind: boolean;
 }) {
+  const truckCount = group.marbleTrucks.length + group.sandstoneTrucks.length;
   return (
     <div>
       {/* Day separator pill */}
@@ -575,7 +699,7 @@ function DayBlock({
           <span>{formatDateLong(group.date)}</span>
           <span style={{ color: "var(--border)" }}>·</span>
           <span style={{ color: "var(--muted)", fontWeight: 700 }}>
-            {group.trucks.length} {group.trucks.length === 1 ? "truck" : "trucks"}
+            {truckCount} {truckCount === 1 ? "truck" : "trucks"}
           </span>
           <span style={{ color: "var(--border)" }}>·</span>
           <span style={{ color: "var(--muted)", fontWeight: 700 }}>
@@ -588,18 +712,102 @@ function DayBlock({
         </div>
       </div>
 
-      {/* Truck cards */}
-      <div
+      {/* Marble cluster */}
+      {group.marbleTrucks.length > 0 && (
+        <>
+          {showKind && (
+            <SubclusterHeader
+              label="Marble"
+              tone="#b45309"
+              count={group.marbleTrucks.length}
+            />
+          )}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))",
+              gap: 10,
+              marginBottom: group.sandstoneTrucks.length > 0 ? 10 : 0,
+            }}
+          >
+            {group.marbleTrucks.map((t) => (
+              <MarbleTruckCard key={t.id} truck={t} />
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* Sandstone cluster */}
+      {group.sandstoneTrucks.length > 0 && (
+        <>
+          {showKind && (
+            <SubclusterHeader
+              label="Sandstone"
+              tone="#0369a1"
+              count={group.sandstoneTrucks.length}
+            />
+          )}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))",
+              gap: 10,
+            }}
+          >
+            {group.sandstoneTrucks.map((t) => (
+              <SandstoneTruckCard key={t.key} truck={t} />
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function SubclusterHeader({
+  label,
+  tone,
+  count,
+}: {
+  label: string;
+  tone: string;
+  count: number;
+}) {
+  return (
+    <div
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        marginBottom: 6,
+        fontSize: 10,
+        fontWeight: 800,
+        color: tone,
+        textTransform: "uppercase",
+        letterSpacing: "0.08em",
+      }}
+    >
+      <span
         style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))",
-          gap: 10,
+          width: 6,
+          height: 6,
+          background: tone,
+          borderRadius: 2,
+        }}
+      />
+      {label}
+      <span
+        style={{
+          fontSize: 9,
+          fontWeight: 700,
+          color: tone,
+          background: tone + "1a",
+          padding: "1px 6px",
+          borderRadius: 4,
         }}
       >
-        {group.kind === "marble"
-          ? group.trucks.map((t) => <MarbleTruckCard key={t.id} truck={t} />)
-          : group.trucks.map((t) => <SandstoneTruckCard key={t.key} truck={t} />)}
-      </div>
+        {count}
+      </span>
     </div>
   );
 }
@@ -932,6 +1140,309 @@ function BlockIdPills({ ids, tone }: { ids: string[]; tone: string }) {
           collapse
         </button>
       )}
+    </div>
+  );
+}
+
+// ── Compare panel ────────────────────────────────────────────────────
+
+function ComparePanel({
+  tab,
+  marbleTotals,
+  sandstoneTotals,
+  combinedTotals,
+}: {
+  tab: Tab;
+  marbleTotals: StockTotals;
+  sandstoneTotals: StockTotals;
+  combinedTotals: StockTotals;
+}) {
+  // Decide which categories to show based on the active tab.
+  const sections: Array<{
+    title: string;
+    subtitle: string;
+    tone: string;
+    icon: string;
+    unit: "tonnes" | "cft";
+    totals: StockTotals;
+  }> = [];
+
+  if (tab === "all" || tab === "marble") {
+    sections.push({
+      title: "Marble",
+      subtitle: "Tonnes from truck bills · CFT @ 8/tonne",
+      tone: "#b45309",
+      icon: "⛰",
+      unit: "tonnes",
+      totals: marbleTotals,
+    });
+  }
+  if (tab === "all" || tab === "sandstone") {
+    sections.push({
+      title: "Sandstone",
+      subtitle: "Block dims (L × W × H ÷ 1728)",
+      tone: "#0369a1",
+      icon: "🟫",
+      unit: "cft",
+      totals: sandstoneTotals,
+    });
+  }
+  if (tab === "all") {
+    sections.unshift({
+      title: "Total (Marble + Sandstone)",
+      subtitle: "Combined CFT — marble equiv (×8) + sandstone (L×W×H)",
+      tone: "var(--gold-dark)",
+      icon: "📦",
+      unit: "cft",
+      totals: combinedTotals,
+    });
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div
+        style={{
+          padding: "12px 16px",
+          background: "rgba(71,85,105,0.08)",
+          border: "1px solid rgba(71,85,105,0.2)",
+          borderRadius: 12,
+          fontSize: 12,
+          color: "var(--muted)",
+          lineHeight: 1.6,
+        }}
+      >
+        <strong style={{ color: "var(--text)" }}>📊 Compare</strong> — a live
+        snapshot (not date-filtered). <b>Purchased</b> is everything ever
+        entered. <b>In Stock</b> is what is still in the yard right now
+        (status <code>available</code> or <code>reserved</code>).
+        <b> Consumed</b> is blocks that have been cut.
+        {" "}<i>Purchased = In Stock + Consumed</i> (small drift if any blocks
+        were discarded).
+      </div>
+
+      {sections.map((s) => (
+        <CompareSection key={s.title} {...s} />
+      ))}
+    </div>
+  );
+}
+
+function CompareSection({
+  title,
+  subtitle,
+  tone,
+  icon,
+  unit,
+  totals,
+}: {
+  title: string;
+  subtitle: string;
+  tone: string;
+  icon: string;
+  unit: "tonnes" | "cft";
+  totals: StockTotals;
+}) {
+  const purchased = unit === "tonnes" ? totals.purchasedTonnes : totals.purchasedCft;
+  const inStock = unit === "tonnes" ? totals.inStockTonnes : totals.inStockCft;
+  const consumed = unit === "tonnes" ? totals.consumedTonnes : totals.consumedCft;
+
+  // Percentages relative to purchased — guard against /0.
+  const denom = purchased > 0 ? purchased : 1;
+  const stockPct = Math.max(0, Math.min(100, (inStock / denom) * 100));
+  const consPct = Math.max(0, Math.min(100, (consumed / denom) * 100));
+  const otherPct = Math.max(0, 100 - stockPct - consPct);
+
+  const unitLabel = unit === "tonnes" ? "T" : "CFT";
+
+  return (
+    <div
+      style={{
+        background: "var(--surface)",
+        border: "1px solid var(--border)",
+        borderLeft: `4px solid ${tone}`,
+        borderRadius: 14,
+        padding: "16px 20px",
+      }}
+    >
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 10,
+              background: tone + "22",
+              color: tone,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 18,
+            }}
+          >
+            {icon}
+          </div>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text)", letterSpacing: "-0.01em" }}>
+              {title}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 1 }}>
+              {subtitle}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 3-up metrics */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr 1fr",
+          gap: 10,
+          marginBottom: 14,
+        }}
+      >
+        <CompareMetric
+          label="Purchased"
+          value={fmtNum(purchased, unit === "tonnes" ? 2 : 0)}
+          unit={unitLabel}
+          subValue={`${fmtInt(totals.purchasedBlocks)} blocks`}
+          tone={tone}
+          isPrimary
+        />
+        <CompareMetric
+          label="In stock"
+          value={fmtNum(inStock, unit === "tonnes" ? 2 : 0)}
+          unit={unitLabel}
+          subValue={`${fmtInt(totals.inStockBlocks)} blocks · ${stockPct.toFixed(0)}%`}
+          tone="#10b981"
+        />
+        <CompareMetric
+          label="Consumed"
+          value={fmtNum(consumed, unit === "tonnes" ? 2 : 0)}
+          unit={unitLabel}
+          subValue={`${fmtInt(totals.consumedBlocks)} blocks · ${consPct.toFixed(0)}%`}
+          tone="#94a3b8"
+        />
+      </div>
+
+      {/* Visual ratio bar */}
+      <div
+        style={{
+          display: "flex",
+          height: 14,
+          borderRadius: 7,
+          overflow: "hidden",
+          background: "var(--bg)",
+          border: "1px solid var(--border)",
+        }}
+        title={`In stock ${stockPct.toFixed(1)}% · Consumed ${consPct.toFixed(1)}% · Other ${otherPct.toFixed(1)}%`}
+      >
+        <div
+          style={{
+            width: `${stockPct}%`,
+            background: "#10b981",
+            transition: "width 0.3s",
+          }}
+        />
+        <div
+          style={{
+            width: `${consPct}%`,
+            background: "#94a3b8",
+            transition: "width 0.3s",
+          }}
+        />
+        {otherPct > 0 && (
+          <div
+            style={{
+              width: `${otherPct}%`,
+              background: "rgba(239,68,68,0.4)",
+              transition: "width 0.3s",
+            }}
+            title={`Other (likely discarded): ${otherPct.toFixed(1)}%`}
+          />
+        )}
+      </div>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          fontSize: 10,
+          fontWeight: 700,
+          color: "var(--muted)",
+          marginTop: 4,
+        }}
+      >
+        <span style={{ color: "#059669" }}>● In stock</span>
+        <span style={{ color: "#64748b" }}>● Consumed</span>
+        {otherPct > 0 && <span style={{ color: "#dc2626" }}>● Discarded</span>}
+      </div>
+    </div>
+  );
+}
+
+function CompareMetric({
+  label,
+  value,
+  unit,
+  subValue,
+  tone,
+  isPrimary,
+}: {
+  label: string;
+  value: string;
+  unit: string;
+  subValue: string;
+  tone: string;
+  isPrimary?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        background: isPrimary ? tone + "10" : "var(--bg)",
+        border: `1px solid ${isPrimary ? tone + "33" : "var(--border)"}`,
+        borderRadius: 10,
+        padding: "12px 14px",
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          fontWeight: 800,
+          color: tone,
+          textTransform: "uppercase",
+          letterSpacing: "0.08em",
+          marginBottom: 4,
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "baseline",
+          gap: 4,
+          fontFamily: "ui-monospace, monospace",
+        }}
+      >
+        <span
+          style={{
+            fontSize: 24,
+            fontWeight: 800,
+            color: "var(--text)",
+            letterSpacing: "-0.01em",
+            lineHeight: 1.1,
+          }}
+        >
+          {value}
+        </span>
+        <span style={{ fontSize: 12, color: "var(--muted)", fontWeight: 700 }}>
+          {unit}
+        </span>
+      </div>
+      <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+        {subValue}
+      </div>
     </div>
   );
 }

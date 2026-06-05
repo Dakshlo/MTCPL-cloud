@@ -8,6 +8,7 @@
  * alternate render path for the iframe.
  */
 
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireAuth, getDefaultRouteForRole } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
@@ -131,13 +132,66 @@ export default async function EmbedBlockJourneyPage({
     .map((s: { name: string }) => s.name)
     .filter(Boolean);
 
+  // Block Purchase entry — visible inside the dashboard peek iframe too,
+  // but it'd break the modal if it navigated in place, so it pops out
+  // into a new tab via target="_blank".
+  const canSeePurchase =
+    profile.role === "owner" || profile.role === "developer";
+
   return (
-    <BlockJourneyClient
-      lineages={lineages}
-      profilesMap={profilesMap}
-      stoneOptions={stoneOptions}
-      stoneCategoryMap={stoneCategoryMap}
-      initialMode={initialMode}
-    />
+    <>
+      {canSeePurchase && (
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            marginBottom: 10,
+          }}
+        >
+          <Link
+            href="/blocks/purchase"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "8px 14px",
+              fontSize: 12,
+              fontWeight: 700,
+              color: "#fff",
+              background: "var(--gold-dark)",
+              border: "1px solid var(--gold-dark)",
+              borderRadius: 8,
+              textDecoration: "none",
+              letterSpacing: "0.01em",
+              boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+            }}
+          >
+            📦 Block Purchase
+            <span
+              style={{
+                fontSize: 9,
+                fontWeight: 800,
+                padding: "2px 6px",
+                borderRadius: 4,
+                background: "rgba(255,255,255,0.22)",
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+              }}
+            >
+              ↗ New tab
+            </span>
+          </Link>
+        </div>
+      )}
+      <BlockJourneyClient
+        lineages={lineages}
+        profilesMap={profilesMap}
+        stoneOptions={stoneOptions}
+        stoneCategoryMap={stoneCategoryMap}
+        initialMode={initialMode}
+      />
+    </>
   );
 }
