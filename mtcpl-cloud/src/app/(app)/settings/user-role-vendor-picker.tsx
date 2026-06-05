@@ -27,7 +27,7 @@ export type RolePickerOption = { value: string; label: string };
 export type VendorPickerOption = {
   id: string;
   name: string;
-  vendor_type: "CNC" | "Manual";
+  vendor_type: "CNC" | "Outsource";
 };
 
 export function UserRoleVendorPicker({
@@ -61,7 +61,7 @@ export function UserRoleVendorPicker({
   // "Mohit (CNC)" sitting in the CNC group and lathe vendors in the
   // Manual group at a glance.
   const cncVendors = vendorOptions.filter((v) => v.vendor_type === "CNC");
-  const manualVendors = vendorOptions.filter((v) => v.vendor_type === "Manual");
+  const outsourceVendors = vendorOptions.filter((v) => v.vendor_type === "Outsource");
 
   return (
     <>
@@ -111,9 +111,9 @@ export function UserRoleVendorPicker({
                 ))}
               </optgroup>
             )}
-            {manualVendors.length > 0 && (
-              <optgroup label="Manual vendors (lathe / hand)">
-                {manualVendors.map((v) => (
+            {outsourceVendors.length > 0 && (
+              <optgroup label="Outsource / Jobwork vendors">
+                {outsourceVendors.map((v) => (
                   <option key={v.id} value={v.id}>
                     {v.name}
                   </option>

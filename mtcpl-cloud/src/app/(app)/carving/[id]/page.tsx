@@ -94,7 +94,7 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
     admin
       .from("vendors")
       .select("id, name, vendor_type")
-      .in("vendor_type", ["CNC", "Manual"])
+      .in("vendor_type", ["CNC", "Outsource"])
       .eq("is_active", true)
       .order("name"),
   ]);
@@ -283,7 +283,7 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
               />
               {/* Manual vendor lifecycle buttons — Mark started / complete.
                   Server-rendered (no client state). */}
-              {jobRow.vendor_type === "Manual" && (
+              {jobRow.vendor_type === "Outsource" && (
                 <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
                   {jobRow.status === "carving_assigned" && (
                     <form action={markCarvingStartedManuallyAction}>

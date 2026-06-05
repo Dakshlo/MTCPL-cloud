@@ -322,7 +322,7 @@ export async function updateUserAction(formData: FormData) {
     if (!vendorRow.is_active) {
       redirect("/settings?toast=Pick+an+active+vendor");
     }
-    if (vendorRow.vendor_type !== "CNC" && vendorRow.vendor_type !== "Manual") {
+    if (vendorRow.vendor_type !== "CNC" && vendorRow.vendor_type !== "Outsource") {
       redirect("/settings?toast=Not+a+carving+vendor");
     }
     vendorIdToSave = vendorRow.id;

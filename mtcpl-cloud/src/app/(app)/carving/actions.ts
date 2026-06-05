@@ -662,7 +662,7 @@ export async function createVendorAction(formData: FormData) {
   const admin = createAdminSupabaseClient();
 
   const name = txt(formData, "name");
-  const vendorType = txt(formData, "vendor_type") as "CNC" | "Manual" | "Outsource";
+  const vendorType = txt(formData, "vendor_type") as "CNC" | "Outsource";
   const machinesJson = txt(formData, "machines_json");
   // Migration 025 — standard slab dropoff location for CNC vendors.
   const dropoffLocation = txt(formData, "dropoff_location") || null;
@@ -673,7 +673,7 @@ export async function createVendorAction(formData: FormData) {
   const redirectTo = txt(formData, "redirect_to") || "/carving/vendors";
 
   if (!name) redirect(`${redirectTo}?toast=Vendor+name+is+required`);
-  if (!["CNC", "Manual", "Outsource"].includes(vendorType)) {
+  if (!["CNC", "Outsource"].includes(vendorType)) {
     redirect(`${redirectTo}?toast=Invalid+vendor+type`);
   }
 
@@ -769,7 +769,7 @@ export async function updateVendorAction(formData: FormData) {
 
   const vendorId = txt(formData, "vendor_id");
   const name = txt(formData, "name");
-  const vendorType = txt(formData, "vendor_type") as "CNC" | "Manual" | "Outsource";
+  const vendorType = txt(formData, "vendor_type") as "CNC" | "Outsource";
   const isActive = txt(formData, "is_active") === "true";
   const machinesJson = txt(formData, "machines_json");
   // Migration 025 — slab dropoff location (CNC only). Empty string
@@ -1070,8 +1070,8 @@ export async function assignCarvingJobAction(formData: FormData) {
 
   if (!vendor) redirect("/carving?toast=Vendor+not+found");
   const vendorType = (vendor as { vendor_type: string }).vendor_type;
-  if (vendorType !== "CNC" && vendorType !== "Manual") {
-    redirect("/carving?toast=Only+CNC+or+Manual+vendors+supported");
+  if (vendorType !== "CNC" && vendorType !== "Outsource") {
+    redirect("/carving?toast=Only+CNC+or+Outsource+vendors+supported");
   }
   if (!(vendor as { is_active: boolean }).is_active) {
     redirect("/carving?toast=Vendor+is+inactive");
@@ -1172,7 +1172,7 @@ export async function assignCarvingJobAction(formData: FormData) {
   const eta = estimatedMinutes ? `${estimatedMinutes}min` : "no eta";
   const urgencyTag = urgency === "urgent" ? " · ⚡ URGENT" : "";
   const typeTag = finalRequiresMachineType === "lathe" ? " · 🌀 lathe" : "";
-  const manualTag = vendorType === "Manual" ? " · 🪚 manual" : "";
+  const manualTag = vendorType === "Outsource" ? " · 🏭 outsource" : "";
   await recordEvent(
     item.id,
     "assigned",
@@ -1273,8 +1273,8 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
     .single();
   if (!vendor) redirect("/carving?toast=Vendor+not+found");
   const vendorType = (vendor as { vendor_type: string }).vendor_type;
-  if (vendorType !== "CNC" && vendorType !== "Manual") {
-    redirect("/carving?toast=Only+CNC+or+Manual+vendors+supported");
+  if (vendorType !== "CNC" && vendorType !== "Outsource") {
+    redirect("/carving?toast=Only+CNC+or+Outsource+vendors+supported");
   }
   if (!(vendor as { is_active: boolean }).is_active) {
     redirect("/carving?toast=Vendor+is+inactive");
@@ -1994,8 +1994,8 @@ export async function unloadWithProblemAction(formData: FormData) {
     if (!v) redirect(`${redirectTo}?toast=Destination+vendor+not+found`);
     const vendor = v as { id: string; name: string; vendor_type: string; is_active: boolean };
     if (!vendor.is_active) redirect(`${redirectTo}?toast=Destination+vendor+is+inactive`);
-    if (vendor.vendor_type !== "CNC" && vendor.vendor_type !== "Manual") {
-      redirect(`${redirectTo}?toast=Destination+must+be+CNC+or+Manual`);
+    if (vendor.vendor_type !== "CNC" && vendor.vendor_type !== "Outsource") {
+      redirect(`${redirectTo}?toast=Destination+must+be+CNC+or+Outsource`);
     }
     if (vendor.id === item.vendor_id) {
       redirect(`${redirectTo}?toast=Already+with+that+vendor`);
@@ -2215,8 +2215,8 @@ export async function transferReadySlabAction(formData: FormData) {
     is_active: boolean;
   };
   if (!vendor.is_active) redirect(`${redirectTo}?toast=Destination+vendor+is+inactive`);
-  if (vendor.vendor_type !== "CNC" && vendor.vendor_type !== "Manual") {
-    redirect(`${redirectTo}?toast=Destination+must+be+CNC+or+Manual`);
+  if (vendor.vendor_type !== "CNC" && vendor.vendor_type !== "Outsource") {
+    redirect(`${redirectTo}?toast=Destination+must+be+CNC+or+Outsource`);
   }
   if (vendor.id === item.vendor_id) {
     redirect(`${redirectTo}?toast=Already+with+that+vendor`);
@@ -5340,8 +5340,8 @@ export async function transferCarvingJobAction(formData: FormData) {
   if (!newVendor) redirect(`${redirectTo}?toast=Destination+vendor+not+found`);
   const nv = newVendor as { id: string; name: string; vendor_type: string; is_active: boolean };
   if (!nv.is_active) redirect(`${redirectTo}?toast=Destination+vendor+is+inactive`);
-  if (nv.vendor_type !== "CNC" && nv.vendor_type !== "Manual") {
-    redirect(`${redirectTo}?toast=Destination+must+be+CNC+or+Manual`);
+  if (nv.vendor_type !== "CNC" && nv.vendor_type !== "Outsource") {
+    redirect(`${redirectTo}?toast=Destination+must+be+CNC+or+Outsource`);
   }
 
   const now = new Date().toISOString();
@@ -5445,7 +5445,7 @@ export async function markCarvingStartedManuallyAction(formData: FormData) {
     slab_requirement_id: string;
   };
 
-  if (item.vendor_type !== "Manual") {
+  if (item.vendor_type !== "Outsource") {
     redirect(`${redirectTo}?toast=Use+the+load+action+for+CNC+vendors`);
   }
   if (item.status !== "carving_assigned") {
@@ -5468,7 +5468,7 @@ export async function markCarvingStartedManuallyAction(formData: FormData) {
     carvingItemId,
     "started_manually",
     profile.id,
-    `Manual carving started · ${item.vendor_name}`,
+    `Outsource carving started · ${item.vendor_name}`,
   );
   await logAudit(profile.id, "carving_started_manually", "carving_item", carvingItemId, {
     vendor_name: item.vendor_name,
@@ -5483,7 +5483,7 @@ export async function markCarvingCompleteManuallyAction(formData: FormData) {
   const admin = createAdminSupabaseClient();
 
   const carvingItemId = txt(formData, "carving_item_id");
-  const tempLocation = txt(formData, "temporary_location") || "Manual carver yard";
+  const tempLocation = txt(formData, "temporary_location") || "Outsource carver yard";
   const redirectTo = txt(formData, "redirect_to") || `/carving/${carvingItemId}`;
   if (!carvingItemId) redirect(`${redirectTo}?toast=Missing+job+id`);
 
@@ -5501,7 +5501,7 @@ export async function markCarvingCompleteManuallyAction(formData: FormData) {
     completed_at: string | null;
   };
 
-  if (item.vendor_type !== "Manual") {
+  if (item.vendor_type !== "Outsource") {
     redirect(`${redirectTo}?toast=Use+the+unload+action+for+CNC+vendors`);
   }
   if (item.status !== "carving_in_progress") {
@@ -5525,7 +5525,7 @@ export async function markCarvingCompleteManuallyAction(formData: FormData) {
     carvingItemId,
     "completed_manually",
     profile.id,
-    `Manual carving complete · ${item.vendor_name} · stored at ${tempLocation}`,
+    `Outsource carving complete · ${item.vendor_name} · stored at ${tempLocation}`,
   );
   await logAudit(profile.id, "carving_completed_manually", "carving_item", carvingItemId, {
     vendor_name: item.vendor_name,

@@ -27,7 +27,11 @@ create type public.slab_status as enum (
 
 create type public.cut_session_status as enum ('draft', 'approved', 'in_progress', 'closed', 'cancelled');
 create type public.cut_block_status as enum ('pending_worker', 'cutting', 'done_prompt', 'done', 'rejected');
-create type public.vendor_type as enum ('CNC', 'Manual');
+-- Carving vendor types: CNC (machine operators, tracked) and
+-- Outsource / Jobwork (no tracked machines; the head marks work
+-- started/done on their behalf). The legacy 'Manual' value was
+-- replaced by 'Outsource' (migration 092) and is no longer used.
+create type public.vendor_type as enum ('CNC', 'Outsource');
 
 create table public.vendors (
   id uuid primary key default gen_random_uuid(),

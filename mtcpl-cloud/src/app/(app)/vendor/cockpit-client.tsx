@@ -4141,7 +4141,7 @@ function TransferReadyButton({
         {otherVendorsForTransfer.map((v) => (
           <option key={v.id} value={v.id}>
             {v.name}
-            {v.vendor_type === "Manual" ? " (Manual)" : ""}
+            {v.vendor_type === "Outsource" ? " (Outsource)" : ""}
           </option>
         ))}
       </select>
@@ -6268,7 +6268,7 @@ function ProblemModal({
               {otherVendorsForTransfer.map((v) => (
                 <option key={v.id} value={v.id}>
                   {v.name}
-                  {v.vendor_type === "Manual" ? " (Manual)" : ""}
+                  {v.vendor_type === "Outsource" ? " (Outsource)" : ""}
                 </option>
               ))}
             </select>

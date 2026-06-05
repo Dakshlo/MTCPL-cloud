@@ -91,7 +91,7 @@ export function VendorForm({
   initial?: {
     id?: string;
     name?: string;
-    vendor_type?: "CNC" | "Manual" | "Outsource";
+    vendor_type?: "CNC" | "Outsource";
     is_active?: boolean;
     /** Migration 025 — standard place to drop slabs for this CNC vendor. */
     dropoff_location?: string | null;
@@ -101,7 +101,7 @@ export function VendorForm({
 }) {
   const editing = !!initial?.id;
   const [name, setName] = useState(initial?.name ?? "");
-  const [vendorType, setVendorType] = useState<"CNC" | "Manual" | "Outsource">(initial?.vendor_type ?? "Manual");
+  const [vendorType, setVendorType] = useState<"CNC" | "Outsource">(initial?.vendor_type ?? "Outsource");
   const [isActive, setIsActive] = useState(initial?.is_active ?? true);
   const [dropoffLocation, setDropoffLocation] = useState(initial?.dropoff_location ?? "");
   const [machines, setMachines] = useState<Machine[]>(initial?.machines ?? []);
@@ -173,10 +173,9 @@ export function VendorForm({
           <select
             name="vendor_type"
             value={vendorType}
-            onChange={(e) => setVendorType(e.target.value as "CNC" | "Manual" | "Outsource")}
+            onChange={(e) => setVendorType(e.target.value as "CNC" | "Outsource")}
             style={{ padding: "8px 12px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
           >
-            <option value="Manual">Manual (in-house carver)</option>
             <option value="CNC">CNC (machine operator)</option>
             <option value="Outsource">Outsource / Jobwork</option>
           </select>

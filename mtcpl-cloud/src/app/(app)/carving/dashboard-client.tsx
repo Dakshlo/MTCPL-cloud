@@ -79,7 +79,7 @@ type JobRow = {
   thickness_ft: number;
   vendor_id: string;
   vendor_name: string;
-  vendor_type: "CNC" | "Manual";
+  vendor_type: "CNC" | "Outsource";
   status: string;
   /** Urgency stamp from the assign step. Used to surface a chip on
    *  Active cards beside the queued/carving status ribbon. */
@@ -144,7 +144,7 @@ type JobRow = {
 type Vendor = {
   id: string;
   name: string;
-  vendor_type: "CNC" | "Manual";
+  vendor_type: "CNC" | "Outsource";
   machines: Array<{
     id: string;
     machine_code: string;
@@ -2585,8 +2585,8 @@ function JobsByTemple({
                       states so the carving head + team can tell at a
                       glance where each job sits:
                         ▶ CARVING NOW          (loaded on CNC)
-                        🪚 MANUAL CARVING       (in_progress, no machine, Manual vendor)
-                        🪚 AWAITING MANUAL START (assigned, Manual vendor)
+                        🤝 OUTSOURCE CARVING       (in_progress, no machine, Manual vendor)
+                        🪚 AWAITING OUTSOURCE START (assigned, Manual vendor)
                         🚚 AWAITING DELIVERY    (assigned, CNC, no receipt yet)
                         📦 IN STOCK             (assigned, CNC, received but not loaded —
                                                  was "AT VENDOR", renamed per Daksh May 2026)
@@ -2596,7 +2596,7 @@ function JobsByTemple({
                   {fields.includes("deadline") && (() => {
                     const isCarving = j.status === "carving_in_progress";
                     const isUrgent = j.urgency === "urgent";
-                    const isManual = j.vendor_type === "Manual";
+                    const isManual = j.vendor_type === "Outsource";
                     const fmtDur = (m: number) => {
                       const a = Math.abs(Math.round(m));
                       if (a < 60) return `${a}m`;
@@ -2681,7 +2681,7 @@ function JobsByTemple({
                           }}
                         >
                           <div style={{ fontSize: 9, fontWeight: 800, color: isManual ? "#92400e" : "#15803d", letterSpacing: "0.07em" }}>
-                            {isManual ? "🪚 MANUAL CARVING" : "▶ CARVING NOW"}
+                            {isManual ? "🤝 OUTSOURCE CARVING" : "▶ CARVING NOW"}
                           </div>
                           <div
                             style={{
@@ -2722,7 +2722,7 @@ function JobsByTemple({
                             color: isUrgent ? "#991b1b" : "#78350f",
                           }}
                         >
-                          <span>🪚 AWAITING MANUAL START</span>
+                          <span>🪚 AWAITING OUTSOURCE START</span>
                           {isUrgent && <span style={{ fontSize: 9, fontWeight: 800 }}>⚡ URGENT</span>}
                         </div>
                       );
@@ -2862,7 +2862,7 @@ function JobsByTemple({
                             {j.requires_cnc_axes}-AXIS
                           </span>
                         )}
-                      {j.vendor_type === "Manual" && (
+                      {j.vendor_type === "Outsource" && (
                         <span
                           style={{
                             fontSize: 9,
@@ -2873,9 +2873,9 @@ function JobsByTemple({
                             fontWeight: 800,
                             letterSpacing: "0.05em",
                           }}
-                          title="Manual carver — head fires Mark started / complete"
+                          title="Outsource carver — head fires Mark started / complete"
                         >
-                          🪚 MANUAL
+                          🤝 OUTSOURCE
                         </span>
                       )}
                       {j.stone && (
@@ -3142,7 +3142,7 @@ function JobsByTemple({
                       without drilling into the detail page. Buttons
                       stopPropagation so clicking them doesn't also
                       open the peek modal. CNC cards skip this. */}
-                  {j.vendor_type === "Manual" && (
+                  {j.vendor_type === "Outsource" && (
                     <ManualLifecycleButtons job={j} />
                   )}
                 </div>

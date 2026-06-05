@@ -131,19 +131,19 @@ export default async function CarvingDashboardPage({
       .not("review_approved_at", "is", null)
       .order("review_approved_at", { ascending: false })
       .limit(200),
-    // Carving page surfaces CNC + Manual vendors. (Manual carvers
+    // Carving page surfaces CNC + Outsource vendors. (Outsource carvers
     // were re-introduced in Phase 4 — they don't have machines and
     // use a simpler bypass workflow, but the carving head still
     // needs to assign work to them.) Outsource is paused; block_vendor
     // type is for the block side and must never appear here.
     //
-    // We pull ALL CNC + Manual vendors (including inactive) so the
+    // We pull ALL CNC + Outsource vendors (including inactive) so the
     // manage peek modal can show + reactivate them. The Assign modal
     // filters inactive ones out client-side.
     admin
       .from("vendors")
       .select("id, name, vendor_type, is_active")
-      .in("vendor_type", ["CNC", "Manual"])
+      .in("vendor_type", ["CNC", "Outsource"])
       .order("name"),
     // Pull live machine status too so the assign modal can show
     // "Vivek · 3/10 free · 8 queued" per vendor. machine_type also
@@ -322,7 +322,7 @@ export default async function CarvingDashboardPage({
       // pills so the carving head / vendor know where to fetch
       // the slab from before it lands at the shade.
       slab_stock_location: info?.stock_location ?? null,
-      vendor_type: (job as unknown as { vendor_type: string }).vendor_type as "CNC" | "Manual",
+      vendor_type: (job as unknown as { vendor_type: string }).vendor_type as "CNC" | "Outsource",
     };
   }
 
@@ -384,8 +384,8 @@ export default async function CarvingDashboardPage({
       id: v.id,
       name: v.name,
       // Mig 091 follow-on — carry the type so the Manage Vendors peek
-      // can filter its list by the CNC / Manual toggle.
-      vendor_type: (v.vendor_type === "Manual" ? "Manual" : "CNC") as "CNC" | "Manual",
+      // can filter its list by the CNC / Outsource toggle.
+      vendor_type: (v.vendor_type === "Outsource" ? "Outsource" : "CNC") as "CNC" | "Outsource",
       is_active: v.is_active,
       machines: counts.total,
       busy: counts.carving,
@@ -407,7 +407,7 @@ export default async function CarvingDashboardPage({
       return {
         id: v.id,
         name: v.name,
-        vendor_type: v.vendor_type as "CNC" | "Manual",
+        vendor_type: v.vendor_type as "CNC" | "Outsource",
         machines: (machines ?? [])
           .filter((m) => m.vendor_id === v.id)
           .map((m) => {

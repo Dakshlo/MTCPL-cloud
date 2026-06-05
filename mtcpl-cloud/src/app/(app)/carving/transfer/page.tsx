@@ -76,7 +76,7 @@ export default async function SlabTransferPage({
     admin
       .from("vendors")
       .select("id, name, vendor_type, dropoff_location")
-      .in("vendor_type", ["CNC", "Manual"]),
+      .in("vendor_type", ["CNC", "Outsource"]),
     admin
       .from("stone_types")
       .select("id, name, color_top, color_front, color_side, sort_order, is_active")
@@ -140,7 +140,7 @@ export default async function SlabTransferPage({
       {
         id: v.id,
         name: v.name,
-        vendor_type: v.vendor_type as "CNC" | "Manual",
+        vendor_type: v.vendor_type as "CNC" | "Outsource",
         dropoff_location: (v as { dropoff_location?: string | null }).dropoff_location ?? null,
       },
     ]),
@@ -161,7 +161,7 @@ export default async function SlabTransferPage({
       stock_location: info?.stock_location ?? null,
       vendor_id: j.vendor_id,
       vendor_name: vendor?.name ?? j.vendor_name,
-      vendor_type: vendor?.vendor_type ?? (j.vendor_type as "CNC" | "Manual"),
+      vendor_type: vendor?.vendor_type ?? (j.vendor_type as "CNC" | "Outsource"),
       vendor_dropoff: vendor?.dropoff_location ?? null,
       urgency: (j.urgency === "urgent" ? "urgent" : "normal") as "urgent" | "normal",
       assigned_at: j.assigned_at,

@@ -37,7 +37,7 @@ type CncAxesReq = 0 | 4 | 5;
 type Vendor = {
   id: string;
   name: string;
-  vendor_type: "CNC" | "Manual";
+  vendor_type: "CNC" | "Outsource";
   machines: Machine[];
   live?: { free: number; busy: number; maintenance: number; total: number; queued: number };
 };
@@ -193,7 +193,7 @@ export function BulkAssignModal({
   }, [onClose]);
 
   const selectedVendor = vendors.find((v) => v.id === vendorId);
-  const isManual = selectedVendor?.vendor_type === "Manual";
+  const isManual = selectedVendor?.vendor_type === "Outsource";
 
   // Rule-based recommendation. Auto-selects the winner on mount +
   // whenever work-type flips. User can override by clicking another
@@ -208,8 +208,8 @@ export function BulkAssignModal({
 
   const sortedVendors = useMemo(() => {
     return [...vendors].sort((a, b) => {
-      if (a.vendor_type !== b.vendor_type) return a.vendor_type === "Manual" ? 1 : -1;
-      if (a.vendor_type === "Manual" && b.vendor_type === "Manual") {
+      if (a.vendor_type !== b.vendor_type) return a.vendor_type === "Outsource" ? 1 : -1;
+      if (a.vendor_type === "Outsource" && b.vendor_type === "Outsource") {
         return a.name.localeCompare(b.name);
       }
       const am = vendorMatchesReq(a, workType, cncAxesReq);
@@ -230,7 +230,7 @@ export function BulkAssignModal({
   // gate? Mirrors the single-slab modal so a stale tick can't slip
   // into submit. Manual vendors skip the gate (no machines).
   const selectedVendorOk = selectedVendor
-    ? selectedVendor.vendor_type === "Manual" ||
+    ? selectedVendor.vendor_type === "Outsource" ||
       vendorMatchesReq(selectedVendor, workType, cncAxesReq).hasAtAll
     : false;
   useEffect(() => {
@@ -508,14 +508,14 @@ export function BulkAssignModal({
                   )}
                   {sortedVendors.map((v, idx) => {
                     const isSelected = v.id === vendorId;
-                    const isVendorManual = v.vendor_type === "Manual";
+                    const isVendorManual = v.vendor_type === "Outsource";
                     const prev = idx > 0 ? sortedVendors[idx - 1] : null;
                     const showManualHeader =
-                      isVendorManual && (!prev || prev.vendor_type !== "Manual");
+                      isVendorManual && (!prev || prev.vendor_type !== "Outsource");
                     const manualHeader = showManualHeader ? (
                       <SectionHeader
                         key={`__manual-${v.id}`}
-                        label="🪚 Manual Carvers"
+                        label="🤝 Outsource / Jobwork"
                         accent="#92400e"
                         topMargin={prev ? 10 : 0}
                       />
@@ -955,7 +955,7 @@ function VendorRow({
                 color: "#78350f",
               }}
             >
-              🪚 MANUAL
+              🤝 OUTSOURCE
             </span>
           </div>
           {queued > 0 && (

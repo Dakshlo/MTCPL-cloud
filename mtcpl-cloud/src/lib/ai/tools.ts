@@ -264,7 +264,7 @@ export const AI_TOOLS = [
     input_schema: {
       type: "object" as const,
       properties: {
-        type: { type: "string", enum: ["CNC", "Manual", "Outsource"], description: "Filter by vendor type." },
+        type: { type: "string", enum: ["CNC", "Outsource"], description: "Filter by vendor type." },
         active_only: { type: "boolean", description: "Only active vendors. Default true." },
       },
       additionalProperties: false,

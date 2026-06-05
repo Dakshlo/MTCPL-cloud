@@ -194,13 +194,13 @@ export default async function SettingsPage() {
       .from("vendors")
       .select("id, name, vendor_type, is_active")
       .eq("is_active", true)
-      .in("vendor_type", ["CNC", "Manual"])
+      .in("vendor_type", ["CNC", "Outsource"])
       .order("name"),
   ]);
   const vendorList = (vendorRows ?? []) as Array<{
     id: string;
     name: string;
-    vendor_type: "CNC" | "Manual";
+    vendor_type: "CNC" | "Outsource";
     is_active: boolean;
   }>;
   const stoneList = stoneTypes ?? [];

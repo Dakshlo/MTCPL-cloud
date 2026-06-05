@@ -51,7 +51,7 @@ export type TransferRow = {
   stock_location: string | null;
   vendor_id: string;
   vendor_name: string;
-  vendor_type: "CNC" | "Manual";
+  vendor_type: "CNC" | "Outsource";
   vendor_dropoff: string | null;
   urgency: "normal" | "urgent";
   assigned_at: string;

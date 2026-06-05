@@ -26,7 +26,7 @@ import {
 type VendorRow = {
   id: string;
   name: string;
-  vendor_type: "CNC" | "Manual";
+  vendor_type: "CNC" | "Outsource";
   is_active: boolean;
   machines: number;
   busy: number;
@@ -40,9 +40,9 @@ export function VendorsManagerPeek({ vendors }: { vendors: VendorRow[] }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   // Daksh June 2026 — the CNC / Manual toggle now drives BOTH which
   // type a new vendor will be AND which vendors the list shows. Press
-  // "🪚 Manual" → the list filters to manual carvers.
-  const [vendorType, setVendorType] = useState<"CNC" | "Manual">("CNC");
-  const isManualView = vendorType === "Manual";
+  // "🤝 Outsource" → the list filters to manual carvers.
+  const [vendorType, setVendorType] = useState<"CNC" | "Outsource">("CNC");
+  const isManualView = vendorType === "Outsource";
 
   // Esc closes
   useEffect(() => {
@@ -143,7 +143,7 @@ export function VendorsManagerPeek({ vendors }: { vendors: VendorRow[] }) {
             >
               <div>
                 <h2 style={{ margin: 0, fontSize: 17 }}>
-                  👥 Manage {isManualView ? "Manual Carvers" : "CNC Vendors"}
+                  👥 Manage {isManualView ? "Outsource Vendors" : "CNC Vendors"}
                 </h2>
                 <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>
                   Add, rename, deactivate or delete vendors without leaving the
@@ -185,7 +185,7 @@ export function VendorsManagerPeek({ vendors }: { vendors: VendorRow[] }) {
                     letterSpacing: "0.06em",
                   }}
                 >
-                  {sorted.length} {isManualView ? "manual carver" : "CNC vendor"}
+                  {sorted.length} {isManualView ? "outsource carver" : "CNC vendor"}
                   {sorted.length !== 1 ? "s" : ""}
                 </div>
                 {sorted.length === 0 ? (
@@ -199,7 +199,7 @@ export function VendorsManagerPeek({ vendors }: { vendors: VendorRow[] }) {
                       borderRadius: 8,
                     }}
                   >
-                    No {isManualView ? "manual carvers" : "CNC vendors"} yet. Add
+                    No {isManualView ? "outsource carvers" : "CNC vendors"} yet. Add
                     one above to get started.
                   </div>
                 ) : (
@@ -222,12 +222,12 @@ function AddVendorRow({
 }: {
   // Daksh June 2026 — state lifted to the peek so this toggle ALSO
   // filters the vendor list (press Manual → list shows manual carvers).
-  vendorType: "CNC" | "Manual";
-  setVendorType: (t: "CNC" | "Manual") => void;
+  vendorType: "CNC" | "Outsource";
+  setVendorType: (t: "CNC" | "Outsource") => void;
 }) {
   const [name, setName] = useState("");
   const valid = name.trim().length > 0;
-  const isManual = vendorType === "Manual";
+  const isManual = vendorType === "Outsource";
   const accent = isManual ? "#92400e" : "var(--gold-dark)";
   const bg = isManual ? "rgba(146,64,14,0.06)" : "rgba(180,115,51,0.06)";
   return (
@@ -258,7 +258,7 @@ function AddVendorRow({
           letterSpacing: "0.06em",
         }}
       >
-        + New {isManual ? "Manual" : "CNC"} vendor
+        + New {isManual ? "Outsource" : "CNC"} vendor
       </span>
 
       {/* Type toggle — small segmented pair, defaults to CNC (most
@@ -274,9 +274,9 @@ function AddVendorRow({
           background: "var(--bg)",
         }}
       >
-        {(["CNC", "Manual"] as const).map((t) => {
+        {(["CNC", "Outsource"] as const).map((t) => {
           const active = vendorType === t;
-          const tone = t === "Manual" ? "#92400e" : "var(--gold-dark)";
+          const tone = t === "Outsource" ? "#92400e" : "var(--gold-dark)";
           return (
             <button
               key={t}
@@ -295,7 +295,7 @@ function AddVendorRow({
                 transition: "background 0.12s",
               }}
             >
-              {t === "Manual" ? "🪚 Manual" : "🏭 CNC"}
+              {t === "Outsource" ? "🤝 Outsource" : "🏭 CNC"}
             </button>
           );
         })}

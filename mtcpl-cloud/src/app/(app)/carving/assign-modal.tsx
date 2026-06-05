@@ -10,7 +10,7 @@
  *      bubbles up.
  *   2. Picks a vendor from the live list. Each row shows the type
  *      breakdown: "2 multi-head free · 1 lathe free · 4 queued".
- *      Manual vendors show as "🪚 Manual carver".
+ *      Manual vendors show as "🤝 Outsource carver".
  *   3. After picking a CNC vendor, sees a grid of THAT vendor's
  *      machines colour-coded by status. Manual vendors show a
  *      compact "no machines tracked" panel instead.
@@ -57,7 +57,7 @@ type CncAxesReq = 0 | 4 | 5;
 type Vendor = {
   id: string;
   name: string;
-  vendor_type: "CNC" | "Manual";
+  vendor_type: "CNC" | "Outsource";
   machines: Machine[];
   live?: {
     free: number;
@@ -242,7 +242,7 @@ export function AssignModal({
   }, [onClose]);
 
   const selectedVendor = vendors.find((v) => v.id === vendorId);
-  const isManual = selectedVendor?.vendor_type === "Manual";
+  const isManual = selectedVendor?.vendor_type === "Outsource";
 
   // Rule-based recommendation. Re-runs whenever work-type or the
   // vendor fleet changes. Powers the ✨ Best fit badge on one
@@ -269,9 +269,9 @@ export function AssignModal({
     return [...vendors].sort((a, b) => {
       // Manual vendors last (they don't have machines to match)
       if (a.vendor_type !== b.vendor_type) {
-        return a.vendor_type === "Manual" ? 1 : -1;
+        return a.vendor_type === "Outsource" ? 1 : -1;
       }
-      if (a.vendor_type === "Manual" && b.vendor_type === "Manual") {
+      if (a.vendor_type === "Outsource" && b.vendor_type === "Outsource") {
         return a.name.localeCompare(b.name);
       }
       const aMatch = vendorMatchesReq(a, workType, cncAxesReq);
@@ -304,7 +304,7 @@ export function AssignModal({
   // a stale selection (e.g. user picked Alkesh under "Any", then
   // flipped to "4-axis") can't be submitted to the server.
   const selectedVendorOk = selectedVendor
-    ? selectedVendor.vendor_type === "Manual" ||
+    ? selectedVendor.vendor_type === "Outsource" ||
       vendorMatchesReq(selectedVendor, workType, cncAxesReq).hasAtAll
     : false;
   // When the (workType, axes) gate changes and the currently
@@ -528,17 +528,17 @@ export function AssignModal({
                   )}
                   {sortedVendors.map((v, idx) => {
                     const isSelected = v.id === vendorId;
-                    const isVendorManual = v.vendor_type === "Manual";
+                    const isVendorManual = v.vendor_type === "Outsource";
                     const queued = v.live?.queued ?? 0;
                     // Insert the Manual section header right BEFORE
                     // the first Manual vendor in the sorted list.
                     const prev = idx > 0 ? sortedVendors[idx - 1] : null;
                     const showManualHeader =
-                      isVendorManual && (!prev || prev.vendor_type !== "Manual");
+                      isVendorManual && (!prev || prev.vendor_type !== "Outsource");
                     const manualHeaderNode = showManualHeader ? (
                       <SectionHeader
                         key={`__manual-header-${v.id}`}
-                        label="🪚 Manual Carvers"
+                        label="🤝 Outsource / Jobwork"
                         hint="No machines · head fires Mark started / Mark complete"
                         accent="#92400e"
                         topMargin={prev ? 10 : 0}
@@ -596,7 +596,7 @@ export function AssignModal({
                                   letterSpacing: "0.05em",
                                 }}
                               >
-                                🪚 MANUAL
+                                🤝 OUTSOURCE
                               </span>
                             </div>
                             <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
@@ -795,8 +795,8 @@ export function AssignModal({
               {/* Daksh June 2026 — when no Manual carvers exist yet, the
                   list is all CNC and the head wonders why they can't
                   assign to an outside/manual carver. Point them at the
-                  fix: add one in Manage Vendors with the 🪚 Manual toggle. */}
-              {!sortedVendors.some((v) => v.vendor_type === "Manual") && (
+                  fix: add one in Manage Vendors with the 🤝 Outsource toggle. */}
+              {!sortedVendors.some((v) => v.vendor_type === "Outsource") && (
                 <div
                   style={{
                     marginTop: 4,
@@ -809,9 +809,9 @@ export function AssignModal({
                     lineHeight: 1.5,
                   }}
                 >
-                  🪚 No manual / outside carvers yet. Add one in{" "}
+                  🤝 No outsource / jobwork carvers yet. Add one in{" "}
                   <strong>Manage Vendors</strong> (tap the{" "}
-                  <strong>🪚 Manual</strong> toggle on the “+ New vendor”
+                  <strong>🤝 Outsource</strong> toggle on the “+ New vendor”
                   row) and they’ll appear here.
                 </div>
               )}
@@ -1047,7 +1047,7 @@ export function AssignModal({
                   Manual vendor — no machines tracked
                 </div>
                 <div style={{ fontSize: 12, color: "var(--text)", lineHeight: 1.45 }}>
-                  Manual carvers don&apos;t use the system. After assigning,
+                  Outsource carvers don&apos;t use the system. After assigning,
                   the carving head will fire <strong>▶ Mark started</strong>{" "}
                   and <strong>🎯 Mark complete</strong> on their behalf from
                   the job detail page.
@@ -1192,7 +1192,7 @@ export function AssignModal({
               </div>
               <span style={{ fontSize: 11, color: "var(--muted-light)" }}>
                 {isManual
-                  ? "Manual carvers don't update the system; this is your guess for tracking."
+                  ? "Outsource carvers don't update the system; this is your guess for tracking."
                   : "The vendor will set a tighter estimate when they load the slab. Leave 0 if unsure."}
               </span>
             </div>

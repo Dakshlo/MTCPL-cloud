@@ -116,7 +116,7 @@ export type Profile = {
 export type Vendor = {
   id: string;
   name: string;
-  vendor_type: "CNC" | "Manual";
+  vendor_type: "CNC" | "Outsource";
 };
 
 export type NavItem = {

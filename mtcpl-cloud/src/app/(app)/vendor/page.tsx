@@ -229,7 +229,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
     admin
       .from("vendors")
       .select("id, name, vendor_type")
-      .in("vendor_type", ["CNC", "Manual"])
+      .in("vendor_type", ["CNC", "Outsource"])
       .eq("is_active", true)
       .order("name"),
     // Stone palette definitions for the 3D slab thumbnails on

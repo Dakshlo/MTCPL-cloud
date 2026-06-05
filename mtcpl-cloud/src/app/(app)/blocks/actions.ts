@@ -175,7 +175,7 @@ export async function addBlockVendorAction(
   }
 
   // Block suppliers are a dedicated vendor_type = 'block_vendor' in prod.
-  // Carving vendors use 'CNC' or 'Manual'. Keeping them separate is what
+  // Carving vendors use 'CNC' or 'Outsource'. Keeping them separate is what
   // lets the blocks page dropdown show only actual stone suppliers,
   // not carving workshops.
   const { error } = await admin
