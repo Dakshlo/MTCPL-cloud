@@ -514,6 +514,12 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
           .print-wrap { max-width: none; padding: 10mm 12mm; margin: 0; }
           .section-head { margin-top: 14px; }
           @page { margin: 10mm; }
+          /* "Compact" print — single-tap on the print button sets
+             body.print-compact, which collapses the middle Layer-by-
+             Layer + Primary Slab Cutting Guide sections out, leaving
+             just the first overview page + the last tick-sheet page.
+             Long-press leaves the class off and prints everything. */
+          body.print-compact .skip-on-compact { display: none !important; }
         }
 
         @media screen {
@@ -737,8 +743,14 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
         )}
 
         {/* ── Layer-by-Layer Cutting Guide ── */}
+        {/* Wrapper carries .skip-on-compact so the print button's
+            "tap = compact" mode hides this entire section (cutters
+            asked for just the first overview + last tick-sheet
+            page; the middle layer/primary-slab guides are nice-
+            to-have, but eat 3–6 pages on big blocks). Long-press
+            on Print keeps them. */}
         {blk && layers.length > 1 && (
-          <>
+          <div className="skip-on-compact">
             <div className="section-head">Layer-by-Layer Cutting Guide ({layers.length} layers — cut top to bottom)</div>
             <div style={{
               display: "grid",
@@ -795,7 +807,7 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
                 );
               })}
             </div>
-          </>
+          </div>
         )}
 
         {/* ── Primary Slab Cutting Guide ── */}
@@ -815,7 +827,7 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
           const svgW2 = PL + blk.l * sc2 + PR;
           const svgH2 = PT + blk.w * sc2 + PB;
           return (
-            <>
+            <div className="skip-on-compact">
               <div className="section-head">
                 Primary Slab Cutting Guide — {pLayers.length} {pLayers.length === 1 ? "slab" : "slabs"}
               </div>
@@ -989,7 +1001,7 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
                   </div>
                 );
               })}
-            </>
+            </div>
           );
         })()}
 
