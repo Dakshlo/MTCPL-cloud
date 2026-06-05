@@ -3,12 +3,12 @@
 /**
  * Print button with a tap/hold split:
  *   • Single tap    → COMPACT print. Adds body.print-compact, which
- *                     hides the middle Layer-by-Layer + Primary Slab
- *                     Cutting Guide sections (see @media print CSS in
- *                     page.tsx). Result: a 2-page document — first
- *                     page (block info, utilisation, layout) + last
- *                     page (slabs-to-cut tick sheet + manual entry).
- *                     This is what the cutter floor actually uses.
+ *                     hides ONLY the Primary Slab Cutting Guide (one
+ *                     full page per slab — the real page-eater; see
+ *                     @media print CSS in page.tsx). KEEPS the block
+ *                     overview, the Layer-by-Layer cut-order guide,
+ *                     and the slabs-to-cut tick sheet — the pages the
+ *                     cutter floor actually uses.
  *   • Hold ≥800 ms  → FULL print. Keeps everything (the original
  *                     multi-page layout with all per-slab guides).
  *

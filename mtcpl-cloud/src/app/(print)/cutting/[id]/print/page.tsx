@@ -515,10 +515,12 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
           .section-head { margin-top: 14px; }
           @page { margin: 10mm; }
           /* "Compact" print — single-tap on the print button sets
-             body.print-compact, which collapses the middle Layer-by-
-             Layer + Primary Slab Cutting Guide sections out, leaving
-             just the first overview page + the last tick-sheet page.
-             Long-press leaves the class off and prints everything. */
+             body.print-compact, which collapses ONLY the Primary Slab
+             Cutting Guide (one full page per primary slab — the real
+             page-eater). The Layer-by-Layer guide is kept (it's small
+             and cutters want the cut-order overview), plus the tick
+             sheet. Long-press leaves the class off and prints
+             everything. */
           body.print-compact .skip-on-compact { display: none !important; }
         }
 
@@ -743,14 +745,14 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
         )}
 
         {/* ── Layer-by-Layer Cutting Guide ── */}
-        {/* Wrapper carries .skip-on-compact so the print button's
-            "tap = compact" mode hides this entire section (cutters
-            asked for just the first overview + last tick-sheet
-            page; the middle layer/primary-slab guides are nice-
-            to-have, but eat 3–6 pages on big blocks). Long-press
-            on Print keeps them. */}
+        {/* Daksh June 2026 — this section STAYS in compact (tap) print.
+            It's just a couple of small layer cards side-by-side that
+            fit on the front page, and cutters do want the cut-order
+            overview. Only the Primary Slab Cutting Guide below (one
+            full page per primary slab) is hidden in compact mode —
+            that's the real page-eater. So NO .skip-on-compact here. */}
         {blk && layers.length > 1 && (
-          <div className="skip-on-compact">
+          <>
             <div className="section-head">Layer-by-Layer Cutting Guide ({layers.length} layers — cut top to bottom)</div>
             <div style={{
               display: "grid",
@@ -807,7 +809,7 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
                 );
               })}
             </div>
-          </div>
+          </>
         )}
 
         {/* ── Primary Slab Cutting Guide ── */}
