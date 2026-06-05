@@ -2371,7 +2371,18 @@ body.vendor-cockpit-fullscreen .page-card {
 /* ── Print ──────────────────────────────────────────────────── */
 
 @media print {
-  .sidebar, .topbar, .print-hide { display: none !important; }
+  /* The rotate-to-landscape overlay must NEVER show during print —
+   * print preview uses the print "page" orientation (portrait by
+   * default for A4/Letter), which matches the @media (orientation:
+   * portrait) query and would otherwise cover the entire printout
+   * with the dark "Please rotate your phone" prompt. Reported by
+   * Daksh when the new voucher's Print / Save as PDF showed only
+   * the rotate prompt on his phone. */
+  .sidebar, .topbar, .print-hide, .rotate-prompt { display: none !important; }
   .app-shell { grid-template-columns: 1fr; }
   .page-card, .record-card { box-shadow: none; border: 1px solid #ddd; }
+  /* Reset the body scroll-lock that the rotate-prompt set in the
+   * screen media block — otherwise the printout's overflow:hidden
+   * can clip multi-page documents on some browsers. */
+  body { overflow: visible !important; }
 }
