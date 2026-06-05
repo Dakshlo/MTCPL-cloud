@@ -133,6 +133,12 @@ type JobRow = {
   /** Migration 025 — where the transfer runner actually left the
    *  slab (optional — only set when not at standard vendor dropoff). */
   dropoff_note?: string | null;
+  /** Mig 069 — on-hold metadata. Set when a loaded slab is parked in
+   *  the cockpit On-Hold tray. Surfaces the "⏸ ON HOLD" ribbon +
+   *  reason on the Active tab card. NULL unless status is
+   *  carving_on_hold. */
+  held_at?: string | null;
+  held_reason?: string | null;
 };
 
 type Vendor = {
@@ -2296,10 +2302,12 @@ function JobsByTemple({
         let carvingNow = 0;
         let inStock = 0;
         let inTransit = 0;
+        let onHold = 0;
         for (const j of items) {
           totalCft += (j.length_ft * j.width_ft * j.thickness_ft) / 1728;
           totalSft += (j.length_ft * j.width_ft) / 144;
           if (j.status === "carving_in_progress") carvingNow++;
+          else if (j.status === "carving_on_hold") onHold++;
           else if (j.status === "carving_assigned") {
             if (j.received_at_vendor_at) inStock++;
             else inTransit++;
@@ -2445,6 +2453,20 @@ function JobsByTemple({
                       🚚 {inTransit} in transit
                     </span>
                   )}
+                  {onHold > 0 && (
+                    <span
+                      style={{
+                        color: "#475569",
+                        fontWeight: 700,
+                        padding: "1px 8px",
+                        borderRadius: 999,
+                        background: "rgba(100,116,139,0.12)",
+                        border: "1px solid rgba(100,116,139,0.30)",
+                      }}
+                    >
+                      ⏸ {onHold} on hold
+                    </span>
+                  )}
                 </div>
               </div>
               <span
@@ -2486,6 +2508,7 @@ function JobsByTemple({
               // sky-blue for approved, gold for awaiting review.
               const statusStripe = (() => {
                 if (j.status === "carving_in_progress") return "#16a34a";
+                if (j.status === "carving_on_hold") return "#64748b"; // slate — paused
                 if (j.status === "carving_completed") return "#c9a14a";
                 if (j.status === "carving_approved") return "#0ea5e9";
                 if (j.status === "dispatched") return "#0284c7";
@@ -2580,6 +2603,64 @@ function JobsByTemple({
                       if (a < 60 * 24) return `${Math.floor(a / 60)}h ${a % 60}m`;
                       return `${Math.floor(a / (60 * 24))}d ${Math.floor((a % (60 * 24)) / 60)}h`;
                     };
+                    // Daksh June 2026 — on-hold slabs now appear on the
+                    // Active tab. Show a dedicated paused ribbon (slate)
+                    // with how long it's been held + the reason, so the
+                    // head can tell at a glance which slabs are parked
+                    // and why. Reload/complete still happens on the
+                    // vendor cockpit's On-Hold tray.
+                    if (j.status === "carving_on_hold") {
+                      const heldMin = j.held_at
+                        ? (now - new Date(j.held_at).getTime()) / 60000
+                        : null;
+                      return (
+                        <div
+                          style={{
+                            background: "rgba(100,116,139,0.10)",
+                            border: "1px solid rgba(100,116,139,0.40)",
+                            borderRadius: 6,
+                            padding: "5px 8px",
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 2,
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontSize: 9,
+                              fontWeight: 800,
+                              color: "#475569",
+                              letterSpacing: "0.07em",
+                              display: "flex",
+                              justifyContent: "space-between",
+                              gap: 6,
+                            }}
+                          >
+                            <span>⏸ ON HOLD</span>
+                            {heldMin != null && (
+                              <span style={{ fontFamily: "ui-monospace, monospace" }}>
+                                {fmtDur(heldMin)}
+                              </span>
+                            )}
+                          </div>
+                          {j.held_reason && (
+                            <div
+                              style={{
+                                fontSize: 10,
+                                color: "#475569",
+                                lineHeight: 1.35,
+                                overflow: "hidden",
+                                display: "-webkit-box",
+                                WebkitLineClamp: 2,
+                                WebkitBoxOrient: "vertical",
+                              }}
+                            >
+                              {j.held_reason}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
                     if (isCarving && j.loaded_at) {
                       const elapsedMin = (now - new Date(j.loaded_at).getTime()) / 60000;
                       const eta = j.vendor_estimated_minutes ?? j.estimated_minutes ?? null;
@@ -5129,9 +5210,11 @@ function StatusPill({ status }: { status: string }) {
         ? { fg: "#1d4ed8", bg: "rgba(37,99,235,0.12)" }
         : status === "carving_in_progress"
           ? { fg: "#15803d", bg: "rgba(22,163,74,0.12)" }
-          : status === "carving_assigned"
-            ? { fg: "#b45309", bg: "rgba(217,119,6,0.1)" }
-            : { fg: "var(--muted)", bg: "var(--surface-alt)" };
+          : status === "carving_on_hold"
+            ? { fg: "#475569", bg: "rgba(100,116,139,0.14)" }
+            : status === "carving_assigned"
+              ? { fg: "#b45309", bg: "rgba(217,119,6,0.1)" }
+              : { fg: "var(--muted)", bg: "var(--surface-alt)" };
   return (
     <span
       style={{
