@@ -961,11 +961,19 @@ function ConfirmedBatch({
         borderRadius: 12,
         boxShadow: allLocked ? "none" : ACCOUNTS_TOKENS.shadow,
         overflow: "hidden",
-        opacity: allLocked ? 0.88 : 1,
+        opacity: allLocked ? 0.9 : 1,
+        // Daksh June 2026 — slightly desaturate the whole downloaded
+        // batch so its colours read as "done / parked" vs the live
+        // queue above. Kept partial so the Mark-paid button etc. still
+        // carry enough colour to be obviously clickable.
+        filter: allLocked ? "grayscale(0.55)" : undefined,
       }}
     >
-      {/* Diagonal watermark for a downloaded batch. pointer-events
-          none so it never blocks the action buttons underneath. */}
+      {/* Diagonal watermark for a downloaded batch — TILED down the
+          whole card so a tall batch (many bills) is stamped top to
+          bottom, not just once in the middle. pointer-events none so
+          it never blocks the action buttons underneath. Stamp count
+          scales with the number of bills. */}
       {allLocked && (
         <div
           aria-hidden
@@ -973,29 +981,38 @@ function ConfirmedBatch({
             position: "absolute",
             inset: 0,
             display: "flex",
+            flexDirection: "column",
             alignItems: "center",
-            justifyContent: "center",
+            justifyContent: "space-around",
+            gap: 28,
+            padding: "36px 0",
             pointerEvents: "none",
             zIndex: 2,
             overflow: "hidden",
           }}
         >
-          <span
-            style={{
-              transform: "rotate(-18deg)",
-              fontSize: 38,
-              fontWeight: 900,
-              letterSpacing: "0.12em",
-              color: "rgba(100,116,139,0.16)",
-              border: "4px solid rgba(100,116,139,0.16)",
-              borderRadius: 12,
-              padding: "6px 22px",
-              whiteSpace: "nowrap",
-              textTransform: "uppercase",
-            }}
-          >
-            ✓ In HDFC file
-          </span>
+          {Array.from({
+            length: Math.max(2, Math.ceil(rows.length / 3) + 1),
+          }).map((_, i) => (
+            <span
+              key={i}
+              style={{
+                transform: "rotate(-18deg)",
+                fontSize: 52,
+                fontWeight: 900,
+                letterSpacing: "0.14em",
+                color: "rgba(100,116,139,0.15)",
+                border: "5px solid rgba(100,116,139,0.15)",
+                borderRadius: 14,
+                padding: "8px 30px",
+                whiteSpace: "nowrap",
+                textTransform: "uppercase",
+                flexShrink: 0,
+              }}
+            >
+              ✓ In HDFC file
+            </span>
+          ))}
         </div>
       )}
       {/* Batch header */}
