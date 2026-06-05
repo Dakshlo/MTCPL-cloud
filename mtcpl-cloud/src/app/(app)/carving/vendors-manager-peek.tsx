@@ -26,6 +26,7 @@ import {
 type VendorRow = {
   id: string;
   name: string;
+  vendor_type: "CNC" | "Manual";
   is_active: boolean;
   machines: number;
   busy: number;
@@ -37,6 +38,11 @@ type VendorRow = {
 export function VendorsManagerPeek({ vendors }: { vendors: VendorRow[] }) {
   const [open, setOpen] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
+  // Daksh June 2026 — the CNC / Manual toggle now drives BOTH which
+  // type a new vendor will be AND which vendors the list shows. Press
+  // "🪚 Manual" → the list filters to manual carvers.
+  const [vendorType, setVendorType] = useState<"CNC" | "Manual">("CNC");
+  const isManualView = vendorType === "Manual";
 
   // Esc closes
   useEffect(() => {
@@ -51,12 +57,15 @@ export function VendorsManagerPeek({ vendors }: { vendors: VendorRow[] }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
 
-  // Sort: active first, then by name
-  const sorted = [...vendors].sort((a, b) => {
-    if (a.is_active !== b.is_active) return a.is_active ? -1 : 1;
-    return a.name.localeCompare(b.name);
-  });
+  // Filter by the selected type, then sort: active first, then name.
+  const sorted = [...vendors]
+    .filter((v) => v.vendor_type === vendorType)
+    .sort((a, b) => {
+      if (a.is_active !== b.is_active) return a.is_active ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
 
+  // Button count = all active vendors across both types.
   const activeCount = vendors.filter((v) => v.is_active).length;
 
   return (
@@ -133,10 +142,13 @@ export function VendorsManagerPeek({ vendors }: { vendors: VendorRow[] }) {
               }}
             >
               <div>
-                <h2 style={{ margin: 0, fontSize: 17 }}>👥 Manage CNC Vendors</h2>
+                <h2 style={{ margin: 0, fontSize: 17 }}>
+                  👥 Manage {isManualView ? "Manual Carvers" : "CNC Vendors"}
+                </h2>
                 <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>
                   Add, rename, deactivate or delete vendors without leaving the
-                  carving page.
+                  carving page. Use the <strong>CNC / Manual</strong> toggle to
+                  switch the list.
                 </p>
               </div>
               <button
@@ -158,10 +170,11 @@ export function VendorsManagerPeek({ vendors }: { vendors: VendorRow[] }) {
 
             {/* Body */}
             <div style={{ flex: 1, overflowY: "auto", padding: "14px 18px 18px", display: "flex", flexDirection: "column", gap: 16 }}>
-              {/* Add vendor */}
-              <AddVendorRow />
+              {/* Add vendor — the CNC/Manual toggle here also filters
+                  the list below (lifted state). */}
+              <AddVendorRow vendorType={vendorType} setVendorType={setVendorType} />
 
-              {/* Vendor list */}
+              {/* Vendor list (filtered to the selected type) */}
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 <div
                   style={{
@@ -172,7 +185,8 @@ export function VendorsManagerPeek({ vendors }: { vendors: VendorRow[] }) {
                     letterSpacing: "0.06em",
                   }}
                 >
-                  {sorted.length} vendor{sorted.length !== 1 ? "s" : ""}
+                  {sorted.length} {isManualView ? "manual carver" : "CNC vendor"}
+                  {sorted.length !== 1 ? "s" : ""}
                 </div>
                 {sorted.length === 0 ? (
                   <div
@@ -185,7 +199,8 @@ export function VendorsManagerPeek({ vendors }: { vendors: VendorRow[] }) {
                       borderRadius: 8,
                     }}
                   >
-                    No CNC vendors yet. Add one above to get started.
+                    No {isManualView ? "manual carvers" : "CNC vendors"} yet. Add
+                    one above to get started.
                   </div>
                 ) : (
                   sorted.map((v) => <VendorRowCard key={v.id} v={v} />)
@@ -201,15 +216,16 @@ export function VendorsManagerPeek({ vendors }: { vendors: VendorRow[] }) {
 
 // ── Add vendor — inline minimal form ───────────────────────────────
 
-function AddVendorRow() {
+function AddVendorRow({
+  vendorType,
+  setVendorType,
+}: {
+  // Daksh June 2026 — state lifted to the peek so this toggle ALSO
+  // filters the vendor list (press Manual → list shows manual carvers).
+  vendorType: "CNC" | "Manual";
+  setVendorType: (t: "CNC" | "Manual") => void;
+}) {
   const [name, setName] = useState("");
-  // Daksh June 2026 — un-paused Manual vendors in the peek-create
-  // form. Previously this form hardcoded vendor_type="CNC", which
-  // meant Manual carvers (Sharma, JK, etc.) couldn't be added from
-  // the Carving Jobs UI and never appeared in the Assign modal. The
-  // dropdown now lets the head pick CNC or Manual at create time.
-  // (For CNC the machines list is added later from /carving/vendors/[id]).
-  const [vendorType, setVendorType] = useState<"CNC" | "Manual">("CNC");
   const valid = name.trim().length > 0;
   const isManual = vendorType === "Manual";
   const accent = isManual ? "#92400e" : "var(--gold-dark)";

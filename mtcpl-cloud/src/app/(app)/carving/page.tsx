@@ -172,6 +172,7 @@ export default async function CarvingDashboardPage({
   const [
     { data: templesForExternal },
     { data: externalSlabsRaw },
+    { data: assignedExternalRaw },
   ] = canAddExternal
     ? await Promise.all([
         admin
@@ -190,8 +191,23 @@ export default async function CarvingDashboardPage({
           .eq("status", "cut_done")
           .order("temple")
           .order("id"),
+        // Daksh June 2026 — external slabs that have ALREADY moved past
+        // unassigned (assigned / carving / done / dispatched). They're
+        // not lost — they're in the carving flow — but the panel now
+        // shows them read-only so the user can confirm what they added.
+        // External = source_block_id IS NULL; "assigned" = any post-cut
+        // status other than cut_done.
+        admin
+          .from("slab_requirements")
+          .select(
+            "id, temple, stone, length_ft, width_ft, thickness_ft, label, status, updated_at",
+          )
+          .is("source_block_id", null)
+          .in("status", ["carving_assigned", "carving_in_progress", "completed", "dispatched", "rejected"])
+          .order("updated_at", { ascending: false })
+          .limit(200),
       ])
-    : [{ data: null }, { data: null }];
+    : [{ data: null }, { data: null }, { data: null }];
   const externalSlabsForPanel: ExternalSlab[] = (
     (externalSlabsRaw ?? []) as Array<{
       id: string;
@@ -220,6 +236,29 @@ export default async function CarvingDashboardPage({
     quality: s.quality,
     priority: s.priority === true,
     batch_id: s.batch_id,
+  }));
+
+  // Read-only "already assigned" external slabs for the panel.
+  const assignedExternalSlabs = (
+    (assignedExternalRaw ?? []) as Array<{
+      id: string;
+      temple: string;
+      stone: string | null;
+      length_ft: number | string;
+      width_ft: number | string;
+      thickness_ft: number | string;
+      label: string | null;
+      status: string;
+    }>
+  ).map((s) => ({
+    id: s.id,
+    temple: s.temple,
+    stone: s.stone ?? "",
+    length_ft: Number(s.length_ft) || 0,
+    width_ft: Number(s.width_ft) || 0,
+    thickness_ft: Number(s.thickness_ft) || 0,
+    label: s.label,
+    status: s.status,
   }));
 
   // Enrich jobs with temple + slab label — job rows on carving_items
@@ -344,6 +383,9 @@ export default async function CarvingDashboardPage({
     return {
       id: v.id,
       name: v.name,
+      // Mig 091 follow-on — carry the type so the Manage Vendors peek
+      // can filter its list by the CNC / Manual toggle.
+      vendor_type: (v.vendor_type === "Manual" ? "Manual" : "CNC") as "CNC" | "Manual",
       is_active: v.is_active,
       machines: counts.total,
       busy: counts.carving,
@@ -446,6 +488,7 @@ export default async function CarvingDashboardPage({
               }>}
               stoneTypes={(stoneTypes ?? []) as Array<{ id?: string; name: string }>}
               externalSlabs={externalSlabsForPanel}
+              assignedExternalSlabs={assignedExternalSlabs}
             />
           )}
           {/* Mig 081 follow-on (Daksh) — Manage Vendors button gated.

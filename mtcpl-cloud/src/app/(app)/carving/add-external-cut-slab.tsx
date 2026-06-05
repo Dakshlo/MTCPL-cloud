@@ -52,14 +52,30 @@ export type ExternalSlab = {
   batch_id: string | null;
 };
 
+/** Mig 091 follow-on — an external slab that has already been assigned
+ *  (moved past unassigned into the carving flow). Shown read-only in
+ *  the panel so the user can see previously-added slabs aren't lost. */
+export type AssignedExternalSlab = {
+  id: string;
+  temple: string;
+  stone: string;
+  length_ft: number;
+  width_ft: number;
+  thickness_ft: number;
+  label: string | null;
+  status: string;
+};
+
 export function ExternalCutSlabsPanel({
   temples,
   stoneTypes,
   externalSlabs,
+  assignedExternalSlabs = [],
 }: {
   temples: Temple[];
   stoneTypes: StoneType[];
   externalSlabs: ExternalSlab[];
+  assignedExternalSlabs?: AssignedExternalSlab[];
 }) {
   const [open, setOpen] = useState(false);
   const totalCount = externalSlabs.length;
@@ -109,6 +125,7 @@ export function ExternalCutSlabsPanel({
           temples={temples}
           stoneTypes={stoneTypes}
           externalSlabs={externalSlabs}
+          assignedExternalSlabs={assignedExternalSlabs}
           onClose={() => setOpen(false)}
         />
       )}
@@ -120,11 +137,13 @@ function ExternalCutSlabsModal({
   temples,
   stoneTypes,
   externalSlabs,
+  assignedExternalSlabs,
   onClose,
 }: {
   temples: Temple[];
   stoneTypes: StoneType[];
   externalSlabs: ExternalSlab[];
+  assignedExternalSlabs: AssignedExternalSlab[];
   onClose: () => void;
 }) {
   const [showAddForm, setShowAddForm] = useState(externalSlabs.length === 0);
@@ -317,6 +336,74 @@ function ExternalCutSlabsModal({
                 />
               ))}
             </div>
+          )}
+
+          {/* Mig 091 follow-on — read-only list of external slabs the
+              user added earlier that have ALREADY been assigned. They
+              live in the carving flow now (Active tab etc.); shown here
+              so "where did my added slabs go?" has a clear answer. */}
+          {assignedExternalSlabs.length > 0 && (
+            <details style={{ marginTop: 18 }}>
+              <summary
+                style={{
+                  cursor: "pointer",
+                  fontSize: 12,
+                  fontWeight: 800,
+                  color: "var(--muted)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                  padding: "8px 0",
+                  userSelect: "none",
+                }}
+              >
+                📤 Previously added · already assigned ({assignedExternalSlabs.length})
+              </summary>
+              <p style={{ fontSize: 11, color: "var(--muted)", margin: "0 0 8px" }}>
+                These external slabs were added here and have since been assigned —
+                they&apos;re now in the carving flow (see the Active tab). Read-only.
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {assignedExternalSlabs.map((s) => (
+                  <div
+                    key={s.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      padding: "8px 12px",
+                      background: "var(--surface-alt)",
+                      border: "1px solid var(--border)",
+                      borderRadius: 8,
+                      fontSize: 12,
+                      flexWrap: "wrap",
+                      opacity: 0.92,
+                    }}
+                  >
+                    <strong style={{ color: "var(--text)" }}>{s.label || "(no label)"}</strong>
+                    <span style={{ color: "var(--muted)" }}>{s.temple}</span>
+                    <span style={{ color: "var(--muted)", fontFamily: "ui-monospace, monospace" }}>
+                      {s.length_ft}×{s.width_ft}×{s.thickness_ft}″
+                    </span>
+                    {s.stone && <span style={{ color: "var(--muted)" }}>{s.stone}</span>}
+                    <span
+                      style={{
+                        marginLeft: "auto",
+                        fontSize: 10,
+                        fontWeight: 800,
+                        padding: "2px 8px",
+                        borderRadius: 4,
+                        background: "rgba(22,163,74,0.12)",
+                        color: "#15803d",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.04em",
+                      }}
+                    >
+                      {s.status.replace(/_/g, " ")}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </details>
           )}
         </div>
       </div>
