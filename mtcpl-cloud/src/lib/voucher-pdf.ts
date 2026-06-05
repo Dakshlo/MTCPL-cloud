@@ -1,26 +1,28 @@
 // ──────────────────────────────────────────────────────────────────
-// Payment voucher PDF generator
+// Payment voucher PDF generator — letterhead edition
 // ──────────────────────────────────────────────────────────────────
-// Single-page A4 PDF built with pdf-lib. Mirrors the on-screen
-// voucher (src/app/(app)/accounts/payments/[id]/voucher/voucher-view.tsx)
-// layout so a vendor opening the emailed PDF sees the same thing
-// the accountant sees inside MTCPL Cloud.
+// Single-page Letter-size PDF built with pdf-lib. The MTCPL printed
+// letterhead (logo top-left, lotus watermark, footer with address +
+// contact info) is used as the page background — voucher content
+// is drawn into the safe area between the letterhead's logo and
+// its footer.
 //
-// Layout (matches on-screen voucher):
-//   • Logo centred at top
-//   • Company name + address (centred)
-//   • Horizontal divider
-//   • "PAYMENT VOUCHER" title (centred, larger)
+// The vendor opening the emailed PDF sees the EXACT same look as
+// MTCPL's printed letterhead, with the payment details neatly
+// dropped into it.
+//
+// Layout (sitting on letterhead):
+//   • Letterhead chrome (logo top-left + divider + lotus watermark
+//     + footer) comes from public/letterhead.pdf — drawn first
+//   • "PAYMENT VOUCHER" title (centred, just below letterhead logo)
 //   • Two-column label : value list (with yellow-highlight boxes
 //     around Token / UTR / Amount)
 //   • Salutation paragraph
 //   • Bill Description box (cream background, bordered)
 //   • Two-column signature blocks (PREPARED BY + AUTHORISED SIGNATORY)
-//   • Footer note (computer-generated, generation timestamp)
+//   • Tiny "computer-generated" note above the letterhead footer
 //
-// Logo: embedded from /public/MTCPL-Final-logo-2 copy 2.png at
-// build time. Loaded via fs in node runtime — Vercel bundles
-// /public into the serverless function so this works there too.
+// Letterhead: read from /public/letterhead.pdf at build time.
 
 import {
   PDFDocument,
@@ -64,11 +66,15 @@ export type VoucherPdfInput = {
   amountInWords: string;
 };
 
-const A4_WIDTH = 595.28;
-const A4_HEIGHT = 841.89;
+// Letter — matches the source letterhead PDF (612 x 792 pt).
+const A4_WIDTH = 612;
+const A4_HEIGHT = 792;
 const MARGIN_X = 50;
-const MARGIN_TOP = 36;
-const MARGIN_BOTTOM = 36;
+// MARGIN_TOP starts just below the letterhead's logo + horizontal
+// accent line. MARGIN_BOTTOM keeps clear of the letterhead's footer
+// (address + phones + website).
+const MARGIN_TOP = 140;
+const MARGIN_BOTTOM = 95;
 
 // Colours sampled from the on-screen voucher
 const COLOR_TEXT = rgb(0.067, 0.067, 0.067); // #111
@@ -190,6 +196,24 @@ function wrapText(
   return lines;
 }
 
+/** Read the MTCPL letterhead PDF from /public. Cached at module level
+ *  so multiple PDFs in the same serverless invocation share the
+ *  embed. Returns null if the file is unreadable — voucher falls
+ *  back to drawing a plain text header in that case. */
+let cachedLetterheadBytes: Uint8Array | null = null;
+let letterheadLoadAttempted = false;
+async function loadLetterheadBytes(): Promise<Uint8Array | null> {
+  if (letterheadLoadAttempted) return cachedLetterheadBytes;
+  letterheadLoadAttempted = true;
+  try {
+    const lhPath = path.join(process.cwd(), "public", "letterhead.pdf");
+    cachedLetterheadBytes = await readFile(lhPath);
+  } catch (e) {
+    console.warn("[voucher-pdf] letterhead not loaded", e);
+  }
+  return cachedLetterheadBytes;
+}
+
 /** Read the company logo PNG from /public. Cached at module level
  *  so multiple PDFs in the same serverless invocation share the
  *  embed. Returns null if the file is unreadable (logo is optional
@@ -282,77 +306,112 @@ export async function buildVoucherPdf(rawInput: VoucherPdfInput): Promise<Uint8A
   const fontMono = await doc.embedFont(StandardFonts.Courier);
   const fontMonoBold = await doc.embedFont(StandardFonts.CourierBold);
 
-  // Try to embed logo (optional — voucher still renders without it).
-  let logoImage: PDFImage | null = null;
-  const logoBytes = await loadLogoBytes();
-  if (logoBytes) {
+  // ── Letterhead background ────────────────────────────────────────
+  // Embed the MTCPL letterhead PDF's first page and drop it on the
+  // voucher page as a background. The voucher content then renders
+  // on top, sitting in the safe area between the letterhead's logo
+  // (top) and footer (bottom). If the letterhead can't be loaded
+  // for any reason we fall back to drawing a plain text header so
+  // the voucher still functions — never blocking a real payment.
+  let letterheadOk = false;
+  const letterheadBytes = await loadLetterheadBytes();
+  if (letterheadBytes) {
     try {
-      logoImage = await doc.embedPng(logoBytes);
+      const [embeddedPage] = await doc.embedPdf(letterheadBytes, [0]);
+      page.drawPage(embeddedPage, {
+        x: 0,
+        y: 0,
+        width: A4_WIDTH,
+        height: A4_HEIGHT,
+      });
+      letterheadOk = true;
     } catch (e) {
-      console.warn("[voucher-pdf] embedPng failed", e);
+      console.warn("[voucher-pdf] embedPdf(letterhead) failed", e);
     }
   }
 
   let y = A4_HEIGHT - MARGIN_TOP;
 
-  // ── Logo (centred at top) ────────────────────────────────────────
-  if (logoImage) {
-    const logoHeight = 56;
-    const aspect = logoImage.width / logoImage.height;
-    const logoWidth = logoHeight * aspect;
-    page.drawImage(logoImage, {
-      x: (A4_WIDTH - logoWidth) / 2,
-      y: y - logoHeight,
-      width: logoWidth,
-      height: logoHeight,
+  if (!letterheadOk) {
+    // Fallback: draw a plain text header where the letterhead would
+    // have been — keeps the voucher legal-looking even when the
+    // letterhead PDF is unreadable.
+    let logoImage: PDFImage | null = null;
+    const logoBytes = await loadLogoBytes();
+    if (logoBytes) {
+      try {
+        logoImage = await doc.embedPng(logoBytes);
+      } catch (e) {
+        console.warn("[voucher-pdf] embedPng fallback failed", e);
+      }
+    }
+    let fy = A4_HEIGHT - 36;
+    if (logoImage) {
+      const logoHeight = 56;
+      const aspect = logoImage.width / logoImage.height;
+      const logoWidth = logoHeight * aspect;
+      page.drawImage(logoImage, {
+        x: (A4_WIDTH - logoWidth) / 2,
+        y: fy - logoHeight,
+        width: logoWidth,
+        height: logoHeight,
+      });
+      fy -= logoHeight + 8;
+    }
+    const nameSize = 13;
+    const nameWidth = fontBold.widthOfTextAtSize(input.company.name, nameSize);
+    page.drawText(input.company.name, {
+      x: (A4_WIDTH - nameWidth) / 2,
+      y: fy,
+      size: nameSize,
+      font: fontBold,
+      color: COLOR_TEXT,
     });
-    y -= logoHeight + 8;
-  }
-
-  // ── Company name + address (centred) ─────────────────────────────
-  const nameSize = 13;
-  const nameWidth = fontBold.widthOfTextAtSize(input.company.name, nameSize);
-  page.drawText(input.company.name, {
-    x: (A4_WIDTH - nameWidth) / 2,
-    y,
-    size: nameSize,
-    font: fontBold,
-    color: COLOR_TEXT,
-  });
-  y -= 16;
-  for (const addrLine of input.company.addressLines) {
-    const w = fontReg.widthOfTextAtSize(addrLine, 9.5);
-    page.drawText(addrLine, {
-      x: (A4_WIDTH - w) / 2,
-      y,
-      size: 9.5,
-      font: fontReg,
-      color: COLOR_MUTED,
+    fy -= 16;
+    for (const addrLine of input.company.addressLines) {
+      const w = fontReg.widthOfTextAtSize(addrLine, 9.5);
+      page.drawText(addrLine, {
+        x: (A4_WIDTH - w) / 2,
+        y: fy,
+        size: 9.5,
+        font: fontReg,
+        color: COLOR_MUTED,
+      });
+      fy -= 12;
+    }
+    fy -= 8;
+    page.drawLine({
+      start: { x: MARGIN_X, y: fy },
+      end: { x: A4_WIDTH - MARGIN_X, y: fy },
+      thickness: 1.2,
+      color: COLOR_DIVIDER,
     });
-    y -= 12;
+    y = fy - 22;
   }
-  // Divider
-  y -= 8;
-  page.drawLine({
-    start: { x: MARGIN_X, y },
-    end: { x: A4_WIDTH - MARGIN_X, y },
-    thickness: 1.2,
-    color: COLOR_DIVIDER,
-  });
-  y -= 22;
 
   // ── "PAYMENT VOUCHER" title (centred) ────────────────────────────
   const title = "PAYMENT VOUCHER";
-  const titleSize = 12.5;
+  const titleSize = 13;
   const titleWidth = fontBold.widthOfTextAtSize(title, titleSize);
+  // Light gold backing for the title pill so it pops against the
+  // letterhead's cream/white background without looking heavy.
+  const titlePadX = 14;
+  const titlePadY = 5;
+  page.drawRectangle({
+    x: (A4_WIDTH - titleWidth) / 2 - titlePadX,
+    y: y - titlePadY - 1,
+    width: titleWidth + titlePadX * 2,
+    height: titleSize + titlePadY * 2,
+    color: rgb(0.722, 0.451, 0.2),  // MTCPL gold-dark (#b87333)
+  });
   page.drawText(title, {
     x: (A4_WIDTH - titleWidth) / 2,
     y,
     size: titleSize,
     font: fontBold,
-    color: COLOR_TEXT,
+    color: rgb(1, 1, 1),
   });
-  y -= 26;
+  y -= titleSize + titlePadY * 2 + 16;
 
   // ── Field list ───────────────────────────────────────────────────
   // Lays out label : value pairs in a single column with consistent
@@ -594,27 +653,20 @@ export async function buildVoucherPdf(rawInput: VoucherPdfInput): Promise<Uint8A
     color: COLOR_TEXT,
   });
 
-  // ── Footer ───────────────────────────────────────────────────────
-  page.drawLine({
-    start: { x: MARGIN_X, y: MARGIN_BOTTOM + 24 },
-    end: { x: A4_WIDTH - MARGIN_X, y: MARGIN_BOTTOM + 24 },
-    thickness: 0.3,
-    color: COLOR_DESC_BORDER,
-  });
+  // ── Tiny "computer-generated" note ──────────────────────────────
+  // Sits just above the letterhead's own footer. The full divider
+  // line + "this is a computer-generated…" footer from the old
+  // template is gone — the letterhead's address-and-contact footer
+  // takes that role now.
   const generatedAt = fmtDateIST(new Date().toISOString(), "long");
-  const footer = `This is a computer-generated voucher and does not require a physical signature unless otherwise marked above. Voucher generated ${generatedAt}.`;
-  const footerLines = wrapText(footer, fontIta, 8, A4_WIDTH - 2 * MARGIN_X);
-  let footerY = MARGIN_BOTTOM + 12;
-  for (let i = footerLines.length - 1; i >= 0; i--) {
-    page.drawText(footerLines[i], {
-      x: MARGIN_X,
-      y: footerY,
-      size: 8,
-      font: fontIta,
-      color: COLOR_MUTED,
-    });
-    footerY -= 10;
-  }
+  const footer = `Computer-generated voucher  ·  ${generatedAt}`;
+  page.drawText(footer, {
+    x: MARGIN_X,
+    y: MARGIN_BOTTOM + 6,
+    size: 7.5,
+    font: fontIta,
+    color: COLOR_MUTED,
+  });
 
   return await doc.save();
 }

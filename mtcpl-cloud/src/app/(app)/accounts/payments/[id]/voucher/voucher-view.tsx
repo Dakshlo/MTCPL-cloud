@@ -83,18 +83,57 @@ export function VoucherView({
         @media print {
           .voucher-screen-chrome { display: none !important; }
           body, .page-content { background: #fff !important; }
-          .voucher-page { box-shadow: none !important; margin: 0 !important; padding: 24mm 20mm !important; max-width: none !important; }
+          .voucher-page { box-shadow: none !important; margin: 0 !important; padding: 18mm 16mm !important; max-width: none !important; border: none !important; }
         }
         .voucher-page {
           background: #fff;
           color: #111;
-          max-width: 780px;
+          max-width: 820px;
           margin: 0 auto;
-          padding: 28px 36px 36px;
+          padding: 32px 40px 40px;
           border: 1px solid #d8d4c7;
           border-radius: 8px;
           box-shadow: 0 2px 12px rgba(0,0,0,0.06);
           font-family: ui-sans-serif, system-ui, "Helvetica Neue", Arial, sans-serif;
+          position: relative;
+        }
+        /* Letterhead chrome — logo top-left + gold accent line. */
+        .voucher-letterhead-header {
+          display: flex;
+          align-items: center;
+          padding-bottom: 14px;
+          border-bottom: 1px solid #222;
+          margin-bottom: 0;
+        }
+        .voucher-letterhead-header img {
+          height: 56px;
+          width: auto;
+        }
+        .voucher-title-pill {
+          display: inline-block;
+          padding: 7px 18px;
+          background: var(--gold-dark, #b87333);
+          color: #fff;
+          font-size: 13px;
+          font-weight: 800;
+          letter-spacing: 0.08em;
+          border-radius: 4px;
+        }
+        /* Letterhead footer — address + phones + websites. */
+        .voucher-letterhead-footer {
+          margin-top: 28px;
+          padding-top: 10px;
+          border-top: 1px solid #222;
+          text-align: center;
+          font-size: 10.5px;
+          color: #555;
+          line-height: 1.55;
+        }
+        .voucher-letterhead-footer .gen-note {
+          font-size: 9px;
+          font-style: italic;
+          color: #888;
+          margin-top: 6px;
         }
         .voucher-kv { display: grid; grid-template-columns: 200px auto 1fr; gap: 6px 12px; font-size: 13px; }
         .voucher-kv dt { color: #555; font-weight: 600; }
@@ -145,44 +184,18 @@ export function VoucherView({
       </div>
 
       <article className="voucher-page">
-        {/* Company header */}
-        <header
-          style={{
-            textAlign: "center",
-            paddingBottom: 14,
-            borderBottom: "2px solid #222",
-            marginBottom: 18,
-          }}
-        >
-          <h1
-            style={{
-              margin: 0,
-              fontSize: 18,
-              fontWeight: 800,
-              letterSpacing: "0.02em",
-            }}
-          >
-            {COMPANY.name}
-          </h1>
-          {COMPANY.addressLines.map((l) => (
-            <div key={l} style={{ fontSize: 12, color: "#444", marginTop: 2 }}>
-              {l}
-            </div>
-          ))}
+        {/* Letterhead chrome — logo top-left + dark accent line.
+            Mirrors the printed MTCPL letterhead so the on-screen and
+            emailed PDF feel like the same document. */}
+        <header className="voucher-letterhead-header">
+          <img src="/logo-dark.png" alt="MTCPL" />
         </header>
 
-        <h2
-          style={{
-            margin: "0 0 18px",
-            fontSize: 14,
-            fontWeight: 800,
-            letterSpacing: "0.08em",
-            textAlign: "center",
-            color: "#222",
-          }}
-        >
-          PAYMENT VOUCHER
-        </h2>
+        {/* "PAYMENT VOUCHER" title as a gold pill, sitting just below
+            the letterhead logo line. */}
+        <div style={{ textAlign: "center", margin: "20px 0 22px" }}>
+          <span className="voucher-title-pill">PAYMENT VOUCHER</span>
+        </div>
 
         {/* Two-column key/value list (HDFC-style) */}
         <dl className="voucher-kv">
@@ -343,26 +356,25 @@ export function VoucherView({
           <SignatureBlock label="Authorised signatory" name="For " companySuffix />
         </div>
 
-        <footer
-          style={{
-            marginTop: 28,
-            paddingTop: 10,
-            borderTop: "1px solid #ddd",
-            fontSize: 10,
-            color: "#777",
-            textAlign: "center",
-          }}
-        >
-          This is a computer-generated voucher and does not require a physical
-          signature unless otherwise marked above. Voucher generated{" "}
-          {new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata",
-            day: "2-digit",
-            month: "short",
-            year: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
-          .
+        {/* Letterhead-style footer with address + phones + websites
+            (matches the printed letterhead PDF), plus a tiny
+            computer-generated note underneath. */}
+        <footer className="voucher-letterhead-footer">
+          <div>
+            Mateshwari Temples Construction Pvt. Ltd. · Nh-27, Opposite Ajari Gate, Pindwara, Dist-Sirohi, Rajasthan
+          </div>
+          <div>
+            ☎ +91 9414152740 / +91 9414374979 · 🌐 Mtcpl.org · mateshwaritemples.com
+          </div>
+          <div className="gen-note">
+            Computer-generated voucher · {new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata",
+              day: "2-digit",
+              month: "short",
+              year: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+          </div>
         </footer>
       </article>
     </>
