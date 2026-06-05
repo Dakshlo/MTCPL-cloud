@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { slabSearchMatch } from "@/lib/slab-search";
 
 type Slab = {
   id: string;
@@ -95,11 +96,12 @@ export function SlabSelector({
     else if (qualityFilter === "B") rows = rows.filter((s) => s.quality === "B");
     else if (qualityFilter === "none") rows = rows.filter((s) => !s.quality);
     if (q.trim()) {
-      const lower = q.toLowerCase();
       rows = rows.filter((s) =>
-        s.id.toLowerCase().includes(lower) ||
-        s.label.toLowerCase().includes(lower) ||
-        s.temple.toLowerCase().includes(lower),
+        slabSearchMatch(
+          q,
+          { length_ft: s.length_ft, width_ft: s.width_ft, thickness_ft: s.thickness_ft },
+          [s.id, s.label, s.temple, s.stone],
+        ),
       );
     }
     // Canonicalise on insert — `"PinkStone"` and `"PinkStone "` (trailing
@@ -123,11 +125,12 @@ export function SlabSelector({
     else if (qualityFilter === "B") rows = rows.filter((s) => s.quality === "B");
     else if (qualityFilter === "none") rows = rows.filter((s) => !s.quality);
     if (q.trim()) {
-      const lower = q.toLowerCase();
       rows = rows.filter((s) =>
-        s.id.toLowerCase().includes(lower) ||
-        s.label.toLowerCase().includes(lower) ||
-        s.temple.toLowerCase().includes(lower),
+        slabSearchMatch(
+          q,
+          { length_ft: s.length_ft, width_ft: s.width_ft, thickness_ft: s.thickness_ft },
+          [s.id, s.label, s.temple, s.stone],
+        ),
       );
     }
     const set = new Set<string>();
@@ -203,11 +206,12 @@ export function SlabSelector({
   function applyDropdowns(rows: Slab[]): Slab[] {
     let out = rows;
     if (q.trim()) {
-      const lower = q.toLowerCase();
       out = out.filter(s =>
-        s.id.toLowerCase().includes(lower) ||
-        s.label.toLowerCase().includes(lower) ||
-        s.temple.toLowerCase().includes(lower)
+        slabSearchMatch(
+          q,
+          { length_ft: s.length_ft, width_ft: s.width_ft, thickness_ft: s.thickness_ft },
+          [s.id, s.label, s.temple, s.stone],
+        )
       );
     }
     if (stoneFilter !== "all") out = out.filter(s => eqNorm(s.stone, stoneFilter));
@@ -439,7 +443,7 @@ export function SlabSelector({
             <input
               value={q}
               onChange={e => setQ(e.target.value)}
-              placeholder="Code, label, temple…"
+              placeholder="Code, label, temple, or size (e.g. 53x29x14)…"
             />
           </label>
 

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
+import { slabSearchMatch } from "@/lib/slab-search";
 
 /** Mig follow-on (Daksh, May 2026) — derive the Month dropdown's
  *  current value from the Cut From / Cut To range. Returns the
@@ -164,13 +165,12 @@ export function ReadySlabsClient({
     else if (qualityFilter === "B") rows = rows.filter((s) => s.quality === "B");
     else if (qualityFilter === "none") rows = rows.filter((s) => !s.quality);
     if (search) {
-      const lower = search.toLowerCase();
       rows = rows.filter((s) =>
-        s.id.toLowerCase().includes(lower) ||
-        s.label.toLowerCase().includes(lower) ||
-        s.temple.toLowerCase().includes(lower) ||
-        (s.stone ?? "").toLowerCase().includes(lower) ||
-        (s.source_block_id ?? "").toLowerCase().includes(lower),
+        slabSearchMatch(
+          search,
+          { length_ft: s.length_ft, width_ft: s.width_ft, thickness_ft: s.thickness_ft },
+          [s.id, s.label, s.temple, s.stone, s.source_block_id],
+        ),
       );
     }
     const set = new Set<string>();
@@ -185,13 +185,12 @@ export function ReadySlabsClient({
     else if (qualityFilter === "B") rows = rows.filter((s) => s.quality === "B");
     else if (qualityFilter === "none") rows = rows.filter((s) => !s.quality);
     if (search) {
-      const lower = search.toLowerCase();
       rows = rows.filter((s) =>
-        s.id.toLowerCase().includes(lower) ||
-        s.label.toLowerCase().includes(lower) ||
-        s.temple.toLowerCase().includes(lower) ||
-        (s.stone ?? "").toLowerCase().includes(lower) ||
-        (s.source_block_id ?? "").toLowerCase().includes(lower),
+        slabSearchMatch(
+          search,
+          { length_ft: s.length_ft, width_ft: s.width_ft, thickness_ft: s.thickness_ft },
+          [s.id, s.label, s.temple, s.stone, s.source_block_id],
+        ),
       );
     }
     const set = new Set<string>();
@@ -227,13 +226,12 @@ export function ReadySlabsClient({
       rows = rows.filter((s) => s.status === statusFilter);
     }
     if (search) {
-      const q = search.toLowerCase();
       rows = rows.filter(s =>
-        s.id.toLowerCase().includes(q) ||
-        s.label.toLowerCase().includes(q) ||
-        s.temple.toLowerCase().includes(q) ||
-        (s.stone ?? "").toLowerCase().includes(q) ||
-        (s.source_block_id ?? "").toLowerCase().includes(q)
+        slabSearchMatch(
+          search,
+          { length_ft: s.length_ft, width_ft: s.width_ft, thickness_ft: s.thickness_ft },
+          [s.id, s.label, s.temple, s.stone, s.source_block_id],
+        )
       );
     }
     if (dateFrom) rows = rows.filter(s => s.updated_at && s.updated_at >= dateFrom);
@@ -436,7 +434,7 @@ export function ReadySlabsClient({
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Code, label, temple, stone, block…"
+              placeholder="Code, label, temple, stone, block, or size (e.g. 53x29x14)…"
             />
           </label>
 

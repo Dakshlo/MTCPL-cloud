@@ -33,18 +33,49 @@ export default async function ReadyForCarvingPage() {
 
   const admin = createAdminSupabaseClient();
 
-  const [{ data, error }, { data: stoneTypeRows }] = await Promise.all([
-    admin
-      .from("slab_requirements")
-      .select(
-        "id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority, created_at, updated_at, source_block_id",
-      )
-      .in("status", POST_CUT_STATUSES)
-      .order("updated_at", { ascending: false }),
+  // Paginated fetch — PostgREST caps a single query at 1000 rows.
+  // Ready Sizes Stock now holds more than that, so walk 1000-row
+  // pages until exhausted (Daksh June 2026). Same as Total Ready Sizes.
+  type ReadySlabRow = {
+    id: string;
+    label: string;
+    temple: string;
+    stone: string | null;
+    quality: string | null;
+    length_ft: number;
+    width_ft: number;
+    thickness_ft: number;
+    status: string;
+    priority: boolean;
+    created_at: string | null;
+    updated_at: string | null;
+    source_block_id: string | null;
+  };
+  async function fetchAllReadySlabs(): Promise<ReadySlabRow[]> {
+    const PAGE = 1000;
+    const MAX = 50000;
+    const out: ReadySlabRow[] = [];
+    for (let offset = 0; offset < MAX; offset += PAGE) {
+      const { data, error } = await admin
+        .from("slab_requirements")
+        .select(
+          "id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority, created_at, updated_at, source_block_id",
+        )
+        .in("status", POST_CUT_STATUSES)
+        .order("updated_at", { ascending: false })
+        .range(offset, offset + PAGE - 1);
+      if (error) throw new Error(error.message);
+      if (!data || data.length === 0) break;
+      out.push(...(data as ReadySlabRow[]));
+      if (data.length < PAGE) break;
+    }
+    return out;
+  }
+
+  const [data, { data: stoneTypeRows }] = await Promise.all([
+    fetchAllReadySlabs(),
     admin.from("stone_types").select("name").order("name"),
   ]);
-
-  if (error) throw new Error(error.message);
 
   const stoneNames = (stoneTypeRows ?? []).map((s) => s.name);
   const templeNames = [...new Set((data ?? []).map((s) => s.temple))].sort();
