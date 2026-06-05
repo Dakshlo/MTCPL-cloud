@@ -1438,24 +1438,19 @@ function ConfirmedRow({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // Mig 090 follow-on (Daksh) — replace the browser confirm() with our
+  // own in-app modal + gold spinning-logo feedback while it sends.
+  const [confirmBackToDue, setConfirmBackToDue] = useState(false);
 
   // Mig 090 — two exit paths depending on whether the HDFC file has
   // been downloaded (= payment sent to the bank):
-  //   not downloaded → "Back to due" (accountant, with confirm).
+  //   not downloaded → "Back to due" (accountant, in-app confirm).
   //   downloaded     → "Mark paid" + "Bank declined" (owner approval).
   const downloaded = row.hdfcCsvDownloaded;
   const declinePending = row.bankDeclineStatus === "pending";
 
   function runBackToDue() {
-    if (
-      !window.confirm(
-        `Send ${row.vendorName}'s payment (₹${row.proposedAmount.toLocaleString(
-          "en-IN",
-        )}, bill ${row.billToken}) back to Due Bills?\n\nThis only works because the HDFC file hasn't been downloaded yet.`,
-      )
-    ) {
-      return;
-    }
+    setConfirmBackToDue(false);
     setError(null);
     startTransition(async () => {
       const fd = new FormData();
@@ -1468,6 +1463,34 @@ function ConfirmedRow({
   }
 
   return (
+    <>
+      {/* Gold spinning-logo overlay while the back-to-due is sending. */}
+      <FinanceLoadingOverlay show={pending} label="Sending back to due…" />
+
+      {/* In-app confirm (replaces the browser confirm popup). */}
+      {confirmBackToDue && (
+        <ConfirmDialog
+          title="Send back to due?"
+          body={
+            <>
+              Send <strong>{row.vendorName}</strong>&apos;s payment of{" "}
+              <strong>₹{row.proposedAmount.toLocaleString("en-IN")}</strong>{" "}
+              (bill <code style={{ fontFamily: "ui-monospace, monospace" }}>{row.billToken}</code>)
+              back to <strong>Due Bills</strong>?
+              <br />
+              <span style={{ color: "var(--muted)", fontSize: 12 }}>
+                Allowed because the HDFC file hasn&apos;t been downloaded yet —
+                no bank payment has started.
+              </span>
+            </>
+          }
+          confirmLabel="↩ Send back to due"
+          confirmTone="danger"
+          onConfirm={runBackToDue}
+          onCancel={() => setConfirmBackToDue(false)}
+        />
+      )}
+
     <div
       style={{
         background: "#fff",
@@ -1615,7 +1638,7 @@ function ConfirmedRow({
           canMarkPaid && (
             <button
               type="button"
-              onClick={runBackToDue}
+              onClick={() => setConfirmBackToDue(true)}
               disabled={pending}
               style={BUTTON_STYLES.ghost}
               title="No HDFC file downloaded yet — send this payment back to the due-bills list."
@@ -1624,6 +1647,97 @@ function ConfirmedRow({
             </button>
           )
         )}
+      </div>
+    </div>
+    </>
+  );
+}
+
+/** Small in-app confirm dialog (replaces window.confirm so the
+ *  Finance flows stay inside the branded UI). Centered modal with a
+ *  backdrop; Cancel + a tone-coloured confirm button. */
+function ConfirmDialog({
+  title,
+  body,
+  confirmLabel,
+  confirmTone = "primary",
+  onConfirm,
+  onCancel,
+}: {
+  title: string;
+  body: React.ReactNode;
+  confirmLabel: string;
+  confirmTone?: "primary" | "danger";
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div
+      onMouseDown={onCancel}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(15,12,6,0.45)",
+        backdropFilter: "blur(2px)",
+        zIndex: 1200,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+      }}
+    >
+      <div
+        onMouseDown={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        style={{
+          background: "var(--surface)",
+          border: "1px solid var(--border)",
+          borderRadius: 14,
+          boxShadow: "0 18px 60px rgba(0,0,0,0.4)",
+          width: "100%",
+          maxWidth: 420,
+          padding: "20px 22px",
+        }}
+      >
+        <h3 style={{ margin: "0 0 10px", fontSize: 17, fontWeight: 800, color: "var(--text)" }}>
+          {title}
+        </h3>
+        <div style={{ fontSize: 14, color: "var(--text)", lineHeight: 1.55 }}>{body}</div>
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 20 }}>
+          <button
+            type="button"
+            onClick={onCancel}
+            style={{
+              padding: "9px 16px",
+              fontSize: 13,
+              fontWeight: 700,
+              background: "transparent",
+              color: "var(--muted)",
+              border: "1px solid var(--border)",
+              borderRadius: 8,
+              cursor: "pointer",
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            style={{
+              padding: "9px 16px",
+              fontSize: 13,
+              fontWeight: 700,
+              background: confirmTone === "danger" ? "#b91c1c" : "var(--gold)",
+              color: "#fff",
+              border: `1px solid ${confirmTone === "danger" ? "#991b1b" : "var(--gold-dark)"}`,
+              borderRadius: 8,
+              cursor: "pointer",
+            }}
+          >
+            {confirmLabel}
+          </button>
+        </div>
       </div>
     </div>
   );

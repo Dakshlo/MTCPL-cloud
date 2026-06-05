@@ -365,14 +365,9 @@ const navEntries: NavEntry[] = [
     roles: ["accountant", "accountant_star"],
     department: "finance",
   },
-  {
-    // Mig 090 — owner's bank-decline approval queue.
-    href: "/accounts/bank-declines",
-    label: "Bank Declines",
-    icon: "🏦",
-    roles: ["developer", "owner"],
-    department: "finance",
-  },
+  // Mig 090 — Bank Declines is NOT a sidebar item: it already lives in
+  // the topbar Tasks dropdown (owner/dev), so a sidebar entry would be
+  // redundant. (Daksh.)
   {
     href: "/accounts/payments",
     label: "Payment History",

@@ -6,6 +6,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { ACCOUNTS_TOKENS, Money, VendorAvatar } from "../_ui/components";
 
 type ServerResult = { ok: true } | { ok: false; error: string };
@@ -47,6 +48,10 @@ export function BankDeclinesClient({
   approveAction: (formData: FormData) => Promise<ServerResult>;
   rejectAction: (formData: FormData) => Promise<ServerResult>;
 }) {
+  // Daksh — resolved history is hidden behind a top-right toggle so
+  // the page lands focused on what needs action (pending only).
+  const [showResolved, setShowResolved] = useState(false);
+
   return (
     <section style={{ paddingBottom: 32 }}>
       <header
@@ -56,28 +61,149 @@ export function BankDeclinesClient({
           borderRadius: 14,
           padding: "18px 22px",
           marginBottom: 16,
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          gap: 14,
+          flexWrap: "wrap",
         }}
       >
-        <div
+        <div style={{ minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: "var(--muted)",
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+            }}
+          >
+            Finance · Owner approval
+          </div>
+          <h1 style={{ fontSize: 24, fontWeight: 800, margin: "2px 0 4px", color: "var(--text)" }}>
+            🏦 Bank Declines
+          </h1>
+          <p style={{ fontSize: 13, color: "var(--muted)", margin: 0, lineHeight: 1.5 }}>
+            The accountant flagged these already-sent payments as refused by the
+            bank. <strong>Approve</strong> sends the bill back to Due Bills;{" "}
+            <strong>Reject</strong> keeps the payment confirmed.
+          </p>
+        </div>
+        {/* Top-right toggle → reveals the resolved history panel. */}
+        <button
+          type="button"
+          onClick={() => setShowResolved((v) => !v)}
           style={{
-            fontSize: 11,
+            flexShrink: 0,
+            padding: "8px 14px",
+            fontSize: 12,
             fontWeight: 700,
-            color: "var(--muted)",
-            textTransform: "uppercase",
-            letterSpacing: "0.08em",
+            background: showResolved ? "var(--gold-dark)" : "var(--bg)",
+            color: showResolved ? "#fff" : "var(--muted)",
+            border: `1px solid ${showResolved ? "var(--gold-dark)" : "var(--border)"}`,
+            borderRadius: 8,
+            cursor: "pointer",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
           }}
         >
-          Finance · Owner approval
-        </div>
-        <h1 style={{ fontSize: 24, fontWeight: 800, margin: "2px 0 4px", color: "var(--text)" }}>
-          🏦 Bank Declines
-        </h1>
-        <p style={{ fontSize: 13, color: "var(--muted)", margin: 0, lineHeight: 1.5 }}>
-          The accountant flagged these already-sent payments as refused by the
-          bank. <strong>Approve</strong> sends the bill back to Due Bills;{" "}
-          <strong>Reject</strong> keeps the payment confirmed.
-        </p>
+          🗂 Resolved
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 800,
+              padding: "1px 7px",
+              borderRadius: 999,
+              background: showResolved ? "rgba(255,255,255,0.22)" : "var(--surface)",
+              color: showResolved ? "#fff" : "var(--text)",
+              border: showResolved ? "none" : "1px solid var(--border)",
+            }}
+          >
+            {resolved.length}
+          </span>
+        </button>
       </header>
+
+      {/* Resolved history — only when the toggle is on. Shows all the
+          recent approved (→ due) / rejected (kept) decisions. */}
+      {showResolved && (
+        <div
+          style={{
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+            borderRadius: 12,
+            padding: "14px 16px",
+            marginBottom: 16,
+          }}
+        >
+          <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)", margin: "0 0 10px" }}>
+            Recently resolved ({resolved.length})
+          </div>
+          {resolved.length === 0 ? (
+            <div style={{ fontSize: 12, color: "var(--muted)" }}>
+              Nothing resolved yet.
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {resolved.map((r) => (
+                <Link
+                  key={r.paymentId}
+                  href={`/accounts/bills/${r.billId}`}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    padding: "10px 14px",
+                    background: "var(--bg)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 10,
+                    flexWrap: "wrap",
+                    textDecoration: "none",
+                    color: "inherit",
+                  }}
+                  title="Open this bill"
+                >
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 800,
+                      padding: "2px 8px",
+                      borderRadius: 4,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.04em",
+                      background: r.declineStatus === "approved" ? "rgba(22,163,74,0.12)" : "var(--surface-alt)",
+                      color: r.declineStatus === "approved" ? "#15803d" : "var(--muted)",
+                      border: `1px solid ${r.declineStatus === "approved" ? "rgba(22,163,74,0.3)" : "var(--border)"}`,
+                    }}
+                  >
+                    {r.declineStatus === "approved" ? "→ Back to due" : "Kept confirmed"}
+                  </span>
+                  <strong style={{ fontSize: 13 }}>{r.vendorName}</strong>
+                  <code
+                    style={{
+                      fontSize: 11,
+                      fontFamily: "ui-monospace, monospace",
+                      padding: "2px 8px",
+                      background: ACCOUNTS_TOKENS.accentLight,
+                      color: ACCOUNTS_TOKENS.accent,
+                      borderRadius: 4,
+                      fontWeight: 700,
+                    }}
+                  >
+                    {r.billToken}
+                  </code>
+                  <Money value={r.amount} size="small" tone="muted" />
+                  <span style={{ fontSize: 11, color: "var(--muted)", marginLeft: "auto" }}>
+                    {fmtDateTime(r.resolvedAt)}
+                    {r.resolvedByName ? ` · ${r.resolvedByName}` : ""}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Pending queue */}
       <div
@@ -134,67 +260,6 @@ export function BankDeclinesClient({
           ))}
         </div>
       )}
-
-      {/* Resolved history */}
-      {resolved.length > 0 && (
-        <>
-          <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)", margin: "0 0 10px" }}>
-            Recently resolved
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {resolved.map((r) => (
-              <div
-                key={r.paymentId}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 12,
-                  padding: "10px 14px",
-                  background: "var(--surface)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 10,
-                  flexWrap: "wrap",
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 800,
-                    padding: "2px 8px",
-                    borderRadius: 4,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.04em",
-                    background: r.declineStatus === "approved" ? "rgba(22,163,74,0.12)" : "var(--surface-alt)",
-                    color: r.declineStatus === "approved" ? "#15803d" : "var(--muted)",
-                    border: `1px solid ${r.declineStatus === "approved" ? "rgba(22,163,74,0.3)" : "var(--border)"}`,
-                  }}
-                >
-                  {r.declineStatus === "approved" ? "→ Back to due" : "Kept confirmed"}
-                </span>
-                <strong style={{ fontSize: 13 }}>{r.vendorName}</strong>
-                <code
-                  style={{
-                    fontSize: 11,
-                    fontFamily: "ui-monospace, monospace",
-                    padding: "2px 8px",
-                    background: ACCOUNTS_TOKENS.accentLight,
-                    color: ACCOUNTS_TOKENS.accent,
-                    borderRadius: 4,
-                    fontWeight: 700,
-                  }}
-                >
-                  {r.billToken}
-                </code>
-                <Money value={r.amount} size="small" tone="muted" />
-                <span style={{ fontSize: 11, color: "var(--muted)", marginLeft: "auto" }}>
-                  {fmtDateTime(r.resolvedAt)}
-                  {r.resolvedByName ? ` · ${r.resolvedByName}` : ""}
-                </span>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
     </section>
   );
 }
@@ -238,7 +303,21 @@ function PendingCard({
         alignItems: "flex-start",
       }}
     >
-      <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flex: 1, minWidth: 0 }}>
+      {/* Whole info region is a link → opens the bill page. The
+          Approve/Reject buttons are siblings outside this link. */}
+      <Link
+        href={`/accounts/bills/${row.billId}`}
+        style={{
+          display: "flex",
+          gap: 12,
+          alignItems: "flex-start",
+          flex: 1,
+          minWidth: 0,
+          textDecoration: "none",
+          color: "inherit",
+        }}
+        title="Open this bill"
+      >
         <VendorAvatar name={row.vendorName} size={42} />
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 4 }}>
@@ -278,7 +357,7 @@ function PendingCard({
             {row.requestedByName ? ` · ${row.requestedByName}` : ""}
           </p>
         </div>
-      </div>
+      </Link>
 
       <div style={{ textAlign: "right" }}>
         <div style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
