@@ -78,12 +78,36 @@ export function VoucherView({
   return (
     <>
       {/* Print + screen styles. The .voucher-only class hides
-          everything except the voucher itself when printing. */}
+          everything except the voucher itself when printing.
+          Print tightens every vertical margin so the whole voucher
+          (header + KV list + salutation + description + signatures
+          + letterhead footer) lands on a single A4 page — vendors
+          asked for a one-page document, the original split the
+          letterhead footer to page 2. */}
       <style>{`
         @media print {
+          @page { size: A4; margin: 0; }
           .voucher-screen-chrome { display: none !important; }
           body, .page-content { background: #fff !important; }
-          .voucher-page { box-shadow: none !important; margin: 0 !important; padding: 18mm 16mm !important; max-width: none !important; border: none !important; }
+          .voucher-page {
+            box-shadow: none !important;
+            margin: 0 !important;
+            padding: 10mm 14mm !important;
+            max-width: none !important;
+            border: none !important;
+            font-size: 12px !important;
+            page-break-inside: avoid !important;
+          }
+          .voucher-kv { gap: 3px 12px !important; font-size: 11.5px !important; }
+          .voucher-letterhead-header { padding-bottom: 8px !important; }
+          .voucher-title-pill { padding: 5px 14px !important; font-size: 11.5px !important; }
+          .voucher-print-title-wrap { margin: 12px 0 14px !important; }
+          .voucher-salutation { margin: 14px 0 0 !important; font-size: 11.5px !important; line-height: 1.5 !important; }
+          .voucher-description { margin-top: 10px !important; padding: 7px 12px !important; font-size: 11px !important; }
+          .voucher-signatures { margin-top: 22px !important; gap: 28px !important; }
+          .voucher-sig-spacer { margin-bottom: 22px !important; }
+          .voucher-letterhead-footer { margin-top: 14px !important; padding-top: 7px !important; font-size: 9.5px !important; }
+          .voucher-letterhead-footer .gen-note { margin-top: 3px !important; }
         }
         .voucher-page {
           background: #fff;
@@ -193,7 +217,7 @@ export function VoucherView({
 
         {/* "PAYMENT VOUCHER" title as a gold pill, sitting just below
             the letterhead logo line. */}
-        <div style={{ textAlign: "center", margin: "20px 0 22px" }}>
+        <div className="voucher-print-title-wrap" style={{ textAlign: "center", margin: "20px 0 22px" }}>
           <span className="voucher-title-pill">PAYMENT VOUCHER</span>
         </div>
 
@@ -285,6 +309,7 @@ export function VoucherView({
 
         {/* Salutation paragraph (mirrors HDFC's "Dear Sir/Madam …") */}
         <p
+          className="voucher-salutation"
           style={{
             margin: "22px 0 0",
             fontSize: 13,
@@ -316,6 +341,7 @@ export function VoucherView({
         {/* Bill description for reference */}
         {bill.description && (
           <div
+            className="voucher-description"
             style={{
               marginTop: 18,
               padding: "10px 14px",
@@ -345,6 +371,7 @@ export function VoucherView({
 
         {/* Signature line */}
         <div
+          className="voucher-signatures"
           style={{
             marginTop: 56,
             display: "grid",
@@ -424,6 +451,7 @@ function SignatureBlock({
   return (
     <div>
       <div
+        className="voucher-sig-spacer"
         style={{
           fontSize: 10,
           fontWeight: 800,
