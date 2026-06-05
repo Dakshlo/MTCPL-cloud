@@ -366,6 +366,14 @@ const navEntries: NavEntry[] = [
     department: "finance",
   },
   {
+    // Mig 090 — owner's bank-decline approval queue.
+    href: "/accounts/bank-declines",
+    label: "Bank Declines",
+    icon: "🏦",
+    roles: ["developer", "owner"],
+    department: "finance",
+  },
+  {
     href: "/accounts/payments",
     label: "Payment History",
     icon: "🗂️",

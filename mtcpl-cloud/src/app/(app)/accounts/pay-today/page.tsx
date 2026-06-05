@@ -9,11 +9,13 @@ import {
   canMarkPaid,
 } from "@/lib/accounts-permissions";
 import {
-  bankRejectPaymentAction,
   cancelPaymentAction,
   confirmPaymentsAction,
   markPaymentPaidAction,
   retryBankRejectedPaymentAction,
+  // Mig 090 — bank-decline approval flow.
+  sendConfirmedBackToDueAction,
+  requestBankDeclineAction,
 } from "../actions";
 import {
   PayTodayClient,
@@ -43,7 +45,7 @@ export default async function PayTodayPage() {
   const { data: openRowsRaw } = await supabase
     .from("bill_payments")
     .select(
-      "id, bill_id, status, proposed_amount, proposed_by, proposed_at, confirmed_by, confirmed_at, proposal_batch_id, hdfc_csv_downloaded_at, bills(id, token, vendor_bill_no, bill_date, amount_outstanding, amount_total, bill_vendor_id, bill_vendors(id, name, payment_terms_days))",
+      "id, bill_id, status, proposed_amount, proposed_by, proposed_at, confirmed_by, confirmed_at, proposal_batch_id, hdfc_csv_downloaded_at, bank_decline_status, bank_decline_reason, bills(id, token, vendor_bill_no, bill_date, amount_outstanding, amount_total, bill_vendor_id, bill_vendors(id, name, payment_terms_days))",
     )
     .in("status", ["proposed", "confirmed"])
     .order("proposed_at", { ascending: false });
@@ -94,6 +96,10 @@ export default async function PayTodayPage() {
     // HDFC CSV. Excludes the row from the next CSV download +
     // renders a 🔒 badge on the Pay Today card.
     hdfc_csv_downloaded_at: string | null;
+    // Mig 090 — bank-decline approval state ('pending' while awaiting
+    // owner approval). NULL = no decline requested.
+    bank_decline_status: string | null;
+    bank_decline_reason: string | null;
     bills:
       | {
           id: string;
@@ -147,6 +153,12 @@ export default async function PayTodayPage() {
       paymentTermsDays: terms,
       prematureForPayment: terms > 0 && d !== null && d < terms,
       hdfcCsvDownloaded: r.hdfc_csv_downloaded_at != null,
+      bankDeclineStatus: (r.bank_decline_status ?? null) as
+        | "pending"
+        | "approved"
+        | "rejected"
+        | null,
+      bankDeclineReason: r.bank_decline_reason ?? null,
     };
   }
 
@@ -328,8 +340,14 @@ export default async function PayTodayPage() {
         confirmAction={confirmPaymentsAction}
         markPaidAction={markPaymentPaidAction}
         cancelAction={cancelPaymentAction}
-        // Mig 052 — bank-rejected flow.
-        bankRejectAction={bankRejectPaymentAction}
+        // Mig 090 — "Back to due" on a NOT-yet-downloaded confirmed
+        // payment (accountant allowed; no bank money moved).
+        backToDueAction={sendConfirmedBackToDueAction}
+        // Mig 090 — "Bank declined" on a DOWNLOADED row now REQUESTS
+        // owner approval instead of immediately rejecting. Reuses the
+        // existing reason slide-over; the action is the request, not
+        // the old immediate bank-reject.
+        bankRejectAction={requestBankDeclineAction}
         retryBankRejectedAction={retryBankRejectedPaymentAction}
       />
 

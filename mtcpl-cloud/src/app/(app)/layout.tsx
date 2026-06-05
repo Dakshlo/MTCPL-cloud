@@ -315,6 +315,18 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     if (rejErr) return null;
     return count ?? 0;
   }
+  // Mig 090 — Bank Decline approval queue. Owner / developer only —
+  // they approve an accountant's request to bank-decline a payment
+  // that's already in a downloaded HDFC file (→ bill back to due).
+  async function fetchBankDeclineBadge(): Promise<number | null> {
+    if (!canConfirmPayments(profile)) return null;
+    const { count, error: declErr } = await supabase
+      .from("bill_payments")
+      .select("*", { count: "exact", head: true })
+      .eq("bank_decline_status", "pending");
+    if (declErr) return null;
+    return count ?? 0;
+  }
 
   const [
     approvalsBadge,
@@ -327,6 +339,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     awaitingReviewBadge,
     carvingRejectedBadge,
     debitApprovalBadge,
+    bankDeclineBadge,
   ] = await Promise.all([
     fetchApprovalsBadge(),
     fetchBillsAuditBadge(),
@@ -338,6 +351,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     fetchAwaitingReviewBadge(),
     fetchCarvingRejectedBadge(),
     fetchDebitApprovalBadge(),
+    fetchBankDeclineBadge(),
   ]);
 
   return (
@@ -537,6 +551,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               awaitingReviewBadge,
               carvingRejectedBadge,
               debitApprovalBadge,
+              bankDeclineBadge,
             })} />
 
             {/* Mig 078 — Messenger pilot. canUseMessenger is locked
@@ -649,6 +664,9 @@ function buildTopbarTaskItems(counts: {
   /** Mig 085 — pending debit settlements awaiting owner approval.
    *  Owner / developer only; null otherwise. */
   debitApprovalBadge: number | null;
+  /** Mig 090 — pending bank-decline requests awaiting owner approval.
+   *  Owner / developer only; null otherwise. */
+  bankDeclineBadge: number | null;
 }): TopbarTask[] {
   const items: TopbarTask[] = [];
   // Mig 058 follow-on (Daksh) — per-user rejected-bills item.
@@ -761,6 +779,20 @@ function buildTopbarTaskItems(counts: {
       description: "Overpayment debits awaiting your sign-off",
       count: counts.debitApprovalBadge,
       icon: "⇄",
+      department: "finance",
+    });
+  }
+  // Mig 090 — Bank Decline approval (owner / developer only). The
+  // accountant flagged a downloaded payment as refused by the bank;
+  // approving it sends the bill back to due.
+  if (counts.bankDeclineBadge !== null) {
+    items.push({
+      id: "bank-decline-approval",
+      href: "/accounts/bank-declines",
+      label: "Bank Declines",
+      description: "Bank-declined payments awaiting your approval",
+      count: counts.bankDeclineBadge,
+      icon: "🏦",
       department: "finance",
     });
   }

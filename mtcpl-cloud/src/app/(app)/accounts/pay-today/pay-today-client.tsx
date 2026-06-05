@@ -58,6 +58,12 @@ export type PayTodayRow = {
    *  a previous HDFC CSV download. Used to render a 🔒 badge on
    *  the row and to exclude from the "downloadable now" count. */
   hdfcCsvDownloaded: boolean;
+  /** Mig 090 — bank-decline approval state. 'pending' = the
+   *  accountant requested a bank decline and it's awaiting owner
+   *  approval (row shows "Decline in approval", actions hidden).
+   *  NULL = no decline requested. */
+  bankDeclineStatus?: "pending" | "approved" | "rejected" | null;
+  bankDeclineReason?: string | null;
 };
 
 /** Legacy app-level default — only used as a fallback when a vendor
@@ -95,6 +101,7 @@ export function PayTodayClient({
   confirmAction,
   markPaidAction,
   cancelAction,
+  backToDueAction,
   bankRejectAction,
   retryBankRejectedAction,
 }: {
@@ -107,6 +114,10 @@ export function PayTodayClient({
   confirmAction: (formData: FormData) => Promise<ServerResult>;
   markPaidAction: (formData: FormData) => Promise<ServerResult>;
   cancelAction: (formData: FormData) => Promise<ServerResult>;
+  /** Mig 090 — send a NOT-yet-downloaded confirmed payment back to due
+   *  (accountant allowed). Distinct from cancelAction (owner-only,
+   *  still used by the legacy bank-rejected section). */
+  backToDueAction: (formData: FormData) => Promise<ServerResult>;
   bankRejectAction: (formData: FormData) => Promise<ServerResult>;
   retryBankRejectedAction: (formData: FormData) => Promise<ServerResult>;
 }) {
@@ -333,10 +344,10 @@ export function PayTodayClient({
             batchIndex={idx + 1}
             rows={batch.rows}
             canMarkPaid={canMarkPaid}
-            canCancel={canCancel}
-            cancelAction={cancelAction}
+            backToDueAction={backToDueAction}
             onMarkPaid={(row) => setActiveMarkRow(row)}
-            // Mig 052 — bank-decline trigger on confirmed rows.
+            // Mig 052/090 — bank-decline trigger on DOWNLOADED rows
+            // (opens the reason slide-over → owner approval).
             onBankReject={
               canMarkPaid
                 ? (row) => setActiveBankRejectRow(row)
@@ -885,8 +896,7 @@ function ConfirmedBatch({
   batchIndex,
   rows,
   canMarkPaid,
-  canCancel,
-  cancelAction,
+  backToDueAction,
   onMarkPaid,
   onBankReject,
 }: {
@@ -894,11 +904,11 @@ function ConfirmedBatch({
   batchIndex: number;
   rows: PayTodayRow[];
   canMarkPaid: boolean;
-  canCancel: boolean;
-  cancelAction: (formData: FormData) => Promise<ServerResult>;
+  /** Mig 090 — send a NOT-yet-downloaded confirmed payment back to due. */
+  backToDueAction: (formData: FormData) => Promise<ServerResult>;
   onMarkPaid: (row: PayTodayRow) => void;
-  /** Mig 052 — when set, ConfirmedRow renders a "❌ Bank declined"
-   *  button alongside Mark Paid / Send to due. Undefined for users
+  /** Mig 052/090 — when set, ConfirmedRow renders a "Bank declined"
+   *  button (→ owner approval) on DOWNLOADED rows. Undefined for users
    *  who don't have canMarkPaid permission. */
   onBankReject?: (row: PayTodayRow) => void;
 }) {
@@ -1397,8 +1407,7 @@ function ConfirmedBatch({
             key={row.id}
             row={row}
             canMarkPaid={canMarkPaid}
-            canCancel={canCancel}
-            cancelAction={cancelAction}
+            backToDueAction={backToDueAction}
             onMarkPaid={() => onMarkPaid(row)}
             onBankReject={onBankReject ? () => onBankReject(row) : undefined}
           />
@@ -1411,31 +1420,48 @@ function ConfirmedBatch({
 function ConfirmedRow({
   row,
   canMarkPaid,
-  canCancel,
-  cancelAction,
+  backToDueAction,
   onMarkPaid,
   onBankReject,
 }: {
   row: PayTodayRow;
   canMarkPaid: boolean;
-  canCancel: boolean;
-  cancelAction: (formData: FormData) => Promise<ServerResult>;
+  /** Mig 090 — send a NOT-yet-downloaded confirmed payment back to
+   *  due (accountant allowed, since no bank money moved). */
+  backToDueAction: (formData: FormData) => Promise<ServerResult>;
   onMarkPaid: () => void;
-  /** Mig 052 — accountant clicked "❌ Bank declined" on this row.
-   *  Opens the reason slide-over. Undefined hides the button. */
+  /** Mig 052/090 — accountant clicked "Bank declined" on a DOWNLOADED
+   *  row. Opens the reason slide-over (→ owner approval). Undefined
+   *  hides the button. */
   onBankReject?: () => void;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  function runCancel() {
+  // Mig 090 — two exit paths depending on whether the HDFC file has
+  // been downloaded (= payment sent to the bank):
+  //   not downloaded → "Back to due" (accountant, with confirm).
+  //   downloaded     → "Mark paid" + "Bank declined" (owner approval).
+  const downloaded = row.hdfcCsvDownloaded;
+  const declinePending = row.bankDeclineStatus === "pending";
+
+  function runBackToDue() {
+    if (
+      !window.confirm(
+        `Send ${row.vendorName}'s payment (₹${row.proposedAmount.toLocaleString(
+          "en-IN",
+        )}, bill ${row.billToken}) back to Due Bills?\n\nThis only works because the HDFC file hasn't been downloaded yet.`,
+      )
+    ) {
+      return;
+    }
     setError(null);
     startTransition(async () => {
       const fd = new FormData();
       fd.set("payment_id", row.id);
-      fd.set("cancel_reason", "aborted_before_pay");
-      const r = await cancelAction(fd);
+      fd.set("reason", "Sent back to due before HDFC download");
+      const r = await backToDueAction(fd);
       if (!r.ok) setError(r.error);
       else router.refresh();
     });
@@ -1531,43 +1557,72 @@ function ConfirmedRow({
             {error}
           </span>
         )}
-        {canMarkPaid && (
-          <button type="button" onClick={onMarkPaid} style={BUTTON_STYLES.primary}>
-            💸 Mark paid
-          </button>
-        )}
-        {/* Mig 052 — only visible to canMarkPaid users (accountant /
-            owner / dev). Click → opens reason slide-over → on submit,
-            row moves to the Bank Rejected section. */}
-        {onBankReject && (
-          <button
-            type="button"
-            onClick={onBankReject}
+
+        {/* Mig 090 — a bank decline is awaiting owner approval. Show a
+            status pill, no action buttons, so it can't be double-
+            submitted or marked paid while the owner decides. */}
+        {declinePending ? (
+          <span
             style={{
               padding: "8px 14px",
               fontSize: 12,
               fontWeight: 700,
-              background: "transparent",
-              color: "#b91c1c",
-              border: "1px solid rgba(185, 28, 28, 0.45)",
+              background: "rgba(217,119,6,0.12)",
+              color: "#92400e",
+              border: "1px solid rgba(217,119,6,0.4)",
               borderRadius: 8,
-              cursor: "pointer",
             }}
-            title="The bank refused this row (wrong IFSC, account closed, NSF, etc.). Moves it to the holding section instead of cancelling outright."
+            title={
+              row.bankDeclineReason
+                ? `Bank decline awaiting owner approval — reason: ${row.bankDeclineReason}`
+                : "Bank decline awaiting owner approval"
+            }
           >
-            ❌ Bank declined
-          </button>
-        )}
-        {canCancel && (
-          <button
-            type="button"
-            onClick={runCancel}
-            disabled={pending}
-            style={BUTTON_STYLES.ghost}
-            title="Cancel this payment and return the bill to the due-bills list"
-          >
-            ↩ Send back to due
-          </button>
+            ⏳ Decline — owner approving
+          </span>
+        ) : downloaded ? (
+          <>
+            {/* DOWNLOADED row → Mark paid (normal) + Bank declined
+                (→ owner approval). No back-to-due. */}
+            {canMarkPaid && (
+              <button type="button" onClick={onMarkPaid} style={BUTTON_STYLES.primary}>
+                💸 Mark paid
+              </button>
+            )}
+            {onBankReject && (
+              <button
+                type="button"
+                onClick={onBankReject}
+                style={{
+                  padding: "8px 14px",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  background: "transparent",
+                  color: "#b91c1c",
+                  border: "1px solid rgba(185, 28, 28, 0.45)",
+                  borderRadius: 8,
+                  cursor: "pointer",
+                }}
+                title="The bank refused this payment. Fills a reason and sends it to the owner for approval; on approval the bill goes back to due."
+              >
+                ❌ Bank declined
+              </button>
+            )}
+          </>
+        ) : (
+          /* NOT-downloaded row → only "Back to due" (no money moved
+             yet). Accountant allowed; confirm before sending. */
+          canMarkPaid && (
+            <button
+              type="button"
+              onClick={runBackToDue}
+              disabled={pending}
+              style={BUTTON_STYLES.ghost}
+              title="No HDFC file downloaded yet — send this payment back to the due-bills list."
+            >
+              ↩ Back to due
+            </button>
+          )
         )}
       </div>
     </div>
@@ -1942,9 +1997,11 @@ function BankRejectForm({
           lineHeight: 1.5,
         }}
       >
-        Marking this row as <strong>bank declined</strong> moves it out of
-        Confirmed and into the holding section below. The bill stays open —
-        you can retry, mark paid manually, or send back to due from there.
+        This sends a <strong>bank-decline request to the owner</strong>. While
+        it&apos;s pending, the row shows &ldquo;Decline — owner approving&rdquo;
+        and stays in Confirmed. If the owner <strong>approves</strong>, the bill
+        goes back to Due Bills; if they <strong>reject</strong>, it stays
+        confirmed for payment.
       </div>
 
       <Field label="Reason" required>
@@ -2018,7 +2075,7 @@ function BankRejectForm({
             opacity: reason.trim().length < 3 ? 0.55 : 1,
           }}
         >
-          {pending ? "Recording…" : "❌ Mark bank declined"}
+          {pending ? "Sending…" : "❌ Send decline for owner approval"}
         </button>
       </div>
     </form>

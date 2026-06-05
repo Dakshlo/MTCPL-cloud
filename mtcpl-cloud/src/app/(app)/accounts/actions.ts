@@ -44,6 +44,8 @@ async function refreshAccountsPaths() {
   revalidatePath("/accounts/pay-today");
   revalidatePath("/accounts/payments");
   revalidatePath("/accounts/vendors");
+  // Mig 090 — owner's bank-decline approval queue.
+  revalidatePath("/accounts/bank-declines");
 }
 
 /** Postgres unique-violation code. Used to surface a friendly
@@ -1906,6 +1908,251 @@ export async function bankRejectPaymentAction(
     bill_id: payment.bill_id,
     proposed_amount: Number(payment.proposed_amount),
     reason,
+  });
+  await refreshAccountsPaths();
+  return { ok: true };
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Mig 090 — Pay Today confirmed-row exits split by download state
+// ──────────────────────────────────────────────────────────────────
+//   • NOT-yet-downloaded batch (no bank money initiated) → the
+//     accountant can send a confirmed payment straight back to Due
+//     with sendConfirmedBackToDueAction.
+//   • DOWNLOADED batch (CSV is in HDFC) → the only exit is a
+//     BANK-DECLINE REQUEST that the OWNER must approve:
+//       requestBankDeclineAction (accountant) → pending
+//       approveBankDeclineAction (owner) → payment cancelled → bill to due
+//       rejectBankDeclineAction  (owner) → stays confirmed
+// ──────────────────────────────────────────────────────────────────
+
+/** Send a CONFIRMED but NOT-yet-downloaded payment back to Due.
+ *  Allowed for the accountant (canMarkPaid) because no bank money has
+ *  moved yet — the CSV was never generated. Hard-blocked once the row
+ *  is in a downloaded HDFC file (those must go through the owner
+ *  bank-decline approval instead). */
+export async function sendConfirmedBackToDueAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canMarkPaid(profile)) {
+    return { ok: false, error: "You don't have permission to send payments back to due." };
+  }
+  const supabase = createAdminSupabaseClient();
+  const paymentId = String(formData.get("payment_id") || "").trim();
+  const reason = String(formData.get("reason") || "").trim() || null;
+  if (!paymentId) return { ok: false, error: "Missing payment_id." };
+
+  const { data: payment, error: loadErr } = await supabase
+    .from("bill_payments")
+    .select("id, status, bill_id, hdfc_csv_downloaded_at")
+    .eq("id", paymentId)
+    .maybeSingle();
+  if (loadErr) return { ok: false, error: loadErr.message };
+  if (!payment) return { ok: false, error: "Payment row not found." };
+  if (payment.status !== "confirmed") {
+    return { ok: false, error: `Payment is not confirmed (current: ${payment.status}).` };
+  }
+  if ((payment as { hdfc_csv_downloaded_at?: string | null }).hdfc_csv_downloaded_at) {
+    return {
+      ok: false,
+      error:
+        "This payment is already in a downloaded HDFC file. Use “Bank declined” (owner approval) instead of sending it back to due.",
+    };
+  }
+
+  const now = new Date().toISOString();
+  const { data: updated, error } = await supabase
+    .from("bill_payments")
+    .update({
+      status: "cancelled",
+      cancelled_by: profile.id,
+      cancelled_at: now,
+      cancel_reason: reason ?? "Sent back to due (not yet sent to bank)",
+      updated_at: now,
+    })
+    .eq("id", paymentId)
+    .eq("status", "confirmed")
+    .is("hdfc_csv_downloaded_at", null)
+    .select("id, bill_id")
+    .single();
+  if (error) return { ok: false, error: error.message };
+  if (!updated) {
+    return { ok: false, error: "Payment is no longer eligible (it may have just been downloaded)." };
+  }
+
+  void logAudit(profile.id, "payment_back_to_due", "bill_payment", paymentId, {
+    bill_id: updated.bill_id,
+    reason,
+  });
+  await refreshAccountsPaths();
+  return { ok: true };
+}
+
+/** Accountant requests a bank-decline on a DOWNLOADED confirmed
+ *  payment. Does NOT change status — sets bank_decline_status =
+ *  'pending' so the row shows "Decline in approval" and the owner
+ *  sees it in the Bank Declines queue. */
+export async function requestBankDeclineAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canMarkPaid(profile)) {
+    return { ok: false, error: "You don't have permission to flag bank declines." };
+  }
+  const supabase = createAdminSupabaseClient();
+  const paymentId = String(formData.get("payment_id") || "").trim();
+  const reason = String(formData.get("rejection_reason") || "").trim();
+  if (!paymentId) return { ok: false, error: "Missing payment_id." };
+  if (reason.length < 3) {
+    return {
+      ok: false,
+      error:
+        "Tell us why the bank refused this payment (min 3 chars). e.g. 'Wrong IFSC', 'Account closed', 'Insufficient funds'.",
+    };
+  }
+
+  const { data: payment, error: loadErr } = await supabase
+    .from("bill_payments")
+    .select("id, status, bill_id, proposed_amount, hdfc_csv_downloaded_at, bank_decline_status")
+    .eq("id", paymentId)
+    .maybeSingle();
+  if (loadErr) return { ok: false, error: loadErr.message };
+  if (!payment) return { ok: false, error: "Payment row not found." };
+  if (payment.status !== "confirmed") {
+    return { ok: false, error: `Payment is not confirmed (current: ${payment.status}).` };
+  }
+  if (!(payment as { hdfc_csv_downloaded_at?: string | null }).hdfc_csv_downloaded_at) {
+    return {
+      ok: false,
+      error:
+        "This batch's HDFC file hasn't been downloaded yet — send it back to due instead of bank-declining.",
+    };
+  }
+  const declineStatus = (payment as { bank_decline_status?: string | null }).bank_decline_status;
+  if (declineStatus === "pending") {
+    return { ok: false, error: "A bank-decline for this payment is already awaiting owner approval." };
+  }
+
+  const now = new Date().toISOString();
+  const { data: updated, error } = await supabase
+    .from("bill_payments")
+    .update({
+      bank_decline_status: "pending",
+      bank_decline_reason: reason,
+      bank_decline_requested_at: now,
+      bank_decline_requested_by: profile.id,
+      bank_decline_resolved_at: null,
+      bank_decline_resolved_by: null,
+      updated_at: now,
+    })
+    .eq("id", paymentId)
+    .eq("status", "confirmed")
+    .select("id, bill_id")
+    .single();
+  if (error) return { ok: false, error: error.message };
+  if (!updated) return { ok: false, error: "Couldn't submit the decline — try again." };
+
+  void logAudit(profile.id, "bank_decline_requested", "bill_payment", paymentId, {
+    bill_id: updated.bill_id,
+    proposed_amount: Number(payment.proposed_amount),
+    reason,
+  });
+  await refreshAccountsPaths();
+  return { ok: true };
+}
+
+/** OWNER approves a pending bank-decline → the payment is cancelled
+ *  and its bill drops back into Due Bills. */
+export async function approveBankDeclineAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canConfirmPayments(profile)) {
+    return { ok: false, error: "Only the owner can approve a bank decline." };
+  }
+  const supabase = createAdminSupabaseClient();
+  const paymentId = String(formData.get("payment_id") || "").trim();
+  if (!paymentId) return { ok: false, error: "Missing payment_id." };
+
+  const { data: payment, error: loadErr } = await supabase
+    .from("bill_payments")
+    .select("id, status, bill_id, bank_decline_status, bank_decline_reason")
+    .eq("id", paymentId)
+    .maybeSingle();
+  if (loadErr) return { ok: false, error: loadErr.message };
+  if (!payment) return { ok: false, error: "Payment row not found." };
+  if ((payment as { bank_decline_status?: string | null }).bank_decline_status !== "pending") {
+    return { ok: false, error: "This decline is no longer pending approval." };
+  }
+
+  const now = new Date().toISOString();
+  const reason = (payment as { bank_decline_reason?: string | null }).bank_decline_reason ?? "";
+  // Approve = mark the decline approved AND cancel the payment so the
+  // bill returns to due (same effect as the existing back-to-due path,
+  // the recalc trigger reopens the bill's outstanding).
+  const { data: updated, error } = await supabase
+    .from("bill_payments")
+    .update({
+      bank_decline_status: "approved",
+      bank_decline_resolved_at: now,
+      bank_decline_resolved_by: profile.id,
+      status: "cancelled",
+      cancelled_by: profile.id,
+      cancelled_at: now,
+      cancel_reason: `Bank declined (owner approved): ${reason}`,
+      updated_at: now,
+    })
+    .eq("id", paymentId)
+    .eq("status", "confirmed")
+    .eq("bank_decline_status", "pending")
+    .select("id, bill_id")
+    .single();
+  if (error) return { ok: false, error: error.message };
+  if (!updated) return { ok: false, error: "This decline was already resolved." };
+
+  void logAudit(profile.id, "bank_decline_approved", "bill_payment", paymentId, {
+    bill_id: updated.bill_id,
+    reason,
+  });
+  await refreshAccountsPaths();
+  return { ok: true };
+}
+
+/** OWNER rejects a pending bank-decline → nothing moves; the payment
+ *  stays confirmed (the accountant may request again later). */
+export async function rejectBankDeclineAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canConfirmPayments(profile)) {
+    return { ok: false, error: "Only the owner can reject a bank decline." };
+  }
+  const supabase = createAdminSupabaseClient();
+  const paymentId = String(formData.get("payment_id") || "").trim();
+  const note = String(formData.get("note") || "").trim() || null;
+  if (!paymentId) return { ok: false, error: "Missing payment_id." };
+
+  const now = new Date().toISOString();
+  const { data: updated, error } = await supabase
+    .from("bill_payments")
+    .update({
+      bank_decline_status: "rejected",
+      bank_decline_resolved_at: now,
+      bank_decline_resolved_by: profile.id,
+      updated_at: now,
+    })
+    .eq("id", paymentId)
+    .eq("status", "confirmed")
+    .eq("bank_decline_status", "pending")
+    .select("id, bill_id")
+    .single();
+  if (error) return { ok: false, error: error.message };
+  if (!updated) return { ok: false, error: "This decline was already resolved." };
+
+  void logAudit(profile.id, "bank_decline_rejected", "bill_payment", paymentId, {
+    bill_id: updated.bill_id,
+    note,
   });
   await refreshAccountsPaths();
   return { ok: true };
