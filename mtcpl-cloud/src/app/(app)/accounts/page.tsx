@@ -72,7 +72,12 @@ export default async function AccountsHomePage({
   if (
     profile.role !== "developer" &&
     profile.role !== "owner" &&
-    profile.role !== "accountant"
+    profile.role !== "accountant" &&
+    // Daksh June 2026 — Accountant ★ (accountant_star) now also sees
+    // Due Bills. Amounts stay blurred (the Peek/unhide button below is
+    // owner+developer only), so they read the page like a regular
+    // accountant: blurred totals, no on-screen reveal.
+    profile.role !== "accountant_star"
   ) {
     redirect("/accounts/bills");
   }

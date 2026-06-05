@@ -834,7 +834,15 @@ export function AssignModal({
                   border: "2px solid var(--gold-dark)",
                   borderRadius: 10,
                   boxShadow: "0 2px 12px rgba(180,115,51,0.10)",
-                  maxHeight: "70vh",
+                  // Daksh June 2026 — cap the cockpit so it is never the
+                  // tallest column. The left controls (work type + axes
+                  // + vendor list + urgency + sides + time + note +
+                  // Assign) are reliably taller than this, so they drive
+                  // the modal height and scrolling ENDS at the Assign
+                  // button. A big fleet scrolls inside the cockpit panel
+                  // instead of stretching the whole modal (which caused
+                  // the "endless scroll past Assign & queue").
+                  maxHeight: "min(58vh, 540px)",
                   overflowY: "auto",
                 }}
               >
