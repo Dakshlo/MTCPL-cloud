@@ -203,7 +203,17 @@ export function VendorsManagerPeek({ vendors }: { vendors: VendorRow[] }) {
 
 function AddVendorRow() {
   const [name, setName] = useState("");
+  // Daksh June 2026 — un-paused Manual vendors in the peek-create
+  // form. Previously this form hardcoded vendor_type="CNC", which
+  // meant Manual carvers (Sharma, JK, etc.) couldn't be added from
+  // the Carving Jobs UI and never appeared in the Assign modal. The
+  // dropdown now lets the head pick CNC or Manual at create time.
+  // (For CNC the machines list is added later from /carving/vendors/[id]).
+  const [vendorType, setVendorType] = useState<"CNC" | "Manual">("CNC");
   const valid = name.trim().length > 0;
+  const isManual = vendorType === "Manual";
+  const accent = isManual ? "#92400e" : "var(--gold-dark)";
+  const bg = isManual ? "rgba(146,64,14,0.06)" : "rgba(180,115,51,0.06)";
   return (
     <form
       action={createVendorAction}
@@ -212,24 +222,72 @@ function AddVendorRow() {
         alignItems: "center",
         gap: 8,
         padding: "10px 12px",
-        background: "rgba(180,115,51,0.06)",
-        border: "1px dashed var(--gold-dark)",
+        background: bg,
+        border: `1px dashed ${accent}`,
         borderRadius: 8,
         flexWrap: "wrap",
       }}
     >
-      {/* Always CNC for now (Manual / Outsource paused per business decision) */}
-      <input type="hidden" name="vendor_type" value="CNC" />
+      <input type="hidden" name="vendor_type" value={vendorType} />
       <input type="hidden" name="machines_json" value="[]" />
-      <span style={{ fontSize: 11, fontWeight: 700, color: "var(--gold-dark)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-        + New CNC vendor
+      <span
+        style={{
+          fontSize: 11,
+          fontWeight: 700,
+          color: accent,
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+        }}
+      >
+        + New {isManual ? "Manual" : "CNC"} vendor
       </span>
+
+      {/* Type toggle — small segmented pair, defaults to CNC (most
+          common). Manual hides the machine setup since manual
+          carvers don't have tracked machines. */}
+      <div
+        role="tablist"
+        style={{
+          display: "inline-flex",
+          border: "1px solid var(--border)",
+          borderRadius: 6,
+          overflow: "hidden",
+          background: "var(--bg)",
+        }}
+      >
+        {(["CNC", "Manual"] as const).map((t) => {
+          const active = vendorType === t;
+          const tone = t === "Manual" ? "#92400e" : "var(--gold-dark)";
+          return (
+            <button
+              key={t}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => setVendorType(t)}
+              style={{
+                padding: "5px 10px",
+                fontSize: 11,
+                fontWeight: 700,
+                border: "none",
+                cursor: "pointer",
+                background: active ? tone : "transparent",
+                color: active ? "#fff" : "var(--muted)",
+                transition: "background 0.12s",
+              }}
+            >
+              {t === "Manual" ? "🪚 Manual" : "🏭 CNC"}
+            </button>
+          );
+        })}
+      </div>
+
       <input
         type="text"
         name="name"
         value={name}
         onChange={(e) => setName(e.target.value)}
-        placeholder="Vendor name (e.g. Vivek)"
+        placeholder={isManual ? "Carver name (e.g. Sharma)" : "Vendor name (e.g. Vivek)"}
         required
         style={{
           flex: "1 1 200px",

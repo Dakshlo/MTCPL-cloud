@@ -25,19 +25,32 @@ export default async function VendorDetailPage({ params }: { params: Promise<{ i
 
   if (!vendor) notFound();
 
-  const machineList = (machines ?? []).map((m) => ({
-    id: m.id,
-    machine_code: m.machine_code,
-    operator_name: m.operator_name ?? "",
-    is_active: m.is_active,
-    machine_type: ((m as { machine_type?: string }).machine_type ?? "multi_head_2") as
-      | "single_head"
-      | "multi_head_2"
-      | "lathe",
-    max_length_in: (m as { max_length_in?: number | string | null }).max_length_in ?? null,
-    max_width_in: (m as { max_width_in?: number | string | null }).max_width_in ?? null,
-    max_thickness_in: (m as { max_thickness_in?: number | string | null }).max_thickness_in ?? null,
-  }));
+  const machineList = (machines ?? []).map((m) => {
+    // Daksh June 2026 — pass cnc_axes through to the form. The query
+    // above already selects it, but the form's initial.machines was
+    // dropping the field, so the axis dropdown re-rendered at "3"
+    // after every save — even though the DB was correctly storing
+    // 4 / 5. Looked like a save bug ("vendor updated but axis didn't
+    // change"); was actually a display bug. Same coercion as the
+    // form's select (NULL on lathes, 3/4/5 on CNCs).
+    const rawAxes = (m as { cnc_axes?: number | null }).cnc_axes;
+    const cncAxes: 3 | 4 | 5 | null =
+      rawAxes === 3 || rawAxes === 4 || rawAxes === 5 ? rawAxes : null;
+    return {
+      id: m.id,
+      machine_code: m.machine_code,
+      operator_name: m.operator_name ?? "",
+      is_active: m.is_active,
+      machine_type: ((m as { machine_type?: string }).machine_type ?? "multi_head_2") as
+        | "single_head"
+        | "multi_head_2"
+        | "lathe",
+      cnc_axes: cncAxes,
+      max_length_in: (m as { max_length_in?: number | string | null }).max_length_in ?? null,
+      max_width_in: (m as { max_width_in?: number | string | null }).max_width_in ?? null,
+      max_thickness_in: (m as { max_thickness_in?: number | string | null }).max_thickness_in ?? null,
+    };
+  });
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20, paddingBottom: 32 }}>
