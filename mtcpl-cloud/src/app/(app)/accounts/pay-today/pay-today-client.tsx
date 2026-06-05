@@ -134,12 +134,18 @@ export function PayTodayClient({
       list.push(r);
       map.set(key, list);
     }
-    // Sort batches by the earliest proposedAt within each (oldest
-    // first — keeps the queue feeling like a queue).
+    // Sort batches: NOT-yet-downloaded batches first (oldest proposed
+    // first — the active queue), then fully-downloaded batches at the
+    // BOTTOM (Daksh June 2026 — a batch whose CSV is already in HDFC
+    // is "done sending", so it drops below the live queue with a
+    // watermark; the user can still mark it paid from there).
     return [...map.entries()]
       .map(([batchId, rows]) => ({
         batchId,
         rows,
+        // A batch is "downloaded" once every row in it has been
+        // included in an HDFC CSV.
+        allDownloaded: rows.length > 0 && rows.every((r) => r.hdfcCsvDownloaded),
         proposedAt: rows.reduce<string | null>((earliest, r) => {
           if (!r.proposedAt) return earliest;
           if (!earliest) return r.proposedAt;
@@ -147,6 +153,10 @@ export function PayTodayClient({
         }, null),
       }))
       .sort((a, b) => {
+        // Downloaded batches sink to the bottom.
+        if (a.allDownloaded !== b.allDownloaded) {
+          return a.allDownloaded ? 1 : -1;
+        }
         if (!a.proposedAt && !b.proposedAt) return 0;
         if (!a.proposedAt) return 1;
         if (!b.proposedAt) return -1;
@@ -892,17 +902,21 @@ function ConfirmedBatch({
    *  who don't have canMarkPaid permission. */
   onBankReject?: (row: PayTodayRow) => void;
 }) {
+  // Daksh June 2026 — needed to re-pull the locked state after a CSV
+  // download so the just-downloaded batch shows 🔒 and the next
+  // confirmed batch becomes the one available to download.
+  const router = useRouter();
   const total = rows.reduce((s, r) => s + r.proposedAmount, 0);
-  // Daksh (May 2026): HDFC CSV one-shot lock temporarily disabled
-  // (server has the same flag flipped off). downloadableCount now
-  // counts every confirmed row in the batch so the button stays
-  // active and the download URL always re-issues the same set.
-  // The "🔒 IN HDFC FILE" badges below stay (historical signal —
-  // these rows have been included in a CSV before), but they no
-  // longer gate the button.
-  const downloadableCount = rows.length;
+  // Daksh June 2026 — one-shot lock RE-ENABLED (server flag flipped
+  // back to TRUE too). A CSV can be downloaded only once per row: a
+  // batch got paid into HDFC twice because the same file was
+  // downloadable again. downloadableCount now counts only rows NOT
+  // yet included in a CSV, so once a batch is downloaded its button
+  // locks ("🔒 In HDFC file") and the next confirmed batch is the one
+  // that's still downloadable.
+  const downloadableCount = rows.filter((r) => !r.hdfcCsvDownloaded).length;
   const lockedCount = rows.filter((r) => r.hdfcCsvDownloaded).length;
-  const allLocked = false;
+  const allLocked = rows.length > 0 && lockedCount === rows.length;
   const someLocked = lockedCount > 0;
 
   // Mig 048 follow-on (Daksh): pre-flight the export so a missing-
@@ -935,14 +949,55 @@ function ConfirmedBatch({
     <div
       style={{
         marginBottom: 14,
-        background: "#fff",
+        // Daksh June 2026 — a fully-downloaded batch (already in an
+        // HDFC file) reads as "done sending": muted card, slate left
+        // bar, slightly faded, with a big diagonal "IN HDFC FILE"
+        // watermark so it's unmistakably different from the live
+        // queue above. All actions (Mark paid, etc.) still work.
+        position: "relative",
+        background: allLocked ? "var(--surface-alt)" : "#fff",
         border: `1px solid ${ACCOUNTS_TOKENS.border}`,
-        borderLeft: `5px solid var(--section-tint, ${ACCOUNTS_TOKENS.success})`,
+        borderLeft: `5px solid ${allLocked ? "#94a3b8" : `var(--section-tint, ${ACCOUNTS_TOKENS.success})`}`,
         borderRadius: 12,
-        boxShadow: ACCOUNTS_TOKENS.shadow,
+        boxShadow: allLocked ? "none" : ACCOUNTS_TOKENS.shadow,
         overflow: "hidden",
+        opacity: allLocked ? 0.88 : 1,
       }}
     >
+      {/* Diagonal watermark for a downloaded batch. pointer-events
+          none so it never blocks the action buttons underneath. */}
+      {allLocked && (
+        <div
+          aria-hidden
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            pointerEvents: "none",
+            zIndex: 2,
+            overflow: "hidden",
+          }}
+        >
+          <span
+            style={{
+              transform: "rotate(-18deg)",
+              fontSize: 38,
+              fontWeight: 900,
+              letterSpacing: "0.12em",
+              color: "rgba(100,116,139,0.16)",
+              border: "4px solid rgba(100,116,139,0.16)",
+              borderRadius: 12,
+              padding: "6px 22px",
+              whiteSpace: "nowrap",
+              textTransform: "uppercase",
+            }}
+          >
+            ✓ In HDFC file
+          </span>
+        </div>
+      )}
       {/* Batch header */}
       <div
         style={{
@@ -1111,7 +1166,49 @@ function ConfirmedBatch({
                       "en-IN",
                     )}) as HDFC CSV?\n\nProceed only if you're about to upload this file to HDFC.`,
                   );
-                  if (ok) window.location.href = finalUrl;
+                  if (ok) {
+                    // Daksh June 2026 — fetch the CSV as a blob instead
+                    // of navigating to it. This guarantees the batch is
+                    // only treated as "downloaded / locked" on a REAL
+                    // success: if the server returns an error (e.g. a
+                    // beneficiary name got cleared between the pre-flight
+                    // and now, or any other failure), we show it in-page
+                    // and DON'T refresh — and the server never wrote the
+                    // lock (it validates + returns the error BEFORE the
+                    // lock write-back). So a failed/empty download leaves
+                    // the batch fully re-downloadable.
+                    const dl = await fetch(finalUrl, { credentials: "same-origin" });
+                    if (!dl.ok) {
+                      const body = await dl.json().catch(() => null);
+                      if (body && Array.isArray(body.missing) && body.missing.length > 0) {
+                        setMissing(body.missing as MissingFieldReason[]);
+                      } else {
+                        setOtherError(
+                          (body?.error ??
+                            `Download failed (HTTP ${dl.status}).`) +
+                            " Nothing was locked — fix the issue and try again.",
+                        );
+                      }
+                      return; // no lock, no refresh
+                    }
+                    // Success → save the file the browser way.
+                    const blob = await dl.blob();
+                    const cd = dl.headers.get("Content-Disposition") ?? "";
+                    const m = cd.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+                    const fname = m ? decodeURIComponent(m[1]) : "hdfc-payment.csv";
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = fname;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    setTimeout(() => URL.revokeObjectURL(url), 1000);
+                    // Server has now locked the rows → re-pull so this
+                    // batch flips to ✓ In HDFC file + sinks to the
+                    // bottom, and the next confirmed batch is active.
+                    router.refresh();
+                  }
                   return;
                 }
                 const body = await r.json().catch(() => null);
@@ -1155,7 +1252,11 @@ function ConfirmedBatch({
                 : "This batch is already in a downloaded HDFC CSV."
             }
           >
-            {checking === "csv" ? "Checking…" : `📥 Download CSV (${downloadableCount})`}
+            {checking === "csv"
+              ? "Checking…"
+              : downloadableCount === 0
+                ? "🔒 In HDFC file"
+                : `📥 Download CSV (${downloadableCount})`}
           </button>
         </div>
       </div>

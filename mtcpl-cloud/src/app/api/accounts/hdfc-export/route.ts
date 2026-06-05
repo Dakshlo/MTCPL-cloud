@@ -94,14 +94,14 @@ async function handleHdfcExport(req: NextRequest) {
   //                    payment with hdfc_csv_downloaded_at + _by so
   //                    a second click can't re-issue the same rows.
   //
-  // Daksh (May 2026): temporarily disabled — flip back to TRUE later.
-  // While LOCK_HDFC_CSV_DOWNLOAD is false, the CSV endpoint behaves
-  // like the XLSX preview (returns every confirmed payment in scope)
-  // and does NOT write hdfc_csv_downloaded_at on the rows it serves.
-  // The client-side "🔒 IN HDFC FILE" badge still renders for rows
-  // with a historical timestamp — purely informational — but doesn't
-  // block re-downloads.
-  const LOCK_HDFC_CSV_DOWNLOAD = false;
+  // Daksh June 2026 — RE-ENABLED. The one-shot lock had been
+  // temporarily off, which let the same CSV be downloaded twice — and
+  // a batch got paid into HDFC twice by accident. With this TRUE the
+  // CSV endpoint returns only CONFIRMED + not-yet-downloaded rows and
+  // stamps hdfc_csv_downloaded_at on every row it serves, so a second
+  // download of the same batch returns "nothing new" and the next
+  // confirmed batch becomes the one available to download.
+  const LOCK_HDFC_CSV_DOWNLOAD = true;
 
   let paymentIds: string[] = [];
   if (paymentIdsParam) {
