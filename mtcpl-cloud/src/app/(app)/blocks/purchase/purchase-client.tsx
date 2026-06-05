@@ -1215,9 +1215,11 @@ function ComparePanel({
         snapshot (not date-filtered). <b>Purchased</b> is everything ever
         entered. <b>In Stock</b> is what is still in the yard right now
         (status <code>available</code> or <code>reserved</code>).
-        <b> Consumed</b> is blocks that have been cut.
-        {" "}<i>Purchased = In Stock + Consumed</i> (small drift if any blocks
-        were discarded).
+        <b> Consumed</b> is blocks that have been cut. <b>Other</b> is anything
+        else (discarded, or older entries without a status set).{" "}
+        <i>Percentages and the bar use block counts</i> — the
+        tonnes/CFT numbers above are informational and can drift on old
+        entries with sketchy dimensions.
       </div>
 
       {sections.map((s) => (
@@ -1246,11 +1248,18 @@ function CompareSection({
   const inStock = unit === "tonnes" ? totals.inStockTonnes : totals.inStockCft;
   const consumed = unit === "tonnes" ? totals.consumedTonnes : totals.consumedCft;
 
-  // Percentages relative to purchased — guard against /0.
-  const denom = purchased > 0 ? purchased : 1;
-  const stockPct = Math.max(0, Math.min(100, (inStock / denom) * 100));
-  const consPct = Math.max(0, Math.min(100, (consumed / denom) * 100));
-  const otherPct = Math.max(0, 100 - stockPct - consPct);
+  // Percentages: BLOCK COUNTS — integer-clean, never thrown off by
+  // legacy dimension-unit inconsistencies in the CFT column. The
+  // CFT/tonnes numbers above stay as informational totals.
+  const purchasedBlocks = totals.purchasedBlocks;
+  const inStockBlocks = totals.inStockBlocks;
+  const consumedBlocks = totals.consumedBlocks;
+  const otherBlocks = Math.max(0, purchasedBlocks - inStockBlocks - consumedBlocks);
+
+  const denomBlocks = purchasedBlocks > 0 ? purchasedBlocks : 1;
+  const stockPct = Math.max(0, Math.min(100, (inStockBlocks / denomBlocks) * 100));
+  const consPct = Math.max(0, Math.min(100, (consumedBlocks / denomBlocks) * 100));
+  const otherPct = Math.max(0, Math.min(100, (otherBlocks / denomBlocks) * 100));
 
   const unitLabel = unit === "tonnes" ? "T" : "CFT";
 
@@ -1326,7 +1335,7 @@ function CompareSection({
         />
       </div>
 
-      {/* Visual ratio bar */}
+      {/* Visual ratio bar — based on block COUNT */}
       <div
         style={{
           display: "flex",
@@ -1336,7 +1345,7 @@ function CompareSection({
           background: "var(--bg)",
           border: "1px solid var(--border)",
         }}
-        title={`In stock ${stockPct.toFixed(1)}% · Consumed ${consPct.toFixed(1)}% · Other ${otherPct.toFixed(1)}%`}
+        title={`In stock ${stockPct.toFixed(1)}% · Consumed ${consPct.toFixed(1)}%${otherBlocks > 0 ? ` · Other ${otherPct.toFixed(1)}%` : ""} — by block count`}
       >
         <div
           style={{
@@ -1356,10 +1365,10 @@ function CompareSection({
           <div
             style={{
               width: `${otherPct}%`,
-              background: "rgba(239,68,68,0.4)",
+              background: "#f59e0b",
               transition: "width 0.3s",
             }}
-            title={`Other (likely discarded): ${otherPct.toFixed(1)}%`}
+            title={`Other (status not set / discarded): ${otherPct.toFixed(1)}%`}
           />
         )}
       </div>
@@ -1373,10 +1382,32 @@ function CompareSection({
           marginTop: 4,
         }}
       >
-        <span style={{ color: "#059669" }}>● In stock</span>
-        <span style={{ color: "#64748b" }}>● Consumed</span>
-        {otherPct > 0 && <span style={{ color: "#dc2626" }}>● Discarded</span>}
+        <span style={{ color: "#059669" }}>● In stock · {fmtInt(inStockBlocks)} blocks</span>
+        <span style={{ color: "#64748b" }}>● Consumed · {fmtInt(consumedBlocks)} blocks</span>
+        {otherBlocks > 0 && (
+          <span style={{ color: "#b45309" }}>● Other · {fmtInt(otherBlocks)} blocks</span>
+        )}
       </div>
+
+      {/* Data quality note — only if there's an "Other" bucket */}
+      {otherBlocks > 0 && (
+        <div
+          style={{
+            marginTop: 12,
+            padding: "8px 12px",
+            background: "rgba(245,158,11,0.08)",
+            border: "1px solid rgba(245,158,11,0.25)",
+            borderRadius: 8,
+            fontSize: 11,
+            color: "#92400e",
+            lineHeight: 1.5,
+          }}
+        >
+          <strong>{fmtInt(otherBlocks)} block{otherBlocks === 1 ? "" : "s"}</strong>{" "}
+          aren&apos;t classified as in-stock or consumed — most likely older
+          entries with status not set, or blocks marked discarded.
+        </div>
+      )}
     </div>
   );
 }
