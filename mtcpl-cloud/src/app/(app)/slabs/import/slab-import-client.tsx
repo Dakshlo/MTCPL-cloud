@@ -18,6 +18,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { importSlabsAction } from "../actions";
+import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 
 export type TempleOpt = { name: string; default_stone: string | null };
 
@@ -37,8 +38,54 @@ const TEMPLATE_ROWS = 30;
 const inp = { padding: "8px 10px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", color: "var(--text)" } as const;
 const lbl = { fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase" as const, letterSpacing: "0.06em" };
 
+// Safety rule (Daksh June 2026): every started row must have ALL fields
+// filled. A row counts as "started" once any field has content; a fully
+// blank row (template filler / a stray + Add a row) is ignored. fieldEmpty
+// powers both the per-cell red highlight and the named-field error list.
+type RowField = "label" | "description" | "length" | "width" | "height" | "quantity";
+const REQUIRED_FIELDS: { key: RowField; label: string }[] = [
+  { key: "label", label: "Label" },
+  { key: "description", label: "Description" },
+  { key: "length", label: "Length" },
+  { key: "width", label: "Width" },
+  { key: "height", label: "Height" },
+  { key: "quantity", label: "Quantity" },
+];
+function rowHasContent(r: Row): boolean {
+  return !!(
+    r.label.trim() ||
+    r.description.trim() ||
+    r.length.trim() ||
+    r.width.trim() ||
+    r.height.trim() ||
+    r.quantity.trim()
+  );
+}
+function fieldEmpty(r: Row, field: RowField): boolean {
+  if (!rowHasContent(r)) return false; // never flag a fully-blank row
+  switch (field) {
+    case "label":
+      return !r.label.trim();
+    case "description":
+      return !r.description.trim();
+    case "length":
+      return !(Number(r.length) > 0);
+    case "width":
+      return !(Number(r.width) > 0);
+    case "height":
+      return !(Number(r.height) > 0);
+    case "quantity": {
+      const n = Number(r.quantity);
+      return !r.quantity.trim() || !(n >= 1) || !Number.isInteger(n);
+    }
+  }
+}
+function rowProblems(r: Row): string[] {
+  if (!rowHasContent(r)) return [];
+  return REQUIRED_FIELDS.filter((f) => fieldEmpty(r, f.key)).map((f) => f.label);
+}
 function rowValid(r: Row): boolean {
-  return Number(r.length) > 0 && Number(r.width) > 0 && Number(r.height) > 0;
+  return rowHasContent(r) && rowProblems(r).length === 0;
 }
 
 export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; stones: string[] }) {
@@ -104,7 +151,9 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
           length,
           width,
           height,
-          quantity: quantity || "1",
+          // No silent default — a blank quantity is flagged as a missing
+          // field in the review step so nothing is added with assumed data.
+          quantity,
           quality: "",
           priority: false,
         });
@@ -128,12 +177,21 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
     setRows((prev) => prev.filter((r) => r.key !== key));
   }
   function addRow() {
-    setRows((prev) => [...prev, { key: crypto.randomUUID(), label: "", description: "", length: "", width: "", height: "", quantity: "1", quality: "", priority: false }]);
+    setRows((prev) => [...prev, { key: crypto.randomUUID(), label: "", description: "", length: "", width: "", height: "", quantity: "", quality: "", priority: false }]);
   }
 
   const validRows = useMemo(() => rows.filter(rowValid), [rows]);
-  const invalidCount = rows.length - validRows.length;
-  const totalSlabs = useMemo(() => validRows.reduce((s, r) => s + Math.max(1, Math.floor(Number(r.quantity) || 1)), 0), [validRows]);
+  // Started-but-incomplete rows, with the exact empty fields named.
+  const issues = useMemo(
+    () => rows.map((r, i) => ({ i, probs: rowProblems(r) })).filter((x) => x.probs.length > 0),
+    [rows],
+  );
+  const totalSlabs = useMemo(
+    () => validRows.reduce((s, r) => s + Math.max(1, Math.floor(Number(r.quantity) || 1)), 0),
+    [validRows],
+  );
+  // Block the add while any started row is missing a field.
+  const canAdd = issues.length === 0 && totalSlabs > 0;
 
   async function doImport() {
     setBusy(true);
@@ -214,13 +272,30 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
 
   return (
     <>
+      <FinanceLoadingOverlay show={busy} label="Adding slabs…" />
+
+      {/* Per-row validation — every field is required; name the empties. */}
+      {issues.length > 0 && (
+        <div style={{ background: "rgba(220,38,38,0.06)", border: "1px solid rgba(220,38,38,0.35)", borderRadius: 12, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: "#991b1b" }}>
+            ⚠ {issues.length} row{issues.length === 1 ? "" : "s"} {issues.length === 1 ? "is" : "are"} incomplete — every field is required. Fix to continue:
+          </div>
+          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, color: "#7f1d1d", lineHeight: 1.6 }}>
+            {issues.slice(0, 25).map((x) => (
+              <li key={x.i}><strong>Row {x.i + 1}</strong>: {x.probs.join(", ")} {x.probs.length === 1 ? "is" : "are"} empty/invalid</li>
+            ))}
+          </ul>
+          {issues.length > 25 && <div style={{ fontSize: 12, color: "#7f1d1d" }}>…and {issues.length - 25} more.</div>}
+        </div>
+      )}
+
       <section style={{ ...card, padding: 0, overflow: "hidden" }}>
         <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
           <div>
             <div style={{ fontSize: 15, fontWeight: 800 }}>Review — {temple} · {stone}</div>
             <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
-              {fileName ? `${fileName} · ` : ""}{validRows.length} valid row{validRows.length === 1 ? "" : "s"} → <strong>{totalSlabs} slab{totalSlabs === 1 ? "" : "s"}</strong>
-              {invalidCount > 0 && <span style={{ color: "#b45309", fontWeight: 700 }}> · {invalidCount} need a size (highlighted)</span>}
+              {fileName ? `${fileName} · ` : ""}{validRows.length} ready row{validRows.length === 1 ? "" : "s"} → <strong>{totalSlabs} slab{totalSlabs === 1 ? "" : "s"}</strong>
+              {issues.length > 0 && <span style={{ color: "#991b1b", fontWeight: 700 }}> · {issues.length} incomplete (see above)</span>}
             </div>
           </div>
           <button type="button" onClick={() => { setStep(1); setRows([]); setError(""); }} style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", background: "none", border: "1px solid var(--border)", borderRadius: 8, padding: "7px 12px", cursor: "pointer" }}>← Upload a different file</button>
@@ -244,17 +319,19 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
             </thead>
             <tbody>
               {rows.map((r, i) => {
-                const bad = !rowValid(r);
+                const bad = rowHasContent(r) && !rowValid(r);
+                // Red border on any required cell that's empty/invalid for a started row.
+                const cell = (f: RowField) => ({ ...cellInp, borderColor: fieldEmpty(r, f) ? "#dc2626" : "var(--border)" });
                 return (
-                  <tr key={r.key} style={{ borderBottom: "1px solid var(--border)", background: bad ? "rgba(217,119,6,0.06)" : undefined }}>
+                  <tr key={r.key} style={{ borderBottom: "1px solid var(--border)", background: bad ? "rgba(220,38,38,0.05)" : undefined }}>
                     <td style={{ ...td, color: "var(--muted)", fontSize: 12, fontFamily: "ui-monospace, monospace" }}>{i + 1}</td>
-                    <td style={td}><input value={r.label} onChange={(e) => patch(r.key, "label", e.target.value)} placeholder="(temple name)" style={cellInp} /></td>
-                    <td style={td}><input value={r.description} onChange={(e) => patch(r.key, "description", e.target.value)} style={cellInp} /></td>
-                    <td style={td}><input value={r.length} onChange={(e) => patch(r.key, "length", e.target.value)} inputMode="decimal" style={{ ...cellInp, borderColor: bad && !(Number(r.length) > 0) ? "#d97706" : "var(--border)" }} /></td>
-                    <td style={td}><input value={r.width} onChange={(e) => patch(r.key, "width", e.target.value)} inputMode="decimal" style={{ ...cellInp, borderColor: bad && !(Number(r.width) > 0) ? "#d97706" : "var(--border)" }} /></td>
-                    <td style={td}><input value={r.height} onChange={(e) => patch(r.key, "height", e.target.value)} inputMode="decimal" style={{ ...cellInp, borderColor: bad && !(Number(r.height) > 0) ? "#d97706" : "var(--border)" }} /></td>
-                    <td style={td}><input value={r.quantity} onChange={(e) => patch(r.key, "quantity", e.target.value)} inputMode="numeric" style={cellInp} /></td>
-                    <td style={td}><input value={r.quality} onChange={(e) => patch(r.key, "quality", e.target.value)} placeholder="—" style={cellInp} /></td>
+                    <td style={td}><input value={r.label} onChange={(e) => patch(r.key, "label", e.target.value)} placeholder="required" style={cell("label")} /></td>
+                    <td style={td}><input value={r.description} onChange={(e) => patch(r.key, "description", e.target.value)} placeholder="required" style={cell("description")} /></td>
+                    <td style={td}><input value={r.length} onChange={(e) => patch(r.key, "length", e.target.value)} inputMode="decimal" placeholder="req" style={cell("length")} /></td>
+                    <td style={td}><input value={r.width} onChange={(e) => patch(r.key, "width", e.target.value)} inputMode="decimal" placeholder="req" style={cell("width")} /></td>
+                    <td style={td}><input value={r.height} onChange={(e) => patch(r.key, "height", e.target.value)} inputMode="decimal" placeholder="req" style={cell("height")} /></td>
+                    <td style={td}><input value={r.quantity} onChange={(e) => patch(r.key, "quantity", e.target.value)} inputMode="numeric" placeholder="req" style={cell("quantity")} /></td>
+                    <td style={td}><input value={r.quality} onChange={(e) => patch(r.key, "quality", e.target.value)} placeholder="optional" style={cellInp} /></td>
                     <td style={{ ...td, textAlign: "center" }}><input type="checkbox" checked={r.priority} onChange={(e) => patch(r.key, "priority", e.target.checked)} style={{ cursor: "pointer", width: 16, height: 16 }} /></td>
                     <td style={{ ...td, textAlign: "center" }}><button type="button" onClick={() => removeRow(r.key)} title="Remove row" style={{ fontSize: 14, color: "#991b1b", background: "none", border: "none", cursor: "pointer" }}>✕</button></td>
                   </tr>
@@ -273,10 +350,14 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
 
       {/* Sticky add bar */}
       <div style={{ position: "sticky", bottom: 0, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "12px 18px", boxShadow: "0 -2px 10px rgba(0,0,0,0.05)" }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: totalSlabs ? "var(--text)" : "var(--muted)" }}>
-          {totalSlabs > 0 ? `Ready to add ${totalSlabs} slab${totalSlabs === 1 ? "" : "s"} to ${temple}` : "Fill in size on at least one row"}
+        <div style={{ fontSize: 13, fontWeight: 700, color: canAdd ? "var(--text)" : "var(--muted)" }}>
+          {issues.length > 0
+            ? `Fix ${issues.length} incomplete row${issues.length === 1 ? "" : "s"} before adding`
+            : totalSlabs > 0
+              ? `Ready to add ${totalSlabs} slab${totalSlabs === 1 ? "" : "s"} to ${temple}`
+              : "Fill in at least one row"}
         </div>
-        <button type="button" disabled={totalSlabs === 0} onClick={() => { setError(""); setStage("confirm"); }} style={{ padding: "11px 24px", fontSize: 14, fontWeight: 800, color: "#fff", background: totalSlabs ? "var(--gold-dark)" : "var(--border)", border: "none", borderRadius: 8, cursor: totalSlabs ? "pointer" : "not-allowed" }}>
+        <button type="button" disabled={!canAdd} onClick={() => { setError(""); setStage("confirm"); }} style={{ padding: "11px 24px", fontSize: 14, fontWeight: 800, color: "#fff", background: canAdd ? "var(--gold-dark)" : "var(--border)", border: "none", borderRadius: 8, cursor: canAdd ? "pointer" : "not-allowed" }}>
           Add {totalSlabs} slab{totalSlabs === 1 ? "" : "s"}
         </button>
       </div>
@@ -290,7 +371,6 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
                 <div style={{ fontSize: 17, fontWeight: 800 }}>Add {totalSlabs} slab{totalSlabs === 1 ? "" : "s"}?</div>
                 <div style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>
                   {validRows.length} row{validRows.length === 1 ? "" : "s"} → <strong>{totalSlabs}</strong> slab{totalSlabs === 1 ? "" : "s"} into <strong>{temple}</strong> ({stone}), status <strong>open</strong>.
-                  {invalidCount > 0 && <> {invalidCount} row{invalidCount === 1 ? "" : "s"} without a size will be skipped.</>}
                   {" "}They&apos;ll be one group you can delete together later.
                 </div>
                 <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
