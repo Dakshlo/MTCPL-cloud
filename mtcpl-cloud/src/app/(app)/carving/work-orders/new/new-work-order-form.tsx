@@ -8,30 +8,21 @@ export type PickableSlab = {
   id: string;
   label: string | null;
   temple: string;
+  stone: string | null;
   status: string;
   dims: string;
 };
 
-type Line =
-  | { key: string; kind: "slab"; slab_requirement_id: string; label: string; status: string }
-  | {
-      key: string;
-      kind: "future";
-      description: string;
-      planned_length_ft: number | null;
-      planned_width_ft: number | null;
-      planned_thickness_ft: number | null;
-      qty: number;
-    };
+const STATUS = {
+  cut_done: { label: "Ready", icon: "✅", bg: "rgba(22,163,74,0.14)", fg: "#15803d" },
+  planned: { label: "Planned", icon: "⏳", bg: "rgba(217,119,6,0.14)", fg: "#b45309" },
+  open: { label: "Open", icon: "○", bg: "rgba(100,116,139,0.14)", fg: "#475569" },
+} as const;
+function tone(s: string) {
+  return STATUS[s as keyof typeof STATUS] ?? STATUS.open;
+}
 
-const STATUS_TONE: Record<string, { bg: string; fg: string }> = {
-  open: { bg: "rgba(100,116,139,0.14)", fg: "#475569" },
-  planned: { bg: "rgba(217,119,6,0.14)", fg: "#b45309" },
-  cut_done: { bg: "rgba(22,163,74,0.14)", fg: "#15803d" },
-};
-
-let counter = 0;
-const nextKey = () => `l${++counter}`;
+const RENDER_CAP = 120;
 
 export function NewWorkOrderForm({ vendors, slabs }: { vendors: VendorOpt[]; slabs: PickableSlab[] }) {
   const [vendorId, setVendorId] = useState(vendors[0]?.id ?? "");
@@ -39,82 +30,64 @@ export function NewWorkOrderForm({ vendors, slabs }: { vendors: VendorOpt[]; sla
   const [temple, setTemple] = useState("");
   const [rate, setRate] = useState("");
   const [unit, setUnit] = useState<"cft" | "sft">("cft");
-  const [lines, setLines] = useState<Line[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "cut_done" | "uncut">("all");
 
-  // Future-need draft
-  const [fDesc, setFDesc] = useState("");
-  const [fL, setFL] = useState("");
-  const [fW, setFW] = useState("");
-  const [fT, setFT] = useState("");
-  const [fQty, setFQty] = useState("1");
+  const readyCount = useMemo(() => slabs.filter((s) => s.status === "cut_done").length, [slabs]);
+  const uncutCount = slabs.length - readyCount;
 
-  const usedSlabIds = new Set(lines.filter((l) => l.kind === "slab").map((l) => (l as { slab_requirement_id: string }).slab_requirement_id));
-  const filteredSlabs = useMemo(() => {
+  const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return slabs
-      .filter((s) => !usedSlabIds.has(s.id))
-      .filter((s) =>
-        !q ||
+    return slabs.filter((s) => {
+      if (statusFilter === "cut_done" && s.status !== "cut_done") return false;
+      if (statusFilter === "uncut" && s.status === "cut_done") return false;
+      if (!q) return true;
+      return (
         s.id.toLowerCase().includes(q) ||
         (s.label ?? "").toLowerCase().includes(q) ||
         s.temple.toLowerCase().includes(q) ||
-        s.dims.toLowerCase().includes(q),
-      )
-      .slice(0, 40);
-  }, [slabs, search, usedSlabIds]);
+        (s.stone ?? "").toLowerCase().includes(q) ||
+        s.dims.toLowerCase().includes(q)
+      );
+    });
+  }, [slabs, search, statusFilter]);
 
-  function addSlab(s: PickableSlab) {
-    setLines((p) => [...p, { key: nextKey(), kind: "slab", slab_requirement_id: s.id, label: s.label ? `${s.id} · ${s.label}` : s.id, status: s.status }]);
+  const shown = filtered.slice(0, RENDER_CAP);
+
+  function toggle(id: string) {
+    setSelected((p) => {
+      const n = new Set(p);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
   }
-  function addFuture() {
-    if (!fDesc.trim()) return;
-    setLines((p) => [
-      ...p,
-      {
-        key: nextKey(),
-        kind: "future",
-        description: fDesc.trim(),
-        planned_length_ft: fL ? Number(fL) : null,
-        planned_width_ft: fW ? Number(fW) : null,
-        planned_thickness_ft: fT ? Number(fT) : null,
-        qty: Math.max(1, Number(fQty) || 1),
-      },
-    ]);
-    setFDesc(""); setFL(""); setFW(""); setFT(""); setFQty("1");
-  }
-  function remove(key: string) {
-    setLines((p) => p.filter((l) => l.key !== key));
+  function selectAllFiltered() {
+    setSelected((p) => {
+      const n = new Set(p);
+      for (const s of filtered) n.add(s.id);
+      return n;
+    });
   }
 
-  const linesJson = JSON.stringify(
-    lines.map((l) =>
-      l.kind === "slab"
-        ? { slab_requirement_id: l.slab_requirement_id }
-        : {
-            description: l.description,
-            planned_length_ft: l.planned_length_ft,
-            planned_width_ft: l.planned_width_ft,
-            planned_thickness_ft: l.planned_thickness_ft,
-            qty: l.qty,
-          },
-    ),
-  );
-  const canSubmit = vendorId && lines.length > 0;
+  const linesJson = JSON.stringify([...selected].map((id) => ({ slab_requirement_id: id })));
+  const canSubmit = !!vendorId && selected.size > 0;
 
-  const labelStyle = { fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase" as const, letterSpacing: "0.06em" };
-  const inputStyle = { padding: "8px 12px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", color: "var(--text)" };
+  const card = { background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: 18 } as const;
+  const lbl = { fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase" as const, letterSpacing: "0.06em" };
+  const inp = { padding: "9px 12px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", color: "var(--text)" };
 
   if (vendors.length === 0) {
     return (
-      <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 20, color: "var(--muted)" }}>
+      <div style={{ ...card, color: "var(--muted)" }}>
         No active Outsource vendors. Add one in Carving Jobs → Manage Vendors first.
       </div>
     );
   }
 
   return (
-    <form action={createWorkOrderAction} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <form action={createWorkOrderAction} style={{ display: "flex", flexDirection: "column", gap: 14, paddingBottom: 80 }}>
       <input type="hidden" name="vendor_id" value={vendorId} />
       <input type="hidden" name="title" value={title} />
       <input type="hidden" name="temple" value={temple} />
@@ -122,102 +95,114 @@ export function NewWorkOrderForm({ vendors, slabs }: { vendors: VendorOpt[]; sla
       <input type="hidden" name="jobwork_unit" value={unit} />
       <input type="hidden" name="lines_json" value={linesJson} />
 
-      {/* Header fields */}
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-        <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: "1 1 220px" }}>
-          <span style={labelStyle}>Vendor</span>
-          <select value={vendorId} onChange={(e) => setVendorId(e.target.value)} style={{ ...inputStyle, fontWeight: 600 }}>
-            {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-          </select>
-        </label>
-        <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: "1 1 200px" }}>
-          <span style={labelStyle}>Title (optional)</span>
-          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Sukhadia pillar set" style={inputStyle} />
-        </label>
-        <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: "1 1 160px" }}>
-          <span style={labelStyle}>Temple (optional)</span>
-          <input value={temple} onChange={(e) => setTemple(e.target.value)} style={inputStyle} />
-        </label>
-      </div>
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
-        <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: "0 1 180px" }}>
-          <span style={labelStyle}>Rate (₹/unit, optional)</span>
-          <input type="number" min="0" value={rate} onChange={(e) => setRate(e.target.value)} placeholder="e.g. 1200" style={inputStyle} />
-        </label>
-        <div style={{ display: "flex", gap: 4 }}>
-          {(["cft", "sft"] as const).map((u) => (
-            <button key={u} type="button" onClick={() => setUnit(u)} style={{ padding: "9px 14px", fontSize: 13, fontWeight: 700, textTransform: "uppercase", border: `1.5px solid ${unit === u ? "#92400e" : "var(--border)"}`, background: unit === u ? "rgba(146,64,14,0.08)" : "var(--surface)", color: unit === u ? "#92400e" : "var(--muted)", borderRadius: 8, cursor: "pointer" }}>/{u}</button>
-          ))}
-        </div>
-      </div>
-
-      {/* Added lines */}
-      <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
-        <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)", fontSize: 12, fontWeight: 700, color: "var(--muted)" }}>
-          Work order lines ({lines.length})
-        </div>
-        {lines.length === 0 ? (
-          <div style={{ padding: "14px", fontSize: 13, color: "var(--muted)" }}>No lines yet — add cut/uncut slabs or future-need items below.</div>
-        ) : (
-          lines.map((l) => (
-            <div key={l.key} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderTop: "1px solid var(--border)" }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                {l.kind === "slab" ? (
-                  <div style={{ fontSize: 13, fontWeight: 700, fontFamily: "ui-monospace, monospace" }}>
-                    {l.label}
-                    <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 800, textTransform: "uppercase", color: (STATUS_TONE[l.status] ?? STATUS_TONE.open).fg, background: (STATUS_TONE[l.status] ?? STATUS_TONE.open).bg, borderRadius: 999, padding: "1px 6px" }}>{l.status.replace("_", " ")}</span>
-                  </div>
-                ) : (
-                  <div style={{ fontSize: 13 }}>
-                    <span style={{ fontWeight: 700 }}>📝 {l.description}</span>
-                    <span style={{ color: "var(--muted)" }}>
-                      {l.planned_length_ft ? ` · ${l.planned_length_ft}×${l.planned_width_ft ?? "?"}×${l.planned_thickness_ft ?? "?"}″` : ""} · qty {l.qty}
-                    </span>
-                  </div>
-                )}
-              </div>
-              <button type="button" onClick={() => remove(l.key)} style={{ fontSize: 12, fontWeight: 700, color: "#991b1b", background: "none", border: "none", cursor: "pointer" }}>Remove</button>
+      {/* ── Details card ── */}
+      <section style={card}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <span style={lbl}>Vendor</span>
+            <select value={vendorId} onChange={(e) => setVendorId(e.target.value)} style={{ ...inp, fontWeight: 700 }}>
+              {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+            </select>
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <span style={lbl}>Title (optional)</span>
+            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Sukhadia pillar set" style={inp} />
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <span style={lbl}>Temple (optional)</span>
+            <input value={temple} onChange={(e) => setTemple(e.target.value)} style={inp} />
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <span style={lbl}>Rate (optional)</span>
+            <div style={{ display: "flex", gap: 6 }}>
+              <input type="number" min="0" value={rate} onChange={(e) => setRate(e.target.value)} placeholder="₹/unit" style={{ ...inp, flex: 1, minWidth: 0 }} />
+              {(["cft", "sft"] as const).map((u) => (
+                <button key={u} type="button" onClick={() => setUnit(u)} style={{ padding: "0 12px", fontSize: 12, fontWeight: 700, textTransform: "uppercase", border: `1.5px solid ${unit === u ? "#92400e" : "var(--border)"}`, background: unit === u ? "rgba(146,64,14,0.08)" : "var(--surface)", color: unit === u ? "#92400e" : "var(--muted)", borderRadius: 8, cursor: "pointer" }}>{u}</button>
+              ))}
             </div>
-          ))
-        )}
-      </div>
+          </label>
+        </div>
+      </section>
 
-      {/* Add existing slab (any status — incl. uncut) */}
-      <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 14 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Add a slab (cut or not-yet-cut)</div>
-        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by id / label / temple / size…" style={{ ...inputStyle, width: "100%" }} />
-        <div style={{ marginTop: 8, maxHeight: 220, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
-          {filteredSlabs.length === 0 ? (
-            <div style={{ fontSize: 12, color: "var(--muted)", padding: "6px 0" }}>No matching slabs.</div>
-          ) : (
-            filteredSlabs.map((s) => (
-              <button key={s.id} type="button" onClick={() => addSlab(s)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", cursor: "pointer", textAlign: "left" }}>
-                <span style={{ fontSize: 12.5, minWidth: 0 }}>
-                  <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>{s.id}</span>
-                  {s.label ? ` · ${s.label}` : ""} <span style={{ color: "var(--muted)" }}>· {s.temple} · {s.dims}</span>
-                </span>
-                <span style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", color: (STATUS_TONE[s.status] ?? STATUS_TONE.open).fg, background: (STATUS_TONE[s.status] ?? STATUS_TONE.open).bg, borderRadius: 999, padding: "1px 6px", whiteSpace: "nowrap" }}>{s.status.replace("_", " ")}</span>
-              </button>
-            ))
+      {/* ── Slab picker card ── */}
+      <section style={{ ...card, padding: 0, overflow: "hidden" }}>
+        <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 15, fontWeight: 800 }}>
+            Slabs to outsource
+            <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 800, color: "#fff", background: selected.size ? "#92400e" : "var(--border)", borderRadius: 999, padding: "2px 10px" }}>{selected.size} selected</span>
+          </div>
+          {selected.size > 0 && (
+            <button type="button" onClick={() => setSelected(new Set())} style={{ fontSize: 12, fontWeight: 700, color: "#991b1b", background: "none", border: "none", cursor: "pointer" }}>Clear all</button>
           )}
         </div>
-      </div>
 
-      {/* Add future-need line */}
-      <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 14 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>…or add a future-need line (no slab yet)</div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <input value={fDesc} onChange={(e) => setFDesc(e.target.value)} placeholder="Description, e.g. Pillar — PinkStone" style={{ ...inputStyle, flex: "2 1 220px" }} />
-          <input value={fL} onChange={(e) => setFL(e.target.value)} placeholder="L″" style={{ ...inputStyle, width: 64 }} />
-          <input value={fW} onChange={(e) => setFW(e.target.value)} placeholder="W″" style={{ ...inputStyle, width: 64 }} />
-          <input value={fT} onChange={(e) => setFT(e.target.value)} placeholder="T″" style={{ ...inputStyle, width: 64 }} />
-          <input value={fQty} onChange={(e) => setFQty(e.target.value)} placeholder="Qty" style={{ ...inputStyle, width: 60 }} />
-          <button type="button" onClick={addFuture} disabled={!fDesc.trim()} style={{ padding: "9px 16px", fontSize: 13, fontWeight: 700, color: "#fff", background: fDesc.trim() ? "var(--gold-dark)" : "var(--border)", border: "none", borderRadius: 8, cursor: fDesc.trim() ? "pointer" : "not-allowed" }}>Add</button>
+        {/* Search + status filter */}
+        <div style={{ padding: "12px 18px", display: "flex", flexDirection: "column", gap: 10, borderBottom: "1px solid var(--border)" }}>
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="🔍  Search by id, label, temple, stone or size…" style={{ ...inp, width: "100%", fontSize: 14, padding: "11px 14px" }} />
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+            {([
+              { k: "all", t: `All (${slabs.length})` },
+              { k: "cut_done", t: `✅ Ready to send (${readyCount})` },
+              { k: "uncut", t: `⏳ Not yet cut (${uncutCount})` },
+            ] as const).map((f) => (
+              <button key={f.k} type="button" onClick={() => setStatusFilter(f.k)} style={{ padding: "6px 12px", fontSize: 12, fontWeight: 700, borderRadius: 999, cursor: "pointer", border: `1px solid ${statusFilter === f.k ? "#92400e" : "var(--border)"}`, background: statusFilter === f.k ? "#92400e" : "var(--bg)", color: statusFilter === f.k ? "#fff" : "var(--muted)" }}>{f.t}</button>
+            ))}
+            <button type="button" onClick={selectAllFiltered} style={{ marginLeft: "auto", fontSize: 12, fontWeight: 700, color: "var(--gold-dark)", background: "none", border: "none", cursor: "pointer" }}>+ Select all shown</button>
+          </div>
         </div>
-      </div>
 
-      <div style={{ display: "flex", justifyContent: "flex-end" }}>
-        <button type="submit" disabled={!canSubmit} style={{ padding: "10px 22px", fontSize: 14, fontWeight: 800, color: "#fff", background: canSubmit ? "#92400e" : "var(--border)", border: "none", borderRadius: 8, cursor: canSubmit ? "pointer" : "not-allowed" }}>
+        {/* List */}
+        <div style={{ maxHeight: 460, overflowY: "auto" }}>
+          {shown.length === 0 ? (
+            <div style={{ padding: 24, textAlign: "center", color: "var(--muted)", fontSize: 13 }}>No matching slabs.</div>
+          ) : (
+            shown.map((s) => {
+              const on = selected.has(s.id);
+              const t = tone(s.status);
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => toggle(s.id)}
+                  style={{
+                    width: "100%",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    padding: "11px 18px",
+                    borderTop: "1px solid var(--border)",
+                    background: on ? "rgba(146,64,14,0.06)" : "transparent",
+                    cursor: "pointer",
+                    textAlign: "left",
+                  }}
+                >
+                  <span style={{ width: 20, height: 20, flexShrink: 0, borderRadius: 5, border: `2px solid ${on ? "#92400e" : "var(--border)"}`, background: on ? "#92400e" : "transparent", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 900 }}>{on ? "✓" : ""}</span>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ fontSize: 13.5, fontWeight: 700, fontFamily: "ui-monospace, monospace" }}>{s.id}</span>
+                    {s.label ? <span style={{ fontSize: 13 }}> · {s.label}</span> : ""}
+                    <span style={{ display: "block", fontSize: 11.5, color: "var(--muted)", marginTop: 1 }}>
+                      {s.temple}{s.stone ? ` · ${s.stone}` : ""} · {s.dims}
+                    </span>
+                  </span>
+                  <span style={{ flexShrink: 0, fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.04em", color: t.fg, background: t.bg, borderRadius: 999, padding: "3px 9px" }}>{t.icon} {t.label}</span>
+                </button>
+              );
+            })
+          )}
+        </div>
+
+        <div style={{ padding: "10px 18px", borderTop: "1px solid var(--border)", fontSize: 12, color: "var(--muted)" }}>
+          Showing {shown.length} of {filtered.length}{filtered.length > RENDER_CAP ? " — refine the search to see the rest" : ""}.
+          {" "}<span style={{ color: "#15803d" }}>✅ Ready</span> slabs can be sent now; <span style={{ color: "#b45309" }}>⏳ not-cut</span> ones wait until cut, then you Send them.
+        </div>
+      </section>
+
+      {/* ── Sticky create bar ── */}
+      <div style={{ position: "sticky", bottom: 0, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "12px 18px", boxShadow: "0 -2px 10px rgba(0,0,0,0.05)" }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: selected.size ? "var(--text)" : "var(--muted)" }}>
+          {selected.size > 0 ? `${selected.size} slab${selected.size === 1 ? "" : "s"} in this work order` : "Select at least one slab"}
+        </div>
+        <button type="submit" disabled={!canSubmit} style={{ padding: "11px 24px", fontSize: 14, fontWeight: 800, color: "#fff", background: canSubmit ? "#92400e" : "var(--border)", border: "none", borderRadius: 8, cursor: canSubmit ? "pointer" : "not-allowed" }}>
           Create work order
         </button>
       </div>

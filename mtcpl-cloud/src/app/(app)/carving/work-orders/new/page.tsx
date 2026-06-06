@@ -25,13 +25,30 @@ export default async function NewWorkOrderPage() {
   }));
 
   // Slabs that can be put on a work order: still in the pre-carving pool
-  // (open / planned / cut_done). Pre-cut ones are the whole point.
-  const { data: sRows } = await admin
-    .from("slab_requirements")
-    .select("id, label, temple, stone, status, length_ft, width_ft, thickness_ft")
-    .in("status", ["open", "planned", "cut_done"])
-    .order("created_at", { ascending: false })
-    .limit(800);
+  // (open / planned / cut_done). Paginated past the PostgREST 1000-row cap
+  // so the picker shows EVERY eligible slab, not just the latest few.
+  type SRow = {
+    id: string;
+    label: string | null;
+    temple: string;
+    stone: string | null;
+    status: string;
+    length_ft: number | string;
+    width_ft: number | string;
+    thickness_ft: number | string;
+  };
+  const sRows: SRow[] = [];
+  for (let off = 0; off < 50000; off += 1000) {
+    const { data } = await admin
+      .from("slab_requirements")
+      .select("id, label, temple, stone, status, length_ft, width_ft, thickness_ft")
+      .in("status", ["open", "planned", "cut_done"])
+      .order("created_at", { ascending: false })
+      .range(off, off + 999);
+    if (!data || data.length === 0) break;
+    sRows.push(...(data as SRow[]));
+    if (data.length < 1000) break;
+  }
 
   // Exclude slabs already on a live (non-cancelled) work-order line.
   const { data: liveLines } = await admin
@@ -45,21 +62,13 @@ export default async function NewWorkOrderPage() {
       .filter(Boolean) as string[],
   );
 
-  const slabs: PickableSlab[] = ((sRows ?? []) as Array<{
-    id: string;
-    label: string | null;
-    temple: string;
-    stone: string | null;
-    status: string;
-    length_ft: number | string;
-    width_ft: number | string;
-    thickness_ft: number | string;
-  }>)
+  const slabs: PickableSlab[] = sRows
     .filter((s) => !taken.has(s.id))
     .map((s) => ({
       id: s.id,
       label: s.label,
       temple: s.temple,
+      stone: s.stone,
       status: s.status,
       dims: `${Number(s.length_ft)}×${Number(s.width_ft)}×${Number(s.thickness_ft)}″`,
     }));
