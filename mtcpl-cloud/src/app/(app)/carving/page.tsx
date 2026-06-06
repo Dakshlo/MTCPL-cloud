@@ -518,6 +518,30 @@ export default async function CarvingDashboardPage({
             profile.role === "senior_incharge") && (
             <VendorsManagerPeek vendors={vendorsForPeek} />
           )}
+          {/* Jobwork challans — Outsource mode only (owner/dev/head/senior). */}
+          {mode === "outsource" &&
+            (profile.role === "developer" ||
+              profile.role === "owner" ||
+              profile.role === "carving_head" ||
+              profile.role === "senior_incharge") && (
+              <Link
+                href="/carving/challans"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "8px 14px",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: "#fff",
+                  background: "#92400e",
+                  borderRadius: 8,
+                  textDecoration: "none",
+                }}
+              >
+                🧾 Challans
+              </Link>
+            )}
         </div>
       </div>
 

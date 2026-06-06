@@ -229,6 +229,11 @@ export function AssignModal({
     if (workType === "lathe" && cncAxesReq !== 0) setCncAxesReq(0);
   }, [workType, cncAxesReq]);
   const [urgency, setUrgency] = useState<"normal" | "urgent">("normal");
+  // Mig 094 — Outsource jobwork rate (₹ per cft/sft), entered every
+  // time. Only used when the selected vendor is Outsource; the server
+  // ignores it for CNC. Snapshotted on the carving_item at assign.
+  const [jobworkRate, setJobworkRate] = useState<string>("");
+  const [jobworkUnit, setJobworkUnit] = useState<"cft" | "sft">("cft");
   // Mig 088 — carved sides. 2 → output counts x2 in the CNC costing.
   const [carvingSides, setCarvingSides] = useState<1 | 2>(1);
   const [days, setDays] = useState<string>("");
@@ -1087,6 +1092,64 @@ export function AssignModal({
               >
                 Pick a vendor on the left to see their machine
                 availability here.
+              </div>
+            )}
+
+            {/* Mig 094 — Outsource jobwork rate (₹ per cft/sft). Shown
+                only for an Outsource vendor; CNC ignores these. Entered
+                every time (no saved default); snapshotted on assign. */}
+            <input type="hidden" name="jobwork_rate" value={isManual ? jobworkRate : ""} />
+            <input type="hidden" name="jobwork_unit" value={isManual ? jobworkUnit : ""} />
+            {isManual && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <Label>Jobwork rate</Label>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    inputMode="decimal"
+                    value={jobworkRate}
+                    onChange={(e) => setJobworkRate(e.target.value)}
+                    placeholder="₹ per unit, e.g. 1200"
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      padding: "10px 12px",
+                      fontSize: 14,
+                      fontWeight: 700,
+                      border: "1.5px solid var(--border)",
+                      borderRadius: 8,
+                      background: "var(--surface)",
+                      color: "var(--text)",
+                    }}
+                  />
+                  <div style={{ display: "flex", gap: 4 }}>
+                    {(["cft", "sft"] as const).map((u) => (
+                      <button
+                        key={u}
+                        type="button"
+                        onClick={() => setJobworkUnit(u)}
+                        style={{
+                          padding: "10px 14px",
+                          fontSize: 13,
+                          fontWeight: 700,
+                          textTransform: "uppercase",
+                          border: `1.5px solid ${jobworkUnit === u ? "#92400e" : "var(--border)"}`,
+                          background: jobworkUnit === u ? "rgba(146,64,14,0.08)" : "var(--surface)",
+                          color: jobworkUnit === u ? "#92400e" : "var(--muted)",
+                          borderRadius: 8,
+                          cursor: "pointer",
+                        }}
+                      >
+                        /{u}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ fontSize: 11, color: "var(--muted)" }}>
+                  Bills the vendor — amount = slab {jobworkUnit.toUpperCase()} × rate. Optional now; you can also set it on the challan.
+                </div>
               </div>
             )}
 

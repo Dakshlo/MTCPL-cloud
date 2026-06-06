@@ -12,6 +12,7 @@ import {
 } from "@/lib/cutting-permissions";
 import { POWER_CUT_REASON } from "@/lib/carving-power-cut";
 import { nextSlabCodeFromMaxId } from "../slabs/utils";
+import { jobworkQuantity } from "@/lib/dimensions";
 
 /**
  * Daksh May 2026 — temporary feature flag.
@@ -1055,6 +1056,13 @@ export async function assignCarvingJobAction(formData: FormData) {
   // supervisor) decides which of their machines to load it on.
   const urgency = txt(formData, "urgency") === "urgent" ? "urgent" : "normal";
   const estimatedMinutes = Math.max(0, num(formData, "estimated_minutes", 0));
+  // Mig 094 — Outsource jobwork rate snapshot (₹ per cft/sft). Applied
+  // only for Outsource vendors below; ignored for CNC. Optional — the
+  // rate can also be set later on the challan.
+  const jobworkRateRaw = txt(formData, "jobwork_rate");
+  const jobworkRate =
+    jobworkRateRaw && Number(jobworkRateRaw) > 0 ? Number(jobworkRateRaw) : null;
+  const jobworkUnit = txt(formData, "jobwork_unit") === "sft" ? "sft" : "cft";
   // Mig 088 — double-side carving. 2 → output counts x2 in the CNC
   // costing + cockpit stat. Anything but "2" collapses to 1.
   const carvingSides = num(formData, "carving_sides", 1) === 2 ? 2 : 1;
@@ -1189,6 +1197,10 @@ export async function assignCarvingJobAction(formData: FormData) {
       // Outsource auto-start: stamp loaded_at/by at assign so the Active
       // card shows it as carving (no separate Mark-started step).
       ...(isOutsource ? { loaded_at: nowIso, loaded_by: profile.id } : {}),
+      // Mig 094 — snapshot the jobwork rate (Outsource only, if given).
+      ...(isOutsource && jobworkRate != null
+        ? { jobwork_rate: jobworkRate, jobwork_unit: jobworkUnit }
+        : {}),
       urgency,
       estimated_minutes: estimatedMinutes || null,
       carving_sides: carvingSides,
@@ -5591,6 +5603,152 @@ export async function markCarvingCompleteManuallyAction(formData: FormData) {
 
   refreshAll();
   redirect(`${redirectTo}?toast=Received`);
+}
+
+// ── Outsource jobwork challan generation (Mig 094/096) ───────────────
+// Builds a printable JW-YYYY-N challan from approved Outsource carving
+// jobs for one vendor: each slab's CFT/SFT × rate = amount, plus optional
+// GST / RCM. Everything (qty/rate/amount) is snapshotted so the bill
+// can't drift if dims or rates change later. NOT wired to accounts.
+export async function generateCarvingChallanAction(formData: FormData) {
+  const { profile } = await requireAuth([
+    "developer",
+    "owner",
+    "carving_head",
+    "senior_incharge",
+  ]);
+  const admin = createAdminSupabaseClient();
+
+  const vendorId = txt(formData, "vendor_id");
+  const idsRaw = txt(formData, "carving_item_ids");
+  const rate = Number(txt(formData, "rate"));
+  const unit = txt(formData, "unit") === "sft" ? "sft" : "cft";
+  const gstPctRaw = txt(formData, "gst_pct");
+  const gstPct = gstPctRaw && Number(gstPctRaw) > 0 ? Number(gstPctRaw) : null;
+  const isRcm = txt(formData, "is_rcm") === "true";
+  const notes = txt(formData, "notes") || null;
+
+  if (!vendorId) redirect("/carving/challans/new?toast=Pick+a+vendor");
+  if (!rate || rate <= 0) redirect("/carving/challans/new?toast=Enter+a+valid+rate");
+
+  let ids: string[] = [];
+  try {
+    const parsed = JSON.parse(idsRaw);
+    if (Array.isArray(parsed)) {
+      ids = parsed.filter((x): x is string => typeof x === "string" && !!x);
+    }
+  } catch {
+    /* empty */
+  }
+  if (ids.length === 0) redirect("/carving/challans/new?toast=Select+at+least+one+slab");
+
+  const { data: itemsData } = await admin
+    .from("carving_items")
+    .select(
+      "id, vendor_id, vendor_name, vendor_type, slab_requirement_id, review_approved_at",
+    )
+    .in("id", ids)
+    .eq("vendor_id", vendorId);
+  const items = (itemsData ?? []) as Array<{
+    id: string;
+    vendor_id: string;
+    vendor_name: string;
+    vendor_type: string;
+    slab_requirement_id: string;
+    review_approved_at: string | null;
+  }>;
+  if (items.length === 0) redirect("/carving/challans/new?toast=No+matching+approved+slabs");
+  if (items.some((i) => i.vendor_type !== "Outsource" || !i.review_approved_at)) {
+    redirect("/carving/challans/new?toast=Only+approved+Outsource+slabs+can+be+billed");
+  }
+
+  // Refuse any slab already on a non-cancelled challan (no double-billing).
+  const { data: already } = await admin
+    .from("carving_challan_items")
+    .select("carving_item_id, carving_challans!inner(cancelled_at)")
+    .in("carving_item_id", ids);
+  const billed = ((already ?? []) as unknown as Array<{
+    carving_item_id: string | null;
+    carving_challans: { cancelled_at: string | null } | null;
+  }>).some((r) => r.carving_item_id && !r.carving_challans?.cancelled_at);
+  if (billed) {
+    redirect("/carving/challans/new?toast=Some+slabs+are+already+on+a+challan");
+  }
+
+  const { data: slabRows } = await admin
+    .from("slab_requirements")
+    .select("id, label, temple, length_ft, width_ft, thickness_ft")
+    .in("id", items.map((i) => i.slab_requirement_id));
+  const slabById = new Map(
+    ((slabRows ?? []) as Array<{
+      id: string;
+      label: string | null;
+      temple: string;
+      length_ft: number | string;
+      width_ft: number | string;
+      thickness_ft: number | string;
+    }>).map((s) => [s.id, s]),
+  );
+
+  const lines = items.map((it, idx) => {
+    const slab = slabById.get(it.slab_requirement_id);
+    const qty = slab
+      ? jobworkQuantity(unit, slab.length_ft, slab.width_ft, slab.thickness_ft)
+      : 0;
+    const amount = Math.round(qty * rate * 100) / 100;
+    const dims = slab
+      ? `${Number(slab.length_ft)}x${Number(slab.width_ft)}x${Number(slab.thickness_ft)} in`
+      : "";
+    const desc = slab
+      ? `${it.slab_requirement_id} · ${slab.label ?? slab.temple} · ${dims}`
+      : it.slab_requirement_id;
+    return {
+      carving_item_id: it.id,
+      slab_requirement_id: it.slab_requirement_id,
+      description: desc,
+      quantity: Math.round(qty * 1000) / 1000,
+      unit,
+      rate,
+      amount,
+      position: idx,
+    };
+  });
+  const subtotal = Math.round(lines.reduce((s, l) => s + l.amount, 0) * 100) / 100;
+  const gstAmount = gstPct ? Math.round(subtotal * gstPct) / 100 : 0;
+  const total = Math.round((subtotal + (isRcm ? 0 : gstAmount)) * 100) / 100;
+
+  const { data: challan, error: chErr } = await admin
+    .from("carving_challans")
+    .insert({
+      vendor_id: vendorId,
+      vendor_name: items[0].vendor_name,
+      amount_subtotal: subtotal,
+      gst_pct: gstPct,
+      gst_amount: gstAmount,
+      is_rcm: isRcm,
+      amount_total: total,
+      notes,
+      created_by: profile.id,
+    })
+    .select("id")
+    .single();
+  if (chErr || !challan) {
+    redirect(
+      `/carving/challans/new?toast=${encodeURIComponent(chErr?.message ?? "Failed to create challan")}`,
+    );
+  }
+
+  await admin
+    .from("carving_challan_items")
+    .insert(lines.map((l) => ({ challan_id: challan.id, ...l })));
+
+  await logAudit(profile.id, "carving_challan_generated", "carving_challan", challan.id, {
+    vendor_id: vendorId,
+    items: lines.length,
+    total,
+  });
+  refreshAll();
+  redirect(`/carving/challans/${challan.id}?toast=Challan+generated`);
 }
 
 // ── Job event timeline — used by JobDetailPeek modal ─────────────
