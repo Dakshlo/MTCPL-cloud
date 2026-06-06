@@ -6165,6 +6165,89 @@ export async function sendWorkOrderLineToVendorAction(formData: FormData) {
   redirect(`/carving/work-orders/${woId}?toast=Sent+to+vendor`);
 }
 
+// Daksh June 2026 — send EVERY ready (cut-done, un-sent) line of a work
+// order to the vendor in one press. Loops the per-line bridge so the head
+// doesn't tap Send slab-by-slab. Lines whose slab isn't cut-done yet are
+// skipped (stay planned). Office roles only.
+export async function sendAllReadyWorkOrderLinesAction(formData: FormData) {
+  const { profile } = await requireAuth([...WO_ROLES]);
+  const admin = createAdminSupabaseClient();
+  const woId = txt(formData, "work_order_id");
+  if (!woId) redirect("/carving/work-orders?toast=Missing+work+order");
+
+  const { data: woRow } = await admin
+    .from("carving_work_orders")
+    .select("id, vendor_id, vendor_name, jobwork_rate, jobwork_unit")
+    .eq("id", woId)
+    .maybeSingle();
+  const wo = woRow as {
+    vendor_id: string;
+    vendor_name: string;
+    jobwork_rate: number | string | null;
+    jobwork_unit: string | null;
+  } | null;
+  if (!wo) redirect(`/carving/work-orders/${woId}?toast=Work+order+not+found`);
+
+  const { data: lineRows } = await admin
+    .from("carving_work_order_items")
+    .select("id, slab_requirement_id, carving_item_id, line_status, jobwork_rate, jobwork_unit, position")
+    .eq("work_order_id", woId)
+    .eq("line_status", "planned")
+    .is("carving_item_id", null)
+    .not("slab_requirement_id", "is", null)
+    .order("position", { ascending: true });
+  const lines = (lineRows ?? []) as Array<{
+    id: string;
+    slab_requirement_id: string;
+    jobwork_rate: number | string | null;
+    jobwork_unit: string | null;
+  }>;
+  if (lines.length === 0) {
+    redirect(`/carving/work-orders/${woId}?toast=No+ready+lines+to+send`);
+  }
+
+  let sent = 0;
+  for (const line of lines) {
+    const rate =
+      line.jobwork_rate != null
+        ? Number(line.jobwork_rate)
+        : wo!.jobwork_rate != null
+          ? Number(wo!.jobwork_rate)
+          : null;
+    const unit = (line.jobwork_unit ?? wo!.jobwork_unit) === "sft" ? "sft" : "cft";
+    const res = await sendSlabToOutsourceVendor(admin, {
+      slabId: line.slab_requirement_id,
+      vendorId: wo!.vendor_id,
+      vendorName: wo!.vendor_name,
+      rate,
+      unit,
+      profileId: profile.id,
+    });
+    if (res.ok) {
+      await admin
+        .from("carving_work_order_items")
+        .update({ carving_item_id: res.id, line_status: "sent" })
+        .eq("id", line.id);
+      sent += 1;
+    }
+    // Not cut-done yet → skip; the line stays planned for next time.
+  }
+  if (sent > 0) {
+    await admin
+      .from("carving_work_orders")
+      .update({ status: "in_progress", updated_at: new Date().toISOString(), updated_by: profile.id })
+      .eq("id", woId)
+      .eq("status", "open");
+  }
+  await logAudit(profile.id, "work_order_send_all", "carving_work_order", woId, { sent });
+  refreshAll();
+  redirect(
+    `/carving/work-orders/${woId}?toast=${encodeURIComponent(
+      sent > 0 ? `📤 Sent ${sent} to vendor` : "Nothing ready to send yet",
+    )}`,
+  );
+}
+
 export async function cancelWorkOrderAction(formData: FormData) {
   const { profile } = await requireAuth([...WO_ROLES]);
   const admin = createAdminSupabaseClient();
