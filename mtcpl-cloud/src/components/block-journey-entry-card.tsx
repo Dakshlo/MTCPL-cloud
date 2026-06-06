@@ -29,7 +29,10 @@ export function BlockJourneyEntryCard() {
             // OCD fix) — all four dashboard cards equal-height.
             display: "flex",
             flexDirection: "column",
+            justifyContent: "space-between",
+            gap: 12,
             height: "100%",
+            minHeight: 150,
             cursor: "pointer",
             textDecoration: "none",
             background: "linear-gradient(135deg, #1A2414 0%, #3d5a28 100%)",
@@ -55,57 +58,46 @@ export function BlockJourneyEntryCard() {
             }}
           />
 
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 16,
-              flexWrap: "wrap",
-              position: "relative",
-            }}
-          >
-            <div style={{ flex: "1 1 auto", minWidth: 0 }}>
-              <div
-                style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  letterSpacing: "0.1em",
-                  textTransform: "uppercase",
-                  color: "#86AC5B",
-                  marginBottom: 6,
-                }}
-              >
-                📈 Real efficiency
-              </div>
-              <div
-                style={{
-                  fontSize: 22,
-                  fontWeight: 700,
-                  color: "#fff",
-                  letterSpacing: "-0.2px",
-                  marginBottom: 4,
-                }}
-              >
-                Block Journey
-              </div>
-            </div>
-
+          <div style={{ position: "relative", minWidth: 0 }}>
             <div
               style={{
-                flexShrink: 0,
-                padding: "10px 18px",
-                background: "#86AC5B",
-                color: "#1A2414",
-                borderRadius: 8,
-                fontSize: 13,
+                fontSize: 11,
                 fontWeight: 700,
-                letterSpacing: "0.02em",
-                whiteSpace: "nowrap",
+                letterSpacing: "0.1em",
+                textTransform: "uppercase",
+                color: "#86AC5B",
+                marginBottom: 6,
               }}
             >
-              Open report →
+              📈 Real efficiency
             </div>
+            <div
+              style={{
+                fontSize: 22,
+                fontWeight: 700,
+                color: "#fff",
+                letterSpacing: "-0.2px",
+              }}
+            >
+              Block Journey
+            </div>
+          </div>
+
+          <div
+            style={{
+              position: "relative",
+              alignSelf: "flex-start",
+              padding: "10px 18px",
+              background: "#86AC5B",
+              color: "#1A2414",
+              borderRadius: 8,
+              fontSize: 13,
+              fontWeight: 700,
+              letterSpacing: "0.02em",
+              whiteSpace: "nowrap",
+            }}
+          >
+            Open report →
           </div>
         </div>
       }

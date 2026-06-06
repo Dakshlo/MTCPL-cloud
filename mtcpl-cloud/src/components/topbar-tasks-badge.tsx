@@ -421,18 +421,6 @@ export function TopbarTasksBadge({ items }: { items: TopbarTask[] }) {
                           >
                             {it.label}
                           </span>
-                          <span
-                            style={{
-                              fontSize: 11,
-                              color: "rgba(15, 23, 42, 0.55)",
-                              lineHeight: 1.35,
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {it.description}
-                          </span>
                         </span>
                         <span
                           style={{

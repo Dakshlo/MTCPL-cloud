@@ -10,12 +10,16 @@ export function AskAiEntryCard() {
     <Link
       href="/ask-ai"
       style={{
-        // Daksh: cards in a row must be one size. Switched to a
-        // flex container so children stretch + the card itself
-        // fills its grid cell via height:100%.
+        // Daksh June 2026 — uniform card: kicker+title pinned top, CTA
+        // pinned bottom-left via space-between, with a shared minHeight
+        // so all four dashboard cards are exactly the same size whether
+        // the title is one line or two.
         display: "flex",
         flexDirection: "column",
+        justifyContent: "space-between",
+        gap: 12,
         height: "100%",
+        minHeight: 150,
         textDecoration: "none",
         background: "linear-gradient(135deg, #2D2410 0%, #6b4f18 100%)",
         borderRadius: 12,
@@ -40,38 +44,37 @@ export function AskAiEntryCard() {
         }}
       />
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap", position: "relative" }}>
-        <div style={{ flex: "1 1 auto", minWidth: 0 }}>
-          <div style={{
-            fontSize: 11,
-            fontWeight: 700,
-            letterSpacing: "0.1em",
-            textTransform: "uppercase",
-            color: "#E8C572",
-            marginBottom: 6,
-          }}>
-            ✨ New
-          </div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: "#fff", letterSpacing: "-0.2px" }}>
-            MTCPL-AI
-          </div>
+      <div style={{ position: "relative", minWidth: 0 }}>
+        <div style={{
+          fontSize: 11,
+          fontWeight: 700,
+          letterSpacing: "0.1em",
+          textTransform: "uppercase",
+          color: "#E8C572",
+          marginBottom: 6,
+        }}>
+          ✨ New
         </div>
+        <div style={{ fontSize: 22, fontWeight: 700, color: "#fff", letterSpacing: "-0.2px" }}>
+          MTCPL-AI
+        </div>
+      </div>
 
-        <div
-          style={{
-            flexShrink: 0,
-            padding: "10px 18px",
-            background: "#E8C572",
-            color: "#2D2410",
-            borderRadius: 8,
-            fontSize: 13,
-            fontWeight: 700,
-            letterSpacing: "0.02em",
-            whiteSpace: "nowrap",
-          }}
-        >
-          Open chat →
-        </div>
+      <div
+        style={{
+          position: "relative",
+          alignSelf: "flex-start",
+          padding: "10px 18px",
+          background: "#E8C572",
+          color: "#2D2410",
+          borderRadius: 8,
+          fontSize: 13,
+          fontWeight: 700,
+          letterSpacing: "0.02em",
+          whiteSpace: "nowrap",
+        }}
+      >
+        Open chat →
       </div>
     </Link>
   );

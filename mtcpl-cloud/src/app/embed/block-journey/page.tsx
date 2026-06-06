@@ -150,8 +150,11 @@ export default async function EmbedBlockJourneyPage({
         >
           <Link
             href="/blocks/purchase"
-            target="_blank"
-            rel="noopener noreferrer"
+            // Daksh June 2026 — open in the CURRENT window, not a new
+            // tab. This link lives inside the dashboard peek iframe, so
+            // a plain navigation would only swap the iframe contents;
+            // target="_top" breaks out and navigates the whole tab.
+            target="_top"
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -169,19 +172,6 @@ export default async function EmbedBlockJourneyPage({
             }}
           >
             📦 Block Purchase
-            <span
-              style={{
-                fontSize: 9,
-                fontWeight: 800,
-                padding: "2px 6px",
-                borderRadius: 4,
-                background: "rgba(255,255,255,0.22)",
-                textTransform: "uppercase",
-                letterSpacing: "0.06em",
-              }}
-            >
-              ↗ New tab
-            </span>
           </Link>
         </div>
       )}

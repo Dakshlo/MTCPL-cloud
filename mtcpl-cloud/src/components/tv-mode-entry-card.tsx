@@ -22,10 +22,14 @@ export function TvModeEntryCard() {
       target="_blank"
       rel="noreferrer"
       style={{
-        // Daksh OCD fix — all four dashboard cards equal-height.
+        // Daksh OCD fix — all four dashboard cards equal-height
+        // (kicker+title top, CTA bottom-left, shared minHeight).
         display: "flex",
         flexDirection: "column",
+        justifyContent: "space-between",
+        gap: 12,
         height: "100%",
+        minHeight: 150,
         textDecoration: "none",
         background: "linear-gradient(135deg, #1a1a1a 0%, #2D2410 60%, #6b4f18 100%)",
         borderRadius: 12,
@@ -53,55 +57,45 @@ export function TvModeEntryCard() {
           pointerEvents: "none",
         }}
       />
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 16,
-          flexWrap: "wrap",
-          position: "relative",
-        }}
-      >
-        <div style={{ flex: "1 1 auto", minWidth: 0 }}>
-          <div
-            style={{
-              fontSize: 11,
-              fontWeight: 700,
-              letterSpacing: "0.1em",
-              textTransform: "uppercase",
-              color: "#E8C572",
-              marginBottom: 6,
-            }}
-          >
-            📺 TV Mode
-          </div>
-          <div
-            style={{
-              fontSize: 22,
-              fontWeight: 700,
-              color: "#fff",
-              letterSpacing: "-0.2px",
-              marginBottom: 4,
-            }}
-          >
-            Carving floor on the wall
-          </div>
+      <div style={{ position: "relative", minWidth: 0 }}>
+        <div
+          style={{
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: "0.1em",
+            textTransform: "uppercase",
+            color: "#E8C572",
+            marginBottom: 6,
+          }}
+        >
+          📺 TV Mode
         </div>
         <div
           style={{
-            fontSize: 12,
-            padding: "8px 14px",
-            background: "rgba(232,197,114,0.18)",
-            border: "1px solid rgba(232,197,114,0.4)",
-            borderRadius: 8,
-            color: "#E8C572",
-            fontWeight: 600,
-            whiteSpace: "nowrap",
-            flexShrink: 0,
+            fontSize: 22,
+            fontWeight: 700,
+            color: "#fff",
+            letterSpacing: "-0.2px",
           }}
         >
-          Open ↗
+          Carving floor on the wall
         </div>
+      </div>
+      <div
+        style={{
+          position: "relative",
+          alignSelf: "flex-start",
+          fontSize: 12,
+          padding: "8px 14px",
+          background: "rgba(232,197,114,0.18)",
+          border: "1px solid rgba(232,197,114,0.4)",
+          borderRadius: 8,
+          color: "#E8C572",
+          fontWeight: 600,
+          whiteSpace: "nowrap",
+        }}
+      >
+        Open ↗
       </div>
     </Link>
   );
