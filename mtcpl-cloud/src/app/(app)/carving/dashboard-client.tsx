@@ -21,12 +21,12 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AssignModal } from "./assign-modal";
 import { BulkAssignModal } from "./bulk-assign-modal";
+import { ReceiveModal } from "./receive-modal";
 import {
   approveCarvingJobAction,
   rejectCarvingJobAction,
   reworkCarvingJobAction,
   markCarvingStartedManuallyAction,
-  markCarvingCompleteManuallyAction,
   getJobEvents,
   getSignedReviewMediaUrl,
   type JobEvent,
@@ -198,6 +198,10 @@ export function CarvingDashboardClient({
   const router = useRouter();
   const searchParams = useSearchParams();
   const [assigning, setAssigning] = useState<UnassignedSlab | null>(null);
+  // Daksh June 2026 — Outsource batch-receive modal. initialId is the
+  // carving_item whose card 📥 Receive was tapped (pre-selected); the head
+  // can tick up to 8 returned slabs and confirm in one press.
+  const [receiving, setReceiving] = useState<{ initialId: string | null } | null>(null);
   // Job detail peek — opened by clicking any card on Active /
   // Awaiting Review / Carving Done. Center modal with slab info,
   // assignment, and inline approve/reject forms.
@@ -934,6 +938,7 @@ export function CarvingDashboardClient({
             fmtDate={fmtDate}
             daysUntil={daysUntil}
             onOpenJob={(j) => setPeekJob(j)}
+            onReceive={(id) => setReceiving({ initialId: id })}
           />
         </>
       )}
@@ -984,7 +989,37 @@ export function CarvingDashboardClient({
           vendors={vendors.filter(
             (v) => v.vendor_type === (mode === "outsource" ? "Outsource" : "CNC"),
           )}
+          outsourceOnly={mode === "outsource"}
           onClose={() => setAssigning(null)}
+        />
+      )}
+
+      {/* Outsource batch-receive modal (Daksh June 2026). Lists every
+          slab currently out with a vendor (in-progress Outsource jobs),
+          pre-selects the tapped card, and receives up to 8 in one press
+          with a two-tap confirm. */}
+      {receiving && (
+        <ReceiveModal
+          jobs={activeJobs
+            .filter(
+              (j) =>
+                j.vendor_type === "Outsource" &&
+                j.status === "carving_in_progress" &&
+                !j.completed_at,
+            )
+            .map((j) => ({
+              id: j.id,
+              slab_id: j.slab_requirement_id,
+              label: j.slab_label,
+              temple: j.temple,
+              stone: j.stone,
+              length_ft: j.length_ft,
+              width_ft: j.width_ft,
+              thickness_ft: j.thickness_ft,
+              vendor_name: j.vendor_name,
+            }))}
+          initialId={receiving.initialId}
+          onClose={() => setReceiving(null)}
         />
       )}
 
@@ -2151,6 +2186,7 @@ function JobsByTemple({
   fmtDate,
   daysUntil,
   onOpenJob,
+  onReceive,
   collapseByDefault = false,
 }: {
   jobs: JobRow[];
@@ -2168,6 +2204,9 @@ function JobsByTemple({
   /** Click handler — opens the JobDetailPeek modal. The card is
    *  no longer a navigation target; clicking opens the peek. */
   onOpenJob: (job: JobRow) => void;
+  /** Daksh June 2026 — opens the Outsource batch-receive modal with the
+   *  tapped slab pre-selected. Only the Active tab passes it. */
+  onReceive?: (carvingItemId: string) => void;
   /** Daksh (June 2026) — when true, every group renders collapsed
    *  on first paint regardless of group count. Set on Carving Done
    *  where the per-vendor sections were all expanded by default,
@@ -3108,7 +3147,7 @@ function JobsByTemple({
                       stopPropagation so clicking them doesn't also
                       open the peek modal. CNC cards skip this. */}
                   {j.vendor_type === "Outsource" && (
-                    <ManualLifecycleButtons job={j} />
+                    <ManualLifecycleButtons job={j} onReceive={onReceive} />
                   )}
                 </div>
               );
@@ -3124,7 +3163,15 @@ function JobsByTemple({
 // Tiny client-side button bar for manual-vendor jobs on Active cards.
 // Imported actions are server actions; calling them from a form runs
 // the server action and refreshes via revalidatePath().
-function ManualLifecycleButtons({ job }: { job: JobRow }) {
+function ManualLifecycleButtons({
+  job,
+  onReceive,
+}: {
+  job: JobRow;
+  /** Opens the batch-receive modal with this job pre-selected. Optional
+   *  because non-Active JobsByTemple instances don't render Receive. */
+  onReceive?: (carvingItemId: string) => void;
+}) {
   // carving_assigned → Mark started (LEGACY: only in-flight Outsource
   // rows assigned before auto-start shipped land here; new ones skip it).
   if (job.status === "carving_assigned") {
@@ -3160,32 +3207,33 @@ function ManualLifecycleButtons({ job }: { job: JobRow }) {
   // the old two-step Mark-started/Mark-complete: assign now auto-starts,
   // so the only Outsource action on the Active card is Receive, which
   // sends the slab to Carving Done Approval.
+  // Daksh June 2026 — Receive now OPENS a confirm / multi-select modal
+  // instead of firing immediately. A stray tap just opens the modal (no
+  // accidental receive), and the head can tick up to 8 returned slabs and
+  // receive them all in one press.
   if (job.status === "carving_in_progress" && !job.completed_at) {
     return (
-      <form
-        action={markCarvingCompleteManuallyAction}
-        onClick={(e) => e.stopPropagation()}
-        style={{ marginTop: 4 }}
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onReceive?.(job.id);
+        }}
+        style={{
+          marginTop: 4,
+          width: "100%",
+          fontSize: 11,
+          padding: "6px 10px",
+          fontWeight: 700,
+          background: "#15803d",
+          color: "#fff",
+          border: "none",
+          borderRadius: 6,
+          cursor: "pointer",
+        }}
       >
-        <input type="hidden" name="carving_item_id" value={job.id} />
-        <input type="hidden" name="redirect_to" value="/carving?tab=active&mode=outsource" />
-        <button
-          type="submit"
-          style={{
-            width: "100%",
-            fontSize: 11,
-            padding: "6px 10px",
-            fontWeight: 700,
-            background: "#15803d",
-            color: "#fff",
-            border: "none",
-            borderRadius: 6,
-            cursor: "pointer",
-          }}
-        >
-          📥 Receive
-        </button>
-      </form>
+        📥 Receive
+      </button>
     );
   }
   return null;

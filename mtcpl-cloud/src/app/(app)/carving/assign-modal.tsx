@@ -211,10 +211,16 @@ export function AssignModal({
   slab,
   vendors,
   onClose,
+  outsourceOnly = false,
 }: {
   slab: Slab;
   vendors: Vendor[];
   onClose: () => void;
+  /** Daksh June 2026 — Outsource mode on /carving. Hides the CNC-only
+   *  Work type + CNC axes controls entirely (they're meaningless for
+   *  jobwork carvers and were flashing on first open, before a vendor
+   *  was picked, even in Outsource mode). */
+  outsourceOnly?: boolean;
 }) {
   const [vendorId, setVendorId] = useState<string>("");
   const [workType, setWorkType] = useState<WorkType>("flat");
@@ -431,7 +437,7 @@ export function AssignModal({
             {/* Work type picker — drives vendor sort + load-time
                 validation. Hidden when the selected vendor is Manual
                 (they don't have machine types to match). */}
-            {!isManual && (
+            {!isManual && !outsourceOnly && (
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <Label>Work type</Label>
                 <div style={{ display: "flex", gap: 8 }}>
@@ -1090,8 +1096,9 @@ export function AssignModal({
                   lineHeight: 1.5,
                 }}
               >
-                Pick a vendor on the left to see their machine
-                availability here.
+                {outsourceOnly
+                  ? "Pick an outsource / jobwork vendor on the left to assign this slab."
+                  : "Pick a vendor on the left to see their machine availability here."}
               </div>
             )}
 

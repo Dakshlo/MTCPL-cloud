@@ -1255,7 +1255,14 @@ export async function assignCarvingJobAction(formData: FormData) {
   });
 
   refreshAll();
-  redirect("/carving?tab=active&toast=Job+queued");
+  // Daksh June 2026 — an Outsource assign must return to the Outsource
+  // Active view (mode=outsource), not the default CNC Active tab, so the
+  // user isn't dragged out of the Outsource flow after every assign.
+  redirect(
+    isOutsource
+      ? "/carving?tab=active&mode=outsource&toast=Job+queued"
+      : "/carving?tab=active&toast=Job+queued",
+  );
 }
 
 // ── Migration 026: bulk-assign up to 10 slabs in one shot ──────────
@@ -1402,6 +1409,9 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
   // Outsource jobs auto-start on assign (see single-assign note above).
   const isOutsourceBatch = vendorType === "Outsource";
   const assignedStatusBatch = isOutsourceBatch ? "carving_in_progress" : "carving_assigned";
+  // Daksh June 2026 — keep Outsource batch assigns inside the Outsource
+  // view on redirect (mode=outsource), mirroring the single-assign fix.
+  const modeQ = isOutsourceBatch ? "mode=outsource&" : "";
 
   for (const slabId of slabIds) {
     // Race-guard the slab transition first.
@@ -1480,20 +1490,20 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
   refreshAll();
   if (successes.length === 0) {
     redirect(
-      `/carving?toast=${encodeURIComponent(
+      `/carving?${modeQ}toast=${encodeURIComponent(
         `Batch failed — no slabs could be assigned. ${failures[0]?.reason ?? ""}`,
       )}`,
     );
   }
   if (failures.length > 0) {
     redirect(
-      `/carving?tab=active&toast=${encodeURIComponent(
+      `/carving?tab=active&${modeQ}toast=${encodeURIComponent(
         `Assigned ${successes.length} of ${slabIds.length} · ${failures.length} failed (${failures[0]?.reason ?? "see log"})`,
       )}`,
     );
   }
   redirect(
-    `/carving?tab=active&toast=${encodeURIComponent(
+    `/carving?tab=active&${modeQ}toast=${encodeURIComponent(
       `📦 Batch of ${successes.length} queued`,
     )}`,
   );
@@ -5630,7 +5640,94 @@ export async function markCarvingCompleteManuallyAction(formData: FormData) {
   });
 
   refreshAll();
-  redirect(`${redirectTo}?toast=Received`);
+  // Daksh June 2026 — redirect_to already carries a query string
+  // (?tab=active&mode=outsource), so the toast MUST be joined with & —
+  // using ? here produced "…&mode=outsource?toast=Received", which broke
+  // the mode param and dragged the user to the CNC Active tab.
+  const sep1 = redirectTo.includes("?") ? "&" : "?";
+  redirect(`${redirectTo}${sep1}toast=Received`);
+}
+
+// ── Batch Receive for Outsource carving (Daksh June 2026) ────────────
+// Marks up to 8 returned Outsource slabs as received in one press. Same
+// per-slab effect as markCarvingCompleteManuallyAction (status→completed,
+// completed_at/unloaded_at stamped → slab moves to Carving Done Approval),
+// just looped. Office roles only. Skips any row that isn't a still-in-
+// progress Outsource job (CNC + cutting untouched).
+export async function receiveOutsourceCarvingBatchAction(formData: FormData) {
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge"]);
+  const admin = createAdminSupabaseClient();
+
+  const redirectTo = txt(formData, "redirect_to") || "/carving?tab=active&mode=outsource";
+  const sep = redirectTo.includes("?") ? "&" : "?";
+  const tempLocation = txt(formData, "temporary_location") || "Outsource carver yard";
+
+  let ids: string[] = [];
+  try {
+    const parsed = JSON.parse(txt(formData, "carving_item_ids"));
+    if (Array.isArray(parsed)) {
+      ids = parsed.filter((x): x is string => typeof x === "string" && !!x);
+    }
+  } catch {
+    /* empty → handled below */
+  }
+  // De-dupe + hard cap at 8 (the UI caps too; this is the last line of
+  // defence against a tampered form).
+  ids = [...new Set(ids)].slice(0, 8);
+  if (ids.length === 0) redirect(`${redirectTo}${sep}toast=No+slabs+selected`);
+
+  const { data: rows } = await admin
+    .from("carving_items")
+    .select("id, vendor_type, vendor_name, status, completed_at")
+    .in("id", ids);
+  const items = (rows ?? []) as Array<{
+    id: string;
+    vendor_type: string;
+    vendor_name: string;
+    status: string;
+    completed_at: string | null;
+  }>;
+
+  const now = new Date().toISOString();
+  let received = 0;
+  for (const it of items) {
+    if (it.vendor_type !== "Outsource") continue;
+    if (it.status !== "carving_in_progress") continue;
+    if (it.completed_at) continue;
+    const { data: upd } = await admin
+      .from("carving_items")
+      .update({
+        status: "completed",
+        completed_at: now,
+        unloaded_at: now,
+        unloaded_by: profile.id,
+        temporary_location: tempLocation,
+      })
+      .eq("id", it.id)
+      .is("completed_at", null)
+      .select("id");
+    if (upd && upd.length > 0) {
+      received += 1;
+      await recordEvent(
+        it.id,
+        "completed_manually",
+        profile.id,
+        `Outsource carving received (back from vendor) · ${it.vendor_name} · stored at ${tempLocation}`,
+      );
+      await logAudit(profile.id, "carving_completed_manually", "carving_item", it.id, {
+        vendor_name: it.vendor_name,
+        temporary_location: tempLocation,
+        batch: true,
+      });
+    }
+  }
+
+  refreshAll();
+  redirect(
+    `${redirectTo}${sep}toast=${encodeURIComponent(
+      received > 0 ? `📥 Received ${received} slab${received === 1 ? "" : "s"}` : "Nothing to receive",
+    )}`,
+  );
 }
 
 // ── Outsource jobwork challan generation (Mig 094/096) ───────────────
