@@ -93,7 +93,7 @@ export default async function NewWorkOrderPage() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16, paddingBottom: 32, maxWidth: 1180 }}>
       <div>
-        <Link href="/carving/work-orders" style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", textDecoration: "none" }}>← Work orders</Link>
+        <Link href="/carving?mode=outsource&tab=workorders" style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", textDecoration: "none" }}>← Work orders</Link>
         <h1 style={{ margin: "6px 0 0", fontSize: 22 }}>New work order</h1>
       </div>
       <NewWorkOrderForm vendors={vendors} slabs={slabs} stoneTypes={stoneTypes} />

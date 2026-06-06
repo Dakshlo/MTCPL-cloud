@@ -214,7 +214,7 @@ export function CarvingDashboardClient({
   // Daksh June 2026 — Outsource batch-receive modal. initialId is the
   // carving_item whose card 📥 Receive was tapped (pre-selected); the head
   // can tick up to 8 returned slabs and confirm in one press.
-  const [receiving, setReceiving] = useState<{ initialId: string | null } | null>(null);
+  const [receiving, setReceiving] = useState<{ initialId: string | null; vendorName: string | null } | null>(null);
   // Job detail peek — opened by clicking any card on Active /
   // Awaiting Review / Carving Done. Center modal with slab info,
   // assignment, and inline approve/reject forms.
@@ -956,7 +956,7 @@ export function CarvingDashboardClient({
             fmtDate={fmtDate}
             daysUntil={daysUntil}
             onOpenJob={(j) => setPeekJob(j)}
-            onReceive={(id) => setReceiving({ initialId: id })}
+            onReceive={(id, vendorName) => setReceiving({ initialId: id, vendorName })}
           />
         </>
       )}
@@ -1028,7 +1028,10 @@ export function CarvingDashboardClient({
               (j) =>
                 j.vendor_type === "Outsource" &&
                 j.status === "carving_in_progress" &&
-                !j.completed_at,
+                !j.completed_at &&
+                // Daksh June 2026 — scope the Receive list to the vendor whose
+                // card was tapped; the head receives one carver at a time.
+                (!receiving.vendorName || j.vendor_name === receiving.vendorName),
             )
             .map((j) => ({
               id: j.id,
@@ -1042,6 +1045,8 @@ export function CarvingDashboardClient({
               vendor_name: j.vendor_name,
             }))}
           initialId={receiving.initialId}
+          vendorName={receiving.vendorName}
+          stoneTypes={stoneTypes}
           onClose={() => setReceiving(null)}
         />
       )}
@@ -2231,8 +2236,9 @@ function JobsByTemple({
    *  no longer a navigation target; clicking opens the peek. */
   onOpenJob: (job: JobRow) => void;
   /** Daksh June 2026 — opens the Outsource batch-receive modal with the
-   *  tapped slab pre-selected. Only the Active tab passes it. */
-  onReceive?: (carvingItemId: string) => void;
+   *  tapped slab pre-selected, scoped to the tapped card's vendor. Only
+   *  the Active tab passes it. */
+  onReceive?: (carvingItemId: string, vendorName: string) => void;
   /** Daksh (June 2026) — when true, every group renders collapsed
    *  on first paint regardless of group count. Set on Carving Done
    *  where the per-vendor sections were all expanded by default,
@@ -3246,9 +3252,10 @@ function ManualLifecycleButtons({
   onReceive,
 }: {
   job: JobRow;
-  /** Opens the batch-receive modal with this job pre-selected. Optional
-   *  because non-Active JobsByTemple instances don't render Receive. */
-  onReceive?: (carvingItemId: string) => void;
+  /** Opens the batch-receive modal with this job pre-selected, scoped to
+   *  this job's vendor. Optional because non-Active JobsByTemple instances
+   *  don't render Receive. */
+  onReceive?: (carvingItemId: string, vendorName: string) => void;
 }) {
   // carving_assigned → Mark started (LEGACY: only in-flight Outsource
   // rows assigned before auto-start shipped land here; new ones skip it).
@@ -3295,7 +3302,7 @@ function ManualLifecycleButtons({
         type="button"
         onClick={(e) => {
           e.stopPropagation();
-          onReceive?.(job.id);
+          onReceive?.(job.id, job.vendor_name);
         }}
         style={{
           marginTop: 4,

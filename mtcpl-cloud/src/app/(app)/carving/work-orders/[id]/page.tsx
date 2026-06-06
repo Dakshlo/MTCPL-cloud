@@ -131,7 +131,7 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
     <div style={{ display: "flex", flexDirection: "column", gap: 16, paddingBottom: 32, maxWidth: 1180 }}>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
         <div>
-          <Link href="/carving/work-orders" style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", textDecoration: "none" }}>← Work orders</Link>
+          <Link href="/carving?mode=outsource&tab=workorders" style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", textDecoration: "none" }}>← Work orders</Link>
           <h1 style={{ margin: "6px 0 0", fontSize: 22, fontFamily: "ui-monospace, monospace" }}>{wo.wo_number}</h1>
           <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 2 }}>
             🤝 {wo.vendor_name}{wo.title ? ` · ${wo.title}` : ""}{wo.temple ? ` · ${wo.temple}` : ""}

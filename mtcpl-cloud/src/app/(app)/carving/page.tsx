@@ -8,6 +8,7 @@ import {
   canSeeAwaitingReview,
 } from "@/lib/cutting-permissions";
 import { CarvingDashboardClient } from "./dashboard-client";
+import { WorkOrdersTab, type WorkOrderRow, type WorkOrderLineCounts } from "./work-orders-tab";
 import { VendorsManagerPeek } from "./vendors-manager-peek";
 import { CockpitSidebarToggle } from "@/components/cockpit-sidebar-toggle";
 import {
@@ -15,7 +16,7 @@ import {
   type ExternalSlab,
 } from "./add-external-cut-slab";
 
-type Tab = "unassigned" | "active" | "review" | "done" | "pending";
+type Tab = "unassigned" | "active" | "review" | "done" | "pending" | "workorders";
 
 export default async function CarvingDashboardPage({
   searchParams,
@@ -58,9 +59,11 @@ export default async function CarvingDashboardPage({
   const wantVendorType = mode === "outsource" ? "Outsource" : "CNC";
   // Mig 097 — the "Still Pending Work" tab exists only in Outsource mode.
   if (tab === "pending" && (mode !== "outsource" || !reviewAccess)) tab = "unassigned";
+  // Mig 098 — the Work Orders tab is Outsource-only.
+  if (tab === "workorders" && (mode !== "outsource" || !canUseOutsource)) tab = "unassigned";
   // Mig 098 — Outsource has NO Unassigned tab: work orders are the only way
-  // to give a vendor work. Bounce any unassigned deep-link to Active there.
-  if (mode === "outsource" && tab === "unassigned") tab = "active";
+  // to give a vendor work, so its home tab is Work Orders.
+  if (mode === "outsource" && tab === "unassigned") tab = "workorders";
 
   // Paginated fetcher for unassigned slabs — Supabase's PostgREST
   // caps single .select() at 1000 rows. Once cut_done count crosses
@@ -496,12 +499,47 @@ export default async function CarvingDashboardPage({
   const machineCodeById: Record<string, string> = {};
   for (const m of machines ?? []) machineCodeById[m.id] = m.machine_code;
 
+  // Mig 098 — Work Orders tab data (Outsource mode only). Outsource is
+  // work-order-only, so this tab is the entry point. Fetched here (not in
+  // the client) so the owner Approve/Reject controls stay server-action
+  // forms and the CNC flow is untouched.
+  const isOwner = profile.role === "developer" || profile.role === "owner";
+  let workOrders: WorkOrderRow[] = [];
+  const woLineCounts = new Map<string, WorkOrderLineCounts>();
+  if (canUseOutsource && mode === "outsource") {
+    const [{ data: woRows }, { data: woLineRows }] = await Promise.all([
+      admin
+        .from("carving_work_orders")
+        .select("id, wo_number, vendor_name, title, temple, status, jobwork_rate, jobwork_unit, reject_reason, cancel_reason, created_at")
+        .order("created_at", { ascending: false })
+        .limit(300),
+      admin.from("carving_work_order_items").select("work_order_id, line_status"),
+    ]);
+    workOrders = (woRows ?? []) as WorkOrderRow[];
+    for (const r of (woLineRows ?? []) as Array<{ work_order_id: string; line_status: string }>) {
+      const cc = woLineCounts.get(r.work_order_id) ?? { total: 0, planned: 0, sent: 0, received: 0, approved: 0 };
+      if (r.line_status === "cancelled") {
+        woLineCounts.set(r.work_order_id, cc);
+        continue;
+      }
+      cc.total += 1;
+      if (r.line_status === "planned") cc.planned += 1;
+      else if (r.line_status === "sent") cc.sent += 1;
+      else if (r.line_status === "received") cc.received += 1;
+      else if (r.line_status === "approved") cc.approved += 1;
+      woLineCounts.set(r.work_order_id, cc);
+    }
+  }
+  // Tab badge = live orders (exclude cancelled / rejected).
+  const workOrdersLiveCount = workOrders.filter((w) => w.status !== "cancelled" && w.status !== "rejected").length;
+
   const counts = {
     unassigned: (unassignedSlabsAll ?? []).length,
     active: activeForMode.length,
     review: reviewForMode.length,
     done: doneForMode.length,
     pending: pendingForMode.length,
+    workorders: workOrdersLiveCount,
   };
 
   return (
@@ -554,32 +592,14 @@ export default async function CarvingDashboardPage({
             profile.role === "senior_incharge") && (
             <VendorsManagerPeek vendors={vendorsForPeek} />
           )}
-          {/* Work orders + Jobwork challans — Outsource mode only
-              (owner/dev/head/senior). */}
+          {/* Jobwork challans — Outsource mode only (owner/dev/head/senior).
+              Mig 098 — Work Orders moved from a button to a tab below. */}
           {mode === "outsource" &&
             (profile.role === "developer" ||
               profile.role === "owner" ||
               profile.role === "carving_head" ||
               profile.role === "senior_incharge") && (
               <>
-                <Link
-                  href="/carving/work-orders"
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                    padding: "8px 14px",
-                    fontSize: 12,
-                    fontWeight: 700,
-                    color: "#92400e",
-                    background: "rgba(146,64,14,0.10)",
-                    border: "1px solid rgba(146,64,14,0.35)",
-                    borderRadius: 8,
-                    textDecoration: "none",
-                  }}
-                >
-                  🏭 Work Orders
-                </Link>
                 <Link
                   href="/carving/challans"
                   style={{
@@ -629,14 +649,13 @@ export default async function CarvingDashboardPage({
           const active = mode === m.key;
           const p = new URLSearchParams();
           p.set("mode", m.key);
-          // Outsource has no Unassigned tab — fall back to Active.
-          p.set("tab", m.key === "outsource" && tab === "unassigned" ? "active" : tab);
+          // Mig 098 — switching INTO Outsource lands on the Work Orders tab
+          // (its home, where outsource work is created). Otherwise keep the
+          // current tab; the page bounces any tab not valid in the target
+          // mode (e.g. workorders/pending → unassigned in CNC).
+          p.set("tab", m.key === "outsource" && mode !== "outsource" ? "workorders" : tab);
           if (templeFilter) p.set("temple", templeFilter);
-          // Mig 098 — Outsource is Work-Order-first: the toggle lands on the
-          // Work Orders page (the only entry path for outsource work). The
-          // outsource carving dashboard (Active / Approval / Done / Still
-          // Pending) is reached from there via "← Carving Jobs".
-          const href = m.key === "outsource" ? "/carving/work-orders" : `/carving?${p.toString()}`;
+          const href = `/carving?${p.toString()}`;
           return (
             <Link
               key={m.key}
@@ -682,6 +701,12 @@ export default async function CarvingDashboardPage({
             // vendor only through an owner-approved work order.
             ...(mode === "cnc"
               ? [{ key: "unassigned" as const, label: "Unassigned", count: counts.unassigned }]
+              : []),
+            // Mig 098 — Work Orders tab (Outsource only), sitting where
+            // Unassigned used to be. It's the outsource home + entry point,
+            // so the head can switch Work Orders ↔ Active ↔ Done in one tap.
+            ...(canUseOutsource && mode === "outsource"
+              ? [{ key: "workorders" as const, label: "🏭 Work Orders", count: counts.workorders }]
               : []),
             { key: "active", label: "Active", count: counts.active },
             // Mig 074 — hide Carving Done Approval for vendor-with-flag
@@ -747,20 +772,27 @@ export default async function CarvingDashboardPage({
         })}
       </div>
 
-      <CarvingDashboardClient
-        tab={tab}
-        mode={mode}
-        unassignedSlabs={unassignedSlabsAll ?? []}
-        activeJobs={activeForMode}
-        reviewJobs={reviewAccess ? reviewForMode : []}
-        doneJobs={doneForMode}
-        pendingJobs={mode === "outsource" && reviewAccess ? pendingForMode : []}
-        vendors={vendorsEnriched}
-        machineCodeById={machineCodeById}
-        templeNames={templeNames}
-        templeFilter={templeFilter}
-        stoneTypes={stoneTypes ?? []}
-      />
+      {/* Mig 098 — Work Orders is a server-rendered tab (owner Approve/
+          Reject are server-action forms); every other tab is the client
+          dashboard. */}
+      {tab === "workorders" ? (
+        <WorkOrdersTab wos={workOrders} counts={woLineCounts} isOwner={isOwner} />
+      ) : (
+        <CarvingDashboardClient
+          tab={tab}
+          mode={mode}
+          unassignedSlabs={unassignedSlabsAll ?? []}
+          activeJobs={activeForMode}
+          reviewJobs={reviewAccess ? reviewForMode : []}
+          doneJobs={doneForMode}
+          pendingJobs={mode === "outsource" && reviewAccess ? pendingForMode : []}
+          vendors={vendorsEnriched}
+          machineCodeById={machineCodeById}
+          templeNames={templeNames}
+          templeFilter={templeFilter}
+          stoneTypes={stoneTypes ?? []}
+        />
+      )}
     </div>
   );
 }

@@ -18,6 +18,8 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
+import { SlabThumb } from "@/components/slab-thumb";
+import type { StoneTypeDef } from "@/lib/stone-utils";
 import { receiveOutsourceCarvingBatchAction } from "./actions";
 
 export type ReceivableJob = {
@@ -44,10 +46,16 @@ function PendingOverlay() {
 export function ReceiveModal({
   jobs,
   initialId,
+  vendorName,
+  stoneTypes,
   onClose,
 }: {
   jobs: ReceivableJob[];
   initialId?: string | null;
+  /** Daksh June 2026 — the modal is scoped to one carver; shown in the
+   *  header. Receive lists one vendor at a time. */
+  vendorName?: string | null;
+  stoneTypes: StoneTypeDef[];
   onClose: () => void;
 }) {
   const [selected, setSelected] = useState<Set<string>>(
@@ -130,7 +138,7 @@ export function ReceiveModal({
           borderRadius: 12,
           boxShadow: "0 18px 60px rgba(0,0,0,0.45)",
           width: "100%",
-          maxWidth: 560,
+          maxWidth: 620,
           maxHeight: "88vh",
           display: "flex",
           flexDirection: "column",
@@ -150,9 +158,9 @@ export function ReceiveModal({
           }}
         >
           <div style={{ minWidth: 0 }}>
-            <h2 style={{ margin: 0, fontSize: 17 }}>📥 Receive carved slabs</h2>
+            <h2 style={{ margin: 0, fontSize: 17 }}>📥 Receive carved slabs{vendorName ? ` — ${vendorName}` : ""}</h2>
             <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>
-              Mark slabs returned from the vendor — they move to{" "}
+              Mark slabs returned{vendorName ? ` from ${vendorName}` : " from the vendor"} — they move to{" "}
               <strong>Carving Done Approval</strong>. Select up to {MAX_RECEIVE}.
             </p>
           </div>
@@ -214,82 +222,103 @@ export function ReceiveModal({
           )}
         </div>
 
-        {/* List */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
+        {/* List — full card view (3D thumbnail), scoped to one carver. */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px" }}>
           {jobs.length === 0 ? (
             <div style={{ padding: 24, textAlign: "center", color: "var(--muted)", fontSize: 13 }}>
-              No slabs are out with vendors right now.
+              No slabs are out with {vendorName ?? "this vendor"} right now.
             </div>
           ) : (
-            grouped.map(([vendorName, rows]) => (
-              <Fragment key={vendorName}>
+            grouped.map(([vName, rows]) => (
+              <Fragment key={vName}>
+                {/* Vendor sub-header only when the list spans >1 vendor
+                    (normally it's scoped to one). */}
+                {grouped.length > 1 && (
+                  <div
+                    style={{
+                      padding: "4px 2px 8px",
+                      fontSize: 11,
+                      fontWeight: 800,
+                      letterSpacing: "0.06em",
+                      textTransform: "uppercase",
+                      color: "#92400e",
+                    }}
+                  >
+                    🤝 {vName}
+                  </div>
+                )}
                 <div
                   style={{
-                    padding: "8px 18px 4px",
-                    fontSize: 11,
-                    fontWeight: 800,
-                    letterSpacing: "0.06em",
-                    textTransform: "uppercase",
-                    color: "#92400e",
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
+                    gap: 10,
+                    marginBottom: 8,
                   }}
                 >
-                  🤝 {vendorName}
-                </div>
-                {rows.map((j) => {
-                  const on = selected.has(j.id);
-                  const blocked = !on && atCap;
-                  return (
-                    <button
-                      key={j.id}
-                      type="button"
-                      onClick={() => toggle(j.id)}
-                      disabled={blocked}
-                      title={blocked ? `You can receive up to ${MAX_RECEIVE} at once` : undefined}
-                      style={{
-                        width: "100%",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 12,
-                        padding: "10px 18px",
-                        background: on ? "rgba(22,163,74,0.07)" : "transparent",
-                        border: "none",
-                        borderTop: "1px solid var(--border)",
-                        cursor: blocked ? "not-allowed" : "pointer",
-                        opacity: blocked ? 0.5 : 1,
-                        textAlign: "left",
-                      }}
-                    >
-                      <span
+                  {rows.map((j) => {
+                    const on = selected.has(j.id);
+                    const blocked = !on && atCap;
+                    return (
+                      <button
+                        key={j.id}
+                        type="button"
+                        onClick={() => toggle(j.id)}
+                        disabled={blocked}
+                        title={blocked ? `You can receive up to ${MAX_RECEIVE} at once` : undefined}
                         style={{
-                          width: 20,
-                          height: 20,
-                          flexShrink: 0,
-                          borderRadius: 5,
-                          border: `2px solid ${on ? "#15803d" : "var(--border)"}`,
-                          background: on ? "#15803d" : "transparent",
-                          color: "#fff",
+                          position: "relative",
                           display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: 13,
-                          fontWeight: 900,
+                          flexDirection: "column",
+                          gap: 5,
+                          padding: 10,
+                          textAlign: "left",
+                          background: on ? "rgba(22,163,74,0.07)" : "var(--surface)",
+                          border: `2px solid ${on ? "#15803d" : "var(--border)"}`,
+                          borderRadius: 12,
+                          cursor: blocked ? "not-allowed" : "pointer",
+                          opacity: blocked ? 0.45 : 1,
                         }}
                       >
-                        {on ? "✓" : ""}
-                      </span>
-                      <span style={{ flex: 1, minWidth: 0 }}>
-                        <span style={{ fontSize: 13.5, fontWeight: 700, fontFamily: "ui-monospace, monospace" }}>
+                        <span
+                          style={{
+                            position: "absolute",
+                            top: 8,
+                            right: 8,
+                            width: 22,
+                            height: 22,
+                            borderRadius: "50%",
+                            border: `2px solid ${on ? "#15803d" : "var(--border)"}`,
+                            background: on ? "#15803d" : "var(--surface)",
+                            color: "#fff",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontSize: 13,
+                            fontWeight: 900,
+                            zIndex: 1,
+                          }}
+                        >
+                          {on ? "✓" : ""}
+                        </span>
+                        <SlabThumb stone={j.stone} l={j.length_ft} w={j.width_ft} t={j.thickness_ft} stoneTypes={stoneTypes} />
+                        <div style={{ fontSize: 13, fontWeight: 700, fontFamily: "ui-monospace, monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {j.slab_id}
-                        </span>
-                        {j.label ? <span style={{ fontSize: 13 }}> · {j.label}</span> : ""}
-                        <span style={{ display: "block", fontSize: 11.5, color: "var(--muted)", marginTop: 1 }}>
+                        </div>
+                        {j.label && (
+                          <div style={{ fontSize: 11, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {j.label}
+                          </div>
+                        )}
+                        <div style={{ fontSize: 10.5, color: "var(--muted-light)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {j.temple}
-                          {j.stone ? ` · ${j.stone}` : ""} · {j.length_ft}×{j.width_ft}×{j.thickness_ft}&Prime;
-                        </span>
-                      </span>
-                    </button>
-                  );
-                })}
+                        </div>
+                        <div style={{ fontSize: 10.5, color: "var(--muted-light)", fontFamily: "ui-monospace, monospace" }}>
+                          {j.stone ? `${j.stone} · ` : ""}{j.length_ft}×{j.width_ft}×{j.thickness_ft}&Prime;
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
               </Fragment>
             ))
           )}

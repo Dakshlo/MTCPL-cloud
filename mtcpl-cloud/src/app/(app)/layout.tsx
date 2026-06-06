@@ -844,7 +844,7 @@ function buildTopbarTaskItems(counts: {
   if (counts.workOrderApprovalBadge !== null) {
     items.push({
       id: "work-order-approval",
-      href: "/carving/work-orders",
+      href: "/carving?mode=outsource&tab=workorders",
       label: "Work Order Approvals",
       description: "Outsource work orders awaiting your price approval",
       count: counts.workOrderApprovalBadge,
