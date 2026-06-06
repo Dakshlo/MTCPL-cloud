@@ -327,6 +327,18 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     if (declErr) return null;
     return count ?? 0;
   }
+  // Mig 098 — Outsource Work Order price approval. Owner / developer
+  // only — a new work order can't send slabs to the vendor until the
+  // owner approves its price.
+  async function fetchWorkOrderApprovalBadge(): Promise<number | null> {
+    if (profile.role !== "owner" && profile.role !== "developer") return null;
+    const { count, error: woErr } = await supabase
+      .from("carving_work_orders")
+      .select("*", { count: "exact", head: true })
+      .eq("status", "pending_approval");
+    if (woErr) return null;
+    return count ?? 0;
+  }
 
   const [
     approvalsBadge,
@@ -340,6 +352,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     carvingRejectedBadge,
     debitApprovalBadge,
     bankDeclineBadge,
+    workOrderApprovalBadge,
   ] = await Promise.all([
     fetchApprovalsBadge(),
     fetchBillsAuditBadge(),
@@ -352,6 +365,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     fetchCarvingRejectedBadge(),
     fetchDebitApprovalBadge(),
     fetchBankDeclineBadge(),
+    fetchWorkOrderApprovalBadge(),
   ]);
 
   return (
@@ -552,6 +566,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               carvingRejectedBadge,
               debitApprovalBadge,
               bankDeclineBadge,
+              workOrderApprovalBadge,
             })} />
 
             {/* Mig 078 — Messenger pilot. canUseMessenger is locked
@@ -667,6 +682,9 @@ function buildTopbarTaskItems(counts: {
   /** Mig 090 — pending bank-decline requests awaiting owner approval.
    *  Owner / developer only; null otherwise. */
   bankDeclineBadge: number | null;
+  /** Mig 098 — outsource work orders awaiting owner price approval.
+   *  Owner / developer only; null otherwise. */
+  workOrderApprovalBadge: number | null;
 }): TopbarTask[] {
   const items: TopbarTask[] = [];
   // Mig 058 follow-on (Daksh) — per-user rejected-bills item.
@@ -820,6 +838,18 @@ function buildTopbarTaskItems(counts: {
       count: counts.royaltyApprovalBadge,
       icon: "🏷️",
       department: "finance",
+    });
+  }
+  // Mig 098 — Outsource Work Order price approval (owner / developer only).
+  if (counts.workOrderApprovalBadge !== null) {
+    items.push({
+      id: "work-order-approval",
+      href: "/carving/work-orders",
+      label: "Work Order Approvals",
+      description: "Outsource work orders awaiting your price approval",
+      count: counts.workOrderApprovalBadge,
+      icon: "🏭",
+      department: "production",
     });
   }
   return items;

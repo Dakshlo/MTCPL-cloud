@@ -127,6 +127,17 @@ export default async function TasksPage() {
     if (error) return null;
     return count ?? 0;
   }
+  // Mig 098 — outsource work orders await owner price approval before any
+  // slab can be sent to the vendor. Owner/dev only.
+  async function fetchWorkOrderApproval(): Promise<number | null> {
+    if (profile.role !== "owner" && profile.role !== "developer") return null;
+    const { count, error } = await supabase
+      .from("carving_work_orders")
+      .select("*", { count: "exact", head: true })
+      .eq("status", "pending_approval");
+    if (error) return null;
+    return count ?? 0;
+  }
 
   const [
     approvals,
@@ -136,6 +147,7 @@ export default async function TasksPage() {
     rejectedBills,
     finalAudit,
     royaltyApproval,
+    workOrderApproval,
   ] = await Promise.all([
     fetchApprovals(),
     fetchBillsAudit(),
@@ -144,6 +156,7 @@ export default async function TasksPage() {
     fetchRejectedBills(),
     fetchFinalAudit(),
     fetchRoyaltyApproval(),
+    fetchWorkOrderApproval(),
   ]);
 
   const cards: TaskCard[] = [];
@@ -211,6 +224,17 @@ export default async function TasksPage() {
       count: royaltyApproval,
       icon: "🏷️",
       department: "finance",
+    });
+  }
+  if (workOrderApproval !== null) {
+    cards.push({
+      id: "work-order-approval",
+      href: "/carving/work-orders",
+      label: "Work Order Approvals",
+      description: "Outsource work orders awaiting your price approval",
+      count: workOrderApproval,
+      icon: "🏭",
+      department: "production",
     });
   }
   if (inventoryAudit !== null) {

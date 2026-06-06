@@ -10,6 +10,8 @@ import {
   bindSlabToWorkOrderLineAction,
   removeWorkOrderLineAction,
   cancelWorkOrderAction,
+  approveWorkOrderAction,
+  rejectWorkOrderAction,
   markCarvingCompleteManuallyAction,
 } from "../../actions";
 
@@ -31,14 +33,14 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
 
   const { data: woRow } = await admin
     .from("carving_work_orders")
-    .select("id, wo_number, vendor_name, title, temple, jobwork_rate, jobwork_unit, status, notes, cancelled_at")
+    .select("id, wo_number, vendor_name, title, temple, jobwork_rate, jobwork_unit, status, notes, cancelled_at, reject_reason")
     .eq("id", id)
     .maybeSingle();
   if (!woRow) redirect("/carving/work-orders?toast=Work+order+not+found");
   const wo = woRow as {
     wo_number: string; vendor_name: string; title: string | null; temple: string | null;
     jobwork_rate: number | string | null; jobwork_unit: string | null; status: string;
-    notes: string | null; cancelled_at: string | null;
+    notes: string | null; cancelled_at: string | null; reject_reason: string | null;
   };
 
   const { data: lineRows } = await admin
@@ -114,6 +116,10 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
   const stoneTypes = (stoneRows ?? []) as StoneTypeDef[];
 
   const cancelled = !!wo.cancelled_at;
+  // Mig 098 — only the owner can edit/cancel/approve; slabs can be sent only
+  // once the work order is owner-approved (status open/in_progress).
+  const isOwner = profile.role === "owner" || profile.role === "developer";
+  const approved = wo.status === "open" || wo.status === "in_progress";
   // Lines that are cut-done + not yet sent → eligible for "Send all ready".
   const readyToSend = lines.filter(
     (l) => !l.carving_item_id && l.line_status === "planned" && l.slab_requirement_id && slabMeta.get(l.slab_requirement_id)?.status === "cut_done",
@@ -136,8 +142,52 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
         <Link href="/carving/challans/new" style={{ padding: "8px 14px", fontSize: 12, fontWeight: 700, color: "#92400e", background: "rgba(146,64,14,0.1)", borderRadius: 8, textDecoration: "none" }}>🧾 Generate challan</Link>
       </div>
 
+      {/* Mig 098 — owner price-approval gate. Nothing can be sent until approved. */}
+      {wo.status === "pending_approval" && (
+        isOwner ? (
+          <div style={{ background: "rgba(217,119,6,0.08)", border: "1px solid rgba(217,119,6,0.4)", borderRadius: 12, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "#92400e" }}>⏳ This work order needs your price approval before any slab can be sent.</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "flex-end" }}>
+              <form action={approveWorkOrderAction} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+                <input type="hidden" name="work_order_id" value={id} />
+                <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--muted)" }}>Price (edit if needed)</span>
+                  <input name="jobwork_rate" type="number" min="0" step="0.01" defaultValue={wo.jobwork_rate != null ? String(Number(wo.jobwork_rate)) : ""} style={{ width: 120, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: 7, fontSize: 13 }} />
+                </label>
+                <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--muted)" }}>Unit</span>
+                  <select name="jobwork_unit" defaultValue={wo.jobwork_unit === "sft" ? "sft" : "cft"} style={{ padding: "7px 9px", border: "1px solid var(--border)", borderRadius: 7, fontSize: 13 }}>
+                    <option value="cft">cft</option>
+                    <option value="sft">sft</option>
+                  </select>
+                </label>
+                <button type="submit" style={{ padding: "9px 18px", fontSize: 13, fontWeight: 800, color: "#fff", background: "#15803d", border: "none", borderRadius: 8, cursor: "pointer" }}>✓ Approve</button>
+              </form>
+              <form action={rejectWorkOrderAction} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+                <input type="hidden" name="work_order_id" value={id} />
+                <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--muted)" }}>Reject reason</span>
+                  <input name="reason" placeholder="optional" style={{ width: 160, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: 7, fontSize: 13 }} />
+                </label>
+                <button type="submit" style={{ padding: "9px 16px", fontSize: 13, fontWeight: 700, color: "#991b1b", background: "rgba(220,38,38,0.1)", border: "1px solid rgba(220,38,38,0.3)", borderRadius: 8, cursor: "pointer" }}>✕ Reject</button>
+              </form>
+            </div>
+          </div>
+        ) : (
+          <div style={{ background: "rgba(217,119,6,0.08)", border: "1px solid rgba(217,119,6,0.4)", borderRadius: 12, padding: "14px 16px", fontSize: 13, fontWeight: 700, color: "#92400e" }}>
+            ⏳ Waiting for the owner to approve the price. Slabs can be sent only after approval.
+          </div>
+        )
+      )}
+      {wo.status === "rejected" && (
+        <div style={{ background: "rgba(220,38,38,0.07)", border: "1px solid rgba(220,38,38,0.35)", borderRadius: 12, padding: "14px 16px", fontSize: 13, color: "#991b1b" }}>
+          <div style={{ fontWeight: 800 }}>✕ This work order was rejected by the owner.</div>
+          {wo.reject_reason && <div style={{ marginTop: 4 }}>Reason: {wo.reject_reason}</div>}
+        </div>
+      )}
+
       {/* Send-all bar — sends every cut-done, un-sent slab to the vendor at once. */}
-      {!cancelled && readyToSend > 0 && (
+      {approved && !cancelled && readyToSend > 0 && (
         <form action={sendAllReadyWorkOrderLinesAction} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", background: "rgba(146,64,14,0.06)", border: "1px solid rgba(146,64,14,0.3)", borderRadius: 12, padding: "12px 16px" }}>
           <input type="hidden" name="work_order_id" value={id} />
           <div style={{ fontSize: 13, fontWeight: 700, color: "#7c2d12" }}>
@@ -211,14 +261,18 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
                       </form>
                     ) : null
                   ) : l.slab_requirement_id && slab?.status === "cut_done" ? (
-                    <form action={sendWorkOrderLineToVendorAction}>
-                      <input type="hidden" name="line_id" value={l.id} />
-                      <input type="hidden" name="work_order_id" value={id} />
-                      <button type="submit" style={btn("#92400e")}>📤 Send to vendor</button>
-                    </form>
+                    approved ? (
+                      <form action={sendWorkOrderLineToVendorAction}>
+                        <input type="hidden" name="line_id" value={l.id} />
+                        <input type="hidden" name="work_order_id" value={id} />
+                        <button type="submit" style={btn("#92400e")}>📤 Send to vendor</button>
+                      </form>
+                    ) : (
+                      <span style={{ fontSize: 11, color: "#b45309", fontWeight: 600 }}>⏳ approve WO to send</span>
+                    )
                   ) : l.slab_requirement_id ? (
                     <span style={{ fontSize: 11, color: "var(--muted)" }}>⏳ waiting to be cut</span>
-                  ) : (
+                  ) : isOwner ? (
                     <form action={bindSlabToWorkOrderLineAction} style={{ display: "flex", gap: 4, alignItems: "center" }}>
                       <input type="hidden" name="line_id" value={l.id} />
                       <input type="hidden" name="work_order_id" value={id} />
@@ -228,8 +282,10 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
                       </select>
                       <button type="submit" style={{ fontSize: 11, fontWeight: 700, color: "#fff", background: "#0f766e", border: "none", borderRadius: 6, padding: "5px 10px", cursor: "pointer" }}>Link</button>
                     </form>
+                  ) : (
+                    <span style={{ fontSize: 11, color: "var(--muted)" }}>📝 future need</span>
                   )}
-                  {!cancelled && !isSent && (
+                  {isOwner && !cancelled && !isSent && (
                     <form action={removeWorkOrderLineAction}>
                       <input type="hidden" name="line_id" value={l.id} />
                       <input type="hidden" name="work_order_id" value={id} />
@@ -243,9 +299,11 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
         </div>
       )}
 
-      {!cancelled && (
-        <form action={cancelWorkOrderAction} style={{ marginTop: 4 }}>
+      {/* Mig 098 — only the owner can cancel a work order. */}
+      {isOwner && !cancelled && wo.status !== "rejected" && (
+        <form action={cancelWorkOrderAction} style={{ marginTop: 4, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <input type="hidden" name="work_order_id" value={id} />
+          <input name="reason" placeholder="Cancel reason (optional)" style={{ fontSize: 12, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: 7, minWidth: 200 }} />
           <button type="submit" style={{ fontSize: 12, fontWeight: 700, color: "#991b1b", background: "none", border: "1px solid rgba(220,38,38,0.4)", borderRadius: 8, padding: "8px 14px", cursor: "pointer" }}>
             Cancel work order (un-sent lines only)
           </button>

@@ -58,6 +58,9 @@ export default async function CarvingDashboardPage({
   const wantVendorType = mode === "outsource" ? "Outsource" : "CNC";
   // Mig 097 — the "Still Pending Work" tab exists only in Outsource mode.
   if (tab === "pending" && (mode !== "outsource" || !reviewAccess)) tab = "unassigned";
+  // Mig 098 — Outsource has NO Unassigned tab: work orders are the only way
+  // to give a vendor work. Bounce any unassigned deep-link to Active there.
+  if (mode === "outsource" && tab === "unassigned") tab = "active";
 
   // Paginated fetcher for unassigned slabs — Supabase's PostgREST
   // caps single .select() at 1000 rows. Once cut_done count crosses
@@ -626,12 +629,18 @@ export default async function CarvingDashboardPage({
           const active = mode === m.key;
           const p = new URLSearchParams();
           p.set("mode", m.key);
-          p.set("tab", tab);
+          // Outsource has no Unassigned tab — fall back to Active.
+          p.set("tab", m.key === "outsource" && tab === "unassigned" ? "active" : tab);
           if (templeFilter) p.set("temple", templeFilter);
+          // Mig 098 — Outsource is Work-Order-first: the toggle lands on the
+          // Work Orders page (the only entry path for outsource work). The
+          // outsource carving dashboard (Active / Approval / Done / Still
+          // Pending) is reached from there via "← Carving Jobs".
+          const href = m.key === "outsource" ? "/carving/work-orders" : `/carving?${p.toString()}`;
           return (
             <Link
               key={m.key}
-              href={`/carving?${p.toString()}`}
+              href={href}
               style={{
                 padding: "8px 18px",
                 fontSize: 13,
@@ -669,7 +678,11 @@ export default async function CarvingDashboardPage({
       >
         {(
           [
-            { key: "unassigned", label: "Unassigned", count: counts.unassigned },
+            // Mig 098 — no Unassigned tab in Outsource mode: slabs reach a
+            // vendor only through an owner-approved work order.
+            ...(mode === "cnc"
+              ? [{ key: "unassigned" as const, label: "Unassigned", count: counts.unassigned }]
+              : []),
             { key: "active", label: "Active", count: counts.active },
             // Mig 074 — hide Carving Done Approval for vendor-with-flag
             // users; they don't sign off on their own work.

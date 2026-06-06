@@ -6073,6 +6073,11 @@ export async function createWorkOrderAction(formData: FormData) {
   const rate = rateRaw && Number(rateRaw) > 0 ? Number(rateRaw) : null;
   const unit = txt(formData, "jobwork_unit") === "sft" ? "sft" : "cft";
   if (!vendorId) redirect("/carving/work-orders/new?toast=Pick+a+vendor");
+  // Mig 098 — price is mandatory: the work order goes to the owner for
+  // approval, so there must be a number to approve.
+  if (rate == null) {
+    redirect("/carving/work-orders/new?toast=" + encodeURIComponent("Enter a price (rate) — it needs owner approval"));
+  }
 
   const { data: vendor } = await admin
     .from("vendors")
@@ -6114,7 +6119,9 @@ export async function createWorkOrderAction(formData: FormData) {
       temple,
       jobwork_rate: rate,
       jobwork_unit: unit,
-      status: "open",
+      // Mig 098 — new work orders wait for owner approval before they can
+      // be used (slabs sent to the vendor).
+      status: "pending_approval",
       created_by: profile.id,
     })
     .select("id")
@@ -6142,11 +6149,71 @@ export async function createWorkOrderAction(formData: FormData) {
     lines: lines.length,
   });
   refreshAll();
-  redirect(`/carving/work-orders/${wo.id}?toast=Work+order+created`);
+  redirect(`/carving/work-orders/${wo.id}?toast=${encodeURIComponent("Work order created — pending owner approval")}`);
+}
+
+// ── Owner work-order approval (Mig 098) ─────────────────────────────
+// Only the owner (or developer) approves a work order. Approving makes it
+// usable (slabs can be sent); the owner may edit the price at approval.
+export async function approveWorkOrderAction(formData: FormData) {
+  const { profile } = await requireAuth(["developer", "owner"]);
+  const admin = createAdminSupabaseClient();
+  const woId = txt(formData, "work_order_id");
+  if (!woId) redirect("/carving/work-orders?toast=Missing+work+order");
+
+  // Optional price edit at approval time.
+  const rateRaw = txt(formData, "jobwork_rate");
+  const newRate = rateRaw && Number(rateRaw) > 0 ? Number(rateRaw) : null;
+  const unitRaw = txt(formData, "jobwork_unit");
+  const newUnit = unitRaw === "sft" || unitRaw === "cft" ? unitRaw : null;
+
+  const now = new Date().toISOString();
+  const patch: Record<string, unknown> = {
+    status: "open",
+    approved_at: now,
+    approved_by: profile.id,
+    updated_at: now,
+    updated_by: profile.id,
+  };
+  if (newRate != null) patch.jobwork_rate = newRate;
+  if (newUnit) patch.jobwork_unit = newUnit;
+
+  const { error } = await admin
+    .from("carving_work_orders")
+    .update(patch)
+    .eq("id", woId)
+    .eq("status", "pending_approval");
+  if (error) redirect(`/carving/work-orders?toast=${encodeURIComponent(error.message)}`);
+
+  await logAudit(profile.id, "work_order_approved", "carving_work_order", woId, {
+    edited_rate: newRate,
+  });
+  refreshAll();
+  redirect(`/carving/work-orders/${woId}?toast=${encodeURIComponent("Work order approved — ready to assign")}`);
+}
+
+// Owner rejects a pending work order (with a reason). Office team can edit
+// and re-create / re-submit.
+export async function rejectWorkOrderAction(formData: FormData) {
+  const { profile } = await requireAuth(["developer", "owner"]);
+  const admin = createAdminSupabaseClient();
+  const woId = txt(formData, "work_order_id");
+  const reason = txt(formData, "reason") || null;
+  if (!woId) redirect("/carving/work-orders?toast=Missing+work+order");
+  const now = new Date().toISOString();
+  await admin
+    .from("carving_work_orders")
+    .update({ status: "rejected", rejected_at: now, rejected_by: profile.id, reject_reason: reason, updated_at: now, updated_by: profile.id })
+    .eq("id", woId)
+    .eq("status", "pending_approval");
+  await logAudit(profile.id, "work_order_rejected", "carving_work_order", woId, { reason });
+  refreshAll();
+  redirect(`/carving/work-orders?toast=${encodeURIComponent("Work order rejected")}`);
 }
 
 export async function addWorkOrderLineAction(formData: FormData) {
-  const { profile } = await requireAuth([...WO_ROLES]);
+  // Mig 098 — editing a work order's lines is owner-only.
+  const { profile } = await requireAuth(["developer", "owner"]);
   const admin = createAdminSupabaseClient();
   const woId = txt(formData, "work_order_id");
   if (!woId) redirect("/carving/work-orders?toast=Missing+work+order");
@@ -6176,7 +6243,7 @@ export async function addWorkOrderLineAction(formData: FormData) {
 }
 
 export async function bindSlabToWorkOrderLineAction(formData: FormData) {
-  await requireAuth([...WO_ROLES]);
+  await requireAuth(["developer", "owner"]);
   const admin = createAdminSupabaseClient();
   const lineId = txt(formData, "line_id");
   const woId = txt(formData, "work_order_id");
@@ -6192,7 +6259,7 @@ export async function bindSlabToWorkOrderLineAction(formData: FormData) {
 }
 
 export async function removeWorkOrderLineAction(formData: FormData) {
-  await requireAuth([...WO_ROLES]);
+  await requireAuth(["developer", "owner"]);
   const admin = createAdminSupabaseClient();
   const lineId = txt(formData, "line_id");
   const woId = txt(formData, "work_order_id");
@@ -6238,7 +6305,7 @@ export async function sendWorkOrderLineToVendorAction(formData: FormData) {
 
   const { data: woRow } = await admin
     .from("carving_work_orders")
-    .select("id, vendor_id, vendor_name, jobwork_rate, jobwork_unit")
+    .select("id, vendor_id, vendor_name, jobwork_rate, jobwork_unit, status")
     .eq("id", line!.work_order_id)
     .maybeSingle();
   const wo = woRow as {
@@ -6246,8 +6313,13 @@ export async function sendWorkOrderLineToVendorAction(formData: FormData) {
     vendor_name: string;
     jobwork_rate: number | string | null;
     jobwork_unit: string | null;
+    status: string;
   } | null;
   if (!wo) redirect(`/carving/work-orders/${woId}?toast=Work+order+not+found`);
+  // Mig 098 — a work order must be owner-approved before any slab is sent.
+  if (wo!.status !== "open" && wo!.status !== "in_progress") {
+    redirect(`/carving/work-orders/${woId}?toast=${encodeURIComponent("Needs owner approval before sending")}`);
+  }
 
   const rate =
     line!.jobwork_rate != null
@@ -6298,7 +6370,7 @@ export async function sendAllReadyWorkOrderLinesAction(formData: FormData) {
 
   const { data: woRow } = await admin
     .from("carving_work_orders")
-    .select("id, vendor_id, vendor_name, jobwork_rate, jobwork_unit")
+    .select("id, vendor_id, vendor_name, jobwork_rate, jobwork_unit, status")
     .eq("id", woId)
     .maybeSingle();
   const wo = woRow as {
@@ -6306,8 +6378,13 @@ export async function sendAllReadyWorkOrderLinesAction(formData: FormData) {
     vendor_name: string;
     jobwork_rate: number | string | null;
     jobwork_unit: string | null;
+    status: string;
   } | null;
   if (!wo) redirect(`/carving/work-orders/${woId}?toast=Work+order+not+found`);
+  // Mig 098 — only send once the owner has approved the work order.
+  if (wo!.status !== "open" && wo!.status !== "in_progress") {
+    redirect(`/carving/work-orders/${woId}?toast=${encodeURIComponent("Needs owner approval before sending")}`);
+  }
 
   const { data: lineRows } = await admin
     .from("carving_work_order_items")
@@ -6370,7 +6447,8 @@ export async function sendAllReadyWorkOrderLinesAction(formData: FormData) {
 }
 
 export async function cancelWorkOrderAction(formData: FormData) {
-  const { profile } = await requireAuth([...WO_ROLES]);
+  // Mig 098 — only the owner (or dev) can cancel a work order.
+  const { profile } = await requireAuth(["developer", "owner"]);
   const admin = createAdminSupabaseClient();
   const woId = txt(formData, "work_order_id");
   const reason = txt(formData, "reason") || null;

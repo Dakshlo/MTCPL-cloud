@@ -104,7 +104,9 @@ export function NewWorkOrderForm({
     list.reduce((acc, s) => acc + (selected.has(s.id) ? 1 : 0), 0);
 
   const linesJson = JSON.stringify([...selected].map((id) => ({ slab_requirement_id: id })));
-  const canSubmit = !!vendorId && selected.size > 0;
+  // Mig 098 — price is mandatory; the work order goes to the owner for
+  // approval, so it can't be created without a number to approve.
+  const canSubmit = !!vendorId && selected.size > 0 && Number(rate) > 0;
 
   const card = { background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: 18 } as const;
   const lbl = { fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase" as const, letterSpacing: "0.06em" };
@@ -147,7 +149,7 @@ export function NewWorkOrderForm({
             <input value={temple} onChange={(e) => setTemple(e.target.value)} style={inp} />
           </label>
           <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span style={lbl}>Rate (optional)</span>
+            <span style={lbl}>Rate (required · needs owner approval)</span>
             <div style={{ display: "flex", gap: 6 }}>
               <input type="number" min="0" value={rate} onChange={(e) => setRate(e.target.value)} placeholder="₹/unit" style={{ ...inp, flex: 1, minWidth: 0 }} />
               {(["cft", "sft"] as const).map((u) => (
@@ -225,7 +227,11 @@ export function NewWorkOrderForm({
       {/* ── Sticky create bar ── */}
       <div style={{ position: "sticky", bottom: 0, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "12px 18px", boxShadow: "0 -2px 10px rgba(0,0,0,0.05)" }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: selected.size ? "var(--text)" : "var(--muted)" }}>
-          {selected.size > 0 ? `${selected.size} slab${selected.size === 1 ? "" : "s"} in this work order` : "Open a temple and pick at least one slab"}
+          {selected.size === 0
+            ? "Open a temple and pick at least one slab"
+            : !(Number(rate) > 0)
+              ? "Enter a price (₹/unit) — it needs owner approval"
+              : `${selected.size} slab${selected.size === 1 ? "" : "s"} · will go for owner approval`}
         </div>
         <button type="submit" disabled={!canSubmit} style={{ padding: "11px 24px", fontSize: 14, fontWeight: 800, color: "#fff", background: canSubmit ? "#92400e" : "var(--border)", border: "none", borderRadius: 8, cursor: canSubmit ? "pointer" : "not-allowed" }}>
           Create work order
