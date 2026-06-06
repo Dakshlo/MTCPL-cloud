@@ -15,7 +15,7 @@ import {
   type ExternalSlab,
 } from "./add-external-cut-slab";
 
-type Tab = "unassigned" | "active" | "review" | "done";
+type Tab = "unassigned" | "active" | "review" | "done" | "pending";
 
 export default async function CarvingDashboardPage({
   searchParams,
@@ -56,6 +56,8 @@ export default async function CarvingDashboardPage({
   const mode: "cnc" | "outsource" =
     canUseOutsource && params.mode === "outsource" ? "outsource" : "cnc";
   const wantVendorType = mode === "outsource" ? "Outsource" : "CNC";
+  // Mig 097 — the "Still Pending Work" tab exists only in Outsource mode.
+  if (tab === "pending" && (mode !== "outsource" || !reviewAccess)) tab = "unassigned";
 
   // Paginated fetcher for unassigned slabs — Supabase's PostgREST
   // caps single .select() at 1000 rows. Once cut_done count crosses
@@ -105,6 +107,7 @@ export default async function CarvingDashboardPage({
     { data: activeJobs },
     { data: reviewJobs },
     { data: doneJobs },
+    { data: pendingJobs },
     { data: vendors },
     { data: machines },
     { data: stoneTypes },
@@ -138,6 +141,9 @@ export default async function CarvingDashboardPage({
       .select("id, slab_requirement_id, vendor_id, vendor_name, vendor_type, status, due_at, assigned_at, completed_at, cnc_machine_id, completed_on_cnc_machine_id")
       .not("completed_at", "is", null)
       .is("review_approved_at", null)
+      // Mig 097 — slabs marked "Still Pending Work" leave the approval
+      // queue into their own tab; keep them out of Carving Done Approval.
+      .is("pending_work_at", null)
       .order("completed_at", { ascending: false }),
     admin
       .from("carving_items")
@@ -146,10 +152,20 @@ export default async function CarvingDashboardPage({
       // notes so the Carving Done card / peek can SHOW the photo the
       // reviewer took at sign-off. completed_on_cnc_machine_id is the
       // carving machine (cnc_machine_id is already nulled by now).
-      .select("id, slab_requirement_id, vendor_id, vendor_name, vendor_type, status, due_at, assigned_at, completed_at, review_approved_at, cnc_machine_id, completed_on_cnc_machine_id, location, ready_to_dispatch_at, review_image_path, review_image_paths, review_quality_flag, review_notes")
+      .select("id, slab_requirement_id, vendor_id, vendor_name, vendor_type, status, due_at, assigned_at, completed_at, review_approved_at, cnc_machine_id, completed_on_cnc_machine_id, location, ready_to_dispatch_at, review_image_path, review_image_paths, review_quality_flag, review_notes, depart_flag, depart_note")
       .not("review_approved_at", "is", null)
       .order("review_approved_at", { ascending: false })
       .limit(200),
+    // Mig 097 — Outsource "Still Pending Work": received but not approved,
+    // pulled out of the approval queue, waiting on vendor rework.
+    admin
+      .from("carving_items")
+      .select("id, slab_requirement_id, vendor_id, vendor_name, vendor_type, status, due_at, assigned_at, completed_at, review_approved_at, pending_work_at, pending_work_note, cnc_machine_id, completed_on_cnc_machine_id")
+      .not("completed_at", "is", null)
+      .is("review_approved_at", null)
+      .not("pending_work_at", "is", null)
+      .order("pending_work_at", { ascending: false })
+      .limit(300),
     // Carving page surfaces CNC + Outsource vendors. (Outsource carvers
     // were re-introduced in Phase 4 — they don't have machines and
     // use a simpler bypass workflow, but the carving head still
@@ -286,6 +302,7 @@ export default async function CarvingDashboardPage({
     ...(activeJobs ?? []).map((j) => j.slab_requirement_id),
     ...(reviewJobs ?? []).map((j) => j.slab_requirement_id),
     ...(doneJobs ?? []).map((j) => j.slab_requirement_id),
+    ...(pendingJobs ?? []).map((j) => j.slab_requirement_id),
   ].filter(Boolean);
   const uniqueSlabReqIds = [...new Set(allJobSlabReqIds)];
 
@@ -348,6 +365,7 @@ export default async function CarvingDashboardPage({
   const activeJobsEnriched = (activeJobs ?? []).map(enrich);
   const reviewJobsEnriched = (reviewJobs ?? []).map(enrich);
   const doneJobsEnriched = (doneJobs ?? []).map(enrich);
+  const pendingJobsEnriched = (pendingJobs ?? []).map(enrich);
 
   // Mode-filtered views (CNC vs Outsource) for the job tabs + counts +
   // client. In-memory filter only — the SQL above is unchanged, so the
@@ -357,6 +375,7 @@ export default async function CarvingDashboardPage({
   const activeForMode = activeJobsEnriched.filter((j) => j.vendor_type === wantVendorType);
   const reviewForMode = reviewJobsEnriched.filter((j) => j.vendor_type === wantVendorType);
   const doneForMode = doneJobsEnriched.filter((j) => j.vendor_type === wantVendorType);
+  const pendingForMode = pendingJobsEnriched.filter((j) => j.vendor_type === wantVendorType);
 
   // Build list of all temples across every dataset for the filter dropdown.
   const templeSet = new Set<string>();
@@ -479,6 +498,7 @@ export default async function CarvingDashboardPage({
     active: activeForMode.length,
     review: reviewForMode.length,
     done: doneForMode.length,
+    pending: pendingForMode.length,
   };
 
   return (
@@ -661,6 +681,11 @@ export default async function CarvingDashboardPage({
               ? [{ key: "review" as const, label: "Carving Done Approval", count: counts.review }]
               : []),
             { key: "done", label: "Carving Done", count: counts.done },
+            // Mig 097 — Outsource only: slabs the vendor still needs to
+            // rework (received, not approved, marked Still Pending Work).
+            ...(canUseOutsource && mode === "outsource"
+              ? [{ key: "pending" as const, label: "Still Pending Work", count: counts.pending }]
+              : []),
           ] as Array<{ key: Tab; label: string; count: number }>
         ).map((t) => {
           const active = tab === t.key;
@@ -716,6 +741,7 @@ export default async function CarvingDashboardPage({
         activeJobs={activeForMode}
         reviewJobs={reviewAccess ? reviewForMode : []}
         doneJobs={doneForMode}
+        pendingJobs={mode === "outsource" && reviewAccess ? pendingForMode : []}
         vendors={vendorsEnriched}
         machineCodeById={machineCodeById}
         templeNames={templeNames}

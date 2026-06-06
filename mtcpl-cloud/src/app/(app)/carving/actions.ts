@@ -4211,6 +4211,11 @@ export async function approveCarvingJobAction(formData: FormData) {
   const admin = createAdminSupabaseClient();
   const jobId = txt(formData, "job_id");
   const notes = txt(formData, "notes") || null;
+  // Mig 097 — "Depart": approve the slab (it goes to Carving Done) but
+  // HOLD it out of dispatch because it needs a finishing touch first.
+  // Photo + note are mandatory when departing (validated after the photo
+  // upload below). Applies to both CNC + Outsource.
+  const depart = txt(formData, "depart") === "1";
   // Mig 088 — the reviewer can confirm / correct carved sides (1 or 2)
   // at approval, right before it counts in costing. Only an explicit
   // "1"/"2" changes the column — absence leaves whatever was set at
@@ -4259,6 +4264,21 @@ export async function approveCarvingJobAction(formData: FormData) {
   // First photo also lands in the legacy single column so every surface
   // that still reads review_image_path keeps showing photo #1.
   const reviewImagePath: string | null = reviewImagePaths[0] ?? null;
+  // Mig 097 — Depart requires a photo + a note (the proof of what still
+  // needs doing). Reuses the approval photo, so just check we have one.
+  if (depart) {
+    const stayD = txt(formData, "stay") === "1";
+    if (reviewImagePaths.length === 0) {
+      const msg = "A photo is required when marking Depart.";
+      if (stayD) throw new Error(msg);
+      redirect(`/carving/${jobId}?toast=${encodeURIComponent(msg)}`);
+    }
+    if (!notes) {
+      const msg = "A note is required when marking Depart.";
+      if (stayD) throw new Error(msg);
+      redirect(`/carving/${jobId}?toast=${encodeURIComponent(msg)}`);
+    }
+  }
   // When the action is called from the JobDetailPeek modal we don't
   // want to redirect — the modal closes itself + parent revalidates
   // in place. Set `stay=1` from the form to opt out of the redirect.
@@ -4328,6 +4348,11 @@ export async function approveCarvingJobAction(formData: FormData) {
       // 1:1 to these keys; analytics will GROUP BY this column to
       // surface vendor mistake patterns.
       review_quality_flag: qualityFlag,
+      // Mig 097 — Depart: still approved (review_approved_at set above) but
+      // flagged so the Carving Done card shows it apart + Dispatch holds it.
+      // Only written when departing so a normal approve never references
+      // the new columns (safe if the migration runs a little after deploy).
+      ...(depart ? { depart_flag: true, depart_note: notes, depart_at: now, depart_by: profile.id } : {}),
       // Mig 088 — confirm/correct carved sides at approval (only when
       // the form explicitly posted 1 or 2; otherwise untouched).
       ...carvingSidesUpdate,
@@ -4349,7 +4374,10 @@ export async function approveCarvingJobAction(formData: FormData) {
   if (j.slab_requirement_id) {
     await admin
       .from("slab_requirements")
-      .update({ status: "completed", updated_by: profile.id, updated_at: now })
+      // Mig 097 — dispatch_hold mirrors depart so the Dispatch page can
+      // sort departed slabs into a "Needs work" section, out of Make Dispatch.
+      // Set only when departing (keeps a normal approve off the new column).
+      .update({ status: "completed", ...(depart ? { dispatch_hold: true } : {}), updated_by: profile.id, updated_at: now })
       .eq("id", j.slab_requirement_id);
   }
 
@@ -4383,6 +4411,90 @@ export async function approveCarvingJobAction(formData: FormData) {
   refreshAll();
   if (stay) return;
   redirect(`/carving/${jobId}?toast=Approved+%E2%80%94+ready+for+dispatch`);
+}
+
+// ── Outsource "Still Pending Work" (Mig 097) ────────────────────────
+// Replaces Rework + Reject for Outsource on Carving Done Approval. The
+// slab stays RECEIVED (completed_at set, review_approved_at NULL) but
+// leaves the approval queue into the vendor-wise "Still Pending Work"
+// tab. The vendor reworks; backToApprovalAction returns it for approval.
+export async function stillPendingWorkAction(formData: FormData) {
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge"]);
+  const admin = createAdminSupabaseClient();
+  const jobId = txt(formData, "job_id");
+  const note = txt(formData, "notes") || null;
+  const stay = txt(formData, "stay") === "1";
+  if (!jobId) {
+    if (stay) return;
+    redirect("/carving?toast=Missing+job+id");
+  }
+
+  // Optional photo(s) — reuse the review-image uploader.
+  let imgs: string[] = [];
+  try {
+    imgs = await uploadReviewImages(admin, jobId, profile.id, formData);
+  } catch {
+    /* photo optional here — ignore upload errors */
+  }
+
+  const { data: jobRow } = await admin
+    .from("carving_items")
+    .select("id, vendor_type, vendor_name, completed_at, review_approved_at")
+    .eq("id", jobId)
+    .maybeSingle();
+  const job = jobRow as {
+    vendor_type: string;
+    vendor_name: string;
+    completed_at: string | null;
+    review_approved_at: string | null;
+  } | null;
+  if (!job) {
+    if (stay) throw new Error("Job not found");
+    redirect("/carving?toast=Job+not+found");
+  }
+  if (job!.vendor_type !== "Outsource") {
+    if (stay) throw new Error("Still Pending Work is for Outsource jobs only");
+    redirect(`/carving/${jobId}?toast=Outsource+only`);
+  }
+  if (!job!.completed_at || job!.review_approved_at) {
+    if (stay) throw new Error("Job is not awaiting approval");
+    redirect(`/carving/${jobId}?toast=Not+awaiting+approval`);
+  }
+
+  const now = new Date().toISOString();
+  await admin
+    .from("carving_items")
+    .update({
+      pending_work_at: now,
+      pending_work_by: profile.id,
+      pending_work_note: note,
+      ...(imgs.length ? { review_image_paths: imgs, review_image_path: imgs[0] } : {}),
+    })
+    .eq("id", jobId);
+  await recordEvent(jobId, "pending_work", profile.id, `Still pending work${note ? ` · ${note}` : ""}`);
+  await logAudit(profile.id, "carving_pending_work", "carving_item", jobId, { note });
+
+  refreshAll();
+  if (stay) return;
+  redirect("/carving?tab=pending&mode=outsource&toast=Moved+to+Still+Pending+Work");
+}
+
+// Clears the pending-work flag → the slab returns to Carving Done
+// Approval so it can be approved after the vendor's rework. (Mig 097)
+export async function backToApprovalAction(formData: FormData) {
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge"]);
+  const admin = createAdminSupabaseClient();
+  const jobId = txt(formData, "job_id");
+  if (!jobId) redirect("/carving?toast=Missing+job+id");
+  await admin
+    .from("carving_items")
+    .update({ pending_work_at: null })
+    .eq("id", jobId)
+    .is("review_approved_at", null);
+  await recordEvent(jobId, "pending_work_cleared", profile.id, "Back to approval");
+  await logAudit(profile.id, "carving_pending_work_cleared", "carving_item", jobId, {});
+  refreshAll();
+  redirect("/carving?tab=review&mode=outsource&toast=Back+to+approval");
 }
 
 export async function markReadyToDispatchAction(formData: FormData) {

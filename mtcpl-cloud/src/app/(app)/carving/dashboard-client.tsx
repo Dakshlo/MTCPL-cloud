@@ -26,6 +26,8 @@ import {
   approveCarvingJobAction,
   rejectCarvingJobAction,
   reworkCarvingJobAction,
+  stillPendingWorkAction,
+  backToApprovalAction,
   markCarvingStartedManuallyAction,
   getJobEvents,
   getSignedReviewMediaUrl,
@@ -139,6 +141,14 @@ type JobRow = {
    *  carving_on_hold. */
   held_at?: string | null;
   held_reason?: string | null;
+  /** Mig 097 — Depart: approved but held from dispatch (needs a touch-up).
+   *  Surfaces a distinct card tint on Carving Done. */
+  depart_flag?: boolean | null;
+  depart_note?: string | null;
+  /** Mig 097 — Outsource "Still Pending Work" — received, not approved,
+   *  waiting on vendor rework. */
+  pending_work_at?: string | null;
+  pending_work_note?: string | null;
 };
 
 type Vendor = {
@@ -172,13 +182,14 @@ export function CarvingDashboardClient({
   activeJobs,
   reviewJobs,
   doneJobs,
+  pendingJobs,
   vendors,
   machineCodeById,
   templeNames,
   templeFilter,
   stoneTypes,
 }: {
-  tab: "unassigned" | "active" | "review" | "done";
+  tab: "unassigned" | "active" | "review" | "done" | "pending";
   /** Daksh June 2026 — CNC vs Outsource view. Drives assign-vendor
    *  filtering + the Outsource "Receive" affordance. */
   mode: "cnc" | "outsource";
@@ -186,6 +197,8 @@ export function CarvingDashboardClient({
   activeJobs: JobRow[];
   reviewJobs: JobRow[];
   doneJobs: JobRow[];
+  /** Mig 097 — Outsource "Still Pending Work" (received, not approved). */
+  pendingJobs: JobRow[];
   vendors: Vendor[];
   machineCodeById: Record<string, string>;
   /** Every temple that appears in any of the four datasets. Dropdown source. */
@@ -914,13 +927,18 @@ export function CarvingDashboardClient({
             }}
             bulkMax={BULK_MAX}
             anchorDims={
-              anchor
-                ? {
-                    length_ft: Number(anchor.length_ft),
-                    width_ft: Number(anchor.width_ft),
-                    thickness_ft: Number(anchor.thickness_ft),
-                  }
-                : null
+              // Mig 097 — Outsource has no 2-head pairing, so drop the
+              // "identical L×W×T only" rule: any slabs can batch together.
+              // CNC keeps the mirror-pair constraint via the anchor.
+              mode === "outsource"
+                ? null
+                : anchor
+                  ? {
+                      length_ft: Number(anchor.length_ft),
+                      width_ft: Number(anchor.width_ft),
+                      thickness_ft: Number(anchor.thickness_ft),
+                    }
+                  : null
             }
           />
         );
@@ -981,6 +999,11 @@ export function CarvingDashboardClient({
             collapseByDefault
           />
         </>
+      )}
+
+      {/* Mig 097 — Outsource "Still Pending Work" tab (vendor-wise). */}
+      {tab === "pending" && (
+        <PendingWorkList jobs={pendingJobs} stoneTypes={stoneTypes} />
       )}
 
       {assigning && (
@@ -2535,9 +2558,11 @@ function JobsByTemple({
                   tabIndex={0}
                   style={{
                     padding: "10px 12px",
-                    background: "var(--surface)",
-                    border: "1px solid var(--border)",
-                    borderLeft: `4px solid ${statusStripe}`,
+                    // Mig 097 — departed (approved-but-held) slabs get a
+                    // distinct amber card on Carving Done so they stand apart.
+                    background: j.depart_flag ? "rgba(180,83,9,0.07)" : "var(--surface)",
+                    border: j.depart_flag ? "1px solid rgba(180,83,9,0.4)" : "1px solid var(--border)",
+                    borderLeft: `4px solid ${j.depart_flag ? "#b45309" : statusStripe}`,
                     borderRadius: 10,
                     display: "flex",
                     flexDirection: "column",
@@ -3160,6 +3185,56 @@ function JobsByTemple({
         );
       })}
     </>
+  );
+}
+
+// Mig 097 — Outsource "Still Pending Work" tab. Vendor-grouped cards
+// (received, not approved, sent back for rework). Each card has a
+// "↩ Back to approval" button that returns it to Carving Done Approval.
+function PendingWorkList({ jobs, stoneTypes }: { jobs: JobRow[]; stoneTypes: StoneTypeDef[] }) {
+  if (jobs.length === 0) {
+    return (
+      <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 28, textAlign: "center", color: "var(--muted)", fontSize: 14 }}>
+        Nothing is pending vendor rework. When you mark an Outsource slab “Still Pending Work” on the Approval tab, it lands here.
+      </div>
+    );
+  }
+  const byVendor = new Map<string, JobRow[]>();
+  for (const j of jobs) {
+    const arr = byVendor.get(j.vendor_name) ?? [];
+    arr.push(j);
+    byVendor.set(j.vendor_name, arr);
+  }
+  const groups = [...byVendor.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      {groups.map(([vendor, list]) => (
+        <div key={vendor}>
+          <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.06em", textTransform: "uppercase", color: "#92400e", marginBottom: 8 }}>
+            🤝 {vendor} · {list.length} pending
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
+            {list.map((j) => (
+              <div key={j.id} style={{ display: "flex", flexDirection: "column", gap: 6, padding: 10, background: "rgba(180,83,9,0.05)", border: "1px solid rgba(180,83,9,0.35)", borderRadius: 12 }}>
+                <SlabThumb stone={j.stone} l={j.length_ft} w={j.width_ft} t={j.thickness_ft} stoneTypes={stoneTypes} />
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+                  <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.slab_requirement_id}</span>
+                  {j.stone && <span className="role-pill" style={{ fontSize: 9, padding: "1px 6px", flexShrink: 0 }}>{j.stone}</span>}
+                </div>
+                {j.slab_label && <div style={{ fontSize: 10, color: "var(--muted)" }}>{j.slab_label}</div>}
+                <div style={{ fontSize: 10, color: "var(--muted-light)", fontFamily: "ui-monospace, monospace" }}>{j.length_ft}×{j.width_ft}×{j.thickness_ft}&Prime;</div>
+                <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.04em", color: "#b45309", background: "rgba(180,83,9,0.1)", borderRadius: 999, padding: "3px 9px", alignSelf: "flex-start" }}>⏳ Still pending work</div>
+                {j.pending_work_note && <div style={{ fontSize: 11.5, color: "var(--text)", lineHeight: 1.4 }}>📝 {j.pending_work_note}</div>}
+                <form action={backToApprovalAction} style={{ marginTop: "auto", paddingTop: 4 }}>
+                  <input type="hidden" name="job_id" value={j.id} />
+                  <button type="submit" style={{ width: "100%", padding: "7px 10px", fontSize: 12, fontWeight: 800, color: "#fff", background: "#15803d", border: "none", borderRadius: 6, cursor: "pointer" }}>↩ Back to approval</button>
+                </form>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -3851,7 +3926,7 @@ function JobDetailPeek({
 
           {/* Status banner — context-specific */}
           {inReview && (
-            <ApproveRejectForms jobId={job.id} onDone={onClose} />
+            <ApproveRejectForms jobId={job.id} isOutsource={job.vendor_type === "Outsource"} onDone={onClose} />
           )}
           {/* Event timeline — server-action fetched on mount.
               Lazy so opening the peek stays instant. */}
@@ -3900,12 +3975,14 @@ function JobDetailPeek({
 // so the server action skips its redirect; on success we close the
 // modal and refresh the route, which keeps the carving head on the
 // Awaiting Review tab instead of bouncing them to the detail page.
-function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => void }) {
+function ApproveRejectForms({ jobId, isOutsource, onDone }: { jobId: string; isOutsource: boolean; onDone: () => void }) {
   const router = useRouter();
   // Mig 080 — three outcomes. The selected mode drives which form
   // is open and which server action gets called on submit. Image
   // upload is OPTIONAL on approve, MANDATORY on rework + reject.
-  type Mode = "approve" | "rework" | "reject";
+  // Mig 097 — Outsource swaps Rework+Reject for a single "pending"
+  // (Still Pending Work). CNC keeps all three.
+  type Mode = "approve" | "rework" | "reject" | "pending";
   const [mode, setMode] = useState<Mode>("approve");
   const [notes, setNotes] = useState("");
   // Mig 089 — up to 3 review photos (was a single imageFile). Each
@@ -4017,6 +4094,9 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
   // clicking that fires the server action. Any click on any other
   // mode resets confirmStage to 0.
   const [confirmStage, setConfirmStage] = useState<0 | 1 | 2>(0);
+  // Mig 097 — "Depart": approve but hold from dispatch (needs a touch-up).
+  // Only meaningful in approve mode; requires a photo + note when on.
+  const [depart, setDepart] = useState(false);
 
   // Reset state when the user flips between modes so a half-typed
   // reason doesn't leak across (e.g. typing Approve notes then
@@ -4035,6 +4115,8 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
     setQualityFlag("");
     // Mig 088 — reset the carved-sides correction.
     setSidesOverride("");
+    // Mig 097 — Depart only applies to approve; clear on any switch.
+    setDepart(false);
   }
 
   // Mig 089 — append a captured photo (up to MAX_REVIEW_IMAGES).
@@ -4072,12 +4154,18 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
     if (mode === "approve" && sidesOverride) {
       fd.set("carving_sides", sidesOverride);
     }
+    // Mig 097 — Depart rides on the approve action.
+    if (mode === "approve" && depart) {
+      fd.set("depart", "1");
+    }
     const action =
       mode === "approve"
         ? approveCarvingJobAction
         : mode === "rework"
           ? reworkCarvingJobAction
-          : rejectCarvingJobAction;
+          : mode === "reject"
+            ? rejectCarvingJobAction
+            : stillPendingWorkAction;
     action(fd)
       .then(() => {
         onDone();
@@ -4107,6 +4195,17 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
         return;
       }
     }
+    // Mig 097 — Depart requires a photo + note (proof of the touch-up).
+    if (mode === "approve" && depart) {
+      if (!notes.trim()) {
+        setErr("A note is required when marking Depart.");
+        return;
+      }
+      if (images.length === 0) {
+        setErr("A photo is required when marking Depart.");
+        return;
+      }
+    }
     // Mig 081 — when Approve mode picks "Other" the notes textarea
     // is mandatory (otherwise we'd save a useless 'other' tag with
     // no detail). Server enforces too, but the client guard avoids
@@ -4130,7 +4229,7 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
     doSubmit();
   }
 
-  const isMandatoryImage = mode === "rework" || mode === "reject";
+  const isMandatoryImage = mode === "rework" || mode === "reject" || (mode === "approve" && depart);
   // Mig 080 follow-on (Daksh round 2) — full visual rebrand. Three
   // mode-aware tint packs let one component switch entire colour
   // languages (gold/approve, amber/rework, red/reject) without
@@ -4169,6 +4268,18 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
       submitGradient: "linear-gradient(180deg, #dc2626 0%, #991b1b 100%)",
       shadow: "0 6px 18px rgba(185,28,28,0.4)",
     },
+    // Mig 097 — Outsource "Still Pending Work" (amber, like rework).
+    pending: {
+      accent: "#b45309",
+      accentSolid: "#b45309",
+      tintBg: "linear-gradient(180deg, rgba(180,83,9,0.06) 0%, rgba(180,83,9,0) 80%)",
+      tintBorder: "rgba(180,83,9,0.28)",
+      label: "Still Pending Work",
+      icon: "⏳",
+      tagline: "Back to vendor — still needs work (slab stays received)",
+      submitGradient: "linear-gradient(180deg, #d97706 0%, #b45309 100%)",
+      shadow: "0 6px 18px rgba(180,83,9,0.35)",
+    },
   }[mode];
   const accent = tintPack.accent;
   const placeholder =
@@ -4176,7 +4287,9 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
       ? "Approval notes (optional) — anything worth recording?"
       : mode === "rework"
         ? "What exactly needs to be fixed? (required)"
-        : "Why is this slab being rejected? (required)";
+        : mode === "reject"
+          ? "Why is this slab being rejected? (required)"
+          : "What still needs work? (helps the vendor)";
 
   return (
     <div
@@ -4197,7 +4310,9 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
         aria-label="Review outcome"
         style={{
           display: "grid",
-          gridTemplateColumns: "1fr 1fr 1fr",
+          // Mig 097 — Outsource shows 2 options (Approve + Still Pending);
+          // CNC keeps 3 (Approve / Rework / Reject).
+          gridTemplateColumns: isOutsource ? "1fr 1fr" : "1fr 1fr 1fr",
           gap: 8,
         }}
       >
@@ -4213,26 +4328,43 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
               activeBg:
                 "linear-gradient(180deg, rgba(202,138,4,0.18) 0%, rgba(161,98,7,0.08) 100%)",
             },
-            {
-              key: "rework" as const,
-              icon: "↻",
-              label: "Rework",
-              sub: "Send back",
-              tone: "#b45309",
-              toneSolid: "#b45309",
-              activeBg:
-                "linear-gradient(180deg, rgba(217,119,6,0.18) 0%, rgba(180,83,9,0.08) 100%)",
-            },
-            {
-              key: "reject" as const,
-              icon: "✕",
-              label: "Reject",
-              sub: "Hard stop",
-              tone: "#b91c1c",
-              toneSolid: "#b91c1c",
-              activeBg:
-                "linear-gradient(180deg, rgba(220,38,38,0.18) 0%, rgba(153,27,27,0.10) 100%)",
-            },
+            // Mig 097 — Outsource: a single "Still Pending Work" replaces
+            // Rework + Reject. CNC: keep Rework + Reject as-is.
+            ...(isOutsource
+              ? [
+                  {
+                    key: "pending" as const,
+                    icon: "⏳",
+                    label: "Still Pending",
+                    sub: "Send back",
+                    tone: "#b45309",
+                    toneSolid: "#b45309",
+                    activeBg:
+                      "linear-gradient(180deg, rgba(217,119,6,0.18) 0%, rgba(180,83,9,0.08) 100%)",
+                  },
+                ]
+              : [
+                  {
+                    key: "rework" as const,
+                    icon: "↻",
+                    label: "Rework",
+                    sub: "Send back",
+                    tone: "#b45309",
+                    toneSolid: "#b45309",
+                    activeBg:
+                      "linear-gradient(180deg, rgba(217,119,6,0.18) 0%, rgba(180,83,9,0.08) 100%)",
+                  },
+                  {
+                    key: "reject" as const,
+                    icon: "✕",
+                    label: "Reject",
+                    sub: "Hard stop",
+                    tone: "#b91c1c",
+                    toneSolid: "#b91c1c",
+                    activeBg:
+                      "linear-gradient(180deg, rgba(220,38,38,0.18) 0%, rgba(153,27,27,0.10) 100%)",
+                  },
+                ]),
           ]
         ).map((opt) => {
           const active = mode === opt.key;
@@ -4333,6 +4465,38 @@ function ApproveRejectForms({ jobId, onDone }: { jobId: string; onDone: () => vo
         </span>
         {tintPack.tagline}
       </div>
+
+      {/* Mig 097 — Depart toggle (approve only): sign off but hold from
+          dispatch for a finishing touch. Requires a photo + note. */}
+      {mode === "approve" && (
+        <label
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 10,
+            padding: "10px 12px",
+            border: `1.5px solid ${depart ? "#b45309" : "var(--border)"}`,
+            background: depart ? "rgba(180,83,9,0.07)" : "var(--surface)",
+            borderRadius: 10,
+            cursor: "pointer",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={depart}
+            onChange={(e) => setDepart(e.target.checked)}
+            style={{ marginTop: 2, width: 16, height: 16, cursor: "pointer", flexShrink: 0 }}
+          />
+          <span style={{ minWidth: 0 }}>
+            <span style={{ fontSize: 13, fontWeight: 800, color: depart ? "#7c2d12" : "var(--text)" }}>
+              🚧 Depart — hold from dispatch
+            </span>
+            <span style={{ display: "block", fontSize: 11.5, color: "var(--muted)", marginTop: 2, lineHeight: 1.4 }}>
+              Approve now but keep it OUT of Make Dispatch — it needs a finishing touch first. A photo + note are required.
+            </span>
+          </span>
+        </label>
+      )}
 
       {err && (
         <div

@@ -42,6 +42,7 @@ export default async function DispatchPage({
     { data: closedDispatches },
     { data: allDispatchLogs },
     { data: stoneTypeRows },
+    { data: departSlabsRaw },
   ] = await Promise.all([
     // Ready ("Make Dispatch") = status=completed slabs waiting to be packed
     admin
@@ -86,6 +87,15 @@ export default async function DispatchPage({
       .order("dispatched_at", { ascending: false }),
     // Stone categories — needed to render marble separately in the UI
     admin.from("stone_types").select("name, stone_category"),
+    // Mig 097 — departed slabs: approved but held from dispatch, waiting
+    // for a finishing touch. Shown in the "Needs work" section with a
+    // "Correct" button that releases the hold back into Make Dispatch.
+    admin
+      .from("slab_requirements")
+      .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, priority, status")
+      .eq("status", "completed")
+      .eq("dispatch_hold", true)
+      .order("updated_at", { ascending: true }),
   ]);
 
   const profilesMap = await getProfilesMap();
@@ -140,9 +150,34 @@ export default async function DispatchPage({
 
   // ── Shape data for the client component
 
+  // Mig 097 — departed (held) slab ids, excluded from Make Dispatch.
+  // Built from the separate depart query so the Ready query itself never
+  // references dispatch_hold (stays safe if the migration runs late).
+  const departIdSet = new Set(((departSlabsRaw ?? []) as Array<{ id: string }>).map((s) => s.id));
   const readySlabs: ReadySlab[] = (completedSlabs ?? [])
     // Defensive filter: if somehow a completed slab is on an open
-    // dispatch (shouldn't happen), exclude it.
+    // dispatch (shouldn't happen), exclude it. Departed slabs are held
+    // out too — they live in the Needs-work section.
+    .filter((s) => !dispatchedSlabIds.has(s.id) && !departIdSet.has(s.id))
+    .map((s) => {
+      const L = Number(s.length_ft);
+      const W = Number(s.width_ft);
+      const T = Number(s.thickness_ft);
+      return {
+        id: s.id,
+        label: s.label,
+        temple: s.temple,
+        stone: s.stone,
+        quality: s.quality ?? null,
+        dimensions: `${L}×${W}×${T} in`,
+        cft: toCftFromFtNums(L, W, T),
+        priority: Boolean(s.priority),
+        isMarble: stoneCategoryMap[s.stone ?? ""] === "marble",
+      };
+    });
+
+  // Mig 097 — departed slabs (held for a touch-up) for the Needs-work section.
+  const departSlabs: ReadySlab[] = (departSlabsRaw ?? [])
     .filter((s) => !dispatchedSlabIds.has(s.id))
     .map((s) => {
       const L = Number(s.length_ft);
@@ -271,6 +306,7 @@ export default async function DispatchPage({
   return (
     <DispatchClient
       readySlabs={readySlabs}
+      departSlabs={departSlabs}
       provisional={provisional}
       provisionalSlabsByDispatch={provisionalSlabsByDispatch}
       outForDelivery={outForDelivery}

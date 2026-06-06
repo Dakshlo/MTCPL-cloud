@@ -600,3 +600,27 @@ export async function editDispatchSlabsAction(formData: FormData) {
     )}`,
   );
 }
+
+// ─── clearDispatchHoldAction (Mig 097) ─────────────────────────────────────
+// "✓ Correct" on the Needs-work section: the departed slab's touch-up is
+// done, so release the dispatch hold → it drops back into Make Dispatch.
+export async function clearDispatchHoldAction(formData: FormData) {
+  const { profile } = await requireAuth(["developer", "owner", "senior_incharge", "carving_head"]);
+  const admin = createAdminSupabaseClient();
+  const slabId = String(formData.get("slab_id") || "").trim();
+  if (!slabId) fail("/dispatch", "Missing slab id");
+  const now = new Date().toISOString();
+  await admin
+    .from("slab_requirements")
+    .update({ dispatch_hold: false, updated_by: profile.id, updated_at: now })
+    .eq("id", slabId);
+  // Record on the carving_item that the touch-up was signed off.
+  await admin
+    .from("carving_items")
+    .update({ depart_cleared_at: now, depart_cleared_by: profile.id })
+    .eq("slab_requirement_id", slabId);
+  await logAudit(profile.id, "dispatch_hold_cleared", "slab", slabId, {});
+  revalidatePath("/dispatch");
+  revalidatePath("/carving");
+  redirect(`/dispatch?dispatch_toast=${encodeURIComponent("Released for dispatch")}`);
+}

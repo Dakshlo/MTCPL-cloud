@@ -17,7 +17,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { DispatchModal } from "./dispatch-modal";
 import { DeliverModal } from "./deliver-modal";
 import { EditSlabsModal } from "./edit-slabs-modal";
-import { undoDispatchAction, approveDispatchAction, cancelDispatchAction } from "./actions";
+import { undoDispatchAction, approveDispatchAction, cancelDispatchAction, clearDispatchHoldAction } from "./actions";
 
 type Tab = "ready" | "provisional" | "out_for_delivery" | "delivered";
 
@@ -86,6 +86,7 @@ export type LegacyDispatch = {
 
 export function DispatchClient({
   readySlabs,
+  departSlabs,
   provisional,
   provisionalSlabsByDispatch,
   outForDelivery,
@@ -96,6 +97,8 @@ export function DispatchClient({
   error,
 }: {
   readySlabs: ReadySlab[];
+  /** Mig 097 — departed (held) slabs for the Needs-work section. */
+  departSlabs: ReadySlab[];
   provisional: ProvisionalRow[];
   /** Map dispatch_id → its current slab list. Rendered by EditSlabsModal. */
   provisionalSlabsByDispatch: Record<string, ReadySlab[]>;
@@ -263,7 +266,12 @@ export function DispatchClient({
         })}
       </div>
 
-      {tab === "ready" && <ReadyTab slabs={readySlabs} />}
+      {tab === "ready" && (
+        <>
+          <DepartSection slabs={departSlabs} />
+          <ReadyTab slabs={readySlabs} />
+        </>
+      )}
       {tab === "provisional" && (
         <ProvisionalTab rows={provisional} slabsByDispatch={provisionalSlabsByDispatch} readySlabs={readySlabs} />
       )}
@@ -428,6 +436,37 @@ function ProvisionalTab({
 // ─── Ready tab ───────────────────────────────────────────────────────────
 
 type TempleGroupKey = string; // "temple::category" — marble + sandstone stay separate
+
+// Mig 097 — "Needs work" section: approved slabs held from dispatch
+// (marked Depart). Each has a "✓ Correct" button that releases the hold
+// so the slab drops into Make Dispatch.
+function DepartSection({ slabs }: { slabs: ReadySlab[] }) {
+  if (slabs.length === 0) return null;
+  return (
+    <div style={{ marginBottom: 16, background: "rgba(180,83,9,0.06)", border: "1px solid rgba(180,83,9,0.35)", borderRadius: 12, padding: 14 }}>
+      <div style={{ fontSize: 13, fontWeight: 800, color: "#92400e" }}>🚧 Needs work — {slabs.length} held from dispatch</div>
+      <div style={{ fontSize: 12, color: "var(--muted)", margin: "4px 0 10px" }}>
+        Approved but marked Depart (need a finishing touch). Press <strong>Correct</strong> once done to move a slab into Make Dispatch.
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 10 }}>
+        {slabs.map((s) => (
+          <div key={s.id} style={{ background: "var(--surface)", border: "1px solid rgba(180,83,9,0.3)", borderRadius: 10, padding: 10, display: "flex", flexDirection: "column", gap: 4 }}>
+            <div style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 12.5 }}>
+              {s.priority ? "⚡ " : ""}{s.id}{s.label ? ` · ${s.label}` : ""}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--muted)" }}>🏛 {s.temple} · {s.dimensions}</div>
+            <form action={clearDispatchHoldAction} style={{ marginTop: 4 }}>
+              <input type="hidden" name="slab_id" value={s.id} />
+              <button type="submit" style={{ width: "100%", padding: "7px 10px", fontSize: 12, fontWeight: 800, color: "#fff", background: "#15803d", border: "none", borderRadius: 6, cursor: "pointer" }}>
+                ✓ Correct — release to dispatch
+              </button>
+            </form>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function ReadyTab({ slabs }: { slabs: ReadySlab[] }) {
   // Per-group selection: key = templeGroupKey, value = Set of slab ids
