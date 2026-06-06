@@ -111,15 +111,66 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
     if (def && !stone) setStone(def);
   }
 
-  function downloadTemplate() {
+  async function downloadTemplate() {
     const header = ["Sr.No.", "Temple", "Stone", "Label", "Description", "Length (in)", "Width (in)", "Height (in)", "Quantity"];
     const body = Array.from({ length: TEMPLATE_ROWS }, (_, i) => [i + 1, temple, stone, "", "", "", "", "", ""]);
-    const ws = XLSX.utils.aoa_to_sheet([header, ...body]);
-    ws["!cols"] = [{ wch: 7 }, { wch: 26 }, { wch: 14 }, { wch: 18 }, { wch: 28 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 10 }];
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Slabs");
+    const aoa = [header, ...body];
+    const cols = [{ wch: 7 }, { wch: 26 }, { wch: 14 }, { wch: 20 }, { wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 10 }];
     const safe = `${temple}-${stone}`.replace(/[^a-z0-9]+/gi, "_");
-    XLSX.writeFile(wb, `slab-import-${safe}.xlsx`);
+    const filename = `slab-import-${safe}.xlsx`;
+
+    // Colourful template via xlsx-js-style (the plain `xlsx` strips cell
+    // styles on write). Dynamically imported inside this handler + wrapped
+    // in try/catch so the documented Turbopack quirk with the styled fork
+    // can never break the page — worst case it falls back to a plain file.
+    try {
+      const mod = await import("xlsx-js-style");
+      const XS = (mod as unknown as { default?: typeof mod }).default ?? mod;
+      const ws = XS.utils.aoa_to_sheet(aoa);
+      ws["!cols"] = cols;
+      ws["!rows"] = aoa.map((_, r) => ({ hpt: r === 0 ? 26 : 18 }));
+
+      const border = (rgb: string) => ({
+        top: { style: "thin", color: { rgb } },
+        bottom: { style: "thin", color: { rgb } },
+        left: { style: "thin", color: { rgb } },
+        right: { style: "thin", color: { rgb } },
+      });
+      const headerStyle = {
+        fill: { fgColor: { rgb: "92400E" } }, // brand brown band
+        font: { name: "Calibri", sz: 12, bold: true, color: { rgb: "FFFFFF" } },
+        alignment: { horizontal: "center", vertical: "center", wrapText: true },
+        border: border("5B2E0A"),
+      };
+      const bodyStyle = (col: number) => {
+        const prefilled = col <= 2; // Sr.No / Temple / Stone — don't edit
+        return {
+          fill: { fgColor: { rgb: prefilled ? "FDE9C8" : "EAF4FF" } }, // gold = locked, blue = fill here
+          font: { name: "Calibri", sz: 11, bold: col === 1, color: { rgb: prefilled ? "7C2D12" : "1F2937" } },
+          alignment: { horizontal: col === 0 || col >= 5 ? "center" : "left", vertical: "center" },
+          border: border(prefilled ? "E7C9A0" : "C7DEF5"),
+        };
+      };
+      for (let R = 0; R < aoa.length; R++) {
+        for (let C = 0; C < header.length; C++) {
+          const cell = ws[XS.utils.encode_cell({ r: R, c: C })] as { s?: unknown } | undefined;
+          if (!cell) continue;
+          cell.s = R === 0 ? headerStyle : bodyStyle(C);
+        }
+      }
+
+      const wb = XS.utils.book_new();
+      XS.utils.book_append_sheet(wb, ws, "Slabs");
+      XS.writeFile(wb, filename);
+      return;
+    } catch {
+      // Plain (uncoloured) fallback — feature still works.
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws["!cols"] = cols;
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Slabs");
+      XLSX.writeFile(wb, filename);
+    }
   }
 
   async function onFile(file: File) {
@@ -259,6 +310,8 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
         <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.6, background: "var(--surface-alt)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px" }}>
           <strong>Columns:</strong> Sr.No · Temple (filled) · Stone (filled) · Label · Description · Length · Width · Height · Quantity.{" "}
           Sizes are in <strong>inches</strong>. One row with quantity N becomes N slabs. After upload you can fix anything before it&apos;s added.
+          {" "}In the file, <span style={{ color: "#7c2d12", fontWeight: 700 }}>gold columns</span> are pre-filled (leave them) and{" "}
+          <span style={{ color: "#1d4ed8", fontWeight: 700 }}>blue columns</span> are for you to fill in.
         </div>
         {error && <div style={{ fontSize: 13, fontWeight: 700, color: "#991b1b" }}>{error}</div>}
       </section>
