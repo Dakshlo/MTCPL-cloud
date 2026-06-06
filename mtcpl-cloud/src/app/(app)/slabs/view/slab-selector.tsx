@@ -508,6 +508,7 @@ export function SlabSelector({
                 { label: "Size Code",  col: "id" as SortCol },
                 { label: "Temple",     col: "temple" as SortCol },
                 { label: "Label",      col: null },
+                { label: "Description", col: null },
                 { label: "Stone",      col: "stone" as SortCol },
                 { label: "Quality",    col: null },
                 { label: "Dimensions", col: null },
@@ -541,7 +542,7 @@ export function SlabSelector({
             {visiblePriority.length > 0 && (
               <>
                 <tr>
-                  <td colSpan={10} style={{
+                  <td colSpan={11} style={{
                     padding: "7px 14px",
                     background: "rgba(220,38,38,0.07)",
                     borderBottom: "1px solid rgba(220,38,38,0.2)",
@@ -574,10 +575,8 @@ export function SlabSelector({
                         {s.id} <span style={{ fontSize: 12 }}>⚡</span>
                       </td>
                       <td style={{ padding: "9px 12px", fontSize: 12 }}>{s.temple}</td>
-                      <td style={{ padding: "9px 12px", fontSize: 12, color: "var(--muted)" }}>
-                        {s.label}
-                        {s.description ? <span style={{ display: "block", fontSize: 11, color: "var(--muted-light)", marginTop: 2 }}>{s.description}</span> : null}
-                      </td>
+                      <td style={{ padding: "9px 12px", fontSize: 12, color: "var(--muted)" }}>{s.label}</td>
+                      <td style={{ padding: "9px 12px", fontSize: 12, color: "var(--muted)" }}>{s.description || "—"}</td>
                       <td style={{ padding: "9px 12px" }}>
                         {s.stone ? <span className={`role-pill ${s.stone === "PinkStone" ? "badge-pink" : s.stone === "WhiteStone" ? "badge-white-stone" : "badge-open"}`}>{stoneLabel(s.stone)}</span> : <span className="muted">—</span>}
                       </td>
@@ -601,7 +600,7 @@ export function SlabSelector({
             {/* ── NORMAL SECTION — filtered by all controls ── */}
             {visiblePriority.length > 0 && visibleNormal.length > 0 && (
               <tr>
-                <td colSpan={10} style={{
+                <td colSpan={11} style={{
                   padding: "7px 14px",
                   background: "var(--surface-alt)",
                   borderBottom: "1px solid var(--border)",
@@ -616,13 +615,13 @@ export function SlabSelector({
 
             {visibleNormal.length === 0 && visiblePriority.length === 0 ? (
               <tr>
-                <td colSpan={10} style={{ padding: 32, textAlign: "center", color: "var(--muted)" }}>
+                <td colSpan={11} style={{ padding: 32, textAlign: "center", color: "var(--muted)" }}>
                   No sizes match your filters.
                 </td>
               </tr>
             ) : visibleNormal.length === 0 ? (
               <tr>
-                <td colSpan={10} style={{ padding: 20, textAlign: "center", color: "var(--muted)", fontSize: 12 }}>
+                <td colSpan={11} style={{ padding: 20, textAlign: "center", color: "var(--muted)", fontSize: 12 }}>
                   No normal sizes match the current filters.
                 </td>
               </tr>
@@ -649,6 +648,7 @@ export function SlabSelector({
                     <td style={{ padding: "9px 12px", fontFamily: "ui-monospace, monospace", fontWeight: 600, whiteSpace: "nowrap" }}>{s.id}</td>
                     <td style={{ padding: "9px 12px", fontSize: 12 }}>{s.temple}</td>
                     <td style={{ padding: "9px 12px", fontSize: 12, color: "var(--muted)" }}>{s.label}</td>
+                    <td style={{ padding: "9px 12px", fontSize: 12, color: "var(--muted)" }}>{s.description || "—"}</td>
                     <td style={{ padding: "9px 12px" }}>
                       {s.stone ? <span className={`role-pill ${s.stone === "PinkStone" ? "badge-pink" : s.stone === "WhiteStone" ? "badge-white-stone" : "badge-open"}`}>{stoneLabel(s.stone)}</span> : <span className="muted">—</span>}
                     </td>
