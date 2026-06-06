@@ -66,16 +66,6 @@ export function MaintenanceCollapsible({ children }: { children: ReactNode }) {
           >
             Maintenance &amp; system status
           </div>
-          <div
-            style={{
-              fontSize: 12,
-              color: "var(--muted)",
-              marginTop: 2,
-            }}
-          >
-            Selectively take down Production, Finance, Inventory, or
-            Invoicing. Plus the global kill-switch. Developer-only.
-          </div>
         </div>
         <span
           style={{

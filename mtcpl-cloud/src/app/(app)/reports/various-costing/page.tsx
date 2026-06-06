@@ -29,25 +29,22 @@ export default async function VariousCostingLanding() {
 
   return (
     <section style={{ paddingBottom: 24 }}>
-      <header
-        style={{
-          padding: "20px 24px",
-          marginBottom: 18,
-          background: "var(--surface)",
-          border: "1px solid var(--border)",
-          borderRadius: 14,
-        }}
-      >
-        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-          Reports
-        </div>
-        <div style={{ fontSize: 24, fontWeight: 800, color: "var(--text)", letterSpacing: "-0.01em" }}>
-          Various Costing
-        </div>
-        <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 4 }}>
-          Cost-per-unit reports for production. Pick the department.
-        </div>
-      </header>
+      <div style={{ marginBottom: 18 }}>
+        <Link
+          href="/dashboard"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 13,
+            fontWeight: 600,
+            color: "var(--muted)",
+            textDecoration: "none",
+          }}
+        >
+          ← Back to dashboard
+        </Link>
+      </div>
 
       <div
         style={{

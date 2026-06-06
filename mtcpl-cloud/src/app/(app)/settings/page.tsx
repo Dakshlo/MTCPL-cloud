@@ -367,9 +367,7 @@ export default async function SettingsPage() {
         <PeekSection
           icon="👥"
           title="Users"
-          count={userList.length}
-          subtitle="Manage roles, status, and access for everyone on your team."
-          modalMaxWidth={1100}
+          count={userList.length}          modalMaxWidth={1100}
         >
           {userList.length === 0 ? (
             <div className="banner">No users found.</div>
@@ -628,9 +626,7 @@ export default async function SettingsPage() {
       <PeekSection
         icon="🪨"
         title="Stone Types"
-        count={stoneList.length}
-        subtitle="Add, recategorise, or remove stone types. Sandstone uses CFT; Marble uses tonnes."
-        modalMaxWidth={1100}
+        count={stoneList.length}        modalMaxWidth={1100}
       >
         <div className="settings-card">
           <h3 className="settings-card-title">Add Stone Type</h3>
@@ -802,9 +798,7 @@ export default async function SettingsPage() {
       <PeekSection
         icon="🛕"
         title="Temple Codes"
-        count={templeList.length}
-        subtitle="Add or edit temple names + their slab-id prefixes."
-        modalMaxWidth={1100}
+        count={templeList.length}        modalMaxWidth={1100}
       >
         <div className="settings-card">
           <h3 className="settings-card-title">Add Temple</h3>
@@ -977,13 +971,7 @@ export default async function SettingsPage() {
         <PeekSection
           icon="🛰"
           title="Live Users"
-          count={liveUsers.length}
-          subtitle={
-            liveUsers.length === 0
-              ? "Nobody seen in the last 5 minutes — everyone is offline."
-              : `Who's online RIGHT NOW (last 5 min), which page they're on, and where they signed in from. Updates each time someone navigates or every 2 minutes.`
-          }
-          modalMaxWidth={1100}
+          count={liveUsers.length}          modalMaxWidth={1100}
         >
           <div className="settings-card" style={{ padding: 0, overflow: "hidden" }}>
             {liveUsers.length === 0 ? (
@@ -1147,9 +1135,7 @@ export default async function SettingsPage() {
         <PeekSection
           icon="🕐"
           title="Screen Time Today"
-          count={screenTimeData.length}
-          subtitle={`How long each user has been active today (${todayIST}). Heartbeat pings every 2 minutes.`}
-        >
+          count={screenTimeData.length}        >
           <div className="settings-card" style={{ padding: 0, overflow: "hidden" }}>
             {screenTimeData.length === 0 ? (
               <p className="muted" style={{ padding: 16 }}>No activity recorded today yet.</p>
@@ -1218,9 +1204,7 @@ export default async function SettingsPage() {
         <PeekSection
           icon="📋"
           title="Audit Log"
-          count={(recentAudit ?? []).length}
-          subtitle="Last 50 actions by your team — who did what when."
-        >
+          count={(recentAudit ?? []).length}        >
           <div className="settings-card" style={{ padding: 0, overflow: "hidden" }}>
             {(recentAudit ?? []).length === 0 ? (
               <p className="muted" style={{ padding: 16 }}>No actions recorded yet.</p>
@@ -1248,9 +1232,7 @@ export default async function SettingsPage() {
       {currentUser.role === "developer" && (
         <PeekSection
           icon="💾"
-          title="Full System Backup"
-          subtitle="Download all live data as an Excel file. Each table is a separate sheet with raw column names — ready to insert directly into Supabase."
-        >
+          title="Full System Backup"        >
           <div className="settings-card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
             <div>
               <p style={{ margin: 0, fontWeight: 600, fontSize: 14 }}>Export: blocks · slab_requirements · cut_sessions · temples · vendors · profiles</p>

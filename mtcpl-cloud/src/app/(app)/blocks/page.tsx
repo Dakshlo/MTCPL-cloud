@@ -456,7 +456,10 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
         />
       ) : null}
 
-      {canViewReport && (
+      {/* Marble Cutting Log stays near the top (active log the cutter
+          uses daily). Only on Marble / All tabs. Block Report moved to
+          the bottom — just above Block History — per Daksh. */}
+      {canViewReport && (activeCat === "marble" || activeCat === "all") && (
         <div
           style={{
             margin: "28px 0 4px",
@@ -466,25 +469,7 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
             alignItems: "stretch",
           }}
         >
-          {/* Block Report — opens in a center-peek iframe over /embed/blocks/report
-              so the team doesn't lose their place on /blocks. The
-              standalone /blocks/report route still works (sidebar +
-              back button) for direct nav. */}
-          <div style={{ flex: "1 1 320px", display: "flex" }}>
-            <PeekIframe
-              url="/embed/blocks/report"
-              triggerIcon="📊"
-              triggerLabel="Block Report"
-              triggerSubtitle="View, filter and sort all block records — including consumed, discarded, and active · Export to Excel"
-              modalTitle="Block Report"
-              triggerStyle={{ flex: 1 }}
-            />
-          </div>
-          {/* Marble Cutting Log only relevant on the Marble or All tabs —
-              hide it on Sandstone so the Block Report stretches full-width. */}
-          {(activeCat === "marble" || activeCat === "all") && (
-            <MarbleCutLog entries={marbleCutLog} undoAction={undoMarbleCutAction} />
-          )}
+          <MarbleCutLog entries={marbleCutLog} undoAction={undoMarbleCutAction} />
         </div>
       )}
 
@@ -533,6 +518,22 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
           openSlabs={openSlabs}
           stoneCategoryMap={stoneCategoryMap}
         />
+      )}
+
+      {/* Block Report — moved here (bottom, just above Block History)
+          per Daksh. Opens in a center-peek iframe over
+          /embed/blocks/report; the standalone /blocks/report route
+          still works for direct nav. */}
+      {canViewReport && (
+        <div style={{ marginTop: 24, display: "flex" }}>
+          <PeekIframe
+            url="/embed/blocks/report"
+            triggerIcon="📊"
+            triggerLabel="Block Report"
+            modalTitle="Block Report"
+            triggerStyle={{ flex: 1 }}
+          />
+        </div>
       )}
 
       {/* Block Usage History — center-peek modal so the page stays

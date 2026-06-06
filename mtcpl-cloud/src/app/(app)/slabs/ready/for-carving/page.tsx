@@ -93,13 +93,6 @@ export default async function ReadyForCarvingPage() {
       <div className="page-header" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
         <div>
           <h1>Ready Sizes Stock</h1>
-          <p className="muted">
-            Carving team&apos;s stockpile view, bucketed by lifecycle.
-            Default lands on <strong>Cut · awaiting carving</strong> —
-            click any other chip above the table to peek at slabs
-            already assigned, being carved, completed, or dispatched.
-            Assign → routes to <Link href="/carving" style={{ color: "var(--gold-dark)", fontWeight: 600 }}>Carving Jobs</Link>.
-          </p>
         </div>
         <Link
           href="/carving"

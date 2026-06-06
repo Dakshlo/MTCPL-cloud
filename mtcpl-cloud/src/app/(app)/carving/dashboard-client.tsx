@@ -920,54 +920,6 @@ export function CarvingDashboardClient({
 
       {tab === "active" && (
         <>
-          {/* Single Floor View link — was a full inline cockpit
-              embed, but the user wants the Active tab focused on the
-              job cards. The button takes them to the dedicated
-              /carving/floor page when they need the cockpit view. */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 12,
-              padding: "10px 14px",
-              marginBottom: 14,
-              background: "var(--surface)",
-              border: "1px solid var(--border)",
-              borderRadius: 10,
-              flexWrap: "wrap",
-            }}
-          >
-            <div>
-              <div
-                style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  color: "var(--muted)",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.07em",
-                }}
-              >
-                Live operator cockpit
-              </div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text)", marginTop: 2 }}>
-                Every vendor&apos;s machines, queue, and last-24h done
-              </div>
-            </div>
-            <Link
-              href="/carving/floor"
-              className="primary-button"
-              style={{
-                fontSize: 13,
-                padding: "8px 16px",
-                fontWeight: 700,
-                textDecoration: "none",
-                whiteSpace: "nowrap",
-              }}
-            >
-              📺 Open Floor View
-            </Link>
-          </div>
           <JobsByTemple
             jobs={filteredActive}
             machineCodeById={machineCodeById}
