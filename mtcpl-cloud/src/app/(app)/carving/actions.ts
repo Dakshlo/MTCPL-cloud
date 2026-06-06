@@ -5582,6 +5582,11 @@ export async function markCarvingCompleteManuallyAction(formData: FormData) {
   await admin
     .from("carving_items")
     .update({
+      // Daksh June 2026 — set status='completed' on Receive so the slab
+      // LEAVES the Active tab (status no longer carving_in_progress) and
+      // shows only under Carving Done Approval. Without this it matched
+      // both tabs at once.
+      status: "completed",
       completed_at: now,
       unloaded_at: now,
       unloaded_by: profile.id,

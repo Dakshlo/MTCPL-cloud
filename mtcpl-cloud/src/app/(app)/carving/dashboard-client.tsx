@@ -2780,12 +2780,15 @@ function JobsByTemple({
                     );
                   })()}
 
-                  {/* Header: slab id + stone (+ lathe / manual chips) */}
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
-                    <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {/* Header: slab id + stone (+ lathe / outsource chips).
+                      Daksh June 2026 — id must stay fully visible (don't
+                      let the Outsource/stone chips squeeze it to "AST–…").
+                      Id no longer shrinks; chips wrap to a second line. */}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, flexWrap: "wrap" }}>
+                    <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 12, flexShrink: 0, whiteSpace: "nowrap" }}>
                       {j.slab_requirement_id}
                     </span>
-                    <div style={{ display: "flex", gap: 4, alignItems: "center", flexShrink: 0 }}>
+                    <div style={{ display: "flex", gap: 4, alignItems: "center", flexShrink: 0, flexWrap: "wrap" }}>
                       {j.requires_machine_type === "lathe" && (
                         <span
                           style={{
