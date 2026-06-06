@@ -436,6 +436,19 @@ export default async function SettingsPage() {
                               letterSpacing: "0.04em",
                               boxShadow: "0 0 0 1px rgba(255,255,255,0.18) inset, 0 1px 3px rgba(16,185,129,0.35)",
                             } :
+                            role === "carving_head" ? {
+                              // Daksh June 2026 — "carved / engraved stone"
+                              // chip for the Carving Head. Bronze stone
+                              // gradient + pressed-in inset shadow + letterpress
+                              // text so it reads chiselled, not flat.
+                              background: "linear-gradient(135deg, #6e5230 0%, #8a6a3a 45%, #574122 100%)",
+                              color: "#f6ecd6",
+                              fontWeight: 800,
+                              letterSpacing: "0.08em",
+                              textShadow: "0 1px 1px rgba(0,0,0,0.55), 0 -1px 0 rgba(255,255,255,0.12)",
+                              boxShadow: "inset 0 2px 3px rgba(0,0,0,0.55), inset 0 -1px 1px rgba(255,255,255,0.18), 0 1px 2px rgba(0,0,0,0.25)",
+                              border: "1px solid rgba(60,40,15,0.5)",
+                            } :
                             role === "team_head" ? { background: "#1e3a5f", color: "#fff", fontWeight: 700 } : {}
                           }>
                             {roleLabel(role)}
@@ -477,6 +490,16 @@ export default async function SettingsPage() {
                               fontWeight: 800,
                               letterSpacing: "0.04em",
                               boxShadow: "0 0 0 1px rgba(255,255,255,0.18) inset, 0 1px 3px rgba(16,185,129,0.35)",
+                            } :
+                            role === "carving_head" ? {
+                              // Carved / engraved stone chip (see locked-row note).
+                              background: "linear-gradient(135deg, #6e5230 0%, #8a6a3a 45%, #574122 100%)",
+                              color: "#f6ecd6",
+                              fontWeight: 800,
+                              letterSpacing: "0.08em",
+                              textShadow: "0 1px 1px rgba(0,0,0,0.55), 0 -1px 0 rgba(255,255,255,0.12)",
+                              boxShadow: "inset 0 2px 3px rgba(0,0,0,0.55), inset 0 -1px 1px rgba(255,255,255,0.18), 0 1px 2px rgba(0,0,0,0.25)",
+                              border: "1px solid rgba(60,40,15,0.5)",
                             } :
                             role === "team_head" ? { background: "#1e3a5f", color: "#fff", fontWeight: 700 } :
                             {}

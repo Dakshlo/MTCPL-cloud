@@ -8,6 +8,7 @@ import { slabSearchMatch } from "@/lib/slab-search";
 type Slab = {
   id: string;
   label: string;
+  description?: string | null;
   temple: string;
   stone: string | null;
   length_ft: number;
@@ -573,7 +574,10 @@ export function SlabSelector({
                         {s.id} <span style={{ fontSize: 12 }}>⚡</span>
                       </td>
                       <td style={{ padding: "9px 12px", fontSize: 12 }}>{s.temple}</td>
-                      <td style={{ padding: "9px 12px", fontSize: 12, color: "var(--muted)" }}>{s.label}</td>
+                      <td style={{ padding: "9px 12px", fontSize: 12, color: "var(--muted)" }}>
+                        {s.label}
+                        {s.description ? <span style={{ display: "block", fontSize: 11, color: "var(--muted-light)", marginTop: 2 }}>{s.description}</span> : null}
+                      </td>
                       <td style={{ padding: "9px 12px" }}>
                         {s.stone ? <span className={`role-pill ${s.stone === "PinkStone" ? "badge-pink" : s.stone === "WhiteStone" ? "badge-white-stone" : "badge-open"}`}>{stoneLabel(s.stone)}</span> : <span className="muted">—</span>}
                       </td>

@@ -14,7 +14,11 @@ const nextConfig: NextConfig = {
   // external tells Next to require() it from node_modules at
   // request time — same approach Next docs recommend for `xlsx`,
   // `puppeteer`, `sharp`, etc.
-  serverExternalPackages: ["xlsx"],
+  // exceljs (Daksh June 2026) — same treatment as xlsx. It builds the
+  // colourful slab-import template server-side (/api/slabs/import-template);
+  // marking it external keeps Next/Turbopack from re-bundling its Node
+  // internals, which is exactly the trap that broke the styled xlsx fork.
+  serverExternalPackages: ["xlsx", "exceljs"],
 };
 
 /**

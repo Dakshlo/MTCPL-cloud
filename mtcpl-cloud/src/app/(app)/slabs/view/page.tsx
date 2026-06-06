@@ -19,7 +19,7 @@ export default async function SlabViewPage({
   // db-max-rows=1000 cap. Single .limit() calls over that silently
   // truncate, hiding older temples' slabs. Loop in 1000-row pages.
   type SlabRow = {
-    id: string; label: string; temple: string; stone: string | null;
+    id: string; label: string; description: string | null; temple: string; stone: string | null;
     length_ft: number; width_ft: number; thickness_ft: number;
     status: string; priority: boolean | null; priority_note: string | null;
     quality: string | null; created_at: string | null;
@@ -31,7 +31,7 @@ export default async function SlabViewPage({
     for (let offset = 0; offset < CAP; offset += PAGE) {
       let q = supabase
         .from("slab_requirements")
-        .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, status, priority, priority_note, quality, created_at")
+        .select("id, label, description, temple, stone, length_ft, width_ft, thickness_ft, status, priority, priority_note, quality, created_at")
         .order("priority", { ascending: false })
         .order("created_at", { ascending: true })
         .range(offset, offset + PAGE - 1);
@@ -72,7 +72,7 @@ export default async function SlabViewPage({
 
   const { data: urgentSlabs } = await supabase
     .from("slab_requirements")
-    .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, status, priority, priority_note, quality, created_at")
+    .select("id, label, description, temple, stone, length_ft, width_ft, thickness_ft, status, priority, priority_note, quality, created_at")
     .eq("priority", true)
     .in("status", urgentStatusIn)
     .order("created_at", { ascending: true });

@@ -13,6 +13,7 @@
     "@sentry/nextjs": "^10.49.0",
     "@supabase/ssr": "latest",
     "@supabase/supabase-js": "latest",
+    "exceljs": "^4.4.0",
     "framer-motion": "^12.38.0",
     "next": "latest",
     "pdf-lib": "^1.17.1",

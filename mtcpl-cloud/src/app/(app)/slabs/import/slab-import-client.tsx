@@ -34,7 +34,6 @@ type Row = {
   priority: boolean;
 };
 
-const TEMPLATE_ROWS = 30;
 const inp = { padding: "8px 10px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", color: "var(--text)" } as const;
 const lbl = { fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase" as const, letterSpacing: "0.06em" };
 
@@ -111,66 +110,18 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
     if (def && !stone) setStone(def);
   }
 
-  async function downloadTemplate() {
-    const header = ["Sr.No.", "Temple", "Stone", "Label", "Description", "Length (in)", "Width (in)", "Height (in)", "Quantity"];
-    const body = Array.from({ length: TEMPLATE_ROWS }, (_, i) => [i + 1, temple, stone, "", "", "", "", "", ""]);
-    const aoa = [header, ...body];
-    const cols = [{ wch: 7 }, { wch: 26 }, { wch: 14 }, { wch: 20 }, { wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 10 }];
-    const safe = `${temple}-${stone}`.replace(/[^a-z0-9]+/gi, "_");
-    const filename = `slab-import-${safe}.xlsx`;
-
-    // Colourful template via xlsx-js-style (the plain `xlsx` strips cell
-    // styles on write). Dynamically imported inside this handler + wrapped
-    // in try/catch so the documented Turbopack quirk with the styled fork
-    // can never break the page — worst case it falls back to a plain file.
-    try {
-      const mod = await import("xlsx-js-style");
-      const XS = (mod as unknown as { default?: typeof mod }).default ?? mod;
-      const ws = XS.utils.aoa_to_sheet(aoa);
-      ws["!cols"] = cols;
-      ws["!rows"] = aoa.map((_, r) => ({ hpt: r === 0 ? 26 : 18 }));
-
-      const border = (rgb: string) => ({
-        top: { style: "thin", color: { rgb } },
-        bottom: { style: "thin", color: { rgb } },
-        left: { style: "thin", color: { rgb } },
-        right: { style: "thin", color: { rgb } },
-      });
-      const headerStyle = {
-        fill: { fgColor: { rgb: "92400E" } }, // brand brown band
-        font: { name: "Calibri", sz: 12, bold: true, color: { rgb: "FFFFFF" } },
-        alignment: { horizontal: "center", vertical: "center", wrapText: true },
-        border: border("5B2E0A"),
-      };
-      const bodyStyle = (col: number) => {
-        const prefilled = col <= 2; // Sr.No / Temple / Stone — don't edit
-        return {
-          fill: { fgColor: { rgb: prefilled ? "FDE9C8" : "EAF4FF" } }, // gold = locked, blue = fill here
-          font: { name: "Calibri", sz: 11, bold: col === 1, color: { rgb: prefilled ? "7C2D12" : "1F2937" } },
-          alignment: { horizontal: col === 0 || col >= 5 ? "center" : "left", vertical: "center" },
-          border: border(prefilled ? "E7C9A0" : "C7DEF5"),
-        };
-      };
-      for (let R = 0; R < aoa.length; R++) {
-        for (let C = 0; C < header.length; C++) {
-          const cell = ws[XS.utils.encode_cell({ r: R, c: C })] as { s?: unknown } | undefined;
-          if (!cell) continue;
-          cell.s = R === 0 ? headerStyle : bodyStyle(C);
-        }
-      }
-
-      const wb = XS.utils.book_new();
-      XS.utils.book_append_sheet(wb, ws, "Slabs");
-      XS.writeFile(wb, filename);
-      return;
-    } catch {
-      // Plain (uncoloured) fallback — feature still works.
-      const ws = XLSX.utils.aoa_to_sheet(aoa);
-      ws["!cols"] = cols;
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Slabs");
-      XLSX.writeFile(wb, filename);
-    }
+  function downloadTemplate() {
+    // The colourful template is built server-side with exceljs (see
+    // /api/slabs/import-template) — reliable colours, no client bundle
+    // weight, and it sidesteps the Turbopack quirk that broke the styled
+    // xlsx fork in the browser. We just navigate to it; the response is an
+    // attachment so the browser downloads it without leaving the page.
+    const url = `/api/slabs/import-template?temple=${encodeURIComponent(temple)}&stone=${encodeURIComponent(stone)}`;
+    const a = document.createElement("a");
+    a.href = url;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
   }
 
   async function onFile(file: File) {
@@ -384,7 +335,13 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
                     <td style={td}><input value={r.width} onChange={(e) => patch(r.key, "width", e.target.value)} inputMode="decimal" placeholder="req" style={cell("width")} /></td>
                     <td style={td}><input value={r.height} onChange={(e) => patch(r.key, "height", e.target.value)} inputMode="decimal" placeholder="req" style={cell("height")} /></td>
                     <td style={td}><input value={r.quantity} onChange={(e) => patch(r.key, "quantity", e.target.value)} inputMode="numeric" placeholder="req" style={cell("quantity")} /></td>
-                    <td style={td}><input value={r.quality} onChange={(e) => patch(r.key, "quality", e.target.value)} placeholder="optional" style={cellInp} /></td>
+                    <td style={td}>
+                      <select value={r.quality} onChange={(e) => patch(r.key, "quality", e.target.value)} style={cellInp}>
+                        <option value="">Both</option>
+                        <option value="A">Grade A</option>
+                        <option value="B">Grade B</option>
+                      </select>
+                    </td>
                     <td style={{ ...td, textAlign: "center" }}><input type="checkbox" checked={r.priority} onChange={(e) => patch(r.key, "priority", e.target.checked)} style={{ cursor: "pointer", width: 16, height: 16 }} /></td>
                     <td style={{ ...td, textAlign: "center" }}><button type="button" onClick={() => removeRow(r.key)} title="Remove row" style={{ fontSize: 14, color: "#991b1b", background: "none", border: "none", cursor: "pointer" }}>✕</button></td>
                   </tr>
