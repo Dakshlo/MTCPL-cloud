@@ -52,12 +52,8 @@ export function VariousCostingEntryCard() {
           }}>
             📊 Reports
           </div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: "#fff", letterSpacing: "-0.2px", marginBottom: 4 }}>
+          <div style={{ fontSize: 22, fontWeight: 700, color: "#fff", letterSpacing: "-0.2px" }}>
             Various Costing
-          </div>
-          <div style={{ fontSize: 14, color: "rgba(255,255,255,0.78)", lineHeight: 1.5 }}>
-            CNC + Cutter cost-per-CFT, with operational expenses and depreciation.
-            <span style={{ color: "rgba(255,255,255,0.5)" }}> &nbsp;Daily / weekly / monthly views.</span>
           </div>
         </div>
 

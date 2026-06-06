@@ -171,9 +171,9 @@ export function BulkAssignModal({
 }) {
   const [vendorId, setVendorId] = useState("");
   const [workType, setWorkType] = useState<WorkType>("flat");
-  // Mig 079 — CNC axis requirement (0 = Any). Same shape as
-  // assign-modal.tsx; flipping to lathe resets it.
-  const [cncAxesReq, setCncAxesReq] = useState<CncAxesReq>(0);
+  // Mig 079 / 093 — CNC axis requirement. Defaults to 3-axis (floor
+  // majority) like the single-slab modal; flipping to lathe resets it.
+  const [cncAxesReq, setCncAxesReq] = useState<CncAxesReq>(3);
   useEffect(() => {
     if (workType === "lathe" && cncAxesReq !== 0) setCncAxesReq(0);
   }, [workType, cncAxesReq]);

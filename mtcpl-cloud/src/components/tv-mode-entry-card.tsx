@@ -86,10 +86,6 @@ export function TvModeEntryCard() {
           >
             Carving floor on the wall
           </div>
-          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.6)" }}>
-            Auto-rotates through every operator&apos;s cockpit. Built for the
-            shop-floor TV. Toggle dark / light from inside.
-          </div>
         </div>
         <div
           style={{

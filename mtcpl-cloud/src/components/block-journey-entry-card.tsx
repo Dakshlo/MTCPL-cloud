@@ -89,12 +89,6 @@ export function BlockJourneyEntryCard() {
               >
                 Block Journey
               </div>
-              <div style={{ fontSize: 14, color: "rgba(255,255,255,0.7)", lineHeight: 1.5 }}>
-                Track every Fresh block end-to-end — true slab yield across the full cutting lineage.
-                <span style={{ color: "rgba(255,255,255,0.45)" }}>
-                  &nbsp;Sandstone CFT yield · Marble CFT per tonne.
-                </span>
-              </div>
             </div>
 
             <div

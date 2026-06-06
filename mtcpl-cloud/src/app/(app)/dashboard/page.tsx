@@ -293,7 +293,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
             url="/embed/blocks/report"
             triggerIcon="📊"
             triggerLabel="Block Report"
-            triggerSubtitle="All blocks — filter by stone, yard, vendor · Export to Excel"
             modalTitle="Block Report"
             triggerStyle={{
               flex: 1,
@@ -314,7 +313,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
             url="/embed/slabs/ready"
             triggerIcon="📋"
             triggerLabel="Ready Sizes Report"
-            triggerSubtitle="Cut-done sizes — filter by temple, stone, grade · Export to Excel"
             modalTitle="Ready Sizes Report"
             triggerStyle={{
               flex: 1,
@@ -342,7 +340,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
           icon="🔔"
           title="Push Urgent Alert to Workers"
           count={pushList.length}
-          subtitle="Mark a slab as urgent — workers see a red highlight on their pages."
           modalMaxWidth={1100}
         >
           <PushPanel slabs={pushList} pushed={pushed} todayLabel={today.label} expandedByDefault />

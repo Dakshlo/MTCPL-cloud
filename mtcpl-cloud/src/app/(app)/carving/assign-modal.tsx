@@ -218,10 +218,13 @@ export function AssignModal({
 }) {
   const [vendorId, setVendorId] = useState<string>("");
   const [workType, setWorkType] = useState<WorkType>("flat");
-  // Mig 079 — CNC axis requirement. Only meaningful when workType
-  // is "flat" (CNC); flipping to lathe resets it to 0 ("Any") so
-  // it doesn't leak into the lathe assignment.
-  const [cncAxesReq, setCncAxesReq] = useState<CncAxesReq>(0);
+  // Mig 079 / 093 — CNC axis requirement. Daksh June 2026: default to
+  // 3-axis (the floor majority) instead of "Any" so most slabs are
+  // axis-locked out of the box; the assigner bumps to 4/5 only for
+  // the special ones. Only meaningful when workType is "flat" (CNC);
+  // flipping to lathe resets it to 0 ("Any") so it doesn't leak into
+  // the lathe assignment.
+  const [cncAxesReq, setCncAxesReq] = useState<CncAxesReq>(3);
   useEffect(() => {
     if (workType === "lathe" && cncAxesReq !== 0) setCncAxesReq(0);
   }, [workType, cncAxesReq]);

@@ -111,6 +111,17 @@ export function BlockPurchaseClient({
   const [range, setRange] = useState<DateRange>("30d");
   const [customFrom, setCustomFrom] = useState<string>(isoDaysAgo(30));
   const [customTo, setCustomTo] = useState<string>(todayISO());
+  // Daksh June 2026 — vendor-wise filter. "all" = no filter. List is
+  // derived from EVERY truck (both stones) so the dropdown stays stable
+  // regardless of the date window.
+  const [vendorFilter, setVendorFilter] = useState<string>("all");
+
+  const vendorOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const t of marbleTrucks) if (t.vendor_name) set.add(t.vendor_name);
+    for (const t of sandstoneTrucks) if (t.vendor_name) set.add(t.vendor_name);
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [marbleTrucks, sandstoneTrucks]);
 
   // ── Build the effective date window ────────────────────────────────
   const { fromISO, toISO } = useMemo(() => {
@@ -125,13 +136,19 @@ export function BlockPurchaseClient({
   const filteredMarble = useMemo(() => {
     return marbleTrucks.filter((t) => {
       const d = (t.created_at ?? "").slice(0, 10);
-      return d >= fromISO && d <= toISO;
+      if (d < fromISO || d > toISO) return false;
+      if (vendorFilter !== "all" && (t.vendor_name ?? "") !== vendorFilter) return false;
+      return true;
     });
-  }, [marbleTrucks, fromISO, toISO]);
+  }, [marbleTrucks, fromISO, toISO, vendorFilter]);
 
   const filteredSandstone = useMemo(() => {
-    return sandstoneTrucks.filter((t) => t.date >= fromISO && t.date <= toISO);
-  }, [sandstoneTrucks, fromISO, toISO]);
+    return sandstoneTrucks.filter((t) => {
+      if (t.date < fromISO || t.date > toISO) return false;
+      if (vendorFilter !== "all" && (t.vendor_name ?? "") !== vendorFilter) return false;
+      return true;
+    });
+  }, [sandstoneTrucks, fromISO, toISO, vendorFilter]);
 
   // ── Summary KPIs for the active tab ────────────────────────────────
   const summary = useMemo(() => {
@@ -501,6 +518,53 @@ export function BlockPurchaseClient({
                   color: "var(--text)",
                 }}
               />
+            </div>
+          )}
+          {/* Vendor-wise filter — dropdown so a long supplier list
+              stays compact. Pushed to the right; "All vendors" clears
+              it. Applies to whichever tab + date window is active. */}
+          {vendorOptions.length > 0 && (
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                marginLeft: "auto",
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: "var(--muted)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                }}
+              >
+                Vendor
+              </span>
+              <select
+                value={vendorFilter}
+                onChange={(e) => setVendorFilter(e.target.value)}
+                style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  padding: "5px 10px",
+                  borderRadius: 999,
+                  border: `1px solid ${vendorFilter !== "all" ? "var(--gold-dark)" : "var(--border)"}`,
+                  background: vendorFilter !== "all" ? "rgba(180,115,51,0.10)" : "var(--bg)",
+                  color: "var(--text)",
+                  maxWidth: 260,
+                  cursor: "pointer",
+                }}
+              >
+                <option value="all">All vendors ({vendorOptions.length})</option>
+                {vendorOptions.map((v) => (
+                  <option key={v} value={v}>
+                    {v}
+                  </option>
+                ))}
+              </select>
             </div>
           )}
         </div>
