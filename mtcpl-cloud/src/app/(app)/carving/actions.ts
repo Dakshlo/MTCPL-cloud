@@ -1115,6 +1115,20 @@ export async function assignCarvingJobAction(formData: FormData) {
     redirect("/carving?toast=Vendor+is+inactive");
   }
 
+  // Daksh June 2026 — server-side backstop for the Outsource gating.
+  // The /carving toggle hides Outsource mode from CNC operators, but a
+  // CNC operator (vendor role + can_assign_carving, e.g. Mohit) can
+  // still reach this action through the CNC assign form. Assigning to an
+  // Outsource vendor (auto-start → Receive → jobwork challan) is the
+  // office team's flow only, so reject it for anyone outside the four
+  // roles — a replayed form can't push work to an Outsource carver.
+  if (
+    vendorType === "Outsource" &&
+    !["developer", "owner", "carving_head", "senior_incharge"].includes(profile.role)
+  ) {
+    redirect("/carving?toast=Not+authorised+for+Outsource+carving");
+  }
+
   // Work-type tag only applies to CNC vendors. For Manual jobs we
   // ignore the field and store NULL (manual carvers have no machines
   // to match).
@@ -1332,6 +1346,15 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
   }
   if (!(vendor as { is_active: boolean }).is_active) {
     redirect("/carving?toast=Vendor+is+inactive");
+  }
+  // Daksh June 2026 — same Outsource backstop as the single-slab assign:
+  // a CNC operator (vendor role, e.g. Mohit) may never batch-assign to an
+  // Outsource vendor. The toggle hides it; this guards a replayed form.
+  if (
+    vendorType === "Outsource" &&
+    !["developer", "owner", "carving_head", "senior_incharge"].includes(profile.role)
+  ) {
+    redirect("/carving?toast=Not+authorised+for+Outsource+carving");
   }
   const finalRequiresMachineType = vendorType === "CNC" ? requiresMachineType : null;
   // Mig 079 — axis requirement applies only to CNC + flat-panel.

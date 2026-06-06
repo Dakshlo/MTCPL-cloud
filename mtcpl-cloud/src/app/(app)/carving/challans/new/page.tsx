@@ -11,7 +11,7 @@ const ALLOWED = ["developer", "owner", "carving_head", "senior_incharge"];
 
 export default async function NewCarvingChallanPage() {
   const { profile } = await requireAuth();
-  if (!ALLOWED.includes(profile.role)) redirect("/carving?mode=outsource");
+  if (!ALLOWED.includes(profile.role)) redirect("/carving");
   const admin = createAdminSupabaseClient();
 
   // Approved Outsource carving jobs (review_approved_at set).

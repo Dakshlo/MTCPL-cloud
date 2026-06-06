@@ -26,7 +26,7 @@ function fmtDate(d: string | null): string {
 
 export default async function CarvingChallansListPage() {
   const { profile } = await requireAuth();
-  if (!ALLOWED.includes(profile.role)) redirect("/carving?mode=outsource");
+  if (!ALLOWED.includes(profile.role)) redirect("/carving");
   const admin = createAdminSupabaseClient();
 
   const { data: rows } = await admin

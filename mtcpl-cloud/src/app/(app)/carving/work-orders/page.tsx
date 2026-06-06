@@ -25,7 +25,7 @@ const STATUS_TONE: Record<string, { bg: string; fg: string }> = {
 
 export default async function WorkOrdersListPage() {
   const { profile } = await requireAuth();
-  if (!ALLOWED.includes(profile.role)) redirect("/carving?mode=outsource");
+  if (!ALLOWED.includes(profile.role)) redirect("/carving");
   const admin = createAdminSupabaseClient();
 
   const { data: woRows } = await admin

@@ -41,7 +41,20 @@ export default async function CarvingDashboardPage({
   // the page byte-identical for the CNC flow; 'outsource' filters the
   // Active/Approval/Done datasets to Outsource vendors (in-memory, no
   // SQL change) and switches on the Outsource affordances.
-  const mode: "cnc" | "outsource" = params.mode === "outsource" ? "outsource" : "cnc";
+  //
+  // The Outsource flow (toggle, Work Orders, Challans, Receive, jobwork
+  // rate) belongs to the office team only: owner / dev / carving_head /
+  // senior_incharge. A CNC operator (vendor role + can_assign_carving,
+  // e.g. Mohit) keeps the CNC carving-vendor flow exactly as before — so
+  // ?mode=outsource is IGNORED for him (a stray bookmark can't open it)
+  // and the toggle is hidden below.
+  const canUseOutsource =
+    profile.role === "developer" ||
+    profile.role === "owner" ||
+    profile.role === "carving_head" ||
+    profile.role === "senior_incharge";
+  const mode: "cnc" | "outsource" =
+    canUseOutsource && params.mode === "outsource" ? "outsource" : "cnc";
   const wantVendorType = mode === "outsource" ? "Outsource" : "CNC";
 
   // Paginated fetcher for unassigned slabs — Supabase's PostgREST
@@ -568,7 +581,11 @@ export default async function CarvingDashboardPage({
 
       {/* CNC / Outsource mode toggle — splits the whole page by vendor
           type. CNC = existing machine flow (byte-identical); Outsource =
-          simplified jobwork flow. Preserves the current tab + temple. */}
+          simplified jobwork flow. Preserves the current tab + temple.
+          Daksh June 2026 — gated to the office team (owner / dev /
+          carving_head / senior_incharge). A CNC operator (Mohit) never
+          sees it; his page stays CNC-only, exactly as before. */}
+      {canUseOutsource && (
       <div
         style={{
           display: "inline-flex",
@@ -615,6 +632,7 @@ export default async function CarvingDashboardPage({
           );
         })}
       </div>
+      )}
 
       {/* Tabs — solid pill style. Active tab = filled gold; inactive
           = soft hover. Single colour family so the carving head's eye

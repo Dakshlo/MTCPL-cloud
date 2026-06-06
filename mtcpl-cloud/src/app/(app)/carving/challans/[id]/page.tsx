@@ -33,7 +33,7 @@ export default async function CarvingChallanDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { profile } = await requireAuth();
-  if (!ALLOWED.includes(profile.role)) redirect("/carving?mode=outsource");
+  if (!ALLOWED.includes(profile.role)) redirect("/carving");
   const { id } = await params;
   const admin = createAdminSupabaseClient();
 

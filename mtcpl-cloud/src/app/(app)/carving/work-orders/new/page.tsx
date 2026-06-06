@@ -10,7 +10,7 @@ const ALLOWED = ["developer", "owner", "carving_head", "senior_incharge"];
 
 export default async function NewWorkOrderPage() {
   const { profile } = await requireAuth();
-  if (!ALLOWED.includes(profile.role)) redirect("/carving?mode=outsource");
+  if (!ALLOWED.includes(profile.role)) redirect("/carving");
   const admin = createAdminSupabaseClient();
 
   const { data: vRows } = await admin

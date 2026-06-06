@@ -22,7 +22,7 @@ const SLAB_TONE: Record<string, { bg: string; fg: string }> = {
 
 export default async function WorkOrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { profile } = await requireAuth();
-  if (!ALLOWED.includes(profile.role)) redirect("/carving?mode=outsource");
+  if (!ALLOWED.includes(profile.role)) redirect("/carving");
   const { id } = await params;
   const admin = createAdminSupabaseClient();
 
