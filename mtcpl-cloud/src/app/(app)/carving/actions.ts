@@ -1317,6 +1317,12 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
         : requiresCncAxesBatchRaw === "5"
           ? 5
           : null;
+  // Mig 094 — Outsource jobwork rate snapshot for the batch (₹ per
+  // cft/sft). Applied only to Outsource vendors below; CNC ignores it.
+  const jobworkRateBatchRaw = txt(formData, "jobwork_rate");
+  const jobworkRateBatch =
+    jobworkRateBatchRaw && Number(jobworkRateBatchRaw) > 0 ? Number(jobworkRateBatchRaw) : null;
+  const jobworkUnitBatch = txt(formData, "jobwork_unit") === "sft" ? "sft" : "cft";
 
   let slabIds: string[] = [];
   try {
@@ -1441,6 +1447,9 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
         note,
         status: assignedStatusBatch,
         ...(isOutsourceBatch ? { loaded_at: now, loaded_by: profile.id } : {}),
+        ...(isOutsourceBatch && jobworkRateBatch != null
+          ? { jobwork_rate: jobworkRateBatch, jobwork_unit: jobworkUnitBatch }
+          : {}),
         urgency,
         estimated_minutes: estimatedMinutes || null,
         carving_sides: carvingSides,

@@ -1037,7 +1037,10 @@ export function CarvingDashboardClient({
               width_ft: Number(s.width_ft) || 0,
               thickness_ft: Number(s.thickness_ft) || 0,
             }))}
-          vendors={vendors}
+          vendors={vendors.filter(
+            (v) => v.vendor_type === (mode === "outsource" ? "Outsource" : "CNC"),
+          )}
+          outsourceOnly={mode === "outsource"}
           stoneTypes={stoneTypes}
           onClose={() => {
             setBulkOpen(false);

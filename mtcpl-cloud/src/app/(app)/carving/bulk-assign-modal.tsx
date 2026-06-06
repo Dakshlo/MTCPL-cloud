@@ -3,21 +3,21 @@
 /**
  * Bulk assign — pick up to 10 slabs in the Unassigned tab, hit
  * "Assign N selected", land here. One vendor, one set of params
- * (urgency / work-type / ETA / note) applied to every slab in the
- * selection. Behind the scenes each row gets the same `batch_id`
- * so the downstream cockpit + transfer UI can colour-group them
- * as "these came together".
+ * (urgency / work-type / rate / ETA / note) applied to every slab in
+ * the selection. Each row gets the same `batch_id` so the downstream
+ * cockpit + transfer UI can colour-group them as "these came together".
  *
- * Built as a separate component from the single-slab AssignModal
- * so the existing flow stays untouched. Reuses the same visual
- * pattern (center peek, dark backdrop, vendor radio list with
- * type breakdown).
- *
- * Marked "use client" because of inline event handlers + local
- * state for vendor / urgency / work-type pickers.
+ * Daksh June 2026 — reworked to be visually IDENTICAL to the single-slab
+ * AssignModal: same two-column .assign-grid (controls left, vendor
+ * cockpit right), same mode handling (CNC shows work-type + axes +
+ * cockpit; Outsource shows jobwork rate + a manual panel, with the
+ * CNC-only controls hidden). The only differences from single assign
+ * are the header (N slabs) + a selected-slab thumbnail strip.
  */
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useFormStatus } from "react-dom";
+import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 import { assignCarvingJobsBatchAction } from "./actions";
 import { SlabThumb } from "@/components/slab-thumb";
 import type { StoneTypeDef } from "@/lib/stone-utils";
@@ -55,22 +55,25 @@ export type BulkAssignSlab = {
 
 type WorkType = "flat" | "lathe";
 
-// Same colour map the single-slab AssignModal uses for its machine
-// grid — kept in sync visually so a vendor's cockpit-preview looks
-// identical whether the carving head opens single or bulk assign.
+function FormPendingOverlay({ label }: { label: string }) {
+  const { pending } = useFormStatus();
+  return <FinanceLoadingOverlay show={pending} label={label} />;
+}
+
+// Same palette as the single-slab AssignModal: idle = low-key light
+// blue, carving = confident green, maintenance = red. Kept in sync so a
+// vendor's cockpit reads identical in single vs bulk assign.
 const MACHINE_TINT: Record<
   Machine["status"],
   { bg: string; border: string; fg: string; label: string }
 > = {
-  idle: { bg: "rgba(22,163,74,0.1)", border: "rgba(22,163,74,0.4)", fg: "#15803d", label: "FREE" },
-  carving: { bg: "rgba(37,99,235,0.08)", border: "rgba(37,99,235,0.4)", fg: "#1d4ed8", label: "RUNNING" },
+  idle: { bg: "rgba(56,189,248,0.08)", border: "rgba(56,189,248,0.4)", fg: "#0369a1", label: "FREE" },
+  carving: { bg: "rgba(22,163,74,0.10)", border: "rgba(22,163,74,0.45)", fg: "#15803d", label: "RUNNING" },
   maintenance: { bg: "rgba(220,38,38,0.08)", border: "rgba(220,38,38,0.4)", fg: "#b91c1c", label: "DOWN" },
   inactive: { bg: "var(--surface-alt)", border: "var(--border)", fg: "var(--muted)", label: "OFF" },
 };
 
-// Same rule-based recommender as the single-slab AssignModal. Kept
-// in sync visually (✨ BEST FIT chip + auto-select) so the workflow
-// reads identical whether assigning one slab or a batch.
+// Same rule-based recommender as the single-slab AssignModal.
 function recommendVendor(
   vendors: Vendor[],
   workType: WorkType,
@@ -110,7 +113,6 @@ function typeBreakdown(v: Vendor) {
     multiTotal: 0,
     latheFree: 0,
     latheTotal: 0,
-    // Mig 079 — per-axis tallies (mirror assign-modal.tsx).
     axes3Total: 0,
     axes3Free: 0,
     axes4Total: 0,
@@ -141,8 +143,6 @@ function typeBreakdown(v: Vendor) {
   return out;
 }
 
-/** Same shape as in assign-modal.tsx — does this vendor have a
- *  machine that matches (workType, axesReq)? */
 function vendorMatchesReq(
   v: Vendor,
   workType: WorkType,
@@ -163,22 +163,26 @@ export function BulkAssignModal({
   vendors,
   stoneTypes,
   onClose,
+  outsourceOnly = false,
 }: {
   slabs: BulkAssignSlab[];
   vendors: Vendor[];
   stoneTypes: StoneTypeDef[];
   onClose: () => void;
+  /** Mirrors AssignModal — Outsource mode hides the CNC-only Work type +
+   *  CNC axes controls and shows the jobwork rate field instead. */
+  outsourceOnly?: boolean;
 }) {
   const [vendorId, setVendorId] = useState("");
   const [workType, setWorkType] = useState<WorkType>("flat");
-  // Mig 079 / 093 — CNC axis requirement. Defaults to 3-axis (floor
-  // majority) like the single-slab modal; flipping to lathe resets it.
   const [cncAxesReq, setCncAxesReq] = useState<CncAxesReq>(3);
   useEffect(() => {
     if (workType === "lathe" && cncAxesReq !== 0) setCncAxesReq(0);
   }, [workType, cncAxesReq]);
   const [urgency, setUrgency] = useState<"normal" | "urgent">("normal");
-  // Mig 088 — carved sides for the whole batch. 2 → output counts x2.
+  // Mig 094 — Outsource jobwork rate (₹ per cft/sft) for the whole batch.
+  const [jobworkRate, setJobworkRate] = useState("");
+  const [jobworkUnit, setJobworkUnit] = useState<"cft" | "sft">("cft");
   const [carvingSides, setCarvingSides] = useState<1 | 2>(1);
   const [days, setDays] = useState("");
   const [hours, setHours] = useState("");
@@ -199,9 +203,6 @@ export function BulkAssignModal({
   const selectedVendor = vendors.find((v) => v.id === vendorId);
   const isManual = selectedVendor?.vendor_type === "Outsource";
 
-  // Rule-based recommendation. Auto-selects the winner on mount +
-  // whenever work-type flips. User can override by clicking another
-  // vendor row.
   const recommendation = useMemo(
     () => recommendVendor(vendors, workType, cncAxesReq),
     [vendors, workType, cncAxesReq],
@@ -228,11 +229,7 @@ export function BulkAssignModal({
 
   const totalMinutes = (Number(days) || 0) * 60 * 24 + (Number(hours) || 0) * 60;
   const requiresMachineType = workType === "lathe" ? "lathe" : "";
-  // Mig 079 — requires_cnc_axes hidden form value (mirrors assign-modal).
   const requiresCncAxesForm = cncAxesReq === 0 ? "" : String(cncAxesReq);
-  // Mig 079 — does the currently selected vendor still satisfy the
-  // gate? Mirrors the single-slab modal so a stale tick can't slip
-  // into submit. Manual vendors skip the gate (no machines).
   const selectedVendorOk = selectedVendor
     ? selectedVendor.vendor_type === "Outsource" ||
       vendorMatchesReq(selectedVendor, workType, cncAxesReq).hasAtAll
@@ -246,7 +243,7 @@ export function BulkAssignModal({
 
   // Detect mirror-pairs in the selection — same label + L×W×T means
   // these slabs are pair-eligible, which gives the carving head
-  // confidence that the batch can run on a 2-head together.
+  // confidence the batch can run on a 2-head together.
   const pairHint = useMemo(() => {
     if (slabs.length < 2) return null;
     const first = slabs[0];
@@ -275,8 +272,6 @@ export function BulkAssignModal({
         bottom: 0,
         background: "rgba(15, 12, 6, 0.55)",
         backdropFilter: "blur(2px)",
-        // 1100 so we float ABOVE the temple peek modal (1000) when
-        // the user bulk-selects from inside the peek then submits.
         zIndex: 1100,
         display: "flex",
         alignItems: "flex-start",
@@ -296,7 +291,8 @@ export function BulkAssignModal({
           borderRadius: 12,
           boxShadow: "0 18px 60px rgba(0,0,0,0.45)",
           width: "100%",
-          maxWidth: 760,
+          // Match the single-slab AssignModal's width for the two-column grid.
+          maxWidth: 1040,
           maxHeight: "88vh",
           display: "flex",
           flexDirection: "column",
@@ -317,36 +313,19 @@ export function BulkAssignModal({
         >
           <div style={{ minWidth: 0, flex: 1 }}>
             <h2 style={{ margin: 0, fontSize: 17 }}>
-              📦 Assign {slabs.length} slab{slabs.length !== 1 ? "s" : ""} as a batch
+              {outsourceOnly ? "🤝" : "📦"} Assign {slabs.length} slab{slabs.length !== 1 ? "s" : ""} as a batch
             </h2>
             <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>
-              They&apos;ll share a batch tag — vendor + runner see them grouped
-              by colour, easy to pair up on a 2-head.
+              One vendor + one set of options applied to all {slabs.length}. They share a batch tag so the cockpit + runner see them grouped.
             </p>
             {pairHint && (
-              <p
-                style={{
-                  fontSize: 11,
-                  margin: "6px 0 0",
-                  color: "#15803d",
-                  fontWeight: 700,
-                }}
-              >
-                ✓ {pairHint}
-              </p>
+              <p style={{ fontSize: 11, margin: "6px 0 0", color: "#15803d", fontWeight: 700 }}>✓ {pairHint}</p>
             )}
           </div>
           <button
             type="button"
             onClick={onClose}
-            style={{
-              fontSize: 18,
-              border: "none",
-              background: "transparent",
-              cursor: "pointer",
-              color: "var(--muted)",
-              padding: 4,
-            }}
+            style={{ fontSize: 18, border: "none", background: "transparent", cursor: "pointer", color: "var(--muted)", padding: 4 }}
             aria-label="Close"
           >
             ✕
@@ -354,11 +333,12 @@ export function BulkAssignModal({
         </div>
 
         <div style={{ flex: 1, overflowY: "auto", padding: "14px 18px 18px" }}>
-          {/* Selected slab thumbnails */}
+          {/* Selected slab thumbnails — the bulk equivalent of the single
+              modal's header slab line. */}
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))",
+              gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))",
               gap: 6,
               marginBottom: 14,
               padding: 10,
@@ -368,99 +348,33 @@ export function BulkAssignModal({
             }}
           >
             {slabs.map((s) => (
-              <div
-                key={s.id}
-                style={{
-                  padding: 4,
-                  background: "var(--surface)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 6,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 4,
-                }}
-              >
-                <SlabThumb
-                  stone={s.stone}
-                  l={Number(s.length_ft)}
-                  w={Number(s.width_ft)}
-                  t={Number(s.thickness_ft)}
-                  stoneTypes={stoneTypes}
-                  size={60}
-                  height={60}
-                />
-                <div
-                  style={{
-                    fontFamily: "ui-monospace, monospace",
-                    fontWeight: 700,
-                    fontSize: 11,
-                    color: "var(--text)",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                  title={s.id}
-                >
-                  {s.id}
-                </div>
-                <div style={{ fontSize: 9, color: "var(--muted)", fontFamily: "ui-monospace, monospace" }}>
-                  {s.length_ft}×{s.width_ft}×{s.thickness_ft}″
-                </div>
+              <div key={s.id} style={{ padding: 4, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, display: "flex", flexDirection: "column", gap: 4 }}>
+                <SlabThumb stone={s.stone} l={Number(s.length_ft)} w={Number(s.width_ft)} t={Number(s.thickness_ft)} stoneTypes={stoneTypes} size={60} height={60} />
+                <div style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 11, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.id}>{s.id}</div>
+                <div style={{ fontSize: 9, color: "var(--muted)", fontFamily: "ui-monospace, monospace" }}>{s.length_ft}×{s.width_ft}×{s.thickness_ft}″</div>
               </div>
             ))}
           </div>
 
-          <form
-            action={assignCarvingJobsBatchAction}
-            style={{ display: "flex", flexDirection: "column", gap: 16 }}
-          >
+          <form action={assignCarvingJobsBatchAction} style={{ position: "relative" }}>
+            <FormPendingOverlay label="Assigning batch…" />
             <input type="hidden" name="slab_ids" value={JSON.stringify(slabs.map((s) => s.id))} />
             <input type="hidden" name="requires_machine_type" value={requiresMachineType} />
-            {/* Mig 079 — requires_cnc_axes ("" = Any, "4", "5"). */}
             <input type="hidden" name="requires_cnc_axes" value={requiresCncAxesForm} />
+            <input type="hidden" name="jobwork_rate" value={isManual ? jobworkRate : ""} />
+            <input type="hidden" name="jobwork_unit" value={isManual ? jobworkUnit : ""} />
 
-            {/* Work type */}
-            {!isManual && (
+            {/* Two-column grid — identical to AssignModal. */}
+            <div className="assign-grid">
+
+            {/* Work type + CNC axes — CNC only, hidden in Outsource mode. */}
+            {!isManual && !outsourceOnly && (
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <Label>Work type (applies to all {slabs.length} slabs)</Label>
+                <Label>Work type (applies to all {slabs.length})</Label>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button
-                    type="button"
-                    onClick={() => setWorkType("flat")}
-                    style={{
-                      flex: 1,
-                      padding: "10px 14px",
-                      fontSize: 13,
-                      fontWeight: 600,
-                      border: `1.5px solid ${workType === "flat" ? "var(--gold-dark)" : "var(--border)"}`,
-                      background: workType === "flat" ? "rgba(180,115,51,0.08)" : "var(--surface)",
-                      color: "var(--text)",
-                      borderRadius: 8,
-                      cursor: "pointer",
-                    }}
-                  >
-                    📐 Flat panel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setWorkType("lathe")}
-                    style={{
-                      flex: 1,
-                      padding: "10px 14px",
-                      fontSize: 13,
-                      fontWeight: 700,
-                      border: `1.5px solid ${workType === "lathe" ? "#7c3aed" : "var(--border)"}`,
-                      background: workType === "lathe" ? "rgba(124,58,237,0.08)" : "var(--surface)",
-                      color: workType === "lathe" ? "#5b21b6" : "var(--text)",
-                      borderRadius: 8,
-                      cursor: "pointer",
-                    }}
-                  >
-                    🌀 Lathe (cylindrical)
-                  </button>
+                  <button type="button" onClick={() => setWorkType("flat")} style={{ flex: 1, padding: "10px 14px", fontSize: 13, fontWeight: 600, border: `1.5px solid ${workType === "flat" ? "var(--gold-dark)" : "var(--border)"}`, background: workType === "flat" ? "rgba(180,115,51,0.08)" : "var(--surface)", color: "var(--text)", borderRadius: 8, cursor: "pointer" }}>📐 Flat panel</button>
+                  <button type="button" onClick={() => setWorkType("lathe")} style={{ flex: 1, padding: "10px 14px", fontSize: 13, fontWeight: 700, border: `1.5px solid ${workType === "lathe" ? "#7c3aed" : "var(--border)"}`, background: workType === "lathe" ? "rgba(124,58,237,0.08)" : "var(--surface)", color: workType === "lathe" ? "#5b21b6" : "var(--text)", borderRadius: 8, cursor: "pointer" }}>🌀 Lathe (cylindrical)</button>
                 </div>
-                {/* Mig 079 — CNC axes sub-picker. Mirrors the
-                    single-slab modal. Only renders for Flat panel. */}
                 {workType === "flat" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
                     <Label>CNC axes</Label>
@@ -473,24 +387,7 @@ export function BulkAssignModal({
                       ].map((opt) => {
                         const active = cncAxesReq === opt.v;
                         return (
-                          <button
-                            key={opt.v}
-                            type="button"
-                            onClick={() => setCncAxesReq(opt.v)}
-                            style={{
-                              flex: 1,
-                              padding: "8px 10px",
-                              fontSize: 12,
-                              fontWeight: 700,
-                              border: `1.5px solid ${active ? "var(--gold-dark)" : "var(--border)"}`,
-                              background: active ? "rgba(180,115,51,0.08)" : "var(--surface)",
-                              color: active ? "#7c4a1f" : "var(--muted)",
-                              borderRadius: 8,
-                              cursor: "pointer",
-                            }}
-                          >
-                            {opt.label}
-                          </button>
+                          <button key={opt.v} type="button" onClick={() => setCncAxesReq(opt.v)} style={{ flex: 1, padding: "8px 10px", fontSize: 12, fontWeight: 700, border: `1.5px solid ${active ? "var(--gold-dark)" : "var(--border)"}`, background: active ? "rgba(180,115,51,0.08)" : "var(--surface)", color: active ? "#7c4a1f" : "var(--muted)", borderRadius: 8, cursor: "pointer" }}>{opt.label}</button>
                         );
                       })}
                     </div>
@@ -503,9 +400,7 @@ export function BulkAssignModal({
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <Label>Vendor</Label>
               {sortedVendors.length === 0 ? (
-                <div className="muted" style={{ padding: 12, fontSize: 13 }}>
-                  No active vendors.
-                </div>
+                <div className="muted" style={{ padding: 12, fontSize: 13 }}>No active vendors.</div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   {sortedVendors.some((v) => v.vendor_type === "CNC") && (
@@ -515,209 +410,81 @@ export function BulkAssignModal({
                     const isSelected = v.id === vendorId;
                     const isVendorManual = v.vendor_type === "Outsource";
                     const prev = idx > 0 ? sortedVendors[idx - 1] : null;
-                    const showManualHeader =
-                      isVendorManual && (!prev || prev.vendor_type !== "Outsource");
+                    const showManualHeader = isVendorManual && (!prev || prev.vendor_type !== "Outsource");
                     const manualHeader = showManualHeader ? (
-                      <SectionHeader
-                        key={`__manual-${v.id}`}
-                        label="🤝 Outsource / Jobwork"
-                        accent="#92400e"
-                        topMargin={prev ? 10 : 0}
-                      />
+                      <SectionHeader key={`__manual-${v.id}`} label="🤝 Outsource / Jobwork" accent="#92400e" topMargin={prev ? 10 : 0} />
                     ) : null;
-
                     if (isVendorManual) {
                       return (
                         <Fragment key={v.id}>
                           {manualHeader}
-                          <VendorRow
-                            v={v}
-                            isSelected={isSelected}
-                            isManual
-                            onSelect={() => setVendorId(v.id)}
-                            workType={workType}
-                            cncAxesReq={cncAxesReq}
-                          />
+                          <VendorRow v={v} isSelected={isSelected} isManual onSelect={() => setVendorId(v.id)} workType={workType} cncAxesReq={cncAxesReq} />
                         </Fragment>
                       );
                     }
                     return (
-                      <VendorRow
-                        key={v.id}
-                        v={v}
-                        isSelected={isSelected}
-                        onSelect={() => setVendorId(v.id)}
-                        workType={workType}
-                        cncAxesReq={cncAxesReq}
-                        isRecommended={recommendation.vendorId === v.id}
-                        recommendationReason={recommendation.reason}
-                      />
+                      <VendorRow key={v.id} v={v} isSelected={isSelected} onSelect={() => setVendorId(v.id)} workType={workType} cncAxesReq={cncAxesReq} isRecommended={recommendation.vendorId === v.id} recommendationReason={recommendation.reason} />
                     );
                   })}
                 </div>
               )}
             </div>
 
-            {/* Prominent cockpit panel for the selected CNC vendor —
-                same big-box pattern as the single-slab AssignModal.
-                Shows stock pending + free/busy stat tiles + the
-                full machine grid below. */}
-            {selectedVendor && selectedVendor.vendor_type === "CNC" && (
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 12,
-                  padding: "14px 16px",
-                  background: "linear-gradient(180deg, rgba(180,115,51,0.06) 0%, var(--surface-alt) 100%)",
-                  border: "2px solid var(--gold-dark)",
-                  borderRadius: 10,
-                  boxShadow: "0 2px 12px rgba(180,115,51,0.10)",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-                  <span
-                    style={{
-                      fontSize: 14,
-                      fontWeight: 800,
-                      color: "var(--gold-dark)",
-                      letterSpacing: "0.02em",
-                    }}
-                  >
-                    🏭 {selectedVendor.name}&apos;s cockpit
-                  </span>
+            {/* Jobwork rate — Outsource only (mirrors AssignModal). */}
+            {isManual && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <Label>Jobwork rate (applies to all {slabs.length})</Label>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input type="number" min="0" step="1" inputMode="decimal" value={jobworkRate} onChange={(e) => setJobworkRate(e.target.value)} placeholder="₹ per unit, e.g. 1200" style={{ flex: 1, minWidth: 0, padding: "10px 12px", fontSize: 14, fontWeight: 700, border: "1.5px solid var(--border)", borderRadius: 8, background: "var(--surface)", color: "var(--text)" }} />
+                  <div style={{ display: "flex", gap: 4 }}>
+                    {(["cft", "sft"] as const).map((u) => (
+                      <button key={u} type="button" onClick={() => setJobworkUnit(u)} style={{ padding: "10px 14px", fontSize: 13, fontWeight: 700, textTransform: "uppercase", border: `1.5px solid ${jobworkUnit === u ? "#92400e" : "var(--border)"}`, background: jobworkUnit === u ? "rgba(146,64,14,0.08)" : "var(--surface)", color: jobworkUnit === u ? "#92400e" : "var(--muted)", borderRadius: 8, cursor: "pointer" }}>/{u}</button>
+                    ))}
+                  </div>
                 </div>
-                {/* Live stat tiles */}
+                <div style={{ fontSize: 11, color: "var(--muted)" }}>Bills the vendor — amount = slab {jobworkUnit.toUpperCase()} × rate. Optional now; you can also set it on the challan.</div>
+              </div>
+            )}
+
+            {/* Cockpit panel — CNC vendor selected (right column). */}
+            {selectedVendor && selectedVendor.vendor_type === "CNC" && (
+              <div className="assign-right" style={{ display: "flex", flexDirection: "column", gap: 12, padding: "14px 16px", background: "linear-gradient(180deg, rgba(180,115,51,0.06) 0%, var(--surface-alt) 100%)", border: "2px solid var(--gold-dark)", borderRadius: 10, boxShadow: "0 2px 12px rgba(180,115,51,0.10)", maxHeight: "min(58vh, 540px)", overflowY: "auto" }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 14, fontWeight: 800, color: "var(--gold-dark)", letterSpacing: "0.02em" }}>🏭 {selectedVendor.name}&apos;s cockpit</span>
+                </div>
                 {(() => {
                   const br = typeBreakdown(selectedVendor);
                   const stockPending = selectedVendor.live?.queued ?? 0;
                   const busy = selectedVendor.live?.busy ?? 0;
                   const maint = selectedVendor.live?.maintenance ?? 0;
                   return (
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
-                        gap: 8,
-                      }}
-                    >
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 8 }}>
                       <CockpitStat label="Stock pending" value={stockPending} fg="#b45309" />
-                      <CockpitStat
-                        label={workType === "lathe" ? "Lathes free" : "CNC free"}
-                        value={workType === "lathe" ? br.latheFree : br.multiFree}
-                        fg="#15803d"
-                      />
+                      <CockpitStat label={workType === "lathe" ? "Lathes free" : "CNC free"} value={workType === "lathe" ? br.latheFree : br.multiFree} fg="#15803d" />
                       <CockpitStat label="Carving now" value={busy} fg="#1d4ed8" />
                       <CockpitStat label="Down" value={maint} fg="#b91c1c" />
                     </div>
                   );
                 })()}
                 {selectedVendor.machines.length === 0 ? (
-                  <div style={{ fontSize: 12, color: "var(--muted)" }}>
-                    No machines configured for this vendor yet.
-                  </div>
+                  <div style={{ fontSize: 12, color: "var(--muted)" }}>No machines configured for this vendor yet.</div>
                 ) : (
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))",
-                      gap: 6,
-                    }}
-                  >
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))", gap: 6 }}>
                     {selectedVendor.machines.map((m) => {
                       const tint = MACHINE_TINT[m.status];
-                      const typeLabel =
-                        m.machine_type === "multi_head_2"
-                          ? "2× HEAD"
-                          : m.machine_type === "lathe"
-                            ? "LATHE"
-                            : null;
-                      const matchesWorkType =
-                        workType === "lathe"
-                          ? m.machine_type === "lathe"
-                          : m.machine_type !== "lathe";
-                      // Lathe machines render as circles — visually
-                      // distinct from rectangular CNC tiles so the
-                      // floor + carving head can pick them out at a
-                      // glance. Same treatment as assign-modal.
+                      const typeLabel = m.machine_type === "multi_head_2" ? "2× HEAD" : m.machine_type === "lathe" ? "LATHE" : null;
+                      const matchesWorkType = workType === "lathe" ? m.machine_type === "lathe" : m.machine_type !== "lathe";
                       const isLathe = m.machine_type === "lathe";
                       return (
-                        <div
-                          key={m.id}
-                          style={{
-                            padding: isLathe ? 0 : "6px 10px",
-                            width: isLathe ? 78 : undefined,
-                            height: isLathe ? 78 : undefined,
-                            background: tint.bg,
-                            border: `1.5px solid ${matchesWorkType ? tint.border : "var(--border)"}`,
-                            borderRadius: isLathe ? "50%" : 6,
-                            fontFamily: "ui-monospace, monospace",
-                            display: "flex",
-                            flexDirection: "column",
-                            alignItems: isLathe ? "center" : "flex-start",
-                            justifyContent: isLathe ? "center" : "flex-start",
-                            gap: 2,
-                            opacity: matchesWorkType ? 1 : 0.45,
-                            textAlign: isLathe ? ("center" as const) : undefined,
-                          }}
-                          title={
-                            !matchesWorkType
-                              ? `Wrong machine type for ${workType === "lathe" ? "lathe" : "flat-panel"} work`
-                              : isLathe
-                                ? `Lathe — ${m.machine_code} · ${tint.label}`
-                                : undefined
-                          }
-                        >
-                          <div
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 4,
-                              flexWrap: "wrap",
-                              justifyContent: isLathe ? "center" : "flex-start",
-                            }}
-                          >
-                            <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>
-                              {m.machine_code}
-                            </span>
+                        <div key={m.id} style={{ padding: isLathe ? 0 : "6px 10px", width: isLathe ? 78 : undefined, height: isLathe ? 78 : undefined, background: tint.bg, border: `1.5px solid ${matchesWorkType ? tint.border : "var(--border)"}`, borderRadius: isLathe ? "50%" : 6, fontFamily: "ui-monospace, monospace", display: "flex", flexDirection: "column", alignItems: isLathe ? "center" : "flex-start", justifyContent: isLathe ? "center" : "flex-start", gap: 2, opacity: matchesWorkType ? 1 : 0.45, textAlign: isLathe ? ("center" as const) : undefined }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", justifyContent: isLathe ? "center" : "flex-start" }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>{m.machine_code}</span>
                             {typeLabel && !isLathe && (
-                              <span
-                                style={{
-                                  fontSize: 8,
-                                  fontWeight: 800,
-                                  padding: "0px 5px",
-                                  borderRadius: 3,
-                                  background: "rgba(180,115,51,0.18)",
-                                  color: "#b45309",
-                                  letterSpacing: "0.06em",
-                                }}
-                              >
-                                {typeLabel}
-                              </span>
+                              <span style={{ fontSize: 8, fontWeight: 800, padding: "0px 5px", borderRadius: 3, background: "rgba(180,115,51,0.18)", color: "#b45309", letterSpacing: "0.06em" }}>{typeLabel}</span>
                             )}
                           </div>
-                          {isLathe && (
-                            <span
-                              style={{
-                                fontSize: 8,
-                                fontWeight: 800,
-                                color: "#7c3aed",
-                                letterSpacing: "0.08em",
-                              }}
-                            >
-                              🌀 LATHE
-                            </span>
-                          )}
-                          <span
-                            style={{
-                              fontSize: 9,
-                              fontWeight: 700,
-                              color: tint.fg,
-                              letterSpacing: "0.05em",
-                            }}
-                          >
-                            {tint.label}
-                          </span>
+                          {isLathe && <span style={{ fontSize: 8, fontWeight: 800, color: "#7c3aed", letterSpacing: "0.08em" }}>🌀 LATHE</span>}
+                          <span style={{ fontSize: 9, fontWeight: 700, color: tint.fg, letterSpacing: "0.05em" }}>{tint.label}</span>
                         </div>
                       );
                     })}
@@ -728,22 +495,30 @@ export function BulkAssignModal({
                   const focusedFree = workType === "lathe" ? br.latheFree : br.multiFree;
                   if (focusedFree > 0) return null;
                   return (
-                    <div
-                      style={{
-                        fontSize: 11,
-                        color: "#b45309",
-                        background: "rgba(217,119,6,0.06)",
-                        padding: "6px 10px",
-                        borderRadius: 6,
-                        border: "1px solid rgba(217,119,6,0.25)",
-                      }}
-                    >
-                      No free {workType === "lathe" ? "lathe" : "multi-head"} machines right
-                      now at {selectedVendor.name}. The batch will go into stock pending and
-                      load when one frees up.
+                    <div style={{ fontSize: 11, color: "#b45309", background: "rgba(217,119,6,0.06)", padding: "6px 10px", borderRadius: 6, border: "1px solid rgba(217,119,6,0.25)" }}>
+                      No free {workType === "lathe" ? "lathe" : "CNC"} machines right now at {selectedVendor.name}. The batch will go into stock pending and load when one frees up.
                     </div>
                   );
                 })()}
+              </div>
+            )}
+
+            {/* Manual-vendor empty-state panel — right column. */}
+            {selectedVendor && isManual && (
+              <div className="assign-right" style={{ display: "flex", flexDirection: "column", gap: 6, padding: 12, background: "rgba(180,115,51,0.06)", border: "1px dashed rgba(180,115,51,0.3)", borderRadius: 8 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Outsource vendor — no machines tracked</div>
+                <div style={{ fontSize: 12, color: "var(--text)", lineHeight: 1.45 }}>
+                  All {slabs.length} slabs auto-start at this vendor on assign. When the carved work returns, hit <strong>📥 Receive</strong> on the Active tab.
+                </div>
+              </div>
+            )}
+
+            {/* Placeholder right column when nothing is selected yet. */}
+            {!selectedVendor && (
+              <div className="assign-right" style={{ display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", padding: "28px 18px", minHeight: 160, background: "var(--surface-alt)", border: "1px dashed var(--border)", borderRadius: 10, color: "var(--muted)", fontSize: 12, lineHeight: 1.5 }}>
+                {outsourceOnly
+                  ? "Pick an outsource / jobwork vendor on the left to assign this batch."
+                  : "Pick a vendor on the left to see their machine availability here."}
               </div>
             )}
 
@@ -752,82 +527,18 @@ export function BulkAssignModal({
               <Label>Urgency</Label>
               <input type="hidden" name="urgency" value={urgency} />
               <div style={{ display: "flex", gap: 8 }}>
-                <button
-                  type="button"
-                  onClick={() => setUrgency("normal")}
-                  style={{
-                    flex: 1,
-                    padding: "10px 14px",
-                    fontSize: 13,
-                    fontWeight: 600,
-                    border: `1.5px solid ${urgency === "normal" ? "var(--gold-dark)" : "var(--border)"}`,
-                    background: urgency === "normal" ? "rgba(180,115,51,0.08)" : "var(--surface)",
-                    color: "var(--text)",
-                    borderRadius: 8,
-                    cursor: "pointer",
-                  }}
-                >
-                  Normal
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setUrgency("urgent")}
-                  style={{
-                    flex: 1,
-                    padding: "10px 14px",
-                    fontSize: 13,
-                    fontWeight: 700,
-                    border: `1.5px solid ${urgency === "urgent" ? "#dc2626" : "var(--border)"}`,
-                    background: urgency === "urgent" ? "rgba(220,38,38,0.08)" : "var(--surface)",
-                    color: urgency === "urgent" ? "#991b1b" : "var(--text)",
-                    borderRadius: 8,
-                    cursor: "pointer",
-                  }}
-                >
-                  ⚡ Urgent
-                </button>
+                <button type="button" onClick={() => setUrgency("normal")} style={{ flex: 1, padding: "10px 14px", fontSize: 13, fontWeight: 600, border: `1.5px solid ${urgency === "normal" ? "var(--gold-dark)" : "var(--border)"}`, background: urgency === "normal" ? "rgba(180,115,51,0.08)" : "var(--surface)", color: "var(--text)", borderRadius: 8, cursor: "pointer" }}>Normal</button>
+                <button type="button" onClick={() => setUrgency("urgent")} style={{ flex: 1, padding: "10px 14px", fontSize: 13, fontWeight: 700, border: `1.5px solid ${urgency === "urgent" ? "#dc2626" : "var(--border)"}`, background: urgency === "urgent" ? "rgba(220,38,38,0.08)" : "var(--surface)", color: urgency === "urgent" ? "#991b1b" : "var(--text)", borderRadius: 8, cursor: "pointer" }}>⚡ Urgent</button>
               </div>
             </div>
 
-            {/* Mig 088 — Carved sides (applies to all slabs in the batch). */}
+            {/* Carved sides */}
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <Label>Carved sides (applies to all {slabs.length} slabs)</Label>
+              <Label>Carved sides (applies to all {slabs.length})</Label>
               <input type="hidden" name="carving_sides" value={carvingSides} />
               <div style={{ display: "flex", gap: 8 }}>
-                <button
-                  type="button"
-                  onClick={() => setCarvingSides(1)}
-                  style={{
-                    flex: 1,
-                    padding: "10px 14px",
-                    fontSize: 13,
-                    fontWeight: 600,
-                    border: `1.5px solid ${carvingSides === 1 ? "var(--gold-dark)" : "var(--border)"}`,
-                    background: carvingSides === 1 ? "rgba(180,115,51,0.08)" : "var(--surface)",
-                    color: "var(--text)",
-                    borderRadius: 8,
-                    cursor: "pointer",
-                  }}
-                >
-                  1 side
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCarvingSides(2)}
-                  style={{
-                    flex: 1,
-                    padding: "10px 14px",
-                    fontSize: 13,
-                    fontWeight: 700,
-                    border: `1.5px solid ${carvingSides === 2 ? "#0f766e" : "var(--border)"}`,
-                    background: carvingSides === 2 ? "rgba(13,148,136,0.10)" : "var(--surface)",
-                    color: carvingSides === 2 ? "#0f766e" : "var(--text)",
-                    borderRadius: 8,
-                    cursor: "pointer",
-                  }}
-                >
-                  2 sides (×2 output)
-                </button>
+                <button type="button" onClick={() => setCarvingSides(1)} style={{ flex: 1, padding: "10px 14px", fontSize: 13, fontWeight: 600, border: `1.5px solid ${carvingSides === 1 ? "var(--gold-dark)" : "var(--border)"}`, background: carvingSides === 1 ? "rgba(180,115,51,0.08)" : "var(--surface)", color: "var(--text)", borderRadius: 8, cursor: "pointer" }}>1 side</button>
+                <button type="button" onClick={() => setCarvingSides(2)} style={{ flex: 1, padding: "10px 14px", fontSize: 13, fontWeight: 700, border: `1.5px solid ${carvingSides === 2 ? "#0f766e" : "var(--border)"}`, background: carvingSides === 2 ? "rgba(13,148,136,0.10)" : "var(--surface)", color: carvingSides === 2 ? "#0f766e" : "var(--text)", borderRadius: 8, cursor: "pointer" }}>2 sides (×2 output)</button>
               </div>
             </div>
 
@@ -836,67 +547,28 @@ export function BulkAssignModal({
               <Label>Rough estimated time (carving head&apos;s guess)</Label>
               <input type="hidden" name="estimated_minutes" value={totalMinutes || ""} />
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <input
-                  type="number"
-                  min="0"
-                  max="30"
-                  value={days}
-                  onChange={(e) => setDays(e.target.value)}
-                  placeholder="0"
-                  style={{ width: 80, padding: "8px 10px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
-                />
+                <input type="number" min="0" max="30" value={days} onChange={(e) => setDays(e.target.value)} placeholder="0" style={{ width: 80, padding: "8px 10px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }} />
                 <span style={{ fontSize: 12, color: "var(--muted)" }}>days</span>
-                <input
-                  type="number"
-                  min="0"
-                  max="23"
-                  value={hours}
-                  onChange={(e) => setHours(e.target.value)}
-                  placeholder="0"
-                  style={{ width: 80, padding: "8px 10px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
-                />
+                <input type="number" min="0" max="23" value={hours} onChange={(e) => setHours(e.target.value)} placeholder="0" style={{ width: 80, padding: "8px 10px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }} />
                 <span style={{ fontSize: 12, color: "var(--muted)" }}>hours</span>
               </div>
               <span style={{ fontSize: 11, color: "var(--muted-light)" }}>
-                Applies to every slab in the batch. The vendor will set tighter
-                estimates per slab when loading.
+                {isManual ? "Outsource carvers don't update the system; this is your guess for tracking." : "Applies to every slab in the batch. The vendor sets tighter estimates per slab when loading."}
               </span>
             </div>
 
             <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               <Label>Note (optional)</Label>
-              <textarea
-                name="note"
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                rows={2}
-                placeholder="Design details, urgency reason, anything the vendor should know"
-                style={{ padding: "8px 12px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)", resize: "vertical", fontFamily: "inherit" }}
-              />
+              <textarea name="note" value={note} onChange={(e) => setNote(e.target.value)} rows={3} placeholder="Design details, urgency reason, anything the vendor should know" style={{ padding: "8px 12px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)", resize: "vertical", fontFamily: "inherit" }} />
             </label>
 
             <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-              <button
-                type="submit"
-                className="primary-button"
-                // Mig 079 — also block when the picked vendor doesn't
-                // satisfy the (workType, axes) gate.
-                disabled={!vendorId || !selectedVendorOk}
-                title={
-                  !vendorId
-                    ? "Pick a vendor first"
-                    : !selectedVendorOk
-                      ? "This vendor doesn't have a matching machine — pick another vendor or change the CNC axes requirement"
-                      : undefined
-                }
-                style={{ flex: 1, fontSize: 14, padding: "12px 16px", fontWeight: 700 }}
-              >
-                📦 Assign {slabs.length} slab{slabs.length !== 1 ? "s" : ""}
+              <button type="submit" className="primary-button" disabled={!vendorId || !selectedVendorOk} title={!vendorId ? "Pick a vendor first" : !selectedVendorOk ? "This vendor doesn't have a matching machine — pick another vendor or change the CNC axes requirement" : undefined} style={{ flex: 1, fontSize: 14, padding: "12px 16px", fontWeight: 700 }}>
+                {outsourceOnly ? "🤝" : "📦"} Assign {slabs.length} slab{slabs.length !== 1 ? "s" : ""}
               </button>
-              <button type="button" className="ghost-button" onClick={onClose}>
-                Cancel
-              </button>
+              <button type="button" className="ghost-button" onClick={onClose}>Cancel</button>
             </div>
+            </div>{/* /.assign-grid */}
           </form>
         </div>
       </div>
@@ -926,55 +598,18 @@ function VendorRow({
   const queued = v.live?.queued ?? 0;
   if (isManual) {
     return (
-      <label
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          padding: "10px 12px",
-          background: isSelected ? "rgba(120,53,15,0.10)" : "rgba(120,53,15,0.04)",
-          border: `1.5px solid ${isSelected ? "#92400e" : "rgba(120,53,15,0.25)"}`,
-          borderRadius: 8,
-          cursor: "pointer",
-        }}
-      >
-        <input
-          type="radio"
-          name="vendor_id"
-          value={v.id}
-          checked={isSelected}
-          onChange={onSelect}
-          style={{ cursor: "pointer", flexShrink: 0 }}
-        />
+      <label style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: isSelected ? "rgba(120,53,15,0.10)" : "rgba(120,53,15,0.04)", border: `1.5px solid ${isSelected ? "#92400e" : "rgba(120,53,15,0.25)"}`, borderRadius: 8, cursor: "pointer" }}>
+        <input type="radio" name="vendor_id" value={v.id} checked={isSelected} onChange={onSelect} style={{ cursor: "pointer", flexShrink: 0 }} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 700, fontSize: 13, color: "var(--text)" }}>
             {v.name}
-            <span
-              style={{
-                marginLeft: 8,
-                fontSize: 10,
-                fontWeight: 700,
-                padding: "1px 6px",
-                borderRadius: 4,
-                background: "rgba(120,53,15,0.12)",
-                color: "#78350f",
-              }}
-            >
-              🤝 OUTSOURCE
-            </span>
+            <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: "rgba(120,53,15,0.12)", color: "#78350f" }}>🤝 OUTSOURCE</span>
           </div>
-          {queued > 0 && (
-            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
-              {queued} stock pending
-            </div>
-          )}
+          {queued > 0 && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{queued} stock pending</div>}
         </div>
       </label>
     );
   }
-  // Mig 079 — honor the (workType, axes) gate. Vendor without a
-  // matching machine is grayscaled AND not selectable. Keep `br`
-  // around for the fleet-summary "🏭 N CNC · M Lathe" line below.
   const br = typeBreakdown(v);
   const hasTypeInFleet = vendorMatchesReq(v, workType, cncAxesReq).hasAtAll;
   const blockReason = !hasTypeInFleet
@@ -989,73 +624,18 @@ function VendorRow({
             : "No CNC in this vendor's fleet"
     : null;
   return (
-    <label
-      title={blockReason ?? undefined}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        padding: "12px 14px",
-        background: isSelected
-          ? "rgba(180,115,51,0.10)"
-          : isRecommended
-            ? "rgba(22,163,74,0.05)"
-            : "var(--surface)",
-        border: `2px solid ${
-          isSelected
-            ? "var(--gold-dark)"
-            : isRecommended
-              ? "rgba(22,163,74,0.4)"
-              : "var(--border)"
-        }`,
-        borderRadius: 8,
-        cursor: hasTypeInFleet ? "pointer" : "not-allowed",
-        opacity: hasTypeInFleet ? 1 : 0.45,
-        filter: hasTypeInFleet ? undefined : "grayscale(0.5)",
-      }}
-    >
-      <input
-        type="radio"
-        name="vendor_id"
-        value={v.id}
-        checked={isSelected}
-        onChange={onSelect}
-        disabled={!hasTypeInFleet}
-        style={{
-          cursor: hasTypeInFleet ? "pointer" : "not-allowed",
-          flexShrink: 0,
-        }}
-      />
+    <label title={blockReason ?? undefined} style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", background: isSelected ? "rgba(180,115,51,0.10)" : isRecommended ? "rgba(22,163,74,0.05)" : "var(--surface)", border: `2px solid ${isSelected ? "var(--gold-dark)" : isRecommended ? "rgba(22,163,74,0.4)" : "var(--border)"}`, borderRadius: 8, cursor: hasTypeInFleet ? "pointer" : "not-allowed", opacity: hasTypeInFleet ? 1 : 0.45, filter: hasTypeInFleet ? undefined : "grayscale(0.5)" }}>
+      <input type="radio" name="vendor_id" value={v.id} checked={isSelected} onChange={onSelect} disabled={!hasTypeInFleet} style={{ cursor: hasTypeInFleet ? "pointer" : "not-allowed", flexShrink: 0 }} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <span style={{ fontWeight: 800, fontSize: 15, color: "var(--text)", letterSpacing: "0.02em" }}>
-            {v.name}
-          </span>
+          <span style={{ fontWeight: 800, fontSize: 15, color: "var(--text)", letterSpacing: "0.02em" }}>{v.name}</span>
           {isRecommended && (
-            <span
-              style={{
-                fontSize: 10,
-                fontWeight: 800,
-                padding: "2px 8px",
-                borderRadius: 999,
-                background: "#16a34a",
-                color: "#fff",
-                letterSpacing: "0.06em",
-              }}
-              title={`Best fit: ${recommendationReason}`}
-            >
-              ✨ BEST FIT
-            </span>
+            <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 8px", borderRadius: 999, background: "#16a34a", color: "#fff", letterSpacing: "0.06em" }} title={`Best fit: ${recommendationReason}`}>✨ BEST FIT</span>
           )}
         </div>
         <div style={{ fontSize: 12, color: "var(--muted)", fontFamily: "ui-monospace, monospace", marginTop: 4, fontWeight: 600 }}>
           🏭{" "}
-          {[
-            br.multiTotal > 0 ? `${br.multiTotal} CNC` : null,
-            br.latheTotal > 0 ? `${br.latheTotal} Lathe` : null,
-          ]
-            .filter(Boolean)
-            .join(" · ") || "no machines"}
+          {[br.multiTotal > 0 ? `${br.multiTotal} CNC` : null, br.latheTotal > 0 ? `${br.latheTotal} Lathe` : null].filter(Boolean).join(" · ") || "no machines"}
         </div>
       </div>
     </label>
@@ -1064,80 +644,21 @@ function VendorRow({
 
 function CockpitStat({ label, value, fg }: { label: string; value: number; fg: string }) {
   return (
-    <div
-      style={{
-        padding: "8px 12px",
-        background: "var(--surface)",
-        border: "1px solid var(--border)",
-        borderRadius: 8,
-        textAlign: "center",
-      }}
-    >
-      <div
-        style={{
-          fontSize: 9,
-          color: "var(--muted)",
-          textTransform: "uppercase",
-          letterSpacing: "0.06em",
-          fontWeight: 700,
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          fontSize: 22,
-          fontWeight: 800,
-          color: fg,
-          fontFamily: "ui-monospace, monospace",
-          marginTop: 2,
-        }}
-      >
-        {value}
-      </div>
+    <div style={{ padding: "8px 12px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, textAlign: "center" }}>
+      <div style={{ fontSize: 9, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700 }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 800, color: fg, fontFamily: "ui-monospace, monospace", marginTop: 2 }}>{value}</div>
     </div>
   );
 }
 
-function SectionHeader({
-  label,
-  accent,
-  topMargin,
-}: {
-  label: string;
-  accent?: string;
-  topMargin?: number;
-}) {
+function SectionHeader({ label, accent, topMargin }: { label: string; accent?: string; topMargin?: number }) {
   return (
-    <div
-      style={{
-        marginTop: topMargin ?? 0,
-        paddingTop: topMargin && topMargin > 0 ? 10 : 0,
-        borderTop: topMargin && topMargin > 0 ? "1px dashed var(--border)" : "none",
-        fontSize: 11,
-        fontWeight: 800,
-        letterSpacing: "0.07em",
-        color: accent ?? "var(--gold-dark)",
-        textTransform: "uppercase",
-      }}
-    >
-      {label}
-    </div>
+    <div style={{ marginTop: topMargin ?? 0, paddingTop: topMargin && topMargin > 0 ? 10 : 0, borderTop: topMargin && topMargin > 0 ? "1px dashed var(--border)" : "none", fontSize: 11, fontWeight: 800, letterSpacing: "0.07em", color: accent ?? "var(--gold-dark)", textTransform: "uppercase" }}>{label}</div>
   );
 }
 
 function Label({ children }: { children: React.ReactNode }) {
   return (
-    <span
-      style={{
-        fontSize: 11,
-        fontWeight: 700,
-        color: "var(--muted)",
-        textTransform: "uppercase",
-        letterSpacing: "0.06em",
-      }}
-    >
-      {children}
-    </span>
+    <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>{children}</span>
   );
 }
