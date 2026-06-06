@@ -81,6 +81,10 @@ export default async function SlabsPage() {
   // Mig 076 — senior_incharge has the same slab edit access as
   // team_head (Rajesh-tier; was inherited from his prior role).
   const canEdit = ["developer", "owner", "team_head", "senior_incharge", "slab_entry", "block_slab_entry"].includes(profile.role);
+  // Excel bulk import is gated to the slab-write roles (matches the
+  // /slabs/import page's ALLOWED) — block_slab_entry adds via the block
+  // flow, not here, so it doesn't get the button.
+  const canImport = ["developer", "owner", "team_head", "senior_incharge", "slab_entry"].includes(profile.role);
   const slabList = slabs;
   const templeList = temples ?? [];
   // Fallback: if stone_types query failed, use hardcoded defaults so form still works
@@ -122,9 +126,16 @@ export default async function SlabsPage() {
           <h1>Required Sizes</h1>
           <p className="muted">Track required sizes by temple. Use View Inventory to select and send to planning.</p>
         </div>
-        <Link href="/slabs/view" className="secondary-button">
-          View Inventory →
-        </Link>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {canImport && (
+            <Link href="/slabs/import" className="secondary-button">
+              📥 Import from Excel
+            </Link>
+          )}
+          <Link href="/slabs/view" className="secondary-button">
+            View Inventory →
+          </Link>
+        </div>
       </div>
 
       {/* Add form */}

@@ -1,6 +1,6 @@
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { addTempleAction, updateTempleAction, deleteTempleAction, updateUserAction, deleteUserAction, updateOwnNameAction, addStoneTypeAction, deleteStoneTypeAction, setStoneCategoryAction } from "./actions";
+import { addTempleAction, updateTempleAction, deleteTempleAction, updateUserAction, deleteUserAction, updateOwnNameAction, addStoneTypeAction, deleteStoneTypeAction, setStoneCategoryAction, setBulkImportPasswordAction } from "./actions";
 import {
   takeSystemDownAction,
   bringSystemUpAction,
@@ -354,6 +354,26 @@ export default async function SettingsPage() {
           keeps the page focused on daily-use sections (Users,
           Stone Types, Temple Codes, etc.). See <MaintenanceCollapsible>
           rendered below the AutoBackup PeekSection. */}
+
+      {/* Bulk slab-import password — owner / developer / senior_incharge.
+          Guards the Required Sizes → Import from Excel bulk-add. Stored
+          hashed in system_settings (no migration). */}
+      {(currentUser.role === "owner" || currentUser.role === "developer" || currentUser.role === "senior_incharge") && (
+        <PeekSection icon="🔒" title="Bulk import password" subtitle="Guards Required Sizes → Import from Excel" modalMaxWidth={520}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <p className="muted" style={{ fontSize: 13, margin: 0, lineHeight: 1.5 }}>
+              This is the password the <strong>Import from Excel</strong> flow asks for before adding slabs in bulk. Set a new one below. The default is <code>mtcpl</code> until you change it.
+            </p>
+            <form action={setBulkImportPasswordAction} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minWidth: 200 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>New password</span>
+                <input name="password" type="password" required minLength={3} placeholder="At least 3 characters" style={{ padding: "10px 12px", fontSize: 14, border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", color: "var(--text)" }} />
+              </label>
+              <button type="submit" className="primary-button" style={{ padding: "10px 18px" }}>Save password</button>
+            </form>
+          </div>
+        </PeekSection>
+      )}
 
       {/* User Management — owner + developer only.
           Daksh (this pass): "remove user section on setting page

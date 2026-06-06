@@ -8,6 +8,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { nextSlabCodeFromMaxId } from "./utils";
 import { logAudit } from "@/lib/audit";
 import { notify } from "@/lib/notifications";
+import { verifyBulkImportPassword } from "@/lib/bulk-import-password";
 
 
 function num(fd: FormData, key: string, fallback = 0) {
@@ -176,6 +177,151 @@ export async function deleteSlabAction(formData: FormData) {
   });
   revalidatePath("/slabs");
   redirect("/slabs?toast=Slab+deleted");
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Bulk import from Excel (Daksh June 2026)
+//
+// The /slabs/import flow parses the uploaded .xlsx CLIENT-SIDE (SheetJS)
+// and posts the verified rows here as plain JSON. This action:
+//   • gates the same write roles as addSlabAction (+ developer),
+//   • verifies the bulk-import password SERVER-SIDE,
+//   • allocates ids with the EXACT scheme single-add uses
+//     (nextSlabCodeFromMaxId), one base number per row, quantity
+//     expanded into base / base-1 / base-2 … children — so temple
+//     numbering continues seamlessly, no break,
+//   • tags the whole import with ONE batch_id so the existing Required
+//     Sizes bulk-select can delete the group together later,
+//   • inserts everything at status='open' → it shows in Required Sizes.
+// Returns a result (not a redirect) so the rich client can keep the
+// verify table on a wrong password / error.
+// ────────────────────────────────────────────────────────────────────────────
+export async function importSlabsAction(payload: {
+  temple: string;
+  stone: string;
+  password: string;
+  rows: Array<{
+    label?: string | null;
+    description?: string | null;
+    length?: number | string | null;
+    width?: number | string | null;
+    height?: number | string | null;
+    quantity?: number | string | null;
+    quality?: string | null;
+    priority?: boolean | null;
+  }>;
+}): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
+  const { profile } = await requireAuth([
+    "owner",
+    "team_head",
+    "senior_incharge",
+    "slab_entry",
+    "developer",
+  ]);
+  const supabase = createAdminSupabaseClient();
+
+  const temple = (payload?.temple ?? "").trim();
+  const stone = (payload?.stone ?? "").trim();
+  if (!temple) return { ok: false, error: "Temple is required" };
+  if (!stone) return { ok: false, error: "Stone is required" };
+
+  // Password gate — server-side comparison against the stored hash.
+  const okPw = await verifyBulkImportPassword(payload?.password ?? "");
+  if (!okPw) return { ok: false, error: "Wrong password" };
+
+  const cleaned = (Array.isArray(payload?.rows) ? payload.rows : [])
+    .map((r) => ({
+      label: (r.label ?? "").toString().trim(),
+      description: (r.description ?? "").toString().trim() || null,
+      length: Number(r.length) || 0,
+      width: Number(r.width) || 0,
+      height: Number(r.height) || 0,
+      quantity: Math.min(100, Math.max(1, Math.floor(Number(r.quantity) || 1))),
+      quality: (r.quality ?? "").toString().trim() || null,
+      priority: r.priority === true,
+    }))
+    // Every slab needs all three dimensions (stored as inches in *_ft).
+    .filter((r) => r.length > 0 && r.width > 0 && r.height > 0);
+  if (cleaned.length === 0) {
+    return { ok: false, error: "No valid rows — each slab needs length, width and height." };
+  }
+
+  const totalSlabs = cleaned.reduce((s, r) => s + r.quantity, 0);
+  if (totalSlabs > 1000) {
+    return { ok: false, error: `Too many slabs in one import (${totalSlabs}). Max 1000 — split the file.` };
+  }
+
+  const { data: templeRow } = await supabase
+    .from("temples")
+    .select("code_prefix")
+    .eq("name", temple)
+    .single();
+  const prefix = (templeRow as { code_prefix?: string } | null)?.code_prefix ?? "SLB";
+
+  // One batch_id for the whole import = the deletable "group".
+  const batchId = randomUUID();
+  let inserted = 0;
+  let lastError = "";
+  for (let attempt = 0; attempt < 5; attempt++) {
+    // Highest existing id for this prefix (ORDER BY id DESC LIMIT 1 —
+    // no 1000-row cap issue). parseInt ignores the "-N" child suffix.
+    const { data: maxRow } = await supabase
+      .from("slab_requirements")
+      .select("id")
+      .like("id", `${prefix}-%`)
+      .order("id", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    let cursor = (maxRow as { id?: string } | null)?.id ?? null;
+
+    const insertRows: Array<Record<string, unknown>> = [];
+    for (const r of cleaned) {
+      const baseId = nextSlabCodeFromMaxId(cursor, prefix);
+      for (let i = 0; i < r.quantity; i++) {
+        insertRows.push({
+          id: i === 0 ? baseId : `${baseId}-${i}`,
+          label: r.label || temple,
+          description: r.description,
+          temple,
+          stone,
+          quality: r.quality,
+          length_ft: r.length,
+          width_ft: r.width,
+          thickness_ft: r.height,
+          priority: r.priority,
+          status: "open",
+          batch_id: batchId,
+          created_by: profile.id,
+          updated_by: profile.id,
+        });
+      }
+      // Next row takes the next base number (children share this base's
+      // number, so base+1 never collides with them).
+      cursor = baseId;
+    }
+
+    const { error } = await supabase.from("slab_requirements").insert(insertRows);
+    if (!error) {
+      inserted = insertRows.length;
+      lastError = "";
+      break;
+    }
+    lastError = error.message;
+    // 23505 = id collision (concurrent insert) → refetch max + retry.
+    if (error.code !== "23505") break;
+  }
+  if (lastError) return { ok: false, error: lastError };
+
+  await logAudit(profile.id, "import_bulk", "slab", batchId, {
+    temple,
+    stone,
+    rows: cleaned.length,
+    slabs: inserted,
+    batch_id: batchId,
+  });
+  revalidatePath("/slabs");
+  revalidatePath("/planning");
+  return { ok: true, count: inserted };
 }
 
 // ────────────────────────────────────────────────────────────────────────────

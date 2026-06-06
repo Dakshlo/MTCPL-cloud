@@ -8,6 +8,8 @@ import { requireAuth } from "@/lib/auth";
 // client so RLS doesn't block writes; requireAuth() is the
 // security gate.
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { logAudit } from "@/lib/audit";
+import { hashBulkImportPassword, BULK_IMPORT_PASSWORD_KEY } from "@/lib/bulk-import-password";
 
 function text(fd: FormData, key: string) {
   const v = fd.get(key);
@@ -402,4 +404,41 @@ export async function deleteUserAction(formData: FormData) {
 
   revalidatePath("/settings");
   redirect("/settings?toast=User+permanently+deleted");
+}
+
+// ── Bulk slab-import password (Daksh June 2026) ─────────────────────
+// Sets the password the /slabs/import flow asks for before committing a
+// bulk add. Stored HASHED in system_settings (no migration). Only
+// owner / developer / senior_incharge may change it.
+export async function setBulkImportPasswordAction(formData: FormData) {
+  const { profile } = await requireAuth(["owner", "developer", "senior_incharge"]);
+  const admin = createAdminSupabaseClient();
+
+  const pw = text(formData, "password");
+  if (pw.length < 3) {
+    redirect("/settings?toast=Password+must+be+at+least+3+characters");
+  }
+
+  const { error } = await admin.from("system_settings").upsert(
+    {
+      key: BULK_IMPORT_PASSWORD_KEY,
+      value: { hash: hashBulkImportPassword(pw) },
+      updated_at: new Date().toISOString(),
+      updated_by: profile.id,
+    },
+    { onConflict: "key" },
+  );
+  if (error) {
+    redirect(
+      `/settings?toast=${encodeURIComponent(
+        error.message?.toLowerCase().includes("system_settings")
+          ? "system_settings table missing — run migration 031 first."
+          : error.message,
+      )}`,
+    );
+  }
+
+  await logAudit(profile.id, "bulk_import_password_set", "system_settings", BULK_IMPORT_PASSWORD_KEY, {});
+  revalidatePath("/settings");
+  redirect("/settings?toast=Bulk+import+password+updated");
 }
