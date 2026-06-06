@@ -1144,10 +1144,17 @@ export async function assignCarvingJobAction(formData: FormData) {
     }
   }
 
+  // Daksh June 2026 — Outsource jobs AUTO-START on assign: the slab is
+  // physically sent out to the vendor's facility, so there is no
+  // separate "Mark started" step. CNC stays at carving_assigned and is
+  // started later by loadSlabOnMachineAction (byte-identical for CNC).
+  const isOutsource = vendorType === "Outsource";
+  const assignedStatus = isOutsource ? "carving_in_progress" : "carving_assigned";
+
   // Race guard: slab must currently be cut_done
   const { data: slabRow, error: slabErr } = await admin
     .from("slab_requirements")
-    .update({ status: "carving_assigned", updated_by: profile.id, updated_at: new Date().toISOString() })
+    .update({ status: assignedStatus, updated_by: profile.id, updated_at: new Date().toISOString() })
     .eq("id", slabId)
     .eq("status", "cut_done")
     .select("id");
@@ -1178,7 +1185,10 @@ export async function assignCarvingJobAction(formData: FormData) {
       // (CNC). Stays null forever for Manual vendors.
       cnc_machine_id: null,
       note,
-      status: "carving_assigned",
+      status: assignedStatus,
+      // Outsource auto-start: stamp loaded_at/by at assign so the Active
+      // card shows it as carving (no separate Mark-started step).
+      ...(isOutsource ? { loaded_at: nowIso, loaded_by: profile.id } : {}),
       urgency,
       estimated_minutes: estimatedMinutes || null,
       carving_sides: carvingSides,
@@ -1354,11 +1364,15 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
   const successes: string[] = [];
   const failures: Array<{ slab: string; reason: string }> = [];
 
+  // Outsource jobs auto-start on assign (see single-assign note above).
+  const isOutsourceBatch = vendorType === "Outsource";
+  const assignedStatusBatch = isOutsourceBatch ? "carving_in_progress" : "carving_assigned";
+
   for (const slabId of slabIds) {
     // Race-guard the slab transition first.
     const { data: slabRow, error: slabErr } = await admin
       .from("slab_requirements")
-      .update({ status: "carving_assigned", updated_by: profile.id, updated_at: now })
+      .update({ status: assignedStatusBatch, updated_by: profile.id, updated_at: now })
       .eq("id", slabId)
       .eq("status", "cut_done")
       .select("id");
@@ -1380,7 +1394,8 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
         vendor_type: vendorType,
         cnc_machine_id: null,
         note,
-        status: "carving_assigned",
+        status: assignedStatusBatch,
+        ...(isOutsourceBatch ? { loaded_at: now, loaded_by: profile.id } : {}),
         urgency,
         estimated_minutes: estimatedMinutes || null,
         carving_sides: carvingSides,
@@ -5567,7 +5582,7 @@ export async function markCarvingCompleteManuallyAction(formData: FormData) {
     carvingItemId,
     "completed_manually",
     profile.id,
-    `Outsource carving complete · ${item.vendor_name} · stored at ${tempLocation}`,
+    `Outsource carving received (back from vendor) · ${item.vendor_name} · stored at ${tempLocation}`,
   );
   await logAudit(profile.id, "carving_completed_manually", "carving_item", carvingItemId, {
     vendor_name: item.vendor_name,
@@ -5575,7 +5590,7 @@ export async function markCarvingCompleteManuallyAction(formData: FormData) {
   });
 
   refreshAll();
-  redirect(`${redirectTo}?toast=Marked+complete`);
+  redirect(`${redirectTo}?toast=Received`);
 }
 
 // ── Job event timeline — used by JobDetailPeek modal ─────────────

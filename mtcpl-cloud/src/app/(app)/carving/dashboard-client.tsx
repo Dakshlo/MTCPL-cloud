@@ -167,6 +167,7 @@ type Vendor = {
 
 export function CarvingDashboardClient({
   tab,
+  mode,
   unassignedSlabs,
   activeJobs,
   reviewJobs,
@@ -178,6 +179,9 @@ export function CarvingDashboardClient({
   stoneTypes,
 }: {
   tab: "unassigned" | "active" | "review" | "done";
+  /** Daksh June 2026 — CNC vs Outsource view. Drives assign-vendor
+   *  filtering + the Outsource "Receive" affordance. */
+  mode: "cnc" | "outsource";
   unassignedSlabs: UnassignedSlab[];
   activeJobs: JobRow[];
   reviewJobs: JobRow[];
@@ -975,7 +979,13 @@ export function CarvingDashboardClient({
       )}
 
       {assigning && (
-        <AssignModal slab={assigning} vendors={vendors} onClose={() => setAssigning(null)} />
+        <AssignModal
+          slab={assigning}
+          vendors={vendors.filter(
+            (v) => v.vendor_type === (mode === "outsource" ? "Outsource" : "CNC"),
+          )}
+          onClose={() => setAssigning(null)}
+        />
       )}
 
       {/* Bulk-assign modal — fired by the sticky bottom bar. */}
@@ -3112,7 +3122,8 @@ function JobsByTemple({
 // Imported actions are server actions; calling them from a form runs
 // the server action and refreshes via revalidatePath().
 function ManualLifecycleButtons({ job }: { job: JobRow }) {
-  // carving_assigned → Mark started
+  // carving_assigned → Mark started (LEGACY: only in-flight Outsource
+  // rows assigned before auto-start shipped land here; new ones skip it).
   if (job.status === "carving_assigned") {
     return (
       <form
@@ -3121,7 +3132,7 @@ function ManualLifecycleButtons({ job }: { job: JobRow }) {
         style={{ marginTop: 4 }}
       >
         <input type="hidden" name="carving_item_id" value={job.id} />
-        <input type="hidden" name="redirect_to" value="/carving?tab=active" />
+        <input type="hidden" name="redirect_to" value="/carving?tab=active&mode=outsource" />
         <button
           type="submit"
           style={{
@@ -3141,7 +3152,11 @@ function ManualLifecycleButtons({ job }: { job: JobRow }) {
       </form>
     );
   }
-  // carving_in_progress + completed_at NULL → Mark complete
+  // carving_in_progress + completed_at NULL → Receive (the carved slab
+  // has come back from the vendor's facility). Daksh June 2026 — replaces
+  // the old two-step Mark-started/Mark-complete: assign now auto-starts,
+  // so the only Outsource action on the Active card is Receive, which
+  // sends the slab to Carving Done Approval.
   if (job.status === "carving_in_progress" && !job.completed_at) {
     return (
       <form
@@ -3150,7 +3165,7 @@ function ManualLifecycleButtons({ job }: { job: JobRow }) {
         style={{ marginTop: 4 }}
       >
         <input type="hidden" name="carving_item_id" value={job.id} />
-        <input type="hidden" name="redirect_to" value="/carving?tab=active" />
+        <input type="hidden" name="redirect_to" value="/carving?tab=active&mode=outsource" />
         <button
           type="submit"
           style={{
@@ -3165,7 +3180,7 @@ function ManualLifecycleButtons({ job }: { job: JobRow }) {
             cursor: "pointer",
           }}
         >
-          🎯 Mark complete
+          📥 Receive
         </button>
       </form>
     );

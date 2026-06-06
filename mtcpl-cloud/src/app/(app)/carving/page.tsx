@@ -20,7 +20,7 @@ type Tab = "unassigned" | "active" | "review" | "done";
 export default async function CarvingDashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string; temple?: string }>;
+  searchParams: Promise<{ tab?: string; temple?: string; mode?: string }>;
 }) {
   // Mig 074 — widen requireAuth so vendors with can_assign_carving
   // can reach the page; canAccessCarvingPage covers dev/owner/
@@ -37,6 +37,12 @@ export default async function CarvingDashboardPage({
   // to Unassigned if they try to deep-link there.
   if (tab === "review" && !reviewAccess) tab = "unassigned";
   const templeFilter = params.temple ?? "";
+  // Daksh June 2026 — CNC / Outsource mode toggle. Default 'cnc' keeps
+  // the page byte-identical for the CNC flow; 'outsource' filters the
+  // Active/Approval/Done datasets to Outsource vendors (in-memory, no
+  // SQL change) and switches on the Outsource affordances.
+  const mode: "cnc" | "outsource" = params.mode === "outsource" ? "outsource" : "cnc";
+  const wantVendorType = mode === "outsource" ? "Outsource" : "CNC";
 
   // Paginated fetcher for unassigned slabs — Supabase's PostgREST
   // caps single .select() at 1000 rows. Once cut_done count crosses
@@ -330,12 +336,21 @@ export default async function CarvingDashboardPage({
   const reviewJobsEnriched = (reviewJobs ?? []).map(enrich);
   const doneJobsEnriched = (doneJobs ?? []).map(enrich);
 
+  // Mode-filtered views (CNC vs Outsource) for the job tabs + counts +
+  // client. In-memory filter only — the SQL above is unchanged, so the
+  // CNC flow stays byte-identical. Unassigned (cut_done slabs) has no
+  // vendor type yet, so it is shared across both modes. The full
+  // *Enriched arrays are kept for the per-vendor machine-count logic.
+  const activeForMode = activeJobsEnriched.filter((j) => j.vendor_type === wantVendorType);
+  const reviewForMode = reviewJobsEnriched.filter((j) => j.vendor_type === wantVendorType);
+  const doneForMode = doneJobsEnriched.filter((j) => j.vendor_type === wantVendorType);
+
   // Build list of all temples across every dataset for the filter dropdown.
   const templeSet = new Set<string>();
   for (const s of unassignedSlabsAll ?? []) if (s.temple) templeSet.add(s.temple);
-  for (const j of activeJobsEnriched) if (j.temple) templeSet.add(j.temple);
-  for (const j of reviewJobsEnriched) if (j.temple) templeSet.add(j.temple);
-  for (const j of doneJobsEnriched) if (j.temple) templeSet.add(j.temple);
+  for (const j of activeForMode) if (j.temple) templeSet.add(j.temple);
+  for (const j of reviewForMode) if (j.temple) templeSet.add(j.temple);
+  for (const j of doneForMode) if (j.temple) templeSet.add(j.temple);
   const templeNames = [...templeSet].sort();
 
   // Per-vendor live counts for the Assign modal — count by status.
@@ -448,9 +463,9 @@ export default async function CarvingDashboardPage({
 
   const counts = {
     unassigned: (unassignedSlabsAll ?? []).length,
-    active: activeJobsEnriched.length,
-    review: reviewJobsEnriched.length,
-    done: doneJobsEnriched.length,
+    active: activeForMode.length,
+    review: reviewForMode.length,
+    done: doneForMode.length,
   };
 
   return (
@@ -506,6 +521,56 @@ export default async function CarvingDashboardPage({
         </div>
       </div>
 
+      {/* CNC / Outsource mode toggle — splits the whole page by vendor
+          type. CNC = existing machine flow (byte-identical); Outsource =
+          simplified jobwork flow. Preserves the current tab + temple. */}
+      <div
+        style={{
+          display: "inline-flex",
+          gap: 4,
+          padding: 4,
+          background: "var(--surface-alt)",
+          border: "1px solid var(--border)",
+          borderRadius: 10,
+          alignSelf: "flex-start",
+        }}
+      >
+        {(
+          [
+            { key: "cnc", label: "🏭 CNC Carving" },
+            { key: "outsource", label: "🤝 Outsource Carving" },
+          ] as const
+        ).map((m) => {
+          const active = mode === m.key;
+          const p = new URLSearchParams();
+          p.set("mode", m.key);
+          p.set("tab", tab);
+          if (templeFilter) p.set("temple", templeFilter);
+          return (
+            <Link
+              key={m.key}
+              href={`/carving?${p.toString()}`}
+              style={{
+                padding: "8px 18px",
+                fontSize: 13,
+                fontWeight: 800,
+                color: active ? "#fff" : "var(--muted)",
+                background: active
+                  ? m.key === "outsource"
+                    ? "#92400e"
+                    : "var(--gold-dark)"
+                  : "transparent",
+                borderRadius: 8,
+                textDecoration: "none",
+                transition: "background 0.12s, color 0.12s",
+              }}
+            >
+              {m.label}
+            </Link>
+          );
+        })}
+      </div>
+
       {/* Tabs — solid pill style. Active tab = filled gold; inactive
           = soft hover. Single colour family so the carving head's eye
           isn't pulled in four directions like the old per-tab tints. */}
@@ -539,6 +604,7 @@ export default async function CarvingDashboardPage({
           // Preserve temple filter when switching tabs
           const hrefParams = new URLSearchParams();
           hrefParams.set("tab", t.key);
+          hrefParams.set("mode", mode);
           if (templeFilter) hrefParams.set("temple", templeFilter);
           return (
             <Link
@@ -582,10 +648,11 @@ export default async function CarvingDashboardPage({
 
       <CarvingDashboardClient
         tab={tab}
+        mode={mode}
         unassignedSlabs={unassignedSlabsAll ?? []}
-        activeJobs={activeJobsEnriched}
-        reviewJobs={reviewAccess ? reviewJobsEnriched : []}
-        doneJobs={doneJobsEnriched}
+        activeJobs={activeForMode}
+        reviewJobs={reviewAccess ? reviewForMode : []}
+        doneJobs={doneForMode}
         vendors={vendorsEnriched}
         machineCodeById={machineCodeById}
         templeNames={templeNames}
