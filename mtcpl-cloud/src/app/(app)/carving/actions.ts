@@ -5751,6 +5751,319 @@ export async function generateCarvingChallanAction(formData: FormData) {
   redirect(`/carving/challans/${challan.id}?toast=Challan+generated`);
 }
 
+// ── Outsource work orders (Mig 095) ──────────────────────────────────
+// A work order is a future-need order to an Outsource vendor. Lines may
+// reference an existing slab (any status) OR be pure text until the slab
+// is cut. NOTHING here touches slab_requirements.status or carving_items
+// until a line is "Sent" (slab must be cut_done by then).
+
+const WO_ROLES = ["developer", "owner", "carving_head", "senior_incharge"] as const;
+
+/** Shared "send slab to outsource vendor" — the cut_done-gated bridge that
+ *  the work order's Send action uses. Mirrors the Outsource auto-start in
+ *  assignCarvingJobAction but returns a result instead of redirecting. */
+async function sendSlabToOutsourceVendor(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  opts: {
+    slabId: string;
+    vendorId: string;
+    vendorName: string;
+    rate: number | null;
+    unit: "cft" | "sft";
+    profileId: string;
+  },
+): Promise<{ ok: true; id: string } | { ok: false; reason: string }> {
+  const nowIso = new Date().toISOString();
+  const { data: slabRow } = await admin
+    .from("slab_requirements")
+    .update({ status: "carving_in_progress", updated_by: opts.profileId, updated_at: nowIso })
+    .eq("id", opts.slabId)
+    .eq("status", "cut_done")
+    .select("id");
+  if (!slabRow?.length) return { ok: false, reason: "Slab is not cut-done yet" };
+  const { data: item, error } = await admin
+    .from("carving_items")
+    .insert({
+      slab_requirement_id: opts.slabId,
+      vendor_id: opts.vendorId,
+      vendor_name: opts.vendorName,
+      vendor_type: "Outsource",
+      cnc_machine_id: null,
+      status: "carving_in_progress",
+      loaded_at: nowIso,
+      loaded_by: opts.profileId,
+      urgency: "normal",
+      assigned_by: opts.profileId,
+      received_at_vendor_at: nowIso,
+      received_at_vendor_by: opts.profileId,
+      ...(opts.rate != null ? { jobwork_rate: opts.rate, jobwork_unit: opts.unit } : {}),
+    })
+    .select("id")
+    .single();
+  if (error || !item) {
+    await admin
+      .from("slab_requirements")
+      .update({ status: "cut_done", updated_by: opts.profileId, updated_at: nowIso })
+      .eq("id", opts.slabId);
+    return { ok: false, reason: error?.message ?? "Failed to create carving job" };
+  }
+  await recordEvent(
+    item.id,
+    "assigned",
+    opts.profileId,
+    `Work-order send → ${opts.vendorName} (started) · 🏭 outsource`,
+  );
+  return { ok: true, id: item.id };
+}
+
+export async function createWorkOrderAction(formData: FormData) {
+  const { profile } = await requireAuth([...WO_ROLES]);
+  const admin = createAdminSupabaseClient();
+
+  const vendorId = txt(formData, "vendor_id");
+  const title = txt(formData, "title") || null;
+  const temple = txt(formData, "temple") || null;
+  const rateRaw = txt(formData, "jobwork_rate");
+  const rate = rateRaw && Number(rateRaw) > 0 ? Number(rateRaw) : null;
+  const unit = txt(formData, "jobwork_unit") === "sft" ? "sft" : "cft";
+  if (!vendorId) redirect("/carving/work-orders/new?toast=Pick+a+vendor");
+
+  const { data: vendor } = await admin
+    .from("vendors")
+    .select("id, name, vendor_type, is_active")
+    .eq("id", vendorId)
+    .maybeSingle();
+  const v = vendor as { name: string; vendor_type: string; is_active: boolean } | null;
+  if (!v) redirect("/carving/work-orders/new?toast=Vendor+not+found");
+  if (v!.vendor_type !== "Outsource") {
+    redirect("/carving/work-orders/new?toast=Work+orders+are+for+Outsource+vendors");
+  }
+
+  type LineIn = {
+    slab_requirement_id?: string | null;
+    description?: string | null;
+    planned_length_ft?: number | null;
+    planned_width_ft?: number | null;
+    planned_thickness_ft?: number | null;
+    qty?: number | null;
+  };
+  let lines: LineIn[] = [];
+  try {
+    const parsed = JSON.parse(txt(formData, "lines_json"));
+    if (Array.isArray(parsed)) lines = parsed as LineIn[];
+  } catch {
+    /* empty */
+  }
+  lines = lines.filter(
+    (l) => (l.slab_requirement_id && String(l.slab_requirement_id).trim()) || (l.description && String(l.description).trim()),
+  );
+  if (lines.length === 0) redirect("/carving/work-orders/new?toast=Add+at+least+one+line");
+
+  const { data: wo, error: woErr } = await admin
+    .from("carving_work_orders")
+    .insert({
+      vendor_id: vendorId,
+      vendor_name: v!.name,
+      title,
+      temple,
+      jobwork_rate: rate,
+      jobwork_unit: unit,
+      status: "open",
+      created_by: profile.id,
+    })
+    .select("id")
+    .single();
+  if (woErr || !wo) {
+    redirect(`/carving/work-orders/new?toast=${encodeURIComponent(woErr?.message ?? "Failed to create work order")}`);
+  }
+
+  await admin.from("carving_work_order_items").insert(
+    lines.map((l, i) => ({
+      work_order_id: wo.id,
+      slab_requirement_id: l.slab_requirement_id ? String(l.slab_requirement_id) : null,
+      description: l.description ? String(l.description) : null,
+      planned_length_ft: l.planned_length_ft != null ? Number(l.planned_length_ft) : null,
+      planned_width_ft: l.planned_width_ft != null ? Number(l.planned_width_ft) : null,
+      planned_thickness_ft: l.planned_thickness_ft != null ? Number(l.planned_thickness_ft) : null,
+      qty: l.qty && Number(l.qty) > 0 ? Math.floor(Number(l.qty)) : 1,
+      line_status: "planned",
+      position: i,
+    })),
+  );
+
+  await logAudit(profile.id, "work_order_created", "carving_work_order", wo.id, {
+    vendor_id: vendorId,
+    lines: lines.length,
+  });
+  refreshAll();
+  redirect(`/carving/work-orders/${wo.id}?toast=Work+order+created`);
+}
+
+export async function addWorkOrderLineAction(formData: FormData) {
+  const { profile } = await requireAuth([...WO_ROLES]);
+  const admin = createAdminSupabaseClient();
+  const woId = txt(formData, "work_order_id");
+  if (!woId) redirect("/carving/work-orders?toast=Missing+work+order");
+  const slabId = txt(formData, "slab_requirement_id") || null;
+  const description = txt(formData, "description") || null;
+  if (!slabId && !description) {
+    redirect(`/carving/work-orders/${woId}?toast=Add+a+slab+or+a+description`);
+  }
+  const { data: maxRow } = await admin
+    .from("carving_work_order_items")
+    .select("position")
+    .eq("work_order_id", woId)
+    .order("position", { ascending: false })
+    .limit(1);
+  const nextPos = ((maxRow?.[0] as { position: number } | undefined)?.position ?? -1) + 1;
+  await admin.from("carving_work_order_items").insert({
+    work_order_id: woId,
+    slab_requirement_id: slabId,
+    description,
+    qty: 1,
+    line_status: "planned",
+    position: nextPos,
+  });
+  await logAudit(profile.id, "work_order_line_added", "carving_work_order", woId, {});
+  refreshAll();
+  redirect(`/carving/work-orders/${woId}?toast=Line+added`);
+}
+
+export async function bindSlabToWorkOrderLineAction(formData: FormData) {
+  await requireAuth([...WO_ROLES]);
+  const admin = createAdminSupabaseClient();
+  const lineId = txt(formData, "line_id");
+  const woId = txt(formData, "work_order_id");
+  const slabId = txt(formData, "slab_requirement_id");
+  if (!lineId || !slabId) redirect(`/carving/work-orders/${woId}?toast=Pick+a+slab`);
+  await admin
+    .from("carving_work_order_items")
+    .update({ slab_requirement_id: slabId })
+    .eq("id", lineId)
+    .eq("line_status", "planned");
+  refreshAll();
+  redirect(`/carving/work-orders/${woId}?toast=Slab+linked`);
+}
+
+export async function removeWorkOrderLineAction(formData: FormData) {
+  await requireAuth([...WO_ROLES]);
+  const admin = createAdminSupabaseClient();
+  const lineId = txt(formData, "line_id");
+  const woId = txt(formData, "work_order_id");
+  if (!lineId) redirect(`/carving/work-orders/${woId}?toast=Missing+line`);
+  // Only remove planned (un-sent) lines.
+  await admin
+    .from("carving_work_order_items")
+    .update({ line_status: "cancelled" })
+    .eq("id", lineId)
+    .eq("line_status", "planned");
+  refreshAll();
+  redirect(`/carving/work-orders/${woId}?toast=Line+removed`);
+}
+
+export async function sendWorkOrderLineToVendorAction(formData: FormData) {
+  const { profile } = await requireAuth([...WO_ROLES]);
+  const admin = createAdminSupabaseClient();
+  const lineId = txt(formData, "line_id");
+  const woId = txt(formData, "work_order_id");
+  if (!lineId) redirect(`/carving/work-orders/${woId}?toast=Missing+line`);
+
+  const { data: lineRow } = await admin
+    .from("carving_work_order_items")
+    .select("id, work_order_id, slab_requirement_id, carving_item_id, line_status, jobwork_rate, jobwork_unit")
+    .eq("id", lineId)
+    .maybeSingle();
+  const line = lineRow as {
+    id: string;
+    work_order_id: string;
+    slab_requirement_id: string | null;
+    carving_item_id: string | null;
+    line_status: string;
+    jobwork_rate: number | string | null;
+    jobwork_unit: string | null;
+  } | null;
+  if (!line) redirect(`/carving/work-orders/${woId}?toast=Line+not+found`);
+  if (line!.line_status !== "planned" || line!.carving_item_id) {
+    redirect(`/carving/work-orders/${woId}?toast=Line+already+sent`);
+  }
+  if (!line!.slab_requirement_id) {
+    redirect(`/carving/work-orders/${woId}?toast=Link+a+cut+slab+to+this+line+first`);
+  }
+
+  const { data: woRow } = await admin
+    .from("carving_work_orders")
+    .select("id, vendor_id, vendor_name, jobwork_rate, jobwork_unit")
+    .eq("id", line!.work_order_id)
+    .maybeSingle();
+  const wo = woRow as {
+    vendor_id: string;
+    vendor_name: string;
+    jobwork_rate: number | string | null;
+    jobwork_unit: string | null;
+  } | null;
+  if (!wo) redirect(`/carving/work-orders/${woId}?toast=Work+order+not+found`);
+
+  const rate =
+    line!.jobwork_rate != null
+      ? Number(line!.jobwork_rate)
+      : wo!.jobwork_rate != null
+        ? Number(wo!.jobwork_rate)
+        : null;
+  const unit = (line!.jobwork_unit ?? wo!.jobwork_unit) === "sft" ? "sft" : "cft";
+
+  const res = await sendSlabToOutsourceVendor(admin, {
+    slabId: line!.slab_requirement_id,
+    vendorId: wo!.vendor_id,
+    vendorName: wo!.vendor_name,
+    rate,
+    unit,
+    profileId: profile.id,
+  });
+  if (!res.ok) {
+    redirect(`/carving/work-orders/${woId}?toast=${encodeURIComponent(res.reason)}`);
+  }
+
+  await admin
+    .from("carving_work_order_items")
+    .update({ carving_item_id: res.id, line_status: "sent" })
+    .eq("id", lineId);
+  await admin
+    .from("carving_work_orders")
+    .update({ status: "in_progress", updated_at: new Date().toISOString(), updated_by: profile.id })
+    .eq("id", line!.work_order_id)
+    .eq("status", "open");
+  await logAudit(profile.id, "work_order_line_sent", "carving_work_order", line!.work_order_id, {
+    line_id: lineId,
+    carving_item_id: res.id,
+  });
+  refreshAll();
+  redirect(`/carving/work-orders/${woId}?toast=Sent+to+vendor`);
+}
+
+export async function cancelWorkOrderAction(formData: FormData) {
+  const { profile } = await requireAuth([...WO_ROLES]);
+  const admin = createAdminSupabaseClient();
+  const woId = txt(formData, "work_order_id");
+  const reason = txt(formData, "reason") || null;
+  if (!woId) redirect("/carving/work-orders?toast=Missing+work+order");
+  const now = new Date().toISOString();
+  await admin
+    .from("carving_work_orders")
+    .update({ status: "cancelled", cancelled_at: now, cancel_reason: reason, updated_at: now, updated_by: profile.id })
+    .eq("id", woId)
+    .neq("status", "cancelled");
+  // Cancel only the lines that haven't been sent (sent lines have live
+  // carving_items — those continue through the normal carving flow).
+  await admin
+    .from("carving_work_order_items")
+    .update({ line_status: "cancelled" })
+    .eq("work_order_id", woId)
+    .eq("line_status", "planned");
+  await logAudit(profile.id, "work_order_cancelled", "carving_work_order", woId, { reason });
+  refreshAll();
+  redirect(`/carving/work-orders?toast=Work+order+cancelled`);
+}
+
 // ── Job event timeline — used by JobDetailPeek modal ─────────────
 //
 // Returns the carving_job_events for a single carving_item, with
