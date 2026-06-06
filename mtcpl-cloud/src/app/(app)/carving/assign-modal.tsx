@@ -48,11 +48,12 @@ type Machine = {
   cnc_axes?: number | null;
 };
 
-/** Mig 079 — axis requirement for a CNC assignment.
- *  0 = "Any CNC" (default, current behaviour)
+/** Mig 079 / 093 — axis requirement for a CNC assignment.
+ *  0 = "Any CNC" (default, current behaviour — runs on 3/4/5)
+ *  3 = "Must be 3-axis" (mig 093)
  *  4 = "Must be 4-axis"
  *  5 = "Must be 5-axis" */
-type CncAxesReq = 0 | 4 | 5;
+type CncAxesReq = 0 | 3 | 4 | 5;
 
 type Vendor = {
   id: string;
@@ -152,7 +153,8 @@ function vendorMatchesReq(
   if (workType === "lathe") {
     return { hasAtAll: br.latheTotal > 0, freeNow: br.latheFree };
   }
-  // CNC. "Any" → any CNC machine counts; 4 → only 4-axis; 5 → only 5-axis.
+  // CNC. "Any" → any CNC machine counts; 3/4/5 → only that exact axis.
+  if (axesReq === 3) return { hasAtAll: br.axes3Total > 0, freeNow: br.axes3Free };
   if (axesReq === 4) return { hasAtAll: br.axes4Total > 0, freeNow: br.axes4Free };
   if (axesReq === 5) return { hasAtAll: br.axes5Total > 0, freeNow: br.axes5Free };
   return { hasAtAll: br.multiTotal > 0, freeNow: br.multiFree };
@@ -187,11 +189,13 @@ function recommendVendor(
     const typeLabel =
       workType === "lathe"
         ? "lathe"
-        : axesReq === 4
-          ? "4-axis CNC"
-          : axesReq === 5
-            ? "5-axis CNC"
-            : "CNC";
+        : axesReq === 3
+          ? "3-axis CNC"
+          : axesReq === 4
+            ? "4-axis CNC"
+            : axesReq === 5
+              ? "5-axis CNC"
+              : "CNC";
     const reason =
       match.freeNow > 0
         ? `${match.freeNow} free ${typeLabel}${queued > 0 ? ` · ${queued} pending` : ""}`
@@ -473,6 +477,7 @@ export function AssignModal({
                     <div style={{ display: "flex", gap: 8 }}>
                       {[
                         { v: 0 as CncAxesReq, label: "Any CNC", hint: "Default — any CNC (3, 4, or 5-axis)" },
+                        { v: 3 as CncAxesReq, label: "3-axis only", hint: "Slab must be loaded on a 3-axis machine" },
                         { v: 4 as CncAxesReq, label: "4-axis only", hint: "Slab must be loaded on a 4-axis machine" },
                         { v: 5 as CncAxesReq, label: "5-axis only", hint: "Slab must be loaded on a 5-axis machine" },
                       ].map((opt) => {
@@ -650,11 +655,13 @@ export function AssignModal({
                     const blockReason = !hasTypeInFleet
                       ? workType === "lathe"
                         ? "No lathe in this vendor's fleet"
-                        : cncAxesReq === 4
-                          ? "No 4-axis CNC in this vendor's fleet"
-                          : cncAxesReq === 5
-                            ? "No 5-axis CNC in this vendor's fleet"
-                            : "No CNC in this vendor's fleet"
+                        : cncAxesReq === 3
+                          ? "No 3-axis CNC in this vendor's fleet"
+                          : cncAxesReq === 4
+                            ? "No 4-axis CNC in this vendor's fleet"
+                            : cncAxesReq === 5
+                              ? "No 5-axis CNC in this vendor's fleet"
+                              : "No CNC in this vendor's fleet"
                       : null;
                     return (
                       <label

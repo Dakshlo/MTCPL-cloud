@@ -165,7 +165,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
       .maybeSingle(),
     admin
       .from("cnc_machines")
-      .select("id, machine_code, operator_name, status, is_active, current_carving_item_id, maintenance_reason, maintenance_flagged_at, machine_type")
+      .select("id, machine_code, operator_name, status, is_active, current_carving_item_id, maintenance_reason, maintenance_flagged_at, machine_type, cnc_axes")
       .eq("vendor_id", vendorId)
       .eq("is_active", true)
       .order("machine_code"),
@@ -183,7 +183,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
         // review_image_path / review_notes so we can split rework
         // slabs into the new "Rework pending" window (separate from
         // the regular ready-to-load queue).
-        "id, slab_requirement_id, status, urgency, estimated_minutes, vendor_estimated_minutes, cnc_machine_id, loaded_at, assigned_at, note, received_at_vendor_at, requires_machine_type, carving_sides, batch_id, held_at, held_reason, held_from_machine_id, transferred_from_vendor_id, transferred_from_vendor_name, transferred_at, review_decision, review_reworked_at, review_image_path, review_image_paths, review_notes",
+        "id, slab_requirement_id, status, urgency, estimated_minutes, vendor_estimated_minutes, cnc_machine_id, loaded_at, assigned_at, note, received_at_vendor_at, requires_machine_type, requires_cnc_axes, carving_sides, batch_id, held_at, held_reason, held_from_machine_id, transferred_from_vendor_id, transferred_from_vendor_name, transferred_at, review_decision, review_reworked_at, review_image_path, review_image_paths, review_notes",
       )
       .eq("vendor_id", vendorId)
       .in("status", ["carving_assigned", "carving_in_progress", "carving_on_hold"])
@@ -325,6 +325,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
     note: string | null;
     received_at_vendor_at?: string | null;
     requires_machine_type?: string | null;
+    requires_cnc_axes?: number | null;
     carving_sides?: number | null;
     batch_id?: string | null;
     held_at?: string | null;
@@ -354,6 +355,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
       slab,
       received_at_vendor_at: row.received_at_vendor_at ?? null,
       requires_machine_type: row.requires_machine_type ?? null,
+      requires_cnc_axes: row.requires_cnc_axes ?? null,
       carving_sides: row.carving_sides ?? 1,
       batch_id: row.batch_id ?? null,
       transferred_from_vendor_id: row.transferred_from_vendor_id ?? null,
@@ -366,6 +368,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
         slab_id: row.slab_requirement_id,
         urgency: job.urgency,
         requires_machine_type: row.requires_machine_type ?? null,
+        requires_cnc_axes: row.requires_cnc_axes ?? null,
         carving_sides: row.carving_sides ?? 1,
         held_at: row.held_at ?? null,
         held_reason: row.held_reason ?? null,
@@ -391,6 +394,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
         slab_id: row.slab_requirement_id,
         urgency: job.urgency,
         requires_machine_type: row.requires_machine_type ?? null,
+        requires_cnc_axes: row.requires_cnc_axes ?? null,
         carving_sides: row.carving_sides ?? 1,
         review_reworked_at: row.review_reworked_at ?? null,
         review_image_path: row.review_image_path ?? null,
@@ -445,6 +449,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
     maintenance_reason: string | null;
     maintenance_flagged_at: string | null;
     machine_type: string | null;
+    cnc_axes: number | null;
   }>).map((m) => ({
     id: m.id,
     machine_code: m.machine_code,
@@ -460,6 +465,9 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
       m.machine_type === "multi_head_2" || m.machine_type === "lathe"
         ? m.machine_type
         : "single_head",
+    // Mig 079 / 093 — axis count surfaced to the cockpit so the
+    // machine card can show a "3/4/5 AXIS" badge. NULL for lathes.
+    cnc_axes: m.cnc_axes ?? null,
   }));
   // Daksh May 2026 — natural-sort the machine grid so MA10 lands
   // after MA9, not between MA1 and MA2. The Postgres .order(

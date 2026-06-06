@@ -31,8 +31,9 @@ type Machine = {
   cnc_axes?: number | null;
 };
 
-/** Mig 079 — same shape as in assign-modal.tsx. 0 = "Any CNC". */
-type CncAxesReq = 0 | 4 | 5;
+/** Mig 079 / 093 — same shape as in assign-modal.tsx. 0 = "Any CNC",
+ *  3/4/5 = exact-axis lock. */
+type CncAxesReq = 0 | 3 | 4 | 5;
 
 type Vendor = {
   id: string;
@@ -85,11 +86,13 @@ function recommendVendor(
     const typeLabel =
       workType === "lathe"
         ? "lathe"
-        : axesReq === 4
-          ? "4-axis CNC"
-          : axesReq === 5
-            ? "5-axis CNC"
-            : "CNC";
+        : axesReq === 3
+          ? "3-axis CNC"
+          : axesReq === 4
+            ? "4-axis CNC"
+            : axesReq === 5
+              ? "5-axis CNC"
+              : "CNC";
     const reason =
       match.freeNow > 0
         ? `${match.freeNow} free ${typeLabel}${queued > 0 ? ` · ${queued} pending` : ""}`
@@ -149,6 +152,7 @@ function vendorMatchesReq(
   if (workType === "lathe") {
     return { hasAtAll: br.latheTotal > 0, freeNow: br.latheFree };
   }
+  if (axesReq === 3) return { hasAtAll: br.axes3Total > 0, freeNow: br.axes3Free };
   if (axesReq === 4) return { hasAtAll: br.axes4Total > 0, freeNow: br.axes4Free };
   if (axesReq === 5) return { hasAtAll: br.axes5Total > 0, freeNow: br.axes5Free };
   return { hasAtAll: br.multiTotal > 0, freeNow: br.multiFree };
@@ -463,6 +467,7 @@ export function BulkAssignModal({
                     <div style={{ display: "flex", gap: 8 }}>
                       {[
                         { v: 0 as CncAxesReq, label: "Any CNC" },
+                        { v: 3 as CncAxesReq, label: "3-axis only" },
                         { v: 4 as CncAxesReq, label: "4-axis only" },
                         { v: 5 as CncAxesReq, label: "5-axis only" },
                       ].map((opt) => {
@@ -975,11 +980,13 @@ function VendorRow({
   const blockReason = !hasTypeInFleet
     ? workType === "lathe"
       ? "No lathe in this vendor's fleet"
-      : cncAxesReq === 4
-        ? "No 4-axis CNC in this vendor's fleet"
-        : cncAxesReq === 5
-          ? "No 5-axis CNC in this vendor's fleet"
-          : "No CNC in this vendor's fleet"
+      : cncAxesReq === 3
+        ? "No 3-axis CNC in this vendor's fleet"
+        : cncAxesReq === 4
+          ? "No 4-axis CNC in this vendor's fleet"
+          : cncAxesReq === 5
+            ? "No 5-axis CNC in this vendor's fleet"
+            : "No CNC in this vendor's fleet"
     : null;
   return (
     <label

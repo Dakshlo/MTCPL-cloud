@@ -105,6 +105,30 @@ function checkSlabFits(
   return null;
 }
 
+// Mig 079 / 093 — strict CNC axis match. Single-sources the rule used
+// by EVERY machine-load path (single load, 2-head pair load, reload
+// from hold, pair reload). Daksh's spec is EXACT equality, not >=:
+//   requires = NULL → "Any CNC", fits any axis (backward-compatible
+//                     default for every slab assigned before mig 079).
+//   requires = 3/4/5 → machine.cnc_axes MUST equal it exactly. A
+//                     4-axis slab cannot run on a 3- OR a 5-axis
+//                     machine (hardware-axis mismatches damage tooling).
+// Lathe loads never reach here — the machine_type guard rules them out
+// first. Returns a friendly error string, or null when the load is OK.
+function checkAxisMatch(
+  requires: number | null | undefined,
+  machine: { cnc_axes: number | null; machine_code: string | null },
+): string | null {
+  if (requires == null) return null; // "Any CNC" → fits any axis
+  const machineAxis = machine.cnc_axes ?? 3; // NULL backfills to 3 (mig 079)
+  if (machineAxis === requires) return null;
+  return (
+    `This slab needs a ${requires}-axis CNC. ` +
+    `Machine ${machine.machine_code ?? ""} is ${machineAxis}-axis. ` +
+    `Pick a ${requires}-axis machine.`
+  ).trim();
+}
+
 async function recordEvent(
   carvingItemId: string,
   eventType: string,
@@ -1051,7 +1075,13 @@ export async function assignCarvingJobAction(formData: FormData) {
   // the behaviour byte-identical to before mig 079.
   const requiresCncAxesRaw = txt(formData, "requires_cnc_axes");
   const requiresCncAxes: number | null =
-    requiresCncAxesRaw === "4" ? 4 : requiresCncAxesRaw === "5" ? 5 : null;
+    requiresCncAxesRaw === "3"
+      ? 3
+      : requiresCncAxesRaw === "4"
+        ? 4
+        : requiresCncAxesRaw === "5"
+          ? 5
+          : null;
 
   if (!slabId || !vendorId) {
     redirect("/carving?toast=Missing+slab+or+vendor");
@@ -1237,11 +1267,13 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
   // Mig 079 — bulk axis requirement (same shape as single-slab).
   const requiresCncAxesBatchRaw = txt(formData, "requires_cnc_axes");
   const requiresCncAxesBatch: number | null =
-    requiresCncAxesBatchRaw === "4"
-      ? 4
-      : requiresCncAxesBatchRaw === "5"
-        ? 5
-        : null;
+    requiresCncAxesBatchRaw === "3"
+      ? 3
+      : requiresCncAxesBatchRaw === "4"
+        ? 4
+        : requiresCncAxesBatchRaw === "5"
+          ? 5
+          : null;
 
   let slabIds: string[] = [];
   try {
@@ -1516,28 +1548,11 @@ export async function loadSlabOnMachineAction(formData: FormData) {
     redirect(`/vendor?toast=${encodeURIComponent(friendly)}`);
   }
 
-  // ── Mig 079 — Strict CNC axis match ─────────────────────────────
-  // Daksh's spec: "if the slab is selected 4-axis, he cannot load
-  // it to a 5-axis." So this is strict equality, NOT >= semantics.
-  // requires_cnc_axes = NULL  → any axis is fine (current default;
-  //                              backward-compatible with mig 079
-  //                              backfill).
-  // requires_cnc_axes = 4     → machine.cnc_axes MUST = 4.
-  // requires_cnc_axes = 5     → machine.cnc_axes MUST = 5.
+  // ── Mig 079 / 093 — Strict CNC axis match (shared helper) ───────
   // Skipped on Lathe assignments (the machine_type guard above
-  // already rules them out).
-  if (
-    item.requires_cnc_axes != null &&
-    (machine.cnc_axes ?? 3) !== item.requires_cnc_axes
-  ) {
-    const slabAxis = item.requires_cnc_axes;
-    const machineAxis = machine.cnc_axes ?? 3;
-    const friendly =
-      `This slab needs a ${slabAxis}-axis CNC. ` +
-      `Machine ${machine.machine_code ?? ""} is ${machineAxis}-axis. ` +
-      `Pick a ${slabAxis}-axis machine.`;
-    redirect(`/vendor?toast=${encodeURIComponent(friendly.trim())}`);
-  }
+  // already rules them out). NULL = "Any CNC"; 3/4/5 = exact match.
+  const axisErr = checkAxisMatch(item.requires_cnc_axes, machine);
+  if (axisErr) redirect(`/vendor?toast=${encodeURIComponent(axisErr)}`);
 
   // ── Dimension check (migration 024) ─────────────────────────────
   // Orientation-agnostic on L/W: a slab whose longest face fits the
@@ -1647,21 +1662,21 @@ export async function loadTwoSlabsOnMultiHeadAction(formData: FormData) {
     admin
       .from("carving_items")
       .select(
-        "id, vendor_id, status, cnc_machine_id, slab_requirement_id, estimated_minutes, requires_machine_type, received_at_vendor_at",
+        "id, vendor_id, status, cnc_machine_id, slab_requirement_id, estimated_minutes, requires_machine_type, requires_cnc_axes, received_at_vendor_at",
       )
       .eq("id", carvingItemAId)
       .maybeSingle(),
     admin
       .from("carving_items")
       .select(
-        "id, vendor_id, status, cnc_machine_id, slab_requirement_id, estimated_minutes, requires_machine_type, received_at_vendor_at",
+        "id, vendor_id, status, cnc_machine_id, slab_requirement_id, estimated_minutes, requires_machine_type, requires_cnc_axes, received_at_vendor_at",
       )
       .eq("id", carvingItemBId)
       .maybeSingle(),
     admin
       .from("cnc_machines")
       .select(
-        "id, vendor_id, status, is_active, machine_type, machine_code, max_length_in, max_width_in, max_thickness_in",
+        "id, vendor_id, status, is_active, machine_type, cnc_axes, machine_code, max_length_in, max_width_in, max_thickness_in",
       )
       .eq("id", machineId)
       .maybeSingle(),
@@ -1677,6 +1692,7 @@ export async function loadTwoSlabsOnMultiHeadAction(formData: FormData) {
     slab_requirement_id: string;
     estimated_minutes: number | null;
     requires_machine_type: string | null;
+    requires_cnc_axes: number | null;
     received_at_vendor_at: string | null;
   };
   const b = itemB as {
@@ -1687,6 +1703,7 @@ export async function loadTwoSlabsOnMultiHeadAction(formData: FormData) {
     slab_requirement_id: string;
     estimated_minutes: number | null;
     requires_machine_type: string | null;
+    requires_cnc_axes: number | null;
     received_at_vendor_at: string | null;
   };
   const m = mc as {
@@ -1695,6 +1712,7 @@ export async function loadTwoSlabsOnMultiHeadAction(formData: FormData) {
     status: string;
     is_active: boolean;
     machine_type: string | null;
+    cnc_axes: number | null;
     machine_code: string | null;
     max_length_in: number | string | null;
     max_width_in: number | string | null;
@@ -1723,6 +1741,15 @@ export async function loadTwoSlabsOnMultiHeadAction(formData: FormData) {
         )}`,
       );
     }
+  }
+
+  // Mig 079 / 093 — strict CNC axis match for BOTH slabs (this is the
+  // path that was silently skipping the axis guard — a 2-head load
+  // could land a 4/5-axis slab on any machine). Each slab independently
+  // must fit the machine's axis count.
+  for (const j of [a, b]) {
+    const axisErr = checkAxisMatch(j.requires_cnc_axes, m);
+    if (axisErr) redirect(`/vendor?toast=${encodeURIComponent(axisErr)}`);
   }
 
   // Mig 081 follow-on (Daksh) — opt-in "force mismatched" flag for
@@ -2821,7 +2848,7 @@ export async function reloadHeldSlabAction(formData: FormData) {
   const { data: ci } = await admin
     .from("carving_items")
     .select(
-      "id, vendor_id, status, cnc_machine_id, slab_requirement_id, requires_machine_type, held_from_machine_id",
+      "id, vendor_id, status, cnc_machine_id, slab_requirement_id, requires_machine_type, requires_cnc_axes, held_from_machine_id",
     )
     .eq("id", carvingItemId)
     .maybeSingle();
@@ -2833,6 +2860,7 @@ export async function reloadHeldSlabAction(formData: FormData) {
     cnc_machine_id: string | null;
     slab_requirement_id: string;
     requires_machine_type: string | null;
+    requires_cnc_axes: number | null;
     held_from_machine_id: string | null;
   };
 
@@ -2869,6 +2897,7 @@ export async function reloadHeldSlabAction(formData: FormData) {
     machine_code: string;
     status: string;
     machine_type: string;
+    cnc_axes: number | null;
     vendor_id: string;
   };
   if (machine.vendor_id !== item.vendor_id) {
@@ -2881,6 +2910,11 @@ export async function reloadHeldSlabAction(formData: FormData) {
   if (item.requires_machine_type !== "lathe" && machine.machine_type === "lathe") {
     redirect(`${redirectTo}?toast=Non-lathe+slab+cannot+go+on+a+lathe`);
   }
+
+  // Mig 079 / 093 — strict CNC axis match (was missing on reload, so a
+  // held 4/5-axis slab could be reloaded onto the wrong machine).
+  const axisErr = checkAxisMatch(item.requires_cnc_axes, machine);
+  if (axisErr) redirect(`${redirectTo}?toast=${encodeURIComponent(axisErr)}`);
 
   // Daksh May 2026 — busy-machine reload is allowed only when the
   // target is a 2-head CNC currently running EXACTLY ONE matching
@@ -3052,20 +3086,20 @@ export async function reloadTwoHeldSlabsOnMultiHeadAction(formData: FormData) {
     admin
       .from("carving_items")
       .select(
-        "id, vendor_id, status, cnc_machine_id, slab_requirement_id, requires_machine_type, held_from_machine_id",
+        "id, vendor_id, status, cnc_machine_id, slab_requirement_id, requires_machine_type, requires_cnc_axes, held_from_machine_id",
       )
       .eq("id", carvingItemAId)
       .maybeSingle(),
     admin
       .from("carving_items")
       .select(
-        "id, vendor_id, status, cnc_machine_id, slab_requirement_id, requires_machine_type, held_from_machine_id",
+        "id, vendor_id, status, cnc_machine_id, slab_requirement_id, requires_machine_type, requires_cnc_axes, held_from_machine_id",
       )
       .eq("id", carvingItemBId)
       .maybeSingle(),
     admin
       .from("cnc_machines")
-      .select("id, machine_code, status, machine_type, vendor_id")
+      .select("id, machine_code, status, machine_type, cnc_axes, vendor_id")
       .eq("id", targetMachineId)
       .maybeSingle(),
   ]);
@@ -3080,6 +3114,7 @@ export async function reloadTwoHeldSlabsOnMultiHeadAction(formData: FormData) {
     cnc_machine_id: string | null;
     slab_requirement_id: string;
     requires_machine_type: string | null;
+    requires_cnc_axes: number | null;
     held_from_machine_id: string | null;
   };
   const a = aRow as Item;
@@ -3089,6 +3124,7 @@ export async function reloadTwoHeldSlabsOnMultiHeadAction(formData: FormData) {
     machine_code: string;
     status: string;
     machine_type: string;
+    cnc_axes: number | null;
     vendor_id: string;
   };
 
@@ -3132,6 +3168,12 @@ export async function reloadTwoHeldSlabsOnMultiHeadAction(formData: FormData) {
         )}`,
       );
     }
+  }
+
+  // Mig 079 / 093 — strict CNC axis match for BOTH held slabs.
+  for (const j of [a, b]) {
+    const axisErr = checkAxisMatch(j.requires_cnc_axes, machine);
+    if (axisErr) redirect(`${redirectTo}?toast=${encodeURIComponent(axisErr)}`);
   }
 
   // Validate identical slab geometry — must match for the jig.

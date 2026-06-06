@@ -102,6 +102,8 @@ export type HeldSlabLite = {
   slab_id: string;
   urgency: "normal" | "urgent";
   requires_machine_type: string | null;
+  /** Mig 079 / 093 — required CNC axis (3/4/5). NULL = Any. */
+  requires_cnc_axes?: number | null;
   held_at: string | null;
   held_reason: string | null;
   /** The CNC the slab was last loaded on. Reload modal defaults
@@ -125,6 +127,8 @@ export type ReworkPendingItem = {
   slab_id: string;
   urgency: "normal" | "urgent";
   requires_machine_type: string | null;
+  /** Mig 079 / 093 — required CNC axis (3/4/5). NULL = Any. */
+  requires_cnc_axes?: number | null;
   review_reworked_at: string | null;
   /** Storage key in the carving_review_media private bucket. The
    *  cockpit mints a 5-min signed URL via getSignedReviewMediaUrl
@@ -173,6 +177,9 @@ export type CarvingJobLite = {
   received_at_vendor_at?: string | null;
   /** Migration 024 — work-type tag. 'lathe' = cylindrical. */
   requires_machine_type?: string | null;
+  /** Mig 079 / 093 — required CNC axis (3/4/5). NULL = Any CNC. Drives
+   *  the "needs N-axis" chip + filters the per-machine load picker. */
+  requires_cnc_axes?: number | null;
   /** Mig 088 — 2 = double-side carving (output counts x2). */
   carving_sides?: number;
   /** Migration 026 — batch grouping when slabs were assigned
@@ -203,6 +210,9 @@ export type CncMachineLive = {
   /** Migration 021: 'single_head' (default), 'multi_head_2' (loads
    *  two identical slabs in lockstep), or 'lathe' (turning machine). */
   machine_type: "single_head" | "multi_head_2" | "lathe";
+  /** Mig 079 / 093 — axis count (3/4/5). NULL on lathes. Drives the
+   *  "N AXIS" badge on the machine card + the load-picker axis filter. */
+  cnc_axes?: number | null;
 };
 
 type Vendor = { id: string; name: string; vendor_type?: string };
@@ -3914,6 +3924,27 @@ function QueueRow({
               🌀 LATHE
             </span>
           )}
+          {/* Mig 079 / 093 — required-axis chip. Shows ONLY when the
+              slab is locked to a specific axis (3/4/5); "Any" stays
+              unlabelled. Teal, matching the machine-card AXIS badge so
+              the supervisor can eyeball that a "4-AXIS" slab needs a
+              "4 AXIS" machine. */}
+          {job.requires_cnc_axes != null && (
+            <span
+              style={{
+                fontSize: 9,
+                fontWeight: 800,
+                padding: "2px 6px",
+                borderRadius: 3,
+                background: "rgba(13,148,136,0.14)",
+                color: "#0f766e",
+                letterSpacing: "0.05em",
+              }}
+              title={`Needs a ${job.requires_cnc_axes}-axis CNC — can only load on a ${job.requires_cnc_axes}-axis machine`}
+            >
+              ⚙ {job.requires_cnc_axes}-AXIS
+            </span>
+          )}
           {job.carving_sides === 2 && <TwoSidesBadge />}
           {/* Migration 023 — receipt pill: green when at-shade, amber while in transit. */}
           <span
@@ -4404,6 +4435,32 @@ function MachineCard({
                 }
               >
                 {machine.machine_type === "multi_head_2" ? "2× HEAD" : "LATHE"}
+              </span>
+            )}
+            {/* Mig 079 / 093 — CNC axis badge. Only 4-axis + 5-axis get
+                a badge (3-axis is the floor default — badging every
+                card would just add noise, same reason single_head is
+                unlabelled above). Distinct teal tint so it reads
+                separately from the brown 2× HEAD pill. This is what
+                lets the supervisor spot the 4/5-axis machines at a
+                glance — a 3-axis machine is simply the unbadged one. */}
+            {machine.machine_type !== "lathe" &&
+              (machine.cnc_axes === 4 || machine.cnc_axes === 5) && (
+              <span
+                style={{
+                  fontSize: 9,
+                  fontWeight: 800,
+                  padding: "1px 6px",
+                  borderRadius: 4,
+                  background: "rgba(13,148,136,0.14)",
+                  color: "#0f766e",
+                  letterSpacing: "0.05em",
+                  textTransform: "uppercase",
+                  fontFamily: "ui-monospace, monospace",
+                }}
+                title={`${machine.cnc_axes}-axis CNC — only slabs tagged ${machine.cnc_axes}-axis (or "Any") can load here`}
+              >
+                {machine.cnc_axes} AXIS
               </span>
             )}
             {machine.operator_name && (
@@ -5281,12 +5338,25 @@ function LoadModal({
   // see only non-lathe-tagged slabs.
   const compatibleQueue = useMemo(
     () =>
-      queue.filter((q) =>
-        machineIsLathe
+      queue.filter((q) => {
+        // Machine-type gate (lathe vs flat) — unchanged.
+        const typeOk = machineIsLathe
           ? q.requires_machine_type === "lathe"
-          : q.requires_machine_type !== "lathe",
-      ),
-    [queue, machineIsLathe],
+          : q.requires_machine_type !== "lathe";
+        if (!typeOk) return false;
+        // Mig 079 / 093 — axis gate (non-lathe only). A slab tagged
+        // 3/4/5 only fits a machine of that EXACT axis; NULL = "Any
+        // CNC" fits all. This is the picker-side mirror of the
+        // server's strict checkAxisMatch — a 4-axis slab simply won't
+        // appear when you open Load on a 3-axis machine.
+        if (!machineIsLathe && q.requires_cnc_axes != null) {
+          if ((selectedMachine.cnc_axes ?? 3) !== q.requires_cnc_axes) {
+            return false;
+          }
+        }
+        return true;
+      }),
+    [queue, machineIsLathe, selectedMachine.cnc_axes],
   );
 
   const [carvingItemId, setCarvingItemId] = useState<string>(
