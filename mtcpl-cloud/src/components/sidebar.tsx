@@ -77,6 +77,7 @@ const DEPT_ACCENTS: Record<Department, string> = {
   finance:    "#5e8c4e",  // emerald — money
   invoicing:  "#7a8db8",  // slate-blue — paper / outgoing
   inventory:  "#c87850",  // copper — matches inventory module theme
+  register:   "#8a6fb0",  // violet — the records / proof register (mig 102)
 };
 
 /** Convert "#rrggbb" → "rgba(r,g,b,a)" so we can mix tile accents
@@ -322,23 +323,18 @@ const navEntries: NavEntry[] = [
       },
     ],
   },
-  // ── REGISTER (Mig 101 — Activity Register) ──────────────────────────
-  // A standalone, owner/dev-only record of company activities + proof
-  // (e.g. demos/samples sent to clients). Tagged to production so it
-  // surfaces in dad's default room; data is fully isolated from every
-  // other module. Widen later when specific staff are linked.
-  {
-    type: "divider",
-    label: "REGISTER",
-    roles: ["developer", "owner"],
-    department: "production",
-  },
+  // ── REGISTER department (Mig 101 + 102) — its own switcher tile ──────
+  // Standalone, owner/dev-only record of company activities + proof
+  // (e.g. demos/samples sent to clients). Tagged to its OWN department
+  // so it appears as a 5th switcher room, not a page under Production.
+  // Data is fully isolated from every other module. No divider needed —
+  // the department tile is the section header for this single-page room.
   {
     href: "/activity-register",
     label: "Activity Register",
     icon: "📒",
     roles: ["developer", "owner"],
-    department: "production",
+    department: "register",
   },
   // ── ACCOUNTS section (Finance department, mig 028 + 037 crosscheck) ──
   {

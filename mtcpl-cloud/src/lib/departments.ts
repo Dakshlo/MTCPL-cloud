@@ -34,7 +34,7 @@
 
 import type { AppRole } from "@/lib/types";
 
-export type Department = "production" | "finance" | "inventory" | "invoicing";
+export type Department = "production" | "finance" | "inventory" | "invoicing" | "register";
 
 /** Static metadata for the switcher pill row. Order here = order in
  *  the UI. */
@@ -75,11 +75,21 @@ export const DEPARTMENTS: ReadonlyArray<{
     landingHref: "/inventory/scaffolding",
     tooltip: "Scaffolding · Stock movements · Site holdings",
   },
+  {
+    // Mig 101 + 102 — standalone Activity Register (proof of demos /
+    // samples / activities sent). Owner + developer only for now.
+    id: "register",
+    label: "Register",
+    icon: "📒",
+    landingHref: "/activity-register",
+    tooltip: "Activity register — dated proof of demos / samples / activities",
+  },
 ] as const;
 
 const FINANCE_PREFIXES = ["/accounts"] as const;
 const INVENTORY_PREFIXES = ["/inventory"] as const;
 const INVOICING_PREFIXES = ["/invoicing"] as const;
+const REGISTER_PREFIXES = ["/activity-register"] as const;
 
 /**
  * Given a request pathname, return which department owns it. Used by
@@ -97,6 +107,9 @@ export function departmentForRoute(pathname: string): Department {
   }
   for (const p of INVOICING_PREFIXES) {
     if (pathname === p || pathname.startsWith(p + "/")) return "invoicing";
+  }
+  for (const p of REGISTER_PREFIXES) {
+    if (pathname === p || pathname.startsWith(p + "/")) return "register";
   }
   return "production";
 }
@@ -134,7 +147,7 @@ export function allowedDepartmentsForRole(role: AppRole): Department[] {
   switch (role) {
     case "developer":
     case "owner":
-      return ["production", "finance", "invoicing", "inventory"];
+      return ["production", "finance", "invoicing", "inventory", "register"];
     // Mig 058 follow-on (Daksh): ACCOUNTANT★ gets a 2-tile
     // Finance / Invoicing switcher.
     case "accountant_star":
