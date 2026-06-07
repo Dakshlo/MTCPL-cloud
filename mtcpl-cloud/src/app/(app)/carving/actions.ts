@@ -6071,13 +6071,11 @@ export async function createWorkOrderAction(formData: FormData) {
   const temple = txt(formData, "temple") || null;
   const rateRaw = txt(formData, "jobwork_rate");
   const rate = rateRaw && Number(rateRaw) > 0 ? Number(rateRaw) : null;
-  const unit = txt(formData, "jobwork_unit") === "sft" ? "sft" : "cft";
+  // Mig 100 — units: cft / sft / job (job = a flat ₹ per slab).
+  const unitRaw = txt(formData, "jobwork_unit");
+  const unit = unitRaw === "sft" ? "sft" : unitRaw === "job" ? "job" : "cft";
   if (!vendorId) redirect("/carving/work-orders/new?toast=Pick+a+vendor");
-  // Mig 098 — price is mandatory: the work order goes to the owner for
-  // approval, so there must be a number to approve.
-  if (rate == null) {
-    redirect("/carving/work-orders/new?toast=" + encodeURIComponent("Enter a price (rate) — it needs owner approval"));
-  }
+  // Mig 100 — price is OPTIONAL at creation; the owner sets/approves it.
 
   const { data: vendor } = await admin
     .from("vendors")
@@ -6161,11 +6159,24 @@ export async function approveWorkOrderAction(formData: FormData) {
   const woId = txt(formData, "work_order_id");
   if (!woId) redirect("/carving/work-orders?toast=Missing+work+order");
 
-  // Optional price edit at approval time.
+  // Price edit at approval time. Mig 100 — units: cft / sft / job.
   const rateRaw = txt(formData, "jobwork_rate");
   const newRate = rateRaw && Number(rateRaw) > 0 ? Number(rateRaw) : null;
   const unitRaw = txt(formData, "jobwork_unit");
-  const newUnit = unitRaw === "sft" || unitRaw === "cft" ? unitRaw : null;
+  const newUnit = unitRaw === "sft" || unitRaw === "cft" || unitRaw === "job" ? unitRaw : null;
+
+  // Mig 100 — the owner MUST set a price to approve. Use the edited rate,
+  // else whatever rate is already on the work order.
+  const { data: cur } = await admin
+    .from("carving_work_orders")
+    .select("jobwork_rate")
+    .eq("id", woId)
+    .maybeSingle();
+  const curRate = (cur as { jobwork_rate?: number | string | null } | null)?.jobwork_rate;
+  const effectiveRate = newRate ?? (curRate != null ? Number(curRate) : null);
+  if (effectiveRate == null || !(effectiveRate > 0)) {
+    redirect(`/carving/work-orders/${woId}?toast=${encodeURIComponent("Enter a price before approving.")}`);
+  }
 
   const now = new Date().toISOString();
   const patch: Record<string, unknown> = {
@@ -6174,8 +6185,8 @@ export async function approveWorkOrderAction(formData: FormData) {
     approved_by: profile.id,
     updated_at: now,
     updated_by: profile.id,
+    jobwork_rate: effectiveRate,
   };
-  if (newRate != null) patch.jobwork_rate = newRate;
   if (newUnit) patch.jobwork_unit = newUnit;
 
   const { error } = await admin
@@ -6186,10 +6197,31 @@ export async function approveWorkOrderAction(formData: FormData) {
   if (error) redirect(`/carving/work-orders?toast=${encodeURIComponent(error.message)}`);
 
   await logAudit(profile.id, "work_order_approved", "carving_work_order", woId, {
-    edited_rate: newRate,
+    rate: effectiveRate,
   });
   refreshAll();
-  redirect(`/carving/work-orders/${woId}?toast=${encodeURIComponent("Work order approved — ready to assign")}`);
+  // Mig 100 — approved → print the work-order doc + hand over to the vendor.
+  redirect(`/carving/work-orders/${woId}?toast=${encodeURIComponent("Approved — print the work order & hand it to the vendor")}`);
+}
+
+// Mig 100 — after approval, the office prints the signed work-order
+// document and hands it to the vendor; only then can slabs be sent.
+// Office roles (incl. owner) can mark it handed over.
+export async function handoverWorkOrderAction(formData: FormData) {
+  const { profile } = await requireAuth([...WO_ROLES]);
+  const admin = createAdminSupabaseClient();
+  const woId = txt(formData, "work_order_id");
+  if (!woId) redirect("/carving/work-orders?toast=Missing+work+order");
+  const now = new Date().toISOString();
+  const { error } = await admin
+    .from("carving_work_orders")
+    .update({ handed_over_at: now, handed_over_by: profile.id, updated_at: now, updated_by: profile.id })
+    .eq("id", woId)
+    .in("status", ["open", "in_progress"]);
+  if (error) redirect(`/carving/work-orders/${woId}?toast=${encodeURIComponent(error.message)}`);
+  await logAudit(profile.id, "work_order_handed_over", "carving_work_order", woId, {});
+  refreshAll();
+  redirect(`/carving/work-orders/${woId}?toast=${encodeURIComponent("Handed over to vendor — you can now send slabs")}`);
 }
 
 // Owner rejects a pending work order (with a reason). Office team can edit
@@ -6305,7 +6337,7 @@ export async function sendWorkOrderLineToVendorAction(formData: FormData) {
 
   const { data: woRow } = await admin
     .from("carving_work_orders")
-    .select("id, vendor_id, vendor_name, jobwork_rate, jobwork_unit, status")
+    .select("id, vendor_id, vendor_name, jobwork_rate, jobwork_unit, status, handed_over_at")
     .eq("id", line!.work_order_id)
     .maybeSingle();
   const wo = woRow as {
@@ -6314,11 +6346,16 @@ export async function sendWorkOrderLineToVendorAction(formData: FormData) {
     jobwork_rate: number | string | null;
     jobwork_unit: string | null;
     status: string;
+    handed_over_at: string | null;
   } | null;
   if (!wo) redirect(`/carving/work-orders/${woId}?toast=Work+order+not+found`);
   // Mig 098 — a work order must be owner-approved before any slab is sent.
   if (wo!.status !== "open" && wo!.status !== "in_progress") {
     redirect(`/carving/work-orders/${woId}?toast=${encodeURIComponent("Needs owner approval before sending")}`);
+  }
+  // Mig 100 — the work order must be handed over to the vendor first.
+  if (!wo!.handed_over_at) {
+    redirect(`/carving/work-orders/${woId}?toast=${encodeURIComponent("Hand over to the vendor first, then send")}`);
   }
 
   const rate =
@@ -6370,7 +6407,7 @@ export async function sendAllReadyWorkOrderLinesAction(formData: FormData) {
 
   const { data: woRow } = await admin
     .from("carving_work_orders")
-    .select("id, vendor_id, vendor_name, jobwork_rate, jobwork_unit, status")
+    .select("id, vendor_id, vendor_name, jobwork_rate, jobwork_unit, status, handed_over_at")
     .eq("id", woId)
     .maybeSingle();
   const wo = woRow as {
@@ -6379,11 +6416,16 @@ export async function sendAllReadyWorkOrderLinesAction(formData: FormData) {
     jobwork_rate: number | string | null;
     jobwork_unit: string | null;
     status: string;
+    handed_over_at: string | null;
   } | null;
   if (!wo) redirect(`/carving/work-orders/${woId}?toast=Work+order+not+found`);
   // Mig 098 — only send once the owner has approved the work order.
   if (wo!.status !== "open" && wo!.status !== "in_progress") {
     redirect(`/carving/work-orders/${woId}?toast=${encodeURIComponent("Needs owner approval before sending")}`);
+  }
+  // Mig 100 — the work order must be handed over to the vendor first.
+  if (!wo!.handed_over_at) {
+    redirect(`/carving/work-orders/${woId}?toast=${encodeURIComponent("Hand over to the vendor first, then send")}`);
   }
 
   const { data: lineRows } = await admin

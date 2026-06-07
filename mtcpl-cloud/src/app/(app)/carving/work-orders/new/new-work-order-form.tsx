@@ -52,7 +52,8 @@ export function NewWorkOrderForm({
   const [title, setTitle] = useState("");
   const [temple, setTemple] = useState("");
   const [rate, setRate] = useState("");
-  const [unit, setUnit] = useState<"cft" | "sft">("cft");
+  // Mig 100 — 'job' = a flat ₹ per slab (not by volume).
+  const [unit, setUnit] = useState<"cft" | "sft" | "job">("cft");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState(""); // top-level temple filter
   const [openTemple, setOpenTemple] = useState<string | null>(null);
@@ -104,9 +105,10 @@ export function NewWorkOrderForm({
     list.reduce((acc, s) => acc + (selected.has(s.id) ? 1 : 0), 0);
 
   const linesJson = JSON.stringify([...selected].map((id) => ({ slab_requirement_id: id })));
-  // Mig 098 — price is mandatory; the work order goes to the owner for
-  // approval, so it can't be created without a number to approve.
-  const canSubmit = !!vendorId && selected.size > 0 && Number(rate) > 0;
+  // Mig 100 — price is OPTIONAL at creation; the owner sets/approves it.
+  const canSubmit = !!vendorId && selected.size > 0;
+  // Selected slabs, for the review chips so the head can confirm the set.
+  const selectedSlabs = useMemo(() => slabs.filter((s) => selected.has(s.id)), [slabs, selected]);
 
   const card = { background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: 18 } as const;
   const lbl = { fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase" as const, letterSpacing: "0.06em" };
@@ -149,13 +151,16 @@ export function NewWorkOrderForm({
             <input value={temple} onChange={(e) => setTemple(e.target.value)} style={inp} />
           </label>
           <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span style={lbl}>Rate (required · needs owner approval)</span>
+            <span style={lbl}>Rate (optional · owner approves)</span>
             <div style={{ display: "flex", gap: 6 }}>
-              <input type="number" min="0" value={rate} onChange={(e) => setRate(e.target.value)} placeholder="₹/unit" style={{ ...inp, flex: 1, minWidth: 0 }} />
-              {(["cft", "sft"] as const).map((u) => (
+              <input type="number" min="0" value={rate} onChange={(e) => setRate(e.target.value)} placeholder={unit === "job" ? "₹/slab (flat)" : "₹/unit"} style={{ ...inp, flex: 1, minWidth: 0 }} />
+              {(["cft", "sft", "job"] as const).map((u) => (
                 <button key={u} type="button" onClick={() => setUnit(u)} style={{ padding: "0 12px", fontSize: 12, fontWeight: 700, textTransform: "uppercase", border: `1.5px solid ${unit === u ? "#92400e" : "var(--border)"}`, background: unit === u ? "rgba(146,64,14,0.08)" : "var(--surface)", color: unit === u ? "#92400e" : "var(--muted)", borderRadius: 8, cursor: "pointer" }}>{u}</button>
               ))}
             </div>
+            <span style={{ fontSize: 11, color: "var(--muted-light)" }}>
+              {unit === "job" ? "Job = a flat ₹ per slab (not by volume)." : `By volume — ₹ per ${unit}.`} You can leave it blank — the owner sets/approves the price.
+            </span>
           </label>
         </div>
       </section>
@@ -171,6 +176,24 @@ export function NewWorkOrderForm({
             <button type="button" onClick={() => setSelected(new Set())} style={{ fontSize: 12, fontWeight: 700, color: "#991b1b", background: "none", border: "none", cursor: "pointer" }}>Clear all</button>
           )}
         </div>
+
+        {/* Selected-slabs review — so the head can confirm the full set
+            (every picked slab, across all temples), not just a count. */}
+        {selected.size > 0 && (
+          <div style={{ padding: "10px 18px", borderBottom: "1px solid var(--border)", background: "rgba(146,64,14,0.03)" }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
+              Selected ({selectedSlabs.length}) — tap × to remove
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 132, overflowY: "auto" }}>
+              {selectedSlabs.map((s) => (
+                <span key={s.id} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, fontFamily: "ui-monospace, monospace", color: "#7c2d12", background: "rgba(146,64,14,0.08)", border: "1px solid rgba(146,64,14,0.3)", borderRadius: 999, padding: "3px 4px 3px 10px" }}>
+                  {s.id}
+                  <button type="button" onClick={() => toggle(s.id)} title="Remove" style={{ border: "none", background: "rgba(146,64,14,0.18)", color: "#7c2d12", borderRadius: "50%", width: 16, height: 16, lineHeight: 1, fontSize: 12, fontWeight: 900, cursor: "pointer", padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div style={{ padding: "12px 18px", borderBottom: "1px solid var(--border)" }}>
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="🔍  Search temples…" style={{ ...inp, width: "100%", fontSize: 14, padding: "11px 14px" }} />
@@ -229,9 +252,7 @@ export function NewWorkOrderForm({
         <div style={{ fontSize: 13, fontWeight: 700, color: selected.size ? "var(--text)" : "var(--muted)" }}>
           {selected.size === 0
             ? "Open a temple and pick at least one slab"
-            : !(Number(rate) > 0)
-              ? "Enter a price (₹/unit) — it needs owner approval"
-              : `${selected.size} slab${selected.size === 1 ? "" : "s"} · will go for owner approval`}
+            : `${selected.size} slab${selected.size === 1 ? "" : "s"} · will go for owner approval`}
         </div>
         <button type="submit" disabled={!canSubmit} style={{ padding: "11px 24px", fontSize: 14, fontWeight: 800, color: "#fff", background: canSubmit ? "#92400e" : "var(--border)", border: "none", borderRadius: 8, cursor: canSubmit ? "pointer" : "not-allowed" }}>
           Create work order

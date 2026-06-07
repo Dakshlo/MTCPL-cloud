@@ -591,11 +591,20 @@ export default async function CarvingDashboardPage({
       arr.push({ code, status: eff, isFuture: !r.slab_requirement_id, search });
       linesByWo.set(r.work_order_id, arr);
     }
+    // Mig 100 — handed-over state, fetched separately so the page keeps
+    // working before mig 100 runs (a missing column just yields "not yet
+    // handed over", which only shows the handover step).
+    const handedOverIds = new Set<string>();
+    const { data: hoRows } = await admin.from("carving_work_orders").select("id, handed_over_at");
+    for (const r of (hoRows ?? []) as Array<{ id: string; handed_over_at: string | null }>) {
+      if (r.handed_over_at) handedOverIds.add(r.id);
+    }
     const zeroCounts: WorkOrderLineCounts = { total: 0, planned: 0, sent: 0, received: 0, approved: 0 };
     workOrdersForTab = woRowsT.map((w) => ({
       ...w,
       lines: linesByWo.get(w.id) ?? [],
       counts: countsByWo.get(w.id) ?? zeroCounts,
+      handedOver: handedOverIds.has(w.id),
     }));
   }
   // Tab badge = live orders (exclude cancelled / rejected).

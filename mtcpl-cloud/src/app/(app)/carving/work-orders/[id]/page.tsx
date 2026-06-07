@@ -14,6 +14,7 @@ import {
   cancelWorkOrderAction,
   approveWorkOrderAction,
   rejectWorkOrderAction,
+  handoverWorkOrderAction,
   markCarvingCompleteManuallyAction,
 } from "../../actions";
 
@@ -122,6 +123,19 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
   // once the work order is owner-approved (status open/in_progress).
   const isOwner = profile.role === "owner" || profile.role === "developer";
   const approved = wo.status === "open" || wo.status === "in_progress";
+  // Mig 100 — handover gate. After approval the work-order doc is handed
+  // to the vendor; only then can slabs be sent. Guarded query so the page
+  // survives before mig 100 runs (missing column → treated as not handed
+  // over, which just surfaces the handover step).
+  let handedOver = false;
+  {
+    const { data: hoRow } = await admin
+      .from("carving_work_orders")
+      .select("handed_over_at")
+      .eq("id", id)
+      .maybeSingle();
+    handedOver = !!(hoRow as { handed_over_at?: string | null } | null)?.handed_over_at;
+  }
   // Lines that are cut-done + not yet sent → eligible for "Send all ready".
   const readyToSend = lines.filter(
     (l) => !l.carving_item_id && l.line_status === "planned" && l.slab_requirement_id && slabMeta.get(l.slab_requirement_id)?.status === "cut_done",
@@ -137,7 +151,7 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
           <h1 style={{ margin: "6px 0 0", fontSize: 22, fontFamily: "ui-monospace, monospace" }}>{wo.wo_number}</h1>
           <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 2 }}>
             🤝 {wo.vendor_name}{wo.title ? ` · ${wo.title}` : ""}{wo.temple ? ` · ${wo.temple}` : ""}
-            {wo.jobwork_rate != null ? ` · ₹${Number(wo.jobwork_rate)}/${wo.jobwork_unit ?? "cft"}` : ""}
+            {wo.jobwork_rate != null ? ` · ₹${Number(wo.jobwork_rate)}/${wo.jobwork_unit === "job" ? "slab" : wo.jobwork_unit ?? "cft"}` : ""}
             {cancelled ? " · CANCELLED" : ""}
           </div>
         </div>
@@ -153,14 +167,15 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
               <form action={approveWorkOrderAction} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
                 <input type="hidden" name="work_order_id" value={id} />
                 <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                  <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--muted)" }}>Price (edit if needed)</span>
-                  <input name="jobwork_rate" type="number" min="0" step="0.01" defaultValue={wo.jobwork_rate != null ? String(Number(wo.jobwork_rate)) : ""} style={{ width: 120, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: 7, fontSize: 13 }} />
+                  <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--muted)" }}>Price (required)</span>
+                  <input name="jobwork_rate" type="number" min="0" step="0.01" required defaultValue={wo.jobwork_rate != null ? String(Number(wo.jobwork_rate)) : ""} style={{ width: 120, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: 7, fontSize: 13 }} />
                 </label>
                 <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
                   <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--muted)" }}>Unit</span>
-                  <select name="jobwork_unit" defaultValue={wo.jobwork_unit === "sft" ? "sft" : "cft"} style={{ padding: "7px 9px", border: "1px solid var(--border)", borderRadius: 7, fontSize: 13 }}>
-                    <option value="cft">cft</option>
-                    <option value="sft">sft</option>
+                  <select name="jobwork_unit" defaultValue={wo.jobwork_unit === "sft" ? "sft" : wo.jobwork_unit === "job" ? "job" : "cft"} style={{ padding: "7px 9px", border: "1px solid var(--border)", borderRadius: 7, fontSize: 13 }}>
+                    <option value="cft">/cft</option>
+                    <option value="sft">/sft</option>
+                    <option value="job">/slab (job)</option>
                   </select>
                 </label>
                 <button type="submit" style={{ padding: "9px 18px", fontSize: 13, fontWeight: 800, color: "#fff", background: "#15803d", border: "none", borderRadius: 8, cursor: "pointer" }}>✓ Approve</button>
@@ -188,8 +203,23 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
         </div>
       )}
 
+      {/* Mig 100 — approved, awaiting handover: print the work-order doc,
+          get it signed, hand it to the vendor. Sending unlocks after. */}
+      {approved && !cancelled && !handedOver && (
+        <div style={{ background: "rgba(22,163,74,0.07)", border: "1px solid rgba(22,163,74,0.35)", borderRadius: 12, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: "#15803d" }}>✅ Approved — print the work order, get it signed, and hand it to {wo.vendor_name}. Slabs can be sent only after handover.</div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <a href={`/api/carving/work-order-pdf/${id}`} target="_blank" rel="noopener noreferrer" style={{ padding: "9px 16px", fontSize: 13, fontWeight: 700, color: "#92400e", background: "rgba(146,64,14,0.1)", border: "1px solid rgba(146,64,14,0.35)", borderRadius: 8, textDecoration: "none" }}>⬇ Download work order document</a>
+            <form action={handoverWorkOrderAction}>
+              <input type="hidden" name="work_order_id" value={id} />
+              <button type="submit" style={{ padding: "9px 18px", fontSize: 13, fontWeight: 800, color: "#fff", background: "#15803d", border: "none", borderRadius: 8, cursor: "pointer" }}>🤝 Handover to vendor</button>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Send-all bar — sends every cut-done, un-sent slab to the vendor at once. */}
-      {approved && !cancelled && readyToSend > 0 && (
+      {approved && handedOver && !cancelled && readyToSend > 0 && (
         <form action={sendAllReadyWorkOrderLinesAction} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", background: "rgba(146,64,14,0.06)", border: "1px solid rgba(146,64,14,0.3)", borderRadius: 12, padding: "12px 16px" }}>
           <input type="hidden" name="work_order_id" value={id} />
           <div style={{ fontSize: 13, fontWeight: 700, color: "#7c2d12" }}>
@@ -280,14 +310,14 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
                       )}
                     </>
                   ) : cancelled ? null : l.slab_requirement_id && slab?.status === "cut_done" ? (
-                    approved ? (
+                    approved && handedOver ? (
                       <form action={sendWorkOrderLineToVendorAction}>
                         <input type="hidden" name="line_id" value={l.id} />
                         <input type="hidden" name="work_order_id" value={id} />
                         <button type="submit" style={btn("#92400e")}>📤 Send to vendor</button>
                       </form>
                     ) : (
-                      <span style={{ fontSize: 11, color: "#b45309", fontWeight: 600 }}>⏳ approve WO to send</span>
+                      <span style={{ fontSize: 11, color: "#b45309", fontWeight: 600 }}>{approved ? "⏳ hand over WO to send" : "⏳ approve WO to send"}</span>
                     )
                   ) : l.slab_requirement_id ? (
                     <span style={{ fontSize: 11, color: "var(--muted)" }}>⏳ waiting to be cut</span>

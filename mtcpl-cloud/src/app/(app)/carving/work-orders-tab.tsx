@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { approveWorkOrderAction, rejectWorkOrderAction } from "./actions";
+import { approveWorkOrderAction, rejectWorkOrderAction, handoverWorkOrderAction } from "./actions";
 
 /**
  * Work Orders tab (Daksh June 2026) — renders inside /carving in Outsource
@@ -52,6 +52,8 @@ export type WorkOrderLineChip = {
 export type WorkOrderTabRow = WorkOrderRow & {
   lines: WorkOrderLineChip[];
   counts: WorkOrderLineCounts;
+  /** Mig 100 — approved + handed over to the vendor (then sends unlock). */
+  handedOver: boolean;
 };
 
 const STATUS_META: Record<string, { label: string; emoji: string; bg: string; fg: string }> = {
@@ -97,7 +99,8 @@ function fmtRate(rate: number | string | null, unit: string | null): string {
   if (rate == null) return "—";
   const n = Number(rate);
   if (!Number.isFinite(n)) return "—";
-  return `₹${n.toLocaleString("en-IN")}/${unit === "sft" ? "sft" : "cft"}`;
+  const u = unit === "job" ? "slab" : unit === "sft" ? "sft" : "cft";
+  return `₹${n.toLocaleString("en-IN")}/${u}`;
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -340,14 +343,15 @@ export function WorkOrdersTab({ wos, isOwner }: { wos: WorkOrderTabRow[]; isOwne
                           <form action={approveWorkOrderAction} style={{ display: "flex", gap: 6, alignItems: "flex-end", flexWrap: "wrap" }}>
                             <input type="hidden" name="work_order_id" value={w.id} />
                             <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                              <span style={lbl}>Price</span>
-                              <input name="jobwork_rate" type="number" min="0" step="0.01" defaultValue={w.jobwork_rate != null ? String(Number(w.jobwork_rate)) : ""} style={{ width: 84, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 7, fontSize: 13 }} />
+                              <span style={lbl}>Price (required)</span>
+                              <input name="jobwork_rate" type="number" min="0" step="0.01" required defaultValue={w.jobwork_rate != null ? String(Number(w.jobwork_rate)) : ""} style={{ width: 84, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 7, fontSize: 13 }} />
                             </label>
                             <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
                               <span style={lbl}>Unit</span>
-                              <select name="jobwork_unit" defaultValue={w.jobwork_unit === "sft" ? "sft" : "cft"} style={{ padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 7, fontSize: 13 }}>
-                                <option value="cft">cft</option>
-                                <option value="sft">sft</option>
+                              <select name="jobwork_unit" defaultValue={w.jobwork_unit === "sft" ? "sft" : w.jobwork_unit === "job" ? "job" : "cft"} style={{ padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 7, fontSize: 13 }}>
+                                <option value="cft">/cft</option>
+                                <option value="sft">/sft</option>
+                                <option value="job">/slab (job)</option>
                               </select>
                             </label>
                             <button type="submit" style={{ padding: "8px 14px", fontSize: 12.5, fontWeight: 700, color: "#fff", background: "#15803d", border: "none", borderRadius: 8, cursor: "pointer" }}>✓ Approve</button>
@@ -361,6 +365,22 @@ export function WorkOrdersTab({ wos, isOwner }: { wos: WorkOrderTabRow[]; isOwne
                       ) : isPending && !isOwner ? (
                         <div style={{ fontSize: 12, color: "#b45309", fontWeight: 600 }}>⏳ Waiting for owner price approval.</div>
                       ) : null}
+
+                      {/* Mig 100 — approved but not yet handed over: print the
+                          work-order document + hand it to the vendor before
+                          slabs can be sent. */}
+                      {(w.status === "open" || w.status === "in_progress") && !w.handedOver && (
+                        <div style={{ marginTop: 4, padding: 10, background: "rgba(22,163,74,0.06)", border: "1px solid rgba(22,163,74,0.3)", borderRadius: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: "#15803d" }}>✅ Approved — hand the work order to {vendor} to start.</div>
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                            <a href={`/api/carving/work-order-pdf/${w.id}`} target="_blank" rel="noopener noreferrer" style={{ padding: "7px 12px", fontSize: 12.5, fontWeight: 700, color: "#92400e", background: "rgba(146,64,14,0.1)", border: "1px solid rgba(146,64,14,0.35)", borderRadius: 8, textDecoration: "none" }}>⬇ Download work order</a>
+                            <form action={handoverWorkOrderAction}>
+                              <input type="hidden" name="work_order_id" value={w.id} />
+                              <button type="submit" style={{ padding: "7px 14px", fontSize: 12.5, fontWeight: 700, color: "#fff", background: "#15803d", border: "none", borderRadius: 8, cursor: "pointer" }}>🤝 Handover to vendor</button>
+                            </form>
+                          </div>
+                        </div>
+                      )}
 
                       <Link href={`/carving/work-orders/${w.id}`} style={{ marginTop: "auto", alignSelf: "flex-start", fontSize: 12, fontWeight: 700, color: "#92400e", textDecoration: "none" }}>
                         Open order →
