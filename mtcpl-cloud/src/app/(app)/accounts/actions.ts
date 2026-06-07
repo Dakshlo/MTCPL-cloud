@@ -98,6 +98,119 @@ function validateBillDate(billDate: string): string | null {
 }
 
 // ──────────────────────────────────────────────────────────────────
+// Mig 099 — scanned bill documents (photo / PDF) in private Storage
+// ──────────────────────────────────────────────────────────────────
+//
+// A supplier's bill scan is uploaded (optionally) at creation and shown
+// on the bill detail page. Stored in the private `bill_documents` bucket;
+// the path is saved on bills.document_path. Reads go through a short-lived
+// signed URL minted server-side (same pattern as carving review photos).
+const BILL_DOC_BUCKET = "bill_documents";
+const BILL_DOC_MAX_BYTES = 10 * 1024 * 1024; // 10 MB
+const BILL_DOC_MIME_ALLOW = new Set<string>([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+  "application/pdf",
+]);
+function billDocExt(mime: string): string {
+  switch (mime) {
+    case "image/jpeg":
+      return "jpg";
+    case "image/png":
+      return "png";
+    case "image/webp":
+      return "webp";
+    case "image/heic":
+      return "heic";
+    case "image/heif":
+      return "heif";
+    case "application/pdf":
+      return "pdf";
+    default:
+      return "bin";
+  }
+}
+/** Validate a candidate bill-document file (mime + size). Returns a
+ *  user-facing error string, or null when OK. */
+function validateBillDocument(file: File): string | null {
+  const mime = (file.type || "").toLowerCase();
+  if (!BILL_DOC_MIME_ALLOW.has(mime)) {
+    return "Bill document must be a photo (JPG / PNG / WebP / HEIC) or a PDF.";
+  }
+  if (file.size === 0) return "Bill document file is empty.";
+  if (file.size > BILL_DOC_MAX_BYTES) return "Bill document too large (max 10 MB).";
+  return null;
+}
+/** Upload a bill document to the private bucket; returns the stored path +
+ *  mime. Throws on failure. */
+async function uploadBillDocument(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  billId: string,
+  file: File,
+): Promise<{ path: string; mime: string }> {
+  const mime = (file.type || "").toLowerCase();
+  const err = validateBillDocument(file);
+  if (err) throw new Error(err);
+  const path = `${billId}/${randomUUID()}.${billDocExt(mime)}`;
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const { error } = await admin.storage
+    .from(BILL_DOC_BUCKET)
+    .upload(path, buffer, { contentType: mime, cacheControl: "3600", upsert: false });
+  if (error) throw new Error(`Document upload failed: ${error.message}`);
+  return { path, mime };
+}
+/** Mint a short-lived signed URL to view a bill document (any authed
+ *  user). Returns null if the path is missing/invalid. */
+export async function getSignedBillDocumentUrl(path: string): Promise<string | null> {
+  await requireAuth();
+  if (!path || typeof path !== "string") return null;
+  const admin = createAdminSupabaseClient();
+  const { data, error } = await admin.storage.from(BILL_DOC_BUCKET).createSignedUrl(path, 3600);
+  if (error || !data?.signedUrl) return null;
+  return data.signedUrl;
+}
+/** Owner/dev attach or replace a bill's scanned document from the detail
+ *  page. Redirect-style (used by a plain <form action>). */
+export async function uploadBillDocumentAction(formData: FormData) {
+  const { profile } = await requireAuth();
+  const billId = String(formData.get("bill_id") || "").trim();
+  // Per Daksh — attach/replace later is owner-only for now.
+  if (profile.role !== "owner" && profile.role !== "developer") {
+    redirect(`/accounts/bills/${billId}?docerr=${encodeURIComponent("Only the owner can attach a bill document.")}`);
+  }
+  if (!billId) redirect("/accounts/bills?docerr=Missing+bill");
+  const doc = formData.get("bill_document");
+  if (!(doc instanceof File) || doc.size === 0) {
+    redirect(`/accounts/bills/${billId}?docerr=${encodeURIComponent("Pick a file to upload.")}`);
+  }
+  const file = doc as File;
+  const err = validateBillDocument(file);
+  if (err) redirect(`/accounts/bills/${billId}?docerr=${encodeURIComponent(err)}`);
+  const admin = createAdminSupabaseClient();
+  try {
+    const meta = await uploadBillDocument(admin, billId, file);
+    await admin
+      .from("bills")
+      .update({
+        document_path: meta.path,
+        document_mime: meta.mime,
+        document_uploaded_at: new Date().toISOString(),
+        document_uploaded_by: profile.id,
+      })
+      .eq("id", billId);
+    await logAudit(profile.id, "bill_document_uploaded", "bill", billId, { mime: meta.mime });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    redirect(`/accounts/bills/${billId}?docerr=${encodeURIComponent(msg)}`);
+  }
+  await refreshAccountsPaths();
+  redirect(`/accounts/bills/${billId}?doc=1`);
+}
+
+// ──────────────────────────────────────────────────────────────────
 // Bill submission
 // ──────────────────────────────────────────────────────────────────
 
@@ -192,6 +305,14 @@ export async function submitBillAction(
     return { ok: false, error: "TCS% must be between 0 and 100." };
   }
 
+  // Mig 099 — validate the optional scanned bill document up front so a
+  // bad file is rejected before the bill row is created.
+  const billDocFile = formData.get("bill_document");
+  if (billDocFile instanceof File && billDocFile.size > 0) {
+    const docErr = validateBillDocument(billDocFile);
+    if (docErr) return { ok: false, error: docErr };
+  }
+
   try {
     const { data: inserted, error } = await supabase
       .from("bills")
@@ -234,6 +355,27 @@ export async function submitBillAction(
     const billId = inserted.id as string;
     const token = inserted.token as string;
     const totalAmount = Number(inserted.amount_total ?? 0);
+
+    // Mig 099 — now that we have the bill id (for the storage path), upload
+    // the attached scan and stamp the document columns. Non-fatal: the bill
+    // already exists, so a storage hiccup just means "no document yet" and
+    // the owner can attach it later from the detail page.
+    if (billDocFile instanceof File && billDocFile.size > 0) {
+      try {
+        const meta = await uploadBillDocument(supabase, billId, billDocFile);
+        await supabase
+          .from("bills")
+          .update({
+            document_path: meta.path,
+            document_mime: meta.mime,
+            document_uploaded_at: new Date().toISOString(),
+            document_uploaded_by: profile.id,
+          })
+          .eq("id", billId);
+      } catch (e) {
+        console.warn("[submitBillAction] bill document upload failed (non-fatal)", e);
+      }
+    }
 
     void Promise.all([
       logAudit(profile.id, "bill_submitted", "bill", billId, {

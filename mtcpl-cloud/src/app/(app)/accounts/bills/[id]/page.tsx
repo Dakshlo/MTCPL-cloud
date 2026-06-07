@@ -16,6 +16,8 @@ import {
   cancelBillAction,
   clearPartialRejectionFormAction,
   releaseBillHoldFormAction,
+  getSignedBillDocumentUrl,
+  uploadBillDocumentAction,
 } from "../../actions";
 import { RejectBillForm } from "./reject-bill-form";
 import { ApproveBillButton } from "./approve-bill-button";
@@ -37,7 +39,7 @@ import {
 } from "../../_ui/components";
 
 type Params = Promise<{ id: string }>;
-type SearchParams = Promise<{ error?: string; saved?: string; just_submitted?: string }>;
+type SearchParams = Promise<{ error?: string; saved?: string; just_submitted?: string; doc?: string; docerr?: string }>;
 
 export default async function BillDetailPage({
   params,
@@ -79,6 +81,21 @@ export default async function BillDetailPage({
     : ((bill.bill_vendors as VendorInfo) ?? null);
 
   const profilesMap = await getProfilesMap();
+
+  // Mig 099 — scanned bill document. Fetched in a SEPARATE query (not the
+  // main select) so the bill detail page keeps working even if migration
+  // 099 hasn't run yet — a missing column just yields a null here instead
+  // of erroring the whole page. Mint a short-lived signed URL for viewing.
+  const { data: docRow } = await supabase
+    .from("bills")
+    .select("document_path, document_mime")
+    .eq("id", id)
+    .maybeSingle();
+  const billDocPath = ((docRow as { document_path?: string | null } | null)?.document_path) ?? null;
+  const billDocMime = ((docRow as { document_mime?: string | null } | null)?.document_mime) ?? null;
+  const billDocUrl = billDocPath ? await getSignedBillDocumentUrl(billDocPath) : null;
+  const billDocIsPdf = (billDocMime ?? "").includes("pdf");
+  const isOwnerDev = profile.role === "owner" || profile.role === "developer";
 
   // Mig 073 — vendor advance applications on this bill (active ones
   // only). Plus the vendor's remaining advance credit balance so the
@@ -1210,6 +1227,72 @@ export default async function BillDetailPage({
             <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, whiteSpace: "pre-wrap", color: "var(--text)" }}>
               {bill.description}
             </p>
+          </Section>
+
+          {/* Mig 099 — scanned bill document (photo / PDF). Visible to anyone
+              who can open the bill; only the owner/dev can attach or replace. */}
+          <Section title="Bill document" subtitle={billDocPath ? "Scanned copy of the supplier's bill" : undefined}>
+            {sp.docerr && (
+              <div style={{ marginBottom: 10, padding: "10px 12px", background: ACCOUNTS_TOKENS.dangerLight, border: `1px solid ${ACCOUNTS_TOKENS.danger}`, borderRadius: 8, fontSize: 13, color: ACCOUNTS_TOKENS.danger }}>
+                {sp.docerr}
+              </div>
+            )}
+            {billDocUrl ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {billDocIsPdf ? (
+                  <iframe
+                    src={billDocUrl}
+                    title="Bill document"
+                    style={{ width: "100%", height: 480, border: "1px solid var(--border)", borderRadius: 10, background: "#fff" }}
+                  />
+                ) : (
+                  <a href={billDocUrl} target="_blank" rel="noopener noreferrer">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={billDocUrl}
+                      alt="Scanned bill"
+                      style={{ maxWidth: "100%", maxHeight: 480, borderRadius: 10, border: "1px solid var(--border)", objectFit: "contain", background: "#fff" }}
+                    />
+                  </a>
+                )}
+                <a
+                  href={billDocUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ fontSize: 13, fontWeight: 700, color: ACCOUNTS_TOKENS.accent, textDecoration: "none" }}
+                >
+                  ⬇ Open / download {billDocIsPdf ? "PDF" : "image"} (new tab)
+                </a>
+              </div>
+            ) : billDocPath ? (
+              <p style={{ margin: 0, fontSize: 13, color: "var(--muted)" }}>
+                Document attached, but the preview link couldn&apos;t be generated right now — refresh to retry.
+              </p>
+            ) : (
+              <p style={{ margin: 0, fontSize: 13, color: "var(--muted)" }}>No document attached to this bill.</p>
+            )}
+
+            {isOwnerDev && (
+              <form
+                action={uploadBillDocumentAction}
+                style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border)", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}
+              >
+                <input type="hidden" name="bill_id" value={bill.id} />
+                <input
+                  type="file"
+                  name="bill_document"
+                  accept="image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf"
+                  required
+                  style={{ fontSize: 13 }}
+                />
+                <button
+                  type="submit"
+                  style={{ padding: "8px 16px", fontSize: 13, fontWeight: 700, color: "#fff", background: ACCOUNTS_TOKENS.accent, border: "none", borderRadius: 8, cursor: "pointer" }}
+                >
+                  {billDocPath ? "Replace document" : "Attach document"}
+                </button>
+              </form>
+            )}
           </Section>
 
           {/* Rejection note */}

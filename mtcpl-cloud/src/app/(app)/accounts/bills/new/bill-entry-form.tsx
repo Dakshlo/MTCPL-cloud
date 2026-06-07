@@ -135,6 +135,9 @@ export function BillEntryForm({
   const [billDate, setBillDate] = useState(initialValues?.bill_date ?? today);
   const [vendorBillNo, setVendorBillNo] = useState(initialValues?.vendor_bill_no ?? "");
   const [description, setDescription] = useState(initialValues?.description ?? "");
+  // Mig 099 — optional scanned bill document (photo / PDF), attached at
+  // creation. Owners can add/replace it later from the bill detail page.
+  const [billDoc, setBillDoc] = useState<File | null>(null);
   const [costHead, setCostHead] = useState(initialValues?.cost_head ?? "");
   const [subtotal, setSubtotal] = useState<string>(
     initialValues?.amount_subtotal != null ? String(initialValues.amount_subtotal) : "",
@@ -294,6 +297,9 @@ export function BillEntryForm({
     } else {
       formData.set("block_cft", "");
     }
+    // Mig 099 — attach the scanned bill document on creation (optional).
+    // Edits don't carry it (owners replace it from the detail page).
+    if (mode !== "edit" && billDoc) formData.set("bill_document", billDoc);
 
     startTransition(async () => {
       const result = await submitAction(formData);
@@ -555,6 +561,27 @@ export function BillEntryForm({
               disabled={fieldsDisabled}
             />
           </FormField>
+          {/* Mig 099 — scanned bill document (photo / PDF). Optional, create
+              mode only; owners add/replace later from the bill detail. */}
+          {mode !== "edit" && (
+            <FormField
+              label="Bill document (photo / PDF)"
+              hint="Optional — attach a scan or photo of the supplier's bill. JPG, PNG, WebP, HEIC or PDF, up to 10 MB."
+            >
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf"
+                onChange={(e) => setBillDoc(e.target.files?.[0] ?? null)}
+                style={INPUT_STYLE}
+                disabled={fieldsDisabled}
+              />
+              {billDoc && (
+                <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--muted)" }}>
+                  📎 {billDoc.name} ({(billDoc.size / 1024 / 1024).toFixed(2)} MB)
+                </p>
+              )}
+            </FormField>
+          )}
         </FormSection>
 
         {/* Amount + Taxes — disabled until a vendor is picked */}
