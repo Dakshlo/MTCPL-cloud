@@ -92,3 +92,40 @@ export async function deleteWorkOrderDocAction(formData: FormData) {
   revalidatePath(ROUTE);
   redirect(toastUrl("Record deleted."));
 }
+
+/** Save a reusable vendor (name + address) for quick fill. */
+export async function createWoVendorAction(formData: FormData) {
+  const { profile } = await requireAuth();
+  if (!isAllowed(profile.role)) redirect(toastUrl("Not allowed."));
+  const name = String(formData.get("name") || "").trim();
+  const address = String(formData.get("address") || "").trim() || null;
+  if (!name) redirect(toastUrl("Vendor name is required."));
+
+  const admin = createAdminSupabaseClient();
+  const { data: created, error } = await admin
+    .from("invoicing_wo_vendors")
+    .insert({ name, address, created_by: profile.id })
+    .select("id")
+    .single();
+  if (error || !created) redirect(toastUrl(error?.message ?? "Failed to save vendor."));
+  await logAudit(profile.id, "wo_vendor_created", "invoicing_wo_vendor", created.id, { name });
+  revalidatePath(ROUTE);
+  // Land back with the new vendor pre-selected (its name + address auto-fill).
+  redirect(`${ROUTE}?vendor_added=${created.id}`);
+}
+
+/** Owner/dev — delete a saved vendor. */
+export async function deleteWoVendorAction(formData: FormData) {
+  const { profile } = await requireAuth();
+  if (profile.role !== "owner" && profile.role !== "developer") {
+    redirect(toastUrl("Only the owner can delete vendors."));
+  }
+  const id = String(formData.get("id") || "").trim();
+  if (!id) redirect(toastUrl("Missing vendor."));
+  const admin = createAdminSupabaseClient();
+  const { error } = await admin.from("invoicing_wo_vendors").delete().eq("id", id);
+  if (error) redirect(toastUrl(error.message));
+  await logAudit(profile.id, "wo_vendor_deleted", "invoicing_wo_vendor", id, {});
+  revalidatePath(ROUTE);
+  redirect(toastUrl("Vendor deleted."));
+}

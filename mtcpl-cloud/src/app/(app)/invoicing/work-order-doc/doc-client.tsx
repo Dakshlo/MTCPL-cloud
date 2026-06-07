@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { createWorkOrderDocAction, deleteWorkOrderDocAction } from "./actions";
+import { useEffect, useMemo, useState } from "react";
+import { createWorkOrderDocAction, deleteWorkOrderDocAction, createWoVendorAction } from "./actions";
 import { ConfirmButton } from "@/components/confirm-button";
 
 export type DocRecord = {
@@ -15,6 +15,7 @@ export type DocRecord = {
   rate: number;
   total: number;
 };
+export type SavedVendor = { id: string; name: string; address: string };
 
 function inr(n: number): string {
   return "₹" + (Math.round(n * 100) / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -52,20 +53,49 @@ function Field({ label, children, flex }: { label: string; children: React.React
 
 export function WorkOrderDocClient({
   records,
+  vendors,
   toast,
   createdId,
+  vendorAddedId,
   canDelete,
 }: {
   records: DocRecord[];
+  vendors: SavedVendor[];
   toast: string | null;
   createdId: string | null;
+  vendorAddedId: string | null;
   canDelete: boolean;
 }) {
   const [unit, setUnit] = useState<"cft" | "sft">("cft");
   const [qty, setQty] = useState("");
   const [rate, setRate] = useState("");
+  const [vendorName, setVendorName] = useState("");
+  const [address, setAddress] = useState("");
+  const [selectedVendorId, setSelectedVendorId] = useState("");
+  const [showAddVendor, setShowAddVendor] = useState(false);
+
+  // If a vendor was just added, pre-select it + fill name/address.
+  useEffect(() => {
+    if (!vendorAddedId) return;
+    const v = vendors.find((x) => x.id === vendorAddedId);
+    if (v) {
+      setSelectedVendorId(v.id);
+      setVendorName(v.name);
+      setAddress(v.address);
+    }
+  }, [vendorAddedId, vendors]);
+
+  function pickVendor(id: string) {
+    setSelectedVendorId(id);
+    const v = vendors.find((x) => x.id === id);
+    if (v) {
+      setVendorName(v.name);
+      setAddress(v.address);
+    }
+  }
+
   const total = (Number(qty) || 0) * (Number(rate) || 0);
-  const canSubmit = (Number(qty) || 0) > 0 && (Number(rate) || 0) > 0;
+  const canSubmit = vendorName.trim().length > 0 && (Number(qty) || 0) > 0 && (Number(rate) || 0) > 0;
 
   const justCreated = useMemo(() => records.find((r) => r.id === createdId) ?? null, [records, createdId]);
 
@@ -92,6 +122,29 @@ export function WorkOrderDocClient({
         </div>
       )}
 
+      {/* Saved-vendor picker — pick to auto-fill name + address, or add one. */}
+      <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "12px 14px" }}>
+        <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: "1 1 280px" }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Saved vendor (quick fill)</span>
+          <select value={selectedVendorId} onChange={(e) => pickVendor(e.target.value)} style={inputStyle}>
+            <option value="">— none / type below —</option>
+            {vendors.map((v) => (
+              <option key={v.id} value={v.id}>{v.name}</option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          onClick={() => setShowAddVendor(true)}
+          style={{ padding: "9px 16px", fontSize: 13, fontWeight: 700, color: "var(--text)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}
+        >
+          ＋ Add vendor
+        </button>
+        <span style={{ fontSize: 11, color: "var(--muted)", flex: "1 1 100%" }}>
+          Pick a saved vendor to auto-fill name &amp; address, or just type them below.
+        </span>
+      </div>
+
       {/* Form */}
       <form
         action={createWorkOrderDocAction}
@@ -99,7 +152,14 @@ export function WorkOrderDocClient({
       >
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
           <Field label="Vendor *" flex="2 1 280px">
-            <input name="vendor" required placeholder="e.g. Mr. Pintu jii" style={inputStyle} />
+            <input
+              name="vendor"
+              required
+              value={vendorName}
+              onChange={(e) => { setVendorName(e.target.value); setSelectedVendorId(""); }}
+              placeholder="e.g. Mr. Pintu jii"
+              style={inputStyle}
+            />
           </Field>
           <Field label="Date" flex="0 1 160px">
             <input name="doc_date" type="date" defaultValue={todayISO()} style={inputStyle} />
@@ -109,7 +169,13 @@ export function WorkOrderDocClient({
           </Field>
         </div>
         <Field label="Address">
-          <input name="address" placeholder="Vendor address" style={inputStyle} />
+          <input
+            name="address"
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+            placeholder="Vendor address"
+            style={inputStyle}
+          />
         </Field>
         <Field label="Job work description">
           <textarea name="job_description" rows={2} placeholder="e.g. Carving of pillars — black granite" style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }} />
@@ -195,6 +261,34 @@ export function WorkOrderDocClient({
           </table>
         </div>
       </div>
+
+      {/* Add-vendor modal (separate form — not nested in the doc form) */}
+      {showAddVendor && (
+        <div
+          onClick={() => setShowAddVendor(false)}
+          style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(15,23,42,0.5)", backdropFilter: "blur(3px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "8vh 16px", overflowY: "auto" }}
+        >
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 440, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 16, padding: 22, boxShadow: "0 24px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <h2 style={{ margin: 0, fontSize: 18 }}>Add vendor</h2>
+              <button type="button" onClick={() => setShowAddVendor(false)} style={{ background: "none", border: "none", fontSize: 24, lineHeight: 1, cursor: "pointer", color: "var(--muted)" }} aria-label="Close">×</button>
+            </div>
+            <form action={createWoVendorAction} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <Field label="Vendor name *">
+                <input name="name" required placeholder="e.g. Mr. Pintu jii" style={inputStyle} />
+              </Field>
+              <Field label="Address">
+                <input name="address" placeholder="Vendor address" style={inputStyle} />
+              </Field>
+              <div style={{ fontSize: 11, color: "var(--muted)" }}>Saving will pre-select this vendor on the form.</div>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <button type="button" onClick={() => setShowAddVendor(false)} style={{ padding: "9px 16px", fontSize: 13, fontWeight: 700, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, cursor: "pointer", color: "var(--text)" }}>Cancel</button>
+                <button type="submit" style={{ padding: "9px 20px", fontSize: 13, fontWeight: 800, color: "#fff", background: "var(--gold-dark)", border: "none", borderRadius: 8, cursor: "pointer" }}>Save vendor</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

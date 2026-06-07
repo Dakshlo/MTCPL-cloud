@@ -1,14 +1,14 @@
 import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { WorkOrderDocClient, type DocRecord } from "./doc-client";
+import { WorkOrderDocClient, type DocRecord, type SavedVendor } from "./doc-client";
 
 export const dynamic = "force-dynamic";
 
 // Invoicing department audience.
 const ALLOWED = ["developer", "owner", "accountant_star"];
 
-type SearchParams = Promise<{ toast?: string; created?: string }>;
+type SearchParams = Promise<{ toast?: string; created?: string; vendor_added?: string }>;
 
 export default async function WorkOrderDocPage({ searchParams }: { searchParams: SearchParams }) {
   const { profile } = await requireAuth();
@@ -43,6 +43,15 @@ export default async function WorkOrderDocPage({ searchParams }: { searchParams:
     if (data.length < 1000) break;
   }
 
+  // Saved vendors (name + address) for quick fill.
+  const { data: vendorRows } = await admin
+    .from("invoicing_wo_vendors")
+    .select("id, name, address")
+    .order("name", { ascending: true });
+  const vendors: SavedVendor[] = ((vendorRows ?? []) as Array<{ id: string; name: string; address: string | null }>).map(
+    (v) => ({ id: v.id, name: v.name, address: v.address ?? "" }),
+  );
+
   const records: DocRecord[] = rows.map((r) => ({
     id: r.id,
     date: r.doc_date ?? (r.created_at ? r.created_at.slice(0, 10) : ""),
@@ -66,8 +75,10 @@ export default async function WorkOrderDocPage({ searchParams }: { searchParams:
       </div>
       <WorkOrderDocClient
         records={records}
+        vendors={vendors}
         toast={sp?.toast ?? null}
         createdId={sp?.created ?? null}
+        vendorAddedId={sp?.vendor_added ?? null}
         canDelete={profile.role === "owner" || profile.role === "developer"}
       />
     </div>
