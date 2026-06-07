@@ -5,8 +5,11 @@
 // order is approved: company letterhead (logo + footer) as background,
 // a per-slab table, the AGREED rate + total CFT/SFT (no invoice-style
 // grand total), jobwork terms, and two signature lines (our authorised
-// sign + vendor sign). Built with pdf-lib on /public/letterhead.pdf,
-// mirroring the payment-voucher generator.
+// sign + vendor sign). Built with pdf-lib on /public/letterhead.pdf.
+//
+// EVERY page carries a compact identifying header (WO number + vendor +
+// date + page no.) so a signature page that flows onto its own sheet is
+// never an unidentified orphan.
 // ──────────────────────────────────────────────────────────────────
 
 import path from "node:path";
@@ -37,6 +40,8 @@ const PAGE_H = 792;
 const MARGIN_X = 54;
 const TOP = 156; // below the letterhead's logo + accent line
 const BOTTOM = 96; // above the letterhead footer
+const HEADER_Y = PAGE_H - TOP; // baseline of the per-page identity header
+const CONTENT_TOP = HEADER_Y - 36; // content starts below the header band
 
 // pdf-lib StandardFonts cover WinAnsi only — swap the rupee glyph for
 // "Rs." and drop anything outside Latin-1.
@@ -93,43 +98,33 @@ export async function buildWorkOrderPdf(inp: WorkOrderPdfInput): Promise<Uint8Ar
   const muted = rgb(0.4, 0.4, 0.4);
   const accent = rgb(0.486, 0.231, 0.047);
 
+  let pageNum = 0;
+  // Every page: letterhead background + a compact identity header so a
+  // signature page is never an unidentified orphan.
   const newPage = (): PDFPage => {
     const p = pdf.addPage([PAGE_W, PAGE_H]);
     if (lhEmbed) p.drawPage(lhEmbed, { x: 0, y: 0, width: PAGE_W, height: PAGE_H });
+    pageNum += 1;
+    p.drawText(san(`WORK ORDER  ${inp.woNumber}`), { x: MARGIN_X, y: HEADER_Y, size: 13, font: bold, color: accent });
+    p.drawText(san(`Page ${pageNum}`), { x: PAGE_W - MARGIN_X - 48, y: HEADER_Y, size: 9, font, color: muted });
+    p.drawText(san(`${inp.vendorName}  -  ${fmtDate(inp.dateIso)}${inp.temple ? `  -  ${inp.temple}` : ""}${inp.title ? `  -  ${inp.title}` : ""}`), {
+      x: MARGIN_X,
+      y: HEADER_Y - 14,
+      size: 8.5,
+      font,
+      color: muted,
+    });
+    p.drawLine({ start: { x: MARGIN_X, y: HEADER_Y - 22 }, end: { x: PAGE_W - MARGIN_X, y: HEADER_Y - 22 }, thickness: 1, color: accent });
     return p;
   };
 
   let page = newPage();
-  let y = PAGE_H - TOP;
+  let y = CONTENT_TOP;
   const text = (s: string, x: number, yy: number, size: number, f: PDFFont = font, color = ink) =>
     page.drawText(san(s), { x, y: yy, size, font: f, color });
 
-  // Title
-  text("WORK ORDER - JOBWORK", MARGIN_X, y, 16, bold, accent);
-  y -= 6;
-  page.drawLine({ start: { x: MARGIN_X, y }, end: { x: PAGE_W - MARGIN_X, y }, thickness: 1, color: accent });
-  y -= 20;
-
-  // Meta (two columns)
-  const rightX = PAGE_W / 2 + 10;
-  text("Work Order:", MARGIN_X, y, 9, bold, muted);
-  text(inp.woNumber, MARGIN_X + 72, y, 10, bold);
-  text("Date:", rightX, y, 9, bold, muted);
-  text(fmtDate(inp.dateIso), rightX + 40, y, 10);
-  y -= 16;
-  text("Vendor:", MARGIN_X, y, 9, bold, muted);
-  text(inp.vendorName, MARGIN_X + 72, y, 10, bold);
-  if (inp.temple) {
-    text("Temple:", rightX, y, 9, bold, muted);
-    text(inp.temple, rightX + 40, y, 10);
-  }
-  y -= 16;
-  if (inp.title) {
-    text("Work:", MARGIN_X, y, 9, bold, muted);
-    text(inp.title, MARGIN_X + 72, y, 10);
-    y -= 16;
-  }
-  y -= 8;
+  text("Jobwork handover", MARGIN_X, y, 11, bold, ink);
+  y -= 18;
 
   // Slab table
   const cols = {
@@ -157,7 +152,7 @@ export async function buildWorkOrderPdf(inp: WorkOrderPdfInput): Promise<Uint8Ar
   for (const s of inp.slabs) {
     if (y < BOTTOM + 40) {
       page = newPage();
-      y = PAGE_H - TOP;
+      y = CONTENT_TOP;
       hdr(y);
       y -= 21;
     }
@@ -178,6 +173,10 @@ export async function buildWorkOrderPdf(inp: WorkOrderPdfInput): Promise<Uint8Ar
   y -= 16;
 
   // Totals — slab count + total CFT/SFT + agreed rate. NO grand total.
+  if (y < BOTTOM + 60) {
+    page = newPage();
+    y = CONTENT_TOP;
+  }
   text(`Total slabs: ${inp.slabs.length}`, MARGIN_X, y, 9, bold);
   text(`Total CFT: ${totCft.toFixed(2)}`, MARGIN_X + 150, y, 9, bold);
   text(`Total SFT: ${totSft.toFixed(2)}`, MARGIN_X + 290, y, 9, bold);
@@ -199,22 +198,20 @@ export async function buildWorkOrderPdf(inp: WorkOrderPdfInput): Promise<Uint8Ar
     "3. The vendor is responsible for safe custody and the quality of the work until returned.",
     "4. Payment is on the agreed rate above, against approved / received work only.",
   ];
+  // Keep the terms + signatures together: if they won't fit, start a fresh
+  // page (which carries the identity header).
+  if (y < BOTTOM + 130) {
+    page = newPage();
+    y = CONTENT_TOP;
+  }
   for (const line of terms) {
-    if (y < BOTTOM + 80) {
-      page = newPage();
-      y = PAGE_H - TOP;
-    }
     const isHead = line === "Terms:";
     text(line, MARGIN_X, y, isHead ? 9 : 8, isHead ? bold : font, isHead ? ink : muted);
     y -= 13;
   }
 
   // Signatures
-  let sigY = y - 36;
-  if (sigY < BOTTOM + 36) {
-    page = newPage();
-    sigY = PAGE_H - TOP - 40;
-  }
+  const sigY = y - 40;
   page.drawLine({ start: { x: MARGIN_X, y: sigY }, end: { x: MARGIN_X + 200, y: sigY }, thickness: 0.7, color: ink });
   page.drawLine({ start: { x: PAGE_W - MARGIN_X - 200, y: sigY }, end: { x: PAGE_W - MARGIN_X, y: sigY }, thickness: 0.7, color: ink });
   text("For Mateshwari Temple Construction Pvt Ltd", MARGIN_X, sigY - 12, 8, font, muted);
