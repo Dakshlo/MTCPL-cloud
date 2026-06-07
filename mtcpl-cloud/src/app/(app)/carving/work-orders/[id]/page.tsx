@@ -345,7 +345,12 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
                     <form action={removeWorkOrderLineAction}>
                       <input type="hidden" name="line_id" value={l.id} />
                       <input type="hidden" name="work_order_id" value={id} />
-                      <button type="submit" style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", background: "none", border: "none", cursor: "pointer", padding: "2px 0" }}>Remove</button>
+                      <ConfirmButton
+                        message={`Remove ${l.slab_requirement_id ?? "this line"} from this work order?`}
+                        style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", background: "none", border: "none", cursor: "pointer", padding: "2px 0" }}
+                      >
+                        Remove
+                      </ConfirmButton>
                     </form>
                   )}
                 </div>
