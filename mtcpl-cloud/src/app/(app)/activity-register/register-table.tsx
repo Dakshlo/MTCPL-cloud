@@ -236,9 +236,10 @@ function EntryModal({
               style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }}
             />
           </Field>
-          <Field label="Person (our side)">
-            <input name="person" defaultValue={isEdit ? entry!.person : ""} placeholder="Who did / sent it" style={inputStyle} />
-          </Field>
+          <div style={{ fontSize: 11, color: "var(--muted)" }}>
+            <strong>Person</strong> is recorded automatically as you (the user adding this entry)
+            {isEdit && entry!.person ? <> — currently <strong>{entry!.person}</strong></> : null}.
+          </div>
           <Field label="Concern person">
             <input name="concern_person" defaultValue={isEdit ? entry!.concernPerson : ""} placeholder="The person concerned (e.g. client contact)" style={inputStyle} />
           </Field>

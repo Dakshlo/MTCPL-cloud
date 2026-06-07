@@ -146,12 +146,11 @@ export async function deleteActivitySiteAction(formData: FormData) {
 
 function readEntryFields(formData: FormData) {
   const activity = String(formData.get("activity") || "").trim();
-  const person = String(formData.get("person") || "").trim() || null;
   const concernPerson = String(formData.get("concern_person") || "").trim() || null;
   const reference = String(formData.get("reference") || "").trim() || null;
   const dateRaw = String(formData.get("activity_date") || "").trim();
   const activityDate = /^\d{4}-\d{2}-\d{2}$/.test(dateRaw) ? dateRaw : null;
-  return { activity, person, concernPerson, reference, activityDate };
+  return { activity, concernPerson, reference, activityDate };
 }
 
 /** Owner/dev — add a new entry INSIDE a site (+ optional proof). The code
@@ -163,8 +162,11 @@ export async function createActivityEntryAction(formData: FormData) {
   const siteId = String(formData.get("site_id") || "").trim();
   if (!siteId) redirect(homeToast("Pick a site first."));
 
-  const { activity, person, concernPerson, reference, activityDate } = readEntryFields(formData);
+  const { activity, concernPerson, reference, activityDate } = readEntryFields(formData);
   if (!activity) redirect(siteToast(siteId, "Activity is required."));
+  // "Person" auto-fills with the name of whoever is logging the entry.
+  const creatorName =
+    (profile.full_name || profile.vendor_name || profile.phone || "").trim() || null;
 
   const proof = formData.get("proof");
   const hasProof = proof instanceof File && proof.size > 0;
@@ -204,7 +206,7 @@ export async function createActivityEntryAction(formData: FormData) {
       site_seq: nextSeq,
       entry_code: code,
       activity,
-      person,
+      person: creatorName,
       concern_person: concernPerson,
       reference,
       created_by: profile.id,
@@ -254,13 +256,13 @@ export async function updateActivityEntryAction(formData: FormData) {
   const id = String(formData.get("id") || "").trim();
   if (!id) redirect(siteId ? siteToast(siteId, "Missing entry.") : homeToast("Missing entry."));
 
-  const { activity, person, concernPerson, reference, activityDate } = readEntryFields(formData);
+  const { activity, concernPerson, reference, activityDate } = readEntryFields(formData);
   if (!activity) redirect(siteToast(siteId, "Activity is required."));
 
   const admin = createAdminSupabaseClient();
+  // "Person" (who created the entry) is preserved on edit — not overwritten.
   const update: Record<string, unknown> = {
     activity,
-    person,
     concern_person: concernPerson,
     reference,
     updated_at: new Date().toISOString(),
