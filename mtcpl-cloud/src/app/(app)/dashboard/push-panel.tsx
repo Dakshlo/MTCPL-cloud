@@ -12,6 +12,9 @@ type PushSlab = {
   priority: boolean;
   deadline: string | null;
   priority_note: string | null;
+  /** Vendor name if this slab is already in a live outsource work order
+   *  (so we don't make a second work order for it). null = free. */
+  assignedVendor: string | null;
 };
 
 export function PushPanel({
@@ -33,22 +36,36 @@ export function PushPanel({
   expandedByDefault?: boolean;
 }) {
   const [q, setQ] = useState("");
+  // "" = all · "__none__" = not in any work order (free) · else a vendor name.
+  const [vendorFilter, setVendorFilter] = useState("");
   const [showAll, setShowAll] = useState(expandedByDefault);
   const COLLAPSED_COUNT = 3;
 
+  const vendorOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of slabs) if (s.assignedVendor) set.add(s.assignedVendor);
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [slabs]);
+  const assignedCount = useMemo(() => slabs.filter((s) => s.assignedVendor).length, [slabs]);
+
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
-    if (!term) return slabs;
-    return slabs.filter(s =>
-      s.id.toLowerCase().includes(term) ||
-      s.temple.toLowerCase().includes(term) ||
-      s.label.toLowerCase().includes(term) ||
-      (s.stone ?? "").toLowerCase().includes(term)
-    );
-  }, [slabs, q]);
+    return slabs.filter((s) => {
+      if (vendorFilter === "__none__" && s.assignedVendor) return false;
+      if (vendorFilter && vendorFilter !== "__none__" && s.assignedVendor !== vendorFilter) return false;
+      if (!term) return true;
+      return (
+        s.id.toLowerCase().includes(term) ||
+        s.temple.toLowerCase().includes(term) ||
+        s.label.toLowerCase().includes(term) ||
+        (s.stone ?? "").toLowerCase().includes(term) ||
+        (s.assignedVendor ?? "").toLowerCase().includes(term)
+      );
+    });
+  }, [slabs, q, vendorFilter]);
 
-  // When searching, always show all matches. Otherwise collapse to COLLAPSED_COUNT.
-  const isSearching = q.trim().length > 0;
+  // When searching / filtering, always show all matches. Otherwise collapse.
+  const isSearching = q.trim().length > 0 || vendorFilter !== "";
   const visible = isSearching || showAll ? filtered : filtered.slice(0, COLLAPSED_COUNT);
   const hiddenCount = filtered.length - visible.length;
 
@@ -71,30 +88,45 @@ export function PushPanel({
         )}
       </div>
 
-      {/* Live search */}
-      <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)", background: "var(--surface)" }}>
-        <input
-          type="search"
-          value={q}
-          onChange={e => setQ(e.target.value)}
-          placeholder="Type to search by slab ID, temple, label or stone…"
-          style={{
-            width: "100%",
-            fontSize: 12,
-            padding: "7px 12px",
-            border: "1px solid var(--border)",
-            borderRadius: 6,
-            background: "var(--bg)",
-            color: "var(--text)",
-            outline: "none",
-            boxSizing: "border-box",
-          }}
-        />
-        {q.trim() && (
-          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 5 }}>
-            {filtered.length} of {slabs.length} slabs
-          </div>
-        )}
+      {/* Live search + work-order filter */}
+      <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)", background: "var(--surface)", display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <input
+            type="search"
+            value={q}
+            onChange={e => setQ(e.target.value)}
+            placeholder="Search by slab ID, temple, label, stone or vendor…"
+            style={{
+              flex: "1 1 240px",
+              minWidth: 0,
+              fontSize: 12,
+              padding: "7px 12px",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              background: "var(--bg)",
+              color: "var(--text)",
+              outline: "none",
+              boxSizing: "border-box",
+            }}
+          />
+          <select
+            value={vendorFilter}
+            onChange={(e) => setVendorFilter(e.target.value)}
+            style={{ fontSize: 12, padding: "7px 10px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
+          >
+            <option value="">All work-order status</option>
+            <option value="__none__">🟢 Not in any work order (free)</option>
+            {vendorOptions.length > 0 && <option disabled>── in work order of ──</option>}
+            {vendorOptions.map((v) => (
+              <option key={v} value={v}>🤝 {v}</option>
+            ))}
+          </select>
+        </div>
+        <div style={{ fontSize: 11, color: "var(--muted)" }}>
+          Showing <strong style={{ color: "var(--text)" }}>{filtered.length}</strong> of {slabs.length} open/planned ·{" "}
+          <span style={{ color: "#4f46e5", fontWeight: 700 }}>{assignedCount} already in a work order</span> ·{" "}
+          <span style={{ color: "#16a34a", fontWeight: 700 }}>{slabs.length - assignedCount} free</span>
+        </div>
       </div>
 
       {/* Table */}
@@ -111,14 +143,14 @@ export function PushPanel({
           <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 640 }}>
             <thead>
               <tr style={{ background: "var(--surface-alt)" }}>
-                {["Slab ID", "Temple · Label", "Stone", "Status", "Deadline", "Note", "Action"].map(h => (
+                {["Slab ID", "Temple · Label", "Stone", "Status", "Work order", "Deadline", "Note", "Action"].map(h => (
                   <th key={h} style={{ padding: "8px 14px", textAlign: "left", fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.07em", whiteSpace: "nowrap" }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {visible.map(s => (
-                <tr key={s.id} style={{ borderTop: "1px solid var(--border-light)", background: s.priority ? "rgba(220,38,38,0.04)" : "transparent" }}>
+                <tr key={s.id} style={{ borderTop: "1px solid var(--border-light)", background: s.priority ? "rgba(220,38,38,0.05)" : s.assignedVendor ? "rgba(79,70,229,0.07)" : "transparent" }}>
                   <td style={{ padding: "10px 14px", fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 12, whiteSpace: "nowrap" }}>
                     {s.priority && <span style={{ marginRight: 5 }}>⚡</span>}
                     {s.id}
@@ -132,6 +164,13 @@ export function PushPanel({
                     <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: s.status === "planned" ? "rgba(37,99,235,0.1)" : "rgba(217,119,6,0.1)", color: s.status === "planned" ? "#2563EB" : "#D97706", fontWeight: 600 }}>
                       {s.status}
                     </span>
+                  </td>
+                  <td style={{ padding: "10px 14px" }}>
+                    {s.assignedVendor ? (
+                      <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 10, background: "rgba(79,70,229,0.12)", color: "#4f46e5", whiteSpace: "nowrap" }}>🤝 {s.assignedVendor}</span>
+                    ) : (
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "#16a34a" }}>● free</span>
+                    )}
                   </td>
                   <td style={{ padding: "10px 14px" }}>
                     {s.deadline

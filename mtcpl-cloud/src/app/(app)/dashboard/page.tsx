@@ -3,19 +3,14 @@ import { redirect } from "next/navigation";
 import { requireAuth, getDefaultRouteForRole } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canTransferPlannedSlabs } from "@/lib/cutting-permissions";
-import { PushPanel } from "./push-panel";
 import { AskAiEntryCard } from "@/components/ask-ai-entry-card";
 import { BlockJourneyEntryCard } from "@/components/block-journey-entry-card";
 import { TvModeEntryCard } from "@/components/tv-mode-entry-card";
 import { VariousCostingEntryCard } from "@/components/various-costing-entry-card";
-import { PeekSection } from "@/components/peek-section";
 import { PeekIframe } from "@/components/peek-iframe";
 
-type SearchParams = Promise<{ pushed?: string }>;
-
 /**
- * IST midnight today / start / end — used to scope Screen Time pings + the
- * "today.label" string passed to <PushPanel />.
+ * IST midnight today / start / end — used to scope Screen Time pings.
  */
 function istToday(daysAgo = 0) {
   const ist = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
@@ -31,13 +26,12 @@ function istToday(daysAgo = 0) {
   };
 }
 
-export default async function DashboardPage({ searchParams }: { searchParams: SearchParams }) {
+export default async function DashboardPage() {
   // Permissive auth + explicit guard. We need to allow Rajesh
   // (whose stored role is team_head, not owner) onto the dashboard
   // so he can see his stripped Block-Journey-only variant.
   // canTransferPlannedSlabs catches him by name.
   const { profile } = await requireAuth();
-  const params = await searchParams;
   const isDashboardAllowed =
     profile.role === "owner" ||
     profile.role === "developer" ||
@@ -200,7 +194,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
     deadline: s.deadline,
     priority_note: s.priority_note,
   }));
-  const pushed = params.pushed === "1";
   const onlineList = onlineUsers ?? [];
 
   const istObj = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
@@ -330,20 +323,23 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
       </div>
 
       {/* ── PUSH ALERT PANEL ──
-          Wrapped in PeekSection so the dashboard isn't dominated by
-          the full-table view. Click the card → centred modal opens
-          with the same panel + search + Push controls inside. The
-          "id=push" anchor stays on the wrapper so any deep link
-          (?#push) still scrolls to the right spot. */}
+          Moved to its own full page (/dashboard/push-urgent). The old
+          centred modal rendered every open/planned slab at once and was
+          slow to open; the page also flags slabs already in an outsource
+          work order so the owner can spot what's still free to assign. */}
       <div id="push">
-        <PeekSection
-          icon="🔔"
-          title="Push Urgent Alert to Workers"
-          count={pushList.length}
-          modalMaxWidth={1100}
+        <Link
+          href="/dashboard/push-urgent"
+          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", background: "var(--surface)", border: "2px solid var(--gold-border)", borderRadius: 10, padding: "16px 20px", textDecoration: "none", color: "inherit" }}
         >
-          <PushPanel slabs={pushList} pushed={pushed} todayLabel={today.label} expandedByDefault />
-        </PeekSection>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 14, color: "var(--text)" }}>🔔 Push Urgent Alert to Workers</div>
+            <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 3 }}>
+              {pushList.length} open / planned slabs · mark urgent + see which are already in a work order →
+            </div>
+          </div>
+          <span style={{ fontSize: 13, fontWeight: 700, color: "#fff", background: "var(--gold)", borderRadius: 8, padding: "8px 16px", whiteSpace: "nowrap" }}>Open page →</span>
+        </Link>
       </div>
 
       {/* ── SCREEN TIME TODAY ── */}

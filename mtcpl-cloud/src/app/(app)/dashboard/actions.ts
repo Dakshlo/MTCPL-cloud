@@ -30,7 +30,7 @@ export async function pushSlabAlertAction(formData: FormData) {
     deadline = new Date(candidate) < now ? `${year + 1}-${deadlineMonth}-${deadlineDay}` : candidate;
   }
 
-  if (!id) redirect("/dashboard?toast=Missing+slab+ID");
+  if (!id) redirect("/dashboard/push-urgent?toast=Missing+slab+ID");
 
   const { error } = await admin
     .from("slab_requirements")
@@ -41,7 +41,7 @@ export async function pushSlabAlertAction(formData: FormData) {
     })
     .eq("id", id);
 
-  if (error) redirect(`/dashboard?toast=${encodeURIComponent(error.message)}`);
+  if (error) redirect(`/dashboard/push-urgent?toast=${encodeURIComponent(error.message)}`);
 
   await notify("priority_pushed", `Slab ${id} marked urgent`, {
     message: note ?? undefined,
@@ -50,9 +50,10 @@ export async function pushSlabAlertAction(formData: FormData) {
   });
 
   revalidatePath("/dashboard");
+  revalidatePath("/dashboard/push-urgent");
   revalidatePath("/slabs");
   revalidatePath("/cutting");
-  redirect("/dashboard?pushed=1#push");
+  redirect("/dashboard/push-urgent?pushed=1");
 }
 
 export async function clearSlabAlertAction(formData: FormData) {
@@ -68,6 +69,7 @@ export async function clearSlabAlertAction(formData: FormData) {
     .eq("id", id);
 
   revalidatePath("/dashboard");
+  revalidatePath("/dashboard/push-urgent");
   revalidatePath("/slabs");
   revalidatePath("/cutting");
 }
