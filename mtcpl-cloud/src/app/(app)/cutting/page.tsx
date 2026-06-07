@@ -139,6 +139,11 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
   ]);
   const params = await searchParams;
   const activeTab: Tab = (params.tab as Tab) || defaultTab(profile.role);
+  // Daksh (June 2026) — carving_head gets a READ-ONLY view of cutting:
+  // they can watch all four tabs but every operational write button is
+  // hidden. (Their flag-gated approval/audit flow on /cutting/approvals
+  // + /cutting/[id] is separate and untouched.)
+  const readOnly = profile.role === "carving_head";
   const supabase = createAdminSupabaseClient();
   const profilesMap = await getProfilesMap();
   const showOperatorPicker = canManageOperators(profile);
@@ -1114,7 +1119,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
 
                 {/* Inline actions */}
                 <div className="record-actions" style={{ marginTop: 12, gap: 8 }}>
-                  {block.status === "pending_worker" && (
+                  {!readOnly && block.status === "pending_worker" && (
                     <>
                       {showOperatorPicker ? (
                         <PendingApprovalActions
@@ -1179,7 +1184,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                   {/* Waiting to Cut — operator presses Start Cutting when
                    *  they're physically beginning. Cancel reverts to
                    *  pending_worker. */}
-                  {block.status === "pending_cut" && (
+                  {!readOnly && block.status === "pending_cut" && (
                     <>
                       <form action={startCuttingAction}>
                         <input type="hidden" name="session_block_id" value={block.id} />
@@ -1196,7 +1201,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                     </>
                   )}
 
-                  {isLive && (
+                  {!readOnly && isLive && (
                     <>
                       <Link
                         href={`/cutting/${block.id}`}
@@ -1213,7 +1218,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                     </>
                   )}
 
-                  {block.status === "done_prompt" && (
+                  {!readOnly && block.status === "done_prompt" && (
                     <Link
                       href={`/cutting/${block.id}`}
                       className="primary-button"

@@ -118,6 +118,17 @@ const navEntries: NavEntry[] = [
     department: "production",
   },
   {
+    // Daksh (June 2026) — Block Journey in the menu for team_head
+    // (Paresh) + dev/owner. Page access is already granted via
+    // canTransferPlannedSlabs (team_head passes that guard), so this
+    // just surfaces the entry point in the rail.
+    href: "/block-journey",
+    label: "Block Journey",
+    icon: "🧭",
+    roles: ["developer", "owner", "team_head"],
+    department: "production",
+  },
+  {
     href: "/slabs",
     label: "Required Sizes",
     icon: "▤",
@@ -140,14 +151,20 @@ const navEntries: NavEntry[] = [
     // person handles CNC + cutter expense entry per Daksh's spec).
     // Mig 076 round 2 — Manager (crosscheck) added so the Cutter
     // Expenses entry below renders under a WORKSHOP header.
-    roles: ["developer", "owner", "team_head", "senior_incharge", "cutting_operator", "cnc_expense_entry", "crosscheck"],
+    // Daksh (June 2026) — carving_head added so their read-only Cutting
+    // entry below renders under this WORKSHOP header.
+    roles: ["developer", "owner", "team_head", "senior_incharge", "cutting_operator", "cnc_expense_entry", "crosscheck", "carving_head"],
     department: "production",
   },
   {
+    // Daksh (June 2026) — carving_head gets a READ-ONLY view of Cutting
+    // (all 4 tabs) to monitor progress. The page already grants them
+    // read access; the cutting page hides every write button for the
+    // carving_head role.
     href: "/cutting",
     label: "Cutting",
     icon: "✂",
-    roles: ["developer", "owner", "cutting_operator", "team_head", "senior_incharge"],
+    roles: ["developer", "owner", "cutting_operator", "team_head", "senior_incharge", "carving_head"],
     department: "production",
   },
   {
