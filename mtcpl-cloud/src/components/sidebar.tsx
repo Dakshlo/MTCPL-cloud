@@ -494,6 +494,15 @@ const navEntries: NavEntry[] = [
     roles: ["developer", "owner", "accountant_star"],
     department: "invoicing",
   },
+  {
+    // Mig 105 — standalone manual Work Order Document generator (not
+    // linked to carving work orders or any incoming logic).
+    href: "/invoicing/work-order-doc",
+    label: "Work Order Doc",
+    icon: "📝",
+    roles: ["developer", "owner", "accountant_star"],
+    department: "invoicing",
+  },
   // ── INVENTORY section (Migration 041 — Scaffolding v1) ──────────
   // Deliberately minimal: one entry per role. The scaffolding board
   // itself surfaces a horizontal sub-nav (Board / Issue / Return /
