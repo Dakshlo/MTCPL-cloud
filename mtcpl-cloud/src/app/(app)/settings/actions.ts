@@ -286,6 +286,8 @@ export async function updateUserAction(formData: FormData) {
     "cutting_operator",
     "vendor",
     "slab_transfer",
+    // Mig 104 — owner can assign Tender Manager (Register department).
+    "tender_manager",
   ];
   const role = requestedRole;
   if (currentUser.role === "owner" || currentUser.role === "team_head" || currentUser.role === "senior_incharge") {

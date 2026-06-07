@@ -9,6 +9,9 @@ export function getDefaultRouteForRole(role?: AppRole | null) {
     case "developer":
     case "owner":
       return "/dashboard";
+    // Mig 104 — Tender Manager works the Register department.
+    case "tender_manager":
+      return "/activity-register";
     case "team_head":
     // Mig 076 — senior_incharge shares team_head's landing page
     // (/slabs). Daksh's spec is "all current permissions exactly

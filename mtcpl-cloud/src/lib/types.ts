@@ -66,7 +66,11 @@ export type AppRole =
   //   read-only Global My Jobs (sees every vendor cockpit; can't
   //   load / hold / complete). Cutting + Blocks + Settings
   //   permissions stay identical to team_head.
-  | "senior_incharge";
+  | "senior_incharge"
+  // Migration 104 — Tender Manager. Owns the Register department
+  // (Activity Register): create sites + log/manage activity entries.
+  // Register access also granted to senior_incharge + carving_head.
+  | "tender_manager";
 
 export type StoneType = "PinkStone" | "WhiteStone";
 

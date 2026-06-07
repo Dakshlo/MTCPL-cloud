@@ -5,8 +5,8 @@ import { SitesList, type SiteCard } from "./sites-list";
 
 export const dynamic = "force-dynamic";
 
-// Owner/dev only for now (Mig 101). Widen later to link specific staff.
-const ALLOWED = ["owner", "developer"];
+// Mig 101 + 104 — owner/dev plus Tender Manager, senior_incharge, carving_head.
+const ALLOWED = ["owner", "developer", "tender_manager", "senior_incharge", "carving_head"];
 
 type SearchParams = Promise<{ toast?: string }>;
 

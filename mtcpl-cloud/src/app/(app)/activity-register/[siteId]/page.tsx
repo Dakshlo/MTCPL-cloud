@@ -6,7 +6,8 @@ import { ActivityRegisterTable, type RegisterEntry } from "../register-table";
 
 export const dynamic = "force-dynamic";
 
-const ALLOWED = ["owner", "developer"];
+// Mig 104 — owner/dev + Tender Manager + senior_incharge + carving_head.
+const ALLOWED = ["owner", "developer", "tender_manager", "senior_incharge", "carving_head"];
 
 type Params = Promise<{ siteId: string }>;
 type SearchParams = Promise<{ toast?: string }>;

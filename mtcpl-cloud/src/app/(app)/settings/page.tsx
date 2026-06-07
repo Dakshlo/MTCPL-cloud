@@ -33,6 +33,8 @@ const UI_ROLES_ALL = [
   { value: "senior_incharge",  label: "SENIOR INCHARGE ★" },
   { value: "team_head",        label: "TEAM HEAD" },
   { value: "carving_head",     label: "CARVING HEAD" },
+  // Mig 104 — Tender Manager (owns the Register department).
+  { value: "tender_manager",   label: "TENDER MANAGER" },
   { value: "block_slab_entry", label: "BLOCK+SLAB ENTRY" },
   { value: "slab_entry",       label: "SLAB ENTRY" },
   { value: "block_entry",      label: "BLOCK ENTRY" },
@@ -62,6 +64,7 @@ const UI_ROLES_PLANNER = [
   { value: "senior_incharge",  label: "SENIOR INCHARGE ★" },
   { value: "team_head",        label: "TEAM HEAD" },
   { value: "carving_head",     label: "CARVING HEAD" },
+  { value: "tender_manager",   label: "TENDER MANAGER" },
   { value: "block_slab_entry", label: "BLOCK+SLAB ENTRY" },
   { value: "slab_entry",       label: "SLAB ENTRY" },
   { value: "block_entry",      label: "BLOCK ENTRY" },
@@ -80,8 +83,10 @@ const ROLE_ACCESS: Record<string, string[]> = {
   // Mig 076 — Senior Incharge = team_head's surfaces PLUS the full
   // carving stack (Ready Sizes Stock, Carving Jobs, Carving Done
   // Approval) AND read-only Global My Jobs.
-  senior_incharge:  ["Blocks", "Slabs", "Plan Generator", "Cutting", "Ready Sizes Stock", "Carving Jobs", "Carving Done Approval", "My Jobs (read-only)", "Settings"],
-  carving_head:     ["Ready Sizes", "Carving Jobs", "Slab Transfer", "Dispatch", "My Jobs (read-only)"],
+  senior_incharge:  ["Blocks", "Slabs", "Plan Generator", "Cutting", "Ready Sizes Stock", "Carving Jobs", "Carving Done Approval", "My Jobs (read-only)", "Activity Register", "Settings"],
+  carving_head:     ["Ready Sizes", "Carving Jobs", "Slab Transfer", "Dispatch", "My Jobs (read-only)", "Activity Register"],
+  // Mig 104 — Tender Manager owns the Register department.
+  tender_manager:   ["Activity Register"],
   block_slab_entry: ["Dashboard", "Blocks", "Slabs"],
   slab_entry:       ["Dashboard", "Slabs"],
   block_entry:      ["Blocks"],

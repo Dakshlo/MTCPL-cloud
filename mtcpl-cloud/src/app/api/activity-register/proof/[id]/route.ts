@@ -8,7 +8,8 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 
-const ALLOWED = ["owner", "developer"];
+// Mig 104 — owner/dev + Tender Manager + senior_incharge + carving_head.
+const ALLOWED = ["owner", "developer", "tender_manager", "senior_incharge", "carving_head"];
 const PROOF_BUCKET = "activity_proofs";
 
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {

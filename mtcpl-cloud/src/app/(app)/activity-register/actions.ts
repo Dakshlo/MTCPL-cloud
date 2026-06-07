@@ -77,8 +77,16 @@ async function uploadProof(
   return { path, mime };
 }
 
+// Mig 104 — who can create/use the register: owner/dev + Tender Manager +
+// senior_incharge + carving_head.
 function isManager(role: string): boolean {
-  return role === "owner" || role === "developer";
+  return (
+    role === "owner" ||
+    role === "developer" ||
+    role === "tender_manager" ||
+    role === "senior_incharge" ||
+    role === "carving_head"
+  );
 }
 function homeToast(msg: string): string {
   return `${ROUTE}?toast=${encodeURIComponent(msg)}`;

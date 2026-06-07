@@ -350,7 +350,9 @@ const navEntries: NavEntry[] = [
     href: "/activity-register",
     label: "Activity Register",
     icon: "📒",
-    roles: ["developer", "owner"],
+    // Mig 104 — Tender Manager owns this; senior_incharge + carving_head
+    // also get Register access.
+    roles: ["developer", "owner", "tender_manager", "senior_incharge", "carving_head"],
     department: "register",
   },
   // ── ACCOUNTS section (Finance department, mig 028 + 037 crosscheck) ──
@@ -568,6 +570,8 @@ function roleLabel(role: AppRole): string {
     // regular team head pill so the sidebar instantly signals the
     // extra Carving authority.
     senior_incharge: "SENIOR INCHARGE ★",
+    // Mig 104 — Tender Manager (owns the Register department).
+    tender_manager: "TENDER MANAGER",
   };
   return labels[role] ?? role.replace(/_/g, " ").toUpperCase();
 }
