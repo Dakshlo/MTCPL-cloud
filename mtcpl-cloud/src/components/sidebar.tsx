@@ -322,6 +322,24 @@ const navEntries: NavEntry[] = [
       },
     ],
   },
+  // ── REGISTER (Mig 101 — Activity Register) ──────────────────────────
+  // A standalone, owner/dev-only record of company activities + proof
+  // (e.g. demos/samples sent to clients). Tagged to production so it
+  // surfaces in dad's default room; data is fully isolated from every
+  // other module. Widen later when specific staff are linked.
+  {
+    type: "divider",
+    label: "REGISTER",
+    roles: ["developer", "owner"],
+    department: "production",
+  },
+  {
+    href: "/activity-register",
+    label: "Activity Register",
+    icon: "📒",
+    roles: ["developer", "owner"],
+    department: "production",
+  },
   // ── ACCOUNTS section (Finance department, mig 028 + 037 crosscheck) ──
   {
     type: "divider",
