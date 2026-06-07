@@ -119,13 +119,13 @@ const navEntries: NavEntry[] = [
   },
   {
     // Daksh (June 2026) — Block Journey in the menu for team_head
-    // (Paresh) + dev/owner. Page access is already granted via
-    // canTransferPlannedSlabs (team_head passes that guard), so this
-    // just surfaces the entry point in the rail.
+    // (Paresh) ONLY. Dev/owner already reach it from their dashboard, so
+    // they're intentionally left off here to keep their rail uncluttered.
+    // Page access is already granted via canTransferPlannedSlabs.
     href: "/block-journey",
     label: "Block Journey",
     icon: "🧭",
-    roles: ["developer", "owner", "team_head"],
+    roles: ["team_head"],
     department: "production",
   },
   {
