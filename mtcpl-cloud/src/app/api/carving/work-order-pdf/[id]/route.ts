@@ -16,10 +16,12 @@ export const dynamic = "force-dynamic";
 
 const ALLOWED = ["developer", "owner", "carving_head", "senior_incharge"];
 
-export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { profile } = await requireAuth();
   if (!ALLOWED.includes(profile.role)) return new Response("Forbidden", { status: 403 });
   const { id } = await ctx.params;
+  // ?print=1 → open inline in the browser (for printing); else download.
+  const disposition = req.nextUrl.searchParams.get("print") ? "inline" : "attachment";
   const admin = createAdminSupabaseClient();
 
   const { data: woRow } = await admin
@@ -91,7 +93,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
   return new Response(Buffer.from(bytes), {
     headers: {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="${wo.wo_number}-workorder.pdf"`,
+      "Content-Disposition": `${disposition}; filename="${wo.wo_number}-workorder.pdf"`,
     },
   });
 }

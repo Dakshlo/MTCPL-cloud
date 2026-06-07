@@ -6212,16 +6212,18 @@ export async function handoverWorkOrderAction(formData: FormData) {
   const admin = createAdminSupabaseClient();
   const woId = txt(formData, "work_order_id");
   if (!woId) redirect("/carving/work-orders?toast=Missing+work+order");
+  const redirectTo = txt(formData, "redirect_to") || `/carving/work-orders/${woId}`;
+  const sep = redirectTo.includes("?") ? "&" : "?";
   const now = new Date().toISOString();
   const { error } = await admin
     .from("carving_work_orders")
     .update({ handed_over_at: now, handed_over_by: profile.id, updated_at: now, updated_by: profile.id })
     .eq("id", woId)
     .in("status", ["open", "in_progress"]);
-  if (error) redirect(`/carving/work-orders/${woId}?toast=${encodeURIComponent(error.message)}`);
+  if (error) redirect(`${redirectTo}${sep}toast=${encodeURIComponent(error.message)}`);
   await logAudit(profile.id, "work_order_handed_over", "carving_work_order", woId, {});
   refreshAll();
-  redirect(`/carving/work-orders/${woId}?toast=${encodeURIComponent("Handed over to vendor — you can now send slabs")}`);
+  redirect(`${redirectTo}${sep}toast=${encodeURIComponent("Handed over to vendor — you can now send slabs")}`);
 }
 
 // Owner rejects a pending work order (with a reason). Office team can edit

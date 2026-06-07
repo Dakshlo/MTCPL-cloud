@@ -155,7 +155,14 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
             {cancelled ? " · CANCELLED" : ""}
           </div>
         </div>
-        <Link href="/carving/challans/new" style={{ padding: "8px 14px", fontSize: 12, fontWeight: 700, color: "#92400e", background: "rgba(146,64,14,0.1)", borderRadius: 8, textDecoration: "none" }}>🧾 Generate challan</Link>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {/* Mig 100 — download/print the work-order document anytime from
+              here (the tab card only offers it at handover). */}
+          {(approved || wo.status === "completed") && (
+            <a href={`/api/carving/work-order-pdf/${id}`} target="_blank" rel="noopener noreferrer" style={{ padding: "8px 14px", fontSize: 12, fontWeight: 700, color: "#92400e", background: "rgba(146,64,14,0.1)", border: "1px solid rgba(146,64,14,0.35)", borderRadius: 8, textDecoration: "none" }}>⬇ Work order doc</a>
+          )}
+          <Link href="/carving/challans/new" style={{ padding: "8px 14px", fontSize: 12, fontWeight: 700, color: "#92400e", background: "rgba(146,64,14,0.1)", borderRadius: 8, textDecoration: "none" }}>🧾 Generate challan</Link>
+        </div>
       </div>
 
       {/* Mig 098 — owner price-approval gate. Nothing can be sent until approved. */}

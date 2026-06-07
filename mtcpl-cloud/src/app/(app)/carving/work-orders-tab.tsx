@@ -268,19 +268,32 @@ export function WorkOrdersTab({ wos, isOwner }: { wos: WorkOrderTabRow[]; isOwne
                   const c = w.counts;
                   const assigned = c.sent + c.received + c.approved;
                   const isPending = w.status === "pending_approval";
+                  // Mig 100 — approved but not yet handed over: blur the card
+                  // and show one centred Handover action.
+                  const handoverPending = (w.status === "open" || w.status === "in_progress") && !w.handedOver;
                   return (
                     <div
                       key={w.id}
                       style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 8,
+                        position: "relative",
                         padding: 12,
                         background: "var(--surface)",
-                        border: isPending ? "1.5px solid rgba(217,119,6,0.5)" : "1px solid var(--border)",
+                        border: isPending
+                          ? "1.5px solid rgba(217,119,6,0.5)"
+                          : handoverPending
+                            ? "1.5px solid rgba(22,163,74,0.5)"
+                            : "1px solid var(--border)",
                         borderRadius: 12,
                       }}
                     >
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 8,
+                          ...(handoverPending ? { filter: "blur(3px)", pointerEvents: "none" as const, userSelect: "none" as const } : {}),
+                        }}
+                      >
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
                         <span style={{ fontSize: 14, fontWeight: 700, fontFamily: "ui-monospace, monospace" }}>{w.wo_number}</span>
                         <StatusBadge status={w.status} />
@@ -366,25 +379,35 @@ export function WorkOrdersTab({ wos, isOwner }: { wos: WorkOrderTabRow[]; isOwne
                         <div style={{ fontSize: 12, color: "#b45309", fontWeight: 600 }}>⏳ Waiting for owner price approval.</div>
                       ) : null}
 
-                      {/* Mig 100 — approved but not yet handed over: print the
-                          work-order document + hand it to the vendor before
-                          slabs can be sent. */}
-                      {(w.status === "open" || w.status === "in_progress") && !w.handedOver && (
-                        <div style={{ marginTop: 4, padding: 10, background: "rgba(22,163,74,0.06)", border: "1px solid rgba(22,163,74,0.3)", borderRadius: 8, display: "flex", flexDirection: "column", gap: 8 }}>
-                          <div style={{ fontSize: 12, fontWeight: 700, color: "#15803d" }}>✅ Approved — hand the work order to {vendor} to start.</div>
-                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                            <a href={`/api/carving/work-order-pdf/${w.id}`} target="_blank" rel="noopener noreferrer" style={{ padding: "7px 12px", fontSize: 12.5, fontWeight: 700, color: "#92400e", background: "rgba(146,64,14,0.1)", border: "1px solid rgba(146,64,14,0.35)", borderRadius: 8, textDecoration: "none" }}>⬇ Download work order</a>
-                            <form action={handoverWorkOrderAction}>
-                              <input type="hidden" name="work_order_id" value={w.id} />
-                              <button type="submit" style={{ padding: "7px 14px", fontSize: 12.5, fontWeight: 700, color: "#fff", background: "#15803d", border: "none", borderRadius: 8, cursor: "pointer" }}>🤝 Handover to vendor</button>
-                            </form>
-                          </div>
+                        <Link href={`/carving/work-orders/${w.id}`} style={{ marginTop: "auto", alignSelf: "flex-start", fontSize: 12, fontWeight: 700, color: "#92400e", textDecoration: "none" }}>
+                          Open order →
+                        </Link>
+                      </div>
+
+                      {/* Mig 100 — first approval: blur the card + one centred
+                          Handover action. Pressing it opens the work order for
+                          print (new tab) AND records the handover; the card
+                          then shows the normal way. Re-download later from
+                          "Open order". */}
+                      {handoverPending && (
+                        <div style={{ position: "absolute", inset: 0, borderRadius: 12, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, padding: 16, background: "rgba(247,243,237,0.6)" }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 800, color: "#15803d", textAlign: "center" }}>✅ Approved — hand the work order to {vendor} to start.</div>
+                          <form action={handoverWorkOrderAction}>
+                            <input type="hidden" name="work_order_id" value={w.id} />
+                            <input type="hidden" name="redirect_to" value="/carving?mode=outsource&tab=workorders" />
+                            <button
+                              type="submit"
+                              onClick={() => {
+                                if (typeof window !== "undefined") window.open(`/api/carving/work-order-pdf/${w.id}?print=1`, "_blank");
+                              }}
+                              style={{ padding: "11px 22px", fontSize: 14, fontWeight: 800, color: "#fff", background: "#15803d", border: "none", borderRadius: 10, cursor: "pointer", boxShadow: "0 3px 10px rgba(21,128,61,0.35)" }}
+                            >
+                              🤝 Handover to vendor
+                            </button>
+                          </form>
+                          <div style={{ fontSize: 10.5, color: "var(--muted)", textAlign: "center" }}>Opens the work order to print.</div>
                         </div>
                       )}
-
-                      <Link href={`/carving/work-orders/${w.id}`} style={{ marginTop: "auto", alignSelf: "flex-start", fontSize: 12, fontWeight: 700, color: "#92400e", textDecoration: "none" }}>
-                        Open order →
-                      </Link>
                     </div>
                   );
                 })}
