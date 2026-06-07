@@ -1,3 +1,6 @@
+"use client";
+
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { approveWorkOrderAction, rejectWorkOrderAction } from "./actions";
 
@@ -7,9 +10,10 @@ import { approveWorkOrderAction, rejectWorkOrderAction } from "./actions";
  * Pending Work. Outsource is Work-Order-only, so this is the entry point:
  * create an order → owner approves the price → slabs can be sent.
  *
- * Server component: the owner Approve/Reject controls are plain
- * server-action forms (no client JS). Vendor-grouped to match the Active
- * tab's section chrome.
+ * Client component so it can offer a search box (WO no. / slab no. / dims /
+ * label / description). The owner Approve/Reject controls are still server
+ * actions used in <form action={...}> (works from a client component).
+ * Each card lists its slab codes, colour-coded by stage.
  */
 
 export type WorkOrderRow = {
@@ -34,6 +38,22 @@ export type WorkOrderLineCounts = {
   approved: number;
 };
 
+/** One slab/line chip on a work-order card. */
+export type WorkOrderLineChip = {
+  /** Slab code, or the future-need description when no slab is bound. */
+  code: string;
+  /** line_status: planned | sent | received | approved */
+  status: string;
+  isFuture: boolean;
+  /** Lowercased haystack for the search box (code + label + desc + dims). */
+  search: string;
+};
+
+export type WorkOrderTabRow = WorkOrderRow & {
+  lines: WorkOrderLineChip[];
+  counts: WorkOrderLineCounts;
+};
+
 const STATUS_META: Record<string, { label: string; emoji: string; bg: string; fg: string }> = {
   pending_approval: { label: "Pending approval", emoji: "⏳", bg: "rgba(217,119,6,0.14)", fg: "#b45309" },
   open: { label: "Ready to assign", emoji: "✅", bg: "rgba(22,163,74,0.14)", fg: "#15803d" },
@@ -50,6 +70,20 @@ const STATUS_ORDER: Record<string, number> = {
   rejected: 4,
   cancelled: 5,
 };
+
+// Per-slab stage tints (line_status). "In" = received back in-house.
+const LINE_TONE: Record<string, { bg: string; fg: string; border: string; label: string }> = {
+  planned: { bg: "rgba(217,119,6,0.12)", fg: "#b45309", border: "rgba(217,119,6,0.35)", label: "Pending (not sent)" },
+  sent: { bg: "rgba(37,99,235,0.12)", fg: "#1d4ed8", border: "rgba(37,99,235,0.35)", label: "Sent to vendor" },
+  received: { bg: "rgba(13,148,136,0.14)", fg: "#0f766e", border: "rgba(13,148,136,0.4)", label: "In (received back)" },
+  approved: { bg: "rgba(22,163,74,0.14)", fg: "#15803d", border: "rgba(22,163,74,0.4)", label: "Approved" },
+};
+const LEGEND: Array<{ key: string; label: string }> = [
+  { key: "planned", label: "Pending" },
+  { key: "sent", label: "Sent" },
+  { key: "received", label: "In" },
+  { key: "approved", label: "Approved" },
+];
 
 function fmtDate(d: string | null): string {
   if (!d) return "—";
@@ -77,31 +111,41 @@ function StatusBadge({ status }: { status: string }) {
 
 const lbl: React.CSSProperties = { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--muted)" };
 
-export function WorkOrdersTab({
-  wos,
-  counts,
-  isOwner,
-}: {
-  wos: WorkOrderRow[];
-  counts: Map<string, WorkOrderLineCounts>;
-  isOwner: boolean;
-}) {
+export function WorkOrdersTab({ wos, isOwner }: { wos: WorkOrderTabRow[]; isOwner: boolean }) {
+  const [q, setQ] = useState("");
+  const query = q.trim().toLowerCase();
+
+  const filtered = useMemo(() => {
+    if (!query) return wos;
+    return wos.filter(
+      (w) =>
+        w.wo_number.toLowerCase().includes(query) ||
+        w.vendor_name.toLowerCase().includes(query) ||
+        (w.title ?? "").toLowerCase().includes(query) ||
+        (w.temple ?? "").toLowerCase().includes(query) ||
+        w.lines.some((l) => l.search.includes(query)),
+    );
+  }, [wos, query]);
+
   // Group by vendor; vendors with pending approvals float to the top.
-  const byVendor = new Map<string, WorkOrderRow[]>();
-  for (const w of wos) {
-    const arr = byVendor.get(w.vendor_name) ?? [];
-    arr.push(w);
-    byVendor.set(w.vendor_name, arr);
-  }
-  for (const arr of byVendor.values()) {
-    arr.sort((a, b) => (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9) || b.created_at.localeCompare(a.created_at));
-  }
-  const vendorEntries = [...byVendor.entries()].sort((a, b) => {
-    const aPend = a[1].some((w) => w.status === "pending_approval");
-    const bPend = b[1].some((w) => w.status === "pending_approval");
-    if (aPend !== bPend) return aPend ? -1 : 1;
-    return a[0].localeCompare(b[0]);
-  });
+  const vendorEntries = useMemo(() => {
+    const byVendor = new Map<string, WorkOrderTabRow[]>();
+    for (const w of filtered) {
+      const arr = byVendor.get(w.vendor_name) ?? [];
+      arr.push(w);
+      byVendor.set(w.vendor_name, arr);
+    }
+    for (const arr of byVendor.values()) {
+      arr.sort((a, b) => (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9) || b.created_at.localeCompare(a.created_at));
+    }
+    return [...byVendor.entries()].sort((a, b) => {
+      const aPend = a[1].some((w) => w.status === "pending_approval");
+      const bPend = b[1].some((w) => w.status === "pending_approval");
+      if (aPend !== bPend) return aPend ? -1 : 1;
+      return a[0].localeCompare(b[0]);
+    });
+  }, [filtered]);
+
   const pendingCount = wos.filter((w) => w.status === "pending_approval").length;
 
   return (
@@ -116,6 +160,35 @@ export function WorkOrdersTab({
         </Link>
       </div>
 
+      {/* Search + legend */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ position: "relative", flex: "1 1 320px", maxWidth: 460 }}>
+          <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 14, color: "var(--muted)" }}>🔎</span>
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search WO no., slab no., dimensions, label, description…"
+            style={{ width: "100%", padding: "9px 12px 9px 34px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 9, background: "var(--surface)", color: "var(--text)" }}
+          />
+          {q && (
+            <button type="button" onClick={() => setQ("")} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", fontSize: 13, fontWeight: 700, color: "var(--muted)", background: "none", border: "none", cursor: "pointer" }}>
+              ✕
+            </button>
+          )}
+        </div>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+          {LEGEND.map((l) => {
+            const t = LINE_TONE[l.key];
+            return (
+              <span key={l.key} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--muted)", fontWeight: 600 }}>
+                <span style={{ width: 10, height: 10, borderRadius: 3, background: t.bg, border: `1px solid ${t.border}` }} />
+                {l.label}
+              </span>
+            );
+          })}
+        </div>
+      </div>
+
       {isOwner && pendingCount > 0 && (
         <div style={{ background: "rgba(217,119,6,0.1)", border: "1px solid rgba(217,119,6,0.35)", borderRadius: 12, padding: "12px 16px", color: "#92400e", fontSize: 13, fontWeight: 700 }}>
           ⏳ {pendingCount} work order{pendingCount === 1 ? "" : "s"} waiting for your price approval.
@@ -126,6 +199,10 @@ export function WorkOrdersTab({
         <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 24, color: "var(--muted)", fontSize: 13, textAlign: "center" }}>
           No work orders yet. Tap <strong>+ New work order</strong> to hand work to an outsource vendor.
         </div>
+      ) : filtered.length === 0 ? (
+        <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 24, color: "var(--muted)", fontSize: 13, textAlign: "center" }}>
+          Nothing matches “{q}”. Try a work-order number, slab code, dimension, label, or description.
+        </div>
       ) : (
         vendorEntries.map(([vendor, list]) => {
           const tally = list.reduce<Record<string, number>>((m, w) => {
@@ -134,8 +211,7 @@ export function WorkOrdersTab({
           }, {});
           return (
             <div key={vendor}>
-              {/* Vendor section header — matches the Active tab's gold
-                  gradient bar + worker emoji + summary chips. */}
+              {/* Vendor section header — matches the Active tab's chrome. */}
               <div
                 style={{
                   position: "relative",
@@ -180,13 +256,13 @@ export function WorkOrdersTab({
                   borderRadius: "0 0 12px 12px",
                   padding: 14,
                   display: "grid",
-                  gridTemplateColumns: "repeat(auto-fill, minmax(264px, 1fr))",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
                   gap: 12,
                   background: "var(--bg)",
                 }}
               >
                 {list.map((w) => {
-                  const c = counts.get(w.id) ?? { total: 0, planned: 0, sent: 0, received: 0, approved: 0 };
+                  const c = w.counts;
                   const assigned = c.sent + c.received + c.approved;
                   const isPending = w.status === "pending_approval";
                   return (
@@ -221,6 +297,38 @@ export function WorkOrdersTab({
                           {c.approved > 0 ? ` · ${c.approved} ✓` : ""}
                         </span>
                       </div>
+
+                      {/* Slab chips — see which slabs are in the order + their
+                          stage, without opening it. */}
+                      {w.lines.length > 0 && (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                          {w.lines.map((l, i) => {
+                            const t = LINE_TONE[l.status] ?? LINE_TONE.planned;
+                            return (
+                              <span
+                                key={i}
+                                title={`${l.code} — ${t.label}`}
+                                style={{
+                                  fontSize: 10.5,
+                                  fontWeight: 700,
+                                  fontFamily: "ui-monospace, monospace",
+                                  color: t.fg,
+                                  background: t.bg,
+                                  border: `1px solid ${t.border}`,
+                                  borderRadius: 6,
+                                  padding: "2px 7px",
+                                  maxWidth: 150,
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {l.isFuture ? "📝 " : ""}{l.code}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
 
                       {(w.status === "rejected" || w.status === "cancelled") && (w.reject_reason || w.cancel_reason) && (
                         <div style={{ fontSize: 12, color: "#991b1b" }}>Reason: {w.reject_reason || w.cancel_reason}</div>

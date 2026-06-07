@@ -8,7 +8,7 @@ import {
   canSeeAwaitingReview,
 } from "@/lib/cutting-permissions";
 import { CarvingDashboardClient } from "./dashboard-client";
-import { WorkOrdersTab, type WorkOrderRow, type WorkOrderLineCounts } from "./work-orders-tab";
+import { WorkOrdersTab, type WorkOrderRow, type WorkOrderLineCounts, type WorkOrderTabRow, type WorkOrderLineChip } from "./work-orders-tab";
 import { VendorsManagerPeek } from "./vendors-manager-peek";
 import { CockpitSidebarToggle } from "@/components/cockpit-sidebar-toggle";
 import {
@@ -504,8 +504,7 @@ export default async function CarvingDashboardPage({
   // the client) so the owner Approve/Reject controls stay server-action
   // forms and the CNC flow is untouched.
   const isOwner = profile.role === "developer" || profile.role === "owner";
-  let workOrders: WorkOrderRow[] = [];
-  const woLineCounts = new Map<string, WorkOrderLineCounts>();
+  let workOrdersForTab: WorkOrderTabRow[] = [];
   if (canUseOutsource && mode === "outsource") {
     const [{ data: woRows }, { data: woLineRows }] = await Promise.all([
       admin
@@ -513,13 +512,41 @@ export default async function CarvingDashboardPage({
         .select("id, wo_number, vendor_name, title, temple, status, jobwork_rate, jobwork_unit, reject_reason, cancel_reason, created_at")
         .order("created_at", { ascending: false })
         .limit(300),
-      admin.from("carving_work_order_items").select("work_order_id, line_status"),
+      admin
+        .from("carving_work_order_items")
+        .select("work_order_id, slab_requirement_id, description, planned_length_ft, planned_width_ft, planned_thickness_ft, line_status, position")
+        .order("position", { ascending: true }),
     ]);
-    workOrders = (woRows ?? []) as WorkOrderRow[];
-    for (const r of (woLineRows ?? []) as Array<{ work_order_id: string; line_status: string }>) {
-      const cc = woLineCounts.get(r.work_order_id) ?? { total: 0, planned: 0, sent: 0, received: 0, approved: 0 };
+    const woRowsT = (woRows ?? []) as WorkOrderRow[];
+    const lineRowsT = (woLineRows ?? []) as Array<{
+      work_order_id: string;
+      slab_requirement_id: string | null;
+      description: string | null;
+      planned_length_ft: number | string | null;
+      planned_width_ft: number | string | null;
+      planned_thickness_ft: number | string | null;
+      line_status: string;
+    }>;
+    // Slab meta (label / description / dims) for bound slabs — shown as chips
+    // on the card + folded into each line's search haystack.
+    const woSlabIds = [...new Set(lineRowsT.map((l) => l.slab_requirement_id).filter(Boolean) as string[])];
+    const woSlabMeta = new Map<string, { label: string | null; description: string | null; dims: string }>();
+    if (woSlabIds.length > 0) {
+      const { data: sRows } = await admin
+        .from("slab_requirements")
+        .select("id, label, description, length_ft, width_ft, thickness_ft")
+        .in("id", woSlabIds);
+      for (const s of (sRows ?? []) as Array<{ id: string; label: string | null; description: string | null; length_ft: number | string; width_ft: number | string; thickness_ft: number | string }>) {
+        const l = Number(s.length_ft) || 0, w = Number(s.width_ft) || 0, t = Number(s.thickness_ft) || 0;
+        woSlabMeta.set(s.id, { label: s.label, description: s.description, dims: `${l}×${w}×${t}` });
+      }
+    }
+    const linesByWo = new Map<string, WorkOrderLineChip[]>();
+    const countsByWo = new Map<string, WorkOrderLineCounts>();
+    for (const r of lineRowsT) {
+      const cc = countsByWo.get(r.work_order_id) ?? { total: 0, planned: 0, sent: 0, received: 0, approved: 0 };
       if (r.line_status === "cancelled") {
-        woLineCounts.set(r.work_order_id, cc);
+        countsByWo.set(r.work_order_id, cc);
         continue;
       }
       cc.total += 1;
@@ -527,11 +554,31 @@ export default async function CarvingDashboardPage({
       else if (r.line_status === "sent") cc.sent += 1;
       else if (r.line_status === "received") cc.received += 1;
       else if (r.line_status === "approved") cc.approved += 1;
-      woLineCounts.set(r.work_order_id, cc);
+      countsByWo.set(r.work_order_id, cc);
+
+      const meta = r.slab_requirement_id ? woSlabMeta.get(r.slab_requirement_id) : null;
+      const plannedDims =
+        r.planned_length_ft != null
+          ? `${Number(r.planned_length_ft)}×${Number(r.planned_width_ft ?? 0)}×${Number(r.planned_thickness_ft ?? 0)}`
+          : "";
+      const dims = meta?.dims ?? plannedDims;
+      const code = r.slab_requirement_id ?? (r.description || "future need");
+      const search = [r.slab_requirement_id ?? "", meta?.label ?? "", meta?.description ?? "", r.description ?? "", dims, dims.replaceAll("×", "x")]
+        .join(" ")
+        .toLowerCase();
+      const arr = linesByWo.get(r.work_order_id) ?? [];
+      arr.push({ code, status: r.line_status, isFuture: !r.slab_requirement_id, search });
+      linesByWo.set(r.work_order_id, arr);
     }
+    const zeroCounts: WorkOrderLineCounts = { total: 0, planned: 0, sent: 0, received: 0, approved: 0 };
+    workOrdersForTab = woRowsT.map((w) => ({
+      ...w,
+      lines: linesByWo.get(w.id) ?? [],
+      counts: countsByWo.get(w.id) ?? zeroCounts,
+    }));
   }
   // Tab badge = live orders (exclude cancelled / rejected).
-  const workOrdersLiveCount = workOrders.filter((w) => w.status !== "cancelled" && w.status !== "rejected").length;
+  const workOrdersLiveCount = workOrdersForTab.filter((w) => w.status !== "cancelled" && w.status !== "rejected").length;
 
   const counts = {
     unassigned: (unassignedSlabsAll ?? []).length,
@@ -776,7 +823,7 @@ export default async function CarvingDashboardPage({
           Reject are server-action forms); every other tab is the client
           dashboard. */}
       {tab === "workorders" ? (
-        <WorkOrdersTab wos={workOrders} counts={woLineCounts} isOwner={isOwner} />
+        <WorkOrdersTab wos={workOrdersForTab} isOwner={isOwner} />
       ) : (
         <CarvingDashboardClient
           tab={tab}
