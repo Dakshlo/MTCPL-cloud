@@ -47,6 +47,36 @@ export default async function EmbedBlockJourneyPage({
 
   const admin = createAdminSupabaseClient();
 
+  // Paginated slab_requirements fetch — MUST mirror /block-journey's
+  // fetchAllPostCutSlabs exactly. This embed (the dashboard peek) used a
+  // single un-paginated query, which silently truncated to PostgREST's
+  // 1000-row default page: every cut slab past row 1000 was dropped, so
+  // recovery was undercounted and a block with 3 slabs could show only 1.
+  // The standalone /block-journey page already paginated this query — the
+  // two copies had drifted, which is exactly why the peek (owner / dev /
+  // senior_incharge) disagreed with the full page (team_head). Walk
+  // 1000-row pages up to 50000; also select cut_source_kind so manual-cut
+  // marble lineages compute correctly (same as the standalone page).
+  async function fetchAllPostCutSlabs() {
+    const PAGE = 1000;
+    const MAX = 50000;
+    const out: unknown[] = [];
+    for (let offset = 0; offset < MAX; offset += PAGE) {
+      const { data, error } = await admin
+        .from("slab_requirements")
+        .select("id, length_ft, width_ft, thickness_ft, source_block_id, label, temple, status, cut_source_kind")
+        .not("source_block_id", "is", null)
+        .in("status", POST_CUT_STATUSES)
+        .order("id", { ascending: true })
+        .range(offset, offset + PAGE - 1);
+      if (error) throw new Error(error.message);
+      if (!data || data.length === 0) break;
+      out.push(...data);
+      if (data.length < PAGE) break;
+    }
+    return { data: out, error: null as null };
+  }
+
   const [freshR, reusedR, cutDoneR, doneCsbR, stoneTypesR, trucksR, cutSessionSlabsR] = await Promise.all([
     admin
       .from("blocks")
@@ -60,15 +90,12 @@ export default async function EmbedBlockJourneyPage({
         "id, stone, yard, quality, category, length_ft, width_ft, height_ft, tonnes, truck_entry_id, status, created_at, created_by, updated_at",
       )
       .eq("category", "Reused"),
-    // Match the in-app /block-journey page (see comment there): slabs
-    // that have moved past cut_done still count toward what each block
-    // produced — otherwise the lineage card silently loses them once
-    // carving picks them up. Same MT-B-246 class of bug.
-    admin
-      .from("slab_requirements")
-      .select("id, length_ft, width_ft, thickness_ft, source_block_id, label, temple, status")
-      .not("source_block_id", "is", null)
-      .in("status", POST_CUT_STATUSES),
+    // Paginated to match /block-journey exactly — see fetchAllPostCutSlabs
+    // above. (Was a single un-paginated query here, which capped at 1000
+    // rows and made the dashboard peek undercount recovery vs the full
+    // page.) Slabs that moved past cut_done still count toward what each
+    // block produced (POST_CUT_STATUSES), same MT-B-246 fix.
+    fetchAllPostCutSlabs(),
     admin
       .from("cut_session_blocks")
       .select("block_id, status, updated_at")
