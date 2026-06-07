@@ -123,9 +123,6 @@ export async function buildWorkOrderPdf(inp: WorkOrderPdfInput): Promise<Uint8Ar
   const text = (s: string, x: number, yy: number, size: number, f: PDFFont = font, color = ink) =>
     page.drawText(san(s), { x, y: yy, size, font: f, color });
 
-  text("Jobwork handover", MARGIN_X, y, 11, bold, ink);
-  y -= 18;
-
   // Slab table
   const cols = {
     code: MARGIN_X,
@@ -197,10 +194,15 @@ export async function buildWorkOrderPdf(inp: WorkOrderPdfInput): Promise<Uint8Ar
     "2. The material remains the property of Mateshwari Temple Construction Pvt Ltd at all times.",
     "3. The vendor is responsible for safe custody and the quality of the work until returned.",
     "4. Payment is on the agreed rate above, against approved / received work only.",
+    "5. Only a part-payment is released; the balance is held until the carved slab is",
+    "   successfully installed at the site.",
+    "6. Any installation problem caused by a carving or handling defect remains the vendor's",
+    "   responsibility to help rectify. The full and final payment is released only after our",
+    "   client approves and releases the payment to us, and 90 days after that release.",
   ];
   // Keep the terms + signatures together: if they won't fit, start a fresh
   // page (which carries the identity header).
-  if (y < BOTTOM + 130) {
+  if (y < BOTTOM + 210) {
     page = newPage();
     y = CONTENT_TOP;
   }
