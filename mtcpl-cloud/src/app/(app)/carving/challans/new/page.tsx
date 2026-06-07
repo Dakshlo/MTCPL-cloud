@@ -87,7 +87,8 @@ export default async function NewCarvingChallanPage() {
       cft: s ? Math.round(cftFromSlab(s.length, s.width, s.thickness) * 1000) / 1000 : 0,
       sft: s ? Math.round(sftFromSlab(s.length, s.width) * 1000) / 1000 : 0,
       snapRate: i.jobwork_rate != null ? Number(i.jobwork_rate) : null,
-      snapUnit: i.jobwork_unit === "sft" ? "sft" : i.jobwork_unit === "cft" ? "cft" : null,
+      // Mig 100 — carry the slab's own unit (job = flat per slab). Default cft.
+      snapUnit: i.jobwork_unit === "sft" ? "sft" : i.jobwork_unit === "job" ? "job" : "cft",
     };
   });
 

@@ -5867,15 +5867,29 @@ export async function generateCarvingChallanAction(formData: FormData) {
 
   const vendorId = txt(formData, "vendor_id");
   const idsRaw = txt(formData, "carving_item_ids");
-  const rate = Number(txt(formData, "rate"));
-  const unit = txt(formData, "unit") === "sft" ? "sft" : "cft";
+  const ratesRaw = txt(formData, "rates_json");
   const gstPctRaw = txt(formData, "gst_pct");
   const gstPct = gstPctRaw && Number(gstPctRaw) > 0 ? Number(gstPctRaw) : null;
   const isRcm = txt(formData, "is_rcm") === "true";
   const notes = txt(formData, "notes") || null;
 
   if (!vendorId) redirect("/carving/challans/new?toast=Pick+a+vendor");
-  if (!rate || rate <= 0) redirect("/carving/challans/new?toast=Enter+a+valid+rate");
+
+  // Per-slab rate overrides {carving_item_id: rate}. Falls back to the slab's
+  // owner-approved snapshot rate when absent. Each slab is billed by its OWN
+  // unit (cft / sft / job-flat), so one challan can mix units correctly.
+  const rateMap: Record<string, number> = {};
+  try {
+    const parsed = JSON.parse(ratesRaw);
+    if (parsed && typeof parsed === "object") {
+      for (const [k, v] of Object.entries(parsed)) {
+        const n = Number(v);
+        if (Number.isFinite(n) && n > 0) rateMap[k] = n;
+      }
+    }
+  } catch {
+    /* empty */
+  }
 
   let ids: string[] = [];
   try {
@@ -5891,7 +5905,7 @@ export async function generateCarvingChallanAction(formData: FormData) {
   const { data: itemsData } = await admin
     .from("carving_items")
     .select(
-      "id, vendor_id, vendor_name, vendor_type, slab_requirement_id, review_approved_at",
+      "id, vendor_id, vendor_name, vendor_type, slab_requirement_id, review_approved_at, jobwork_rate, jobwork_unit",
     )
     .in("id", ids)
     .eq("vendor_id", vendorId);
@@ -5902,6 +5916,8 @@ export async function generateCarvingChallanAction(formData: FormData) {
     vendor_type: string;
     slab_requirement_id: string;
     review_approved_at: string | null;
+    jobwork_rate: number | string | null;
+    jobwork_unit: string | null;
   }>;
   if (items.length === 0) redirect("/carving/challans/new?toast=No+matching+approved+slabs");
   if (items.some((i) => i.vendor_type !== "Outsource" || !i.review_approved_at)) {
@@ -5938,10 +5954,18 @@ export async function generateCarvingChallanAction(formData: FormData) {
 
   const lines = items.map((it, idx) => {
     const slab = slabById.get(it.slab_requirement_id);
-    const qty = slab
-      ? jobworkQuantity(unit, slab.length_ft, slab.width_ft, slab.thickness_ft)
-      : 0;
-    const amount = Math.round(qty * rate * 100) / 100;
+    // Each slab keeps its OWN unit (snapshot from the work order) and its own
+    // rate (per-slab override from the form, else the snapshot rate). 'job' is
+    // a flat amount per slab; cft/sft multiply by the slab's quantity.
+    const u = it.jobwork_unit === "sft" ? "sft" : it.jobwork_unit === "job" ? "job" : "cft";
+    const r = rateMap[it.id] ?? (it.jobwork_rate != null ? Number(it.jobwork_rate) : 0);
+    const qty =
+      u === "job"
+        ? 1
+        : slab
+          ? jobworkQuantity(u as "cft" | "sft", slab.length_ft, slab.width_ft, slab.thickness_ft)
+          : 0;
+    const amount = Math.round((u === "job" ? r : qty * r) * 100) / 100;
     const dims = slab
       ? `${Number(slab.length_ft)}x${Number(slab.width_ft)}x${Number(slab.thickness_ft)} in`
       : "";
@@ -5953,12 +5977,16 @@ export async function generateCarvingChallanAction(formData: FormData) {
       slab_requirement_id: it.slab_requirement_id,
       description: desc,
       quantity: Math.round(qty * 1000) / 1000,
-      unit,
-      rate,
+      unit: u,
+      rate: r,
       amount,
       position: idx,
     };
   });
+  // Every billed slab must carry a positive rate (per-slab or snapshot).
+  if (lines.some((l) => !(l.rate > 0))) {
+    redirect("/carving/challans/new?toast=" + encodeURIComponent("Every slab needs a rate"));
+  }
   const subtotal = Math.round(lines.reduce((s, l) => s + l.amount, 0) * 100) / 100;
   const gstAmount = gstPct ? Math.round(subtotal * gstPct) / 100 : 0;
   const total = Math.round((subtotal + (isRcm ? 0 : gstAmount)) * 100) / 100;

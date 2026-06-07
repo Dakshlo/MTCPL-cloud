@@ -56,7 +56,12 @@ export async function GET(
   }>).map((r) => ({
     description: r.description,
     quantity: Number(r.quantity),
-    unit: r.unit === "sft" ? ("sft" as const) : ("cft" as const),
+    unit:
+      r.unit === "sft"
+        ? ("sft" as const)
+        : r.unit === "job"
+          ? ("job" as const)
+          : ("cft" as const),
     rate: Number(r.rate),
     amount: Number(r.amount),
   }));

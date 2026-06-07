@@ -19,7 +19,8 @@ export type JobworkChallanPdfInput = {
   items: Array<{
     description: string;
     quantity: number;
-    unit: "cft" | "sft";
+    // 'job' = flat amount per slab (qty 1); cft/sft multiply by quantity.
+    unit: "cft" | "sft" | "job";
     rate: number;
     amount: number;
   }>;
