@@ -210,6 +210,41 @@ export async function uploadBillDocumentAction(formData: FormData) {
   redirect(`/accounts/bills/${billId}?doc=1`);
 }
 
+/** Owner/dev remove a bill's scanned document — deletes the stored file
+ *  and clears the columns so the field is empty again. Redirect-style. */
+export async function removeBillDocumentAction(formData: FormData) {
+  const { profile } = await requireAuth();
+  const billId = String(formData.get("bill_id") || "").trim();
+  if (profile.role !== "owner" && profile.role !== "developer") {
+    redirect(`/accounts/bills/${billId}?docerr=${encodeURIComponent("Only the owner can remove a bill document.")}`);
+  }
+  if (!billId) redirect("/accounts/bills?docerr=Missing+bill");
+  const admin = createAdminSupabaseClient();
+  // Look up the current object path so we can delete the stored file too.
+  const { data: row } = await admin.from("bills").select("document_path").eq("id", billId).maybeSingle();
+  const path = (row as { document_path?: string | null } | null)?.document_path ?? null;
+  if (path) {
+    // Best-effort storage cleanup — never block the unlink on a storage hiccup.
+    try {
+      await admin.storage.from(BILL_DOC_BUCKET).remove([path]);
+    } catch {
+      /* ignore — the DB unlink below is what matters */
+    }
+  }
+  await admin
+    .from("bills")
+    .update({
+      document_path: null,
+      document_mime: null,
+      document_uploaded_at: null,
+      document_uploaded_by: null,
+    })
+    .eq("id", billId);
+  await logAudit(profile.id, "bill_document_removed", "bill", billId, {});
+  await refreshAccountsPaths();
+  redirect(`/accounts/bills/${billId}?doc=removed`);
+}
+
 // ──────────────────────────────────────────────────────────────────
 // Bill submission
 // ──────────────────────────────────────────────────────────────────

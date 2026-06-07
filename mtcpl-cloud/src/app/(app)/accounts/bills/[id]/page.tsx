@@ -18,7 +18,9 @@ import {
   releaseBillHoldFormAction,
   getSignedBillDocumentUrl,
   uploadBillDocumentAction,
+  removeBillDocumentAction,
 } from "../../actions";
+import { ConfirmButton } from "@/components/confirm-button";
 import { RejectBillForm } from "./reject-bill-form";
 import { ApproveBillButton } from "./approve-bill-button";
 import { BillBackLink } from "./bill-back-link";
@@ -1291,6 +1293,17 @@ export default async function BillDetailPage({
                 >
                   {billDocPath ? "Replace document" : "Attach document"}
                 </button>
+              </form>
+            )}
+            {isOwnerDev && billDocPath && (
+              <form action={removeBillDocumentAction} style={{ marginTop: 8 }}>
+                <input type="hidden" name="bill_id" value={bill.id} />
+                <ConfirmButton
+                  message="Remove this bill document? The file is deleted and the field becomes empty (you can attach a new one later)."
+                  style={{ padding: "7px 14px", fontSize: 13, fontWeight: 700, color: ACCOUNTS_TOKENS.danger, background: ACCOUNTS_TOKENS.dangerLight, border: `1px solid ${ACCOUNTS_TOKENS.danger}`, borderRadius: 8, cursor: "pointer" }}
+                >
+                  🗑 Remove document
+                </ConfirmButton>
               </form>
             )}
           </Section>
