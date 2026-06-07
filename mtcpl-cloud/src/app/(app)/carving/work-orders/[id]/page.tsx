@@ -254,9 +254,9 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
 
                 {/* action */}
                 <div style={{ marginTop: "auto", paddingTop: 4, display: "flex", flexDirection: "column", gap: 4 }}>
-                  {cancelled ? null : isSent ? (
+                  {isSent ? (
                     <>
-                      {ci && !ci.completed_at && (
+                      {!cancelled && ci && !ci.completed_at && (
                         <form action={markCarvingCompleteManuallyAction}>
                           <input type="hidden" name="carving_item_id" value={l.carving_item_id!} />
                           <input type="hidden" name="redirect_to" value={`/carving/work-orders/${id}`} />
@@ -264,7 +264,8 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
                         </form>
                       )}
                       {/* Owner/dev can pull a sent slab back to "not yet
-                          shipped" — even while active or after approval. */}
+                          shipped" — even while active, after approval, or on
+                          a cancelled work order. */}
                       {isOwner && (
                         <form action={recallWorkOrderLineAction}>
                           <input type="hidden" name="line_id" value={l.id} />
@@ -278,7 +279,7 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
                         </form>
                       )}
                     </>
-                  ) : l.slab_requirement_id && slab?.status === "cut_done" ? (
+                  ) : cancelled ? null : l.slab_requirement_id && slab?.status === "cut_done" ? (
                     approved ? (
                       <form action={sendWorkOrderLineToVendorAction}>
                         <input type="hidden" name="line_id" value={l.id} />
