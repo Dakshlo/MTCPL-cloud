@@ -401,7 +401,9 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
                 </div>
               )}
 
-              {!inReview && !approved && !dispatched && (
+              {/* Mig 098 — Outsource cancel/recall lives on the Work Orders
+                  page now (owner-only). Keep this generic cancel for CNC. */}
+              {!inReview && !approved && !dispatched && jobRow.vendor_type !== "Outsource" && (
                 <form action={cancelCarvingJobAction}>
                   <input type="hidden" name="job_id" value={jobRow.id} />
                   <ConfirmButton

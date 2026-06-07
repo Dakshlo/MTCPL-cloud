@@ -514,13 +514,14 @@ export default async function CarvingDashboardPage({
         .limit(300),
       admin
         .from("carving_work_order_items")
-        .select("work_order_id, slab_requirement_id, description, planned_length_ft, planned_width_ft, planned_thickness_ft, line_status, position")
+        .select("work_order_id, slab_requirement_id, carving_item_id, description, planned_length_ft, planned_width_ft, planned_thickness_ft, line_status, position")
         .order("position", { ascending: true }),
     ]);
     const woRowsT = (woRows ?? []) as WorkOrderRow[];
     const lineRowsT = (woLineRows ?? []) as Array<{
       work_order_id: string;
       slab_requirement_id: string | null;
+      carving_item_id: string | null;
       description: string | null;
       planned_length_ft: number | string | null;
       planned_width_ft: number | string | null;
@@ -541,6 +542,20 @@ export default async function CarvingDashboardPage({
         woSlabMeta.set(s.id, { label: s.label, description: s.description, dims: `${l}×${w}×${t}` });
       }
     }
+    // Real stage comes from the carving_item, not line_status (which only
+    // ever holds planned / sent / cancelled): completed_at → received,
+    // review_approved_at → approved.
+    const woCiIds = [...new Set(lineRowsT.map((l) => l.carving_item_id).filter(Boolean) as string[])];
+    const woCiMeta = new Map<string, { completed_at: string | null; review_approved_at: string | null }>();
+    if (woCiIds.length > 0) {
+      const { data: ciRows } = await admin
+        .from("carving_items")
+        .select("id, completed_at, review_approved_at")
+        .in("id", woCiIds);
+      for (const ci of (ciRows ?? []) as Array<{ id: string; completed_at: string | null; review_approved_at: string | null }>) {
+        woCiMeta.set(ci.id, { completed_at: ci.completed_at, review_approved_at: ci.review_approved_at });
+      }
+    }
     const linesByWo = new Map<string, WorkOrderLineChip[]>();
     const countsByWo = new Map<string, WorkOrderLineCounts>();
     for (const r of lineRowsT) {
@@ -549,11 +564,17 @@ export default async function CarvingDashboardPage({
         countsByWo.set(r.work_order_id, cc);
         continue;
       }
+      // Effective stage: planned (no item) → sent → received → approved.
+      let eff = "planned";
+      if (r.carving_item_id) {
+        const ci = woCiMeta.get(r.carving_item_id);
+        eff = ci?.review_approved_at ? "approved" : ci?.completed_at ? "received" : "sent";
+      }
       cc.total += 1;
-      if (r.line_status === "planned") cc.planned += 1;
-      else if (r.line_status === "sent") cc.sent += 1;
-      else if (r.line_status === "received") cc.received += 1;
-      else if (r.line_status === "approved") cc.approved += 1;
+      if (eff === "planned") cc.planned += 1;
+      else if (eff === "sent") cc.sent += 1;
+      else if (eff === "received") cc.received += 1;
+      else if (eff === "approved") cc.approved += 1;
       countsByWo.set(r.work_order_id, cc);
 
       const meta = r.slab_requirement_id ? woSlabMeta.get(r.slab_requirement_id) : null;
@@ -567,7 +588,7 @@ export default async function CarvingDashboardPage({
         .join(" ")
         .toLowerCase();
       const arr = linesByWo.get(r.work_order_id) ?? [];
-      arr.push({ code, status: r.line_status, isFuture: !r.slab_requirement_id, search });
+      arr.push({ code, status: eff, isFuture: !r.slab_requirement_id, search });
       linesByWo.set(r.work_order_id, arr);
     }
     const zeroCounts: WorkOrderLineCounts = { total: 0, planned: 0, sent: 0, received: 0, approved: 0 };

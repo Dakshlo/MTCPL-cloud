@@ -3,12 +3,14 @@ import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { SlabThumb } from "@/components/slab-thumb";
+import { ConfirmButton } from "@/components/confirm-button";
 import type { StoneTypeDef } from "@/lib/stone-utils";
 import {
   sendWorkOrderLineToVendorAction,
   sendAllReadyWorkOrderLinesAction,
   bindSlabToWorkOrderLineAction,
   removeWorkOrderLineAction,
+  recallWorkOrderLineAction,
   cancelWorkOrderAction,
   approveWorkOrderAction,
   rejectWorkOrderAction,
@@ -253,13 +255,29 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
                 {/* action */}
                 <div style={{ marginTop: "auto", paddingTop: 4, display: "flex", flexDirection: "column", gap: 4 }}>
                   {cancelled ? null : isSent ? (
-                    ci && !ci.completed_at ? (
-                      <form action={markCarvingCompleteManuallyAction}>
-                        <input type="hidden" name="carving_item_id" value={l.carving_item_id!} />
-                        <input type="hidden" name="redirect_to" value={`/carving/work-orders/${id}`} />
-                        <button type="submit" style={btn("#15803d")}>📥 Receive</button>
-                      </form>
-                    ) : null
+                    <>
+                      {ci && !ci.completed_at && (
+                        <form action={markCarvingCompleteManuallyAction}>
+                          <input type="hidden" name="carving_item_id" value={l.carving_item_id!} />
+                          <input type="hidden" name="redirect_to" value={`/carving/work-orders/${id}`} />
+                          <button type="submit" style={btn("#15803d")}>📥 Receive</button>
+                        </form>
+                      )}
+                      {/* Owner/dev can pull a sent slab back to "not yet
+                          shipped" — even while active or after approval. */}
+                      {isOwner && (
+                        <form action={recallWorkOrderLineAction}>
+                          <input type="hidden" name="line_id" value={l.id} />
+                          <input type="hidden" name="work_order_id" value={id} />
+                          <ConfirmButton
+                            message="Cancel this slab's assignment and bring it back to ‘not yet shipped’? Its carving record is removed and the slab returns to cut-done (you can re-send it later)."
+                            style={{ width: "100%", padding: "6px 10px", fontSize: 11, fontWeight: 700, color: "#991b1b", background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.3)", borderRadius: 6, cursor: "pointer" }}
+                          >
+                            ↩ Cancel assignment
+                          </ConfirmButton>
+                        </form>
+                      )}
+                    </>
                   ) : l.slab_requirement_id && slab?.status === "cut_done" ? (
                     approved ? (
                       <form action={sendWorkOrderLineToVendorAction}>

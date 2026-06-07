@@ -6446,6 +6446,77 @@ export async function sendAllReadyWorkOrderLinesAction(formData: FormData) {
   );
 }
 
+// Mig 098 follow-up — owner/dev can pull a slab back OFF the vendor and
+// return its work-order line to 'planned' (assigned in the work order but
+// NOT yet shipped). Works even when the slab is active (being carved) or
+// approved (Carving Done). Deletes the carving_item and resets the slab to
+// cut_done so it can be re-sent later. Blocked once the slab is billed on a
+// live challan or already dispatched (undo those first).
+export async function recallWorkOrderLineAction(formData: FormData) {
+  const { profile } = await requireAuth(["developer", "owner"]);
+  const admin = createAdminSupabaseClient();
+  const lineId = txt(formData, "line_id");
+  const woId = txt(formData, "work_order_id");
+  if (!lineId) redirect(`/carving/work-orders/${woId}?toast=Missing+line`);
+
+  const { data: lineRow } = await admin
+    .from("carving_work_order_items")
+    .select("id, work_order_id, slab_requirement_id, carving_item_id, line_status")
+    .eq("id", lineId)
+    .maybeSingle();
+  const line = lineRow as {
+    work_order_id: string;
+    slab_requirement_id: string | null;
+    carving_item_id: string | null;
+    line_status: string;
+  } | null;
+  if (!line) redirect(`/carving/work-orders/${woId}?toast=Line+not+found`);
+  if (!line!.carving_item_id) redirect(`/carving/work-orders/${woId}?toast=Nothing+to+recall`);
+
+  // Block if this slab is already billed on a live (non-cancelled) challan.
+  const { data: billedRows } = await admin
+    .from("carving_challan_items")
+    .select("id, carving_challans!inner(cancelled_at)")
+    .eq("carving_item_id", line!.carving_item_id);
+  const billed = ((billedRows ?? []) as unknown as Array<{ carving_challans: { cancelled_at: string | null } | null }>).some(
+    (r) => !r.carving_challans?.cancelled_at,
+  );
+  if (billed) {
+    redirect(`/carving/work-orders/${woId}?toast=${encodeURIComponent("Cancel its challan first, then recall")}`);
+  }
+
+  // Block if the slab has already been dispatched.
+  if (line!.slab_requirement_id) {
+    const { data: slabRow } = await admin
+      .from("slab_requirements")
+      .select("status")
+      .eq("id", line!.slab_requirement_id)
+      .maybeSingle();
+    if ((slabRow as { status: string } | null)?.status === "dispatched") {
+      redirect(`/carving/work-orders/${woId}?toast=${encodeURIComponent("Already dispatched — cannot recall")}`);
+    }
+  }
+
+  await recordEvent(line!.carving_item_id, "cancelled", profile.id, "Recalled to work order (un-shipped) by owner");
+  await admin.from("carving_items").delete().eq("id", line!.carving_item_id);
+  if (line!.slab_requirement_id) {
+    await admin
+      .from("slab_requirements")
+      .update({ status: "cut_done", updated_by: profile.id, updated_at: new Date().toISOString() })
+      .eq("id", line!.slab_requirement_id);
+  }
+  await admin
+    .from("carving_work_order_items")
+    .update({ carving_item_id: null, line_status: "planned" })
+    .eq("id", lineId);
+  await logAudit(profile.id, "work_order_line_recalled", "carving_work_order", line!.work_order_id, {
+    line_id: lineId,
+    carving_item_id: line!.carving_item_id,
+  });
+  refreshAll();
+  redirect(`/carving/work-orders/${woId}?toast=${encodeURIComponent("Recalled — back to not yet shipped")}`);
+}
+
 export async function cancelWorkOrderAction(formData: FormData) {
   // Mig 098 — only the owner (or dev) can cancel a work order.
   const { profile } = await requireAuth(["developer", "owner"]);

@@ -79,7 +79,9 @@ export function CarvingJobControls({
     canManage && isCnc && status === "carving_assigned" && !receivedAtVendorAt;
   const canShowTagEditor =
     canManage && isCnc && (status === "carving_assigned" || status === "carving_in_progress") && !cncMachineId;
-  const canShowTransfer = canManage && !isLockedDone;
+  // Mig 098 — Outsource has no transfer-between-vendors flow on this page;
+  // owner recalls from the Work Orders page instead. CNC keeps transfer.
+  const canShowTransfer = canManage && !isLockedDone && vendorType !== "Outsource";
 
   if (!canManage) return null;
 
