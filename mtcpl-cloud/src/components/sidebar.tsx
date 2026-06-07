@@ -340,16 +340,6 @@ const navEntries: NavEntry[] = [
       },
     ],
   },
-  // ── Personal/owner tool (Daksh, June 2026) — a blank MTCPL letterhead
-  // (logo + footer + standard terms + vendor signature) to print and fill
-  // by hand for vendor dealings. Not tied to any system record. Owner/dev.
-  {
-    href: "/blank-document",
-    label: "Blank Document",
-    icon: "📄",
-    roles: ["developer", "owner"],
-    department: "production",
-  },
   // ── REGISTER department (Mig 101 + 102) — its own switcher tile ──────
   // Standalone, owner/dev-only record of company activities + proof
   // (e.g. demos/samples sent to clients). Tagged to its OWN department
