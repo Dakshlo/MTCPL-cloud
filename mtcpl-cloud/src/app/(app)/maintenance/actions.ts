@@ -103,6 +103,16 @@ async function uploadImage(
   return { path, mime };
 }
 
+/** Remember a fixed location name so the picker offers it next time. */
+async function rememberLocation(admin: ReturnType<typeof createAdminSupabaseClient>, name: string) {
+  if (!name) return;
+  try {
+    await admin.from("machine_locations").insert({ name }).select("id").single();
+  } catch {
+    /* unique violation = already exists; ignore */
+  }
+}
+
 // ── Groups ──────────────────────────────────────────────────────────
 
 export async function createGroupAction(formData: FormData) {
@@ -110,10 +120,11 @@ export async function createGroupAction(formData: FormData) {
   if (!isAllowed(profile.role)) redirect(back(formData, "Not allowed."));
   const name = txt(formData, "name");
   if (!name) redirect(back(formData, "Group name is required."));
+  const parentId = txt(formData, "parent_id") || null;
   const admin = createAdminSupabaseClient();
   const { data: created, error } = await admin
     .from("machine_groups")
-    .insert({ name, created_by: profile.id })
+    .insert({ name, parent_id: parentId, created_by: profile.id })
     .select("id")
     .single();
   if (error || !created) {
@@ -141,8 +152,10 @@ export async function updateGroupAction(formData: FormData) {
   const name = txt(formData, "name");
   if (!id) redirect(back(formData, "Missing group."));
   if (!name) redirect(back(formData, "Group name is required."));
+  // A group can't be its own parent.
+  const parentId = (txt(formData, "parent_id") || null);
   const admin = createAdminSupabaseClient();
-  const update: Record<string, unknown> = { name, updated_at: new Date().toISOString() };
+  const update: Record<string, unknown> = { name, parent_id: parentId === id ? null : parentId, updated_at: new Date().toISOString() };
   const image = formData.get("image");
   if (image instanceof File && image.size > 0) {
     try {
@@ -207,6 +220,7 @@ export async function createMachineAction(formData: FormData) {
       redirect(back(formData, `Machine added, but photo failed: ${e instanceof Error ? e.message : String(e)}`));
     }
   }
+  if (location) await rememberLocation(admin, location);
   await logAudit(profile.id, "machine_created", "company_machine", created.id, { name, group_id: groupId });
   revalidatePath(ROUTE);
   redirect(`${ROUTE}/${created.id}?toast=${encodeURIComponent(`Machine added (${created.machine_code}).`)}`);
@@ -243,6 +257,7 @@ export async function updateMachineAction(formData: FormData) {
   }
   const { error } = await admin.from("company_machines").update(update).eq("id", id);
   if (error) redirect(back(formData, error.message));
+  if (location) await rememberLocation(admin, location);
   await logAudit(profile.id, "machine_updated", "company_machine", id, { name, group_id: groupId });
   revalidatePath(ROUTE);
   redirect(back(formData, "Machine updated."));

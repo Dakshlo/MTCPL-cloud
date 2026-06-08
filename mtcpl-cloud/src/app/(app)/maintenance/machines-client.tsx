@@ -1,10 +1,11 @@
 "use client";
 
 // ──────────────────────────────────────────────────────────────────
-// Maintenance — machine registry UI (groups + photo cards).
-// Create a GROUP (e.g. Cranes, CNCs) with a shared photo, then add
-// machines into it. A machine can keep its own photo or share the
-// group's. Cards show the photo, grouped group-wise.
+// Maintenance — machine registry UI (nested groups + photo cards).
+// Create a primary GROUP (e.g. CNC) with a shared photo; optionally nest
+// sub-groups under it (e.g. Mohit CNC). Add machines into any group. A
+// machine keeps its own photo or shares the group's. Location is a
+// creatable fixed list (Shade 1, Shade 2, …).
 // ──────────────────────────────────────────────────────────────────
 
 import { useMemo, useState } from "react";
@@ -22,8 +23,11 @@ export type Machine = {
   imageUrl: string | null;   // resolved: own photo, else the group's photo
   openTickets: number;
 };
-export type GroupOpt = { id: string; name: string };
-export type Group = { id: string; name: string; imageUrl: string | null; machines: Machine[] };
+export type GroupOpt = { id: string; name: string };   // name may carry hierarchy ("CNC › Mohit CNC")
+export type Group = {
+  id: string; name: string; imageUrl: string | null; parent_id: string | null;
+  machines: Machine[]; subgroups?: Group[];
+};
 
 const STATUS_META: Record<string, { label: string; bg: string; fg: string }> = {
   working: { label: "Working", bg: "rgba(22,163,74,0.15)", fg: "#15803d" },
@@ -53,7 +57,7 @@ function PhotoBox({ url, height, rounded }: { url: string | null; height: number
     return <img src={url} alt="" style={{ width: "100%", height, objectFit: "cover", borderRadius: rounded, display: "block", background: "var(--surface-alt, #eee)" }} />;
   }
   return (
-    <div style={{ width: "100%", height, borderRadius: rounded, background: "linear-gradient(135deg, rgba(63,143,134,0.12), rgba(63,143,134,0.04))", display: "flex", alignItems: "center", justifyContent: "center", fontSize: height > 80 ? 34 : 20, color: "rgba(63,143,134,0.55)" }}>🛠️</div>
+    <div style={{ width: "100%", height, borderRadius: rounded, background: "linear-gradient(135deg, rgba(63,143,134,0.12), rgba(63,143,134,0.04))", display: "flex", alignItems: "center", justifyContent: "center", fontSize: height > 80 ? 34 : 18, color: "rgba(63,143,134,0.55)" }}>🛠️</div>
   );
 }
 
@@ -71,18 +75,22 @@ function ModalShell({ title, onClose, children }: { title: string; onClose: () =
   );
 }
 
-// ── Group create / edit (+ delete) modal ────────────────────────────
+// ── Group create / edit (+ nest under a parent, + delete) ───────────
 export function GroupFormModal({
-  mode, group, back, buttonLabel, buttonStyle,
+  mode, group, parentOptions, defaultParentId, back, buttonLabel, buttonStyle,
 }: {
   mode: "add" | "edit";
-  group?: { id: string; name: string; imageUrl: string | null };
+  group?: { id: string; name: string; imageUrl: string | null; parent_id: string | null };
+  parentOptions: GroupOpt[];
+  defaultParentId?: string | null;
   back: string;
   buttonLabel: string;
   buttonStyle?: React.CSSProperties;
 }) {
   const [open, setOpen] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
+  // A group can't be its own parent.
+  const parents = parentOptions.filter((p) => !group || p.id !== group.id);
   return (
     <>
       <button type="button" onClick={() => setOpen(true)} style={buttonStyle ?? btnGold}>{buttonLabel}</button>
@@ -92,9 +100,15 @@ export function GroupFormModal({
             {mode === "edit" && group && <input type="hidden" name="id" value={group.id} />}
             <input type="hidden" name="back" value={back} />
             <label><FieldLabel>Group name *</FieldLabel>
-              <input name="name" required defaultValue={group?.name ?? ""} placeholder="e.g. Cranes, CNCs, Vehicles" style={inputStyle} />
+              <input name="name" required defaultValue={group?.name ?? ""} placeholder="e.g. CNC, Cranes, Vehicles" style={inputStyle} />
             </label>
-            <label><FieldLabel>{mode === "add" ? "Group photo (shared by all machines)" : "Replace group photo"}</FieldLabel>
+            <label><FieldLabel>Parent group (optional — leave as None for a primary group)</FieldLabel>
+              <select name="parent_id" defaultValue={group?.parent_id ?? defaultParentId ?? ""} style={inputStyle}>
+                <option value="">— None (primary group) —</option>
+                {parents.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </label>
+            <label><FieldLabel>{mode === "add" ? "Group photo (shared by its machines)" : "Replace group photo"}</FieldLabel>
               {mode === "edit" && group?.imageUrl && <div style={{ marginBottom: 8 }}><PhotoBox url={group.imageUrl} height={120} rounded="10px" /></div>}
               <input type="file" name="image" accept="image/*" style={{ fontSize: 13 }} />
             </label>
@@ -125,12 +139,13 @@ export function GroupFormModal({
 
 // ── Machine create / edit modal ─────────────────────────────────────
 export function MachineFormModal({
-  mode, machine, groups, defaultGroupId, back, buttonLabel, buttonStyle,
+  mode, machine, groups, defaultGroupId, locations, back, buttonLabel, buttonStyle,
 }: {
   mode: "add" | "edit";
   machine?: Machine;
   groups: GroupOpt[];
   defaultGroupId?: string | null;
+  locations: string[];
   back: string;
   buttonLabel: string;
   buttonStyle?: React.CSSProperties;
@@ -158,7 +173,8 @@ export function MachineFormModal({
               <input type="file" name="image" accept="image/*" style={{ fontSize: 13 }} />
             </label>
             <label><FieldLabel>Location</FieldLabel>
-              <input name="location" defaultValue={machine?.location ?? ""} placeholder="Where it is" style={inputStyle} />
+              <input name="location" list="machine-locs" defaultValue={machine?.location ?? ""} placeholder="e.g. Shade 1 (pick or type a new one)" style={inputStyle} />
+              <datalist id="machine-locs">{locations.map((l) => <option key={l} value={l} />)}</datalist>
             </label>
             <label><FieldLabel>Notes</FieldLabel>
               <textarea name="notes" rows={2} defaultValue={machine?.notes ?? ""} placeholder="Any notes" style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }} />
@@ -203,70 +219,105 @@ function MachineCard({ m }: { m: Machine }) {
   );
 }
 
+function MachineGrid({ machines }: { machines: Machine[] }) {
+  if (machines.length === 0) return <div className="muted" style={{ fontSize: 13, padding: "6px 2px" }}>No machines here yet.</div>;
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 12 }}>
+      {machines.map((m) => <MachineCard key={m.id} m={m} />)}
+    </div>
+  );
+}
+
 // ── Registry ────────────────────────────────────────────────────────
-export function MachinesGrid({ groups, ungrouped }: { groups: Group[]; ungrouped: Machine[] }) {
+export function MachinesGrid({
+  tree, ungrouped, groupOpts, topGroupOpts, locations,
+}: {
+  tree: Group[]; ungrouped: Machine[]; groupOpts: GroupOpt[]; topGroupOpts: GroupOpt[]; locations: string[];
+}) {
   const [search, setSearch] = useState("");
   const q = search.trim().toLowerCase();
-  const allGroupOpts: GroupOpt[] = groups.map((g) => ({ id: g.id, name: g.name }));
+  const matchM = (m: Machine) => [m.machine_code, m.name, m.location].some((v) => (v ?? "").toLowerCase().includes(q));
+  const fM = (list: Machine[]) => (q ? list.filter(matchM) : list);
 
-  const matchM = (m: Machine) => !q || [m.machine_code, m.name, m.location].some((v) => (v ?? "").toLowerCase().includes(q));
+  const totalMachines = useMemo(() => {
+    let n = ungrouped.length;
+    for (const g of tree) { n += g.machines.length; for (const s of g.subgroups ?? []) n += s.machines.length; }
+    return n;
+  }, [tree, ungrouped]);
 
-  const shownGroups = useMemo(
-    () => groups
-      .map((g) => ({ ...g, machines: g.machines.filter(matchM) }))
-      .filter((g) => !q || g.machines.length > 0 || g.name.toLowerCase().includes(q)),
-    [groups, q],
-  );
-  const shownUngrouped = ungrouped.filter(matchM);
-  const totalMachines = groups.reduce((n, g) => n + g.machines.length, 0) + ungrouped.length;
+  // When searching, hide groups/subgroups with no matches.
+  const visibleTree = q
+    ? tree
+        .map((g) => ({
+          ...g,
+          machines: fM(g.machines),
+          subgroups: (g.subgroups ?? []).map((s) => ({ ...s, machines: fM(s.machines) })).filter((s) => s.machines.length > 0),
+        }))
+        .filter((g) => g.machines.length > 0 || (g.subgroups ?? []).length > 0)
+    : tree;
+  const visibleUngrouped = fM(ungrouped);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-        <GroupFormModal mode="add" back="/maintenance" buttonLabel="＋ Create group" />
+        <GroupFormModal mode="add" parentOptions={topGroupOpts} back="/maintenance" buttonLabel="＋ Create group" />
         <Link href="/maintenance/tickets" style={{ ...btnGhost, textDecoration: "none", display: "inline-block" }}>🧾 Repair tickets</Link>
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search machines — code, name, location…" style={{ ...inputStyle, flex: "1 1 260px", width: "auto" }} />
       </div>
 
-      {groups.length === 0 && ungrouped.length === 0 ? (
-        <div className="banner">No groups yet. Tap <strong>＋ Create group</strong> (e.g. Cranes, CNCs), then add machines into it.</div>
+      {tree.length === 0 && ungrouped.length === 0 ? (
+        <div className="banner">No groups yet. Tap <strong>＋ Create group</strong> (e.g. CNC, Cranes), then add machines into it. You can also nest a sub-group (e.g. CNC → Mohit CNC).</div>
       ) : (
-        <p className="muted" style={{ fontSize: 13, margin: 0 }}>{groups.length} group(s) · {totalMachines} machine(s)</p>
+        <p className="muted" style={{ fontSize: 13, margin: 0 }}>{tree.length} group(s) · {totalMachines} machine(s)</p>
       )}
 
-      {shownGroups.map((g) => (
+      {visibleTree.map((g) => (
         <div key={g.id} style={{ border: "1px solid var(--border)", borderRadius: 16, background: "var(--surface)", overflow: "hidden" }}>
+          {/* Top group header */}
           <div style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, borderBottom: "1px solid var(--border)", background: "var(--surface-alt, rgba(0,0,0,0.02))" }}>
             <div style={{ width: 52, height: 52, flexShrink: 0 }}><PhotoBox url={g.imageUrl} height={52} rounded="10px" /></div>
             <div style={{ minWidth: 0, flex: 1 }}>
               <div style={{ fontWeight: 800, fontSize: 16 }}>{g.name}</div>
-              <div className="muted" style={{ fontSize: 12 }}>{g.machines.length} machine(s)</div>
+              <div className="muted" style={{ fontSize: 12 }}>{g.machines.length} machine(s){(g.subgroups?.length ?? 0) > 0 ? ` · ${g.subgroups!.length} sub-group(s)` : ""}</div>
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <MachineFormModal mode="add" groups={allGroupOpts} defaultGroupId={g.id} back="/maintenance" buttonLabel="＋ Add machine" buttonStyle={{ ...btnGold, padding: "7px 12px" }} />
-              <GroupFormModal mode="edit" group={{ id: g.id, name: g.name, imageUrl: g.imageUrl }} back="/maintenance" buttonLabel="Edit" buttonStyle={{ ...btnGhost, padding: "7px 12px" }} />
+              <MachineFormModal mode="add" groups={groupOpts} defaultGroupId={g.id} locations={locations} back="/maintenance" buttonLabel="＋ Machine" buttonStyle={{ ...btnGold, padding: "7px 12px" }} />
+              <GroupFormModal mode="add" parentOptions={topGroupOpts} defaultParentId={g.id} back="/maintenance" buttonLabel="＋ Sub-group" buttonStyle={{ ...btnGhost, padding: "7px 12px" }} />
+              <GroupFormModal mode="edit" group={{ id: g.id, name: g.name, imageUrl: g.imageUrl, parent_id: g.parent_id }} parentOptions={topGroupOpts} back="/maintenance" buttonLabel="Edit" buttonStyle={{ ...btnGhost, padding: "7px 12px" }} />
             </div>
           </div>
-          <div style={{ padding: 12 }}>
-            {g.machines.length === 0 ? (
-              <div className="muted" style={{ fontSize: 13, padding: "8px 2px" }}>No machines in this group yet.</div>
-            ) : (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 12 }}>
-                {g.machines.map((m) => <MachineCard key={m.id} m={m} />)}
+
+          <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 14 }}>
+            {/* direct machines */}
+            {(g.machines.length > 0 || !q) && <MachineGrid machines={g.machines} />}
+
+            {/* sub-groups */}
+            {(g.subgroups ?? []).map((s) => (
+              <div key={s.id} style={{ border: "1px dashed var(--border)", borderRadius: 12, padding: 12, background: "var(--bg)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                  <div style={{ width: 36, height: 36, flexShrink: 0 }}><PhotoBox url={s.imageUrl} height={36} rounded="8px" /></div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14 }}>↳ {s.name}</div>
+                    <div className="muted" style={{ fontSize: 11.5 }}>{s.machines.length} machine(s)</div>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <MachineFormModal mode="add" groups={groupOpts} defaultGroupId={s.id} locations={locations} back="/maintenance" buttonLabel="＋ Machine" buttonStyle={{ ...btnGold, padding: "6px 11px", fontSize: 12 }} />
+                    <GroupFormModal mode="edit" group={{ id: s.id, name: s.name, imageUrl: s.imageUrl, parent_id: s.parent_id }} parentOptions={topGroupOpts} back="/maintenance" buttonLabel="Edit" buttonStyle={{ ...btnGhost, padding: "6px 11px", fontSize: 12 }} />
+                  </div>
+                </div>
+                <MachineGrid machines={s.machines} />
               </div>
-            )}
+            ))}
           </div>
         </div>
       ))}
 
-      {shownUngrouped.length > 0 && (
+      {visibleUngrouped.length > 0 && (
         <div style={{ border: "1px solid var(--border)", borderRadius: 16, background: "var(--surface)", overflow: "hidden" }}>
           <div style={{ padding: 12, borderBottom: "1px solid var(--border)", background: "var(--surface-alt, rgba(0,0,0,0.02))", fontWeight: 800, fontSize: 15 }}>
-            Ungrouped <span className="muted" style={{ fontWeight: 600, fontSize: 12 }}>· {shownUngrouped.length}</span>
+            Ungrouped <span className="muted" style={{ fontWeight: 600, fontSize: 12 }}>· {visibleUngrouped.length}</span>
           </div>
-          <div style={{ padding: 12, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 12 }}>
-            {shownUngrouped.map((m) => <MachineCard key={m.id} m={m} />)}
-          </div>
+          <div style={{ padding: 12 }}><MachineGrid machines={visibleUngrouped} /></div>
         </div>
       )}
     </div>

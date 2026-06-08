@@ -5,7 +5,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
 import { MachineFormModal, StatusChip, type Machine, type GroupOpt } from "../machines-client";
 import { RaiseTicketButton, TicketList, type Ticket } from "../tickets-client";
-import { setMachineStatusAction, deleteMachineAction } from "../actions";
+import { MachineAdminControls } from "../machine-admin-controls";
 
 export const dynamic = "force-dynamic";
 
@@ -46,20 +46,31 @@ export default async function MachineDetailPage({ params }: { params: Promise<{ 
   const admin = createAdminSupabaseClient();
   const pub = (path: string | null) => (path ? admin.storage.from(IMG_BUCKET).getPublicUrl(path).data.publicUrl : null);
 
-  const [{ data: machineRow }, { data: ticketRows }, { data: groupRows }, profilesMap] = await Promise.all([
+  const [{ data: machineRow }, { data: ticketRows }, { data: groupRows }, { data: locRows }, profilesMap] = await Promise.all([
     admin.from("company_machines").select("id, machine_code, name, group_id, image_path, status, location, notes").eq("id", id).maybeSingle(),
     admin.from("machine_maintenance_tickets").select(TICKET_COLS).eq("machine_id", id).order("created_at", { ascending: false }),
-    admin.from("machine_groups").select("id, name, image_path").order("name", { ascending: true }),
+    admin.from("machine_groups").select("id, name, image_path, parent_id").order("name", { ascending: true }),
+    admin.from("machine_locations").select("name").order("name", { ascending: true }),
     getProfilesMap(),
   ]);
 
   if (!machineRow) redirect("/maintenance?toast=" + encodeURIComponent("Machine not found."));
   const mr = machineRow as { id: string; machine_code: string | null; name: string; group_id: string | null; image_path: string | null; status: string; location: string | null; notes: string | null };
-  type GroupRow = { id: string; name: string; image_path: string | null };
+  type GroupRow = { id: string; name: string; image_path: string | null; parent_id: string | null };
   const groupsTyped = (groupRows ?? []) as GroupRow[];
-  const groupOpts: GroupOpt[] = groupsTyped.map((g) => ({ id: g.id, name: g.name }));
-  const myGroup = groupsTyped.find((g) => g.id === mr.group_id) ?? null;
-  const imageUrl = mr.image_path ? pub(mr.image_path) : (myGroup ? pub(myGroup.image_path) : null);
+  const gById = new Map<string, GroupRow>();
+  for (const g of groupsTyped) gById.set(g.id, g);
+  // Hierarchical group options for the edit form ("Parent › Child").
+  const groupOpts: GroupOpt[] = [];
+  for (const g of groupsTyped.filter((x) => !x.parent_id)) {
+    groupOpts.push({ id: g.id, name: g.name });
+    for (const s of groupsTyped.filter((x) => x.parent_id === g.id)) groupOpts.push({ id: s.id, name: `${g.name} › ${s.name}` });
+  }
+  const locations = ((locRows ?? []) as Array<{ name: string }>).map((l) => l.name);
+  const myGroup = mr.group_id ? gById.get(mr.group_id) ?? null : null;
+  const resolveGroupImg = (g: GroupRow | null): string | null =>
+    g ? (g.image_path ? pub(g.image_path) : (g.parent_id ? resolveGroupImg(gById.get(g.parent_id) ?? null) : null)) : null;
+  const imageUrl = mr.image_path ? pub(mr.image_path) : resolveGroupImg(myGroup);
 
   const machine: Machine = {
     id: mr.id, machine_code: mr.machine_code, name: mr.name, status: mr.status,
@@ -99,33 +110,15 @@ export default async function MachineDetailPage({ params }: { params: Promise<{ 
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <RaiseTicketButton machineId={machine.id} back={back} />
-                <MachineFormModal mode="edit" machine={machine} groups={groupOpts} back={back}
+                <MachineFormModal mode="edit" machine={machine} groups={groupOpts} locations={locations} back={back}
                   buttonLabel="Edit" buttonStyle={{ padding: "8px 14px", fontSize: 13, fontWeight: 700, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 9, cursor: "pointer", color: "var(--text)" }} />
               </div>
             </div>
           </div>
         </div>
 
-        {/* Manual status controls */}
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: "12px 18px", borderTop: "1px dashed var(--border)", alignItems: "center" }}>
-          <span style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Set status</span>
-          {(["working", "under_maintenance", "retired"] as const).filter((s) => s !== machine.status).map((s) => (
-            <form key={s} action={setMachineStatusAction}>
-              <input type="hidden" name="id" value={machine.id} /><input type="hidden" name="status" value={s} /><input type="hidden" name="back" value={back} />
-              <button type="submit" style={{ padding: "6px 12px", fontSize: 12, fontWeight: 700, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, cursor: "pointer", color: "var(--text)" }}>
-                {s === "working" ? "Working" : s === "under_maintenance" ? "Under maintenance" : "Retire"}
-              </button>
-            </form>
-          ))}
-          {!hasTickets && (
-            <form action={deleteMachineAction} style={{ marginLeft: "auto" }}>
-              <input type="hidden" name="id" value={machine.id} /><input type="hidden" name="back" value="/maintenance" />
-              <button type="submit" style={{ padding: "6px 12px", fontSize: 12, fontWeight: 700, color: "#b91c1c", background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.3)", borderRadius: 8, cursor: "pointer" }}>
-                Delete machine
-              </button>
-            </form>
-          )}
-        </div>
+        {/* Manual status controls — Retire + Delete ask for in-app confirmation */}
+        <MachineAdminControls machineId={machine.id} status={machine.status} back={back} hasTickets={hasTickets} />
       </div>
 
       {/* Ticket history */}
