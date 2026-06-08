@@ -255,8 +255,13 @@ export function MachinesGrid({
   const matchM = (m: Machine) => [m.machine_code, m.name, m.location].some((v) => (v ?? "").toLowerCase().includes(q));
   const fM = (list: Machine[]) => (q ? list.filter(matchM) : list);
 
-  // Collapsible top-level groups. While searching, everything is forced open.
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  // Collapsible groups. Default = everything collapsed for a quick
+  // overview; click a header (or Expand all) to open. Searching forces open.
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
+    const init: Record<string, boolean> = {};
+    for (const g of tree) { init[g.id] = true; for (const s of g.subgroups ?? []) init[s.id] = true; }
+    return init;
+  });
   const toggle = (id: string) => setCollapsed((c) => ({ ...c, [id]: !c[id] }));
   const allCollapsed = tree.length > 0 && tree.every((g) => collapsed[g.id]);
   const collapseAll = () => { const next: Record<string, boolean> = {}; for (const g of tree) { next[g.id] = true; for (const s of g.subgroups ?? []) next[s.id] = true; } setCollapsed(next); };
