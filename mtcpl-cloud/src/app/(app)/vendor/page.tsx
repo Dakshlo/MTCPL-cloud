@@ -204,7 +204,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
       .eq("vendor_id", vendorId)
       .not("completed_at", "is", null)
       .order("completed_at", { ascending: false })
-      .limit(10),
+      .limit(30),
     // Mig 080 — rejected items (status='carving_rejected'). Separate
     // query because the main carving_items fetch above is scoped to
     // ('carving_assigned', 'carving_in_progress', 'carving_on_hold').
@@ -488,22 +488,38 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
     return an - bn;
   });
 
-  const recent = ((completedRecent ?? []) as Array<{
-    id: string;
-    slab_requirement_id: string;
-    completed_at: string | null;
-    temporary_location: string | null;
-    review_approved_at: string | null;
-    review_notes: string | null;
-  }>).map((r) => ({
-    id: r.id,
-    slab_id: r.slab_requirement_id,
-    completed_at: r.completed_at,
-    temporary_location: r.temporary_location,
-    review_approved_at: r.review_approved_at,
-    review_notes: r.review_notes,
-    slab: slabById.get(r.slab_requirement_id) ?? null,
-  }));
+  // Daksh June 2026 — never cap the slabs still AWAITING approval. The
+  // query above pulls the last 30 completed (history); this pulls EVERY
+  // completed-but-unapproved slab (no limit) so the team review queue is
+  // always complete even when there are more than 30 waiting.
+  type RecentRow = {
+    id: string; slab_requirement_id: string; completed_at: string | null;
+    temporary_location: string | null; review_approved_at: string | null; review_notes: string | null;
+  };
+  const { data: pendingApprovalRows } = await admin
+    .from("carving_items")
+    .select("id, slab_requirement_id, completed_at, temporary_location, review_approved_at, review_notes")
+    .eq("vendor_id", vendorId)
+    .not("completed_at", "is", null)
+    .is("review_approved_at", null)
+    .order("completed_at", { ascending: false });
+
+  const seenRecent = new Set<string>();
+  const recent = ([
+    ...((pendingApprovalRows ?? []) as RecentRow[]),
+    ...((completedRecent ?? []) as RecentRow[]),
+  ])
+    .filter((r) => (seenRecent.has(r.id) ? false : (seenRecent.add(r.id), true)))
+    .map((r) => ({
+      id: r.id,
+      slab_id: r.slab_requirement_id,
+      completed_at: r.completed_at,
+      temporary_location: r.temporary_location,
+      review_approved_at: r.review_approved_at,
+      review_notes: r.review_notes,
+      slab: slabById.get(r.slab_requirement_id) ?? null,
+    }))
+    .sort((a, b) => (b.completed_at ?? "").localeCompare(a.completed_at ?? ""));
 
   // Mig 080 — Rejected window. Read-only on the vendor cockpit; the
   // vendor sees what they got rejected for + the reviewer's photo
@@ -656,10 +672,18 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
   // narrowed to the cockpit-switcher allow-list, so the transfer
   // picker needs its own full list — the same complete CNC + Manual
   // set every other role already gets.
+  // Daksh June 2026 — a CNC vendor can only transfer to other CNC
+  // vendors. Nothing in-house can be handed off to an Outsource vendor
+  // from a CNC cockpit, so drop Outsource targets when the current
+  // cockpit is a CNC vendor.
+  const currentVendorType = (
+    (vendorPickerRows as { id: string; vendor_type: string }[] | null) ?? []
+  ).find((v) => v.id === vendorId)?.vendor_type;
   const transferVendors = (
     (vendorPickerRows as { id: string; name: string; vendor_type: string }[] | null) ?? []
   )
     .filter((v) => v.id !== vendorId)
+    .filter((v) => (currentVendorType === "CNC" ? v.vendor_type === "CNC" : true))
     .map((v) => ({ id: v.id, name: v.name, vendor_type: v.vendor_type }));
 
   // Mig 077 — show the switcher to managed-vendor users too, even

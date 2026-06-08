@@ -2040,7 +2040,7 @@ export async function unloadWithProblemAction(formData: FormData) {
   const { data: ci } = await admin
     .from("carving_items")
     .select(
-      "id, vendor_id, vendor_name, status, cnc_machine_id, slab_requirement_id",
+      "id, vendor_id, vendor_name, vendor_type, status, cnc_machine_id, slab_requirement_id",
     )
     .eq("id", carvingItemId)
     .maybeSingle();
@@ -2049,6 +2049,7 @@ export async function unloadWithProblemAction(formData: FormData) {
     id: string;
     vendor_id: string;
     vendor_name: string;
+    vendor_type: string;
     status: string;
     cnc_machine_id: string | null;
     slab_requirement_id: string;
@@ -2092,6 +2093,10 @@ export async function unloadWithProblemAction(formData: FormData) {
     if (!vendor.is_active) redirect(`${redirectTo}?toast=Destination+vendor+is+inactive`);
     if (vendor.vendor_type !== "CNC" && vendor.vendor_type !== "Outsource") {
       redirect(`${redirectTo}?toast=Destination+must+be+CNC+or+Outsource`);
+    }
+    // A CNC vendor's slab cannot be handed off to an Outsource vendor.
+    if (item.vendor_type === "CNC" && vendor.vendor_type === "Outsource") {
+      redirect(`${redirectTo}?toast=${encodeURIComponent("A CNC vendor cannot transfer to an outsource vendor.")}`);
     }
     if (vendor.id === item.vendor_id) {
       redirect(`${redirectTo}?toast=Already+with+that+vendor`);
@@ -2255,7 +2260,7 @@ export async function transferReadySlabAction(formData: FormData) {
   const { data: ci } = await admin
     .from("carving_items")
     .select(
-      "id, vendor_id, vendor_name, status, cnc_machine_id, slab_requirement_id, requires_machine_type",
+      "id, vendor_id, vendor_name, vendor_type, status, cnc_machine_id, slab_requirement_id, requires_machine_type",
     )
     .eq("id", carvingItemId)
     .maybeSingle();
@@ -2264,6 +2269,7 @@ export async function transferReadySlabAction(formData: FormData) {
     id: string;
     vendor_id: string;
     vendor_name: string;
+    vendor_type: string;
     status: string;
     cnc_machine_id: string | null;
     slab_requirement_id: string;
@@ -2316,6 +2322,10 @@ export async function transferReadySlabAction(formData: FormData) {
   }
   if (vendor.id === item.vendor_id) {
     redirect(`${redirectTo}?toast=Already+with+that+vendor`);
+  }
+  // A CNC vendor's slab cannot be handed off to an Outsource vendor.
+  if (item.vendor_type === "CNC" && vendor.vendor_type === "Outsource") {
+    redirect(`${redirectTo}?toast=${encodeURIComponent("A CNC vendor cannot transfer to an outsource vendor.")}`);
   }
 
   const now = new Date().toISOString();

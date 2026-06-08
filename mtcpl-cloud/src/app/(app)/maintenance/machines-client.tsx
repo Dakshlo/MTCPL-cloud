@@ -247,9 +247,12 @@ function MachineCard({ m }: { m: Machine }) {
 
 function MachineGrid({ machines }: { machines: Machine[] }) {
   if (machines.length === 0) return <div className="muted" style={{ fontSize: 13, padding: "6px 2px" }}>No machines here yet.</div>;
+  // Natural-sort by name so CNC-1, CNC-2 … CNC-10 line up in sequence
+  // (not CNC-1, CNC-10, CNC-2 or whatever created-order produced).
+  const ordered = [...machines].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 12 }}>
-      {machines.map((m) => <MachineCard key={m.id} m={m} />)}
+      {ordered.map((m) => <MachineCard key={m.id} m={m} />)}
     </div>
   );
 }
@@ -326,7 +329,10 @@ export function MachinesGrid({
               <div style={{ width: 52, height: 52, flexShrink: 0 }}><PhotoBox url={g.imageUrl} height={52} rounded="10px" /></div>
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div style={{ fontWeight: 800, fontSize: 16, color: "var(--text)" }}>{g.name}</div>
-                <div className="muted" style={{ fontSize: 12 }}>{g.machines.length} machine(s){(g.subgroups?.length ?? 0) > 0 ? ` · ${g.subgroups!.length} sub-group(s)` : ""}</div>
+                <div className="muted" style={{ fontSize: 12 }}>
+                  {g.machines.length + (g.subgroups ?? []).reduce((n, s) => n + s.machines.length, 0)} machine(s)
+                  {(g.subgroups?.length ?? 0) > 0 ? ` · ${g.subgroups!.length} sub-group(s)` : ""}
+                </div>
               </div>
             </button>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
