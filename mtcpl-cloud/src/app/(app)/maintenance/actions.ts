@@ -192,6 +192,13 @@ export async function updateGroupAction(formData: FormData) {
     } catch (e) {
       redirect(back(formData, e instanceof Error ? e.message : "Photo upload failed."));
     }
+  } else if (txt(formData, "remove_image") === "yes") {
+    // Remove the group photo without replacing it.
+    const { data: cur } = await admin.from("machine_groups").select("image_path").eq("id", id).maybeSingle();
+    const oldPath = (cur as { image_path?: string | null } | null)?.image_path ?? null;
+    update.image_path = null;
+    update.image_mime = null;
+    if (oldPath) { try { await admin.storage.from(IMG_BUCKET).remove([oldPath]); } catch { /* best effort */ } }
   }
   const { error } = await admin.from("machine_groups").update(update).eq("id", id);
   if (error) redirect(back(formData, error.message));
@@ -323,6 +330,13 @@ export async function updateMachineAction(formData: FormData) {
     } catch (e) {
       redirect(back(formData, e instanceof Error ? e.message : "Photo upload failed."));
     }
+  } else if (txt(formData, "remove_image") === "yes") {
+    // Remove this machine's own photo (it falls back to the group photo).
+    const { data: cur } = await admin.from("company_machines").select("image_path").eq("id", id).maybeSingle();
+    const oldPath = (cur as { image_path?: string | null } | null)?.image_path ?? null;
+    update.image_path = null;
+    update.image_mime = null;
+    if (oldPath) { try { await admin.storage.from(IMG_BUCKET).remove([oldPath]); } catch { /* best effort */ } }
   }
   const { error } = await admin.from("company_machines").update(update).eq("id", id);
   if (error) redirect(back(formData, error.message));

@@ -119,6 +119,11 @@ export function GroupFormModal({
               {mode === "edit" && group?.imageUrl && <div style={{ marginBottom: 8 }}><PhotoBox url={group.imageUrl} height={120} rounded="10px" /></div>}
               <input type="file" name="image" accept="image/*" style={{ fontSize: 13 }} />
             </label>
+            {mode === "edit" && group?.imageUrl && (
+              <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, color: "var(--muted)", marginTop: -4 }}>
+                <input type="checkbox" name="remove_image" value="yes" /> Remove current photo
+              </label>
+            )}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
               <button type="button" onClick={() => setOpen(false)} style={btnGhost}>Cancel</button>
               <button type="submit" style={btnGold}>{mode === "add" ? "Create group" : "Save"}</button>
@@ -185,6 +190,11 @@ export function MachineFormModal({
               {mode === "edit" && machine?.imageUrl && <div style={{ marginBottom: 8 }}><PhotoBox url={machine.imageUrl} height={110} rounded="10px" /></div>}
               <input type="file" name="image" accept="image/*" style={{ fontSize: 13 }} />
             </label>
+            {mode === "edit" && machine?.imageUrl && (
+              <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, color: "var(--muted)", marginTop: -4 }}>
+                <input type="checkbox" name="remove_image" value="yes" /> Remove this machine&apos;s photo (use group photo)
+              </label>
+            )}
             <label><FieldLabel>{mode === "add" ? "Location (applied to all)" : "Location"}</FieldLabel>
               <input name="location" list="machine-locs" defaultValue={machine?.location ?? ""} placeholder="e.g. Shade 1 (pick or type a new one)" style={inputStyle} />
               <datalist id="machine-locs">{locations.map((l) => <option key={l} value={l} />)}</datalist>
