@@ -22,6 +22,7 @@ export function PushPanel({
   pushed,
   todayLabel,
   expandedByDefault = false,
+  hideSearch = false,
 }: {
   slabs: PushSlab[];
   pushed: boolean;
@@ -34,6 +35,12 @@ export function PushPanel({
    * friction.
    */
   expandedByDefault?: boolean;
+  /**
+   * When true, hide the panel's own text search box — the page owns
+   * search server-side (so it can search the full backlog, not just the
+   * loaded subset). The vendor filter stays.
+   */
+  hideSearch?: boolean;
 }) {
   const [q, setQ] = useState("");
   // "" = all · "__none__" = not in any work order (free) · else a vendor name.
@@ -91,24 +98,26 @@ export function PushPanel({
       {/* Live search + work-order filter */}
       <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)", background: "var(--surface)", display: "flex", flexDirection: "column", gap: 8 }}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <input
-            type="search"
-            value={q}
-            onChange={e => setQ(e.target.value)}
-            placeholder="Search by slab ID, temple, label, stone or vendor…"
-            style={{
-              flex: "1 1 240px",
-              minWidth: 0,
-              fontSize: 12,
-              padding: "7px 12px",
-              border: "1px solid var(--border)",
-              borderRadius: 6,
-              background: "var(--bg)",
-              color: "var(--text)",
-              outline: "none",
-              boxSizing: "border-box",
-            }}
-          />
+          {!hideSearch && (
+            <input
+              type="search"
+              value={q}
+              onChange={e => setQ(e.target.value)}
+              placeholder="Search by slab ID, temple, label, stone or vendor…"
+              style={{
+                flex: "1 1 240px",
+                minWidth: 0,
+                fontSize: 12,
+                padding: "7px 12px",
+                border: "1px solid var(--border)",
+                borderRadius: 6,
+                background: "var(--bg)",
+                color: "var(--text)",
+                outline: "none",
+                boxSizing: "border-box",
+              }}
+            />
+          )}
           <select
             value={vendorFilter}
             onChange={(e) => setVendorFilter(e.target.value)}
