@@ -48,6 +48,11 @@ type Slab = {
   /** Block this slab was cut from. Set by finish_block_cut RPC at
    *  approval time. Older / manually-entered slabs may be NULL. */
   source_block_id?: string | null;
+  /** Vendor name when this slab is on a LIVE outsource work order
+   *  (carving_work_orders, non-cancelled). NULL = not in any work
+   *  order. Read-only display so non-push users can see what's
+   *  already promised to a vendor. */
+  assignedVendor?: string | null;
 };
 
 /** Display chip for the slab's post-cut lifecycle position. */
@@ -132,6 +137,11 @@ export function ReadySlabsClient({
   const [stoneFilter, setStoneFilter] = useState("all");
   const [templeFilter, setTempleFilter] = useState("all");
   const [qualityFilter, setQualityFilter] = useState("all");
+  // Work-order assignment filter — "all" (no filter), "__assigned__"
+  // (any live work order), "__free__" (not in any work order), or a
+  // specific vendor name. Mirrors the Push Urgent vendor view so
+  // non-push users can see what's already promised to a vendor.
+  const [vendorFilter, setVendorFilter] = useState("all");
   // for-carving mode lands the carving team on the "Cut · awaiting
   // carving" bucket so they see what's pickable first. Total Ready
   // Sizes (verification mode) doesn't show the chip row at all, so
@@ -211,6 +221,32 @@ export function ReadySlabsClient({
     }
   }, [availableTemples, templeFilter]);
 
+  // Distinct vendor names across slabs in a live work order. Drives
+  // the work-order filter dropdown + decides whether to show the
+  // assignment column at all (hidden when nothing is assigned).
+  const availableVendors = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of slabs) if (s.assignedVendor) set.add(s.assignedVendor);
+    return [...set].sort();
+  }, [slabs]);
+  const anyAssigned = availableVendors.length > 0;
+  const assignedCount = useMemo(
+    () => slabs.reduce((n, s) => n + (s.assignedVendor ? 1 : 0), 0),
+    [slabs],
+  );
+
+  // If the chosen vendor disappears from the data, fall back to "all".
+  useEffect(() => {
+    if (
+      vendorFilter !== "all" &&
+      vendorFilter !== "__assigned__" &&
+      vendorFilter !== "__free__" &&
+      !availableVendors.includes(vendorFilter)
+    ) {
+      setVendorFilter("all");
+    }
+  }, [availableVendors, vendorFilter]);
+
   const filtered = useMemo(() => {
     let rows = [...slabs];
     if (stoneFilter !== "all") rows = rows.filter(s => s.stone === stoneFilter);
@@ -218,6 +254,9 @@ export function ReadySlabsClient({
     if (qualityFilter === "A") rows = rows.filter(s => s.quality === "A");
     else if (qualityFilter === "B") rows = rows.filter(s => s.quality === "B");
     else if (qualityFilter === "none") rows = rows.filter(s => !s.quality);
+    if (vendorFilter === "__assigned__") rows = rows.filter(s => !!s.assignedVendor);
+    else if (vendorFilter === "__free__") rows = rows.filter(s => !s.assignedVendor);
+    else if (vendorFilter !== "all") rows = rows.filter(s => s.assignedVendor === vendorFilter);
     // statusFilter applies on the page that owns the chip row. With
     // the move from verification → for-carving, that's the carving
     // team's page now. The verification page intentionally has no
@@ -253,7 +292,7 @@ export function ReadySlabsClient({
     });
 
     return rows;
-  }, [slabs, stoneFilter, templeFilter, qualityFilter, statusFilter, mode, search, dateFrom, dateTo, sortBy, sortDir]);
+  }, [slabs, stoneFilter, templeFilter, qualityFilter, vendorFilter, statusFilter, mode, search, dateFrom, dateTo, sortBy, sortDir]);
 
   const totalCft = filtered.reduce((sum, s) => sum + calcCft(s.length_ft, s.width_ft, s.thickness_ft), 0);
 
@@ -271,6 +310,7 @@ export function ReadySlabsClient({
     setStoneFilter("all");
     setTempleFilter("all");
     setQualityFilter("all");
+    setVendorFilter("all");
     setStatusFilter("all");
     setSearch("");
     setDateFrom("");
@@ -428,6 +468,23 @@ export function ReadySlabsClient({
             </select>
           </label>
 
+          {/* Work order — only when something is actually assigned to a
+              vendor. Lets users WITHOUT push-page access see what's
+              already promised. "🤝 In a work order" / "● Free" / a
+              specific vendor. */}
+          {anyAssigned && (
+            <label className="stack" style={{ flex: "0 0 auto" }}>
+              <span>Work order <span style={{ fontSize: 9, color: "var(--muted)" }}>({assignedCount})</span></span>
+              <select value={vendorFilter} onChange={e => setVendorFilter(e.target.value)} style={{ minWidth: 160 }}>
+                <option value="all">All slabs</option>
+                <option value="__assigned__">🤝 In a work order ({assignedCount})</option>
+                <option value="__free__">● Free (no work order)</option>
+                <option disabled>──────────</option>
+                {availableVendors.map(v => <option key={v} value={v}>{v}</option>)}
+              </select>
+            </label>
+          )}
+
           {/* Search */}
           <label className="stack" style={{ flex: "1 1 160px" }}>
             <span>Search</span>
@@ -580,6 +637,12 @@ export function ReadySlabsClient({
                 { label: "Priority",     col: null },
                 { label: "Added",        col: "created_at" as SortCol },
                 { label: "Cut Done",     col: "updated_at" as SortCol },
+                // Work-order column — only when at least one slab is on a
+                // live work order. Read-only "who is this promised to"
+                // view for users without push-page access.
+                ...(anyAssigned
+                  ? ([{ label: "Work Order", col: null }] as { label: string; col: SortCol | null }[])
+                  : ([] as { label: string; col: SortCol | null }[])),
                 // Status column on the for-carving page (where the
                 // chip row + multi-status query make it meaningful).
                 // Verification ("Total Ready Sizes") is a flat list
@@ -615,7 +678,7 @@ export function ReadySlabsClient({
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={mode === "for-carving" ? 13 : 11} style={{ padding: 32, textAlign: "center", color: "var(--muted)" }}>
+                <td colSpan={(mode === "for-carving" ? 13 : 11) + (anyAssigned ? 1 : 0)} style={{ padding: 32, textAlign: "center", color: "var(--muted)" }}>
                   {slabs.length === 0 ? "No sizes have been cut yet." : "No sizes match the current filters."}
                 </td>
               </tr>
@@ -627,7 +690,12 @@ export function ReadySlabsClient({
                     key={s.id}
                     style={{
                       borderBottom: "1px solid var(--border)",
-                      background: i % 2 === 0 ? "var(--surface)" : "var(--surface-alt)",
+                      // Slabs already on a live work order get an indigo
+                      // tint (same cue as the Push Urgent page) so they
+                      // stand out from free stock at a glance.
+                      background: s.assignedVendor
+                        ? "rgba(99,102,241,0.10)"
+                        : i % 2 === 0 ? "var(--surface)" : "var(--surface-alt)",
                     }}
                   >
                     <td style={{ padding: "9px 12px", fontFamily: "ui-monospace, monospace", fontWeight: 600, whiteSpace: "nowrap" }}>
@@ -676,6 +744,33 @@ export function ReadySlabsClient({
                     </td>
                     <td style={{ padding: "9px 12px", whiteSpace: "nowrap", color: "var(--muted)", fontSize: 12 }}>{fmtDate(s.created_at)}</td>
                     <td style={{ padding: "9px 12px", whiteSpace: "nowrap", color: "var(--muted)", fontSize: 12 }}>{fmtDate(s.updated_at)}</td>
+                    {anyAssigned && (
+                      <td style={{ padding: "9px 12px", whiteSpace: "nowrap" }}>
+                        {s.assignedVendor ? (
+                          <span
+                            title={`On a work order for ${s.assignedVendor}`}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 4,
+                              fontSize: 11,
+                              fontWeight: 700,
+                              padding: "3px 9px",
+                              borderRadius: 999,
+                              background: "rgba(99,102,241,0.14)",
+                              color: "#4338ca",
+                              maxWidth: 180,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                            }}
+                          >
+                            🤝 {s.assignedVendor}
+                          </span>
+                        ) : (
+                          <span className="muted" style={{ fontSize: 11 }}>● Free</span>
+                        )}
+                      </td>
+                    )}
                     {mode === "for-carving" && (
                       <>
                         <td style={{ padding: "9px 12px", whiteSpace: "nowrap" }}>
@@ -715,6 +810,7 @@ export function ReadySlabsClient({
 
       <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>
         Columns: Size Code · From Block · Temple · Label · Stone · Quality · Dimensions · CFT · Priority · Added · Cut Done
+        {anyAssigned ? " · Work Order" : ""}
         {mode === "for-carving" ? " · Status · Assign" : ""}
       </p>
     </div>
