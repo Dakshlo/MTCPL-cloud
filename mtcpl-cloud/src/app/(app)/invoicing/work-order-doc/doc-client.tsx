@@ -33,20 +33,12 @@ function todayISO(): string {
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 }
 
-const inputStyle: React.CSSProperties = {
-  padding: "9px 12px",
-  fontSize: 14,
-  border: "1px solid var(--border)",
-  borderRadius: 8,
-  background: "var(--bg)",
-  color: "var(--text)",
-  width: "100%",
-};
-function Field({ label, children, flex }: { label: string; children: React.ReactNode; flex?: string }) {
+function Field({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
   return (
-    <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: flex ?? "1 1 200px" }}>
-      <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</span>
+    <label style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
+      <span style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</span>
       {children}
+      {hint && <span style={{ fontSize: 11, color: "var(--muted)" }}>{hint}</span>}
     </label>
   );
 }
@@ -74,7 +66,6 @@ export function WorkOrderDocClient({
   const [selectedVendorId, setSelectedVendorId] = useState("");
   const [showAddVendor, setShowAddVendor] = useState(false);
 
-  // If a vendor was just added, pre-select it + fill name/address.
   useEffect(() => {
     if (!vendorAddedId) return;
     const v = vendors.find((x) => x.id === vendorAddedId);
@@ -96,158 +87,143 @@ export function WorkOrderDocClient({
 
   const total = (Number(qty) || 0) * (Number(rate) || 0);
   const canSubmit = vendorName.trim().length > 0 && (Number(qty) || 0) > 0 && (Number(rate) || 0) > 0;
-
   const justCreated = useMemo(() => records.find((r) => r.id === createdId) ?? null, [records, createdId]);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: 920 }}>
+      {/* Scoped polish: focus rings, row hover, button lift. */}
+      <style>{`
+        .wod-in { width:100%; box-sizing:border-box; padding:10px 13px; font-size:14px; border:1px solid var(--border);
+                  border-radius:10px; background:var(--bg); color:var(--text); transition:border-color .15s, box-shadow .15s; }
+        .wod-in:focus { outline:none; border-color:var(--gold); box-shadow:0 0 0 3px rgba(201,161,74,0.18); }
+        .wod-row:hover { background:rgba(201,161,74,0.05); }
+        .wod-btn { transition:transform .08s ease, filter .15s ease; }
+        .wod-btn:hover:not(:disabled) { filter:brightness(1.04); }
+        .wod-btn:active:not(:disabled) { transform:translateY(1px); }
+      `}</style>
+
       {toast && (
-        <div style={{ background: "rgba(217,119,6,0.1)", border: "1px solid rgba(217,119,6,0.35)", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "#92400e" }}>
+        <div style={{ background: "rgba(217,119,6,0.1)", border: "1px solid rgba(217,119,6,0.35)", borderRadius: 12, padding: "11px 15px", fontSize: 13, color: "#92400e" }}>
           {toast}
         </div>
       )}
 
       {justCreated && (
-        <div style={{ background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.4)", borderRadius: 10, padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 13, color: "#15803d", fontWeight: 600 }}>
-            ✓ Document created for <strong>{justCreated.vendor}</strong>
-            {justCreated.jobWorkNo ? ` (No. ${justCreated.jobWorkNo})` : ""}.
+        <div style={{ background: "linear-gradient(135deg, rgba(34,197,94,0.12), rgba(34,197,94,0.04))", border: "1px solid rgba(34,197,94,0.4)", borderRadius: 14, padding: "14px 18px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 14, color: "#15803d", fontWeight: 700 }}>
+            ✓ Document ready for <strong>{justCreated.vendor}</strong>
+            {justCreated.jobWorkNo ? ` · ${justCreated.jobWorkNo}` : ""}
           </span>
-          <a
-            href={`/api/invoicing/work-order-doc/${justCreated.id}`}
-            style={{ padding: "9px 18px", fontSize: 13, fontWeight: 800, color: "#fff", background: "var(--gold-dark)", border: "none", borderRadius: 8, textDecoration: "none", whiteSpace: "nowrap" }}
-          >
+          <a className="wod-btn" href={`/api/invoicing/work-order-doc/${justCreated.id}`} style={{ padding: "10px 20px", fontSize: 14, fontWeight: 800, color: "#fff", background: "var(--gold-dark)", borderRadius: 10, textDecoration: "none", whiteSpace: "nowrap", boxShadow: "0 2px 8px rgba(146,64,14,0.25)" }}>
             ⬇ Download document
           </a>
         </div>
       )}
 
-      {/* Saved-vendor picker — pick to auto-fill name + address, or add one. */}
-      <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "12px 14px" }}>
-        <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: "1 1 280px" }}>
-          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Saved vendor (quick fill)</span>
-          <select value={selectedVendorId} onChange={(e) => pickVendor(e.target.value)} style={inputStyle}>
-            <option value="">— none / type below —</option>
+      {/* ── The form card ─────────────────────────────────────────── */}
+      <form action={createWorkOrderDocAction} style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+        {/* Saved-vendor quick pick — sits inside the card as a header strip */}
+        <div style={{ background: "linear-gradient(180deg, rgba(201,161,74,0.10), rgba(201,161,74,0.03))", borderBottom: "1px solid var(--border)", padding: "14px 20px", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12, fontWeight: 800, color: "var(--gold-dark)", whiteSpace: "nowrap" }}>👤 Quick fill</span>
+          <select value={selectedVendorId} onChange={(e) => pickVendor(e.target.value)} className="wod-in" style={{ flex: "1 1 240px", fontWeight: 600 }}>
+            <option value="">— Saved vendor (or type below) —</option>
             {vendors.map((v) => (
               <option key={v.id} value={v.id}>{v.name}</option>
             ))}
           </select>
-        </label>
-        <button
-          type="button"
-          onClick={() => setShowAddVendor(true)}
-          style={{ padding: "9px 16px", fontSize: 13, fontWeight: 700, color: "var(--text)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}
-        >
-          ＋ Add vendor
-        </button>
-        <span style={{ fontSize: 11, color: "var(--muted)", flex: "1 1 100%" }}>
-          Pick a saved vendor to auto-fill name &amp; address, or just type them below.
-        </span>
-      </div>
-
-      {/* Form */}
-      <form
-        action={createWorkOrderDocAction}
-        style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: 18, display: "flex", flexDirection: "column", gap: 12 }}
-      >
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-          <Field label="Vendor *" flex="2 1 280px">
-            <input
-              name="vendor"
-              required
-              value={vendorName}
-              onChange={(e) => { setVendorName(e.target.value); setSelectedVendorId(""); }}
-              placeholder="e.g. Mr. Pintu jii"
-              style={inputStyle}
-            />
-          </Field>
-          <Field label="Date" flex="0 1 160px">
-            <input name="doc_date" type="date" defaultValue={todayISO()} style={inputStyle} />
-          </Field>
-          <Field label="Job work no." flex="0 1 180px">
-            <input name="job_work_no" placeholder="e.g. WO-12" style={inputStyle} />
-          </Field>
+          <button type="button" onClick={() => setShowAddVendor(true)} className="wod-btn" style={{ padding: "10px 16px", fontSize: 13, fontWeight: 700, color: "var(--gold-dark)", background: "var(--bg)", border: "1px solid var(--gold)", borderRadius: 10, cursor: "pointer", whiteSpace: "nowrap" }}>
+            ＋ Add vendor
+          </button>
         </div>
-        <Field label="Address">
-          <input
-            name="address"
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
-            placeholder="Vendor address"
-            style={inputStyle}
-          />
-        </Field>
-        <Field label="Job work description">
-          <textarea name="job_description" rows={2} placeholder="e.g. Carving of pillars — black granite" style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }} />
-        </Field>
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <Field label="Unit" flex="0 1 130px">
-            <select name="unit" value={unit} onChange={(e) => setUnit(e.target.value as "cft" | "sft")} style={inputStyle}>
-              <option value="cft">CFT</option>
-              <option value="sft">SFT</option>
-            </select>
+
+        <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* Vendor / date / job no */}
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(220px, 2fr) minmax(150px, 1fr) minmax(140px, 1fr)", gap: 14 }}>
+            <Field label="Vendor *">
+              <input name="vendor" required value={vendorName} onChange={(e) => { setVendorName(e.target.value); setSelectedVendorId(""); }} placeholder="e.g. Mr. Pintu jii" className="wod-in" />
+            </Field>
+            <Field label="Date">
+              <input name="doc_date" type="date" defaultValue={todayISO()} className="wod-in" />
+            </Field>
+            <Field label="Job work no.">
+              <input name="job_work_no" placeholder="WO-12" className="wod-in" />
+            </Field>
+          </div>
+
+          <Field label="Address">
+            <input name="address" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Vendor address" className="wod-in" />
           </Field>
-          <Field label="Quantity" flex="0 1 150px">
-            <input name="quantity" type="number" min="0" step="0.001" inputMode="decimal" value={qty} onChange={(e) => setQty(e.target.value)} placeholder={`Total ${unit.toUpperCase()}`} style={inputStyle} />
+
+          <Field label="Job work description">
+            <textarea name="job_description" rows={2} placeholder="e.g. Carving of pillars — black granite" className="wod-in" style={{ resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }} />
           </Field>
-          <Field label={`Price (₹ / ${unit.toUpperCase()})`} flex="0 1 170px">
-            <input name="rate" type="number" min="0" step="0.01" inputMode="decimal" value={rate} onChange={(e) => setRate(e.target.value)} placeholder="₹ per unit" style={inputStyle} />
-          </Field>
-          <div style={{ flex: "1 1 160px", display: "flex", flexDirection: "column", gap: 4 }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Total (auto)</span>
-            <div style={{ padding: "9px 12px", fontSize: 16, fontWeight: 800, border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", fontFamily: "ui-monospace, monospace" }}>
-              {inr(total)}
+
+          {/* ── Pricing strip ───────────────────────────────────────── */}
+          <div style={{ background: "var(--gold-subtle, rgba(201,161,74,0.08))", border: "1px solid var(--gold-border, rgba(201,161,74,0.3))", borderRadius: 12, padding: 16, display: "flex", gap: 16, alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
+              <Field label="Unit">
+                <select name="unit" value={unit} onChange={(e) => setUnit(e.target.value as "cft" | "sft")} className="wod-in" style={{ width: 96 }}>
+                  <option value="cft">CFT</option>
+                  <option value="sft">SFT</option>
+                </select>
+              </Field>
+              <Field label="Quantity">
+                <input name="quantity" type="number" min="0" step="0.001" inputMode="decimal" value={qty} onChange={(e) => setQty(e.target.value)} placeholder={`Total ${unit.toUpperCase()}`} className="wod-in" style={{ width: 130 }} />
+              </Field>
+              <Field label={`Price · ₹/${unit.toUpperCase()}`}>
+                <input name="rate" type="number" min="0" step="0.01" inputMode="decimal" value={rate} onChange={(e) => setRate(e.target.value)} placeholder="₹ per unit" className="wod-in" style={{ width: 150 }} />
+              </Field>
+            </div>
+            <div style={{ textAlign: "right", minWidth: 140 }}>
+              <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Total (auto)</div>
+              <div style={{ fontSize: 26, fontWeight: 900, color: "var(--gold-dark)", fontFamily: "ui-monospace, monospace", lineHeight: 1 }}>{inr(total)}</div>
             </div>
           </div>
-        </div>
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          <button
-            type="submit"
-            disabled={!canSubmit}
-            style={{ padding: "11px 24px", fontSize: 14, fontWeight: 800, color: "#fff", background: canSubmit ? "var(--gold-dark)" : "var(--border)", border: "none", borderRadius: 10, cursor: canSubmit ? "pointer" : "not-allowed" }}
-          >
-            ✅ Generate document
+
+          <button type="submit" disabled={!canSubmit} className="wod-btn" style={{ alignSelf: "flex-end", padding: "12px 28px", fontSize: 15, fontWeight: 800, color: "#fff", background: canSubmit ? "var(--gold-dark)" : "var(--border)", border: "none", borderRadius: 12, cursor: canSubmit ? "pointer" : "not-allowed", boxShadow: canSubmit ? "0 3px 10px rgba(146,64,14,0.25)" : "none" }}>
+            ✅ Generate &amp; download
           </button>
         </div>
       </form>
 
-      {/* Saved records */}
+      {/* ── Saved records ─────────────────────────────────────────── */}
       <div>
-        <div style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", marginBottom: 8 }}>
-          Saved documents ({records.length})
+        <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)", marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+          🗂️ Saved documents
+          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", background: "var(--surface-alt, rgba(0,0,0,0.04))", borderRadius: 999, padding: "2px 9px" }}>{records.length}</span>
         </div>
-        <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: 12, background: "var(--surface)" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 820 }}>
+        <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: 14, background: "var(--surface)", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 760 }}>
             <thead>
               <tr style={{ background: "var(--surface-alt, rgba(0,0,0,0.03))", textAlign: "left" }}>
                 {["Date", "Job no.", "Vendor", "Unit", "Qty", "Rate", "Total", "", ""].map((h, i) => (
-                  <th key={i} style={{ padding: "10px 12px", fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.04em", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" }}>{h}</th>
+                  <th key={i} style={{ padding: "11px 14px", fontSize: 10.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap", textAlign: i === 4 || i === 5 || i === 6 ? "right" : "left" }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {records.length === 0 ? (
-                <tr><td colSpan={9} style={{ padding: 24, textAlign: "center", color: "var(--muted)" }}>No documents yet. Fill the form above and tap “Generate document”.</td></tr>
+                <tr><td colSpan={9} style={{ padding: 32, textAlign: "center", color: "var(--muted)" }}>No documents yet. Fill the form above and tap <strong>“Generate &amp; download”</strong>.</td></tr>
               ) : (
                 records.map((r) => (
-                  <tr key={r.id} style={{ borderBottom: "1px solid var(--border)", background: r.id === createdId ? "rgba(34,197,94,0.07)" : "transparent" }}>
-                    <td style={{ padding: "9px 12px", whiteSpace: "nowrap" }}>{fmtDate(r.date)}</td>
-                    <td style={{ padding: "9px 12px", fontFamily: "ui-monospace, monospace", whiteSpace: "nowrap" }}>{r.jobWorkNo || "—"}</td>
-                    <td style={{ padding: "9px 12px" }}>{r.vendor}</td>
-                    <td style={{ padding: "9px 12px", textTransform: "uppercase" }}>{r.unit}</td>
-                    <td style={{ padding: "9px 12px", textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{r.quantity}</td>
-                    <td style={{ padding: "9px 12px", textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{inr(r.rate)}</td>
-                    <td style={{ padding: "9px 12px", textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>{inr(r.total)}</td>
-                    <td style={{ padding: "9px 12px", whiteSpace: "nowrap" }}>
-                      <a href={`/api/invoicing/work-order-doc/${r.id}`} style={{ color: "var(--gold-dark)", fontWeight: 700, textDecoration: "none" }}>⬇ Download</a>
+                  <tr key={r.id} className="wod-row" style={{ borderBottom: "1px solid var(--border)", background: r.id === createdId ? "rgba(34,197,94,0.08)" : "transparent", transition: "background .12s" }}>
+                    <td style={{ padding: "11px 14px", whiteSpace: "nowrap" }}>{fmtDate(r.date)}</td>
+                    <td style={{ padding: "11px 14px", fontFamily: "ui-monospace, monospace", fontWeight: 700, whiteSpace: "nowrap" }}>{r.jobWorkNo || "—"}</td>
+                    <td style={{ padding: "11px 14px", fontWeight: 600 }}>{r.vendor}</td>
+                    <td style={{ padding: "11px 14px", textTransform: "uppercase", color: "var(--muted)" }}>{r.unit}</td>
+                    <td style={{ padding: "11px 14px", textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{r.quantity}</td>
+                    <td style={{ padding: "11px 14px", textAlign: "right", fontFamily: "ui-monospace, monospace", color: "var(--muted)" }}>{inr(r.rate)}</td>
+                    <td style={{ padding: "11px 14px", textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>{inr(r.total)}</td>
+                    <td style={{ padding: "11px 14px", whiteSpace: "nowrap" }}>
+                      <a href={`/api/invoicing/work-order-doc/${r.id}`} style={{ color: "var(--gold-dark)", fontWeight: 700, textDecoration: "none" }}>⬇ PDF</a>
                     </td>
-                    <td style={{ padding: "9px 12px", whiteSpace: "nowrap", textAlign: "right" }}>
+                    <td style={{ padding: "11px 14px", whiteSpace: "nowrap", textAlign: "right" }}>
                       {canDelete && (
                         <form action={deleteWorkOrderDocAction} style={{ display: "inline" }}>
                           <input type="hidden" name="id" value={r.id} />
                           <ConfirmButton
                             message={`Delete this saved document for ${r.vendor}?`}
-                            style={{ fontSize: 12, fontWeight: 700, color: "#b91c1c", background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.3)", borderRadius: 7, padding: "4px 10px", cursor: "pointer" }}
+                            style={{ fontSize: 12, fontWeight: 700, color: "#b91c1c", background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.3)", borderRadius: 8, padding: "5px 11px", cursor: "pointer" }}
                           >
                             Delete
                           </ConfirmButton>
@@ -262,28 +238,28 @@ export function WorkOrderDocClient({
         </div>
       </div>
 
-      {/* Add-vendor modal (separate form — not nested in the doc form) */}
+      {/* ── Add-vendor modal (separate form, not nested) ──────────── */}
       {showAddVendor && (
         <div
           onClick={() => setShowAddVendor(false)}
           style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(15,23,42,0.5)", backdropFilter: "blur(3px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "8vh 16px", overflowY: "auto" }}
         >
           <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 440, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 16, padding: 22, boxShadow: "0 24px 60px rgba(0,0,0,0.3)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-              <h2 style={{ margin: 0, fontSize: 18 }}>Add vendor</h2>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <h2 style={{ margin: 0, fontSize: 18 }}>👤 Add vendor</h2>
               <button type="button" onClick={() => setShowAddVendor(false)} style={{ background: "none", border: "none", fontSize: 24, lineHeight: 1, cursor: "pointer", color: "var(--muted)" }} aria-label="Close">×</button>
             </div>
-            <form action={createWoVendorAction} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <form action={createWoVendorAction} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               <Field label="Vendor name *">
-                <input name="name" required placeholder="e.g. Mr. Pintu jii" style={inputStyle} />
+                <input name="name" required placeholder="e.g. Mr. Pintu jii" className="wod-in" />
               </Field>
               <Field label="Address">
-                <input name="address" placeholder="Vendor address" style={inputStyle} />
+                <input name="address" placeholder="Vendor address" className="wod-in" />
               </Field>
               <div style={{ fontSize: 11, color: "var(--muted)" }}>Saving will pre-select this vendor on the form.</div>
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                <button type="button" onClick={() => setShowAddVendor(false)} style={{ padding: "9px 16px", fontSize: 13, fontWeight: 700, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, cursor: "pointer", color: "var(--text)" }}>Cancel</button>
-                <button type="submit" style={{ padding: "9px 20px", fontSize: 13, fontWeight: 800, color: "#fff", background: "var(--gold-dark)", border: "none", borderRadius: 8, cursor: "pointer" }}>Save vendor</button>
+                <button type="button" onClick={() => setShowAddVendor(false)} style={{ padding: "10px 16px", fontSize: 13, fontWeight: 700, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, cursor: "pointer", color: "var(--text)" }}>Cancel</button>
+                <button type="submit" className="wod-btn" style={{ padding: "10px 22px", fontSize: 13, fontWeight: 800, color: "#fff", background: "var(--gold-dark)", border: "none", borderRadius: 10, cursor: "pointer" }}>Save vendor</button>
               </div>
             </form>
           </div>
