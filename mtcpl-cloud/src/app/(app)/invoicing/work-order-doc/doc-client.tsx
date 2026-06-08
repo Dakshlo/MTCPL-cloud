@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createWorkOrderDocAction, deleteWorkOrderDocAction, createWoVendorAction } from "./actions";
+import { createWorkOrderDocAction, deleteWorkOrderDocAction, createWoVendorAction, updateWoVendorAction, deleteWoVendorAction } from "./actions";
 import { VendorPicker, type VendorPickerOption } from "../../accounts/bills/new/vendor-picker";
 
 export type DocRecord = {
@@ -68,16 +68,21 @@ export function WorkOrderDocClient({
   const [docDate, setDocDate] = useState(todayISO());
   const [showAddVendor, setShowAddVendor] = useState(false);
   const [showRecords, setShowRecords] = useState(false);
+  // Edit-vendor modal (null = closed).
+  const [editVendor, setEditVendor] = useState<{ id: string; name: string; address: string } | null>(null);
   // Custom (our-UI) confirmation gate. null = closed.
   const [confirmAction, setConfirmAction] = useState<
     | { kind: "generate" }
     | { kind: "delete"; id: string; vendor: string }
+    | { kind: "deleteVendor"; id: string; name: string }
     | null
   >(null);
 
   const formRef = useRef<HTMLFormElement>(null);
   const deleteFormRef = useRef<HTMLFormElement>(null);
   const [deleteId, setDeleteId] = useState("");
+  const vendorDeleteFormRef = useRef<HTMLFormElement>(null);
+  const [vendorDeleteId, setVendorDeleteId] = useState("");
 
   useEffect(() => {
     if (!vendorAddedId) return;
@@ -103,6 +108,10 @@ export function WorkOrderDocClient({
     () => vendors.map((v) => ({ id: v.id, name: v.name, category: v.address || null, gstin: null })),
     [vendors],
   );
+  const selectedVendor = useMemo(
+    () => vendors.find((v) => v.id === selectedVendorId) ?? null,
+    [vendors, selectedVendorId],
+  );
 
   const total = (Number(qty) || 0) * (Number(rate) || 0);
   const canSubmit = vendorName.trim().length > 0 && (Number(qty) || 0) > 0 && (Number(rate) || 0) > 0;
@@ -123,6 +132,9 @@ export function WorkOrderDocClient({
       setDeleteId(a.id);
       // Let the hidden input's value flush before submitting.
       requestAnimationFrame(() => deleteFormRef.current?.requestSubmit());
+    } else if (a.kind === "deleteVendor") {
+      setVendorDeleteId(a.id);
+      requestAnimationFrame(() => vendorDeleteFormRef.current?.requestSubmit());
     }
   }
 
@@ -181,6 +193,24 @@ export function WorkOrderDocClient({
                 onChange={pickVendor}
                 placeholder="— Select a vendor —"
               />
+              {selectedVendor && (
+                <div style={{ display: "flex", gap: 8, marginTop: 2 }}>
+                  <button
+                    type="button"
+                    onClick={() => setEditVendor({ id: selectedVendor.id, name: selectedVendor.name, address: selectedVendor.address })}
+                    style={{ fontSize: 12, fontWeight: 700, color: "var(--gold-dark)", background: "var(--bg)", border: "1px solid var(--gold)", borderRadius: 8, padding: "4px 10px", cursor: "pointer" }}
+                  >
+                    ✏️ Edit vendor
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmAction({ kind: "deleteVendor", id: selectedVendor.id, name: selectedVendor.name })}
+                    style={{ fontSize: 12, fontWeight: 700, color: "#b91c1c", background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.3)", borderRadius: 8, padding: "4px 10px", cursor: "pointer" }}
+                  >
+                    🗑 Delete vendor
+                  </button>
+                </div>
+              )}
             </Field>
             <Field label="Date">
               <input name="doc_date" type="date" value={docDate} onChange={(e) => setDocDate(e.target.value)} className="wod-in" />
@@ -238,6 +268,10 @@ export function WorkOrderDocClient({
       {/* Hidden delete form, driven by the confirm modal (owner only). */}
       <form ref={deleteFormRef} action={deleteWorkOrderDocAction} style={{ display: "none" }}>
         <input type="hidden" name="id" value={deleteId} readOnly />
+      </form>
+      {/* Hidden vendor-delete form, driven by the confirm modal. */}
+      <form ref={vendorDeleteFormRef} action={deleteWoVendorAction} style={{ display: "none" }}>
+        <input type="hidden" name="id" value={vendorDeleteId} readOnly />
       </form>
 
       {/* ── Saved-documents peek (centered modal) ─────────────────── */}
@@ -325,6 +359,17 @@ export function WorkOrderDocClient({
                   <button type="button" onClick={confirmYes} className="wod-btn" style={{ ...btnPrimary, background: "var(--gold-dark)" }}>✅ Confirm &amp; generate</button>
                 </div>
               </>
+            ) : confirmAction.kind === "deleteVendor" ? (
+              <>
+                <h2 style={{ margin: "0 0 6px", fontSize: 19 }}>Delete this vendor?</h2>
+                <p className="muted" style={{ margin: "0 0 18px", fontSize: 13 }}>
+                  <strong style={{ color: "var(--text)" }}>{confirmAction.name}</strong> will be removed from the saved-vendor list. Documents already generated are unaffected.
+                </p>
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                  <button type="button" onClick={() => setConfirmAction(null)} style={btnGhost}>Cancel</button>
+                  <button type="button" onClick={confirmYes} className="wod-btn" style={{ ...btnPrimary, background: "#b91c1c" }}>Delete vendor</button>
+                </div>
+              </>
             ) : (
               <>
                 <h2 style={{ margin: "0 0 6px", fontSize: 19 }}>Delete this document?</h2>
@@ -363,6 +408,34 @@ export function WorkOrderDocClient({
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
                 <button type="button" onClick={() => setShowAddVendor(false)} style={btnGhost}>Cancel</button>
                 <button type="submit" className="wod-btn" style={{ ...btnPrimary, background: "var(--gold-dark)" }}>Save vendor</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Edit-vendor modal ─────────────────────────────────────── */}
+      {editVendor && (
+        <div
+          onClick={() => setEditVendor(null)}
+          style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(15,23,42,0.5)", backdropFilter: "blur(3px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "8vh 16px", overflowY: "auto" }}
+        >
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 440, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 16, padding: 22, boxShadow: "0 24px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <h2 style={{ margin: 0, fontSize: 18 }}>✏️ Edit vendor</h2>
+              <button type="button" onClick={() => setEditVendor(null)} style={{ background: "none", border: "none", fontSize: 24, lineHeight: 1, cursor: "pointer", color: "var(--muted)" }} aria-label="Close">×</button>
+            </div>
+            <form action={updateWoVendorAction} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <input type="hidden" name="id" value={editVendor.id} />
+              <Field label="Vendor name *">
+                <input name="name" required defaultValue={editVendor.name} placeholder="e.g. Mr. Pintu jii" className="wod-in" />
+              </Field>
+              <Field label="Address">
+                <input name="address" defaultValue={editVendor.address} placeholder="Vendor address" className="wod-in" />
+              </Field>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <button type="button" onClick={() => setEditVendor(null)} style={btnGhost}>Cancel</button>
+                <button type="submit" className="wod-btn" style={{ ...btnPrimary, background: "var(--gold-dark)" }}>Save changes</button>
               </div>
             </form>
           </div>

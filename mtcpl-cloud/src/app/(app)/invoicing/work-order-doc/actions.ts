@@ -136,12 +136,34 @@ export async function createWoVendorAction(formData: FormData) {
   redirect(`${ROUTE}?vendor_added=${created.id}`);
 }
 
-/** Owner/dev — delete a saved vendor. */
+/** Edit a saved vendor (name + address). Any invoicing role, incl.
+ *  accountant — managing this small address book isn't owner-only. */
+export async function updateWoVendorAction(formData: FormData) {
+  const { profile } = await requireAuth();
+  if (!isAllowed(profile.role)) redirect(toastUrl("Not allowed."));
+  const id = String(formData.get("id") || "").trim();
+  const name = String(formData.get("name") || "").trim();
+  const address = String(formData.get("address") || "").trim() || null;
+  if (!id) redirect(toastUrl("Missing vendor."));
+  if (!name) redirect(toastUrl("Vendor name is required."));
+
+  const admin = createAdminSupabaseClient();
+  const { error } = await admin
+    .from("invoicing_wo_vendors")
+    .update({ name, address })
+    .eq("id", id);
+  if (error) redirect(toastUrl(error.message));
+  await logAudit(profile.id, "wo_vendor_updated", "invoicing_wo_vendor", id, { name });
+  revalidatePath(ROUTE);
+  // Land back with the edited vendor re-selected (name + address refresh).
+  redirect(`${ROUTE}?vendor_added=${id}`);
+}
+
+/** Delete a saved vendor. Any invoicing role, incl. accountant — this
+ *  is the document's own address book, not the system vendor master. */
 export async function deleteWoVendorAction(formData: FormData) {
   const { profile } = await requireAuth();
-  if (profile.role !== "owner" && profile.role !== "developer") {
-    redirect(toastUrl("Only the owner can delete vendors."));
-  }
+  if (!isAllowed(profile.role)) redirect(toastUrl("Not allowed."));
   const id = String(formData.get("id") || "").trim();
   if (!id) redirect(toastUrl("Missing vendor."));
   const admin = createAdminSupabaseClient();
