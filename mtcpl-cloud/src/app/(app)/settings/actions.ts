@@ -335,6 +335,26 @@ export async function updateUserAction(formData: FormData) {
   // stale binding so the JOIN in getAuthContext doesn't pick up
   // garbage if someone flips vendor → accountant.
 
+  // Per-user idle auto-logout window (mig 113) — DEVELOPER-ONLY. The
+  // field is only rendered for the developer in Settings; we also gate
+  // it here so an owner/team_head save can never touch it. Absent field
+  // (any non-developer editor) leaves the existing value untouched.
+  //   ""  → NULL  (use the 10-minute default)
+  //   "0" → 0     (never auto-logout for this user)
+  //   N   → minutes (clamped 0..1440)
+  let idlePatch: { idle_logout_minutes: number | null } | null = null;
+  if (currentUser.role === "developer" && formData.has("idle_logout_minutes")) {
+    const raw = text(formData, "idle_logout_minutes");
+    if (raw === "") {
+      idlePatch = { idle_logout_minutes: null };
+    } else {
+      const n = parseInt(raw, 10);
+      if (Number.isFinite(n) && n >= 0 && n <= 1440) {
+        idlePatch = { idle_logout_minutes: n };
+      }
+    }
+  }
+
   const { error } = await admin
     .from("profiles")
     .update({
@@ -342,6 +362,7 @@ export async function updateUserAction(formData: FormData) {
       is_active,
       vendor_id: vendorIdToSave,
       ...(full_name !== null ? { full_name } : {}),
+      ...(idlePatch ?? {}),
     })
     .eq("id", id);
   if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);

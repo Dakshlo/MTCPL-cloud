@@ -417,10 +417,20 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           fires useSignOut(). Mounts as a portal off document.body
           so it sits above every page surface. */}
       <SignOutOverlayHost />
-      {/* Idle auto-logout — every role except developer. 10 min of no
-          activity → signed out with a security message; active use
-          keeps the session alive. */}
-      <IdleLogout enabled={profile.role !== "developer"} />
+      {/* Idle auto-logout (mig 113 — per-user window). Developer is
+          always exempt (0 = off). Everyone else uses their
+          idle_logout_minutes if the developer set one in Settings, else
+          the 10-minute default; a developer-set 0 means "never" for that
+          user. Active use keeps the session alive. */}
+      <IdleLogout
+        idleMinutes={
+          profile.role === "developer"
+            ? 0
+            : profile.idle_logout_minutes == null
+              ? 10
+              : profile.idle_logout_minutes
+        }
+      />
       <Sidebar
         displayName={displayName}
         role={profile.role}

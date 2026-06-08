@@ -185,7 +185,7 @@ export default async function SettingsPage() {
     admin.from("temples").select("*").order("name"),
     // Admin client needed — RLS on profiles only returns the current user's own row.
     // vendor_id pulled so the row's vendor-picker can show the current binding.
-    admin.from("profiles").select("id, full_name, phone, role, is_active, created_at, vendor_id").order("full_name"),
+    admin.from("profiles").select("id, full_name, phone, role, is_active, created_at, vendor_id, idle_logout_minutes").order("full_name"),
     admin.from("stone_types").select("id, name, color_top, color_front, color_side, is_active, sort_order, stone_category").order("sort_order").order("name"),
     // Usage counts for stone types
     admin.from("blocks").select("stone"),
@@ -627,6 +627,38 @@ export default async function SettingsPage() {
                                 <option value="false">Inactive</option>
                               </select>
                             </label>
+
+                            {/* Per-user idle auto-logout window (mig 113).
+                                DEVELOPER-ONLY control. Some users want a
+                                longer window (or none), while critical
+                                roles like owner / accounts should keep the
+                                short 10-min default. The field is only
+                                rendered for the developer, and the server
+                                only honors it for the developer — so an
+                                owner saving a row never changes it.
+                                "" = default 10 min, "0" = never. */}
+                            {currentUser.role === "developer" && (
+                              <label className="stack" style={{ flex: "0 0 auto" }}>
+                                <span>Idle logout ⏳</span>
+                                <select
+                                  name="idle_logout_minutes"
+                                  defaultValue={
+                                    (user as { idle_logout_minutes?: number | null }).idle_logout_minutes == null
+                                      ? ""
+                                      : String((user as { idle_logout_minutes?: number | null }).idle_logout_minutes)
+                                  }
+                                >
+                                  <option value="">Default (10 min)</option>
+                                  <option value="10">10 minutes</option>
+                                  <option value="30">30 minutes</option>
+                                  <option value="60">1 hour</option>
+                                  <option value="120">2 hours</option>
+                                  <option value="240">4 hours</option>
+                                  <option value="480">8 hours</option>
+                                  <option value="0">Never log out</option>
+                                </select>
+                              </label>
+                            )}
 
                             <div style={{ alignSelf: "flex-end", display: "flex", gap: 8 }}>
                               <button className="secondary-button" type="submit">Save</button>

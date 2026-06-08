@@ -3,18 +3,24 @@
 // ──────────────────────────────────────────────────────────────────
 // Idle auto-logout (Daksh, June 2026)
 //
-// For accounts-desk users (handling money), sign out automatically
-// after 10 minutes of NO activity. Any interaction — mouse, keyboard,
-// scroll, touch — resets the timer, so someone actively using the
-// system is never logged out; only a left-unattended session is.
+// Signs a user out automatically after a window of NO activity. Any
+// interaction — mouse, keyboard, scroll, touch — resets the timer, so
+// someone actively using the system is never logged out; only a
+// left-unattended session is.
 //
-// A 60-second warning appears first ("Stay signed in") so an accounts
-// person mid-entry can keep their session (and unsaved work) alive.
+// The window is per-user (mig 113): the developer sets it in Settings.
+//   idleMinutes <= 0 → feature OFF for this user (no listeners, no timer).
+//   idleMinutes  > 0 → log out after that many minutes of inactivity.
+// Developer accounts pass 0 (always exempt). Default for everyone else is
+// 10 minutes unless the developer changed it — see (app)/layout.tsx.
+//
+// A warning appears first ("Stay signed in") so a user mid-entry can keep
+// their session (and unsaved work) alive. The warning lead is 60s, but
+// never more than half the window so short timeouts still get a heads-up.
 //
 // Cross-tab aware: activity in any tab resets all tabs (via a shared
 // localStorage timestamp), and a logout in one tab logs out the rest.
 //
-// Mounted (enabled) only for the accounts roles — see (app)/layout.tsx.
 // Renders nothing until the warning fires, so it's effectively free
 // otherwise (just listeners + a 1s timer).
 // ──────────────────────────────────────────────────────────────────
@@ -22,12 +28,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
-const IDLE_MS = 10 * 60 * 1000; // 10 minutes of inactivity → logout
-const WARN_BEFORE_MS = 60 * 1000; // show the warning 60s before
 const ACTIVITY_KEY = "mtcpl:lastActivity";
 const LOGOUT_KEY = "mtcpl:idleLogout";
 
-export function IdleLogout({ enabled }: { enabled: boolean }) {
+export function IdleLogout({ idleMinutes }: { idleMinutes: number }) {
+  // <= 0 disables the feature for this user (developer, or an explicit
+  // "Never" set by the developer in Settings).
+  const enabled = Number.isFinite(idleMinutes) && idleMinutes > 0;
+  const idleMs = enabled ? idleMinutes * 60 * 1000 : 0;
+  // Warn 60s before logout, but never more than half the window — so a
+  // 1-minute timeout still shows a 30s warning rather than firing instantly.
+  const warnBeforeMs = enabled ? Math.min(60 * 1000, Math.floor(idleMs / 2)) : 0;
   const [warnLeft, setWarnLeft] = useState<number | null>(null); // secs left, or null = hidden
   const warnLeftRef = useRef<number | null>(null);
   const lastActivity = useRef(Date.now());
@@ -111,10 +122,10 @@ export function IdleLogout({ enabled }: { enabled: boolean }) {
     const tick = setInterval(() => {
       if (loggedOut.current) return;
       const elapsed = Date.now() - lastActivity.current;
-      if (elapsed >= IDLE_MS) {
+      if (elapsed >= idleMs) {
         doLogout();
-      } else if (elapsed >= IDLE_MS - WARN_BEFORE_MS) {
-        setWarnLeft(Math.max(1, Math.ceil((IDLE_MS - elapsed) / 1000)));
+      } else if (elapsed >= idleMs - warnBeforeMs) {
+        setWarnLeft(Math.max(1, Math.ceil((idleMs - elapsed) / 1000)));
       } else if (warnLeftRef.current !== null) {
         setWarnLeft(null);
       }
@@ -125,7 +136,7 @@ export function IdleLogout({ enabled }: { enabled: boolean }) {
       window.removeEventListener("storage", onStorage);
       clearInterval(tick);
     };
-  }, [enabled, doLogout]);
+  }, [enabled, idleMs, warnBeforeMs, doLogout]);
 
   if (!enabled || warnLeft === null) return null;
 

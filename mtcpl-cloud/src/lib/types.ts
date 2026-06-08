@@ -115,6 +115,12 @@ export type Profile = {
    *  treat Mohit as Alkesh too. Empty array (default) means no
    *  change in behaviour. Set via Settings UI by owner/developer. */
   managed_vendor_ids?: string[];
+  /** Mig 113 — per-user idle auto-logout timeout, in minutes
+   *  (developer-set in Settings). NULL/undefined → use the default
+   *  (10 min). 0 → never auto-logout for this user. N → log out after
+   *  N minutes of inactivity. Developer accounts are always exempt in
+   *  the app layer regardless of this value. */
+  idle_logout_minutes?: number | null;
 };
 
 export type Vendor = {
