@@ -35,6 +35,13 @@ const STATUS_META: Record<string, { label: string; bg: string; fg: string }> = {
   retired: { label: "Retired", bg: "rgba(148,163,184,0.2)", fg: "#475569" },
 };
 
+// Whole-card tint by status so the state reads at a glance, not just the chip.
+const STATUS_CARD: Record<string, { border: string; bg: string }> = {
+  working: { border: "rgba(22,163,74,0.55)", bg: "rgba(22,163,74,0.07)" },
+  under_maintenance: { border: "rgba(234,88,12,0.6)", bg: "rgba(234,88,12,0.10)" },
+  retired: { border: "rgba(148,163,184,0.6)", bg: "rgba(148,163,184,0.14)" },
+};
+
 const inputStyle: React.CSSProperties = {
   width: "100%", boxSizing: "border-box", padding: "9px 12px", fontSize: 14,
   border: "1px solid var(--border)", borderRadius: 9, background: "var(--bg)", color: "var(--text)",
@@ -198,13 +205,14 @@ export function MachineFormModal({
 
 // ── Machine card ────────────────────────────────────────────────────
 function MachineCard({ m }: { m: Machine }) {
+  const sc = STATUS_CARD[m.status] ?? STATUS_CARD.working;
   return (
     <Link
       href={`/maintenance/${m.id}`}
       style={{
-        textDecoration: "none", color: "inherit", border: "1px solid var(--border)", borderRadius: 14,
-        background: "var(--surface)", overflow: "hidden", display: "flex", flexDirection: "column",
-        boxShadow: "0 1px 3px rgba(0,0,0,0.05)", ...(m.status === "retired" ? { opacity: 0.6 } : {}),
+        textDecoration: "none", color: "inherit", border: `2px solid ${sc.border}`, borderRadius: 14,
+        background: sc.bg, overflow: "hidden", display: "flex", flexDirection: "column",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.05)", ...(m.status === "retired" ? { opacity: 0.7 } : {}),
       }}
     >
       <div style={{ position: "relative" }}>
@@ -215,6 +223,8 @@ function MachineCard({ m }: { m: Machine }) {
             {m.openTickets} open
           </div>
         )}
+        {/* bottom status ribbon so the colour is unmistakable on the whole card */}
+        <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 4, background: sc.border }} />
       </div>
       <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 4 }}>
         <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 11.5, color: "var(--muted)" }}>{m.machine_code}</code>
@@ -245,6 +255,13 @@ export function MachinesGrid({
   const matchM = (m: Machine) => [m.machine_code, m.name, m.location].some((v) => (v ?? "").toLowerCase().includes(q));
   const fM = (list: Machine[]) => (q ? list.filter(matchM) : list);
 
+  // Collapsible top-level groups. While searching, everything is forced open.
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const toggle = (id: string) => setCollapsed((c) => ({ ...c, [id]: !c[id] }));
+  const allCollapsed = tree.length > 0 && tree.every((g) => collapsed[g.id]);
+  const collapseAll = () => { const next: Record<string, boolean> = {}; for (const g of tree) next[g.id] = true; setCollapsed(next); };
+  const expandAll = () => setCollapsed({});
+
   const totalMachines = useMemo(() => {
     let n = ungrouped.length;
     for (const g of tree) { n += g.machines.length; for (const s of g.subgroups ?? []) n += s.machines.length; }
@@ -268,6 +285,11 @@ export function MachinesGrid({
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
         <GroupFormModal mode="add" parentOptions={topGroupOpts} back="/maintenance" buttonLabel="＋ Create group" />
         <Link href="/maintenance/tickets" style={{ ...btnGhost, textDecoration: "none", display: "inline-block" }}>🧾 Repair tickets</Link>
+        {tree.length > 0 && (
+          <button type="button" onClick={allCollapsed ? expandAll : collapseAll} style={btnGhost}>
+            {allCollapsed ? "Expand all" : "Collapse all"}
+          </button>
+        )}
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search machines — code, name, location…" style={{ ...inputStyle, flex: "1 1 260px", width: "auto" }} />
       </div>
 
@@ -277,15 +299,21 @@ export function MachinesGrid({
         <p className="muted" style={{ fontSize: 13, margin: 0 }}>{tree.length} group(s) · {totalMachines} machine(s)</p>
       )}
 
-      {visibleTree.map((g) => (
+      {visibleTree.map((g) => {
+        const isCollapsed = q ? false : !!collapsed[g.id];
+        return (
         <div key={g.id} style={{ border: "1px solid var(--border)", borderRadius: 16, background: "var(--surface)", overflow: "hidden" }}>
-          {/* Top group header */}
-          <div style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, borderBottom: "1px solid var(--border)", background: "var(--surface-alt, rgba(0,0,0,0.02))" }}>
-            <div style={{ width: 52, height: 52, flexShrink: 0 }}><PhotoBox url={g.imageUrl} height={52} rounded="10px" /></div>
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontWeight: 800, fontSize: 16 }}>{g.name}</div>
-              <div className="muted" style={{ fontSize: 12 }}>{g.machines.length} machine(s){(g.subgroups?.length ?? 0) > 0 ? ` · ${g.subgroups!.length} sub-group(s)` : ""}</div>
-            </div>
+          {/* Top group header — click the left part to collapse / expand */}
+          <div style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, borderBottom: isCollapsed ? "none" : "1px solid var(--border)", background: "var(--surface-alt, rgba(0,0,0,0.02))" }}>
+            <button type="button" onClick={() => toggle(g.id)} aria-expanded={!isCollapsed}
+              style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0, background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>
+              <span style={{ fontSize: 12, color: "var(--muted)", width: 14, flexShrink: 0 }}>{isCollapsed ? "▶" : "▼"}</span>
+              <div style={{ width: 52, height: 52, flexShrink: 0 }}><PhotoBox url={g.imageUrl} height={52} rounded="10px" /></div>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontWeight: 800, fontSize: 16, color: "var(--text)" }}>{g.name}</div>
+                <div className="muted" style={{ fontSize: 12 }}>{g.machines.length} machine(s){(g.subgroups?.length ?? 0) > 0 ? ` · ${g.subgroups!.length} sub-group(s)` : ""}</div>
+              </div>
+            </button>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <MachineFormModal mode="add" groups={groupOpts} defaultGroupId={g.id} locations={locations} back="/maintenance" buttonLabel="＋ Machine" buttonStyle={{ ...btnGold, padding: "7px 12px" }} />
               <GroupFormModal mode="add" parentOptions={topGroupOpts} defaultParentId={g.id} back="/maintenance" buttonLabel="＋ Sub-group" buttonStyle={{ ...btnGhost, padding: "7px 12px" }} />
@@ -293,6 +321,7 @@ export function MachinesGrid({
             </div>
           </div>
 
+          {!isCollapsed && (
           <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 14 }}>
             {/* direct machines */}
             {(g.machines.length > 0 || !q) && <MachineGrid machines={g.machines} />}
@@ -315,8 +344,10 @@ export function MachinesGrid({
               </div>
             ))}
           </div>
+          )}
         </div>
-      ))}
+        );
+      })}
 
       {visibleUngrouped.length > 0 && (
         <div style={{ border: "1px solid var(--border)", borderRadius: 16, background: "var(--surface)", overflow: "hidden" }}>
