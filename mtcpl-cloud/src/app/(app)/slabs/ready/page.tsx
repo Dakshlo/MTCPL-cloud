@@ -73,41 +73,8 @@ export default async function ReadySlabsPage() {
     admin.from("stone_types").select("name").order("name"),
   ]);
 
-  // Work-order assignment map — which slab is assigned to which vendor on a
-  // LIVE outsource work order. Same pattern as the Push Urgent page: join
-  // carving_work_order_items → carving_work_orders, skip cancelled lines and
-  // cancelled/rejected work orders. This lets users WITHOUT push-page access
-  // see (and filter by) what's already promised to a vendor, without giving
-  // them the ability to push/assign anything. Read-only display only.
-  const assignedVendorBySlab = new Map<string, string>();
-  {
-    const { data: woItems } = await admin
-      .from("carving_work_order_items")
-      .select("slab_requirement_id, line_status, carving_work_orders(vendor_name, status)")
-      .neq("line_status", "cancelled")
-      .not("slab_requirement_id", "is", null);
-    for (const r of (woItems ?? []) as Array<{
-      slab_requirement_id: string | null;
-      carving_work_orders:
-        | { vendor_name: string | null; status: string | null }
-        | { vendor_name: string | null; status: string | null }[]
-        | null;
-    }>) {
-      const sid = r.slab_requirement_id;
-      if (!sid) continue;
-      const wo = Array.isArray(r.carving_work_orders) ? r.carving_work_orders[0] : r.carving_work_orders;
-      if (!wo || wo.status === "cancelled" || wo.status === "rejected") continue;
-      if (wo.vendor_name && !assignedVendorBySlab.has(sid)) assignedVendorBySlab.set(sid, wo.vendor_name);
-    }
-  }
-
-  const slabs = (data ?? []).map((s) => ({
-    ...s,
-    assignedVendor: assignedVendorBySlab.get(s.id) ?? null,
-  }));
-
   const stoneNames = (stoneTypeRows ?? []).map((s) => s.name);
-  const templeNames = [...new Set(slabs.map((s) => s.temple))].sort();
+  const templeNames = [...new Set((data ?? []).map((s) => s.temple))].sort();
 
   return (
     <>
@@ -118,7 +85,7 @@ export default async function ReadySlabsPage() {
       </div>
 
       <ReadySlabsClient
-        slabs={slabs}
+        slabs={data ?? []}
         stoneNames={stoneNames}
         templeNames={templeNames}
         mode="verification"
