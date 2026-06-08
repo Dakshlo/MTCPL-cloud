@@ -54,6 +54,11 @@ export type WorkOrderTabRow = WorkOrderRow & {
   counts: WorkOrderLineCounts;
   /** Mig 100 — approved + handed over to the vendor (then sends unlock). */
   handedOver: boolean;
+  /** Sum of all (non-cancelled) slabs' CFT / SFT in the order. */
+  totalCft: number;
+  totalSft: number;
+  /** Tentative total cost from the agreed rate (null until owner sets a price). */
+  tentativeCost: number | null;
 };
 
 const STATUS_META: Record<string, { label: string; emoji: string; bg: string; fg: string }> = {
@@ -312,6 +317,18 @@ export function WorkOrdersTab({ wos, isOwner }: { wos: WorkOrderTabRow[]; isOwne
                           {c.planned > 0 ? ` · ${c.planned} waiting` : ""}
                           {c.approved > 0 ? ` · ${c.approved} ✓` : ""}
                         </span>
+                      </div>
+
+                      {/* Order totals — CFT in the order + tentative cost at the agreed rate. */}
+                      <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                        📦 <strong style={{ color: "var(--text)" }}>{w.totalCft.toFixed(2)} cft</strong>
+                        {w.totalSft > 0 ? ` · ${w.totalSft.toFixed(2)} sft` : ""}
+                        {" · "}
+                        {w.tentativeCost != null ? (
+                          <>💰 Tentative <strong style={{ color: "var(--text)" }}>₹{w.tentativeCost.toLocaleString("en-IN")}</strong></>
+                        ) : (
+                          <span style={{ fontStyle: "italic" }}>💰 cost after price approval</span>
+                        )}
                       </div>
 
                       {/* Slab chips — see which slabs are in the order + their

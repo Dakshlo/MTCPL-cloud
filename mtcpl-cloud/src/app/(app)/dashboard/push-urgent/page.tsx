@@ -53,6 +53,32 @@ export default async function PushUrgentPage({ searchParams }: { searchParams: S
     .select("*", { count: "exact", head: true })
     .in("status", ["open", "planned"]);
 
+  // Global map of slab → vendor for every slab in a LIVE outsource work order
+  // (small set; bounded by active work orders). Used both to colour rows and
+  // to GUARANTEE a temple's work-order slabs show even past the load cap.
+  const assignedVendorBySlab = new Map<string, string>();
+  {
+    const { data: woItems } = await admin
+      .from("carving_work_order_items")
+      .select("slab_requirement_id, line_status, carving_work_orders(vendor_name, status)")
+      .neq("line_status", "cancelled")
+      .not("slab_requirement_id", "is", null);
+    for (const r of (woItems ?? []) as Array<{
+      slab_requirement_id: string | null;
+      carving_work_orders:
+        | { vendor_name: string | null; status: string | null }
+        | { vendor_name: string | null; status: string | null }[]
+        | null;
+    }>) {
+      const sid = r.slab_requirement_id;
+      if (!sid) continue;
+      const wo = Array.isArray(r.carving_work_orders) ? r.carving_work_orders[0] : r.carving_work_orders;
+      if (!wo || wo.status === "cancelled" || wo.status === "rejected") continue;
+      if (wo.vendor_name && !assignedVendorBySlab.has(sid)) assignedVendorBySlab.set(sid, wo.vendor_name);
+    }
+  }
+  const woSlabIds = [...assignedVendorBySlab.keys()];
+
   // Load just the relevant slice.
   let rows: Row[] = [];
   let capped = false;
@@ -80,12 +106,30 @@ export default async function PushUrgentPage({ searchParams }: { searchParams: S
     rows = (data ?? []) as Row[];
   } else if (temple) {
     mode = "temple";
-    const { data } = await base()
+    // First, this temple's slabs that are already in a work order (always
+    // shown, even if they'd be past the cap). Then fill the rest with the
+    // temple's other open/planned slabs.
+    let woRows: Row[] = [];
+    if (woSlabIds.length > 0) {
+      const { data } = await base()
+        .eq("temple", temple)
+        .in("id", woSlabIds)
+        .order("created_at", { ascending: true })
+        .limit(CAP);
+      woRows = (data ?? []) as Row[];
+    }
+    const { data: mainData } = await base()
       .eq("temple", temple)
       .order("priority", { ascending: false })
       .order("created_at", { ascending: true })
       .limit(CAP + 1);
-    rows = (data ?? []) as Row[];
+    const main = (mainData ?? []) as Row[];
+    const seen = new Set(woRows.map((r) => r.id));
+    rows = [...woRows];
+    for (const r of main) {
+      if (rows.length >= CAP) { capped = true; break; }
+      if (!seen.has(r.id)) { rows.push(r); seen.add(r.id); }
+    }
   } else {
     mode = "flagged";
     const { data } = await base()
@@ -97,30 +141,6 @@ export default async function PushUrgentPage({ searchParams }: { searchParams: S
   if (rows.length > CAP) {
     capped = true;
     rows = rows.slice(0, CAP);
-  }
-
-  // Which loaded slabs are in a LIVE outsource work order (+ vendor) — drives
-  // the indigo row tint + "🤝 vendor" column + vendor filter.
-  const assignedVendorBySlab = new Map<string, string>();
-  if (rows.length > 0) {
-    const { data: woItems } = await admin
-      .from("carving_work_order_items")
-      .select("slab_requirement_id, line_status, carving_work_orders(vendor_name, status)")
-      .neq("line_status", "cancelled")
-      .in("slab_requirement_id", rows.map((r) => r.id));
-    for (const r of (woItems ?? []) as Array<{
-      slab_requirement_id: string | null;
-      carving_work_orders:
-        | { vendor_name: string | null; status: string | null }
-        | { vendor_name: string | null; status: string | null }[]
-        | null;
-    }>) {
-      const sid = r.slab_requirement_id;
-      if (!sid) continue;
-      const wo = Array.isArray(r.carving_work_orders) ? r.carving_work_orders[0] : r.carving_work_orders;
-      if (!wo || wo.status === "cancelled" || wo.status === "rejected") continue;
-      if (wo.vendor_name && !assignedVendorBySlab.has(sid)) assignedVendorBySlab.set(sid, wo.vendor_name);
-    }
   }
 
   const pushList = rows.map((s) => ({

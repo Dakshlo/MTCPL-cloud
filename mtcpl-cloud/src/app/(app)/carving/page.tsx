@@ -531,7 +531,7 @@ export default async function CarvingDashboardPage({
     // Slab meta (label / description / dims) for bound slabs — shown as chips
     // on the card + folded into each line's search haystack.
     const woSlabIds = [...new Set(lineRowsT.map((l) => l.slab_requirement_id).filter(Boolean) as string[])];
-    const woSlabMeta = new Map<string, { label: string | null; description: string | null; dims: string }>();
+    const woSlabMeta = new Map<string, { label: string | null; description: string | null; dims: string; cft: number; sft: number }>();
     if (woSlabIds.length > 0) {
       const { data: sRows } = await admin
         .from("slab_requirements")
@@ -539,7 +539,8 @@ export default async function CarvingDashboardPage({
         .in("id", woSlabIds);
       for (const s of (sRows ?? []) as Array<{ id: string; label: string | null; description: string | null; length_ft: number | string; width_ft: number | string; thickness_ft: number | string }>) {
         const l = Number(s.length_ft) || 0, w = Number(s.width_ft) || 0, t = Number(s.thickness_ft) || 0;
-        woSlabMeta.set(s.id, { label: s.label, description: s.description, dims: `${l}×${w}×${t}` });
+        // Dims are stored in INCHES → CFT = l*w*t/1728, SFT = l*w/144.
+        woSlabMeta.set(s.id, { label: s.label, description: s.description, dims: `${l}×${w}×${t}`, cft: (l * w * t) / 1728, sft: (l * w) / 144 });
       }
     }
     // Real stage comes from the carving_item, not line_status (which only
@@ -558,6 +559,8 @@ export default async function CarvingDashboardPage({
     }
     const linesByWo = new Map<string, WorkOrderLineChip[]>();
     const countsByWo = new Map<string, WorkOrderLineCounts>();
+    const cftByWo = new Map<string, number>();
+    const sftByWo = new Map<string, number>();
     for (const r of lineRowsT) {
       const cc = countsByWo.get(r.work_order_id) ?? { total: 0, planned: 0, sent: 0, received: 0, approved: 0 };
       if (r.line_status === "cancelled") {
@@ -583,6 +586,15 @@ export default async function CarvingDashboardPage({
           ? `${Number(r.planned_length_ft)}×${Number(r.planned_width_ft ?? 0)}×${Number(r.planned_thickness_ft ?? 0)}`
           : "";
       const dims = meta?.dims ?? plannedDims;
+      // Accumulate CFT/SFT for the order (bound slab dims, else planned dims).
+      let lcft = 0, lsft = 0;
+      if (meta) { lcft = meta.cft; lsft = meta.sft; }
+      else if (r.planned_length_ft != null) {
+        const pl = Number(r.planned_length_ft) || 0, pw = Number(r.planned_width_ft ?? 0) || 0, pt = Number(r.planned_thickness_ft ?? 0) || 0;
+        lcft = (pl * pw * pt) / 1728; lsft = (pl * pw) / 144;
+      }
+      cftByWo.set(r.work_order_id, (cftByWo.get(r.work_order_id) ?? 0) + lcft);
+      sftByWo.set(r.work_order_id, (sftByWo.get(r.work_order_id) ?? 0) + lsft);
       const code = r.slab_requirement_id ?? (r.description || "future need");
       const search = [r.slab_requirement_id ?? "", meta?.label ?? "", meta?.description ?? "", r.description ?? "", dims, dims.replaceAll("×", "x")]
         .join(" ")
@@ -600,12 +612,30 @@ export default async function CarvingDashboardPage({
       if (r.handed_over_at) handedOverIds.add(r.id);
     }
     const zeroCounts: WorkOrderLineCounts = { total: 0, planned: 0, sent: 0, received: 0, approved: 0 };
-    workOrdersForTab = woRowsT.map((w) => ({
-      ...w,
-      lines: linesByWo.get(w.id) ?? [],
-      counts: countsByWo.get(w.id) ?? zeroCounts,
-      handedOver: handedOverIds.has(w.id),
-    }));
+    workOrdersForTab = woRowsT.map((w) => {
+      const cnt = countsByWo.get(w.id) ?? zeroCounts;
+      const totalCft = Math.round((cftByWo.get(w.id) ?? 0) * 100) / 100;
+      const totalSft = Math.round((sftByWo.get(w.id) ?? 0) * 100) / 100;
+      const rate = w.jobwork_rate != null ? Number(w.jobwork_rate) : null;
+      const unit = w.jobwork_unit === "sft" ? "sft" : w.jobwork_unit === "job" ? "job" : "cft";
+      const tentativeCost =
+        rate == null || !Number.isFinite(rate)
+          ? null
+          : unit === "job"
+            ? Math.round(cnt.total * rate)
+            : unit === "sft"
+              ? Math.round(totalSft * rate)
+              : Math.round(totalCft * rate);
+      return {
+        ...w,
+        lines: linesByWo.get(w.id) ?? [],
+        counts: cnt,
+        handedOver: handedOverIds.has(w.id),
+        totalCft,
+        totalSft,
+        tentativeCost,
+      };
+    });
   }
   // Tab badge = live orders (exclude cancelled / rejected).
   const workOrdersLiveCount = workOrdersForTab.filter((w) => w.status !== "cancelled" && w.status !== "rejected").length;
