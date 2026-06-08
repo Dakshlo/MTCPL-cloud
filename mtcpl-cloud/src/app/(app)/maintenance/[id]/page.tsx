@@ -3,13 +3,14 @@ import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
-import { MachineFormModal, StatusChip, type Machine } from "../machines-client";
+import { MachineFormModal, StatusChip, type Machine, type GroupOpt } from "../machines-client";
 import { RaiseTicketButton, TicketList, type Ticket } from "../tickets-client";
 import { setMachineStatusAction, deleteMachineAction } from "../actions";
 
 export const dynamic = "force-dynamic";
 
 const ALLOWED = ["owner", "developer"];
+const IMG_BUCKET = "machine_images";
 
 type TicketRow = {
   id: string; ticket_no: string | null; machine_id: string; machine_name: string;
@@ -43,20 +44,28 @@ export default async function MachineDetailPage({ params }: { params: Promise<{ 
   if (!ALLOWED.includes(profile.role)) redirect("/dashboard");
   const { id } = await params;
   const admin = createAdminSupabaseClient();
+  const pub = (path: string | null) => (path ? admin.storage.from(IMG_BUCKET).getPublicUrl(path).data.publicUrl : null);
 
-  const [{ data: machineRow }, { data: ticketRows }, { data: catRows }, { data: secRows }, profilesMap] = await Promise.all([
-    admin.from("company_machines").select("id, machine_code, name, category, section, status, location, notes").eq("id", id).maybeSingle(),
+  const [{ data: machineRow }, { data: ticketRows }, { data: groupRows }, profilesMap] = await Promise.all([
+    admin.from("company_machines").select("id, machine_code, name, group_id, image_path, status, location, notes").eq("id", id).maybeSingle(),
     admin.from("machine_maintenance_tickets").select(TICKET_COLS).eq("machine_id", id).order("created_at", { ascending: false }),
-    admin.from("machine_categories").select("name").order("name"),
-    admin.from("machine_sections").select("name").order("name"),
+    admin.from("machine_groups").select("id, name, image_path").order("name", { ascending: true }),
     getProfilesMap(),
   ]);
 
   if (!machineRow) redirect("/maintenance?toast=" + encodeURIComponent("Machine not found."));
-  const machine = { ...(machineRow as Omit<Machine, "openTickets">), openTickets: 0 } as Machine;
+  const mr = machineRow as { id: string; machine_code: string | null; name: string; group_id: string | null; image_path: string | null; status: string; location: string | null; notes: string | null };
+  type GroupRow = { id: string; name: string; image_path: string | null };
+  const groupsTyped = (groupRows ?? []) as GroupRow[];
+  const groupOpts: GroupOpt[] = groupsTyped.map((g) => ({ id: g.id, name: g.name }));
+  const myGroup = groupsTyped.find((g) => g.id === mr.group_id) ?? null;
+  const imageUrl = mr.image_path ? pub(mr.image_path) : (myGroup ? pub(myGroup.image_path) : null);
+
+  const machine: Machine = {
+    id: mr.id, machine_code: mr.machine_code, name: mr.name, status: mr.status,
+    location: mr.location, notes: mr.notes, group_id: mr.group_id, imageUrl, openTickets: 0,
+  };
   const tickets = ((ticketRows ?? []) as TicketRow[]).map((r) => toTicket(r, profilesMap));
-  const categories = ((catRows ?? []) as Array<{ name: string }>).map((c) => c.name);
-  const sections = ((secRows ?? []) as Array<{ name: string }>).map((s) => s.name);
   const back = `/maintenance/${id}`;
   const hasTickets = tickets.length > 0;
 
@@ -65,28 +74,40 @@ export default async function MachineDetailPage({ params }: { params: Promise<{ 
       <Link href="/maintenance" style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", textDecoration: "none" }}>← All machines</Link>
 
       {/* Machine header */}
-      <div style={{ border: "1px solid var(--border)", borderRadius: 14, background: "var(--surface)", padding: 18 }}>
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-          <div>
-            <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 12, color: "var(--muted)" }}>{machine.machine_code}</code>
-            <h1 style={{ margin: "2px 0 6px", fontSize: 22 }}>{machine.name}</h1>
-            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-              <StatusChip status={machine.status} />
-              {machine.category && <span className="muted" style={{ fontSize: 12.5 }}>{machine.category}</span>}
-              {machine.section && <span className="muted" style={{ fontSize: 12.5 }}>· {machine.section}</span>}
-              {machine.location && <span className="muted" style={{ fontSize: 12.5 }}>· 📍 {machine.location}</span>}
-            </div>
-            {machine.notes && <p className="muted" style={{ fontSize: 13, margin: "8px 0 0" }}>{machine.notes}</p>}
+      <div style={{ border: "1px solid var(--border)", borderRadius: 14, background: "var(--surface)", overflow: "hidden" }}>
+        <div style={{ display: "flex", gap: 16, padding: 18, flexWrap: "wrap" }}>
+          {/* Photo */}
+          <div style={{ width: 160, flexShrink: 0 }}>
+            {imageUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={imageUrl} alt="" style={{ width: "100%", height: 130, objectFit: "cover", borderRadius: 10, display: "block" }} />
+            ) : (
+              <div style={{ width: "100%", height: 130, borderRadius: 10, background: "linear-gradient(135deg, rgba(63,143,134,0.12), rgba(63,143,134,0.04))", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 34, color: "rgba(63,143,134,0.55)" }}>🛠️</div>
+            )}
           </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <RaiseTicketButton machineId={machine.id} back={back} />
-            <MachineFormModal mode="edit" machine={machine} categories={categories} sections={sections} back={back}
-              buttonLabel="Edit" buttonStyle={{ padding: "8px 14px", fontSize: 13, fontWeight: 700, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 9, cursor: "pointer", color: "var(--text)" }} />
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+              <div>
+                <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 12, color: "var(--muted)" }}>{machine.machine_code}</code>
+                <h1 style={{ margin: "2px 0 6px", fontSize: 22 }}>{machine.name}</h1>
+                <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                  <StatusChip status={machine.status} />
+                  {myGroup && <span className="muted" style={{ fontSize: 12.5 }}>{myGroup.name}</span>}
+                  {machine.location && <span className="muted" style={{ fontSize: 12.5 }}>· 📍 {machine.location}</span>}
+                </div>
+                {machine.notes && <p className="muted" style={{ fontSize: 13, margin: "8px 0 0" }}>{machine.notes}</p>}
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <RaiseTicketButton machineId={machine.id} back={back} />
+                <MachineFormModal mode="edit" machine={machine} groups={groupOpts} back={back}
+                  buttonLabel="Edit" buttonStyle={{ padding: "8px 14px", fontSize: 13, fontWeight: 700, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 9, cursor: "pointer", color: "var(--text)" }} />
+              </div>
+            </div>
           </div>
         </div>
 
         {/* Manual status controls */}
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14, paddingTop: 14, borderTop: "1px dashed var(--border)", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: "12px 18px", borderTop: "1px dashed var(--border)", alignItems: "center" }}>
           <span style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Set status</span>
           {(["working", "under_maintenance", "retired"] as const).filter((s) => s !== machine.status).map((s) => (
             <form key={s} action={setMachineStatusAction}>

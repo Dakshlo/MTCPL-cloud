@@ -73,18 +73,108 @@ async function uploadPhoto(
   return { path, mime };
 }
 
-/** Remember a category / section name so the picker offers it next time. */
-async function rememberLookup(
-  admin: ReturnType<typeof createAdminSupabaseClient>,
-  table: "machine_categories" | "machine_sections",
-  name: string,
-) {
-  if (!name) return;
-  try {
-    await admin.from(table).insert({ name }).select("id").single();
-  } catch {
-    /* unique violation = already exists; ignore */
+// ── Catalog images (public bucket machine_images) ───────────────────
+const IMG_BUCKET = "machine_images";
+const IMG_MIME_ALLOW = new Set<string>(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
+function imgExt(mime: string): string {
+  switch (mime) {
+    case "image/jpeg": return "jpg";
+    case "image/png": return "png";
+    case "image/webp": return "webp";
+    case "image/heic": return "heic";
+    case "image/heif": return "heif";
+    default: return "bin";
   }
+}
+async function uploadImage(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  folder: "groups" | "machines",
+  id: string,
+  file: File,
+): Promise<{ path: string; mime: string }> {
+  const mime = (file.type || "").toLowerCase();
+  if (!IMG_MIME_ALLOW.has(mime)) throw new Error("Photo must be an image (JPG / PNG / WebP / HEIC).");
+  if (file.size === 0) throw new Error("Photo is empty.");
+  if (file.size > PROOF_MAX_BYTES) throw new Error("Photo too large (max 15 MB).");
+  const path = `${folder}/${id}/${randomUUID()}.${imgExt(mime)}`;
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const { error } = await admin.storage.from(IMG_BUCKET).upload(path, buffer, { contentType: mime, cacheControl: "3600", upsert: false });
+  if (error) throw new Error(`Photo upload failed: ${error.message}`);
+  return { path, mime };
+}
+
+// ── Groups ──────────────────────────────────────────────────────────
+
+export async function createGroupAction(formData: FormData) {
+  const { profile } = await requireAuth();
+  if (!isAllowed(profile.role)) redirect(back(formData, "Not allowed."));
+  const name = txt(formData, "name");
+  if (!name) redirect(back(formData, "Group name is required."));
+  const admin = createAdminSupabaseClient();
+  const { data: created, error } = await admin
+    .from("machine_groups")
+    .insert({ name, created_by: profile.id })
+    .select("id")
+    .single();
+  if (error || !created) {
+    const dup = (error?.message || "").toLowerCase().includes("duplicate") || (error?.message || "").toLowerCase().includes("unique");
+    redirect(back(formData, dup ? `A group named "${name}" already exists.` : (error?.message ?? "Failed to create group.")));
+  }
+  const image = formData.get("image");
+  if (image instanceof File && image.size > 0) {
+    try {
+      const meta = await uploadImage(admin, "groups", created.id, image);
+      await admin.from("machine_groups").update({ image_path: meta.path, image_mime: meta.mime }).eq("id", created.id);
+    } catch (e) {
+      redirect(back(formData, `Group created, but photo failed: ${e instanceof Error ? e.message : String(e)}`));
+    }
+  }
+  await logAudit(profile.id, "machine_group_created", "machine_group", created.id, { name });
+  revalidatePath(ROUTE);
+  redirect(back(formData, `Group "${name}" created.`));
+}
+
+export async function updateGroupAction(formData: FormData) {
+  const { profile } = await requireAuth();
+  if (!isAllowed(profile.role)) redirect(back(formData, "Not allowed."));
+  const id = txt(formData, "id");
+  const name = txt(formData, "name");
+  if (!id) redirect(back(formData, "Missing group."));
+  if (!name) redirect(back(formData, "Group name is required."));
+  const admin = createAdminSupabaseClient();
+  const update: Record<string, unknown> = { name, updated_at: new Date().toISOString() };
+  const image = formData.get("image");
+  if (image instanceof File && image.size > 0) {
+    try {
+      const { data: cur } = await admin.from("machine_groups").select("image_path").eq("id", id).maybeSingle();
+      const oldPath = (cur as { image_path?: string | null } | null)?.image_path ?? null;
+      const meta = await uploadImage(admin, "groups", id, image);
+      update.image_path = meta.path;
+      update.image_mime = meta.mime;
+      if (oldPath) { try { await admin.storage.from(IMG_BUCKET).remove([oldPath]); } catch { /* best effort */ } }
+    } catch (e) {
+      redirect(back(formData, e instanceof Error ? e.message : "Photo upload failed."));
+    }
+  }
+  const { error } = await admin.from("machine_groups").update(update).eq("id", id);
+  if (error) redirect(back(formData, error.message));
+  await logAudit(profile.id, "machine_group_updated", "machine_group", id, { name });
+  revalidatePath(ROUTE);
+  redirect(back(formData, "Group updated."));
+}
+
+export async function deleteGroupAction(formData: FormData) {
+  const { profile } = await requireAuth();
+  if (!isAllowed(profile.role)) redirect(back(formData, "Not allowed."));
+  const id = txt(formData, "id");
+  if (!id) redirect(back(formData, "Missing group."));
+  const admin = createAdminSupabaseClient();
+  // Machines in this group fall back to "Ungrouped" (FK ON DELETE SET NULL).
+  const { error } = await admin.from("machine_groups").delete().eq("id", id);
+  if (error) redirect(back(formData, error.message));
+  await logAudit(profile.id, "machine_group_deleted", "machine_group", id, {});
+  revalidatePath(ROUTE);
+  redirect(back(formData, "Group deleted — its machines are now ungrouped."));
 }
 
 // ── Machines ────────────────────────────────────────────────────────
@@ -95,22 +185,29 @@ export async function createMachineAction(formData: FormData) {
 
   const name = txt(formData, "name");
   if (!name) redirect(back(formData, "Machine name is required."));
-  const category = txt(formData, "category") || null;
-  const section = txt(formData, "section") || null;
+  const groupId = txt(formData, "group_id") || null;
   const location = txt(formData, "location") || null;
   const notes = txt(formData, "notes") || null;
 
   const admin = createAdminSupabaseClient();
   const { data: created, error } = await admin
     .from("company_machines")
-    .insert({ name, category, section, location, notes, created_by: profile.id })
+    .insert({ name, group_id: groupId, location, notes, created_by: profile.id })
     .select("id, machine_code")
     .single();
   if (error || !created) redirect(back(formData, error?.message ?? "Failed to add machine."));
 
-  if (category) await rememberLookup(admin, "machine_categories", category);
-  if (section) await rememberLookup(admin, "machine_sections", section);
-  await logAudit(profile.id, "machine_created", "company_machine", created.id, { name, category, section });
+  const image = formData.get("image");
+  if (image instanceof File && image.size > 0) {
+    try {
+      const meta = await uploadImage(admin, "machines", created.id, image);
+      await admin.from("company_machines").update({ image_path: meta.path, image_mime: meta.mime }).eq("id", created.id);
+    } catch (e) {
+      revalidatePath(ROUTE);
+      redirect(back(formData, `Machine added, but photo failed: ${e instanceof Error ? e.message : String(e)}`));
+    }
+  }
+  await logAudit(profile.id, "machine_created", "company_machine", created.id, { name, group_id: groupId });
   revalidatePath(ROUTE);
   redirect(`${ROUTE}/${created.id}?toast=${encodeURIComponent(`Machine added (${created.machine_code}).`)}`);
 }
@@ -122,20 +219,31 @@ export async function updateMachineAction(formData: FormData) {
   if (!id) redirect(back(formData, "Missing machine."));
   const name = txt(formData, "name");
   if (!name) redirect(back(formData, "Machine name is required."));
-  const category = txt(formData, "category") || null;
-  const section = txt(formData, "section") || null;
+  const groupId = txt(formData, "group_id") || null;
   const location = txt(formData, "location") || null;
   const notes = txt(formData, "notes") || null;
 
   const admin = createAdminSupabaseClient();
-  const { error } = await admin
-    .from("company_machines")
-    .update({ name, category, section, location, notes, updated_at: new Date().toISOString(), updated_by: profile.id })
-    .eq("id", id);
+  const update: Record<string, unknown> = {
+    name, group_id: groupId, location, notes,
+    updated_at: new Date().toISOString(), updated_by: profile.id,
+  };
+  const image = formData.get("image");
+  if (image instanceof File && image.size > 0) {
+    try {
+      const { data: cur } = await admin.from("company_machines").select("image_path").eq("id", id).maybeSingle();
+      const oldPath = (cur as { image_path?: string | null } | null)?.image_path ?? null;
+      const meta = await uploadImage(admin, "machines", id, image);
+      update.image_path = meta.path;
+      update.image_mime = meta.mime;
+      if (oldPath) { try { await admin.storage.from(IMG_BUCKET).remove([oldPath]); } catch { /* best effort */ } }
+    } catch (e) {
+      redirect(back(formData, e instanceof Error ? e.message : "Photo upload failed."));
+    }
+  }
+  const { error } = await admin.from("company_machines").update(update).eq("id", id);
   if (error) redirect(back(formData, error.message));
-  if (category) await rememberLookup(admin, "machine_categories", category);
-  if (section) await rememberLookup(admin, "machine_sections", section);
-  await logAudit(profile.id, "machine_updated", "company_machine", id, { name });
+  await logAudit(profile.id, "machine_updated", "company_machine", id, { name, group_id: groupId });
   revalidatePath(ROUTE);
   redirect(back(formData, "Machine updated."));
 }
