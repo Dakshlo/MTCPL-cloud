@@ -64,11 +64,10 @@ const SETTINGS_ROLES = ["developer", "owner", "team_head", "senior_incharge"];
 // stays out of the way when there's nothing to act on.
 const NOTIFICATION_ROLES = ["developer"];
 
-// Idle auto-logout audience (Daksh, June 2026): accounts-desk roles
-// only. These users handle money, so an unattended session is a real
-// risk — 10 min of inactivity signs them out. Active use never logs
-// out. Owner/developer roam every department, so they're excluded.
-const IDLE_LOGOUT_ROLES = ["accountant", "accountant_star", "biller", "crosscheck"];
+// Idle auto-logout (Daksh, June 2026): applies to EVERY role except
+// developer. 10 min of inactivity signs the user out (active use never
+// logs out). Owner is included too — only developer is exempt so debug
+// sessions aren't interrupted.
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const { profile } = await requireAuth();
@@ -418,10 +417,10 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           fires useSignOut(). Mounts as a portal off document.body
           so it sits above every page surface. */}
       <SignOutOverlayHost />
-      {/* Idle auto-logout — accounts-desk roles only (they handle
-          money). 10 min of no activity → signed out with a security
-          message; active use keeps the session alive. */}
-      <IdleLogout enabled={IDLE_LOGOUT_ROLES.includes(profile.role)} />
+      {/* Idle auto-logout — every role except developer. 10 min of no
+          activity → signed out with a security message; active use
+          keeps the session alive. */}
+      <IdleLogout enabled={profile.role !== "developer"} />
       <Sidebar
         displayName={displayName}
         role={profile.role}
