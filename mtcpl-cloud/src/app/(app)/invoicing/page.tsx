@@ -15,6 +15,7 @@ import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
+import { allowedDepartmentsForRole } from "@/lib/departments";
 import {
   ACCOUNTS_TOKENS,
   AccountsHero,
@@ -29,7 +30,16 @@ import { ChallanStatusPill } from "./_ui/challan-status-pill";
 
 export default async function InvoicingDashboardPage() {
   const { profile } = await requireAuth();
-  if (!canUseInvoicing(profile)) redirect("/");
+  if (!canUseInvoicing(profile)) {
+    // Plain accountant has Invoicing in their switcher but only for the
+    // standalone Work Order Document — they don't get the v2 dashboard
+    // (parties / challans / invoices). Bounce them to their one surface
+    // instead of kicking them out of the department entirely.
+    if (allowedDepartmentsForRole(profile.role).includes("invoicing")) {
+      redirect("/invoicing/work-order-doc");
+    }
+    redirect("/");
+  }
 
   const supabase = createAdminSupabaseClient();
 

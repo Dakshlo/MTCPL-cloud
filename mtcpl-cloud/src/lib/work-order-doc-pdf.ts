@@ -17,6 +17,7 @@ export type WorkOrderDocInput = {
   vendor: string;
   address: string | null;
   jobDescription: string | null;
+  descriptionDetail?: string | null;
   jobWorkNo: string | null;
   dateIso: string | null;
   unit: "cft" | "sft";
@@ -148,6 +149,16 @@ export async function buildWorkOrderDocPdf(inp: WorkOrderDocInput): Promise<Uint
     const descLines = wrap(inp.jobDescription, font, 10, valW);
     for (let i = 0; i < descLines.length; i++) {
       text(descLines[i], valX, y, 10, font, ink);
+      y -= 14;
+    }
+    y -= 3;
+  }
+
+  if (inp.descriptionDetail && inp.descriptionDetail.trim()) {
+    text("Details:", MARGIN_X, y, 10, bold, muted);
+    const detailLines = wrap(inp.descriptionDetail, font, 10, valW);
+    for (let i = 0; i < detailLines.length; i++) {
+      text(detailLines[i], valX, y, 10, font, ink);
       y -= 14;
     }
     y -= 3;

@@ -165,8 +165,15 @@ export function allowedDepartmentsForRole(role: AppRole): Department[] {
     case "crosscheck":
       return ["finance", "production", "inventory"];
     case "biller":
-    case "accountant":
       return ["finance"];
+    // Daksh (June 2026): plain accountant now also works in Invoicing —
+    // specifically the standalone Work Order Document generator — so
+    // they get a 2-tile Finance / Invoicing switcher. (The invoicing
+    // v2 surfaces — parties / challans / invoices — stay gated to
+    // accountant_star via canUseInvoicing; accountant only sees the
+    // Work Order Doc inside Invoicing.)
+    case "accountant":
+      return ["finance", "invoicing"];
     // Mig 054 — cnc_expense_entry is a production-cost role.
     // CNC machines are part of production; their operating
     // expenses (tools, electricity, labor) are tracked here so

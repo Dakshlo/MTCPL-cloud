@@ -463,7 +463,10 @@ const navEntries: NavEntry[] = [
   {
     type: "divider",
     label: "INVOICING",
-    roles: ["developer", "owner", "accountant_star"],
+    // accountant included so the section header shows when a plain
+    // accountant switches into Invoicing (their only entry below is
+    // Work Order Doc).
+    roles: ["developer", "owner", "accountant_star", "accountant"],
     department: "invoicing",
   },
   {
@@ -500,7 +503,7 @@ const navEntries: NavEntry[] = [
     href: "/invoicing/work-order-doc",
     label: "Work Order Doc",
     icon: "📝",
-    roles: ["developer", "owner", "accountant_star"],
+    roles: ["developer", "owner", "accountant_star", "accountant"],
     department: "invoicing",
   },
   // ── INVENTORY section (Migration 041 — Scaffolding v1) ──────────

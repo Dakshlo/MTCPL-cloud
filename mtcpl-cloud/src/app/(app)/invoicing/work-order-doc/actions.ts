@@ -15,8 +15,8 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
 
 const ROUTE = "/invoicing/work-order-doc";
-// Invoicing department audience.
-const ALLOWED = ["developer", "owner", "accountant_star"];
+// Invoicing department audience (plain accountant added — Work Order Doc only).
+const ALLOWED = ["developer", "owner", "accountant_star", "accountant"];
 
 function isAllowed(role: string): boolean {
   return ALLOWED.includes(role);
@@ -33,7 +33,7 @@ export async function createWorkOrderDocAction(formData: FormData) {
   const vendor = String(formData.get("vendor") || "").trim();
   const address = String(formData.get("address") || "").trim() || null;
   const jobDescription = String(formData.get("job_description") || "").trim() || null;
-  const jobWorkNo = String(formData.get("job_work_no") || "").trim() || null;
+  const descriptionDetail = String(formData.get("description_detail") || "").trim() || null;
   const unit = String(formData.get("unit") || "").trim() === "sft" ? "sft" : "cft";
   const quantity = Number(String(formData.get("quantity") || "").trim());
   const rate = Number(String(formData.get("rate") || "").trim());
@@ -47,10 +47,32 @@ export async function createWorkOrderDocAction(formData: FormData) {
   const total = Math.round(quantity * rate * 100) / 100;
 
   const admin = createAdminSupabaseClient();
+
+  // Auto-generate the work-order code: MTCPL-WO-{year}-0001, a per-year
+  // sequence. Year comes from the selected date (defaults to the current
+  // IST year). Replaces the old hand-typed job_work_no. Low-volume
+  // internal use, so max(existing seq)+1 is plenty (also survives
+  // deletions, unlike a plain count).
+  const year = docDate
+    ? docDate.slice(0, 4)
+    : new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric" }).format(new Date());
+  const prefix = `MTCPL-WO-${year}-`;
+  const { data: existingCodes } = await admin
+    .from("invoicing_work_order_docs")
+    .select("job_work_no")
+    .like("job_work_no", `${prefix}%`);
+  let maxSeq = 0;
+  for (const r of (existingCodes ?? []) as Array<{ job_work_no: string | null }>) {
+    const m = /-(\d+)$/.exec(r.job_work_no ?? "");
+    if (m) maxSeq = Math.max(maxSeq, Number(m[1]));
+  }
+  const jobWorkNo = `${prefix}${String(maxSeq + 1).padStart(4, "0")}`;
+
   const row: Record<string, unknown> = {
     vendor,
     address,
     job_description: jobDescription,
+    description_detail: descriptionDetail,
     job_work_no: jobWorkNo,
     unit,
     quantity,

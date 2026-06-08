@@ -1,14 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createWorkOrderDocAction, deleteWorkOrderDocAction, createWoVendorAction } from "./actions";
-import { ConfirmButton } from "@/components/confirm-button";
+import { VendorPicker, type VendorPickerOption } from "../../accounts/bills/new/vendor-picker";
 
 export type DocRecord = {
   id: string;
   date: string;
   vendor: string;
   jobDescription: string;
+  descriptionDetail: string;
   jobWorkNo: string;
   unit: "cft" | "sft";
   quantity: number;
@@ -64,7 +65,19 @@ export function WorkOrderDocClient({
   const [vendorName, setVendorName] = useState("");
   const [address, setAddress] = useState("");
   const [selectedVendorId, setSelectedVendorId] = useState("");
+  const [docDate, setDocDate] = useState(todayISO());
   const [showAddVendor, setShowAddVendor] = useState(false);
+  const [showRecords, setShowRecords] = useState(false);
+  // Custom (our-UI) confirmation gate. null = closed.
+  const [confirmAction, setConfirmAction] = useState<
+    | { kind: "generate" }
+    | { kind: "delete"; id: string; vendor: string }
+    | null
+  >(null);
+
+  const formRef = useRef<HTMLFormElement>(null);
+  const deleteFormRef = useRef<HTMLFormElement>(null);
+  const [deleteId, setDeleteId] = useState("");
 
   useEffect(() => {
     if (!vendorAddedId) return;
@@ -85,13 +98,36 @@ export function WorkOrderDocClient({
     }
   }
 
+  // Finance-style combobox options (name + address shown as the subtitle).
+  const vendorOptions: VendorPickerOption[] = useMemo(
+    () => vendors.map((v) => ({ id: v.id, name: v.name, category: v.address || null, gstin: null })),
+    [vendors],
+  );
+
   const total = (Number(qty) || 0) * (Number(rate) || 0);
   const canSubmit = vendorName.trim().length > 0 && (Number(qty) || 0) > 0 && (Number(rate) || 0) > 0;
   const justCreated = useMemo(() => records.find((r) => r.id === createdId) ?? null, [records, createdId]);
 
+  // Live preview of the auto code (year tracks the selected date; the
+  // running number is assigned server-side at save).
+  const codeYear = /^\d{4}/.test(docDate) ? docDate.slice(0, 4) : String(new Date().getFullYear());
+  const codePreview = `MTCPL-WO-${codeYear}-XXXX`;
+
+  function confirmYes() {
+    const a = confirmAction;
+    setConfirmAction(null);
+    if (!a) return;
+    if (a.kind === "generate") {
+      formRef.current?.requestSubmit();
+    } else if (a.kind === "delete") {
+      setDeleteId(a.id);
+      // Let the hidden input's value flush before submitting.
+      requestAnimationFrame(() => deleteFormRef.current?.requestSubmit());
+    }
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: 920 }}>
-      {/* Scoped polish: focus rings, row hover, button lift. */}
       <style>{`
         .wod-in { width:100%; box-sizing:border-box; padding:10px 13px; font-size:14px; border:1px solid var(--border);
                   border-radius:10px; background:var(--bg); color:var(--text); transition:border-color .15s, box-shadow .15s; }
@@ -101,6 +137,16 @@ export function WorkOrderDocClient({
         .wod-btn:hover:not(:disabled) { filter:brightness(1.04); }
         .wod-btn:active:not(:disabled) { transform:translateY(1px); }
       `}</style>
+
+      {/* ── Top action row ─────────────────────────────────────────── */}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <button type="button" onClick={() => setShowAddVendor(true)} className="wod-btn" style={{ padding: "10px 18px", fontSize: 13, fontWeight: 800, color: "#fff", background: "var(--gold-dark)", border: "none", borderRadius: 10, cursor: "pointer", whiteSpace: "nowrap", boxShadow: "0 2px 8px rgba(146,64,14,0.22)" }}>
+          ＋ Add vendor
+        </button>
+        <button type="button" onClick={() => setShowRecords(true)} className="wod-btn" style={{ padding: "10px 18px", fontSize: 13, fontWeight: 800, color: "var(--text)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, cursor: "pointer", whiteSpace: "nowrap" }}>
+          🗂️ Saved documents <span style={{ fontWeight: 700, color: "var(--muted)", background: "var(--surface-alt, rgba(0,0,0,0.05))", borderRadius: 999, padding: "1px 8px", marginLeft: 4 }}>{records.length}</span>
+        </button>
+      </div>
 
       {toast && (
         <div style={{ background: "rgba(217,119,6,0.1)", border: "1px solid rgba(217,119,6,0.35)", borderRadius: 12, padding: "11px 15px", fontSize: 13, color: "#92400e" }}>
@@ -121,34 +167,32 @@ export function WorkOrderDocClient({
       )}
 
       {/* ── The form card ─────────────────────────────────────────── */}
-      <form action={createWorkOrderDocAction} style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
-        {/* Saved-vendor quick pick — sits inside the card as a header strip */}
-        <div style={{ background: "linear-gradient(180deg, rgba(201,161,74,0.10), rgba(201,161,74,0.03))", borderBottom: "1px solid var(--border)", padding: "14px 20px", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          <span style={{ fontSize: 12, fontWeight: 800, color: "var(--gold-dark)", whiteSpace: "nowrap" }}>👤 Quick fill</span>
-          <select value={selectedVendorId} onChange={(e) => pickVendor(e.target.value)} className="wod-in" style={{ flex: "1 1 240px", fontWeight: 600 }}>
-            <option value="">— Saved vendor (or type below) —</option>
-            {vendors.map((v) => (
-              <option key={v.id} value={v.id}>{v.name}</option>
-            ))}
-          </select>
-          <button type="button" onClick={() => setShowAddVendor(true)} className="wod-btn" style={{ padding: "10px 16px", fontSize: 13, fontWeight: 700, color: "var(--gold-dark)", background: "var(--bg)", border: "1px solid var(--gold)", borderRadius: 10, cursor: "pointer", whiteSpace: "nowrap" }}>
-            ＋ Add vendor
-          </button>
-        </div>
+      <form ref={formRef} action={createWorkOrderDocAction} style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, overflow: "visible", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+        {/* Hidden submitted values (vendor + address come from the picker). */}
+        <input type="hidden" name="vendor" value={vendorName} />
 
         <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
-          {/* Vendor / date / job no */}
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(220px, 2fr) minmax(150px, 1fr) minmax(140px, 1fr)", gap: 14 }}>
-            <Field label="Vendor *">
-              <input name="vendor" required value={vendorName} onChange={(e) => { setVendorName(e.target.value); setSelectedVendorId(""); }} placeholder="e.g. Mr. Pintu jii" className="wod-in" />
+          {/* Vendor (finance-style combobox) / date / auto code */}
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(240px, 2fr) minmax(150px, 1fr)", gap: 14 }}>
+            <Field label="Vendor *" hint="Pick a saved vendor, or use ＋ Add vendor above.">
+              <VendorPicker
+                vendors={vendorOptions}
+                selectedId={selectedVendorId}
+                onChange={pickVendor}
+                placeholder="— Select a vendor —"
+              />
             </Field>
             <Field label="Date">
-              <input name="doc_date" type="date" defaultValue={todayISO()} className="wod-in" />
-            </Field>
-            <Field label="Job work no.">
-              <input name="job_work_no" placeholder="WO-12" className="wod-in" />
+              <input name="doc_date" type="date" value={docDate} onChange={(e) => setDocDate(e.target.value)} className="wod-in" />
             </Field>
           </div>
+
+          <Field label="Work order code" hint="Generated automatically when you create the document.">
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "10px 13px", border: "1px dashed var(--border)", borderRadius: 10, background: "var(--surface-alt, rgba(0,0,0,0.03))", fontFamily: "ui-monospace, monospace", fontWeight: 800, color: "var(--gold-dark)", fontSize: 14, width: "fit-content" }}>
+              🏷️ {codePreview}
+              <span style={{ fontFamily: "system-ui, sans-serif", fontWeight: 600, fontSize: 10.5, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>auto</span>
+            </div>
+          </Field>
 
           <Field label="Address">
             <input name="address" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Vendor address" className="wod-in" />
@@ -156,6 +200,10 @@ export function WorkOrderDocClient({
 
           <Field label="Job work description">
             <textarea name="job_description" rows={2} placeholder="e.g. Carving of pillars — black granite" className="wod-in" style={{ resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }} />
+          </Field>
+
+          <Field label="Description detail (optional)">
+            <textarea name="description_detail" rows={2} placeholder="Any extra notes / specifications (optional)" className="wod-in" style={{ resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }} />
           </Field>
 
           {/* ── Pricing strip ───────────────────────────────────────── */}
@@ -180,63 +228,118 @@ export function WorkOrderDocClient({
             </div>
           </div>
 
-          <button type="submit" disabled={!canSubmit} className="wod-btn" style={{ alignSelf: "flex-end", padding: "12px 28px", fontSize: 15, fontWeight: 800, color: "#fff", background: canSubmit ? "var(--gold-dark)" : "var(--border)", border: "none", borderRadius: 12, cursor: canSubmit ? "pointer" : "not-allowed", boxShadow: canSubmit ? "0 3px 10px rgba(146,64,14,0.25)" : "none" }}>
+          {/* Generate — opens our confirmation modal (no browser confirm). */}
+          <button type="button" onClick={() => canSubmit && setConfirmAction({ kind: "generate" })} disabled={!canSubmit} className="wod-btn" style={{ alignSelf: "flex-end", padding: "12px 28px", fontSize: 15, fontWeight: 800, color: "#fff", background: canSubmit ? "var(--gold-dark)" : "var(--border)", border: "none", borderRadius: 12, cursor: canSubmit ? "pointer" : "not-allowed", boxShadow: canSubmit ? "0 3px 10px rgba(146,64,14,0.25)" : "none" }}>
             ✅ Generate &amp; download
           </button>
         </div>
       </form>
 
-      {/* ── Saved records ─────────────────────────────────────────── */}
-      <div>
-        <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)", marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
-          🗂️ Saved documents
-          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", background: "var(--surface-alt, rgba(0,0,0,0.04))", borderRadius: 999, padding: "2px 9px" }}>{records.length}</span>
-        </div>
-        <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: 14, background: "var(--surface)", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 760 }}>
-            <thead>
-              <tr style={{ background: "var(--surface-alt, rgba(0,0,0,0.03))", textAlign: "left" }}>
-                {["Date", "Job no.", "Vendor", "Unit", "Qty", "Rate", "Total", "", ""].map((h, i) => (
-                  <th key={i} style={{ padding: "11px 14px", fontSize: 10.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap", textAlign: i === 4 || i === 5 || i === 6 ? "right" : "left" }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {records.length === 0 ? (
-                <tr><td colSpan={9} style={{ padding: 32, textAlign: "center", color: "var(--muted)" }}>No documents yet. Fill the form above and tap <strong>“Generate &amp; download”</strong>.</td></tr>
-              ) : (
-                records.map((r) => (
-                  <tr key={r.id} className="wod-row" style={{ borderBottom: "1px solid var(--border)", background: r.id === createdId ? "rgba(34,197,94,0.08)" : "transparent", transition: "background .12s" }}>
-                    <td style={{ padding: "11px 14px", whiteSpace: "nowrap" }}>{fmtDate(r.date)}</td>
-                    <td style={{ padding: "11px 14px", fontFamily: "ui-monospace, monospace", fontWeight: 700, whiteSpace: "nowrap" }}>{r.jobWorkNo || "—"}</td>
-                    <td style={{ padding: "11px 14px", fontWeight: 600 }}>{r.vendor}</td>
-                    <td style={{ padding: "11px 14px", textTransform: "uppercase", color: "var(--muted)" }}>{r.unit}</td>
-                    <td style={{ padding: "11px 14px", textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{r.quantity}</td>
-                    <td style={{ padding: "11px 14px", textAlign: "right", fontFamily: "ui-monospace, monospace", color: "var(--muted)" }}>{inr(r.rate)}</td>
-                    <td style={{ padding: "11px 14px", textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>{inr(r.total)}</td>
-                    <td style={{ padding: "11px 14px", whiteSpace: "nowrap" }}>
-                      <a href={`/api/invoicing/work-order-doc/${r.id}`} style={{ color: "var(--gold-dark)", fontWeight: 700, textDecoration: "none" }}>⬇ PDF</a>
-                    </td>
-                    <td style={{ padding: "11px 14px", whiteSpace: "nowrap", textAlign: "right" }}>
-                      {canDelete && (
-                        <form action={deleteWorkOrderDocAction} style={{ display: "inline" }}>
-                          <input type="hidden" name="id" value={r.id} />
-                          <ConfirmButton
-                            message={`Delete this saved document for ${r.vendor}?`}
-                            style={{ fontSize: 12, fontWeight: 700, color: "#b91c1c", background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.3)", borderRadius: 8, padding: "5px 11px", cursor: "pointer" }}
-                          >
-                            Delete
-                          </ConfirmButton>
-                        </form>
-                      )}
-                    </td>
+      {/* Hidden delete form, driven by the confirm modal (owner only). */}
+      <form ref={deleteFormRef} action={deleteWorkOrderDocAction} style={{ display: "none" }}>
+        <input type="hidden" name="id" value={deleteId} readOnly />
+      </form>
+
+      {/* ── Saved-documents peek (centered modal) ─────────────────── */}
+      {showRecords && (
+        <div
+          onClick={() => setShowRecords(false)}
+          style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(15,23,42,0.5)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center", padding: "6vh 16px", overflowY: "auto" }}
+        >
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 860, maxHeight: "88vh", display: "flex", flexDirection: "column", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 16, boxShadow: "0 24px 60px rgba(0,0,0,0.3)", overflow: "hidden" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", borderBottom: "1px solid var(--border)" }}>
+              <h2 style={{ margin: 0, fontSize: 18, display: "flex", alignItems: "center", gap: 8 }}>
+                🗂️ Saved documents
+                <span style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", background: "var(--surface-alt, rgba(0,0,0,0.05))", borderRadius: 999, padding: "2px 9px" }}>{records.length}</span>
+              </h2>
+              <button type="button" onClick={() => setShowRecords(false)} style={{ background: "none", border: "none", fontSize: 26, lineHeight: 1, cursor: "pointer", color: "var(--muted)" }} aria-label="Close">×</button>
+            </div>
+            <div style={{ overflow: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 720 }}>
+                <thead>
+                  <tr style={{ background: "var(--surface-alt, rgba(0,0,0,0.03))", textAlign: "left", position: "sticky", top: 0 }}>
+                    {["Date", "Code", "Vendor", "Unit", "Qty", "Rate", "Total", "", ""].map((h, i) => (
+                      <th key={i} style={{ padding: "11px 14px", fontSize: 10.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap", textAlign: i === 4 || i === 5 || i === 6 ? "right" : "left" }}>{h}</th>
+                    ))}
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                </thead>
+                <tbody>
+                  {records.length === 0 ? (
+                    <tr><td colSpan={9} style={{ padding: 32, textAlign: "center", color: "var(--muted)" }}>No documents yet.</td></tr>
+                  ) : (
+                    records.map((r) => (
+                      <tr key={r.id} className="wod-row" style={{ borderBottom: "1px solid var(--border)", background: r.id === createdId ? "rgba(34,197,94,0.08)" : "transparent", transition: "background .12s" }}>
+                        <td style={{ padding: "11px 14px", whiteSpace: "nowrap" }}>{fmtDate(r.date)}</td>
+                        <td style={{ padding: "11px 14px", fontFamily: "ui-monospace, monospace", fontWeight: 700, whiteSpace: "nowrap" }}>{r.jobWorkNo || "—"}</td>
+                        <td style={{ padding: "11px 14px", fontWeight: 600 }}>{r.vendor}</td>
+                        <td style={{ padding: "11px 14px", textTransform: "uppercase", color: "var(--muted)" }}>{r.unit}</td>
+                        <td style={{ padding: "11px 14px", textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{r.quantity}</td>
+                        <td style={{ padding: "11px 14px", textAlign: "right", fontFamily: "ui-monospace, monospace", color: "var(--muted)" }}>{inr(r.rate)}</td>
+                        <td style={{ padding: "11px 14px", textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>{inr(r.total)}</td>
+                        <td style={{ padding: "11px 14px", whiteSpace: "nowrap" }}>
+                          <a href={`/api/invoicing/work-order-doc/${r.id}`} style={{ color: "var(--gold-dark)", fontWeight: 700, textDecoration: "none" }}>⬇ PDF</a>
+                        </td>
+                        <td style={{ padding: "11px 14px", whiteSpace: "nowrap", textAlign: "right" }}>
+                          {canDelete && (
+                            <button
+                              type="button"
+                              onClick={() => setConfirmAction({ kind: "delete", id: r.id, vendor: r.vendor })}
+                              style={{ fontSize: 12, fontWeight: 700, color: "#b91c1c", background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.3)", borderRadius: 8, padding: "5px 11px", cursor: "pointer" }}
+                            >
+                              Delete
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* ── Custom confirmation modal (our UI — not the browser dialog) ── */}
+      {confirmAction && (
+        <div
+          onClick={() => setConfirmAction(null)}
+          style={{ position: "fixed", inset: 0, zIndex: 1100, background: "rgba(15,23,42,0.55)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}
+        >
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 420, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 16, padding: 24, boxShadow: "0 24px 60px rgba(0,0,0,0.32)" }}>
+            {confirmAction.kind === "generate" ? (
+              <>
+                <h2 style={{ margin: "0 0 6px", fontSize: 19 }}>Generate this work order?</h2>
+                <p className="muted" style={{ margin: "0 0 16px", fontSize: 13 }}>
+                  A document will be created and saved. You can download it right after.
+                </p>
+                <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 6, fontSize: 13, marginBottom: 18 }}>
+                  <Row k="Vendor" v={vendorName || "—"} />
+                  <Row k="Code" v={codePreview} mono />
+                  <Row k="Date" v={fmtDate(docDate)} />
+                  <Row k="Qty × Rate" v={`${qty || 0} ${unit.toUpperCase()} × ${inr(Number(rate) || 0)}`} />
+                  <Row k="Total" v={inr(total)} strong />
+                </div>
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                  <button type="button" onClick={() => setConfirmAction(null)} style={btnGhost}>Cancel</button>
+                  <button type="button" onClick={confirmYes} className="wod-btn" style={{ ...btnPrimary, background: "var(--gold-dark)" }}>✅ Confirm &amp; generate</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h2 style={{ margin: "0 0 6px", fontSize: 19 }}>Delete this document?</h2>
+                <p className="muted" style={{ margin: "0 0 18px", fontSize: 13 }}>
+                  The saved work order for <strong style={{ color: "var(--text)" }}>{confirmAction.vendor}</strong> will be permanently removed. This can&apos;t be undone.
+                </p>
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                  <button type="button" onClick={() => setConfirmAction(null)} style={btnGhost}>Cancel</button>
+                  <button type="button" onClick={confirmYes} className="wod-btn" style={{ ...btnPrimary, background: "#b91c1c" }}>Delete</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ── Add-vendor modal (separate form, not nested) ──────────── */}
       {showAddVendor && (
@@ -258,8 +361,8 @@ export function WorkOrderDocClient({
               </Field>
               <div style={{ fontSize: 11, color: "var(--muted)" }}>Saving will pre-select this vendor on the form.</div>
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                <button type="button" onClick={() => setShowAddVendor(false)} style={{ padding: "10px 16px", fontSize: 13, fontWeight: 700, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, cursor: "pointer", color: "var(--text)" }}>Cancel</button>
-                <button type="submit" className="wod-btn" style={{ padding: "10px 22px", fontSize: 13, fontWeight: 800, color: "#fff", background: "var(--gold-dark)", border: "none", borderRadius: 10, cursor: "pointer" }}>Save vendor</button>
+                <button type="button" onClick={() => setShowAddVendor(false)} style={btnGhost}>Cancel</button>
+                <button type="submit" className="wod-btn" style={{ ...btnPrimary, background: "var(--gold-dark)" }}>Save vendor</button>
               </div>
             </form>
           </div>
@@ -268,3 +371,15 @@ export function WorkOrderDocClient({
     </div>
   );
 }
+
+function Row({ k, v, mono, strong }: { k: string; v: string; mono?: boolean; strong?: boolean }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+      <span style={{ color: "var(--muted)" }}>{k}</span>
+      <span style={{ fontWeight: strong ? 900 : 600, fontFamily: mono ? "ui-monospace, monospace" : "inherit", color: strong ? "var(--gold-dark)" : "var(--text)", textAlign: "right" }}>{v}</span>
+    </div>
+  );
+}
+
+const btnGhost: React.CSSProperties = { padding: "10px 16px", fontSize: 13, fontWeight: 700, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, cursor: "pointer", color: "var(--text)" };
+const btnPrimary: React.CSSProperties = { padding: "10px 22px", fontSize: 13, fontWeight: 800, color: "#fff", border: "none", borderRadius: 10, cursor: "pointer" };

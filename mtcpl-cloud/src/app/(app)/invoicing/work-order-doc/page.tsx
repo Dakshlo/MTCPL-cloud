@@ -5,8 +5,9 @@ import { WorkOrderDocClient, type DocRecord, type SavedVendor } from "./doc-clie
 
 export const dynamic = "force-dynamic";
 
-// Invoicing department audience.
-const ALLOWED = ["developer", "owner", "accountant_star"];
+// Invoicing department audience. Plain accountant added (Daksh, June 2026):
+// they get the Work Order Doc inside Invoicing, but not the v2 surfaces.
+const ALLOWED = ["developer", "owner", "accountant_star", "accountant"];
 
 type SearchParams = Promise<{ toast?: string; created?: string; vendor_added?: string }>;
 
@@ -21,6 +22,7 @@ export default async function WorkOrderDocPage({ searchParams }: { searchParams:
     doc_date: string | null;
     vendor: string;
     job_description: string | null;
+    description_detail: string | null;
     job_work_no: string | null;
     unit: string;
     quantity: number | string;
@@ -35,7 +37,7 @@ export default async function WorkOrderDocPage({ searchParams }: { searchParams:
   for (let off = 0; off < 100000; off += 1000) {
     const { data, error } = await admin
       .from("invoicing_work_order_docs")
-      .select("id, doc_date, vendor, job_description, job_work_no, unit, quantity, rate, total, created_at")
+      .select("id, doc_date, vendor, job_description, description_detail, job_work_no, unit, quantity, rate, total, created_at")
       .order("created_at", { ascending: false })
       .range(off, off + 999);
     if (error || !data || data.length === 0) break;
@@ -57,6 +59,7 @@ export default async function WorkOrderDocPage({ searchParams }: { searchParams:
     date: r.doc_date ?? (r.created_at ? r.created_at.slice(0, 10) : ""),
     vendor: r.vendor,
     jobDescription: r.job_description ?? "",
+    descriptionDetail: r.description_detail ?? "",
     jobWorkNo: r.job_work_no ?? "",
     unit: r.unit === "sft" ? "sft" : "cft",
     quantity: Number(r.quantity),

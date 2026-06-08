@@ -7,7 +7,7 @@ import { buildWorkOrderDocPdf } from "@/lib/work-order-doc-pdf";
 
 export const runtime = "nodejs";
 
-const ALLOWED = ["developer", "owner", "accountant_star"];
+const ALLOWED = ["developer", "owner", "accountant_star", "accountant"];
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { profile } = await requireAuth();
@@ -17,7 +17,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
 
   const { data } = await admin
     .from("invoicing_work_order_docs")
-    .select("doc_date, vendor, address, job_description, job_work_no, unit, quantity, rate, total")
+    .select("doc_date, vendor, address, job_description, description_detail, job_work_no, unit, quantity, rate, total")
     .eq("id", id)
     .maybeSingle();
   if (!data) return new Response("Document not found", { status: 404 });
@@ -26,6 +26,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     vendor: string;
     address: string | null;
     job_description: string | null;
+    description_detail: string | null;
     job_work_no: string | null;
     unit: string;
     quantity: number | string;
@@ -37,6 +38,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     vendor: d.vendor,
     address: d.address,
     jobDescription: d.job_description,
+    descriptionDetail: d.description_detail,
     jobWorkNo: d.job_work_no,
     dateIso: d.doc_date,
     unit: d.unit === "sft" ? "sft" : "cft",
