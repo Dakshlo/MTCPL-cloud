@@ -226,6 +226,51 @@ export async function createMachineAction(formData: FormData) {
   redirect(`${ROUTE}/${created.id}?toast=${encodeURIComponent(`Machine added (${created.machine_code}).`)}`);
 }
 
+/** Add MANY machines at once into the same group — one name per line,
+ *  sharing the group / location / photo / notes. */
+export async function createMachinesBulkAction(formData: FormData) {
+  const { profile } = await requireAuth();
+  if (!isAllowed(profile.role)) redirect(back(formData, "Not allowed."));
+  const groupId = txt(formData, "group_id") || null;
+  const location = txt(formData, "location") || null;
+  const notes = txt(formData, "notes") || null;
+  const names = String(formData.get("names") || "")
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (names.length === 0) redirect(back(formData, "Enter at least one machine name (one per line)."));
+  if (names.length > 100) redirect(back(formData, "Too many at once — add up to 100 at a time."));
+
+  const admin = createAdminSupabaseClient();
+
+  // Optional shared photo — uploaded once, applied to every machine created.
+  let sharedPath: string | null = null;
+  let sharedMime: string | null = null;
+  const image = formData.get("image");
+  if (image instanceof File && image.size > 0) {
+    try {
+      const meta = await uploadImage(admin, "machines", `bulk-${randomUUID()}`, image);
+      sharedPath = meta.path;
+      sharedMime = meta.mime;
+    } catch (e) {
+      redirect(back(formData, e instanceof Error ? e.message : "Photo upload failed."));
+    }
+  }
+
+  const rows = names.map((name) => ({
+    name, group_id: groupId, location, notes,
+    image_path: sharedPath, image_mime: sharedMime, created_by: profile.id,
+  }));
+  const { data: created, error } = await admin.from("company_machines").insert(rows).select("id");
+  if (error) redirect(back(formData, error.message));
+  if (location) await rememberLocation(admin, location);
+  await logAudit(profile.id, "machines_bulk_created", "company_machine", created?.[0]?.id ?? "", {
+    count: created?.length ?? 0, group_id: groupId,
+  });
+  revalidatePath(ROUTE);
+  redirect(back(formData, `Added ${created?.length ?? names.length} machine(s).`));
+}
+
 export async function updateMachineAction(formData: FormData) {
   const { profile } = await requireAuth();
   if (!isAllowed(profile.role)) redirect(back(formData, "Not allowed."));

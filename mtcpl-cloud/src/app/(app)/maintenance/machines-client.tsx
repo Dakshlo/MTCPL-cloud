@@ -10,7 +10,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { createMachineAction, updateMachineAction, createGroupAction, updateGroupAction, deleteGroupAction } from "./actions";
+import { createMachinesBulkAction, updateMachineAction, createGroupAction, updateGroupAction, deleteGroupAction } from "./actions";
 
 export type Machine = {
   id: string;
@@ -156,23 +156,29 @@ export function MachineFormModal({
       <button type="button" onClick={() => setOpen(true)} style={buttonStyle ?? btnGold}>{buttonLabel}</button>
       {open && (
         <ModalShell title={mode === "add" ? "🛠️ Add machine" : "Edit machine"} onClose={() => setOpen(false)}>
-          <form action={mode === "add" ? createMachineAction : updateMachineAction} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <form action={mode === "add" ? createMachinesBulkAction : updateMachineAction} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {mode === "edit" && machine && <input type="hidden" name="id" value={machine.id} />}
             <input type="hidden" name="back" value={back} />
-            <label><FieldLabel>Machine name *</FieldLabel>
-              <input name="name" required defaultValue={machine?.name ?? ""} placeholder="e.g. Gantry Crane #1" style={inputStyle} />
-            </label>
+            {mode === "add" ? (
+              <label><FieldLabel>Machine names * — one per line (add several at once)</FieldLabel>
+                <textarea name="names" required rows={5} placeholder={"One machine per line, e.g.\nMohit CNC 1\nMohit CNC 2\nMohit CNC 3"} style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit", lineHeight: 1.6 }} />
+              </label>
+            ) : (
+              <label><FieldLabel>Machine name *</FieldLabel>
+                <input name="name" required defaultValue={machine?.name ?? ""} placeholder="e.g. Gantry Crane #1" style={inputStyle} />
+              </label>
+            )}
             <label><FieldLabel>Group *</FieldLabel>
               <select name="group_id" required defaultValue={machine?.group_id ?? defaultGroupId ?? ""} style={inputStyle}>
                 <option value="" disabled>— Select a group —</option>
                 {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
               </select>
             </label>
-            <label><FieldLabel>Machine photo (optional — leave blank to use the group photo)</FieldLabel>
+            <label><FieldLabel>{mode === "add" ? "Photo (optional — applied to all; blank = group photo)" : "Machine photo (optional — leave blank to use the group photo)"}</FieldLabel>
               {mode === "edit" && machine?.imageUrl && <div style={{ marginBottom: 8 }}><PhotoBox url={machine.imageUrl} height={110} rounded="10px" /></div>}
               <input type="file" name="image" accept="image/*" style={{ fontSize: 13 }} />
             </label>
-            <label><FieldLabel>Location</FieldLabel>
+            <label><FieldLabel>{mode === "add" ? "Location (applied to all)" : "Location"}</FieldLabel>
               <input name="location" list="machine-locs" defaultValue={machine?.location ?? ""} placeholder="e.g. Shade 1 (pick or type a new one)" style={inputStyle} />
               <datalist id="machine-locs">{locations.map((l) => <option key={l} value={l} />)}</datalist>
             </label>
