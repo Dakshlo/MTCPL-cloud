@@ -277,6 +277,15 @@ export function TopbarTasksBadge({ items }: { items: TopbarTask[] }) {
               display: "flex",
               flexDirection: "column",
               gap: 2,
+              // Cap the panel to the viewport so it scrolls WITHIN itself
+              // (instead of running off the bottom when the page behind is
+              // short and can't scroll). overscroll-contain stops the
+              // wheel from bleeding through to the page.
+              maxHeight: "calc(100vh - 84px)",
+              overflowY: "auto",
+              overflowX: "hidden",
+              overscrollBehavior: "contain",
+              WebkitOverflowScrolling: "touch",
             }}
           >
             <div
