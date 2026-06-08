@@ -78,6 +78,7 @@ const DEPT_ACCENTS: Record<Department, string> = {
   invoicing:  "#7a8db8",  // slate-blue — paper / outgoing
   inventory:  "#c87850",  // copper — matches inventory module theme
   register:   "#8a6fb0",  // violet — the records / proof register (mig 102)
+  maintenance:"#3f8f86",  // teal — machines / upkeep (mig 108–110)
 };
 
 /** Convert "#rrggbb" → "rgba(r,g,b,a)" so we can mix tile accents
@@ -354,6 +355,28 @@ const navEntries: NavEntry[] = [
     // also get Register access.
     roles: ["developer", "owner", "tender_manager", "senior_incharge", "carving_head"],
     department: "register",
+  },
+  // ── MAINTENANCE section (mig 108–110) — company machine registry +
+  //    repair-ticket workflow. Owner + developer only for now.
+  {
+    type: "divider",
+    label: "MAINTENANCE",
+    roles: ["developer", "owner"],
+    department: "maintenance",
+  },
+  {
+    href: "/maintenance",
+    label: "Machines",
+    icon: "🛠️",
+    roles: ["developer", "owner"],
+    department: "maintenance",
+  },
+  {
+    href: "/maintenance/tickets",
+    label: "Repair Tickets",
+    icon: "🧾",
+    roles: ["developer", "owner"],
+    department: "maintenance",
   },
   // ── ACCOUNTS section (Finance department, mig 028 + 037 crosscheck) ──
   {

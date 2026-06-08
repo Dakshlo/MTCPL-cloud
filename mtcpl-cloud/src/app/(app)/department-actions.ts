@@ -25,7 +25,7 @@ import {
   type Department,
 } from "@/lib/departments";
 
-const VALID_DEPTS: ReadonlyArray<Department> = ["production", "finance", "inventory", "invoicing", "register"];
+const VALID_DEPTS: ReadonlyArray<Department> = ["production", "finance", "inventory", "invoicing", "register", "maintenance"];
 
 export async function setActiveDepartmentAction(formData: FormData) {
   const { profile } = await requireAuth();
