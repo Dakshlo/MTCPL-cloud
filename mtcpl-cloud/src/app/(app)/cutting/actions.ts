@@ -1304,10 +1304,16 @@ export async function lockCutterEditAction(
 export async function editPendingApprovalAction(
   formData: FormData,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  // carving_head + senior_incharge are auditors too. Without them in this
+  // list they could open the approval-edit form but the SAVE was rejected
+  // at requireAuth — i.e. "could approve but couldn't edit". The
+  // canApproveCuts / cutter-ownership checks further down still authorize.
   const { profile } = await requireAuth([
     "developer",
     "owner",
     "team_head",
+    "senior_incharge",
+    "carving_head",
     "cutting_operator",
   ]);
   const supabase = createAdminSupabaseClient();

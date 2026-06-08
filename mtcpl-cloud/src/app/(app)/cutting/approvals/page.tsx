@@ -18,6 +18,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
 import { canApproveCuts } from "@/lib/cutting-permissions";
+import { computeActualCutEfficiency } from "@/lib/cut-efficiency";
 import { ApprovalsClient, type ApprovalRow } from "./approvals-client";
 import {
   approveCutAction,
@@ -30,7 +31,7 @@ type PendingPayload = {
   not_cut_slab_ids?: string[];
   extra_slab_ids?: string[];
   transferred_slab_ids?: string[];
-  remainders?: Array<{ id: string }>;
+  remainders?: Array<{ id?: string; l?: number; w?: number; h?: number }>;
   stock_location?: string | null;
   restock?: boolean;
 };
@@ -100,8 +101,43 @@ export default async function CuttingApprovalsPage() {
     ? dbRows
     : dbRows.filter((r) => r.submitted_for_approval_by === profile.id);
 
+  // Projected-recovery data for the audit cards: fetch the dims of every
+  // cut + extra slab in the visible submissions so each card can show the
+  // same green / yellow / red efficiency bar BEFORE approval.
+  const slabIdSet = new Set<string>();
+  for (const r of visible) {
+    const p = r.pending_approval_payload;
+    for (const id of p?.cut_slab_ids ?? []) slabIdSet.add(id);
+    for (const id of p?.extra_slab_ids ?? []) slabIdSet.add(id);
+  }
+  const slabDims = new Map<string, { sw: number; sh: number; sd: number }>();
+  const allSlabIds = [...slabIdSet];
+  for (let i = 0; i < allSlabIds.length; i += 1000) {
+    const chunk = allSlabIds.slice(i, i + 1000);
+    if (chunk.length === 0) break;
+    const { data: dimRows } = await supabase
+      .from("slab_requirements")
+      .select("id, length_ft, width_ft, thickness_ft")
+      .in("id", chunk);
+    for (const s of (dimRows ?? []) as Array<{ id: string; length_ft: number; width_ft: number; thickness_ft: number }>) {
+      slabDims.set(s.id, { sw: Number(s.length_ft), sh: Number(s.width_ft), sd: Number(s.thickness_ft) });
+    }
+  }
+
   const rows: ApprovalRow[] = visible.map((r) => {
     const payload = r.pending_approval_payload ?? null;
+    // Projected recovery from the submitted payload (becomes actual on approval).
+    const blk = r.layout?.blk ?? null;
+    const slabsForEff = [
+      ...(payload?.cut_slab_ids ?? []),
+      ...(payload?.extra_slab_ids ?? []),
+    ].map((id) => slabDims.get(id)).filter(Boolean) as Array<{ sw: number; sh: number; sd: number }>;
+    const remsForEff = (payload?.remainders ?? [])
+      .map((rm) => ({ l: Number(rm.l ?? 0), w: Number(rm.w ?? 0), h: Number(rm.h ?? 0) }))
+      .filter((rm) => rm.l > 0 && rm.w > 0 && rm.h > 0);
+    const eff = blk
+      ? computeActualCutEfficiency({ l: blk.l, w: blk.w, h: blk.h }, slabsForEff, remsForEff)
+      : null;
     // Migration 032: legacy awaiting_cutter_edit rows are treated as
     // awaiting_approval + unlocked. The DB migration should have
     // normalised these but we mirror it here defensively.
@@ -139,6 +175,9 @@ export default async function CuttingApprovalsPage() {
           }
         : null,
       isOwnSubmission: r.submitted_for_approval_by === profile.id,
+      recovery: eff
+        ? { slabPct: eff.slabPct, restockPct: eff.restockPct, wastePct: eff.wastePct }
+        : null,
     };
   });
 

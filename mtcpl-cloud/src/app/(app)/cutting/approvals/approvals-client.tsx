@@ -50,6 +50,9 @@ export type ApprovalRow = {
     restock: boolean;
   } | null;
   isOwnSubmission: boolean;
+  /** Projected recovery from the submitted payload (block vs cut slabs +
+   *  remainders). Shown as a green / yellow / red bar before approval. */
+  recovery: { slabPct: number; restockPct: number; wastePct: number } | null;
 };
 
 type ServerResult = { ok: true } | { ok: false; error: string };
@@ -390,6 +393,35 @@ function ApprovalCard({
               ♻ Restock
             </span>
           )}
+        </div>
+      )}
+
+      {/* Projected recovery bar — same green / yellow / red breakdown the
+          cutting card shows, but computed from the submitted payload so
+          the auditor sees efficiency BEFORE approving. */}
+      {row.recovery && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 4 }}>
+            <span className="muted">Projected recovery</span>
+            <span style={{ fontWeight: 700, color: "var(--gold-dark)" }}>
+              {row.recovery.slabPct + row.recovery.restockPct}% recovered
+            </span>
+          </div>
+          <div
+            title={`Slabs ${row.recovery.slabPct}% · Restockable ${row.recovery.restockPct}% · Waste ${row.recovery.wastePct}%`}
+            style={{ display: "flex", height: 8, borderRadius: 999, overflow: "hidden", background: "var(--surface-alt, #e5e7eb)" }}
+          >
+            <span style={{ width: `${row.recovery.slabPct}%`, background: "#15803d" }} />
+            <span style={{ width: `${row.recovery.restockPct}%`, background: "#eab308" }} />
+            <span style={{ width: `${row.recovery.wastePct}%`, background: "#b91c1c" }} />
+          </div>
+          <div style={{ display: "flex", gap: 14, fontSize: 10.5, marginTop: 4 }}>
+            <span><strong style={{ color: "#15803d" }}>{row.recovery.slabPct}%</strong> slab</span>
+            {row.recovery.restockPct > 0 && (
+              <span><strong style={{ color: "#a16207" }}>{row.recovery.restockPct}%</strong> restock</span>
+            )}
+            <span><strong style={{ color: "#b91c1c" }}>{row.recovery.wastePct}%</strong> waste</span>
+          </div>
         </div>
       )}
 

@@ -247,8 +247,8 @@ export async function importSlabsAction(payload: {
   }
 
   const totalSlabs = cleaned.reduce((s, r) => s + r.quantity, 0);
-  if (totalSlabs > 1000) {
-    return { ok: false, error: `Too many slabs in one import (${totalSlabs}). Max 1000 — split the file.` };
+  if (totalSlabs > 10000) {
+    return { ok: false, error: `Too many slabs in one import (${totalSlabs}). Max 10000 — split the file.` };
   }
 
   const { data: templeRow } = await supabase

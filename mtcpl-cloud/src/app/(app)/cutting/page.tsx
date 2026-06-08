@@ -879,7 +879,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                       >
                         <span style={{ display: "inline-flex", width: 36, height: 5, borderRadius: 2, overflow: "hidden", background: "var(--border)" }}>
                           <span style={{ width: `${eff.slabPct}%`, background: "#15803d" }} />
-                          <span style={{ width: `${eff.restockPct}%`, background: "#b45309" }} />
+                          <span style={{ width: `${eff.restockPct}%`, background: "#eab308" }} />
                           <span style={{ width: `${Math.max(0, 100 - eff.slabPct - eff.restockPct)}%`, background: "#b91c1c" }} />
                         </span>
                         <span style={{ color: "#15803d", fontWeight: 700 }}>{eff.slabPct}%</span>
