@@ -19,6 +19,9 @@ import { LoginLocationProbe } from "@/components/login-location-probe";
 // Mounted once at the (app) layout root so every Sign out button
 // (topbar + sidebar) can trigger the same gold-pulse overlay.
 import { SignOutOverlayHost } from "@/components/sign-out-overlay";
+// Idle auto-logout for accounts-desk users (handle money) — 10 min of
+// inactivity signs them out, active use keeps the session alive.
+import { IdleLogout } from "@/components/idle-logout";
 import { requireAuth } from "@/lib/auth";
 import { canApproveCuts, canSeeAwaitingReview } from "@/lib/cutting-permissions";
 import { canUseMessenger } from "@/lib/messenger-permissions";
@@ -60,6 +63,12 @@ const SETTINGS_ROLES = ["developer", "owner", "team_head", "senior_incharge"];
 // rhythm as Crosscheck / Pay Today / Final Audit counters and
 // stays out of the way when there's nothing to act on.
 const NOTIFICATION_ROLES = ["developer"];
+
+// Idle auto-logout audience (Daksh, June 2026): accounts-desk roles
+// only. These users handle money, so an unattended session is a real
+// risk — 10 min of inactivity signs them out. Active use never logs
+// out. Owner/developer roam every department, so they're excluded.
+const IDLE_LOGOUT_ROLES = ["accountant", "accountant_star", "biller", "crosscheck"];
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const { profile } = await requireAuth();
@@ -409,6 +418,10 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           fires useSignOut(). Mounts as a portal off document.body
           so it sits above every page surface. */}
       <SignOutOverlayHost />
+      {/* Idle auto-logout — accounts-desk roles only (they handle
+          money). 10 min of no activity → signed out with a security
+          message; active use keeps the session alive. */}
+      <IdleLogout enabled={IDLE_LOGOUT_ROLES.includes(profile.role)} />
       <Sidebar
         displayName={displayName}
         role={profile.role}

@@ -6,7 +6,7 @@ import { getAuthContext, getDefaultRouteForProfile } from "@/lib/auth";
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ confirmed?: string; error?: string }>;
+  searchParams: Promise<{ confirmed?: string; error?: string; reason?: string }>;
 }) {
   const { user, profile } = await getAuthContext();
 
@@ -21,6 +21,7 @@ export default async function LoginPage({
 
   const params = await searchParams;
   const justConfirmed = params.confirmed === "1";
+  const idleLogout = params.reason === "idle";
 
   return (
     <main className="login-shell">
@@ -101,6 +102,11 @@ export default async function LoginPage({
           {justConfirmed && (
             <div className="banner" style={{ marginBottom: 16, background: "var(--accent-green-bg, #f0fdf4)", borderColor: "var(--accent-green, #16a34a)", color: "var(--accent-green, #16a34a)" }}>
               ✓ Email confirmed! You can now sign in. Your account will be activated by management shortly.
+            </div>
+          )}
+          {idleLogout && (
+            <div className="banner" style={{ marginBottom: 16, background: "rgba(180,83,9,0.08)", borderColor: "rgba(180,83,9,0.4)", color: "#92400e" }}>
+              ⏳ You were signed out after 10 minutes of inactivity, for security. Please sign in again.
             </div>
           )}
           <AuthForm />
