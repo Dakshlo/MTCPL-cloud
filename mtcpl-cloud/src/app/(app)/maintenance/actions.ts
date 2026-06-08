@@ -16,6 +16,7 @@ import { randomUUID } from "node:crypto";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
+import { sendTemplateSms } from "@/lib/msg91";
 
 const ROUTE = "/maintenance";
 const PROOF_BUCKET = "maintenance_proofs";
@@ -36,6 +37,29 @@ function back(fd: FormData, toast: string): string {
   const b = txt(fd, "back") || ROUTE;
   const safe = b.startsWith("/maintenance") ? b : ROUTE;
   return `${safe}?toast=${encodeURIComponent(toast)}`;
+}
+
+/** Best-effort SMS alert to administration when an URGENT ticket is raised.
+ *  Inert until configured — needs MSG91_AUTH_KEY + a DLT-approved template
+ *  in MSG91_MAINT_ALERT_TEMPLATE_ID + recipient numbers in
+ *  MAINTENANCE_ALERT_NUMBERS (comma-separated). Template variables:
+ *  var1 = machine, var2 = ticket no, var3 = problem (trimmed). Never
+ *  throws — raising a ticket must not depend on the SMS going out. */
+async function notifyUrgent(machineName: string, ticketNo: string, problem: string) {
+  const templateId = process.env.MSG91_MAINT_ALERT_TEMPLATE_ID;
+  const numbers = (process.env.MAINTENANCE_ALERT_NUMBERS || "")
+    .split(",").map((s) => s.trim()).filter(Boolean);
+  if (!templateId || numbers.length === 0) return; // not configured → no-op
+  const vars = {
+    var1: machineName.slice(0, 40),
+    var2: ticketNo,
+    var3: problem.replace(/\s+/g, " ").slice(0, 60),
+  };
+  try {
+    await Promise.allSettled(numbers.map((n) => sendTemplateSms({ templateId, mobile: n, vars })));
+  } catch {
+    /* best-effort */
+  }
 }
 
 function proofExt(mime: string): string {
@@ -378,7 +402,7 @@ export async function raiseTicketAction(formData: FormData) {
       priority,
       raised_by: profile.id,
     })
-    .select("id")
+    .select("id, ticket_no")
     .single();
   if (error || !created) redirect(back(formData, error?.message ?? "Failed to raise ticket."));
 
@@ -395,6 +419,14 @@ export async function raiseTicketAction(formData: FormData) {
       revalidatePath(ROUTE);
       redirect(back(formData, `Ticket raised, but photo upload failed: ${msg}`));
     }
+  }
+  // Urgent → best-effort SMS alert to administration (inert unless configured).
+  if (priority === "urgent") {
+    await notifyUrgent(
+      (machine as { name: string }).name,
+      (created as { ticket_no: string | null }).ticket_no ?? "",
+      problem,
+    );
   }
   await logAudit(profile.id, "maintenance_ticket_raised", "machine_maintenance_ticket", created.id, { machine_id: machineId, priority });
   revalidatePath(ROUTE);

@@ -76,3 +76,36 @@ export async function sendOtpSms(mobileRaw: string, otp: string): Promise<void> 
     throw new Error(`MSG91 send failed: ${detail}`);
   }
 }
+
+/** Generic DLT-template SMS send via the MSG91 v5 flow API. Pass the
+ *  approved template id + the recipient + the template variables
+ *  (e.g. { var1: "...", var2: "..." }). Used for notifications such as
+ *  the urgent-maintenance alert. The template MUST be DLT-approved —
+ *  the login-OTP template can't be reused for other wording. Throws on
+ *  any non-success so callers can decide whether to swallow it. */
+export async function sendTemplateSms(opts: {
+  templateId: string;
+  mobile: string;
+  vars: Record<string, string>;
+}): Promise<void> {
+  const authKey = process.env.MSG91_AUTH_KEY;
+  if (!authKey) throw new Error("MSG91_AUTH_KEY is not set in the environment.");
+  const mobiles = toMsg91Mobile(opts.mobile);
+  if (!/^\d{12}$/.test(mobiles)) throw new Error(`Bad recipient mobile "${opts.mobile}".`);
+
+  const res = await fetch(MSG91_FLOW_URL, {
+    method: "POST",
+    headers: { authkey: authKey, "Content-Type": "application/json", accept: "application/json" },
+    body: JSON.stringify({
+      template_id: opts.templateId,
+      short_url: "0",
+      recipients: [{ mobiles, ...opts.vars }],
+    }),
+  });
+  const text = await res.text();
+  let json: { type?: string; message?: string } = {};
+  try { json = JSON.parse(text); } catch { /* non-JSON */ }
+  if (!res.ok || json.type === "error") {
+    throw new Error(`MSG91 send failed: ${json.message || text || `HTTP ${res.status}`}`);
+  }
+}

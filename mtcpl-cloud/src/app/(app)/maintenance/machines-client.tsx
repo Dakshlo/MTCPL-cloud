@@ -259,7 +259,7 @@ export function MachinesGrid({
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const toggle = (id: string) => setCollapsed((c) => ({ ...c, [id]: !c[id] }));
   const allCollapsed = tree.length > 0 && tree.every((g) => collapsed[g.id]);
-  const collapseAll = () => { const next: Record<string, boolean> = {}; for (const g of tree) next[g.id] = true; setCollapsed(next); };
+  const collapseAll = () => { const next: Record<string, boolean> = {}; for (const g of tree) { next[g.id] = true; for (const s of g.subgroups ?? []) next[s.id] = true; } setCollapsed(next); };
   const expandAll = () => setCollapsed({});
 
   const totalMachines = useMemo(() => {
@@ -327,22 +327,29 @@ export function MachinesGrid({
             {(g.machines.length > 0 || !q) && <MachineGrid machines={g.machines} />}
 
             {/* sub-groups */}
-            {(g.subgroups ?? []).map((s) => (
+            {(g.subgroups ?? []).map((s) => {
+              const subCollapsed = q ? false : !!collapsed[s.id];
+              return (
               <div key={s.id} style={{ border: "1px dashed var(--border)", borderRadius: 12, padding: 12, background: "var(--bg)" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-                  <div style={{ width: 36, height: 36, flexShrink: 0 }}><PhotoBox url={s.imageUrl} height={36} rounded="8px" /></div>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontWeight: 700, fontSize: 14 }}>↳ {s.name}</div>
-                    <div className="muted" style={{ fontSize: 11.5 }}>{s.machines.length} machine(s)</div>
-                  </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: subCollapsed ? 0 : 10 }}>
+                  <button type="button" onClick={() => toggle(s.id)} aria-expanded={!subCollapsed}
+                    style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0, background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>
+                    <span style={{ fontSize: 11, color: "var(--muted)", width: 12, flexShrink: 0 }}>{subCollapsed ? "▶" : "▼"}</span>
+                    <div style={{ width: 36, height: 36, flexShrink: 0 }}><PhotoBox url={s.imageUrl} height={36} rounded="8px" /></div>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: "var(--text)" }}>↳ {s.name}</div>
+                      <div className="muted" style={{ fontSize: 11.5 }}>{s.machines.length} machine(s)</div>
+                    </div>
+                  </button>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                     <MachineFormModal mode="add" groups={groupOpts} defaultGroupId={s.id} locations={locations} back="/maintenance" buttonLabel="＋ Machine" buttonStyle={{ ...btnGold, padding: "6px 11px", fontSize: 12 }} />
                     <GroupFormModal mode="edit" group={{ id: s.id, name: s.name, imageUrl: s.imageUrl, parent_id: s.parent_id }} parentOptions={topGroupOpts} back="/maintenance" buttonLabel="Edit" buttonStyle={{ ...btnGhost, padding: "6px 11px", fontSize: 12 }} />
                   </div>
                 </div>
-                <MachineGrid machines={s.machines} />
+                {!subCollapsed && <MachineGrid machines={s.machines} />}
               </div>
-            ))}
+              );
+            })}
           </div>
           )}
         </div>
