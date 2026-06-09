@@ -107,9 +107,22 @@ export default async function ReconcilePage() {
         title="Reconcile"
         description="Spreadsheet-style read-only view of outstanding bills. Use it to cross-check MTCPL against your external books (Tally / etc). Arrow keys navigate; Enter expands a vendor; nothing on this page writes to the database."
         actions={
-          <Link href="/accounts/final-audit" style={BUTTON_STYLES.secondary}>
-            ← Final Audit
-          </Link>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {/* Vendor-wise outstanding export for audit (Daksh, Jun
+                2026). Plain anchor → the GET route streams an .xlsx
+                attachment; one row per vendor with their grand
+                outstanding, ordered highest-first. Same source data as
+                this page so totals tie out. */}
+            <a
+              href="/api/accounts/vendor-outstanding-export"
+              style={BUTTON_STYLES.primary}
+            >
+              ⬇ Download Excel
+            </a>
+            <Link href="/accounts/final-audit" style={BUTTON_STYLES.secondary}>
+              ← Final Audit
+            </Link>
+          </div>
         }
       />
 
