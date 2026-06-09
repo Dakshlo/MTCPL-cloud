@@ -4092,6 +4092,16 @@ function ApproveRejectForms({ jobId, isOutsource, onDone }: { jobId: string; isO
       icon: "✏",
       tone: "var(--gold-dark)", // brand gold — freeform
     },
+    {
+      // Mig 097 — Depart now lives inside this dropdown (was a separate
+      // checkbox). Selecting it = approve but HOLD from dispatch; the
+      // logic is unchanged (photo + note required, dispatch_hold set).
+      value: "__depart__",
+      label: "Depart — hold from dispatch",
+      sub: "Approve but keep OUT of dispatch — photo + note required",
+      icon: "🚧",
+      tone: "#b45309",
+    },
   ];
   const [pending, setPending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -4473,38 +4483,6 @@ function ApproveRejectForms({ jobId, isOutsource, onDone }: { jobId: string; isO
         {tintPack.tagline}
       </div>
 
-      {/* Mig 097 — Depart toggle (approve only): sign off but hold from
-          dispatch for a finishing touch. Requires a photo + note. */}
-      {mode === "approve" && (
-        <label
-          style={{
-            display: "flex",
-            alignItems: "flex-start",
-            gap: 10,
-            padding: "10px 12px",
-            border: `1.5px solid ${depart ? "#b45309" : "var(--border)"}`,
-            background: depart ? "rgba(180,83,9,0.07)" : "var(--surface)",
-            borderRadius: 10,
-            cursor: "pointer",
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={depart}
-            onChange={(e) => setDepart(e.target.checked)}
-            style={{ marginTop: 2, width: 16, height: 16, cursor: "pointer", flexShrink: 0 }}
-          />
-          <span style={{ minWidth: 0 }}>
-            <span style={{ fontSize: 13, fontWeight: 800, color: depart ? "#7c2d12" : "var(--text)" }}>
-              🚧 Depart — hold from dispatch
-            </span>
-            <span style={{ display: "block", fontSize: 11.5, color: "var(--muted)", marginTop: 2, lineHeight: 1.4 }}>
-              Approve now but keep it OUT of Make Dispatch — it needs a finishing touch first. A photo + note are required.
-            </span>
-          </span>
-        </label>
-      )}
-
       {err && (
         <div
           role="alert"
@@ -4616,8 +4594,9 @@ function ApproveRejectForms({ jobId, isOutsource, onDone }: { jobId: string; isO
                 fd.set so this hidden input is belt + suspenders). */}
             <div ref={qualityRef} style={{ position: "relative" }}>
               {(() => {
+                const selectedValue = depart ? "__depart__" : qualityFlag;
                 const selected =
-                  QUALITY_OPTIONS.find((o) => o.value === qualityFlag) ??
+                  QUALITY_OPTIONS.find((o) => o.value === selectedValue) ??
                   QUALITY_OPTIONS[0]; // index 0 is "Slab was fine" (value="")
                 return (
                   <button
@@ -4734,7 +4713,7 @@ function ApproveRejectForms({ jobId, isOutsource, onDone }: { jobId: string; isO
                   }}
                 >
                   {QUALITY_OPTIONS.map((opt) => {
-                    const isSelected = qualityFlag === opt.value;
+                    const isSelected = (depart ? "__depart__" : qualityFlag) === opt.value;
                     return (
                       <button
                         key={opt.value || "none"}
@@ -4742,13 +4721,20 @@ function ApproveRejectForms({ jobId, isOutsource, onDone }: { jobId: string; isO
                         role="option"
                         aria-selected={isSelected}
                         onClick={() => {
-                          setQualityFlag(opt.value);
+                          if (opt.value === "__depart__") {
+                            // Depart: approve-but-hold. Keep notes (a note is
+                            // required) and clear any quality flag.
+                            setDepart(true);
+                            setQualityFlag("");
+                          } else {
+                            setDepart(false);
+                            setQualityFlag(opt.value);
+                            // Drop any "Other" textarea content when switching
+                            // away from Other so a stale freeform note doesn't
+                            // ride along with a preset on submit.
+                            if (opt.value !== "other") setNotes("");
+                          }
                           setQualityOpen(false);
-                          // Drop any "Other" textarea content when
-                          // switching away from Other so a stale
-                          // freeform note doesn't ride along with
-                          // a preset on submit.
-                          if (opt.value !== "other") setNotes("");
                         }}
                         style={{
                           display: "flex",
@@ -4865,10 +4851,9 @@ function ApproveRejectForms({ jobId, isOutsource, onDone }: { jobId: string; isO
               }}
             />
 
-            {/* When "Other" is picked, surface the freeform textarea
-                so the reviewer can write the actual issue. Required
-                in this state — both client + server validate. */}
-            {qualityFlag === "other" && (
+            {/* "Other" → free-text issue; "Depart" → finishing-touch note.
+                Both require the note (client + server validate). */}
+            {(qualityFlag === "other" || depart) && (
               <div style={{ marginTop: 12 }}>
                 <label
                   htmlFor="review-other-notes"
@@ -4884,8 +4869,8 @@ function ApproveRejectForms({ jobId, isOutsource, onDone }: { jobId: string; isO
                     marginBottom: 6,
                   }}
                 >
-                  <span aria-hidden>📝</span>
-                  Describe the issue
+                  <span aria-hidden>{depart ? "🚧" : "📝"}</span>
+                  {depart ? "Finishing-touch note" : "Describe the issue"}
                   <span
                     style={{
                       fontSize: 9,
@@ -4906,7 +4891,7 @@ function ApproveRejectForms({ jobId, isOutsource, onDone }: { jobId: string; isO
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
                   required
-                  placeholder="What was the issue with this carving?"
+                  placeholder={depart ? "What finishing touch does it still need?" : "What was the issue with this carving?"}
                   rows={3}
                   onFocus={(e) => {
                     e.currentTarget.style.borderColor = tintPack.accentSolid;
