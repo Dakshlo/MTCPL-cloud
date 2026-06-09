@@ -4039,7 +4039,12 @@ function OwnerInvolveSection({
     fd.set("problem_kind", pkind);
     if (pnote.trim()) fd.set("problem_note", pnote.trim());
     involveOwnerAction(fd)
-      .then(() => {
+      .then((res) => {
+        if (res && res.ok === false) {
+          setErr(res.error ?? "Couldn't send to owner.");
+          setPending(false);
+          return;
+        }
         onDone();
         router.refresh();
       })
@@ -4071,13 +4076,48 @@ function OwnerInvolveSection({
         </button>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Report to owner</div>
-          <select value={pkind} onChange={(e) => setPkind(e.target.value as "no_slab_code" | "other")} style={{ padding: "8px 10px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 8, background: "var(--surface)", color: "var(--text)" }}>
-            <option value="no_slab_code">No slab code</option>
-            <option value="other">Other (describe)</option>
-          </select>
+          <div style={{ fontSize: 10.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>Report to owner</div>
+          {/* Segmented picker (matches the "Carved sides" control above). */}
+          <div style={{ display: "flex", gap: 6 }}>
+            {(
+              [
+                { v: "no_slab_code", label: "No slab code" },
+                { v: "other", label: "Other (describe)" },
+              ] as Array<{ v: "no_slab_code" | "other"; label: string }>
+            ).map((o) => {
+              const on = pkind === o.v;
+              return (
+                <button
+                  key={o.v}
+                  type="button"
+                  onClick={() => setPkind(o.v)}
+                  style={{
+                    flex: 1,
+                    padding: "9px 10px",
+                    fontSize: 12.5,
+                    fontWeight: 700,
+                    border: `1.5px solid ${on ? "#b45309" : "var(--border)"}`,
+                    background: on ? "rgba(180,83,9,0.10)" : "var(--surface)",
+                    color: on ? "#7c2d12" : "var(--text)",
+                    borderRadius: 8,
+                    cursor: "pointer",
+                  }}
+                >
+                  {o.label}
+                </button>
+              );
+            })}
+          </div>
           {pkind === "other" && (
-            <textarea value={pnote} onChange={(e) => setPnote(e.target.value)} rows={2} placeholder="Describe the problem for the owner" style={{ padding: "8px 10px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 8, background: "var(--surface)", color: "var(--text)", resize: "vertical", fontFamily: "inherit" }} />
+            <textarea
+              value={pnote}
+              onChange={(e) => setPnote(e.target.value)}
+              rows={2}
+              placeholder="Describe the problem for the owner"
+              onFocus={(e) => { e.currentTarget.style.borderColor = "#b45309"; e.currentTarget.style.boxShadow = "0 0 0 3px rgba(180,83,9,0.16)"; }}
+              onBlur={(e) => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.boxShadow = "none"; }}
+              style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", fontSize: 13, border: "1.5px solid var(--border)", borderRadius: 8, background: "var(--surface)", color: "var(--text)", resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }}
+            />
           )}
           {err && <div style={{ fontSize: 12, color: "#991b1b", fontWeight: 600 }}>⚠ {err}</div>}
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>

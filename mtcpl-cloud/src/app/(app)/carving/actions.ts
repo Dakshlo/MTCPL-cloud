@@ -6865,8 +6865,13 @@ export async function getMachineHistory(
 // ──────────────────────────────────────────────────────────────────
 const OWNER_REVIEW_KINDS = new Set(["no_slab_code", "other"]);
 
-/** Reviewer flags a slab for the owner's attention. */
-export async function involveOwnerAction(formData: FormData) {
+/** Reviewer flags a slab for the owner's attention. Called from the approval
+ *  modal with stay=1, so it RETURNS a {ok,error} result instead of throwing —
+ *  server-action throws are redacted to a generic message in production, which
+ *  hid the real cause. The client reads `error` and shows it inline. */
+export async function involveOwnerAction(
+  formData: FormData,
+): Promise<{ ok: boolean; error?: string } | void> {
   const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge"]);
   const admin = createAdminSupabaseClient();
   const jobId = txt(formData, "job_id");
@@ -6874,13 +6879,13 @@ export async function involveOwnerAction(formData: FormData) {
   const kind = txt(formData, "problem_kind");
   const note = txt(formData, "problem_note") || null;
 
-  const fail = (msg: string) => {
-    if (stay) throw new Error(msg);
+  const fail = (msg: string): { ok: false; error: string } | never => {
+    if (stay) return { ok: false, error: msg };
     redirect(`/carving?toast=${encodeURIComponent(msg)}`);
   };
-  if (!jobId) fail("Missing job id.");
-  if (!OWNER_REVIEW_KINDS.has(kind)) fail("Pick a problem to report.");
-  if (kind === "other" && !note) fail("Describe the problem when choosing 'Other'.");
+  if (!jobId) return fail("Missing job id.");
+  if (!OWNER_REVIEW_KINDS.has(kind)) return fail("Pick a problem to report.");
+  if (kind === "other" && !note) return fail("Describe the problem when choosing 'Other'.");
 
   const now = new Date().toISOString();
   const { error } = await admin
@@ -6899,9 +6904,17 @@ export async function involveOwnerAction(formData: FormData) {
       updated_at: now,
     })
     .eq("id", jobId);
-  if (error) fail(error.message);
+  if (error) {
+    // Most likely cause: migration 118 not applied yet (owner_review_*
+    // columns missing). Surface a clear, actionable message.
+    return fail(
+      /column .* does not exist|owner_review|schema cache/i.test(error.message)
+        ? "Owner-review columns missing — run migration 118 in Supabase, then retry."
+        : error.message,
+    );
+  }
   void logAudit(profile.id, "carving_owner_involved", "carving_item", jobId, { kind });
-  if (stay) return;
+  if (stay) return { ok: true };
   redirect("/carving?toast=Sent+to+owner+for+review");
 }
 
