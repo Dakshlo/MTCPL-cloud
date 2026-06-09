@@ -469,10 +469,21 @@ export function DueBillsClient({
     const proposedAmounts: Record<string, number> = {};
     for (const r of selectedRows) {
       const override = Number(amountOverrides[r.id]);
-      proposedAmounts[r.id] =
+      let amt =
         Number.isFinite(override) && override > 0
           ? Math.min(override, r.amountOutstanding)
           : r.amountOutstanding;
+      // Ghost-paise guard (Daksh, Jun 2026). The propose field shows
+      // whole rupees, but a bill's outstanding can carry paise from
+      // tax (e.g. ₹4,41,513.45). If the entered amount falls short of
+      // the full outstanding by under ₹1, snap it up to the exact
+      // outstanding so the bill clears completely — otherwise a
+      // sub-rupee residual keeps it stuck in Due Bills forever. The
+      // server enforces the same guard in proposePaymentsAction.
+      if (r.amountOutstanding - amt > 0 && r.amountOutstanding - amt < 1) {
+        amt = r.amountOutstanding;
+      }
+      proposedAmounts[r.id] = amt;
     }
     const fd = new FormData();
     fd.set("bill_ids", JSON.stringify(selectedRows.map((r) => r.id)));
@@ -790,7 +801,14 @@ export function DueBillsClient({
                 const display =
                   amountOverrides[r.id] != null
                     ? amountOverrides[r.id]
-                    : String(r.amountOutstanding);
+                    // Daksh Jun 2026 — prefill whole rupees (Math.round,
+                    // matching the <Money> column) instead of the raw
+                    // paise value. Showing "4,41,513.45" tempted the
+                    // owner to "fix" it to 4,41,513, which left a 45-paise
+                    // residual and the bill never cleared. The exact
+                    // paise are still settled at propose time (see
+                    // handlePropose ghost-paise guard).
+                    : String(Math.round(r.amountOutstanding));
                 // Daksh May 2026 — render a thin divider row at the
                 // boundary between pinned-selected and the rest, but
                 // only when BOTH buckets are non-empty AND we just

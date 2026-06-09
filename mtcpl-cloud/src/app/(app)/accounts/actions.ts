@@ -1376,10 +1376,19 @@ export async function proposePaymentsAction(formData: FormData): Promise<
     const requested = proposedAmounts[billId];
     // Clamp to the post-hold proposable ceiling, not raw outstanding,
     // so the accountant can never propose money that's been held.
-    const amount =
+    let amount =
       Number.isFinite(requested) && requested > 0
         ? Math.min(Number(requested), proposable)
         : proposable;
+    // Ghost-paise guard (Daksh, Jun 2026). The accountant proposes in
+    // whole rupees, but `proposable` can carry paise from tax. If the
+    // requested amount is short of the proposable ceiling by under ₹1,
+    // settle the full proposable so no sub-rupee residual is left to
+    // keep the bill stuck in Due Bills. (Mirror of the client guard in
+    // dashboard-client.tsx handlePropose.)
+    if (proposable - amount > 0 && proposable - amount < 1) {
+      amount = proposable;
+    }
     rowsToInsert.push({
       bill_id: billId,
       status: "proposed",
