@@ -22,12 +22,12 @@ export default async function WorkOrderDocPage({ searchParams }: { searchParams:
     doc_date: string | null;
     vendor: string;
     job_description: string | null;
-    description_detail: string | null;
     job_work_no: string | null;
     unit: string;
     quantity: number | string;
     rate: number | string;
     total: number | string;
+    line_items: unknown;
     created_at: string;
   };
 
@@ -37,7 +37,7 @@ export default async function WorkOrderDocPage({ searchParams }: { searchParams:
   for (let off = 0; off < 100000; off += 1000) {
     const { data, error } = await admin
       .from("invoicing_work_order_docs")
-      .select("id, doc_date, vendor, job_description, description_detail, job_work_no, unit, quantity, rate, total, created_at")
+      .select("id, doc_date, vendor, job_description, job_work_no, unit, quantity, rate, total, line_items, created_at")
       .order("created_at", { ascending: false })
       .range(off, off + 999);
     if (error || !data || data.length === 0) break;
@@ -59,12 +59,12 @@ export default async function WorkOrderDocPage({ searchParams }: { searchParams:
     date: r.doc_date ?? (r.created_at ? r.created_at.slice(0, 10) : ""),
     vendor: r.vendor,
     jobDescription: r.job_description ?? "",
-    descriptionDetail: r.description_detail ?? "",
     jobWorkNo: r.job_work_no ?? "",
     unit: r.unit === "sft" ? "sft" : "cft",
     quantity: Number(r.quantity),
     rate: Number(r.rate),
     total: Number(r.total),
+    lineItemCount: Array.isArray(r.line_items) && r.line_items.length > 0 ? r.line_items.length : 1,
   }));
 
   return (

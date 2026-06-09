@@ -3,7 +3,7 @@
 import type { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { buildWorkOrderDocPdf } from "@/lib/work-order-doc-pdf";
+import { buildWorkOrderDocPdf, type WorkOrderLineItem } from "@/lib/work-order-doc-pdf";
 
 export const runtime = "nodejs";
 
@@ -17,7 +17,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
 
   const { data } = await admin
     .from("invoicing_work_order_docs")
-    .select("doc_date, vendor, address, job_description, description_detail, job_work_no, unit, quantity, rate, total")
+    .select("doc_date, vendor, address, job_description, job_work_no, unit, quantity, rate, total, line_items, gst_exclusive")
     .eq("id", id)
     .maybeSingle();
   if (!data) return new Response("Document not found", { status: 404 });
@@ -26,25 +26,54 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     vendor: string;
     address: string | null;
     job_description: string | null;
-    description_detail: string | null;
     job_work_no: string | null;
     unit: string;
     quantity: number | string;
     rate: number | string;
     total: number | string;
+    line_items: unknown;
+    gst_exclusive: boolean | null;
   };
+
+  // Mig 114 — build the line-item list from the JSONB column when present;
+  // otherwise fall back to a single item from the legacy columns (older
+  // rows created before multi-line support).
+  type RawItem = { description?: string | null; unit?: string; quantity?: number | string; rate?: number | string; total?: number | string };
+  let lineItems: WorkOrderLineItem[] = [];
+  if (Array.isArray(d.line_items) && d.line_items.length > 0) {
+    lineItems = (d.line_items as RawItem[]).map((it) => {
+      const quantity = Number(it.quantity ?? 0);
+      const rate = Number(it.rate ?? 0);
+      const total = it.total != null ? Number(it.total) : Math.round(quantity * rate * 100) / 100;
+      return {
+        description: typeof it.description === "string" ? it.description : null,
+        unit: it.unit === "sft" ? "sft" : "cft",
+        quantity,
+        rate,
+        total,
+      };
+    });
+  } else {
+    lineItems = [
+      {
+        description: d.job_description,
+        unit: d.unit === "sft" ? "sft" : "cft",
+        quantity: Number(d.quantity),
+        rate: Number(d.rate),
+        total: Number(d.total),
+      },
+    ];
+  }
+  const grandTotal = Number(d.total) || lineItems.reduce((s, it) => s + (Number(it.total) || 0), 0);
 
   const pdf = await buildWorkOrderDocPdf({
     vendor: d.vendor,
     address: d.address,
-    jobDescription: d.job_description,
-    descriptionDetail: d.description_detail,
     jobWorkNo: d.job_work_no,
     dateIso: d.doc_date,
-    unit: d.unit === "sft" ? "sft" : "cft",
-    quantity: Number(d.quantity),
-    rate: Number(d.rate),
-    total: Number(d.total),
+    lineItems,
+    grandTotal,
+    gstExclusive: d.gst_exclusive !== false,
   });
 
   const inline = new URL(req.url).searchParams.get("print") === "1";

@@ -1,29 +1,35 @@
 // ──────────────────────────────────────────────────────────────────
-// Manual Work Order Document — letterhead PDF (Invoicing, Mig 105)
+// Manual Work Order Document — letterhead PDF (Invoicing, Mig 105 / 114)
 //
 // Standalone: NOT linked to carving work orders or any incoming logic.
 // All values are typed by hand on /invoicing/work-order-doc. Prints on the
 // company letterhead in the format we already use: header fields (vendor /
-// address / job-work description + no. / date), a single line item
-// (unit · quantity · rate · total), the standard terms, and a Vendor
-// signature line. Built with pdf-lib on /public/letterhead.pdf.
+// address / date / no.), then ONE OR MORE line items (mig 114 — up to 4),
+// each with its own description + unit · quantity · rate · total, a grand
+// total, an optional "exclusive of GST" note, the standard terms, and a
+// Vendor signature line. Built with pdf-lib on /public/letterhead.pdf.
 // ──────────────────────────────────────────────────────────────────
 
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { PDFDocument, StandardFonts, rgb, type PDFFont } from "pdf-lib";
 
-export type WorkOrderDocInput = {
-  vendor: string;
-  address: string | null;
-  jobDescription: string | null;
-  descriptionDetail?: string | null;
-  jobWorkNo: string | null;
-  dateIso: string | null;
+export type WorkOrderLineItem = {
+  description: string | null;
   unit: "cft" | "sft";
   quantity: number;
   rate: number;
   total: number;
+};
+
+export type WorkOrderDocInput = {
+  vendor: string;
+  address: string | null;
+  jobWorkNo: string | null;
+  dateIso: string | null;
+  lineItems: WorkOrderLineItem[];
+  grandTotal: number;
+  gstExclusive: boolean;
 };
 
 const PAGE_W = 612;
@@ -144,51 +150,62 @@ export async function buildWorkOrderDocPdf(inp: WorkOrderDocInput): Promise<Uint
     y -= 3;
   }
 
-  if (inp.jobDescription && inp.jobDescription.trim()) {
-    text("Job work:", MARGIN_X, y, 10, bold, muted);
-    const descLines = wrap(inp.jobDescription, font, 10, valW);
-    for (let i = 0; i < descLines.length; i++) {
-      text(descLines[i], valX, y, 10, font, ink);
-      y -= 14;
-    }
-    y -= 3;
-  }
-
-  if (inp.descriptionDetail && inp.descriptionDetail.trim()) {
-    text("Details:", MARGIN_X, y, 10, bold, muted);
-    const detailLines = wrap(inp.descriptionDetail, font, 10, valW);
-    for (let i = 0; i < detailLines.length; i++) {
-      text(detailLines[i], valX, y, 10, font, ink);
-      y -= 14;
-    }
-    y -= 3;
-  }
-
-  // ── Line-item table: Unit · Quantity · Rate · Total ─────────────────
-  y -= 12;
+  // ── Line items (mig 114 — up to 4 groups) ───────────────────────────
+  // Each item prints its own description + a Unit / Quantity / Rate / Total
+  // row, separated by a thin rule. With a single item this reads exactly
+  // like the old one-line layout.
+  const items = inp.lineItems.length > 0 ? inp.lineItems : [];
+  const contentW = PAGE_W - 2 * MARGIN_X;
+  const multi = items.length > 1;
   const cols = {
     unit: MARGIN_X + 6,
     qty: MARGIN_X + 150,
     rate: MARGIN_X + 300,
     total: PAGE_W - MARGIN_X - 6,
   };
-  page.drawRectangle({ x: MARGIN_X, y: y - 4, width: PAGE_W - 2 * MARGIN_X, height: 18, color: headBg });
+
+  y -= 10;
+  // Column header band.
+  page.drawRectangle({ x: MARGIN_X, y: y - 4, width: contentW, height: 18, color: headBg });
   text("Unit", cols.unit, y, 9, bold, muted);
   text("Quantity", cols.qty, y, 9, bold, muted);
   text("Rate", cols.rate, y, 9, bold, muted);
   right("Total", cols.total, y, 9, bold, muted);
   y -= 22;
-  text(inp.unit.toUpperCase(), cols.unit, y, 11, font, ink);
-  text(String(Math.round(inp.quantity * 1000) / 1000), cols.qty, y, 11, font, ink);
-  text(`${rs(inp.rate)} / ${inp.unit.toUpperCase()}`, cols.rate, y, 10, font, ink);
-  right(rs(inp.total), cols.total, y, 12, bold, ink);
-  y -= 10;
-  page.drawLine({ start: { x: MARGIN_X, y }, end: { x: PAGE_W - MARGIN_X, y }, thickness: 0.7, color: muted });
-  y -= 18;
-  right(`Total: ${rs(inp.total)}`, PAGE_W - MARGIN_X, y, 12, bold, accent);
+
+  items.forEach((it, idx) => {
+    // Description line(s) — prefix with the item number when there's more
+    // than one, so the vendor can tell the lines apart.
+    const desc = (it.description ?? "").trim();
+    if (desc) {
+      const prefix = multi ? `${idx + 1}. ` : "";
+      const descLines = wrap(prefix + desc, font, 9.5, contentW - 6);
+      for (let i = 0; i < descLines.length; i++) {
+        text(descLines[i], cols.unit + (i === 0 ? 0 : multi ? 12 : 0), y, 9.5, i === 0 ? bold : font, ink);
+        y -= 13;
+      }
+    } else if (multi) {
+      text(`${idx + 1}.`, cols.unit, y, 9.5, bold, ink);
+      y -= 13;
+    }
+    // Numeric row.
+    text(it.unit.toUpperCase(), cols.unit, y, 11, font, ink);
+    text(String(Math.round(it.quantity * 1000) / 1000), cols.qty, y, 11, font, ink);
+    text(`${rs(it.rate)} / ${it.unit.toUpperCase()}`, cols.rate, y, 10, font, ink);
+    right(rs(it.total), cols.total, y, 12, bold, ink);
+    y -= 12;
+    page.drawLine({ start: { x: MARGIN_X, y }, end: { x: PAGE_W - MARGIN_X, y }, thickness: 0.6, color: muted });
+    y -= 16;
+  });
+
+  // ── Grand total + (optional) GST note ───────────────────────────────
+  right(`Total: ${rs(inp.grandTotal)}`, PAGE_W - MARGIN_X, y, 12, bold, accent);
+  y -= 14;
+  if (inp.gstExclusive) {
+    right("The above amount is exclusive of GST (GST charged extra as applicable).", PAGE_W - MARGIN_X, y, 8, font, muted);
+  }
 
   // ── Terms (full width), anchored near the bottom ────────────────────
-  const contentW = PAGE_W - 2 * MARGIN_X;
   const TSIZE = 8.5;
   const LH = 13;
   const bodyLines: { text: string; indent: boolean }[] = [];

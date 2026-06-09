@@ -9,14 +9,20 @@ export type DocRecord = {
   date: string;
   vendor: string;
   jobDescription: string;
-  descriptionDetail: string;
   jobWorkNo: string;
   unit: "cft" | "sft";
   quantity: number;
   rate: number;
   total: number;
+  lineItemCount: number;
 };
 export type SavedVendor = { id: string; name: string; address: string };
+
+// A single line-item group (mig 114). Up to 4 per document; each prints
+// its own description + unit/quantity/rate/total on the PDF.
+type Group = { description: string; unit: "cft" | "sft"; qty: string; rate: string };
+const MAX_GROUPS = 4;
+const emptyGroup = (): Group => ({ description: "", unit: "cft", qty: "", rate: "" });
 
 function inr(n: number): string {
   return "₹" + (Math.round(n * 100) / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -59,13 +65,23 @@ export function WorkOrderDocClient({
   vendorAddedId: string | null;
   canDelete: boolean;
 }) {
-  const [unit, setUnit] = useState<"cft" | "sft">("cft");
-  const [qty, setQty] = useState("");
-  const [rate, setRate] = useState("");
+  const [groups, setGroups] = useState<Group[]>([emptyGroup()]);
+  const [gstExclusive, setGstExclusive] = useState(true);
   const [vendorName, setVendorName] = useState("");
   const [address, setAddress] = useState("");
   const [selectedVendorId, setSelectedVendorId] = useState("");
   const [docDate, setDocDate] = useState(todayISO());
+
+  function updateGroup(i: number, patch: Partial<Group>) {
+    setGroups((prev) => prev.map((g, idx) => (idx === i ? { ...g, ...patch } : g)));
+  }
+  function addGroup() {
+    setGroups((prev) => (prev.length >= MAX_GROUPS ? prev : [...prev, emptyGroup()]));
+  }
+  function removeGroup(i: number) {
+    setGroups((prev) => (prev.length <= 1 ? prev : prev.filter((_, idx) => idx !== i)));
+  }
+  const groupTotal = (g: Group) => (Number(g.qty) || 0) * (Number(g.rate) || 0);
   const [showAddVendor, setShowAddVendor] = useState(false);
   const [showRecords, setShowRecords] = useState(false);
   // Edit-vendor modal (null = closed).
@@ -113,8 +129,23 @@ export function WorkOrderDocClient({
     [vendors, selectedVendorId],
   );
 
-  const total = (Number(qty) || 0) * (Number(rate) || 0);
-  const canSubmit = vendorName.trim().length > 0 && (Number(qty) || 0) > 0 && (Number(rate) || 0) > 0;
+  const grandTotal = groups.reduce((s, g) => s + groupTotal(g), 0);
+  const lineItemsJson = useMemo(
+    () =>
+      JSON.stringify(
+        groups.map((g) => ({
+          description: g.description.trim(),
+          unit: g.unit,
+          quantity: Number(g.qty) || 0,
+          rate: Number(g.rate) || 0,
+        })),
+      ),
+    [groups],
+  );
+  const canSubmit =
+    vendorName.trim().length > 0 &&
+    groups.length > 0 &&
+    groups.every((g) => (Number(g.qty) || 0) > 0 && (Number(g.rate) || 0) > 0);
   const justCreated = useMemo(() => records.find((r) => r.id === createdId) ?? null, [records, createdId]);
 
   // Live preview of the auto code (year tracks the selected date; the
@@ -182,6 +213,9 @@ export function WorkOrderDocClient({
       <form ref={formRef} action={createWorkOrderDocAction} style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, overflow: "visible", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
         {/* Hidden submitted values (vendor + address come from the picker). */}
         <input type="hidden" name="vendor" value={vendorName} />
+        {/* Mig 114 — line items + GST flag serialised for the action. */}
+        <input type="hidden" name="line_items_json" value={lineItemsJson} />
+        <input type="hidden" name="gst_exclusive" value={gstExclusive ? "yes" : "no"} />
 
         <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
           {/* Vendor (finance-style combobox) / date / auto code */}
@@ -228,33 +262,64 @@ export function WorkOrderDocClient({
             <input name="address" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Vendor address" className="wod-in" />
           </Field>
 
-          <Field label="Job work description">
-            <textarea name="job_description" rows={2} placeholder="e.g. Carving of pillars — black granite" className="wod-in" style={{ resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }} />
-          </Field>
-
-          <Field label="Description detail (optional)">
-            <textarea name="description_detail" rows={2} placeholder="Any extra notes / specifications (optional)" className="wod-in" style={{ resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }} />
-          </Field>
-
-          {/* ── Pricing strip ───────────────────────────────────────── */}
-          <div style={{ background: "var(--gold-subtle, rgba(201,161,74,0.08))", border: "1px solid var(--gold-border, rgba(201,161,74,0.3))", borderRadius: 12, padding: 16, display: "flex", gap: 16, alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap" }}>
-            <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
-              <Field label="Unit">
-                <select name="unit" value={unit} onChange={(e) => setUnit(e.target.value as "cft" | "sft")} className="wod-in" style={{ width: 96 }}>
-                  <option value="cft">CFT</option>
-                  <option value="sft">SFT</option>
-                </select>
-              </Field>
-              <Field label="Quantity">
-                <input name="quantity" type="number" min="0" step="0.001" inputMode="decimal" value={qty} onChange={(e) => setQty(e.target.value)} placeholder={`Total ${unit.toUpperCase()}`} className="wod-in" style={{ width: 130 }} />
-              </Field>
-              <Field label={`Price · ₹/${unit.toUpperCase()}`}>
-                <input name="rate" type="number" min="0" step="0.01" inputMode="decimal" value={rate} onChange={(e) => setRate(e.target.value)} placeholder="₹ per unit" className="wod-in" style={{ width: 150 }} />
-              </Field>
+          {/* ── Line items (up to 4 groups) — each prints its own
+                description + unit/quantity/price/total on the PDF. ─────── */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>Line items</span>
+              <span style={{ fontSize: 11, color: "var(--muted)" }}>{groups.length} of {MAX_GROUPS}</span>
             </div>
-            <div style={{ textAlign: "right", minWidth: 140 }}>
-              <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Total (auto)</div>
-              <div style={{ fontSize: 26, fontWeight: 900, color: "var(--gold-dark)", fontFamily: "ui-monospace, monospace", lineHeight: 1 }}>{inr(total)}</div>
+
+            {groups.map((g, i) => (
+              <div key={i} style={{ background: "var(--gold-subtle, rgba(201,161,74,0.08))", border: "1px solid var(--gold-border, rgba(201,161,74,0.3))", borderRadius: 12, padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                  <span style={{ fontSize: 11, fontWeight: 800, color: "var(--gold-dark)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Item {i + 1}</span>
+                  {groups.length > 1 && (
+                    <button type="button" onClick={() => removeGroup(i)} style={{ fontSize: 12, fontWeight: 700, color: "#b91c1c", background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.3)", borderRadius: 8, padding: "3px 10px", cursor: "pointer" }}>
+                      ✕ Remove
+                    </button>
+                  )}
+                </div>
+                <Field label="Job work description">
+                  <textarea rows={2} value={g.description} onChange={(e) => updateGroup(i, { description: e.target.value })} placeholder="e.g. Carving of pillars — black granite" className="wod-in" style={{ resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }} />
+                </Field>
+                <div style={{ display: "flex", gap: 14, alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
+                    <Field label="Unit">
+                      <select value={g.unit} onChange={(e) => updateGroup(i, { unit: e.target.value as "cft" | "sft" })} className="wod-in" style={{ width: 96 }}>
+                        <option value="cft">CFT</option>
+                        <option value="sft">SFT</option>
+                      </select>
+                    </Field>
+                    <Field label="Quantity">
+                      <input type="number" min="0" step="0.001" inputMode="decimal" value={g.qty} onChange={(e) => updateGroup(i, { qty: e.target.value })} placeholder={`Total ${g.unit.toUpperCase()}`} className="wod-in" style={{ width: 130 }} />
+                    </Field>
+                    <Field label={`Price · ₹/${g.unit.toUpperCase()}`}>
+                      <input type="number" min="0" step="0.01" inputMode="decimal" value={g.rate} onChange={(e) => updateGroup(i, { rate: e.target.value })} placeholder="₹ per unit" className="wod-in" style={{ width: 150 }} />
+                    </Field>
+                  </div>
+                  <div style={{ textAlign: "right", minWidth: 120 }}>
+                    <div style={{ fontSize: 10.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 3 }}>Line total</div>
+                    <div style={{ fontSize: 20, fontWeight: 900, color: "var(--gold-dark)", fontFamily: "ui-monospace, monospace", lineHeight: 1 }}>{inr(groupTotal(g))}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+
+            <button type="button" onClick={addGroup} disabled={groups.length >= MAX_GROUPS} className="wod-btn" style={{ alignSelf: "flex-start", padding: "8px 16px", fontSize: 13, fontWeight: 800, color: groups.length >= MAX_GROUPS ? "var(--muted)" : "var(--gold-dark)", background: "var(--bg)", border: `1px dashed ${groups.length >= MAX_GROUPS ? "var(--border)" : "var(--gold)"}`, borderRadius: 10, cursor: groups.length >= MAX_GROUPS ? "not-allowed" : "pointer" }}>
+              ＋ Add line item{groups.length >= MAX_GROUPS ? " (max 4)" : ""}
+            </button>
+
+            {/* GST note toggle + grand total */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", borderTop: "1px solid var(--border)", paddingTop: 12 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--text)", cursor: "pointer" }}>
+                <input type="checkbox" checked={gstExclusive} onChange={(e) => setGstExclusive(e.target.checked)} style={{ width: 16, height: 16, cursor: "pointer" }} />
+                <span>Amounts are <strong>exclusive of GST</strong> — print this note</span>
+              </label>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 2 }}>Grand total</div>
+                <div style={{ fontSize: 26, fontWeight: 900, color: "var(--gold-dark)", fontFamily: "ui-monospace, monospace", lineHeight: 1 }}>{inr(grandTotal)}</div>
+              </div>
             </div>
           </div>
 
@@ -304,7 +369,12 @@ export function WorkOrderDocClient({
                     records.map((r) => (
                       <tr key={r.id} className="wod-row" style={{ borderBottom: "1px solid var(--border)", background: r.id === createdId ? "rgba(34,197,94,0.08)" : "transparent", transition: "background .12s" }}>
                         <td style={{ padding: "11px 14px", whiteSpace: "nowrap" }}>{fmtDate(r.date)}</td>
-                        <td style={{ padding: "11px 14px", fontFamily: "ui-monospace, monospace", fontWeight: 700, whiteSpace: "nowrap" }}>{r.jobWorkNo || "—"}</td>
+                        <td style={{ padding: "11px 14px", fontFamily: "ui-monospace, monospace", fontWeight: 700, whiteSpace: "nowrap" }}>
+                          {r.jobWorkNo || "—"}
+                          {r.lineItemCount > 1 && (
+                            <span style={{ fontFamily: "system-ui, sans-serif", fontWeight: 700, fontSize: 10, color: "var(--gold-dark)", background: "rgba(201,161,74,0.15)", borderRadius: 999, padding: "1px 7px", marginLeft: 6 }}>{r.lineItemCount} items</span>
+                          )}
+                        </td>
                         <td style={{ padding: "11px 14px", fontWeight: 600 }}>{r.vendor}</td>
                         <td style={{ padding: "11px 14px", textTransform: "uppercase", color: "var(--muted)" }}>{r.unit}</td>
                         <td style={{ padding: "11px 14px", textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{r.quantity}</td>
@@ -351,8 +421,9 @@ export function WorkOrderDocClient({
                   <Row k="Vendor" v={vendorName || "—"} />
                   <Row k="Code" v={codePreview} mono />
                   <Row k="Date" v={fmtDate(docDate)} />
-                  <Row k="Qty × Rate" v={`${qty || 0} ${unit.toUpperCase()} × ${inr(Number(rate) || 0)}`} />
-                  <Row k="Total" v={inr(total)} strong />
+                  <Row k="Line items" v={`${groups.length} item${groups.length === 1 ? "" : "s"}`} />
+                  <Row k="GST" v={gstExclusive ? "Exclusive — note printed" : "Not noted"} />
+                  <Row k="Grand total" v={inr(grandTotal)} strong />
                 </div>
                 <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
                   <button type="button" onClick={() => setConfirmAction(null)} style={btnGhost}>Cancel</button>

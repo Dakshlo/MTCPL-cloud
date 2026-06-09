@@ -32,19 +32,44 @@ export async function createWorkOrderDocAction(formData: FormData) {
 
   const vendor = String(formData.get("vendor") || "").trim();
   const address = String(formData.get("address") || "").trim() || null;
-  const jobDescription = String(formData.get("job_description") || "").trim() || null;
-  const descriptionDetail = String(formData.get("description_detail") || "").trim() || null;
-  const unit = String(formData.get("unit") || "").trim() === "sft" ? "sft" : "cft";
-  const quantity = Number(String(formData.get("quantity") || "").trim());
-  const rate = Number(String(formData.get("rate") || "").trim());
+  const gstExclusive = String(formData.get("gst_exclusive") || "yes").trim() !== "no";
   const dateRaw = String(formData.get("doc_date") || "").trim();
   const docDate = /^\d{4}-\d{2}-\d{2}$/.test(dateRaw) ? dateRaw : null;
 
   if (!vendor) redirect(toastUrl("Vendor is required."));
-  if (!Number.isFinite(quantity) || quantity <= 0) redirect(toastUrl("Enter a valid quantity."));
-  if (!Number.isFinite(rate) || rate <= 0) redirect(toastUrl("Enter a valid price."));
 
-  const total = Math.round(quantity * rate * 100) / 100;
+  // Mig 114 — line items come as a JSON array (1..4). Validate + freeze
+  // each item's total; the grand total is the sum.
+  type RawItem = { description?: string | null; unit?: string; quantity?: unknown; rate?: unknown };
+  let rawItems: RawItem[] = [];
+  try {
+    const parsed = JSON.parse(String(formData.get("line_items_json") || "[]"));
+    if (Array.isArray(parsed)) rawItems = parsed as RawItem[];
+  } catch {
+    rawItems = [];
+  }
+
+  const lineItems: Array<{ description: string | null; unit: "cft" | "sft"; quantity: number; rate: number; total: number }> = [];
+  for (const it of rawItems) {
+    const unit: "cft" | "sft" = it.unit === "sft" ? "sft" : "cft";
+    const quantity = Number(it.quantity);
+    const rate = Number(it.rate);
+    const description = typeof it.description === "string" && it.description.trim() ? it.description.trim() : null;
+    if (!Number.isFinite(quantity) || quantity <= 0) continue;
+    if (!Number.isFinite(rate) || rate <= 0) continue;
+    const total = Math.round(quantity * rate * 100) / 100;
+    lineItems.push({ description, unit, quantity, rate, total });
+    if (lineItems.length >= 4) break;
+  }
+
+  if (lineItems.length === 0) {
+    redirect(toastUrl("Add at least one line item with a valid quantity and price."));
+  }
+
+  const grandTotal = Math.round(lineItems.reduce((s, it) => s + it.total, 0) * 100) / 100;
+  // Legacy single-line columns mirror the FIRST item so older readers +
+  // the saved-documents list stay valid; `total` holds the grand total.
+  const first = lineItems[0];
 
   const admin = createAdminSupabaseClient();
 
@@ -71,13 +96,15 @@ export async function createWorkOrderDocAction(formData: FormData) {
   const row: Record<string, unknown> = {
     vendor,
     address,
-    job_description: jobDescription,
-    description_detail: descriptionDetail,
+    job_description: first.description,
+    description_detail: null,
     job_work_no: jobWorkNo,
-    unit,
-    quantity,
-    rate,
-    total,
+    unit: first.unit,
+    quantity: first.quantity,
+    rate: first.rate,
+    total: grandTotal,
+    line_items: lineItems,
+    gst_exclusive: gstExclusive,
     created_by: profile.id,
   };
   if (docDate) row.doc_date = docDate;
@@ -92,7 +119,8 @@ export async function createWorkOrderDocAction(formData: FormData) {
   await logAudit(profile.id, "work_order_doc_created", "invoicing_work_order_doc", created.id, {
     vendor,
     job_work_no: jobWorkNo,
-    total,
+    total: grandTotal,
+    line_item_count: lineItems.length,
   });
   revalidatePath(ROUTE);
   // Land back on the page with the new doc highlighted (Download button).
