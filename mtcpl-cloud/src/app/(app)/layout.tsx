@@ -347,6 +347,17 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     if (woErr) return null;
     return count ?? 0;
   }
+  // Mig 118 — carving slabs escalated to the owner during Carving Done
+  // Approval ("Involve owner"). Owner / developer only.
+  async function fetchOwnerReviewBadge(): Promise<number | null> {
+    if (profile.role !== "owner" && profile.role !== "developer") return null;
+    const { count, error: orErr } = await supabase
+      .from("carving_items")
+      .select("*", { count: "exact", head: true })
+      .eq("owner_review_status", "open");
+    if (orErr) return null;
+    return count ?? 0;
+  }
 
   const [
     approvalsBadge,
@@ -361,6 +372,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     debitApprovalBadge,
     bankDeclineBadge,
     workOrderApprovalBadge,
+    ownerReviewBadge,
   ] = await Promise.all([
     fetchApprovalsBadge(),
     fetchBillsAuditBadge(),
@@ -374,6 +386,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     fetchDebitApprovalBadge(),
     fetchBankDeclineBadge(),
     fetchWorkOrderApprovalBadge(),
+    fetchOwnerReviewBadge(),
   ]);
 
   return (
@@ -589,6 +602,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               debitApprovalBadge,
               bankDeclineBadge,
               workOrderApprovalBadge,
+              ownerReviewBadge,
             })} />
 
             {/* Mig 078 — Messenger pilot. canUseMessenger is locked
@@ -707,6 +721,9 @@ function buildTopbarTaskItems(counts: {
   /** Mig 098 — outsource work orders awaiting owner price approval.
    *  Owner / developer only; null otherwise. */
   workOrderApprovalBadge: number | null;
+  /** Mig 118 — carving slabs escalated to the owner during approval.
+   *  Owner / developer only; null otherwise. */
+  ownerReviewBadge: number | null;
 }): TopbarTask[] {
   const items: TopbarTask[] = [];
   // Mig 058 follow-on (Daksh) — per-user rejected-bills item.
@@ -871,6 +888,18 @@ function buildTopbarTaskItems(counts: {
       description: "Outsource work orders awaiting your price approval",
       count: counts.workOrderApprovalBadge,
       icon: "🏭",
+      department: "production",
+    });
+  }
+  // Mig 118 — slabs flagged to the owner during Carving Done Approval.
+  if (counts.ownerReviewBadge !== null) {
+    items.push({
+      id: "owner-reviews",
+      href: "/tasks/owner-reviews",
+      label: "Owner Review",
+      description: "Carving slabs flagged to you during approval",
+      count: counts.ownerReviewBadge,
+      icon: "👤",
       department: "production",
     });
   }
