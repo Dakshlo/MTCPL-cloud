@@ -110,6 +110,9 @@ export function CarvingStockClient({
   profilesMap?: Record<string, string>;
 }) {
   const [search, setSearch] = useState("");
+  // Colour-key filters — tap a legend swatch to show only that kind.
+  // Empty = show all; multiple kinds can be active at once.
+  const [kinds, setKinds] = useState<Set<ColorKind>>(new Set());
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
     // Default: all temples collapsed for a quick overview.
     const out: Record<string, boolean> = {};
@@ -119,17 +122,33 @@ export function CarvingStockClient({
   const [allExpanded, setAllExpanded] = useState(false);
 
   const searching = search.trim().length > 0;
+  const kindActive = kinds.size > 0;
+  const active = searching || kindActive; // any filter applied
+
+  const toggleKind = (k: ColorKind) =>
+    setKinds((prev) => {
+      const next = new Set(prev);
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
+      return next;
+    });
 
   const filtered = useMemo(() => {
-    if (!searching) return slabs;
-    return slabs.filter((s) =>
-      slabSearchMatch(
-        search,
-        { length_ft: s.length_ft, width_ft: s.width_ft, thickness_ft: s.thickness_ft },
-        [s.id, s.label, s.temple, s.stone, s.source_block_id, s.description, s.vendorName],
-      ),
-    );
-  }, [slabs, search, searching]);
+    return slabs.filter((s) => {
+      if (kindActive && !kinds.has(s.colorKind)) return false;
+      if (
+        searching &&
+        !slabSearchMatch(
+          search,
+          { length_ft: s.length_ft, width_ft: s.width_ft, thickness_ft: s.thickness_ft },
+          [s.id, s.label, s.temple, s.stone, s.source_block_id, s.description, s.vendorName],
+        )
+      ) {
+        return false;
+      }
+      return true;
+    });
+  }, [slabs, search, searching, kinds, kindActive]);
 
   // Counts for the legend (over the full set, not the filtered view).
   const counts = useMemo(() => {
@@ -185,15 +204,46 @@ export function CarvingStockClient({
         }}
       >
         <span style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-          Colour key
+          Colour key · tap to filter
         </span>
-        {(["normal", "cnc", "outsource", "done"] as ColorKind[]).map((k) => (
-          <span key={k} style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 12.5, color: "var(--text)" }}>
-            <Swatch kind={k} />
-            <strong style={{ fontWeight: 700 }}>{KIND_LABEL[k]}</strong>
-            <span style={{ color: "var(--muted)" }}>· {counts[k]}</span>
-          </span>
-        ))}
+        {(["normal", "cnc", "outsource", "done"] as ColorKind[]).map((k) => {
+          const on = kinds.has(k);
+          return (
+            <button
+              key={k}
+              type="button"
+              onClick={() => toggleKind(k)}
+              aria-pressed={on}
+              title="Tap to filter by this colour"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 7,
+                fontSize: 12.5,
+                color: "var(--text)",
+                cursor: "pointer",
+                padding: "5px 11px",
+                borderRadius: 999,
+                border: `1px solid ${on ? "var(--gold-dark, #a16207)" : "var(--border)"}`,
+                background: on ? "rgba(201,161,74,0.12)" : "var(--bg)",
+              }}
+            >
+              <span style={{ width: 12, textAlign: "center", fontSize: 12, fontWeight: 900, color: "var(--gold-dark, #a16207)" }}>{on ? "✓" : ""}</span>
+              <Swatch kind={k} />
+              <span style={{ fontWeight: on ? 800 : 700 }}>{KIND_LABEL[k]}</span>
+              <span style={{ color: "var(--muted)" }}>· {counts[k]}</span>
+            </button>
+          );
+        })}
+        {kindActive && (
+          <button
+            type="button"
+            onClick={() => setKinds(new Set())}
+            style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
+          >
+            Clear
+          </button>
+        )}
       </div>
 
       {/* ── Search + expand controls ────────────────────────────── */}
@@ -230,16 +280,16 @@ export function CarvingStockClient({
       {/* ── Temple groups ───────────────────────────────────────── */}
       <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
         {grouped.length === 0 ? (
-          <div className="banner">No slabs match the current search.</div>
+          <div className="banner">No slabs match the current filter.</div>
         ) : (
           grouped.map(({ temple, slabs: groupSlabs, latestAt }) => {
-            const isCollapsed = searching ? false : (collapsed[temple] ?? false);
+            const isCollapsed = active ? false : (collapsed[temple] ?? false);
             const priorityCount = groupSlabs.filter((s) => s.priority).length;
             return (
               <div key={temple}>
                 <button
                   type="button"
-                  onClick={() => !searching && toggle(temple)}
+                  onClick={() => !active && toggle(temple)}
                   aria-expanded={!isCollapsed}
                   style={{
                     width: "100%",
@@ -254,7 +304,7 @@ export function CarvingStockClient({
                     borderBottomWidth: 2,
                     borderBottomStyle: "solid",
                     borderBottomColor: "var(--border)",
-                    cursor: searching ? "default" : "pointer",
+                    cursor: active ? "default" : "pointer",
                     textAlign: "left",
                   }}
                 >
@@ -275,7 +325,7 @@ export function CarvingStockClient({
                     <span style={{ fontSize: 12, color: "var(--muted)", fontWeight: 600 }}>
                       {groupSlabs.length} {groupSlabs.length === 1 ? "size" : "sizes"}
                     </span>
-                    {!searching && (
+                    {!active && (
                       <span style={{ fontSize: 11, color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 5 }}>
                         {isCollapsed ? "Show" : "Hide"}
                         <span style={{ fontSize: 10 }}>{isCollapsed ? "▶" : "▼"}</span>
