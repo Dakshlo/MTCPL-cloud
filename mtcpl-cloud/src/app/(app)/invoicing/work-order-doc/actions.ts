@@ -145,20 +145,24 @@ export async function createWorkOrderDocAction(formData: FormData) {
   redirect(`${ROUTE}?created=${created.id}`);
 }
 
-/** Owner/dev — delete a saved document record. */
+/** Delete a saved document — SOFT delete. Any invoicing role (owner, dev,
+ *  accountant, accountant★) can delete; the row is kept (deleted_at stamped)
+ *  so the Saved-documents page can still show what was deleted, in red. */
 export async function deleteWorkOrderDocAction(formData: FormData) {
   const { profile } = await requireAuth();
-  if (profile.role !== "owner" && profile.role !== "developer") {
-    redirect(toastUrl("Only the owner can delete records."));
-  }
+  if (!isAllowed(profile.role)) redirect(toastUrl("Not allowed."));
   const id = String(formData.get("id") || "").trim();
   if (!id) redirect(toastUrl("Missing record."));
   const admin = createAdminSupabaseClient();
-  const { error } = await admin.from("invoicing_work_order_docs").delete().eq("id", id);
+  const { error } = await admin
+    .from("invoicing_work_order_docs")
+    .update({ deleted_at: new Date().toISOString(), deleted_by: profile.id })
+    .eq("id", id)
+    .is("deleted_at", null); // don't re-stamp an already-deleted doc
   if (error) redirect(toastUrl(error.message));
   await logAudit(profile.id, "work_order_doc_deleted", "invoicing_work_order_doc", id, {});
   revalidatePath(ROUTE);
-  redirect(toastUrl("Record deleted."));
+  redirect(toastUrl("Document deleted (kept on record, shown in red)."));
 }
 
 /**

@@ -15,6 +15,8 @@ export type DocRecord = {
   rate: number;
   total: number;
   lineItemCount: number;
+  deletedAt: string | null;      // soft delete — shown in red, kept on record
+  deletedByName: string | null;
 };
 
 // A Finance vendor (public.bill_vendors), trimmed to the display fields the
@@ -82,6 +84,7 @@ export function WorkOrderDocClient({
   const [selectedVendorId, setSelectedVendorId] = useState("");
   const [docDate, setDocDate] = useState(todayISO());
   const [showRecords, setShowRecords] = useState(false);
+  const [recVendor, setRecVendor] = useState(""); // saved-docs vendor filter
   // Custom (our-UI) confirmation gate. null = closed.
   const [confirmAction, setConfirmAction] = useState<
     | { kind: "generate" }
@@ -151,6 +154,17 @@ export function WorkOrderDocClient({
     groups.length > 0 &&
     groups.every((g) => (Number(g.qty) || 0) > 0 && (Number(g.rate) || 0) > 0);
   const justCreated = useMemo(() => records.find((r) => r.id === createdId) ?? null, [records, createdId]);
+
+  // Saved-documents vendor filter (distinct vendor names + filtered list).
+  const recVendors = useMemo(
+    () => Array.from(new Set(records.map((r) => r.vendor).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [records],
+  );
+  const filteredRecords = useMemo(
+    () => (recVendor ? records.filter((r) => r.vendor === recVendor) : records),
+    [records, recVendor],
+  );
+  const deletedCount = useMemo(() => records.filter((r) => r.deletedAt).length, [records]);
 
   // Live preview of the auto code (year tracks the selected date).
   const codeYear = /^\d{4}/.test(docDate) ? docDate.slice(0, 4) : String(new Date().getFullYear());
@@ -369,8 +383,24 @@ export function WorkOrderDocClient({
               <h2 style={{ margin: 0, fontSize: 18, display: "flex", alignItems: "center", gap: 8 }}>
                 🗂️ Saved documents
                 <span style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", background: "var(--surface-alt, rgba(0,0,0,0.05))", borderRadius: 999, padding: "2px 9px" }}>{records.length}</span>
+                {deletedCount > 0 && (
+                  <span style={{ fontSize: 11, fontWeight: 800, color: "#b91c1c", background: "rgba(220,38,38,0.1)", borderRadius: 999, padding: "2px 9px" }}>{deletedCount} deleted</span>
+                )}
               </h2>
               <button type="button" onClick={() => setShowRecords(false)} style={{ background: "none", border: "none", fontSize: 26, lineHeight: 1, cursor: "pointer", color: "var(--muted)" }} aria-label="Close">×</button>
+            </div>
+            {/* Vendor-wise filter + deleted legend */}
+            <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 20px", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+                <span style={{ fontWeight: 700, color: "var(--muted)" }}>Vendor</span>
+                <select value={recVendor} onChange={(e) => setRecVendor(e.target.value)} className="wod-in" style={{ width: "auto", padding: "7px 11px", fontSize: 13 }}>
+                  <option value="">All vendors ({records.length})</option>
+                  {recVendors.map((v) => <option key={v} value={v}>{v}</option>)}
+                </select>
+              </label>
+              <span style={{ fontSize: 11.5, color: "var(--muted)", marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ width: 10, height: 10, borderRadius: 3, background: "rgba(220,38,38,0.5)", display: "inline-block" }} /> deleted (kept on record)
+              </span>
             </div>
             <div style={{ overflow: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 720 }}>
@@ -382,28 +412,38 @@ export function WorkOrderDocClient({
                   </tr>
                 </thead>
                 <tbody>
-                  {records.length === 0 ? (
-                    <tr><td colSpan={9} style={{ padding: 32, textAlign: "center", color: "var(--muted)" }}>No documents yet.</td></tr>
+                  {filteredRecords.length === 0 ? (
+                    <tr><td colSpan={9} style={{ padding: 32, textAlign: "center", color: "var(--muted)" }}>{records.length === 0 ? "No documents yet." : "No documents for this vendor."}</td></tr>
                   ) : (
-                    records.map((r) => (
-                      <tr key={r.id} className="wod-row" style={{ borderBottom: "1px solid var(--border)", background: r.id === createdId ? "rgba(34,197,94,0.08)" : "transparent", transition: "background .12s" }}>
-                        <td style={{ padding: "11px 14px", whiteSpace: "nowrap" }}>{fmtDate(r.date)}</td>
-                        <td style={{ padding: "11px 14px", fontFamily: "ui-monospace, monospace", fontWeight: 700, whiteSpace: "nowrap" }}>
+                    filteredRecords.map((r) => {
+                      const del = !!r.deletedAt;
+                      const ink = del ? "#b91c1c" : undefined;
+                      return (
+                      <tr key={r.id} className="wod-row" style={{ borderBottom: "1px solid var(--border)", background: del ? "rgba(220,38,38,0.07)" : r.id === createdId ? "rgba(34,197,94,0.08)" : "transparent", transition: "background .12s" }}>
+                        <td style={{ padding: "11px 14px", whiteSpace: "nowrap", color: ink }}>{fmtDate(r.date)}</td>
+                        <td style={{ padding: "11px 14px", fontFamily: "ui-monospace, monospace", fontWeight: 700, whiteSpace: "nowrap", color: ink, textDecoration: del ? "line-through" : "none" }}>
                           {r.jobWorkNo || "—"}
-                          {r.lineItemCount > 1 && (
+                          {!del && r.lineItemCount > 1 && (
                             <span style={{ fontFamily: "system-ui, sans-serif", fontWeight: 700, fontSize: 10, color: "var(--gold-dark)", background: "rgba(201,161,74,0.15)", borderRadius: 999, padding: "1px 7px", marginLeft: 6 }}>{r.lineItemCount} items</span>
                           )}
+                          {del && (
+                            <span style={{ fontFamily: "system-ui, sans-serif", fontWeight: 800, fontSize: 10, color: "#fff", background: "#b91c1c", borderRadius: 999, padding: "1px 8px", marginLeft: 6, textDecoration: "none" }}>DELETED</span>
+                          )}
                         </td>
-                        <td style={{ padding: "11px 14px", fontWeight: 600 }}>{r.vendor}</td>
-                        <td style={{ padding: "11px 14px", textTransform: "uppercase", color: "var(--muted)" }}>{r.unit}</td>
-                        <td style={{ padding: "11px 14px", textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{r.quantity}</td>
-                        <td style={{ padding: "11px 14px", textAlign: "right", fontFamily: "ui-monospace, monospace", color: "var(--muted)" }}>{inr(r.rate)}</td>
-                        <td style={{ padding: "11px 14px", textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>{inr(r.total)}</td>
+                        <td style={{ padding: "11px 14px", fontWeight: 600, color: ink }}>{r.vendor}</td>
+                        <td style={{ padding: "11px 14px", textTransform: "uppercase", color: ink ?? "var(--muted)" }}>{r.unit}</td>
+                        <td style={{ padding: "11px 14px", textAlign: "right", fontFamily: "ui-monospace, monospace", color: ink }}>{r.quantity}</td>
+                        <td style={{ padding: "11px 14px", textAlign: "right", fontFamily: "ui-monospace, monospace", color: ink ?? "var(--muted)" }}>{inr(r.rate)}</td>
+                        <td style={{ padding: "11px 14px", textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800, color: ink }}>{inr(r.total)}</td>
                         <td style={{ padding: "11px 14px", whiteSpace: "nowrap" }}>
-                          <a href={`/api/invoicing/work-order-doc/${r.id}`} style={{ color: "var(--gold-dark)", fontWeight: 700, textDecoration: "none" }}>⬇ PDF</a>
+                          <a href={`/api/invoicing/work-order-doc/${r.id}`} style={{ color: del ? "#b91c1c" : "var(--gold-dark)", fontWeight: 700, textDecoration: "none", opacity: del ? 0.75 : 1 }}>⬇ PDF</a>
                         </td>
                         <td style={{ padding: "11px 14px", whiteSpace: "nowrap", textAlign: "right" }}>
-                          {canDelete && (
+                          {del ? (
+                            <span style={{ fontSize: 11, color: "#b91c1c", fontWeight: 600 }}>
+                              🗑 {r.deletedByName ? `by ${r.deletedByName}` : "deleted"}{r.deletedAt ? ` · ${fmtDate(r.deletedAt.slice(0, 10))}` : ""}
+                            </span>
+                          ) : canDelete ? (
                             <button
                               type="button"
                               onClick={() => setConfirmAction({ kind: "delete", id: r.id, vendor: r.vendor })}
@@ -411,10 +451,11 @@ export function WorkOrderDocClient({
                             >
                               Delete
                             </button>
-                          )}
+                          ) : null}
                         </td>
                       </tr>
-                    ))
+                      );
+                    })
                   )}
                 </tbody>
               </table>
@@ -453,7 +494,7 @@ export function WorkOrderDocClient({
               <>
                 <h2 style={{ margin: "0 0 6px", fontSize: 19 }}>Delete this document?</h2>
                 <p className="muted" style={{ margin: "0 0 18px", fontSize: 13 }}>
-                  The saved work order for <strong style={{ color: "var(--text)" }}>{confirmAction.vendor}</strong> will be permanently removed. This can&apos;t be undone.
+                  The work order for <strong style={{ color: "var(--text)" }}>{confirmAction.vendor}</strong> will be marked <strong style={{ color: "#b91c1c" }}>deleted</strong>. It stays on this page (shown in red) for the record — it isn&apos;t erased.
                 </p>
                 <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
                   <button type="button" onClick={() => setConfirmAction(null)} style={btnGhost}>Cancel</button>
