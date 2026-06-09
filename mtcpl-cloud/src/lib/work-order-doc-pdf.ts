@@ -1,18 +1,19 @@
 // ──────────────────────────────────────────────────────────────────
-// Manual Work Order Document — letterhead PDF (Invoicing, Mig 105 / 114)
+// Manual Work Order Document — letterhead PDF (Invoicing, Mig 105 / 114 / 115)
 //
 // Standalone: NOT linked to carving work orders or any incoming logic.
-// All values are typed by hand on /invoicing/work-order-doc. Prints on the
-// company letterhead in the format we already use: header fields (vendor /
-// address / date / no.), then ONE OR MORE line items (mig 114 — up to 4),
-// each with its own description + unit · quantity · rate · total, a grand
-// total, an optional "exclusive of GST" note, the standard terms, and a
-// Vendor signature line. Built with pdf-lib on /public/letterhead.pdf.
+// The vendor is picked from the Finance master and snapshotted onto the doc.
+// Prints on the company letterhead: header (WORK ORDER + no + date), a
+// bordered vendor block (name / GST no / category / mobile / email /
+// address), a bordered line-items table (up to 4 — # · description · unit ·
+// qty · rate · amount), a grand total, an optional "exclusive of GST" note,
+// the standard terms, and two signature lines (MTCPL + Vendor). Built with
+// pdf-lib on /public/letterhead.pdf.
 // ──────────────────────────────────────────────────────────────────
 
 import path from "node:path";
 import { readFile } from "node:fs/promises";
-import { PDFDocument, StandardFonts, rgb, type PDFFont } from "pdf-lib";
+import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage, type RGB } from "pdf-lib";
 
 export type WorkOrderLineItem = {
   description: string | null;
@@ -23,8 +24,12 @@ export type WorkOrderLineItem = {
 };
 
 export type WorkOrderDocInput = {
-  vendor: string;
-  address: string | null;
+  vendorName: string;
+  vendorGstin: string | null;
+  vendorCategory: string | null;
+  vendorMobile: string | null;
+  vendorEmail: string | null;
+  vendorAddress: string | null;
   jobWorkNo: string | null;
   dateIso: string | null;
   lineItems: WorkOrderLineItem[];
@@ -35,6 +40,7 @@ export type WorkOrderDocInput = {
 const PAGE_W = 612;
 const PAGE_H = 792;
 const MARGIN_X = 54;
+const CONTENT_W = PAGE_W - 2 * MARGIN_X;
 
 function san(s: string | null | undefined): string {
   return (s ?? "").replace(/₹/g, "Rs.").replace(/[^\x09\x0a\x0d\x20-\xff]/g, "");
@@ -68,7 +74,7 @@ function wrap(text: string, font: PDFFont, size: number, maxWidth: number): stri
     }
   }
   if (cur) lines.push(cur);
-  return lines;
+  return lines.length ? lines : ["-"];
 }
 
 const TERMS = [
@@ -113,6 +119,7 @@ export async function buildWorkOrderDocPdf(inp: WorkOrderDocInput): Promise<Uint
   const muted = rgb(0.4, 0.4, 0.4);
   const accent = rgb(0.486, 0.231, 0.047);
   const headBg = rgb(0.96, 0.93, 0.88);
+  const lineCol = rgb(0.8, 0.78, 0.74);
 
   const page = pdf.addPage([PAGE_W, PAGE_H]);
   if (lhEmbed) page.drawPage(lhEmbed, { x: 0, y: 0, width: PAGE_W, height: PAGE_H });
@@ -121,111 +128,120 @@ export async function buildWorkOrderDocPdf(inp: WorkOrderDocInput): Promise<Uint
     page.drawText(san(s), { x, y, size, font: f, color });
   const right = (s: string, xRight: number, y: number, size: number, f: PDFFont = font, color = ink) =>
     page.drawText(san(s), { x: xRight - f.widthOfTextAtSize(san(s), size), y, size, font: f, color });
-
-  // ── Header block (below the letterhead's own divider line) ──────────
-  let y = 632;
-  text("WORK ORDER", MARGIN_X, y, 15, bold, accent);
-  right(`No: ${inp.jobWorkNo || "-"}`, PAGE_W - MARGIN_X, y + 2, 10, bold, ink);
-  right(`Date: ${fmtDate(inp.dateIso)}`, PAGE_W - MARGIN_X, y - 12, 9, font, muted);
-  y -= 30;
-
-  const labelW = 96;
-  const valX = MARGIN_X + labelW;
-  const valW = PAGE_W - MARGIN_X - valX;
-
-  text("Vendor:", MARGIN_X, y, 10, bold, muted);
-  for (const ln of wrap(inp.vendor, font, 11, valW)) {
-    text(ln, valX, y, 11, bold, ink);
-    y -= 15;
-  }
-  y -= 3;
-
-  if (inp.address && inp.address.trim()) {
-    text("Address:", MARGIN_X, y, 10, bold, muted);
-    const addrLines = wrap(inp.address, font, 10, valW);
-    for (let i = 0; i < addrLines.length; i++) {
-      text(addrLines[i], valX, y, 10, font, ink);
-      y -= 14;
-    }
-    y -= 3;
-  }
-
-  // ── Line items (mig 114 — up to 4 groups) ───────────────────────────
-  // Each item prints its own description + a Unit / Quantity / Rate / Total
-  // row, separated by a thin rule. With a single item this reads exactly
-  // like the old one-line layout.
-  const items = inp.lineItems.length > 0 ? inp.lineItems : [];
-  const contentW = PAGE_W - 2 * MARGIN_X;
-  const multi = items.length > 1;
-  const cols = {
-    unit: MARGIN_X + 6,
-    qty: MARGIN_X + 150,
-    rate: MARGIN_X + 300,
-    total: PAGE_W - MARGIN_X - 6,
+  const strokeBox = (p: PDFPage, x1: number, yTop: number, x2: number, yBot: number, c: RGB, w: number) => {
+    p.drawLine({ start: { x: x1, y: yTop }, end: { x: x2, y: yTop }, thickness: w, color: c });
+    p.drawLine({ start: { x: x1, y: yBot }, end: { x: x2, y: yBot }, thickness: w, color: c });
+    p.drawLine({ start: { x: x1, y: yTop }, end: { x: x1, y: yBot }, thickness: w, color: c });
+    p.drawLine({ start: { x: x2, y: yTop }, end: { x: x2, y: yBot }, thickness: w, color: c });
   };
 
-  y -= 10;
-  // Column header band.
-  page.drawRectangle({ x: MARGIN_X, y: y - 4, width: contentW, height: 18, color: headBg });
-  text("Unit", cols.unit, y, 9, bold, muted);
-  text("Quantity", cols.qty, y, 9, bold, muted);
-  text("Rate", cols.rate, y, 9, bold, muted);
-  right("Total", cols.total, y, 9, bold, muted);
-  y -= 22;
+  // ── Header ──────────────────────────────────────────────────────────
+  text("WORK ORDER", MARGIN_X, 636, 15, bold, accent);
+  right(`No: ${inp.jobWorkNo || "-"}`, PAGE_W - MARGIN_X, 638, 10, bold, ink);
+  right(`Date: ${fmtDate(inp.dateIso)}`, PAGE_W - MARGIN_X, 624, 9, font, muted);
 
+  // ── Vendor block (bordered) ─────────────────────────────────────────
+  const boxTop = 612;
+  const padX = MARGIN_X + 12;
+  const colRx = MARGIN_X + CONTENT_W / 2 + 6;
+  const kv = (label: string, value: string | null | undefined, x: number, yy: number) => {
+    text(`${label}:`, x, yy, 8, bold, muted);
+    const v = value && value.trim() ? value : "-";
+    text(v, x + 52, yy, 9.5, font, ink);
+  };
+
+  let by = boxTop - 16;
+  text("VENDOR", padX, by, 8, bold, muted);
+  by -= 16;
+  for (const ln of wrap(inp.vendorName || "-", bold, 12.5, CONTENT_W - 24)) {
+    text(ln, padX, by, 12.5, bold, ink);
+    by -= 16;
+  }
+  by -= 2;
+  kv("GST No", inp.vendorGstin, padX, by);
+  kv("Category", inp.vendorCategory, colRx, by);
+  by -= 15;
+  kv("Mobile", inp.vendorMobile, padX, by);
+  kv("Email", inp.vendorEmail, colRx, by);
+  by -= 15;
+  text("Address:", padX, by, 8, bold, muted);
+  for (const ln of wrap(inp.vendorAddress || "-", font, 9.5, CONTENT_W - 24 - 52)) {
+    text(ln, padX + 52, by, 9.5, font, ink);
+    by -= 12.5;
+  }
+  by -= 8;
+  const boxBottom = by;
+  strokeBox(page, MARGIN_X, boxTop + 2, PAGE_W - MARGIN_X, boxBottom, lineCol, 0.8);
+
+  // ── Line-item table ─────────────────────────────────────────────────
+  const amtX = PAGE_W - MARGIN_X - 6;
+  const rateX = PAGE_W - MARGIN_X - 92;
+  const qtyX = PAGE_W - MARGIN_X - 178;
+  const unitX = PAGE_W - MARGIN_X - 250;
+  const numX = MARGIN_X + 4;
+  const descX = MARGIN_X + 22;
+  const descMaxW = unitX - 10 - descX;
+
+  let y = boxBottom - 18;
+  page.drawRectangle({ x: MARGIN_X, y: y - 5, width: CONTENT_W, height: 18, color: headBg });
+  text("#", numX, y, 8.5, bold, muted);
+  text("Description", descX, y, 8.5, bold, muted);
+  text("Unit", unitX, y, 8.5, bold, muted);
+  right("Qty", qtyX, y, 8.5, bold, muted);
+  right("Rate", rateX, y, 8.5, bold, muted);
+  right("Amount", amtX, y, 8.5, bold, muted);
+  y -= 21;
+
+  const items = inp.lineItems.length > 0 ? inp.lineItems : [];
   items.forEach((it, idx) => {
-    // Description line(s) — prefix with the item number when there's more
-    // than one, so the vendor can tell the lines apart.
-    const desc = (it.description ?? "").trim();
-    if (desc) {
-      const prefix = multi ? `${idx + 1}. ` : "";
-      const descLines = wrap(prefix + desc, font, 9.5, contentW - 6);
-      for (let i = 0; i < descLines.length; i++) {
-        text(descLines[i], cols.unit + (i === 0 ? 0 : multi ? 12 : 0), y, 9.5, i === 0 ? bold : font, ink);
-        y -= 13;
-      }
-    } else if (multi) {
-      text(`${idx + 1}.`, cols.unit, y, 9.5, bold, ink);
-      y -= 13;
-    }
-    // Numeric row.
-    text(it.unit.toUpperCase(), cols.unit, y, 11, font, ink);
-    text(String(Math.round(it.quantity * 1000) / 1000), cols.qty, y, 11, font, ink);
-    text(`${rs(it.rate)} / ${it.unit.toUpperCase()}`, cols.rate, y, 10, font, ink);
-    right(rs(it.total), cols.total, y, 12, bold, ink);
-    y -= 12;
-    page.drawLine({ start: { x: MARGIN_X, y }, end: { x: PAGE_W - MARGIN_X, y }, thickness: 0.6, color: muted });
-    y -= 16;
+    const descLines = wrap(it.description?.trim() || "-", font, 9.5, descMaxW);
+    const rowTopY = y;
+    text(`${idx + 1}.`, numX, rowTopY, 9.5, font, ink);
+    descLines.forEach((ln, i) => text(ln, descX, rowTopY - i * 12, 9.5, font, ink));
+    text(it.unit.toUpperCase(), unitX, rowTopY, 9.5, font, ink);
+    right(String(Math.round(it.quantity * 1000) / 1000), qtyX, rowTopY, 9.5, font, ink);
+    right(rs(it.rate), rateX, rowTopY, 9, font, ink);
+    right(rs(it.total), amtX, rowTopY, 9.5, bold, ink);
+    y = rowTopY - Math.max(descLines.length, 1) * 12 - 7;
+    page.drawLine({ start: { x: MARGIN_X, y: y + 3 }, end: { x: PAGE_W - MARGIN_X, y: y + 3 }, thickness: 0.5, color: lineCol });
+    y -= 7;
   });
 
-  // ── Grand total + (optional) GST note ───────────────────────────────
-  right(`Total: ${rs(inp.grandTotal)}`, PAGE_W - MARGIN_X, y, 12, bold, accent);
-  y -= 14;
+  // ── Grand total + GST note ──────────────────────────────────────────
+  y -= 2;
+  const totBandX = PAGE_W - MARGIN_X - 230;
+  page.drawRectangle({ x: totBandX, y: y - 6, width: PAGE_W - MARGIN_X - totBandX, height: 21, color: headBg });
+  text("GRAND TOTAL", totBandX + 8, y, 10, bold, accent);
+  right(rs(inp.grandTotal), amtX, y, 13, bold, accent);
+  y -= 24;
   if (inp.gstExclusive) {
-    right("The above amount is exclusive of GST (GST charged extra as applicable).", PAGE_W - MARGIN_X, y, 8, font, muted);
+    right("Amount is exclusive of GST — GST charged extra as applicable.", PAGE_W - MARGIN_X, y, 8.5, font, muted);
+    y -= 14;
   }
 
-  // ── Terms (full width), anchored near the bottom ────────────────────
-  const TSIZE = 8.5;
-  const LH = 13;
+  // ── Terms (compact), anchored above the signatures ──────────────────
+  const TSIZE = 8;
+  const LH = 12;
   const bodyLines: { text: string; indent: boolean }[] = [];
   for (const t of TERMS) {
-    wrap(t, font, TSIZE, contentW).forEach((ln, i) => bodyLines.push({ text: ln, indent: i > 0 }));
+    wrap(t, font, TSIZE, CONTENT_W).forEach((ln, i) => bodyLines.push({ text: ln, indent: i > 0 }));
   }
-  const sigLabelY = 108;
+  const sigLabelY = 96;
   const sigLineY = sigLabelY + 14;
   const termsBottomY = sigLineY + 30;
   let ty = termsBottomY + bodyLines.length * LH;
-  text("Terms:", MARGIN_X, ty, 9.5, bold, ink);
+  text("Terms:", MARGIN_X, ty, 9, bold, ink);
   ty -= LH;
   for (const ln of bodyLines) {
     text(ln.text, MARGIN_X + (ln.indent ? 12 : 0), ty, TSIZE, font, muted);
     ty -= LH;
   }
 
-  // ── Vendor signature (bottom-right) ─────────────────────────────────
-  page.drawLine({ start: { x: PAGE_W - MARGIN_X - 220, y: sigLineY }, end: { x: PAGE_W - MARGIN_X, y: sigLineY }, thickness: 0.7, color: ink });
-  text("Vendor signature", PAGE_W - MARGIN_X - 220, sigLabelY, 8.5, font, muted);
+  // ── Signatures (two) ────────────────────────────────────────────────
+  page.drawLine({ start: { x: MARGIN_X, y: sigLineY }, end: { x: MARGIN_X + 210, y: sigLineY }, thickness: 0.7, color: ink });
+  text("For Mateshwari Temple Construction Pvt Ltd", MARGIN_X, sigLabelY, 8, font, muted);
+  page.drawLine({ start: { x: PAGE_W - MARGIN_X - 210, y: sigLineY }, end: { x: PAGE_W - MARGIN_X, y: sigLineY }, thickness: 0.7, color: ink });
+  text("Vendor signature", PAGE_W - MARGIN_X - 210, sigLabelY, 8, font, muted);
 
   return await pdf.save();
 }

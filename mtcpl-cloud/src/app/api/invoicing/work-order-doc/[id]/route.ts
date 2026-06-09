@@ -17,7 +17,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
 
   const { data } = await admin
     .from("invoicing_work_order_docs")
-    .select("doc_date, vendor, address, job_description, job_work_no, unit, quantity, rate, total, line_items, gst_exclusive")
+    .select("doc_date, vendor, address, vendor_gstin, vendor_category, vendor_email, vendor_mobile, job_description, job_work_no, unit, quantity, rate, total, line_items, gst_exclusive")
     .eq("id", id)
     .maybeSingle();
   if (!data) return new Response("Document not found", { status: 404 });
@@ -25,6 +25,10 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     doc_date: string | null;
     vendor: string;
     address: string | null;
+    vendor_gstin: string | null;
+    vendor_category: string | null;
+    vendor_email: string | null;
+    vendor_mobile: string | null;
     job_description: string | null;
     job_work_no: string | null;
     unit: string;
@@ -67,8 +71,12 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const grandTotal = Number(d.total) || lineItems.reduce((s, it) => s + (Number(it.total) || 0), 0);
 
   const pdf = await buildWorkOrderDocPdf({
-    vendor: d.vendor,
-    address: d.address,
+    vendorName: d.vendor,
+    vendorGstin: d.vendor_gstin,
+    vendorCategory: d.vendor_category,
+    vendorMobile: d.vendor_mobile,
+    vendorEmail: d.vendor_email,
+    vendorAddress: d.address,
     jobWorkNo: d.job_work_no,
     dateIso: d.doc_date,
     lineItems,

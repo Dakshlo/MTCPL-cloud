@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { WorkOrderDocClient, type DocRecord, type SavedVendor } from "./doc-client";
+import { WorkOrderDocClient, type DocRecord, type FinanceVendor } from "./doc-client";
 
 export const dynamic = "force-dynamic";
 
@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 // they get the Work Order Doc inside Invoicing, but not the v2 surfaces.
 const ALLOWED = ["developer", "owner", "accountant_star", "accountant"];
 
-type SearchParams = Promise<{ toast?: string; created?: string; vendor_added?: string }>;
+type SearchParams = Promise<{ toast?: string; created?: string; vendor_filled?: string }>;
 
 export default async function WorkOrderDocPage({ searchParams }: { searchParams: SearchParams }) {
   const { profile } = await requireAuth();
@@ -45,14 +45,34 @@ export default async function WorkOrderDocPage({ searchParams }: { searchParams:
     if (data.length < 1000) break;
   }
 
-  // Saved vendors (name + address) for quick fill.
+  // Vendors come from the Finance master (bill_vendors). Read-only here —
+  // we only ever SELECT; the document never creates a vendor, and the only
+  // write path (filling empty display fields) is a tightly-allowlisted
+  // server action. Money fields (bank/ifsc/upi/etc) are not even fetched.
   const { data: vendorRows } = await admin
-    .from("invoicing_wo_vendors")
-    .select("id, name, address")
+    .from("bill_vendors")
+    .select("id, name, category, gstin, email, phone, address")
+    .eq("is_active", true)
     .order("name", { ascending: true });
-  const vendors: SavedVendor[] = ((vendorRows ?? []) as Array<{ id: string; name: string; address: string | null }>).map(
-    (v) => ({ id: v.id, name: v.name, address: v.address ?? "" }),
-  );
+  const financeVendors: FinanceVendor[] = (
+    (vendorRows ?? []) as Array<{
+      id: string;
+      name: string;
+      category: string | null;
+      gstin: string | null;
+      email: string | null;
+      phone: string | null;
+      address: string | null;
+    }>
+  ).map((v) => ({
+    id: v.id,
+    name: v.name,
+    category: v.category ?? "",
+    gstin: v.gstin ?? "",
+    email: v.email ?? "",
+    mobile: v.phone ?? "",
+    address: v.address ?? "",
+  }));
 
   const records: DocRecord[] = rows.map((r) => ({
     id: r.id,
@@ -78,10 +98,10 @@ export default async function WorkOrderDocPage({ searchParams }: { searchParams:
       </div>
       <WorkOrderDocClient
         records={records}
-        vendors={vendors}
+        financeVendors={financeVendors}
         toast={sp?.toast ?? null}
         createdId={sp?.created ?? null}
-        vendorAddedId={sp?.vendor_added ?? null}
+        vendorFilledId={sp?.vendor_filled ?? null}
         canDelete={profile.role === "owner" || profile.role === "developer"}
       />
     </div>
