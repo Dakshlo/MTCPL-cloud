@@ -6900,15 +6900,11 @@ export async function involveOwnerAction(
       owner_review_resolved_by: null,
       owner_review_resolved_at: null,
       owner_review_resolution_note: null,
-      updated_by: profile.id,
-      updated_at: now,
     })
     .eq("id", jobId);
   if (error) {
-    // Most likely cause: migration 118 not applied yet (owner_review_*
-    // columns missing). Surface a clear, actionable message.
     return fail(
-      /column .* does not exist|owner_review|schema cache/i.test(error.message)
+      /owner_review/i.test(error.message)
         ? "Owner-review columns missing — run migration 118 in Supabase, then retry."
         : error.message,
     );
@@ -6934,8 +6930,6 @@ export async function resolveOwnerReviewAction(formData: FormData) {
       owner_review_resolved_by: profile.id,
       owner_review_resolved_at: now,
       owner_review_resolution_note: note,
-      updated_by: profile.id,
-      updated_at: now,
     })
     .eq("id", jobId)
     .eq("owner_review_status", "open");
