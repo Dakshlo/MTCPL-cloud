@@ -3,7 +3,8 @@
 // ──────────────────────────────────────────────────────────────────
 // Audit export for Finance → Reconcile. One row per vendor with their
 // current GRAND outstanding (plus billed / paid / held / open-bill
-// count), so it can be cross-checked against external books (Tally).
+// count), ordered highest-first, with a TOTAL row — for cross-checking
+// against external books (Tally).
 //
 // Auth: same audience as the Reconcile page — developer / owner /
 // accountant_star.
@@ -12,16 +13,32 @@
 // non-cancelled bills with amount_outstanding > 0) so the exported
 // totals tie out exactly to what's on screen. Read-only — writes
 // nothing except an audit-log event.
+//
+// Styled with ExcelJS in the Node runtime: header band, zebra-striped
+// rows for easy scanning, Indian (lakh) number format, highlighted
+// total. (The repo's xlsx-js-style fork trips a Turbopack bundling bug
+// and plain `xlsx` strips cell colours on write — see
+// /api/slabs/import-template for the same approach.)
 
 import { NextResponse } from "next/server";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+function round2(n: number): number {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+function thin(argb: string) {
+  const side = { style: "thin" as const, color: { argb } };
+  return { top: side, bottom: side, left: side, right: side };
+}
+
 export async function GET() {
-  // Top-level guard so any runtime error returns JSON the user can
-  // read, not an HTML 500 page that the browser tries to "download".
   try {
     return await handleExport();
   } catch (e) {
@@ -32,10 +49,6 @@ export async function GET() {
       { status: 500 },
     );
   }
-}
-
-function round2(n: number): number {
-  return Math.round((Number(n) || 0) * 100) / 100;
 }
 
 async function handleExport() {
@@ -136,6 +149,49 @@ async function handleExport() {
   const mm = String(ist.getUTCMonth() + 1).padStart(2, "0");
   const dd = String(ist.getUTCDate()).padStart(2, "0");
 
+  // ── Build the styled workbook ────────────────────────────────────
+  const NCOLS = 9;
+  const INR_FMT = "#,##,##0.00"; // Indian lakh grouping, 2 decimals
+  // Column alignment by index (1-based): 1=# center, 2-4 text left,
+  // 5 Open Bills center, 6-9 money right.
+  const alignFor = (col: number): "left" | "center" | "right" =>
+    col === 1 || col === 5 ? "center" : col >= 6 ? "right" : "left";
+
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Vendor Outstanding");
+  ws.columns = [
+    { width: 5 }, // #
+    { width: 34 }, // Vendor
+    { width: 16 }, // Nickname
+    { width: 16 }, // Category
+    { width: 11 }, // Open Bills
+    { width: 18 }, // Total Billed
+    { width: 18 }, // Total Paid
+    { width: 14 }, // Held
+    { width: 20 }, // Outstanding
+  ];
+
+  // Row 1 — title (merged across all columns).
+  ws.addRow(["MATESHWARI TEMPLE CONSTRUCTION PVT LTD — Vendor Outstanding"]);
+  ws.mergeCells(1, 1, 1, NCOLS);
+  const titleCell = ws.getCell(1, 1);
+  titleCell.font = { name: "Calibri", size: 15, bold: true, color: { argb: "FF1F3A5F" } };
+  titleCell.alignment = { horizontal: "left", vertical: "middle" };
+  ws.getRow(1).height = 26;
+
+  // Row 2 — subtitle (merged).
+  ws.addRow([`As on ${dd}-${mm}-${yyyy} (IST)  ·  ${rows.length} vendors`]);
+  ws.mergeCells(2, 1, 2, NCOLS);
+  const subCell = ws.getCell(2, 1);
+  subCell.font = { name: "Calibri", size: 11, italic: true, color: { argb: "FF6B7280" } };
+  subCell.alignment = { horizontal: "left", vertical: "middle" };
+  ws.getRow(2).height = 18;
+
+  // Row 3 — spacer.
+  ws.addRow([]);
+
+  // Row 4 — header band (dark slate-blue, white bold).
+  const HEADER_ROW = 4;
   const header = [
     "#",
     "Vendor",
@@ -147,18 +203,48 @@ async function handleExport() {
     "Held (₹)",
     "Outstanding (₹)",
   ];
-  const dataRows = rows.map((r, i) => [
-    i + 1,
-    r.name,
-    r.nickname || "",
-    r.category || "",
-    r.count,
-    round2(r.billed),
-    round2(r.paid),
-    round2(r.held),
-    round2(r.outstanding),
-  ]);
-  const totalRow = [
+  const headerRow = ws.addRow(header);
+  headerRow.height = 24;
+  headerRow.eachCell((c, col) => {
+    c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F3A5F" } };
+    c.font = { name: "Calibri", size: 11, bold: true, color: { argb: "FFFFFFFF" } };
+    c.alignment = { horizontal: alignFor(col), vertical: "middle", wrapText: true };
+    c.border = thin("FF14283F");
+  });
+
+  // Data rows — zebra striped for easy scanning.
+  rows.forEach((r, i) => {
+    const row = ws.addRow([
+      i + 1,
+      r.name,
+      r.nickname || "",
+      r.category || "",
+      r.count,
+      round2(r.billed),
+      round2(r.paid),
+      round2(r.held),
+      round2(r.outstanding),
+    ]);
+    row.height = 17;
+    const stripe = i % 2 === 0 ? "FFFFFFFF" : "FFEFF4FB"; // white / light blue
+    row.eachCell((c, col) => {
+      c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: stripe } };
+      c.font = {
+        name: "Calibri",
+        size: 11,
+        // The Outstanding column is the headline number — bold + red.
+        bold: col === NCOLS,
+        color: { argb: col === NCOLS ? "FFB91C1C" : "FF1F2937" },
+      };
+      c.alignment = { horizontal: alignFor(col), vertical: "middle" };
+      c.border = thin("FFD7E2F0");
+      if (col >= 6) c.numFmt = INR_FMT;
+    });
+  });
+
+  // Spacer + TOTAL row (gold band, bold, thicker top border).
+  ws.addRow([]);
+  const totalRow = ws.addRow([
     "",
     "TOTAL",
     "",
@@ -168,34 +254,31 @@ async function handleExport() {
     round2(totals.paid),
     round2(totals.held),
     round2(totals.outstanding),
-  ];
+  ]);
+  totalRow.height = 22;
+  totalRow.eachCell((c, col) => {
+    c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFCE8B2" } };
+    c.font = { name: "Calibri", size: 12, bold: true, color: { argb: "FF6B4E0F" } };
+    c.alignment = { horizontal: alignFor(col), vertical: "middle" };
+    c.border = {
+      top: { style: "medium", color: { argb: "FFB8860B" } },
+      bottom: { style: "medium", color: { argb: "FFB8860B" } },
+      left: { style: "thin", color: { argb: "FFE7C77A" } },
+      right: { style: "thin", color: { argb: "FFE7C77A" } },
+    };
+    if (col >= 6) c.numFmt = INR_FMT;
+  });
 
-  const aoa: (string | number)[][] = [
-    ["MATESHWARI TEMPLE CONSTRUCTION PVT LTD — Vendor Outstanding"],
-    [`As on ${dd}-${mm}-${yyyy} (IST) · ${rows.length} vendors`],
-    [],
-    header,
-    ...dataRows,
-    [],
-    totalRow,
-  ];
+  // Freeze everything down to the header so it stays visible on scroll,
+  // and turn on an auto-filter over the data columns.
+  ws.views = [{ state: "frozen", ySplit: HEADER_ROW }];
+  ws.autoFilter = {
+    from: { row: HEADER_ROW, column: 1 },
+    to: { row: HEADER_ROW, column: NCOLS },
+  };
 
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws["!cols"] = [
-    { wch: 4 }, // #
-    { wch: 34 }, // Vendor
-    { wch: 16 }, // Nickname
-    { wch: 16 }, // Category
-    { wch: 10 }, // Open Bills
-    { wch: 16 }, // Total Billed
-    { wch: 16 }, // Total Paid
-    { wch: 14 }, // Held
-    { wch: 18 }, // Outstanding
-  ];
-
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Vendor Outstanding");
-  const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
+  const out = await wb.xlsx.writeBuffer();
+  const body = out instanceof Uint8Array ? out : new Uint8Array(out as ArrayBuffer);
 
   void logAudit(profile.id, "vendor_outstanding_exported", "report", `vendors_${rows.length}`, {
     vendor_count: rows.length,
@@ -204,7 +287,7 @@ async function handleExport() {
   });
 
   const filename = `MTCPL-Vendor-Outstanding-${yyyy}-${mm}-${dd}.xlsx`;
-  return new NextResponse(new Uint8Array(buf), {
+  return new NextResponse(body, {
     status: 200,
     headers: {
       "Content-Type":
