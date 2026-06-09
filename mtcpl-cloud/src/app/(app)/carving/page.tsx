@@ -144,7 +144,7 @@ export default async function CarvingDashboardPage({
       // the carving, preserved at unload (cnc_machine_id is nulled
       // when the slab comes off the bed). The Carving Done Approval
       // card uses it to show which CNC produced the slab. (Daksh)
-      .select("id, slab_requirement_id, vendor_id, vendor_name, vendor_type, status, due_at, assigned_at, completed_at, cnc_machine_id, completed_on_cnc_machine_id")
+      .select("id, slab_requirement_id, vendor_id, vendor_name, vendor_type, status, due_at, assigned_at, completed_at, cnc_machine_id, completed_on_cnc_machine_id, owner_review_status, owner_review_kind, owner_review_note")
       .not("completed_at", "is", null)
       .is("review_approved_at", null)
       // Mig 097 — slabs marked "Still Pending Work" leave the approval
@@ -158,7 +158,7 @@ export default async function CarvingDashboardPage({
       // notes so the Carving Done card / peek can SHOW the photo the
       // reviewer took at sign-off. completed_on_cnc_machine_id is the
       // carving machine (cnc_machine_id is already nulled by now).
-      .select("id, slab_requirement_id, vendor_id, vendor_name, vendor_type, status, due_at, assigned_at, completed_at, review_approved_at, cnc_machine_id, completed_on_cnc_machine_id, location, ready_to_dispatch_at, review_image_path, review_image_paths, review_quality_flag, review_notes, depart_flag, depart_note")
+      .select("id, slab_requirement_id, vendor_id, vendor_name, vendor_type, status, due_at, assigned_at, completed_at, review_approved_at, cnc_machine_id, completed_on_cnc_machine_id, location, ready_to_dispatch_at, review_image_path, review_image_paths, review_quality_flag, review_notes, depart_flag, depart_note, owner_review_status, owner_review_kind, owner_review_note")
       .not("review_approved_at", "is", null)
       .order("review_approved_at", { ascending: false })
       .limit(200),

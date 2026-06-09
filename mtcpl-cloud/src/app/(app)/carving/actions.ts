@@ -6856,3 +6856,78 @@ export async function getMachineHistory(
     events,
   };
 }
+
+// ──────────────────────────────────────────────────────────────────
+// Mig 118 — "Involve owner" from Carving Done Approval.
+// The reviewer escalates a problem (e.g. "No slab code") to the owner.
+// The slab stays approvable/reworkable; state lives on the carving_items
+// row (one open issue per slab) and surfaces on the owner Tasks page.
+// ──────────────────────────────────────────────────────────────────
+const OWNER_REVIEW_KINDS = new Set(["no_slab_code", "other"]);
+
+/** Reviewer flags a slab for the owner's attention. */
+export async function involveOwnerAction(formData: FormData) {
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge"]);
+  const admin = createAdminSupabaseClient();
+  const jobId = txt(formData, "job_id");
+  const stay = txt(formData, "stay") === "1";
+  const kind = txt(formData, "problem_kind");
+  const note = txt(formData, "problem_note") || null;
+
+  const fail = (msg: string) => {
+    if (stay) throw new Error(msg);
+    redirect(`/carving?toast=${encodeURIComponent(msg)}`);
+  };
+  if (!jobId) fail("Missing job id.");
+  if (!OWNER_REVIEW_KINDS.has(kind)) fail("Pick a problem to report.");
+  if (kind === "other" && !note) fail("Describe the problem when choosing 'Other'.");
+
+  const now = new Date().toISOString();
+  const { error } = await admin
+    .from("carving_items")
+    .update({
+      owner_review_status: "open",
+      owner_review_kind: kind,
+      owner_review_note: kind === "no_slab_code" ? (note ?? "No slab code") : note,
+      owner_review_by: profile.id,
+      owner_review_at: now,
+      // Re-raising after a previous resolution clears the old resolution.
+      owner_review_resolved_by: null,
+      owner_review_resolved_at: null,
+      owner_review_resolution_note: null,
+      updated_by: profile.id,
+      updated_at: now,
+    })
+    .eq("id", jobId);
+  if (error) fail(error.message);
+  void logAudit(profile.id, "carving_owner_involved", "carving_item", jobId, { kind });
+  if (stay) return;
+  redirect("/carving?toast=Sent+to+owner+for+review");
+}
+
+/** Owner / developer marks an involved slab resolved (from the Tasks page). */
+export async function resolveOwnerReviewAction(formData: FormData) {
+  const { profile } = await requireAuth(["owner", "developer"]);
+  const admin = createAdminSupabaseClient();
+  const jobId = txt(formData, "job_id");
+  const note = txt(formData, "resolution_note") || null;
+  if (!jobId) redirect("/tasks/owner-reviews?toast=Missing+id");
+
+  const now = new Date().toISOString();
+  const { error } = await admin
+    .from("carving_items")
+    .update({
+      owner_review_status: "resolved",
+      owner_review_resolved_by: profile.id,
+      owner_review_resolved_at: now,
+      owner_review_resolution_note: note,
+      updated_by: profile.id,
+      updated_at: now,
+    })
+    .eq("id", jobId)
+    .eq("owner_review_status", "open");
+  if (error) redirect(`/tasks/owner-reviews?toast=${encodeURIComponent(error.message)}`);
+  void logAudit(profile.id, "carving_owner_resolved", "carving_item", jobId, {});
+  revalidatePath("/tasks/owner-reviews");
+  redirect("/tasks/owner-reviews?toast=Issue+resolved");
+}

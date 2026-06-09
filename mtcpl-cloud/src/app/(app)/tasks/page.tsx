@@ -139,6 +139,18 @@ export default async function TasksPage() {
     return count ?? 0;
   }
 
+  // Mig 118 — carving slabs escalated to the owner during Carving Done
+  // Approval ("Involve owner"). Owner/dev only.
+  async function fetchOwnerReviews(): Promise<number | null> {
+    if (profile.role !== "owner" && profile.role !== "developer") return null;
+    const { count, error } = await supabase
+      .from("carving_items")
+      .select("*", { count: "exact", head: true })
+      .eq("owner_review_status", "open");
+    if (error) return null;
+    return count ?? 0;
+  }
+
   const [
     approvals,
     billsAudit,
@@ -148,6 +160,7 @@ export default async function TasksPage() {
     finalAudit,
     royaltyApproval,
     workOrderApproval,
+    ownerReviews,
   ] = await Promise.all([
     fetchApprovals(),
     fetchBillsAudit(),
@@ -157,6 +170,7 @@ export default async function TasksPage() {
     fetchFinalAudit(),
     fetchRoyaltyApproval(),
     fetchWorkOrderApproval(),
+    fetchOwnerReviews(),
   ]);
 
   const cards: TaskCard[] = [];
@@ -234,6 +248,17 @@ export default async function TasksPage() {
       description: "Outsource work orders awaiting your price approval",
       count: workOrderApproval,
       icon: "🏭",
+      department: "production",
+    });
+  }
+  if (ownerReviews !== null) {
+    cards.push({
+      id: "owner-reviews",
+      href: "/tasks/owner-reviews",
+      label: "Owner Review",
+      description: "Carving slabs flagged to you during approval",
+      count: ownerReviews,
+      icon: "👤",
       department: "production",
     });
   }

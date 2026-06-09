@@ -27,6 +27,7 @@ import {
   rejectCarvingJobAction,
   reworkCarvingJobAction,
   stillPendingWorkAction,
+  involveOwnerAction,
   backToApprovalAction,
   markCarvingStartedManuallyAction,
   getJobEvents,
@@ -149,6 +150,12 @@ type JobRow = {
    *  waiting on vendor rework. */
   pending_work_at?: string | null;
   pending_work_note?: string | null;
+  /** Mig 118 — "Involve owner": a problem escalated to the owner during
+   *  Carving Done Approval. 'open' shows an "Owner review" badge; once the
+   *  owner resolves it the card shows "Issue resolved". */
+  owner_review_status?: string | null;
+  owner_review_kind?: string | null;
+  owner_review_note?: string | null;
 };
 
 type Vendor = {
@@ -3138,6 +3145,20 @@ function JobsByTemple({
                     </div>
                   )}
 
+                  {/* Mig 118 — "Owner review" flag so the team doesn't
+                      forget an escalated slab; turns into "Issue resolved"
+                      once the owner closes it from the Tasks page. */}
+                  {j.owner_review_status === "open" && (
+                    <div style={{ marginTop: 2, alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 800, color: "#7c2d12", background: "rgba(180,83,9,0.14)", border: "1px solid rgba(180,83,9,0.45)" }}>
+                      👤 Owner review{j.owner_review_kind === "no_slab_code" ? " · no slab code" : ""}
+                    </div>
+                  )}
+                  {j.owner_review_status === "resolved" && (
+                    <div style={{ marginTop: 2, alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: "#15803d", background: "rgba(22,163,74,0.12)", border: "1px solid rgba(22,163,74,0.4)" }}>
+                      ✓ Issue resolved
+                    </div>
+                  )}
+
                   {/* Daksh (June 2026) — reviewer's approve photo on
                       the Carving Done card. Before this the photo was
                       saved at sign-off but never shown back here. Only
@@ -3933,7 +3954,14 @@ function JobDetailPeek({
 
           {/* Status banner — context-specific */}
           {inReview && (
-            <ApproveRejectForms jobId={job.id} isOutsource={job.vendor_type === "Outsource"} onDone={onClose} />
+            <ApproveRejectForms
+              jobId={job.id}
+              isOutsource={job.vendor_type === "Outsource"}
+              ownerReviewStatus={job.owner_review_status ?? null}
+              ownerReviewKind={job.owner_review_kind ?? null}
+              ownerReviewNote={job.owner_review_note ?? null}
+              onDone={onClose}
+            />
           )}
           {/* Event timeline — server-action fetched on mount.
               Lazy so opening the peek stays instant. */}
@@ -3982,7 +4010,87 @@ function JobDetailPeek({
 // so the server action skips its redirect; on success we close the
 // modal and refresh the route, which keeps the carving head on the
 // Awaiting Review tab instead of bouncing them to the detail page.
-function ApproveRejectForms({ jobId, isOutsource, onDone }: { jobId: string; isOutsource: boolean; onDone: () => void }) {
+// Mig 118 — "Involve owner" block shown inside the Carving Done Approval
+// modal. Lets the reviewer escalate a problem to the owner (one open issue
+// per slab); the slab can still be approved / reworked / rejected.
+function OwnerInvolveSection({
+  jobId, status, kind, note, onDone,
+}: {
+  jobId: string; status: string | null; kind: string | null; note: string | null; onDone: () => void;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [pkind, setPkind] = useState<"no_slab_code" | "other">("no_slab_code");
+  const [pnote, setPnote] = useState("");
+  const [pending, setPending] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  function send() {
+    if (pending) return;
+    if (pkind === "other" && !pnote.trim()) {
+      setErr("Describe the problem when choosing 'Other'.");
+      return;
+    }
+    setPending(true);
+    setErr(null);
+    const fd = new FormData();
+    fd.set("job_id", jobId);
+    fd.set("stay", "1");
+    fd.set("problem_kind", pkind);
+    if (pnote.trim()) fd.set("problem_note", pnote.trim());
+    involveOwnerAction(fd)
+      .then(() => {
+        onDone();
+        router.refresh();
+      })
+      .catch((e: unknown) => {
+        setErr(e instanceof Error ? e.message : String(e));
+        setPending(false);
+      });
+  }
+
+  if (status === "open") {
+    return (
+      <div style={{ padding: "10px 12px", border: "1.5px solid rgba(180,83,9,0.5)", background: "rgba(180,83,9,0.08)", borderRadius: 10, fontSize: 12.5 }}>
+        <div style={{ fontWeight: 800, color: "#7c2d12" }}>👤 Owner review pending</div>
+        <div style={{ color: "var(--muted)", marginTop: 2, lineHeight: 1.4 }}>
+          {kind === "no_slab_code" ? "No slab code" : "Reported"}{note && kind !== "no_slab_code" ? ` — ${note}` : ""}. The owner resolves it from their Tasks page; you can still approve / rework / reject this slab.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ border: "1px dashed var(--border)", borderRadius: 10, padding: "10px 12px" }}>
+      {status === "resolved" && (
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#15803d", marginBottom: open ? 8 : 0 }}>✓ Owner marked the previous issue resolved</div>
+      )}
+      {!open ? (
+        <button type="button" onClick={() => setOpen(true)} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", padding: "9px 12px", fontSize: 12.5, fontWeight: 800, color: "#7c2d12", background: "rgba(180,83,9,0.08)", border: "1px solid rgba(180,83,9,0.4)", borderRadius: 8, cursor: "pointer" }}>
+          👤 Involve owner — report a problem
+        </button>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Report to owner</div>
+          <select value={pkind} onChange={(e) => setPkind(e.target.value as "no_slab_code" | "other")} style={{ padding: "8px 10px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 8, background: "var(--surface)", color: "var(--text)" }}>
+            <option value="no_slab_code">No slab code</option>
+            <option value="other">Other (describe)</option>
+          </select>
+          {pkind === "other" && (
+            <textarea value={pnote} onChange={(e) => setPnote(e.target.value)} rows={2} placeholder="Describe the problem for the owner" style={{ padding: "8px 10px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 8, background: "var(--surface)", color: "var(--text)", resize: "vertical", fontFamily: "inherit" }} />
+          )}
+          {err && <div style={{ fontSize: 12, color: "#991b1b", fontWeight: 600 }}>⚠ {err}</div>}
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button type="button" onClick={() => { setOpen(false); setErr(null); }} style={{ padding: "7px 12px", fontSize: 12.5, fontWeight: 700, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, cursor: "pointer", color: "var(--text)" }}>Cancel</button>
+            <button type="button" disabled={pending} onClick={send} style={{ padding: "7px 14px", fontSize: 12.5, fontWeight: 800, color: "#fff", background: "#b45309", border: "none", borderRadius: 8, cursor: pending ? "wait" : "pointer" }}>{pending ? "Sending…" : "Send to owner"}</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ApproveRejectForms({ jobId, isOutsource, onDone, ownerReviewStatus, ownerReviewKind, ownerReviewNote }: { jobId: string; isOutsource: boolean; onDone: () => void; ownerReviewStatus?: string | null; ownerReviewKind?: string | null; ownerReviewNote?: string | null }) {
   const router = useRouter();
   // Mig 080 — three outcomes. The selected mode drives which form
   // is open and which server action gets called on submit. Image
@@ -4482,6 +4590,16 @@ function ApproveRejectForms({ jobId, isOutsource, onDone }: { jobId: string; isO
         </span>
         {tintPack.tagline}
       </div>
+
+      {/* Mig 118 — Involve owner: escalate a problem (e.g. no slab code)
+          without blocking approve / rework / reject. */}
+      <OwnerInvolveSection
+        jobId={jobId}
+        status={ownerReviewStatus ?? null}
+        kind={ownerReviewKind ?? null}
+        note={ownerReviewNote ?? null}
+        onDone={onDone}
+      />
 
       {err && (
         <div
