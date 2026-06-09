@@ -8,7 +8,7 @@
 // creatable fixed list (Shade 1, Shade 2, …).
 // ──────────────────────────────────────────────────────────────────
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createMachinesBulkAction, updateMachineAction, createGroupAction, updateGroupAction, deleteGroupAction } from "./actions";
 
@@ -21,7 +21,7 @@ export type Machine = {
   notes: string | null;
   group_id: string | null;
   imageUrl: string | null;   // resolved: own photo, else the group's photo
-  openTickets: number;
+  underMaintenanceSince: string | null; // ISO; set while status = under_maintenance
 };
 export type GroupOpt = { id: string; name: string };   // name may carry hierarchy ("CNC › Mohit CNC")
 export type Group = {
@@ -35,12 +35,43 @@ const STATUS_META: Record<string, { label: string; bg: string; fg: string }> = {
   retired: { label: "Retired", bg: "rgba(148,163,184,0.2)", fg: "#475569" },
 };
 
-// Whole-card tint by status so the state reads at a glance, not just the chip.
-const STATUS_CARD: Record<string, { border: string; bg: string }> = {
-  working: { border: "rgba(22,163,74,0.55)", bg: "rgba(22,163,74,0.07)" },
-  under_maintenance: { border: "rgba(234,88,12,0.6)", bg: "rgba(234,88,12,0.10)" },
-  retired: { border: "rgba(148,163,184,0.6)", bg: "rgba(148,163,184,0.14)" },
+// Whole-card look by status — BOLD so the state is unmistakable even behind a
+// machine photo: solid colour border + a solid status band across the card.
+const STATUS_SOLID: Record<string, string> = {
+  working: "#15803d", // green
+  under_maintenance: "#ea580c", // orange
+  retired: "#64748b", // slate
 };
+const STATUS_CARD: Record<string, { border: string; bg: string }> = {
+  working: { border: "#16a34a", bg: "rgba(22,163,74,0.14)" },
+  under_maintenance: { border: "#ea580c", bg: "rgba(234,88,12,0.20)" },
+  retired: { border: "#94a3b8", bg: "rgba(148,163,184,0.18)" },
+};
+
+// "2d 5h" style elapsed-time formatter.
+function fmtDur(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) ms = 0;
+  const mins = Math.floor(ms / 60000);
+  const d = Math.floor(mins / 1440);
+  const h = Math.floor((mins % 1440) / 60);
+  const m = mins % 60;
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+// Live "down for Xd Yh" timer. Seeded with the server's `now` so the first
+// client render matches (no hydration flicker), then ticks every minute.
+export function MaintTimer({ since, nowMs, style }: { since: string; nowMs: number; style?: React.CSSProperties }) {
+  const [now, setNow] = useState(nowMs);
+  useEffect(() => {
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), 60000);
+    return () => clearInterval(t);
+  }, []);
+  const started = new Date(since).getTime();
+  return <span style={style}>⏱ {fmtDur(now - started)}</span>;
+}
 
 const inputStyle: React.CSSProperties = {
   width: "100%", boxSizing: "border-box", padding: "9px 12px", fontSize: 14,
@@ -214,59 +245,106 @@ export function MachineFormModal({
 }
 
 // ── Machine card ────────────────────────────────────────────────────
-function MachineCard({ m }: { m: Machine }) {
+function MachineCard({ m, nowMs }: { m: Machine; nowMs: number }) {
   const sc = STATUS_CARD[m.status] ?? STATUS_CARD.working;
+  const solid = STATUS_SOLID[m.status] ?? STATUS_SOLID.working;
+  const meta = STATUS_META[m.status] ?? STATUS_META.working;
   return (
     <Link
       href={`/maintenance/${m.id}`}
       style={{
-        textDecoration: "none", color: "inherit", border: `2px solid ${sc.border}`, borderRadius: 14,
+        textDecoration: "none", color: "inherit", border: `3px solid ${sc.border}`, borderRadius: 14,
         background: sc.bg, overflow: "hidden", display: "flex", flexDirection: "column",
-        boxShadow: "0 1px 3px rgba(0,0,0,0.05)", ...(m.status === "retired" ? { opacity: 0.7 } : {}),
+        boxShadow: "0 1px 3px rgba(0,0,0,0.05)", ...(m.status === "retired" ? { opacity: 0.72 } : {}),
       }}
     >
-      <div style={{ position: "relative" }}>
-        <PhotoBox url={m.imageUrl} height={140} rounded="0" />
-        <div style={{ position: "absolute", top: 8, right: 8 }}><StatusChip status={m.status} /></div>
-        {m.openTickets > 0 && (
-          <div style={{ position: "absolute", top: 8, left: 8, fontSize: 10.5, fontWeight: 800, color: "#fff", background: "rgba(234,88,12,0.92)", borderRadius: 999, padding: "2px 9px" }}>
-            {m.openTickets} open
-          </div>
+      {/* Smaller photo so the colour-coding, not the picture, dominates. */}
+      <PhotoBox url={m.imageUrl} height={96} rounded="0" />
+
+      {/* Solid status band — unmistakable colour + live "down for…" timer. */}
+      <div style={{ background: solid, color: "#fff", padding: "5px 10px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <span style={{ fontSize: 11, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em" }}>{meta.label}</span>
+        {m.status === "under_maintenance" && m.underMaintenanceSince && (
+          <MaintTimer since={m.underMaintenanceSince} nowMs={nowMs} style={{ fontSize: 11, fontWeight: 800 }} />
         )}
-        {/* bottom status ribbon so the colour is unmistakable on the whole card */}
-        <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 4, background: sc.border }} />
       </div>
-      <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 4 }}>
-        <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 11.5, color: "var(--muted)" }}>{m.machine_code}</code>
-        <div style={{ fontWeight: 700, fontSize: 15, lineHeight: 1.2 }}>{m.name}</div>
+
+      <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
+        <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 11, color: "var(--muted)" }}>{m.machine_code}</code>
+        <div style={{ fontWeight: 800, fontSize: 15, lineHeight: 1.2 }}>{m.name}</div>
         {m.location && <div className="muted" style={{ fontSize: 11.5 }}>📍 {m.location}</div>}
       </div>
     </Link>
   );
 }
 
-function MachineGrid({ machines }: { machines: Machine[] }) {
-  if (machines.length === 0) return <div className="muted" style={{ fontSize: 13, padding: "6px 2px" }}>No machines here yet.</div>;
+function MachineGrid({ machines, nowMs }: { machines: Machine[]; nowMs: number }) {
+  if (machines.length === 0) return <div className="muted" style={{ fontSize: 13, padding: "6px 2px" }}>No machines here.</div>;
   // Natural-sort by name so CNC-1, CNC-2 … CNC-10 line up in sequence
   // (not CNC-1, CNC-10, CNC-2 or whatever created-order produced).
   const ordered = [...machines].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 12 }}>
-      {ordered.map((m) => <MachineCard key={m.id} m={m} />)}
+      {ordered.map((m) => <MachineCard key={m.id} m={m} nowMs={nowMs} />)}
     </div>
+  );
+}
+
+// ── Top status filter chip (count + click-to-filter) ───────────────
+function FilterChip({
+  label, count, active, onClick, tint,
+}: {
+  label: string; count: number; active: boolean; onClick: () => void;
+  tint: { border: string; bg: string; fg: string };
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: "flex", alignItems: "center", gap: 9, padding: "9px 15px", borderRadius: 12, cursor: "pointer",
+        border: `2px solid ${active ? tint.border : "var(--border)"}`,
+        background: active ? tint.bg : "var(--surface)",
+      }}
+    >
+      <span style={{ fontSize: 13, fontWeight: 800, color: active ? tint.fg : "var(--text)" }}>{label}</span>
+      <span style={{ fontSize: 13, fontWeight: 900, color: tint.fg, background: active ? "rgba(255,255,255,0.65)" : tint.bg, borderRadius: 999, padding: "1px 9px", minWidth: 22, textAlign: "center" }}>{count}</span>
+    </button>
   );
 }
 
 // ── Registry ────────────────────────────────────────────────────────
 export function MachinesGrid({
-  tree, ungrouped, groupOpts, topGroupOpts, locations,
+  tree, ungrouped, groupOpts, topGroupOpts, locations, nowMs,
 }: {
-  tree: Group[]; ungrouped: Machine[]; groupOpts: GroupOpt[]; topGroupOpts: GroupOpt[]; locations: string[];
+  tree: Group[]; ungrouped: Machine[]; groupOpts: GroupOpt[]; topGroupOpts: GroupOpt[]; locations: string[]; nowMs: number;
 }) {
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "working" | "under_maintenance" | "retired">("all");
   const q = search.trim().toLowerCase();
-  const matchM = (m: Machine) => [m.machine_code, m.name, m.location].some((v) => (v ?? "").toLowerCase().includes(q));
-  const fM = (list: Machine[]) => (q ? list.filter(matchM) : list);
+  const matchSearch = (m: Machine) => !q || [m.machine_code, m.name, m.location].some((v) => (v ?? "").toLowerCase().includes(q));
+  const matchStatus = (m: Machine) => statusFilter === "all" || m.status === statusFilter;
+  // A filter is "active" (and hides empty groups) when searching OR a status
+  // chip other than All is selected.
+  const active = q.length > 0 || statusFilter !== "all";
+  const fM = (list: Machine[]) => list.filter((m) => matchStatus(m) && matchSearch(m));
+
+  // Counts across every machine (groups + sub-groups + ungrouped) for the
+  // top filter chips.
+  const counts = useMemo(() => {
+    const c = { all: 0, working: 0, under_maintenance: 0, retired: 0 };
+    const tally = (list: Machine[]) => {
+      for (const m of list) {
+        c.all += 1;
+        if (m.status === "working") c.working += 1;
+        else if (m.status === "under_maintenance") c.under_maintenance += 1;
+        else if (m.status === "retired") c.retired += 1;
+      }
+    };
+    tally(ungrouped);
+    for (const g of tree) { tally(g.machines); for (const s of g.subgroups ?? []) tally(s.machines); }
+    return c;
+  }, [tree, ungrouped]);
 
   // Collapsible groups. Default = everything collapsed for a quick
   // overview; click a header (or Expand all) to open. Searching forces open.
@@ -286,8 +364,9 @@ export function MachinesGrid({
     return n;
   }, [tree, ungrouped]);
 
-  // When searching, hide groups/subgroups with no matches.
-  const visibleTree = q
+  // When a search or status filter is active, hide groups/sub-groups that
+  // have no matching machines.
+  const visibleTree = active
     ? tree
         .map((g) => ({
           ...g,
@@ -296,13 +375,26 @@ export function MachinesGrid({
         }))
         .filter((g) => g.machines.length > 0 || (g.subgroups ?? []).length > 0)
     : tree;
-  const visibleUngrouped = fM(ungrouped);
+  const visibleUngrouped = active ? fM(ungrouped) : ungrouped;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      {/* Status filter chips — counts at a glance; click to filter. */}
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <FilterChip label="All" count={counts.all} active={statusFilter === "all"} onClick={() => setStatusFilter("all")}
+          tint={{ border: "var(--border)", bg: "var(--surface)", fg: "var(--text)" }} />
+        <FilterChip label="Working" count={counts.working} active={statusFilter === "working"} onClick={() => setStatusFilter("working")}
+          tint={{ border: STATUS_SOLID.working, bg: "rgba(22,163,74,0.12)", fg: STATUS_SOLID.working }} />
+        <FilterChip label="Under maintenance" count={counts.under_maintenance} active={statusFilter === "under_maintenance"} onClick={() => setStatusFilter("under_maintenance")}
+          tint={{ border: STATUS_SOLID.under_maintenance, bg: "rgba(234,88,12,0.14)", fg: "#9a3412" }} />
+        {counts.retired > 0 && (
+          <FilterChip label="Retired" count={counts.retired} active={statusFilter === "retired"} onClick={() => setStatusFilter("retired")}
+            tint={{ border: STATUS_SOLID.retired, bg: "rgba(148,163,184,0.16)", fg: "#475569" }} />
+        )}
+      </div>
+
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
         <GroupFormModal mode="add" parentOptions={topGroupOpts} back="/maintenance" buttonLabel="＋ Create group" />
-        <Link href="/maintenance/tickets" style={{ ...btnGhost, textDecoration: "none", display: "inline-block" }}>🧾 Repair tickets</Link>
         {tree.length > 0 && (
           <button type="button" onClick={allCollapsed ? expandAll : collapseAll} style={btnGhost}>
             {allCollapsed ? "Expand all" : "Collapse all"}
@@ -318,7 +410,7 @@ export function MachinesGrid({
       )}
 
       {visibleTree.map((g) => {
-        const isCollapsed = q ? false : !!collapsed[g.id];
+        const isCollapsed = active ? false : !!collapsed[g.id];
         return (
         <div key={g.id} style={{ border: "1px solid var(--border)", borderRadius: 16, background: "var(--surface)", overflow: "hidden" }}>
           {/* Top group header — click the left part to collapse / expand */}
@@ -345,11 +437,11 @@ export function MachinesGrid({
           {!isCollapsed && (
           <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 14 }}>
             {/* direct machines */}
-            {(g.machines.length > 0 || !q) && <MachineGrid machines={g.machines} />}
+            {(g.machines.length > 0 || !active) && <MachineGrid machines={g.machines} nowMs={nowMs} />}
 
             {/* sub-groups */}
             {(g.subgroups ?? []).map((s) => {
-              const subCollapsed = q ? false : !!collapsed[s.id];
+              const subCollapsed = active ? false : !!collapsed[s.id];
               return (
               <div key={s.id} style={{ border: "1px dashed var(--border)", borderRadius: 12, padding: 12, background: "var(--bg)" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: subCollapsed ? 0 : 10 }}>
@@ -367,7 +459,7 @@ export function MachinesGrid({
                     <GroupFormModal mode="edit" group={{ id: s.id, name: s.name, imageUrl: s.imageUrl, parent_id: s.parent_id }} parentOptions={topGroupOpts} back="/maintenance" buttonLabel="Edit" buttonStyle={{ ...btnGhost, padding: "6px 11px", fontSize: 12 }} />
                   </div>
                 </div>
-                {!subCollapsed && <MachineGrid machines={s.machines} />}
+                {!subCollapsed && <MachineGrid machines={s.machines} nowMs={nowMs} />}
               </div>
               );
             })}
@@ -382,7 +474,7 @@ export function MachinesGrid({
           <div style={{ padding: 12, borderBottom: "1px solid var(--border)", background: "var(--surface-alt, rgba(0,0,0,0.02))", fontWeight: 800, fontSize: 15 }}>
             Ungrouped <span className="muted" style={{ fontWeight: 600, fontSize: 12 }}>· {visibleUngrouped.length}</span>
           </div>
-          <div style={{ padding: 12 }}><MachineGrid machines={visibleUngrouped} /></div>
+          <div style={{ padding: 12 }}><MachineGrid machines={visibleUngrouped} nowMs={nowMs} /></div>
         </div>
       )}
     </div>

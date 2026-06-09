@@ -356,9 +356,17 @@ export async function setMachineStatusAction(formData: FormData) {
     redirect(back(formData, "Invalid status change."));
   }
   const admin = createAdminSupabaseClient();
+  const now = new Date().toISOString();
+  // Mig 116 — stamp when the machine goes under maintenance so the board can
+  // show "down for Xd Yh"; clear it the moment it's working/retired again.
   const { error } = await admin
     .from("company_machines")
-    .update({ status, updated_at: new Date().toISOString(), updated_by: profile.id })
+    .update({
+      status,
+      under_maintenance_since: status === "under_maintenance" ? now : null,
+      updated_at: now,
+      updated_by: profile.id,
+    })
     .eq("id", id);
   if (error) redirect(back(formData, error.message));
   await logAudit(profile.id, "machine_status_set", "company_machine", id, { status });
@@ -366,20 +374,13 @@ export async function setMachineStatusAction(formData: FormData) {
   redirect(back(formData, `Machine marked ${status.replace(/_/g, " ")}.`));
 }
 
-/** Delete a machine — only when it has no tickets (otherwise retire it). */
+/** Delete a machine (owner/dev). */
 export async function deleteMachineAction(formData: FormData) {
   const { profile } = await requireAuth();
   if (!isAllowed(profile.role)) redirect(back(formData, "Not allowed."));
   const id = txt(formData, "id");
   if (!id) redirect(back(formData, "Missing machine."));
   const admin = createAdminSupabaseClient();
-  const { count } = await admin
-    .from("machine_maintenance_tickets")
-    .select("*", { count: "exact", head: true })
-    .eq("machine_id", id);
-  if ((count ?? 0) > 0) {
-    redirect(back(formData, "This machine has tickets — retire it instead of deleting."));
-  }
   const { error } = await admin.from("company_machines").delete().eq("id", id);
   if (error) redirect(back(formData, error.message));
   await logAudit(profile.id, "machine_deleted", "company_machine", id, {});

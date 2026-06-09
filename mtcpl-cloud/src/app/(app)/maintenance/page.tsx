@@ -6,7 +6,6 @@ import { MachinesGrid, type Machine, type Group, type GroupOpt } from "./machine
 export const dynamic = "force-dynamic";
 
 const ALLOWED = ["owner", "developer"];
-const OPEN_STATUSES = ["raised", "inspecting", "awaiting_approval", "in_repair"];
 const IMG_BUCKET = "machine_images";
 
 export default async function MaintenancePage() {
@@ -16,17 +15,11 @@ export default async function MaintenancePage() {
   const admin = createAdminSupabaseClient();
   const pub = (path: string | null) => (path ? admin.storage.from(IMG_BUCKET).getPublicUrl(path).data.publicUrl : null);
 
-  const [{ data: groupRows }, { data: machineRows }, { data: openTickets }, { data: locRows }] = await Promise.all([
+  const [{ data: groupRows }, { data: machineRows }, { data: locRows }] = await Promise.all([
     admin.from("machine_groups").select("id, name, image_path, parent_id").order("name", { ascending: true }),
-    admin.from("company_machines").select("id, machine_code, name, group_id, image_path, status, location, notes").order("created_at", { ascending: false }),
-    admin.from("machine_maintenance_tickets").select("machine_id").in("status", OPEN_STATUSES),
+    admin.from("company_machines").select("id, machine_code, name, group_id, image_path, status, location, notes, under_maintenance_since").order("created_at", { ascending: false }),
     admin.from("machine_locations").select("name").order("name", { ascending: true }),
   ]);
-
-  const openCount = new Map<string, number>();
-  for (const r of (openTickets ?? []) as Array<{ machine_id: string }>) {
-    openCount.set(r.machine_id, (openCount.get(r.machine_id) ?? 0) + 1);
-  }
 
   type GroupRow = { id: string; name: string; image_path: string | null; parent_id: string | null };
   const grows = (groupRows ?? []) as GroupRow[];
@@ -44,12 +37,13 @@ export default async function MaintenancePage() {
   type MachineRow = {
     id: string; machine_code: string | null; name: string; group_id: string | null;
     image_path: string | null; status: string; location: string | null; notes: string | null;
+    under_maintenance_since: string | null;
   };
   const machines: Machine[] = ((machineRows ?? []) as MachineRow[]).map((m) => ({
     id: m.id, machine_code: m.machine_code, name: m.name, status: m.status,
     location: m.location, notes: m.notes, group_id: m.group_id,
     imageUrl: m.image_path ? pub(m.image_path) : resolvedImg(m.group_id),
-    openTickets: openCount.get(m.id) ?? 0,
+    underMaintenanceSince: m.under_maintenance_since,
   }));
   const machinesOf = (gid: string) => machines.filter((m) => m.group_id === gid);
 
@@ -79,11 +73,12 @@ export default async function MaintenancePage() {
       <div>
         <h1 style={{ margin: 0, fontSize: 22 }}>🛠️ Maintenance — Machines</h1>
         <p className="muted" style={{ margin: "2px 0 0", fontSize: 13, maxWidth: 720 }}>
-          Group your machines (CNC, Cranes, Vehicles…), nest sub-groups if needed (CNC → Mohit CNC), each group
-          shares a photo. Add machines into a group, then raise a repair ticket from a machine&apos;s page.
+          Group your machines (CNC, Cranes, Vehicles…), nest sub-groups if needed (CNC → Mohit CNC). Mark each
+          machine <strong>Working</strong> or <strong>Under maintenance</strong> from its page — the board shows
+          what&apos;s running at a glance, and how long anything has been down.
         </p>
       </div>
-      <MachinesGrid tree={tree} ungrouped={ungrouped} groupOpts={groupOpts} topGroupOpts={topGroupOpts} locations={locations} />
+      <MachinesGrid tree={tree} ungrouped={ungrouped} groupOpts={groupOpts} topGroupOpts={topGroupOpts} locations={locations} nowMs={Date.now()} />
     </div>
   );
 }

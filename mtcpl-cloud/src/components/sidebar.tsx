@@ -356,8 +356,9 @@ const navEntries: NavEntry[] = [
     roles: ["developer", "owner", "tender_manager", "senior_incharge", "carving_head"],
     department: "register",
   },
-  // ── MAINTENANCE section (mig 108–110) — company machine registry +
-  //    repair-ticket workflow. Owner + developer only for now.
+  // ── MAINTENANCE section (mig 108+) — company machine registry. The
+  //    repair-ticket workflow is shelved for now; the board is a simple
+  //    Working / Under-maintenance view. Owner + developer only.
   {
     type: "divider",
     label: "MAINTENANCE",
@@ -368,13 +369,6 @@ const navEntries: NavEntry[] = [
     href: "/maintenance",
     label: "Machines",
     icon: "🛠️",
-    roles: ["developer", "owner"],
-    department: "maintenance",
-  },
-  {
-    href: "/maintenance/tickets",
-    label: "Repair Tickets",
-    icon: "🧾",
     roles: ["developer", "owner"],
     department: "maintenance",
   },
