@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
+import { AccountsHero } from "../../accounts/_ui/components";
 import { WorkOrderDocClient, type DocRecord, type FinanceVendor } from "./doc-client";
 
 export const dynamic = "force-dynamic";
@@ -94,14 +95,11 @@ export default async function WorkOrderDocPage({ searchParams }: { searchParams:
   }));
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14, paddingBottom: 32 }}>
-      <div>
-        <h1 style={{ margin: 0, fontSize: 22 }}>🧾 Work Order Document</h1>
-        <p className="muted" style={{ margin: "2px 0 0", fontSize: 13, maxWidth: 760 }}>
-          Fill the details by hand and generate a printable work-order on the company letterhead. Standalone —
-          not linked to carving work orders or anything else. Every document you generate is kept below.
-        </p>
-      </div>
+    <section className="page-card">
+      <AccountsHero
+        title="🧾 Work Order Document"
+        description="Generate a printable work order on the company letterhead. Pick the vendor from Finance; every document you generate is kept below."
+      />
       <WorkOrderDocClient
         records={records}
         financeVendors={financeVendors}
@@ -110,6 +108,6 @@ export default async function WorkOrderDocPage({ searchParams }: { searchParams:
         vendorFilledId={sp?.vendor_filled ?? null}
         canDelete={ALLOWED.includes(profile.role)}
       />
-    </div>
+    </section>
   );
 }

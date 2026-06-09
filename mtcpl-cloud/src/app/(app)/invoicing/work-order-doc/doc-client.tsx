@@ -196,8 +196,8 @@ export function WorkOrderDocClient({
       <style>{`
         .wod-in { width:100%; box-sizing:border-box; padding:10px 13px; font-size:14px; border:1px solid var(--border);
                   border-radius:10px; background:var(--bg); color:var(--text); transition:border-color .15s, box-shadow .15s; }
-        .wod-in:focus { outline:none; border-color:var(--gold); box-shadow:0 0 0 3px rgba(201,161,74,0.18); }
-        .wod-row:hover { background:rgba(201,161,74,0.05); }
+        .wod-in:focus { outline:none; border-color:#4f46e5; box-shadow:0 0 0 3px rgba(79,70,229,0.15); }
+        .wod-row:hover { background:rgba(79,70,229,0.05); }
         .wod-btn { transition:transform .08s ease, filter .15s ease; }
         .wod-btn:hover:not(:disabled) { filter:brightness(1.04); }
         .wod-btn:active:not(:disabled) { transform:translateY(1px); }
@@ -225,7 +225,7 @@ export function WorkOrderDocClient({
             ✓ Document ready for <strong>{justCreated.vendor}</strong>
             {justCreated.jobWorkNo ? ` · ${justCreated.jobWorkNo}` : ""}
           </span>
-          <a className="wod-btn" href={`/api/invoicing/work-order-doc/${justCreated.id}`} style={{ padding: "10px 20px", fontSize: 14, fontWeight: 800, color: "#fff", background: "var(--gold-dark)", borderRadius: 10, textDecoration: "none", whiteSpace: "nowrap", boxShadow: "0 2px 8px rgba(146,64,14,0.25)" }}>
+          <a className="wod-btn" href={`/api/invoicing/work-order-doc/${justCreated.id}`} style={{ padding: "10px 20px", fontSize: 14, fontWeight: 800, color: "#fff", background: "#4f46e5", borderRadius: 10, textDecoration: "none", whiteSpace: "nowrap", boxShadow: "0 2px 8px rgba(79,70,229,0.22)" }}>
             ⬇ Download document
           </a>
         </div>
@@ -282,7 +282,7 @@ export function WorkOrderDocClient({
                     ))}
                   </div>
                   <div>
-                    <button type="submit" className="wod-btn" style={{ padding: "8px 16px", fontSize: 13, fontWeight: 800, color: "#fff", background: "var(--gold-dark)", border: "none", borderRadius: 10, cursor: "pointer" }}>
+                    <button type="submit" className="wod-btn" style={{ padding: "8px 16px", fontSize: 13, fontWeight: 800, color: "#fff", background: "#4f46e5", border: "none", borderRadius: 10, cursor: "pointer" }}>
                       💾 Save details to vendor
                     </button>
                     <span style={{ fontSize: 11, color: "var(--muted)", marginLeft: 10 }}>Only these fields are updated — bank / payment details are never touched.</span>
@@ -291,13 +291,6 @@ export function WorkOrderDocClient({
               )}
             </div>
           )}
-
-          <Field label="Work order code" hint="Generated automatically when you create the document.">
-            <div style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "10px 13px", border: "1px dashed var(--border)", borderRadius: 10, background: "var(--surface-alt, rgba(0,0,0,0.03))", fontFamily: "ui-monospace, monospace", fontWeight: 800, color: "var(--gold-dark)", fontSize: 14, width: "fit-content" }}>
-              🏷️ {codePreview}
-              <span style={{ fontFamily: "system-ui, sans-serif", fontWeight: 600, fontSize: 10.5, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>auto</span>
-            </div>
-          </Field>
 
           {/* ── Line items (up to 4 groups) — each prints its own
                 description + unit/quantity/price/total on the PDF. ─────── */}
@@ -308,9 +301,9 @@ export function WorkOrderDocClient({
             </div>
 
             {groups.map((g, i) => (
-              <div key={i} style={{ background: "var(--gold-subtle, rgba(201,161,74,0.08))", border: "1px solid var(--gold-border, rgba(201,161,74,0.3))", borderRadius: 12, padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+              <div key={i} style={{ background: "#eef2ff", border: "1px solid #c7d2fe", borderRadius: 12, padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                  <span style={{ fontSize: 11, fontWeight: 800, color: "var(--gold-dark)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Item {i + 1}</span>
+                  <span style={{ fontSize: 11, fontWeight: 800, color: "#4f46e5", textTransform: "uppercase", letterSpacing: "0.06em" }}>Item {i + 1}</span>
                   {groups.length > 1 && (
                     <button type="button" onClick={() => removeGroup(i)} style={{ fontSize: 12, fontWeight: 700, color: "#b91c1c", background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.3)", borderRadius: 8, padding: "3px 10px", cursor: "pointer" }}>
                       ✕ Remove
@@ -337,13 +330,13 @@ export function WorkOrderDocClient({
                   </div>
                   <div style={{ textAlign: "right", minWidth: 120 }}>
                     <div style={{ fontSize: 10.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 3 }}>Line total</div>
-                    <div style={{ fontSize: 20, fontWeight: 900, color: "var(--gold-dark)", fontFamily: "ui-monospace, monospace", lineHeight: 1 }}>{inr(groupTotal(g))}</div>
+                    <div style={{ fontSize: 20, fontWeight: 900, color: "#4f46e5", fontFamily: "ui-monospace, monospace", lineHeight: 1 }}>{inr(groupTotal(g))}</div>
                   </div>
                 </div>
               </div>
             ))}
 
-            <button type="button" onClick={addGroup} disabled={groups.length >= MAX_GROUPS} className="wod-btn" style={{ alignSelf: "flex-start", padding: "8px 16px", fontSize: 13, fontWeight: 800, color: groups.length >= MAX_GROUPS ? "var(--muted)" : "var(--gold-dark)", background: "var(--bg)", border: `1px dashed ${groups.length >= MAX_GROUPS ? "var(--border)" : "var(--gold)"}`, borderRadius: 10, cursor: groups.length >= MAX_GROUPS ? "not-allowed" : "pointer" }}>
+            <button type="button" onClick={addGroup} disabled={groups.length >= MAX_GROUPS} className="wod-btn" style={{ alignSelf: "flex-start", padding: "8px 16px", fontSize: 13, fontWeight: 800, color: groups.length >= MAX_GROUPS ? "var(--muted)" : "#4f46e5", background: "var(--bg)", border: `1px dashed ${groups.length >= MAX_GROUPS ? "var(--border)" : "#4f46e5"}`, borderRadius: 10, cursor: groups.length >= MAX_GROUPS ? "not-allowed" : "pointer" }}>
               ＋ Add line item{groups.length >= MAX_GROUPS ? " (max 4)" : ""}
             </button>
 
@@ -355,13 +348,13 @@ export function WorkOrderDocClient({
               </label>
               <div style={{ textAlign: "right" }}>
                 <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 2 }}>Grand total</div>
-                <div style={{ fontSize: 26, fontWeight: 900, color: "var(--gold-dark)", fontFamily: "ui-monospace, monospace", lineHeight: 1 }}>{inr(grandTotal)}</div>
+                <div style={{ fontSize: 26, fontWeight: 900, color: "#4f46e5", fontFamily: "ui-monospace, monospace", lineHeight: 1 }}>{inr(grandTotal)}</div>
               </div>
             </div>
           </div>
 
           {/* Generate — opens our confirmation modal (no browser confirm). */}
-          <button type="button" onClick={() => canSubmit && setConfirmAction({ kind: "generate" })} disabled={!canSubmit} className="wod-btn" style={{ alignSelf: "flex-end", padding: "12px 28px", fontSize: 15, fontWeight: 800, color: "#fff", background: canSubmit ? "var(--gold-dark)" : "var(--border)", border: "none", borderRadius: 12, cursor: canSubmit ? "pointer" : "not-allowed", boxShadow: canSubmit ? "0 3px 10px rgba(146,64,14,0.25)" : "none" }}>
+          <button type="button" onClick={() => canSubmit && setConfirmAction({ kind: "generate" })} disabled={!canSubmit} className="wod-btn" style={{ alignSelf: "flex-end", padding: "12px 28px", fontSize: 15, fontWeight: 800, color: "#fff", background: canSubmit ? "#4f46e5" : "var(--border)", border: "none", borderRadius: 12, cursor: canSubmit ? "pointer" : "not-allowed", boxShadow: canSubmit ? "0 3px 10px rgba(79,70,229,0.22)" : "none" }}>
             ✅ Generate &amp; download
           </button>
         </div>
@@ -424,7 +417,7 @@ export function WorkOrderDocClient({
                         <td style={{ padding: "11px 14px", fontFamily: "ui-monospace, monospace", fontWeight: 700, whiteSpace: "nowrap", color: ink, textDecoration: del ? "line-through" : "none" }}>
                           {r.jobWorkNo || "—"}
                           {!del && r.lineItemCount > 1 && (
-                            <span style={{ fontFamily: "system-ui, sans-serif", fontWeight: 700, fontSize: 10, color: "var(--gold-dark)", background: "rgba(201,161,74,0.15)", borderRadius: 999, padding: "1px 7px", marginLeft: 6 }}>{r.lineItemCount} items</span>
+                            <span style={{ fontFamily: "system-ui, sans-serif", fontWeight: 700, fontSize: 10, color: "#4f46e5", background: "rgba(79,70,229,0.12)", borderRadius: 999, padding: "1px 7px", marginLeft: 6 }}>{r.lineItemCount} items</span>
                           )}
                           {del && (
                             <span style={{ fontFamily: "system-ui, sans-serif", fontWeight: 800, fontSize: 10, color: "#fff", background: "#b91c1c", borderRadius: 999, padding: "1px 8px", marginLeft: 6, textDecoration: "none" }}>DELETED</span>
@@ -436,7 +429,7 @@ export function WorkOrderDocClient({
                         <td style={{ padding: "11px 14px", textAlign: "right", fontFamily: "ui-monospace, monospace", color: ink ?? "var(--muted)" }}>{inr(r.rate)}</td>
                         <td style={{ padding: "11px 14px", textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800, color: ink }}>{inr(r.total)}</td>
                         <td style={{ padding: "11px 14px", whiteSpace: "nowrap" }}>
-                          <a href={`/api/invoicing/work-order-doc/${r.id}`} style={{ color: del ? "#b91c1c" : "var(--gold-dark)", fontWeight: 700, textDecoration: "none", opacity: del ? 0.75 : 1 }}>⬇ PDF</a>
+                          <a href={`/api/invoicing/work-order-doc/${r.id}`} style={{ color: del ? "#b91c1c" : "#4f46e5", fontWeight: 700, textDecoration: "none", opacity: del ? 0.75 : 1 }}>⬇ PDF</a>
                         </td>
                         <td style={{ padding: "11px 14px", whiteSpace: "nowrap", textAlign: "right" }}>
                           {del ? (
@@ -487,7 +480,7 @@ export function WorkOrderDocClient({
                 </div>
                 <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
                   <button type="button" onClick={() => setConfirmAction(null)} style={btnGhost}>Cancel</button>
-                  <button type="button" onClick={confirmYes} className="wod-btn" style={{ ...btnPrimary, background: "var(--gold-dark)" }}>✅ Confirm &amp; generate</button>
+                  <button type="button" onClick={confirmYes} className="wod-btn" style={{ ...btnPrimary, background: "#4f46e5" }}>✅ Confirm &amp; generate</button>
                 </div>
               </>
             ) : (
@@ -513,7 +506,7 @@ function Row({ k, v, mono, strong }: { k: string; v: string; mono?: boolean; str
   return (
     <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
       <span style={{ color: "var(--muted)" }}>{k}</span>
-      <span style={{ fontWeight: strong ? 900 : 600, fontFamily: mono ? "ui-monospace, monospace" : "inherit", color: strong ? "var(--gold-dark)" : "var(--text)", textAlign: "right" }}>{v}</span>
+      <span style={{ fontWeight: strong ? 900 : 600, fontFamily: mono ? "ui-monospace, monospace" : "inherit", color: strong ? "#4f46e5" : "var(--text)", textAlign: "right" }}>{v}</span>
     </div>
   );
 }
