@@ -121,9 +121,12 @@ export function CarvingStockClient({
   });
   const [allExpanded, setAllExpanded] = useState(false);
 
+  // "Not assigned" has a sub-option: also restrict to un-cut (open) slabs —
+  // the only place to see all still-uncut required sizes.
+  const [uncutOnly, setUncutOnly] = useState(false);
+
   const searching = search.trim().length > 0;
   const kindActive = kinds.size > 0;
-  const active = searching || kindActive; // any filter applied
 
   const toggleKind = (k: ColorKind) =>
     setKinds((prev) => {
@@ -132,10 +135,22 @@ export function CarvingStockClient({
       else next.add(k);
       return next;
     });
+  // Toggling the "Not assigned" chip; turning it OFF also drops the
+  // un-cut sub-filter so it doesn't linger invisibly.
+  function toggleNormal() {
+    const willBeOn = !kinds.has("normal");
+    toggleKind("normal");
+    if (!willBeOn) setUncutOnly(false);
+  }
+
+  // Un-cut = a required size not yet physically cut (open / planned).
+  const isUncut = (s: StockSlab) => s.status === "open" || s.status === "planned";
 
   const filtered = useMemo(() => {
     return slabs.filter((s) => {
       if (kindActive && !kinds.has(s.colorKind)) return false;
+      // Sub-filter: only un-cut not-assigned slabs (doesn't touch other colours).
+      if (uncutOnly && s.colorKind === "normal" && !isUncut(s)) return false;
       if (
         searching &&
         !slabSearchMatch(
@@ -148,7 +163,7 @@ export function CarvingStockClient({
       }
       return true;
     });
-  }, [slabs, search, searching, kinds, kindActive]);
+  }, [slabs, search, searching, kinds, kindActive, uncutOnly]);
 
   // Counts for the legend (over the full set, not the filtered view).
   const counts = useMemo(() => {
@@ -156,6 +171,11 @@ export function CarvingStockClient({
     for (const s of slabs) c[s.colorKind] += 1;
     return c;
   }, [slabs]);
+  // How many not-assigned slabs are still un-cut (open / planned).
+  const uncutNormalCount = useMemo(
+    () => slabs.filter((s) => s.colorKind === "normal" && isUncut(s)).length,
+    [slabs],
+  );
 
   // Group by temple, newest activity first.
   const grouped = useMemo(() => {
@@ -212,7 +232,7 @@ export function CarvingStockClient({
             <button
               key={k}
               type="button"
-              onClick={() => toggleKind(k)}
+              onClick={() => (k === "normal" ? toggleNormal() : toggleKind(k))}
               aria-pressed={on}
               title="Tap to filter by this colour"
               style={{
@@ -235,10 +255,36 @@ export function CarvingStockClient({
             </button>
           );
         })}
+        {/* Sub-filter of "Not assigned" — appears once it's ticked. Restricts
+            the not-assigned set to still-uncut (open / planned) sizes. */}
+        {kinds.has("normal") && (
+          <button
+            type="button"
+            onClick={() => setUncutOnly((v) => !v)}
+            aria-pressed={uncutOnly}
+            title="Within Not assigned, show only un-cut (open) sizes"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 12.5,
+              color: "var(--text)",
+              cursor: "pointer",
+              padding: "5px 11px",
+              borderRadius: 999,
+              border: `1px dashed ${uncutOnly ? "var(--gold-dark, #a16207)" : "var(--border)"}`,
+              background: uncutOnly ? "rgba(201,161,74,0.12)" : "var(--bg)",
+            }}
+          >
+            <span style={{ width: 12, textAlign: "center", fontSize: 12, fontWeight: 900, color: "var(--gold-dark, #a16207)" }}>{uncutOnly ? "✓" : ""}</span>
+            ↳ <span style={{ fontWeight: uncutOnly ? 800 : 700 }}>Un-cut (open) only</span>
+            <span style={{ color: "var(--muted)" }}>· {uncutNormalCount}</span>
+          </button>
+        )}
         {kindActive && (
           <button
             type="button"
-            onClick={() => setKinds(new Set())}
+            onClick={() => { setKinds(new Set()); setUncutOnly(false); }}
             style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
           >
             Clear
@@ -283,13 +329,13 @@ export function CarvingStockClient({
           <div className="banner">No slabs match the current filter.</div>
         ) : (
           grouped.map(({ temple, slabs: groupSlabs, latestAt }) => {
-            const isCollapsed = active ? false : (collapsed[temple] ?? false);
+            const isCollapsed = searching ? false : (collapsed[temple] ?? false);
             const priorityCount = groupSlabs.filter((s) => s.priority).length;
             return (
               <div key={temple}>
                 <button
                   type="button"
-                  onClick={() => !active && toggle(temple)}
+                  onClick={() => !searching && toggle(temple)}
                   aria-expanded={!isCollapsed}
                   style={{
                     width: "100%",
@@ -304,7 +350,7 @@ export function CarvingStockClient({
                     borderBottomWidth: 2,
                     borderBottomStyle: "solid",
                     borderBottomColor: "var(--border)",
-                    cursor: active ? "default" : "pointer",
+                    cursor: searching ? "default" : "pointer",
                     textAlign: "left",
                   }}
                 >
@@ -325,7 +371,7 @@ export function CarvingStockClient({
                     <span style={{ fontSize: 12, color: "var(--muted)", fontWeight: 600 }}>
                       {groupSlabs.length} {groupSlabs.length === 1 ? "size" : "sizes"}
                     </span>
-                    {!active && (
+                    {!searching && (
                       <span style={{ fontSize: 11, color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 5 }}>
                         {isCollapsed ? "Show" : "Hide"}
                         <span style={{ fontSize: 10 }}>{isCollapsed ? "▶" : "▼"}</span>
