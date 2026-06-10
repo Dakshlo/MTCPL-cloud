@@ -177,9 +177,14 @@ export default async function BillsListPage({
         }
         actions={
           canSubmitBills(profile) ? (
-            <Link href="/accounts/bills/new" style={BUTTON_STYLES.primary}>
-              + New bill
-            </Link>
+            <>
+              <Link href="/accounts/bills/scan-multi" style={BUTTON_STYLES.secondary}>
+                📑 Add multiple bills
+              </Link>
+              <Link href="/accounts/bills/new" style={BUTTON_STYLES.primary}>
+                + New bill
+              </Link>
+            </>
           ) : null
         }
       />
