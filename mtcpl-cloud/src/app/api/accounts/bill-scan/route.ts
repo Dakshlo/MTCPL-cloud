@@ -59,7 +59,17 @@ Rules:
 - GST: report the printed RATES (percent), not the rupee amounts. A bill has either CGST+SGST (intra-state) or IGST (inter-state), not both.
 - If the bill shows multiple line items, subtotal/total are the bill-level figures; description is a short summary.
 - Use null for anything you cannot read confidently. Do not guess digits.
-- Set confidence to "low" if the photo is blurry, cut off, or handwritten and hard to read.`;
+
+DIGIT ACCURACY (critical — this feeds accounting records):
+- Read the bill number and every amount DIGIT BY DIGIT, then look at the image a second time and re-verify each character before answering.
+- Handwritten digits are easily confused: 1 vs 4 vs 7 (a 4 has a closed/angled top, a 1 is a single stroke), 0 vs 6, 5 vs 8, 3 vs 8. Zoom into stroke shapes; never substitute a similar-looking digit.
+- Cross-check the amounts against each other: subtotal + GST must equal total. If your readings don't add up, one digit is wrong — re-read all three before answering.
+- If ANY character of bill_no or any amount is still uncertain after re-checking, keep your best reading but set confidence to "low".
+
+Confidence:
+- "high" only for clean printed bills you read with zero doubt.
+- "medium" for any handwritten bill, even a neat one.
+- "low" if the photo is blurry, cut off, or any digit is uncertain.`;
 
 export async function POST(req: NextRequest) {
   try {
@@ -114,7 +124,10 @@ async function handleScan(req: NextRequest) {
 
   const response = await client.messages.create({
     model,
-    max_tokens: 4096,
+    max_tokens: 8000,
+    // Adaptive thinking — lets the model reason carefully over handwritten
+    // digits (the 4-vs-1 class of misreads) before committing to an answer.
+    thinking: { type: "adaptive" },
     output_config: { format: { type: "json_schema", schema: EXTRACT_SCHEMA } },
     messages: [
       {

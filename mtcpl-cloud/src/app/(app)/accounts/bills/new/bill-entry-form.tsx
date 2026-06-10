@@ -333,6 +333,8 @@ export function BillEntryForm({
     }
     if (d.confidence === "low") {
       notes.push("⚠ The photo was hard to read — double-check every field.");
+    } else if (d.confidence === "medium") {
+      notes.push("⚠ Handwritten / medium-confidence read — verify the bill number and amounts digit by digit.");
     }
 
     // Attach the scan as the bill's proof document (new bills only).
