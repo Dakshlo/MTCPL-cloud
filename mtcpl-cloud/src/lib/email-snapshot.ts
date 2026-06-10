@@ -29,9 +29,52 @@ export type SnapshotItem = {
   urgency: "action_needed" | "fyi";
 };
 
-const LOOKBACK_HOURS = 40; // covers the gap between runs with margin
-const MAX_EMAILS = 40;
+// How far back to read. The 5am/2pm crons always use "today"; the
+// dashboard Refresh button lets the owner pick a wider window.
+export type SnapshotRange = "today" | "yesterday" | "last_3_days" | "last_7_days";
+
+const RANGE_LABELS: Record<SnapshotRange, string> = {
+  today: "Today",
+  yesterday: "Yesterday onward",
+  last_3_days: "Last 3 days",
+  last_7_days: "Last 7 days",
+};
+
+export function rangeLabel(r: string | null | undefined): string {
+  return RANGE_LABELS[(r ?? "today") as SnapshotRange] ?? "Today";
+}
+
+function normalizeRange(r: string | null | undefined): SnapshotRange {
+  return r === "yesterday" || r === "last_3_days" || r === "last_7_days" ? r : "today";
+}
+
+const IST_OFFSET_MS = 5.5 * 3600 * 1000;
+
+// Start of the IST calendar day `daysAgo` days back, as a UTC Date —
+// what IMAP's `since` filter wants. daysAgo: 0=today, 1=yesterday, etc.
+function istStartOfDay(daysAgo: number): Date {
+  const ist = new Date(Date.now() + IST_OFFSET_MS);
+  const midnightIstAsUtc = Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate() - daysAgo) - IST_OFFSET_MS;
+  return new Date(midnightIstAsUtc);
+}
+
+function sinceForRange(range: SnapshotRange): Date {
+  const daysAgo = range === "today" ? 0 : range === "yesterday" ? 1 : range === "last_3_days" ? 2 : 6;
+  return istStartOfDay(daysAgo);
+}
+
+const MAX_EMAILS = 60;
 const MAX_BODY_CHARS = 1500;
+
+// Google's own service mail (sign-in alerts, security/policy notices,
+// account notifications) comes from these domains. Daksh: never show
+// it, no matter how "urgent" it looks. Real people on gmail.com /
+// googlemail.com are NOT affected — only Google-the-company senders.
+function isGoogleServiceSender(address: string | undefined): boolean {
+  if (!address) return false;
+  const domain = address.toLowerCase().split("@")[1] ?? "";
+  return domain === "google.com" || domain.endsWith(".google.com");
+}
 
 const SUMMARY_SCHEMA = {
   type: "object",
@@ -69,14 +112,16 @@ const SUMMARY_SCHEMA = {
 const SUMMARY_PROMPT = `You are screening the inbox of the OWNER of MATESHWARI TEMPLE CONSTRUCTION PVT LTD (MTCPL), a stone/marble temple-construction business in India, so he sees only what matters on his dashboard.
 
 IMPORTANT emails (keep): bank/payment alerts and statements, UPI/NEFT/RTGS confirmations, GST/income-tax/government notices, clients or temples writing about projects or payments, vendors asking for something, legal/insurance/compliance, anything with money amounts or deadlines that concern the business or the owner personally.
-NOT important (drop): promotions, marketing, newsletters, social media notifications, OTP/verification codes, app notifications, spam.
+NOT important (drop): promotions, marketing, newsletters, social media notifications, OTP/verification codes, app notifications, spam. ALSO drop any email sent BY Google itself (sign-in/security alerts, account or policy notices, Google Workspace/Maps/Drive notifications) — mark these important=false even if they look urgent.
 
 For every email in the input, return an item with the same idx. Mark important true/false. For important ones, write a 1-2 sentence summary that states EXACTLY what is in the email — concrete amounts, dates, account/invoice numbers, names, and what (if anything) the owner must do. Do not be vague ("a bank update") — be specific ("HDFC: Rs. 4,41,513 debited to Shree Marble on 9 Jun, balance Rs. 12,30,000"). urgency = action_needed only when he must actually do something.`;
 
-type FetchedEmail = { from: string; subject: string; date: string; body: string };
+// fromName = clean display name (what we show in bold); fromText keeps
+// the full "Name <addr>" for the AI's context.
+type FetchedEmail = { fromName: string; fromText: string; subject: string; date: string; body: string };
 
-/** Read recent inbox mail over read-only IMAP. */
-async function fetchRecentEmails(): Promise<FetchedEmail[]> {
+/** Read recent inbox mail over read-only IMAP, within the given range. */
+async function fetchRecentEmails(range: SnapshotRange): Promise<FetchedEmail[]> {
   const user = process.env.GMAIL_USER;
   const pass = process.env.GMAIL_APP_PASSWORD;
   if (!user || !pass) {
@@ -97,7 +142,7 @@ async function fetchRecentEmails(): Promise<FetchedEmail[]> {
     // readOnly — the session can't even set a \Seen flag.
     const lock = await client.getMailboxLock("INBOX", { readOnly: true });
     try {
-      const since = new Date(Date.now() - LOOKBACK_HOURS * 3600 * 1000);
+      const since = sinceForRange(range);
       const uids = await client.search({ since }, { uid: true });
       const recent = (Array.isArray(uids) ? uids : []).slice(-MAX_EMAILS);
       if (recent.length > 0) {
@@ -105,9 +150,14 @@ async function fetchRecentEmails(): Promise<FetchedEmail[]> {
           if (!msg.source) continue;
           try {
             const parsed = await simpleParser(msg.source);
+            const sender = parsed.from?.value?.[0];
+            // Drop Google's own service mail entirely — never surfaced.
+            if (isGoogleServiceSender(sender?.address)) continue;
+            const fromName = (sender?.name ?? "").trim() || sender?.address || "(unknown sender)";
             const body = (parsed.text ?? "").replace(/\s+/g, " ").trim().slice(0, MAX_BODY_CHARS);
             out.push({
-              from: parsed.from?.text ?? "(unknown sender)",
+              fromName,
+              fromText: parsed.from?.text ?? fromName,
               subject: parsed.subject ?? "(no subject)",
               date: parsed.date ? parsed.date.toISOString() : "",
               body,
@@ -137,7 +187,7 @@ async function summarize(emails: FetchedEmail[]): Promise<{ overview: string; it
   const anthropic = new Anthropic();
   const model = process.env.EMAIL_SNAPSHOT_MODEL || "claude-sonnet-4-6";
 
-  const input = emails.map((e, idx) => ({ idx, from: e.from, subject: e.subject, date: e.date, body: e.body }));
+  const input = emails.map((e, idx) => ({ idx, from: e.fromText, subject: e.subject, date: e.date, body: e.body }));
   const response = await anthropic.messages.create({
     model,
     max_tokens: 8000,
@@ -163,7 +213,7 @@ async function summarize(emails: FetchedEmail[]): Promise<{ overview: string; it
     const src = emails[it.idx];
     if (!src) continue;
     items.push({
-      from: src.from,
+      from: src.fromName,
       subject: src.subject,
       summary: it.summary,
       category: it.category,
@@ -177,16 +227,22 @@ async function summarize(emails: FetchedEmail[]): Promise<{ overview: string; it
 
 /** Full run: fetch → summarize → store. Always writes a row (with `error`
  *  set on failure) so the dashboard can show what happened. */
-export async function runEmailSnapshot(trigger: "cron" | "manual"): Promise<{ ok: boolean; error?: string; itemCount?: number }> {
+export async function runEmailSnapshot(
+  trigger: "cron" | "manual",
+  range: string = "today",
+): Promise<{ ok: boolean; error?: string; itemCount?: number }> {
   const admin = createAdminSupabaseClient();
+  // Crons always read just today; only a manual refresh may widen the window.
+  const effectiveRange: SnapshotRange = trigger === "cron" ? "today" : normalizeRange(range);
   try {
-    const emails = await fetchRecentEmails();
+    const emails = await fetchRecentEmails(effectiveRange);
     const { overview, items } = await summarize(emails);
     const { error } = await admin.from("email_snapshots").insert({
       items,
       overview,
       scanned_count: emails.length,
       trigger,
+      range: effectiveRange,
     });
     if (error) return { ok: false, error: error.message };
     return { ok: true, itemCount: items.length };
@@ -195,7 +251,7 @@ export async function runEmailSnapshot(trigger: "cron" | "manual"): Promise<{ ok
     // Best-effort error row so the dashboard surfaces config problems.
     await admin
       .from("email_snapshots")
-      .insert({ items: [], overview: null, scanned_count: 0, trigger, error: msg })
+      .insert({ items: [], overview: null, scanned_count: 0, trigger, range: effectiveRange, error: msg })
       .then(() => {}, () => {});
     return { ok: false, error: msg };
   }

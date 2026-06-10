@@ -34,18 +34,21 @@ async function isOwnerSession(): Promise<boolean> {
   }
 }
 
-async function handle(req: NextRequest, trigger: "cron" | "manual") {
+export async function GET(req: NextRequest) {
+  // Cron path — always reads just today (range is fixed server-side).
   if (!isCronRequest(req) && !(await isOwnerSession())) {
     return NextResponse.json({ ok: false, error: "Not allowed." }, { status: 403 });
   }
-  const result = await runEmailSnapshot(trigger);
+  const result = await runEmailSnapshot("cron", "today");
   return NextResponse.json(result, { status: result.ok ? 200 : 500 });
 }
 
-export async function GET(req: NextRequest) {
-  return handle(req, "cron");
-}
-
 export async function POST(req: NextRequest) {
-  return handle(req, "manual");
+  // Manual refresh from the dashboard — owner/dev only, with a chosen window.
+  if (!(await isOwnerSession())) {
+    return NextResponse.json({ ok: false, error: "Not allowed." }, { status: 403 });
+  }
+  const range = new URL(req.url).searchParams.get("range") ?? "today";
+  const result = await runEmailSnapshot("manual", range);
+  return NextResponse.json(result, { status: result.ok ? 200 : 500 });
 }
