@@ -6,6 +6,7 @@ import { canTransferPlannedSlabs } from "@/lib/cutting-permissions";
 import { AskAiEntryCard } from "@/components/ask-ai-entry-card";
 import { BlockJourneyEntryCard } from "@/components/block-journey-entry-card";
 import { TvModeEntryCard } from "@/components/tv-mode-entry-card";
+import { EmailSnapshotCard } from "./email-snapshot-card";
 import { VariousCostingEntryCard } from "@/components/various-costing-entry-card";
 import { PeekIframe } from "@/components/peek-iframe";
 
@@ -270,6 +271,13 @@ export default async function DashboardPage() {
         <VariousCostingEntryCard />
         <TvModeEntryCard />
       </div>
+
+      {/* ── EMAIL SNAPSHOT (June 2026) — owner/dev only. AI-picked
+          important emails from the owner's Gmail, summarized. The
+          mailbox link is read-only (IMAP, no SMTP in the codebase). */}
+      {(profile.role === "owner" || profile.role === "developer") && (
+        <EmailSnapshotCard />
+      )}
 
       {/* ── REPORT BUTTONS ──
           Both reports open as center-peek iframe modals over /embed

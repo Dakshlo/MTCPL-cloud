@@ -18,7 +18,9 @@ const nextConfig: NextConfig = {
   // colourful slab-import template server-side (/api/slabs/import-template);
   // marking it external keeps Next/Turbopack from re-bundling its Node
   // internals, which is exactly the trap that broke the styled xlsx fork.
-  serverExternalPackages: ["xlsx", "exceljs"],
+  // imapflow + mailparser (June 2026) — Node-only TCP/stream internals for
+  // the owner email snapshot; same keep-out-of-the-bundle treatment.
+  serverExternalPackages: ["xlsx", "exceljs", "imapflow", "mailparser"],
 };
 
 /**
