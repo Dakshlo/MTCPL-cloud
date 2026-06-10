@@ -12,7 +12,7 @@
  * reloads with the new vendor pre-selected via `?picked=<id>`.
  */
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 import {
@@ -243,6 +243,129 @@ export function BillEntryForm({
     if (!v.tcs_applicable) setTcsPercent("");
   }
 
+  // ── AI bill scan (June 2026) — OPTIONAL pre-fill. Uploads the photo/
+  // PDF to /api/accounts/bill-scan (read-only — no DB writes), maps the
+  // extracted fields into the form state, and attaches the file as the
+  // bill document. The accountant reviews everything and saves through
+  // the normal submit — manual entry is completely unchanged.
+  const scanInputRef = useRef<HTMLInputElement>(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [scanNotes, setScanNotes] = useState<string[]>([]);
+
+  type ScanData = {
+    vendor_name?: string | null;
+    vendor_gstin?: string | null;
+    bill_no?: string | null;
+    bill_date?: string | null;
+    description?: string | null;
+    subtotal?: number | null;
+    cgst_percent?: number | null;
+    sgst_percent?: number | null;
+    igst_percent?: number | null;
+    total?: number | null;
+    confidence?: string;
+  };
+
+  function applyScan(d: ScanData, file: File) {
+    const notes: string[] = [];
+
+    // Vendor match: exact GSTIN first (most reliable), then name.
+    const normGst = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, "").toUpperCase();
+    const normName = (s: string | null | undefined) => (s ?? "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+    let matched: BillVendorOption | null = null;
+    if (d.vendor_gstin) {
+      matched = vendors.find((v) => normGst(v.gstin) === normGst(d.vendor_gstin) && normGst(v.gstin) !== "") ?? null;
+    }
+    if (!matched && d.vendor_name) {
+      const target = normName(d.vendor_name);
+      if (target.length >= 4) {
+        const hits = vendors.filter((v) => {
+          const n = normName(v.name);
+          return n === target || n.includes(target) || target.includes(n);
+        });
+        if (hits.length === 1) matched = hits[0];
+      }
+    }
+    if (matched) {
+      handleVendorChange(matched.id);
+      notes.push(`Vendor matched: ${matched.name}`);
+    } else {
+      notes.push(
+        d.vendor_name
+          ? `Vendor "${d.vendor_name}" not found in your list — pick it manually.`
+          : "Couldn't read the vendor name — pick it manually.",
+      );
+    }
+
+    if (d.bill_date && /^\d{4}-\d{2}-\d{2}$/.test(d.bill_date) && !billDateLocked) setBillDate(d.bill_date);
+    if (d.bill_no && !vendorBillNoLocked) setVendorBillNo(String(d.bill_no));
+    if (d.description) setDescription(String(d.description));
+    if (d.subtotal != null && d.subtotal > 0) setSubtotal(String(d.subtotal));
+
+    const igst = Number(d.igst_percent ?? 0);
+    const cgst = Number(d.cgst_percent ?? 0);
+    const sgst = Number(d.sgst_percent ?? 0);
+    if (igst > 0) {
+      setGstMode("inter");
+      setIgstPercent(String(igst));
+    } else if (cgst > 0 || sgst > 0) {
+      // Bills sometimes print only one of the pair — mirror it.
+      setGstMode("intra");
+      setCgstPercent(String(cgst > 0 ? cgst : sgst));
+      setSgstPercent(String(sgst > 0 ? sgst : cgst));
+    } else {
+      setGstMode("intra");
+      setCgstPercent("0");
+      setSgstPercent("0");
+    }
+
+    // Math check: does subtotal + read GST = the printed total? A
+    // mismatch usually means the AI misread a digit — flag it loudly.
+    if (d.subtotal != null && d.total != null && d.subtotal > 0 && d.total > 0) {
+      const rate = igst > 0 ? igst : (cgst > 0 || sgst > 0 ? (cgst > 0 ? cgst : sgst) + (sgst > 0 ? sgst : cgst) : 0);
+      const expected = d.subtotal * (1 + rate / 100);
+      if (Math.abs(expected - d.total) > 1.5) {
+        notes.push(
+          `⚠ Check amounts — subtotal + GST (₹${Math.round(expected).toLocaleString("en-IN")}) doesn't match the printed total (₹${Math.round(d.total).toLocaleString("en-IN")}).`,
+        );
+      }
+    }
+    if (d.confidence === "low") {
+      notes.push("⚠ The photo was hard to read — double-check every field.");
+    }
+
+    // Attach the scan as the bill's proof document (new bills only).
+    if (mode !== "edit") {
+      setBillDoc(file);
+      notes.push("Scan attached as the bill document.");
+    }
+    setScanNotes(notes);
+  }
+
+  async function handleScanFile(file: File | null) {
+    if (!file || scanning) return;
+    setScanning(true);
+    setScanError(null);
+    setScanNotes([]);
+    try {
+      const fd = new FormData();
+      fd.set("file", file);
+      const res = await fetch("/api/accounts/bill-scan", { method: "POST", body: fd });
+      const json = (await res.json()) as { ok: boolean; data?: ScanData; error?: string };
+      if (!json.ok || !json.data) {
+        setScanError(json.error ?? "Scan failed — enter the bill manually.");
+        return;
+      }
+      applyScan(json.data, file);
+    } catch {
+      setScanError("Scan failed — check your connection, or enter the bill manually.");
+    } finally {
+      setScanning(false);
+      if (scanInputRef.current) scanInputRef.current.value = "";
+    }
+  }
+
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
@@ -362,6 +485,58 @@ export function BillEntryForm({
     >
       {/* LEFT — grouped sections */}
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        {/* ── AI bill scan (optional) — pre-fills the form from a photo/
+            PDF of the bill. Manual entry below works exactly as before. */}
+        {mode === "new" && (
+          <div
+            style={{
+              padding: "12px 14px",
+              background: ACCOUNTS_TOKENS.accentLight,
+              border: `1.5px dashed ${ACCOUNTS_TOKENS.accentBorder}`,
+              borderRadius: 10,
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <input
+                ref={scanInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,application/pdf"
+                style={{ display: "none" }}
+                onChange={(e) => handleScanFile(e.target.files?.[0] ?? null)}
+              />
+              <button
+                type="button"
+                disabled={scanning}
+                onClick={() => scanInputRef.current?.click()}
+                style={{
+                  ...BUTTON_STYLES.primary,
+                  opacity: scanning ? 0.7 : 1,
+                  cursor: scanning ? "wait" : "pointer",
+                }}
+              >
+                {scanning ? "⏳ Reading the bill…" : "📷 Scan bill (AI)"}
+              </button>
+              <span style={{ fontSize: 12, color: "var(--muted)", flex: 1, minWidth: 200 }}>
+                Optional — upload a photo or PDF and the form pre-fills automatically.
+                <strong> Verify every field before submitting.</strong> Manual entry works as always.
+              </span>
+            </div>
+            {scanError && (
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: ACCOUNTS_TOKENS.danger }}>⚠ {scanError}</div>
+            )}
+            {scanNotes.length > 0 && (
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, color: "var(--text)", display: "flex", flexDirection: "column", gap: 2 }}>
+                {scanNotes.map((n, i) => (
+                  <li key={i} style={n.startsWith("⚠") ? { color: "#92400e", fontWeight: 700 } : undefined}>{n}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
         {/* Mig 058 follow-on (Daksh) — callout when bill_date +
             vendor_bill_no are locked (pending-approval edit). */}
         {anyTokenFieldLocked && (
