@@ -8,7 +8,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import type { SnapshotItem } from "@/lib/email-snapshot";
+import type { SnapshotItem, FullMessage } from "@/lib/email-snapshot";
 
 type Snap = {
   generatedAt: string;
@@ -56,12 +56,67 @@ function fmtIst(iso: string): string {
   }
 }
 
+// Email date for the card — day + month + year, no time, to stay compact.
+function fmtEmailDate(iso: string | undefined): string {
+  if (!iso) return "";
+  try {
+    return new Date(iso).toLocaleDateString("en-IN", {
+      timeZone: "Asia/Kolkata",
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+  } catch {
+    return "";
+  }
+}
+
+function fmtBytes(n: number): string {
+  if (!n) return "";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
 export function EmailSnapshotPanel({ snap, configured }: { snap: Snap | null; configured: boolean }) {
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
   const [range, setRange] = useState<string>(snap?.range ?? "today");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // Center-peek: the full email is fetched LIVE on click (never stored).
+  const [openItem, setOpenItem] = useState<SnapshotItem | null>(null);
+  const [full, setFull] = useState<FullMessage | null>(null);
+  const [fullLoading, setFullLoading] = useState(false);
+  const [fullErr, setFullErr] = useState<string | null>(null);
+
+  async function openCard(it: SnapshotItem) {
+    if (!it.uid) return;
+    setOpenItem(it);
+    setFull(null);
+    setFullErr(null);
+    setFullLoading(true);
+    try {
+      const res = await fetch(`/api/email-snapshot/message?uid=${it.uid}`);
+      const json = (await res.json()) as { ok: boolean; message?: FullMessage; error?: string };
+      if (!json.ok || !json.message) {
+        setFullErr(json.error ?? "Couldn't load this email.");
+      } else {
+        setFull(json.message);
+      }
+    } catch {
+      setFullErr("Couldn't load this email — check your connection.");
+    } finally {
+      setFullLoading(false);
+    }
+  }
+
+  function closeCard() {
+    setOpenItem(null);
+    setFull(null);
+    setFullErr(null);
+  }
 
   async function refresh() {
     if (busy) return;
@@ -83,6 +138,7 @@ export function EmailSnapshotPanel({ snap, configured }: { snap: Snap | null; co
   }
 
   return (
+    <>
     <div
       style={{
         background: "var(--surface)",
@@ -186,9 +242,16 @@ export function EmailSnapshotPanel({ snap, configured }: { snap: Snap | null; co
                   {snap.items.map((it, i) => {
                     const cat = CATEGORY_META[it.category] ?? CATEGORY_META.other;
                     const action = it.urgency === "action_needed";
+                    const clickable = !!it.uid;
+                    const dateStr = fmtEmailDate(it.date);
                     return (
                       <div
                         key={i}
+                        onClick={clickable ? () => openCard(it) : undefined}
+                        role={clickable ? "button" : undefined}
+                        tabIndex={clickable ? 0 : undefined}
+                        onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openCard(it); } } : undefined}
+                        title={clickable ? "Open the full email" : undefined}
                         style={{
                           padding: "10px 12px",
                           borderRadius: 10,
@@ -197,13 +260,18 @@ export function EmailSnapshotPanel({ snap, configured }: { snap: Snap | null; co
                           display: "flex",
                           flexDirection: "column",
                           gap: 3,
+                          cursor: clickable ? "pointer" : "default",
                         }}
                       >
-                        {/* Sender first, in bold — then the urgency badge on the right */}
+                        {/* Sender first (bold), then the email date, then the urgency badge */}
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span style={{ fontSize: 13.5, fontWeight: 800, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          <span style={{ fontSize: 13.5, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                             {it.from}
                           </span>
+                          {dateStr && (
+                            <span className="muted" style={{ fontSize: 11, fontWeight: 500, flexShrink: 0 }}>· {dateStr}</span>
+                          )}
+                          <span style={{ flex: 1 }} />
                           <span
                             style={{
                               fontSize: 10,
@@ -222,8 +290,15 @@ export function EmailSnapshotPanel({ snap, configured }: { snap: Snap | null; co
                         </div>
                         <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)" }}>{it.subject}</div>
                         <div style={{ fontSize: 12.5, lineHeight: 1.5 }}>{it.summary}</div>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)" }}>
-                          {cat.icon} {cat.label}
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)" }}>
+                            {cat.icon} {cat.label}
+                          </span>
+                          {clickable && (
+                            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--accent, #4f46e5)", marginLeft: "auto" }}>
+                              Open full email →
+                            </span>
+                          )}
                         </div>
                       </div>
                     );
@@ -238,5 +313,119 @@ export function EmailSnapshotPanel({ snap, configured }: { snap: Snap | null; co
         </>
       )}
     </div>
+
+    {/* ── Center-peek: the full email, fetched live (never stored) ── */}
+    {openItem && (
+      <div
+        onClick={closeCard}
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(15,23,42,0.55)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 20,
+          zIndex: 1000,
+        }}
+      >
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            background: "var(--surface)",
+            borderRadius: 14,
+            width: "min(760px, 96vw)",
+            maxHeight: "88vh",
+            display: "flex",
+            flexDirection: "column",
+            boxShadow: "0 20px 60px rgba(0,0,0,0.35)",
+            overflow: "hidden",
+          }}
+        >
+          {/* header */}
+          <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "flex-start", gap: 12 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 2 }}>{full?.subject ?? openItem.subject}</div>
+              <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                <span style={{ fontWeight: 700, color: "var(--text)" }}>{full?.from ?? openItem.from}</span>
+                {(full?.date || openItem.date) && <> · {fmtEmailDate(full?.date ?? openItem.date)}</>}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={closeCard}
+              aria-label="Close"
+              style={{ background: "none", border: "none", fontSize: 22, lineHeight: 1, cursor: "pointer", color: "var(--muted)", padding: 2 }}
+            >
+              ×
+            </button>
+          </div>
+
+          {/* body */}
+          <div style={{ padding: "16px 18px", overflowY: "auto" }}>
+            {fullLoading ? (
+              <div style={{ color: "var(--muted)", fontSize: 13, fontWeight: 600 }}>⏳ Loading the full email…</div>
+            ) : fullErr ? (
+              <div style={{ color: "#b91c1c", fontSize: 13, fontWeight: 600 }}>⚠ {fullErr}</div>
+            ) : full ? (
+              <>
+                {full.attachments.length > 0 && (
+                  <div style={{ marginBottom: 14, display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                      📎 {full.attachments.length} attachment{full.attachments.length > 1 ? "s" : ""}
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                      {full.attachments.map((a) => (
+                        <a
+                          key={a.index}
+                          href={`/api/email-snapshot/attachment?uid=${openItem.uid}&index=${a.index}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
+                            padding: "6px 12px",
+                            borderRadius: 8,
+                            border: "1px solid var(--border)",
+                            background: "var(--bg)",
+                            fontSize: 12,
+                            fontWeight: 700,
+                            color: "var(--text)",
+                            textDecoration: "none",
+                          }}
+                        >
+                          📄 {a.filename}
+                          {a.size ? <span style={{ color: "var(--muted)", fontWeight: 500 }}>({fmtBytes(a.size)})</span> : null}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <pre
+                  style={{
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                    fontFamily: "inherit",
+                    fontSize: 13,
+                    lineHeight: 1.6,
+                    margin: 0,
+                    color: "var(--text)",
+                  }}
+                >
+                  {full.bodyText || "(This email has no plain-text body.)"}
+                </pre>
+              </>
+            ) : null}
+          </div>
+
+          {/* footer note */}
+          <div style={{ padding: "8px 18px", borderTop: "1px solid var(--border)", fontSize: 10.5, color: "var(--muted)" }}>
+            Shown live & read-only — this full email is not stored anywhere.
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }

@@ -27,6 +27,21 @@ export type SnapshotItem = {
   summary: string;
   category: string;
   urgency: "action_needed" | "fyi";
+  // uid + date let the dashboard open the FULL email on demand (read-
+  // only, fetched live — never stored). Optional so older stored
+  // snapshots that predate this still render.
+  uid?: number;
+  date?: string;
+};
+
+// The full email, fetched live when the owner opens a card. NEVER
+// stored — only the summary above is persisted.
+export type FullMessage = {
+  from: string;
+  subject: string;
+  date: string;
+  bodyText: string;
+  attachments: Array<{ index: number; filename: string; mime: string; size: number }>;
 };
 
 // How far back to read. The 5am/2pm crons always use "today"; the
@@ -117,8 +132,9 @@ NOT important (drop): promotions, marketing, newsletters, social media notificat
 For every email in the input, return an item with the same idx. Mark important true/false. For important ones, write a 1-2 sentence summary that states EXACTLY what is in the email — concrete amounts, dates, account/invoice numbers, names, and what (if anything) the owner must do. Do not be vague ("a bank update") — be specific ("HDFC: Rs. 4,41,513 debited to Shree Marble on 9 Jun, balance Rs. 12,30,000"). urgency = action_needed only when he must actually do something.`;
 
 // fromName = clean display name (what we show in bold); fromText keeps
-// the full "Name <addr>" for the AI's context.
-type FetchedEmail = { fromName: string; fromText: string; subject: string; date: string; body: string };
+// the full "Name <addr>" for the AI's context. uid lets us re-open the
+// full email later (read-only, on demand).
+type FetchedEmail = { uid: number; fromName: string; fromText: string; subject: string; date: string; body: string };
 
 /** Read recent inbox mail over read-only IMAP, within the given range. */
 async function fetchRecentEmails(range: SnapshotRange): Promise<FetchedEmail[]> {
@@ -156,6 +172,7 @@ async function fetchRecentEmails(range: SnapshotRange): Promise<FetchedEmail[]> 
             const fromName = (sender?.name ?? "").trim() || sender?.address || "(unknown sender)";
             const body = (parsed.text ?? "").replace(/\s+/g, " ").trim().slice(0, MAX_BODY_CHARS);
             out.push({
+              uid: typeof msg.uid === "number" ? msg.uid : 0,
               fromName,
               fromText: parsed.from?.text ?? fromName,
               subject: parsed.subject ?? "(no subject)",
@@ -174,6 +191,94 @@ async function fetchRecentEmails(range: SnapshotRange): Promise<FetchedEmail[]> 
     await client.logout().catch(() => {});
   }
   return out;
+}
+
+const FULL_BODY_MAX_CHARS = 100_000; // generous — show the whole email
+const ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024; // 25 MB per attachment
+
+function openImapClient(): ImapFlow {
+  const user = process.env.GMAIL_USER;
+  const pass = process.env.GMAIL_APP_PASSWORD;
+  if (!user || !pass) {
+    throw new Error("Email snapshot not configured — set GMAIL_USER and GMAIL_APP_PASSWORD in Vercel.");
+  }
+  return new ImapFlow({ host: "imap.gmail.com", port: 993, secure: true, auth: { user, pass }, logger: false });
+}
+
+// Keep real file attachments, skip inline/embedded images (cid: logos
+// etc.) so the owner sees the documents that matter.
+function isRealAttachment(a: { filename?: string; contentDisposition?: string; related?: boolean }): boolean {
+  if (a.related) return false;
+  if (a.contentDisposition === "attachment") return true;
+  return !!a.filename;
+}
+
+/** Open ONE email in full, read-only, by UID. Body is fetched live and
+ *  never stored — only the summary persists. */
+export async function fetchFullMessage(uid: number): Promise<FullMessage | null> {
+  const client = openImapClient();
+  await client.connect();
+  try {
+    const lock = await client.getMailboxLock("INBOX", { readOnly: true });
+    try {
+      const msg = await client.fetchOne(String(uid), { source: true }, { uid: true });
+      if (!msg || !msg.source) return null;
+      const parsed = await simpleParser(msg.source);
+      const sender = parsed.from?.value?.[0];
+      const fromName = (sender?.name ?? "").trim() || sender?.address || "(unknown sender)";
+      let bodyText = (parsed.text ?? "").trim();
+      if (!bodyText && parsed.html) {
+        // HTML-only email — strip tags to plain words.
+        bodyText = String(parsed.html).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+      }
+      const atts = (parsed.attachments ?? [])
+        .filter((a) => isRealAttachment(a))
+        .map((a, index) => ({
+          index,
+          filename: a.filename || `attachment-${index + 1}`,
+          mime: a.contentType || "application/octet-stream",
+          size: typeof a.size === "number" ? a.size : 0,
+        }));
+      return {
+        from: parsed.from?.text ?? fromName,
+        subject: parsed.subject ?? "(no subject)",
+        date: parsed.date ? parsed.date.toISOString() : "",
+        bodyText: bodyText.slice(0, FULL_BODY_MAX_CHARS),
+        attachments: atts,
+      };
+    } finally {
+      lock.release();
+    }
+  } finally {
+    await client.logout().catch(() => {});
+  }
+}
+
+/** Stream a single attachment's bytes, read-only, by UID + index. */
+export async function fetchAttachment(
+  uid: number,
+  index: number,
+): Promise<{ filename: string; mime: string; content: Buffer } | null> {
+  const client = openImapClient();
+  await client.connect();
+  try {
+    const lock = await client.getMailboxLock("INBOX", { readOnly: true });
+    try {
+      const msg = await client.fetchOne(String(uid), { source: true }, { uid: true });
+      if (!msg || !msg.source) return null;
+      const parsed = await simpleParser(msg.source);
+      const atts = (parsed.attachments ?? []).filter((a) => isRealAttachment(a));
+      const a = atts[index];
+      if (!a || !a.content) return null;
+      const content = Buffer.isBuffer(a.content) ? a.content : Buffer.from(a.content as Uint8Array);
+      if (content.byteLength > ATTACHMENT_MAX_BYTES) return null;
+      return { filename: a.filename || `attachment-${index + 1}`, mime: a.contentType || "application/octet-stream", content };
+    } finally {
+      lock.release();
+    }
+  } finally {
+    await client.logout().catch(() => {});
+  }
 }
 
 /** Ask Claude which emails matter + what they say. */
@@ -218,6 +323,8 @@ async function summarize(emails: FetchedEmail[]): Promise<{ overview: string; it
       summary: it.summary,
       category: it.category,
       urgency: it.urgency === "action_needed" ? "action_needed" : "fyi",
+      uid: src.uid,
+      date: src.date,
     });
   }
   // Action-needed first.
