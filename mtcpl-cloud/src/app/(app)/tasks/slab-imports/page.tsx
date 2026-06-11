@@ -22,6 +22,7 @@ type BatchRow = {
     label: string; description: string | null;
     length: number; width: number; height: number;
     quantity: number; quality: string | null; priority: boolean;
+    componentSection?: string | null; componentElement?: string | null;
   }> | null;
   row_count: number | null;
   slab_count: number | null;
@@ -98,7 +99,8 @@ export default async function SlabImportApprovalsPage({ searchParams }: { search
                     <tr style={{ borderBottom: "1px solid var(--border)" }}>
                       <th style={th}>#</th><th style={th}>Label</th><th style={th}>Description</th>
                       <th style={th}>L (in)</th><th style={th}>W (in)</th><th style={th}>H (in)</th>
-                      <th style={th}>Qty</th><th style={th}>Quality</th><th style={th}>⚡</th>
+                      <th style={th}>Qty</th><th style={th}>Quality</th>
+                      <th style={th}>Section</th><th style={th}>Element</th><th style={th}>⚡</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -112,6 +114,8 @@ export default async function SlabImportApprovalsPage({ searchParams }: { search
                         <td style={td}>{r.height}</td>
                         <td style={{ ...td, fontWeight: 700 }}>{r.quantity}</td>
                         <td style={td}>{r.quality || "Both"}</td>
+                        <td style={td}>{r.componentSection || "—"}</td>
+                        <td style={td}>{r.componentElement || "—"}</td>
                         <td style={td}>{r.priority ? "⚡" : ""}</td>
                       </tr>
                     ))}

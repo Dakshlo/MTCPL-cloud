@@ -18,6 +18,8 @@ export type ImportBatchRowPreview = {
   quantity: number;
   quality: string | null;
   priority: boolean;
+  componentSection?: string | null;
+  componentElement?: string | null;
 };
 
 export type ImportBatch = {
@@ -131,7 +133,7 @@ export function ImportBatchesButton({ batches }: { batches: ImportBatch[] }) {
                           <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 560 }}>
                             <thead>
                               <tr style={{ borderBottom: "1px solid var(--border)", background: "var(--surface-alt, rgba(0,0,0,0.03))" }}>
-                                {["#", "Label", "Description", "L (in)", "W (in)", "H (in)", "Qty", "Quality", "⚡"].map((h) => (
+                                {["#", "Label", "Description", "L (in)", "W (in)", "H (in)", "Qty", "Quality", "Section", "Element", "⚡"].map((h) => (
                                   <th key={h} style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", textAlign: "left", padding: "6px 8px", whiteSpace: "nowrap" }}>{h}</th>
                                 ))}
                               </tr>
@@ -147,6 +149,8 @@ export function ImportBatchesButton({ batches }: { batches: ImportBatch[] }) {
                                   <td style={{ padding: "5px 8px", fontSize: 12.5 }}>{r.height}</td>
                                   <td style={{ padding: "5px 8px", fontSize: 12.5, fontWeight: 700 }}>{r.quantity}</td>
                                   <td style={{ padding: "5px 8px", fontSize: 12 }}>{r.quality || "Both"}</td>
+                                  <td style={{ padding: "5px 8px", fontSize: 12 }}>{r.componentSection || "—"}</td>
+                                  <td style={{ padding: "5px 8px", fontSize: 12 }}>{r.componentElement || "—"}</td>
                                   <td style={{ padding: "5px 8px", fontSize: 12 }}>{r.priority ? "⚡" : ""}</td>
                                 </tr>
                               ))}

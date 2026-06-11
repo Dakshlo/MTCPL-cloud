@@ -9,6 +9,7 @@ import { nextSlabCodeFromMaxId } from "./utils";
 import { logAudit } from "@/lib/audit";
 import { notify } from "@/lib/notifications";
 import type { AppRole } from "@/lib/types";
+import Anthropic from "@anthropic-ai/sdk";
 
 
 function num(fd: FormData, key: string, fallback = 0) {
@@ -217,6 +218,9 @@ type CleanImportRow = {
   quantity: number;
   quality: string | null;
   priority: boolean;
+  // Mig 123 — temple-component category (AI-filled, editable). Optional.
+  componentSection: string | null;
+  componentElement: string | null;
 };
 
 function cleanImportRows(rows: unknown): CleanImportRow[] {
@@ -224,6 +228,7 @@ function cleanImportRows(rows: unknown): CleanImportRow[] {
     label?: string | null; description?: string | null;
     length?: number | string | null; width?: number | string | null; height?: number | string | null;
     quantity?: number | string | null; quality?: string | null; priority?: boolean | null;
+    componentSection?: string | null; componentElement?: string | null;
   };
   return (Array.isArray(rows) ? (rows as RawRow[]) : [])
     .map((r) => ({
@@ -235,6 +240,8 @@ function cleanImportRows(rows: unknown): CleanImportRow[] {
       quantity: Math.min(100, Math.max(1, Math.floor(Number(r.quantity) || 1))),
       quality: (r.quality ?? "").toString().trim() || null,
       priority: r.priority === true,
+      componentSection: (r.componentSection ?? "").toString().trim() || null,
+      componentElement: (r.componentElement ?? "").toString().trim() || null,
     }))
     // Every slab needs all three dimensions (stored as inches in *_ft).
     .filter((r) => r.length > 0 && r.width > 0 && r.height > 0);
@@ -287,6 +294,8 @@ async function insertApprovedSlabRows(
           width_ft: r.width,
           thickness_ft: r.height,
           priority: r.priority,
+          component_section: r.componentSection,
+          component_element: r.componentElement,
           status: "open",
           batch_id: slabBatchId,
           created_by: actorId,
@@ -310,6 +319,116 @@ async function insertApprovedSlabRows(
   }
   if (lastError) return { ok: false, error: lastError };
   return { ok: true, count: inserted, slabBatchId };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// AI temple-component categorization (mig 123). Read-only — classifies each
+// import row into a component_section (location) + component_element (part
+// type) so the slabs organise inside their temple. NEVER writes to the DB
+// here; it just suggests, the user edits in the review step, and the values
+// ride along the batch → approval. Existing slabs are never touched.
+// ────────────────────────────────────────────────────────────────────────────
+
+const CATEGORIZE_BATCH = 60;
+
+const CATEGORIZE_SCHEMA = {
+  type: "object",
+  properties: {
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          idx: { type: "integer", description: "Index of the slab in the input list" },
+          section: { type: "string", description: "WHERE in the temple this part sits — a location path. Use ' > ' to nest sub-levels, e.g. 'First Floor > Cloister-2'. Reuse an EXISTING section name exactly when it fits." },
+          element: { type: "string", description: "WHAT the part is — a standardised component type, e.g. Pillar, Chajja, Beam, Ceiling, Jali, Arch, Bracket, Coping, Step, Dome, Lintel. Reuse an EXISTING element name exactly when it fits." },
+        },
+        required: ["idx", "section", "element"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["items"],
+  additionalProperties: false,
+} as const;
+
+/** Suggest a {section, element} for every import row, in input order.
+ *  Read-only; returns "" / "" for anything it can't place. */
+export async function categorizeImportRowsAction(payload: {
+  temple: string;
+  rows: Array<{ label?: string | null; description?: string | null }>;
+}): Promise<{ ok: true; cats: Array<{ section: string; element: string }> } | { ok: false; error: string }> {
+  await requireAuth(IMPORT_SUBMIT_ROLES);
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return { ok: false, error: "AI categorization isn't configured — add ANTHROPIC_API_KEY in Vercel." };
+  }
+  const temple = (payload?.temple ?? "").trim();
+  const rows = (Array.isArray(payload?.rows) ? payload.rows : []).map((r) => ({
+    label: (r.label ?? "").toString().trim(),
+    description: (r.description ?? "").toString().trim(),
+  }));
+  if (rows.length === 0) return { ok: true, cats: [] };
+
+  const supabase = createAdminSupabaseClient();
+  // Existing categories for THIS temple — fed to the AI so re-imports of the
+  // same area reuse the same section/element instead of splitting groups.
+  const { data: existingRows } = await supabase
+    .from("slab_requirements")
+    .select("component_section, component_element")
+    .eq("temple", temple)
+    .not("component_section", "is", null)
+    .limit(2000);
+  const existSections = [...new Set(((existingRows ?? []) as Array<{ component_section: string | null }>).map((r) => (r.component_section ?? "").trim()).filter(Boolean))];
+  const existElements = [...new Set(((existingRows ?? []) as Array<{ component_element: string | null }>).map((r) => (r.component_element ?? "").trim()).filter(Boolean))];
+
+  const anthropic = new Anthropic();
+  const model = process.env.SLAB_CATEGORIZE_MODEL || "claude-haiku-4-5-20251001";
+
+  const prompt = `You organise stone slabs for a temple-construction company (MTCPL). For each slab, decide WHERE it sits in the temple (section) and WHAT part it is (element), from its label + description.
+
+Temple: ${temple || "(unknown)"}
+
+${existSections.length ? `Existing sections for this temple (REUSE one of these exactly when it fits): ${existSections.join(" | ")}` : "No sections recorded for this temple yet."}
+${existElements.length ? `Existing elements (REUSE one exactly when it fits): ${existElements.join(" | ")}` : ""}
+
+Rules:
+- section = the location/area. Use ' > ' to nest (e.g. "Ground Floor > Cloister-2"). If the floor/area is unclear, use a single best guess (e.g. "Ground Floor") rather than leaving it blank.
+- element = the standardised part type, singular and title-case (Pillar, Chajja, Beam, Ceiling, Jali, Arch, Bracket, Coping, Step, Dome, Lintel, Bracket, Railing, Floor Slab, …). Map synonyms to the standard word (e.g. "khamba" → Pillar).
+- Be consistent across the list — identical descriptions get the identical section + element.
+- Return one item per input idx.`;
+
+  const cats: Array<{ section: string; element: string }> = rows.map(() => ({ section: "", element: "" }));
+  try {
+    for (let start = 0; start < rows.length; start += CATEGORIZE_BATCH) {
+      const slice = rows.slice(start, start + CATEGORIZE_BATCH);
+      const input = slice.map((r, i) => ({ idx: i, label: r.label, description: r.description }));
+      const response = await anthropic.messages.create({
+        model,
+        max_tokens: 4000,
+        output_config: { format: { type: "json_schema", schema: CATEGORIZE_SCHEMA } },
+        messages: [{ role: "user", content: `${prompt}\n\nSLABS (JSON):\n${JSON.stringify(input)}` }],
+      });
+      const txt = response.content.find((b) => b.type === "text")?.text ?? "";
+      let parsed: { items?: Array<{ idx: number; section: string; element: string }> };
+      try {
+        parsed = JSON.parse(txt);
+      } catch {
+        continue; // skip this chunk, leave its rows blank for manual fill
+      }
+      for (const it of parsed.items ?? []) {
+        const globalIdx = start + it.idx;
+        if (globalIdx >= 0 && globalIdx < cats.length) {
+          cats[globalIdx] = {
+            section: (it.section ?? "").toString().trim(),
+            element: (it.element ?? "").toString().trim(),
+          };
+        }
+      }
+    }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "AI categorization failed." };
+  }
+  return { ok: true, cats };
 }
 
 /** Step 1 — submit an import batch for approval. Stores the reviewed rows

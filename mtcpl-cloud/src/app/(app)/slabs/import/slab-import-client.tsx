@@ -20,7 +20,7 @@
 import { useRouter } from "next/navigation";
 import { useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
-import { submitSlabImportBatchAction } from "../actions";
+import { submitSlabImportBatchAction, categorizeImportRowsAction } from "../actions";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 
 export type TempleOpt = { name: string; default_stone: string | null };
@@ -35,6 +35,10 @@ type Row = {
   quantity: string;
   quality: string;
   priority: boolean;
+  // Mig 123 — temple-component category (AI-filled, editable). Empty until
+  // "Auto-categorize" is run; the user can edit or fill by hand.
+  section: string;
+  element: string;
 };
 
 const inp = { padding: "8px 10px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", color: "var(--text)" } as const;
@@ -105,6 +109,9 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
   // which is a stronger gate than a shared password.
   const [stage, setStage] = useState<"idle" | "confirm">("idle");
   const [busy, setBusy] = useState(false);
+  // Mig 123 — AI auto-categorize state.
+  const [categorizing, setCategorizing] = useState(false);
+  const [catNote, setCatNote] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   const ready = !!temple && !!stone;
@@ -169,6 +176,8 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
           quantity,
           quality,
           priority: false,
+          section: "",
+          element: "",
         });
       }
       if (parsed.length === 0) {
@@ -191,7 +200,47 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
     setRows((prev) => prev.filter((r) => r.key !== key));
   }
   function addRow() {
-    setRows((prev) => [...prev, { key: crypto.randomUUID(), label: "", description: "", length: "", width: "", height: "", quantity: "", quality: "", priority: false }]);
+    setRows((prev) => [...prev, { key: crypto.randomUUID(), label: "", description: "", length: "", width: "", height: "", quantity: "", quality: "", priority: false, section: "", element: "" }]);
+  }
+
+  // Mig 123 — AI auto-categorize. Sends label + description for the rows
+  // that have content; fills the Section + Element columns. Read-only on
+  // the server (suggests only); the user can edit anything after.
+  async function autoCategorize() {
+    if (categorizing) return;
+    setCategorizing(true);
+    setCatNote("");
+    setError("");
+    // Only send rows that have something to classify, but map results back
+    // to their exact row key so edits/removals don't misalign.
+    const targets = rows.filter((r) => rowHasContent(r));
+    if (targets.length === 0) {
+      setCategorizing(false);
+      return;
+    }
+    try {
+      const res = await categorizeImportRowsAction({
+        temple,
+        rows: targets.map((r) => ({ label: r.label, description: r.description })),
+      });
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      const byKey = new Map<string, { section: string; element: string }>();
+      targets.forEach((r, i) => byKey.set(r.key, res.cats[i] ?? { section: "", element: "" }));
+      setRows((prev) =>
+        prev.map((r) => {
+          const c = byKey.get(r.key);
+          return c ? { ...r, section: c.section || r.section, element: c.element || r.element } : r;
+        }),
+      );
+      setCatNote(`Categorized ${targets.length} row${targets.length === 1 ? "" : "s"} — review & edit the Section / Element columns.`);
+    } catch {
+      setError("Auto-categorize failed — you can still fill Section / Element by hand.");
+    } finally {
+      setCategorizing(false);
+    }
   }
 
   const validRows = useMemo(() => rows.filter(rowValid), [rows]);
@@ -231,6 +280,8 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
           quantity: Number(r.quantity) || 1,
           quality: r.quality,
           priority: r.priority,
+          componentSection: r.section,
+          componentElement: r.element,
         })),
       ),
     );
@@ -326,11 +377,28 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
               {issues.length > 0 && <span style={{ color: "#991b1b", fontWeight: 700 }}> · {issues.length} incomplete (see above)</span>}
             </div>
           </div>
-          <button type="button" onClick={() => { setStep(1); setRows([]); setError(""); }} style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", background: "none", border: "1px solid var(--border)", borderRadius: 8, padding: "7px 12px", cursor: "pointer" }}>← Upload a different file</button>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={autoCategorize}
+              disabled={categorizing}
+              title="AI fills the Section + Element columns from each slab's label & description"
+              style={{ fontSize: 12.5, fontWeight: 800, color: "#fff", background: categorizing ? "var(--border)" : "var(--gold-dark)", border: "none", borderRadius: 8, padding: "7px 14px", cursor: categorizing ? "wait" : "pointer", whiteSpace: "nowrap" }}
+            >
+              {categorizing ? "✨ Categorizing…" : "✨ Auto-categorize"}
+            </button>
+            <button type="button" onClick={() => { setStep(1); setRows([]); setError(""); setCatNote(""); }} style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", background: "none", border: "1px solid var(--border)", borderRadius: 8, padding: "7px 12px", cursor: "pointer" }}>← Upload a different file</button>
+          </div>
         </div>
 
+        {catNote && (
+          <div style={{ padding: "8px 18px", fontSize: 12.5, color: "#166534", background: "rgba(22,163,74,0.08)", borderBottom: "1px solid var(--border)" }}>
+            ✨ {catNote}
+          </div>
+        )}
+
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 920 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1160 }}>
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border)" }}>
                 <th style={{ ...th, width: 36 }}>#</th>
@@ -341,6 +409,8 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
                 <th style={{ ...th, width: 80 }}>Hgt (in)</th>
                 <th style={{ ...th, width: 64 }}>Qty</th>
                 <th style={{ ...th, minWidth: 120 }}>Quality</th>
+                <th style={{ ...th, minWidth: 150 }}>✨ Section</th>
+                <th style={{ ...th, minWidth: 110 }}>✨ Element</th>
                 <th style={{ ...th, width: 60 }}>⚡</th>
                 <th style={{ ...th, width: 40 }}></th>
               </tr>
@@ -366,6 +436,8 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
                         <option value="B">Grade B</option>
                       </select>
                     </td>
+                    <td style={td}><input value={r.section} onChange={(e) => patch(r.key, "section", e.target.value)} placeholder="✨ or type" style={cellInp} /></td>
+                    <td style={td}><input value={r.element} onChange={(e) => patch(r.key, "element", e.target.value)} placeholder="✨ or type" style={cellInp} /></td>
                     <td style={{ ...td, textAlign: "center" }}><input type="checkbox" checked={r.priority} onChange={(e) => patch(r.key, "priority", e.target.checked)} style={{ cursor: "pointer", width: 16, height: 16 }} /></td>
                     <td style={{ ...td, textAlign: "center" }}><button type="button" onClick={() => removeRow(r.key)} title="Remove row" style={{ fontSize: 14, color: "#991b1b", background: "none", border: "none", cursor: "pointer" }}>✕</button></td>
                   </tr>
