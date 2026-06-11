@@ -30,15 +30,6 @@ const MAX_BYTES = 10 * 1024 * 1024; // 10 MB — same as the scan route
 const SCAN_CONCURRENCY = 3; // how many bills the AI reads at once
 const ACCEPTED = ".jpg,.jpeg,.png,.webp,.gif,.pdf,application/pdf,image/*";
 
-type LineItem = {
-  particulars?: string | null;
-  from?: string | null;
-  to?: string | null;
-  qty?: string | null;
-  rate?: string | null;
-  amount?: string | null;
-};
-
 type ScanData = {
   vendor_name?: string | null;
   vendor_gstin?: string | null;
@@ -50,43 +41,8 @@ type ScanData = {
   sgst_percent?: number | null;
   igst_percent?: number | null;
   total?: number | null;
-  line_items?: LineItem[] | null;
   confidence?: string;
 };
-
-// Columns we know how to show in the line-item table preview.
-const LINE_COLS: Array<{ key: keyof LineItem; label: string }> = [
-  { key: "particulars", label: "Particulars" },
-  { key: "from", label: "From" },
-  { key: "to", label: "To" },
-  { key: "qty", label: "Qty / Wt" },
-  { key: "rate", label: "Rate" },
-  { key: "amount", label: "Amount" },
-];
-
-const cleanCell = (v: string | null | undefined) => (v ?? "").toString().trim();
-
-// Flatten line items into the readable multi-line text that gets SAVED as
-// the bill description (the DB description is a single text field).
-function lineItemsToText(items: LineItem[]): string {
-  return items
-    .map((it) => {
-      const route = cleanCell(it.from) && cleanCell(it.to)
-        ? `${cleanCell(it.from)}→${cleanCell(it.to)}`
-        : cleanCell(it.from) || cleanCell(it.to);
-      return [
-        cleanCell(it.particulars),
-        route,
-        cleanCell(it.qty),
-        cleanCell(it.rate) ? `@${cleanCell(it.rate)}` : "",
-        cleanCell(it.amount) ? `= ${cleanCell(it.amount)}` : "",
-      ]
-        .filter(Boolean)
-        .join("  ");
-    })
-    .filter(Boolean)
-    .join("\n");
-}
 
 type SubmitResult =
   | { ok: true; billId: string; token: string }
@@ -109,9 +65,6 @@ type Slot = {
   billDate: string;
   vendorBillNo: string;
   description: string;
-  // Structured table rows from the scan (transport/goods bills). Empty for
-  // non-tabular bills — then the review shows a plain description only.
-  lineItems: LineItem[];
   subtotal: string;
   gstMode: "intra" | "inter";
   cgstPercent: string;
@@ -218,14 +171,6 @@ function applyScanToSlot(slot: Slot, d: ScanData, vendors: BillVendorOption[]): 
     notes.push("TDS/TCS field shown for this vendor — verify the % before adding.");
   }
 
-  // Tabular bill → keep the rows for a table preview, and build the saved
-  // description from them (fuller than a flat summary). Non-tabular → plain.
-  const lineItems = Array.isArray(d.line_items)
-    ? d.line_items.filter((r) => r && Object.values(r).some((v) => cleanCell(v as string)))
-    : [];
-  const builtDescription = lineItems.length > 0 ? lineItemsToText(lineItems) : (d.description ? String(d.description) : "");
-  if (lineItems.length > 0) notes.push(`${lineItems.length} line items read from the bill's table.`);
-
   return {
     ...slot,
     scanStatus: "scanned",
@@ -237,8 +182,7 @@ function applyScanToSlot(slot: Slot, d: ScanData, vendors: BillVendorOption[]): 
     tcsPercent: tcsForVendor(matched),
     billDate: d.bill_date && /^\d{4}-\d{2}-\d{2}$/.test(d.bill_date) ? d.bill_date : slot.billDate,
     vendorBillNo: d.bill_no ? String(d.bill_no) : "",
-    description: builtDescription,
-    lineItems,
+    description: d.description ? String(d.description) : "",
     subtotal: d.subtotal != null && d.subtotal > 0 ? String(d.subtotal) : "",
     gstMode,
     cgstPercent: cgstP,
@@ -310,7 +254,6 @@ export function MultiBillScanner({
         billDate: todayIso(),
         vendorBillNo: "",
         description: "",
-        lineItems: [],
         subtotal: "",
         gstMode: "intra",
         cgstPercent: "0",
@@ -791,17 +734,8 @@ function BillReviewCard({
                 </Field>
               </div>
 
-              {/* Tabular bills (e.g. transport with LR rows) show the rows as a
-                  table for readability. The editable text below is what saves. */}
-              {slot.lineItems.length > 0 && <LineItemsTable items={slot.lineItems} />}
-              <Field label={slot.lineItems.length > 0 ? "Description (this text is saved — edit if needed)" : "Description"}>
-                <textarea
-                  rows={slot.lineItems.length > 0 ? 5 : 3}
-                  style={{ ...INPUT_STYLE, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5, minHeight: 64 }}
-                  value={slot.description}
-                  onChange={(e) => onPatch({ description: e.target.value })}
-                  placeholder="What was billed (the scan captures as much as it can read — edit freely)"
-                />
+              <Field label="Description">
+                <input style={INPUT_STYLE} value={slot.description} onChange={(e) => onPatch({ description: e.target.value })} placeholder="What was billed" />
               </Field>
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
@@ -903,44 +837,6 @@ function BillReviewCard({
         </div>
       </div>
       <style>{`.spin{display:inline-block;animation:spin 1.1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.token-blink{animation:tokenBlink 1s steps(1,end) infinite}@keyframes tokenBlink{50%{opacity:0.25}}`}</style>
-    </div>
-  );
-}
-
-// Read-only preview of a bill's particulars table (transport / goods rows).
-// Only renders the columns that actually have data across the rows.
-function LineItemsTable({ items }: { items: LineItem[] }) {
-  const cols = LINE_COLS.filter((c) => items.some((it) => cleanCell(it[c.key])));
-  if (cols.length === 0) return null;
-  const th: React.CSSProperties = { textAlign: "left", padding: "5px 8px", fontSize: 10.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.03em", borderBottom: `1px solid ${ACCOUNTS_TOKENS.border}`, whiteSpace: "nowrap" };
-  const td: React.CSSProperties = { padding: "5px 8px", fontSize: 12, color: "var(--text)", borderBottom: `1px solid ${ACCOUNTS_TOKENS.border}`, verticalAlign: "top" };
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.03em" }}>
-        Items on the bill ({items.length})
-      </span>
-      <div style={{ overflowX: "auto", border: `1px solid ${ACCOUNTS_TOKENS.border}`, borderRadius: 8 }}>
-        <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 320 }}>
-          <thead>
-            <tr>
-              <th style={{ ...th, width: 24 }}>#</th>
-              {cols.map((c) => <th key={c.key} style={th}>{c.label}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((it, i) => (
-              <tr key={i}>
-                <td style={{ ...td, color: "var(--muted)", fontWeight: 700 }}>{i + 1}</td>
-                {cols.map((c) => (
-                  <td key={c.key} style={c.key === "amount" || c.key === "rate" ? { ...td, textAlign: "right", whiteSpace: "nowrap" } : td}>
-                    {cleanCell(it[c.key]) || "—"}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
     </div>
   );
 }
