@@ -89,9 +89,10 @@ function sinceForRange(range: SnapshotRange): Date {
 }
 
 // A 1-month manual pull can return many emails, so the cap scales with the
-// window (the cron's "today" stays small and cheap).
+// window (the cron's "today" stays small and cheap). Kept modest so the
+// whole run fits inside the serverless time budget.
 function maxEmailsForRange(range: SnapshotRange): number {
-  return range === "last_month" ? 120 : range === "last_7_days" ? 80 : 50;
+  return range === "last_month" ? 70 : range === "last_7_days" ? 60 : 40;
 }
 
 const MAX_BODY_CHARS = 1500;
@@ -302,39 +303,29 @@ export async function fetchAttachment(
   }
 }
 
-/** Ask Claude which emails matter + what they say. */
-async function summarize(emails: FetchedEmail[]): Promise<{ overview: string; items: SnapshotItem[] }> {
-  if (emails.length === 0) {
-    return { overview: "No new emails in this period.", items: [] };
-  }
-  if (!process.env.ANTHROPIC_API_KEY) {
-    throw new Error("ANTHROPIC_API_KEY is not set.");
-  }
-  const anthropic = new Anthropic();
-  const model = process.env.EMAIL_SNAPSHOT_MODEL || "claude-sonnet-4-6";
+const SUMMARIZE_BATCH = 15;       // emails per Claude call
+const SUMMARIZE_CONCURRENCY = 3;  // calls running at once
 
+/** Summarize ONE batch of emails — returns the important ones. JSON parse
+ *  errors yield [] (skip the batch); API errors propagate to the caller. */
+async function summarizeBatch(anthropic: Anthropic, model: string, emails: FetchedEmail[]): Promise<SnapshotItem[]> {
   const input = emails.map((e, idx) => ({ idx, from: e.fromText, subject: e.subject, date: e.date, body: e.body }));
   const response = await anthropic.messages.create({
     model,
     max_tokens: 8000,
     thinking: { type: "adaptive" },
     output_config: { format: { type: "json_schema", schema: SUMMARY_SCHEMA } },
-    messages: [
-      {
-        role: "user",
-        content: `${SUMMARY_PROMPT}\n\nEMAILS (JSON):\n${JSON.stringify(input)}`,
-      },
-    ],
+    messages: [{ role: "user", content: `${SUMMARY_PROMPT}\n\nEMAILS (JSON):\n${JSON.stringify(input)}` }],
   });
-
   const text = response.content.find((b) => b.type === "text")?.text ?? "";
-  const parsed = JSON.parse(text) as {
-    overview: string;
-    items: Array<{ idx: number; important: boolean; category: string; urgency: "action_needed" | "fyi"; summary: string }>;
-  };
-
+  let parsed: { items?: Array<{ idx: number; important: boolean; category: string; urgency: "action_needed" | "fyi"; summary: string }> };
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return [];
+  }
   const items: SnapshotItem[] = [];
-  for (const it of parsed.items) {
+  for (const it of parsed.items ?? []) {
     if (!it.important) continue;
     const src = emails[it.idx];
     if (!src) continue;
@@ -349,9 +340,55 @@ async function summarize(emails: FetchedEmail[]): Promise<{ overview: string; it
       messageId: src.messageId,
     });
   }
+  return items;
+}
+
+/** Ask Claude which emails matter + what they say. Processes emails in
+ *  small batches with limited concurrency — a single huge call over a month
+ *  of email is slow and can blow the function's time/token budget (the cause
+ *  of the "Refresh failed" timeout). Batching keeps each call fast. */
+async function summarize(emails: FetchedEmail[]): Promise<{ overview: string; items: SnapshotItem[] }> {
+  if (emails.length === 0) {
+    return { overview: "No new emails in this period.", items: [] };
+  }
+  if (!process.env.ANTHROPIC_API_KEY) {
+    throw new Error("ANTHROPIC_API_KEY is not set.");
+  }
+  const anthropic = new Anthropic();
+  const model = process.env.EMAIL_SNAPSHOT_MODEL || "claude-sonnet-4-6";
+
+  const batches: FetchedEmail[][] = [];
+  for (let i = 0; i < emails.length; i += SUMMARIZE_BATCH) batches.push(emails.slice(i, i + SUMMARIZE_BATCH));
+
+  const out: SnapshotItem[][] = new Array(batches.length).fill(null).map(() => []);
+  let nextIdx = 0;
+  let firstError: unknown = null;
+  async function worker() {
+    while (nextIdx < batches.length) {
+      const i = nextIdx++;
+      try {
+        out[i] = await summarizeBatch(anthropic, model, batches[i]);
+      } catch (e) {
+        if (!firstError) firstError = e;
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(SUMMARIZE_CONCURRENCY, batches.length) }, worker));
+
+  const items = out.flat();
+  // If every batch errored and nothing came back, surface the real error
+  // (so the dashboard shows it) instead of silently storing an empty run.
+  if (items.length === 0 && firstError) {
+    throw firstError instanceof Error ? firstError : new Error(String(firstError));
+  }
   // Action-needed first.
   items.sort((a, b) => (a.urgency === b.urgency ? 0 : a.urgency === "action_needed" ? -1 : 1));
-  return { overview: parsed.overview, items };
+  const actionCount = items.filter((i) => i.urgency === "action_needed").length;
+  const overview =
+    items.length === 0
+      ? `Scanned ${emails.length} email${emails.length === 1 ? "" : "s"} — nothing important.`
+      : `${items.length} important${actionCount ? `, ${actionCount} need action` : ""} (of ${emails.length} scanned).`;
+  return { overview, items };
 }
 
 /** Full run: fetch → summarize → store. Always writes a row (with `error`

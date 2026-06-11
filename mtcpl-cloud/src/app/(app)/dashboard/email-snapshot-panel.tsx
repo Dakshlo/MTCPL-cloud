@@ -94,9 +94,20 @@ export function EmailSnapshotPanel({ snap, configured }: { snap: Snap | null; co
     setErr(null);
     try {
       const res = await fetch(`/api/email-snapshot/run?range=${encodeURIComponent(range)}`, { method: "POST" });
-      const json = (await res.json()) as { ok: boolean; error?: string };
-      if (!json.ok) {
-        setErr(json.error ?? "Refresh failed.");
+      // A timeout (e.g. a heavy 1-month pull) returns a non-JSON gateway
+      // error — read defensively so we can show a useful message.
+      let json: { ok?: boolean; error?: string } | null = null;
+      try {
+        json = await res.json();
+      } catch {
+        json = null;
+      }
+      if (!res.ok || !json?.ok) {
+        if (res.status === 504 || res.status === 502) {
+          setErr("That took too long to read — try a shorter range (the inbox was large).");
+        } else {
+          setErr(json?.error ?? `Refresh failed (status ${res.status}).`);
+        }
         return;
       }
       router.refresh();
