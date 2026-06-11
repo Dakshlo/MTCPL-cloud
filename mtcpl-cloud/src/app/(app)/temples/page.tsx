@@ -15,6 +15,14 @@ export const dynamic = "force-dynamic";
 type SlabRow = {
   id: string; label: string | null; description: string | null; temple: string; status: string;
   component_section: string | null; component_element: string | null;
+  stone: string | null; quality: string | null;
+  length_ft: number | null; width_ft: number | null; thickness_ft: number | null;
+  priority: boolean | null;
+};
+
+export type TempleSlabCard = {
+  id: string; status: string; stone: string | null; quality: string | null;
+  l: number; w: number; t: number; priority: boolean;
 };
 
 const SLAB_LIMIT = 30000;
@@ -34,7 +42,7 @@ const EMPTY_COUNTS = (): Record<StageBucket, number> => ({ pending: 0, cutting: 
 type BuildNode = {
   name: string;
   children: Map<string, BuildNode>;
-  slabs: Array<{ id: string; label: string; status: string }>;
+  slabs: TempleSlabCard[];
 };
 
 function newNode(name: string): BuildNode {
@@ -85,7 +93,7 @@ export default async function TemplesPage() {
     for (let offset = 0; offset < SLAB_LIMIT; offset += PAGE) {
       const { data, error } = await admin
         .from("slab_requirements")
-        .select("id, label, description, temple, status, component_section, component_element")
+        .select("id, label, description, temple, status, component_section, component_element, stone, quality, length_ft, width_ft, thickness_ft, priority")
         .order("temple", { ascending: true })
         .range(offset, offset + PAGE - 1);
       if (error) throw new Error(error.message);
@@ -127,7 +135,16 @@ export default async function TemplesPage() {
       if (!next) { next = newNode(part); cur.children.set(part, next); }
       cur = next;
     }
-    cur.slabs.push({ id: s.id, label: s.label ?? "", status: s.status });
+    cur.slabs.push({
+      id: s.id,
+      status: s.status,
+      stone: s.stone,
+      quality: s.quality,
+      l: Number(s.length_ft) || 0,
+      w: Number(s.width_ft) || 0,
+      t: Number(s.thickness_ft) || 0,
+      priority: s.priority === true,
+    });
   }
 
   const trees: TempleTree[] = [...byTemple.entries()]

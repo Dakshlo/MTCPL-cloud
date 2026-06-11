@@ -8,13 +8,18 @@ import { useMemo, useState } from "react";
 
 export type StageBucket = "pending" | "cutting" | "carving" | "done" | "rejected";
 
+export type TempleSlabCard = {
+  id: string; status: string; stone: string | null; quality: string | null;
+  l: number; w: number; t: number; priority: boolean;
+};
+
 export type TempleTreeNode = {
   id: string;
   name: string;
   total: number;
   counts: Record<StageBucket, number>;
   children: TempleTreeNode[];
-  slabs: Array<{ id: string; label: string; status: string }>;
+  slabs: TempleSlabCard[];
 };
 
 export type TempleTree = {
@@ -38,6 +43,57 @@ const STATUS_LABEL: Record<string, string> = {
   carving_assigned: "Carving assigned", carving_in_progress: "Carving", completed: "Completed",
   dispatched: "Dispatched", rejected: "Rejected",
 };
+
+function bucketOf(status: string): StageBucket {
+  if (["open", "planned"].includes(status)) return "pending";
+  if (["cutting", "cut_done"].includes(status)) return "cutting";
+  if (["carving_assigned", "carving_in_progress"].includes(status)) return "carving";
+  if (status === "rejected") return "rejected";
+  return "done";
+}
+function stoneLabel(s: string | null): string {
+  return (s ?? "").replace(/Stone$/i, "");
+}
+const calcCft = (l: number, w: number, t: number) => (l * w * t) / 1728;
+
+// One slab card — mirrors the Ready Sizes card fields (code, dims, CFT,
+// stone, quality, priority) in a compact stage-coloured card.
+function SlabCard({ s }: { s: TempleSlabCard }) {
+  const bucket = bucketOf(s.status);
+  const color = STAGE_META[bucket].color;
+  const cft = calcCft(s.l, s.w, s.t);
+  return (
+    <div
+      title={STATUS_LABEL[s.status] ?? s.status}
+      style={{
+        border: `1px solid var(--border)`,
+        borderLeft: `4px solid ${color}`,
+        borderRadius: 10,
+        background: "var(--surface)",
+        padding: "8px 10px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 3,
+        minWidth: 0,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.id}</code>
+        {s.priority && <span style={{ fontSize: 12 }}>⚡</span>}
+        <span style={{ marginLeft: "auto", fontSize: 9.5, fontWeight: 800, color: "#fff", background: color, borderRadius: 999, padding: "1px 7px", textTransform: "uppercase", whiteSpace: "nowrap" }}>
+          {STAGE_META[bucket].label}
+        </span>
+      </div>
+      <div style={{ fontFamily: "ui-monospace, monospace", fontSize: 11.5, color: "var(--text)" }}>
+        {s.l}&quot; × {s.w}&quot; × {s.t}&quot; <span className="muted">· {cft.toFixed(2)} CFT</span>
+      </div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {s.stone && <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)" }}>🗿 {stoneLabel(s.stone)}</span>}
+        {s.quality && <span style={{ fontSize: 10, fontWeight: 700, color: s.quality === "A" ? "#15803d" : "#b45309" }}>Grade {s.quality}</span>}
+      </div>
+    </div>
+  );
+}
 
 function StageBar({ counts, total }: { counts: Record<StageBucket, number>; total: number }) {
   if (total === 0) return null;
@@ -102,27 +158,10 @@ function TreeNode({ node, depth }: { node: TempleTreeNode; depth: number }) {
         <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 4 }}>
           {!isLeaf && node.children.map((c) => <TreeNode key={c.id} node={c} depth={depth + 1} />)}
           {isLeaf && (
-            <div style={{ marginLeft: 26, marginBottom: 6 }}>
-              <div style={{ marginBottom: 6 }}><CountChips counts={node.counts} /></div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {node.slabs.map((s) => (
-                  <span
-                    key={s.id}
-                    title={`${s.label} · ${STATUS_LABEL[s.status] ?? s.status}`}
-                    style={{
-                      fontSize: 11,
-                      fontFamily: "ui-monospace, monospace",
-                      fontWeight: 700,
-                      padding: "2px 8px",
-                      borderRadius: 6,
-                      border: "1px solid var(--border)",
-                      background: "var(--bg)",
-                      color: STAGE_META[(["open", "planned"].includes(s.status) ? "pending" : ["cutting", "cut_done"].includes(s.status) ? "cutting" : ["carving_assigned", "carving_in_progress"].includes(s.status) ? "carving" : s.status === "rejected" ? "rejected" : "done")].color,
-                    }}
-                  >
-                    {s.id}
-                  </span>
-                ))}
+            <div style={{ marginLeft: 26, marginBottom: 8 }}>
+              <div style={{ marginBottom: 8 }}><CountChips counts={node.counts} /></div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 8 }}>
+                {node.slabs.map((s) => <SlabCard key={s.id} s={s} />)}
               </div>
             </div>
           )}

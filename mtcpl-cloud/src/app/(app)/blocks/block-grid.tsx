@@ -93,6 +93,11 @@ export function BlockGrid({
   const stones = stoneTypes && stoneTypes.length > 0 ? stoneTypes : FALLBACK_STONES;
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [manualCutOpen, setManualCutOpen] = useState(false);
+  // How marble blocks are grouped: by the truck they arrived on (default,
+  // good for receiving), or by stone TYPE (YellowMarble together, Rajnagar
+  // together — easier to operate the yard). Daksh, June 2026.
+  const [marbleGroupBy, setMarbleGroupBy] = useState<"truck" | "stone">("truck");
+  const hasMarble = blocks.some((b) => stoneCategoryMap[b.stone] === "marble");
   const selected = blocks.find(b => b.id === selectedId) ?? null;
 
   // Drawer facility/yard — synced whenever a different block is opened so the
@@ -267,6 +272,32 @@ export function BlockGrid({
 
   return (
     <>
+      {hasMarble && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)" }}>Marble grouping:</span>
+          {([
+            { key: "truck", label: "🚛 By truck" },
+            { key: "stone", label: "🗿 By stone type" },
+          ] as const).map((opt) => {
+            const active = marbleGroupBy === opt.key;
+            return (
+              <button
+                key={opt.key}
+                type="button"
+                onClick={() => setMarbleGroupBy(opt.key)}
+                style={{
+                  fontSize: 12, fontWeight: 800, padding: "5px 13px", borderRadius: 999, cursor: "pointer",
+                  border: `1.5px solid ${active ? "var(--gold-dark)" : "var(--border)"}`,
+                  background: active ? "rgba(184,115,51,0.1)" : "var(--surface)",
+                  color: active ? "var(--gold-dark)" : "var(--text)",
+                }}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
       <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
         {orderedFacilities.map(f => {
           const list = byFacility[f];
@@ -329,7 +360,11 @@ export function BlockGrid({
                 for (const b of list) {
                   const isMarble = stoneCategoryMap[b.stone] === "marble";
                   if (isMarble) {
-                    const key = b.truck_entry_id ?? "__no_truck__";
+                    // Group key depends on the chosen mode: by truck (default)
+                    // or by stone type (all YellowMarble together, etc.).
+                    const key = marbleGroupBy === "stone"
+                      ? (b.stone || "__no_stone__")
+                      : (b.truck_entry_id ?? "__no_truck__");
                     const g = marbleGroups.get(key) ?? [];
                     g.push(b);
                     marbleGroups.set(key, g);
@@ -337,13 +372,15 @@ export function BlockGrid({
                     sandstone.push(b);
                   }
                 }
-                // Sort truck groups by their most-recent block's created_at
-                // (newest-first) so the last-added truck surfaces at the top.
-                const orderedGroups = [...marbleGroups.entries()].sort(([, a], [, b]) => {
-                  const ma = a.reduce((m, x) => ((x.created_at ?? "") > m ? (x.created_at ?? "") : m), "");
-                  const mb = b.reduce((m, x) => ((x.created_at ?? "") > m ? (x.created_at ?? "") : m), "");
-                  return mb > ma ? 1 : mb < ma ? -1 : 0;
-                });
+                const orderedGroups = marbleGroupBy === "stone"
+                  // By stone type: alphabetical by stone name (stable yard layout).
+                  ? [...marbleGroups.entries()].sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
+                  // By truck: most-recent block first (last-added truck on top).
+                  : [...marbleGroups.entries()].sort(([, a], [, b]) => {
+                      const ma = a.reduce((m, x) => ((x.created_at ?? "") > m ? (x.created_at ?? "") : m), "");
+                      const mb = b.reduce((m, x) => ((x.created_at ?? "") > m ? (x.created_at ?? "") : m), "");
+                      return mb > ma ? 1 : mb < ma ? -1 : 0;
+                    });
                 return (
                   <>
                     {sandstone.length > 0 && (
@@ -357,11 +394,12 @@ export function BlockGrid({
                       const totalCftEquiv = cftEquivFromTonnes(totalTonnes);
                       const newest = group.reduce((m, x) => ((x.created_at ?? "") > m ? (x.created_at ?? "") : m), "");
                       const hasTruck = groupKey !== "__no_truck__";
+                      const byStone = marbleGroupBy === "stone";
                       return (
                         <div key={`${f}-${groupKey}`} style={{ marginBottom: 18 }}>
-                          {/* Truck header strip — pulled from the denormalised
-                              truck_no / vendor_name / bill_no on every block row
-                              (marble-actions.ts sets these at insert time). */}
+                          {/* Group header — stone type, or the truck the blocks
+                              arrived on (truck_no / vendor / bill denormalised
+                              onto every block row by marble-actions.ts). */}
                           <div
                             style={{
                               display: "flex",
@@ -377,26 +415,37 @@ export function BlockGrid({
                               fontSize: 12,
                             }}
                           >
-                            <span style={{ fontSize: 13 }}>🚛</span>
-                            {hasTruck ? (
+                            {byStone ? (
                               <>
-                                <span style={{ fontWeight: 700, color: "var(--gold-dark)", fontFamily: "ui-monospace, monospace" }}>
-                                  {sample.truck_no || "(no truck no.)"}
+                                <span style={{ fontSize: 13 }}>🗿</span>
+                                <span style={{ fontWeight: 800, color: "var(--gold-dark)" }}>
+                                  {groupKey === "__no_stone__" ? "(unspecified marble)" : stoneDisplayName(groupKey)}
                                 </span>
-                                {sample.vendor_name && (
-                                  <span style={{ color: "var(--text)", fontWeight: 600 }}>· {sample.vendor_name}</span>
-                                )}
-                                {sample.bill_no && (
-                                  <span style={{ color: "var(--muted)" }}>· bill {sample.bill_no}</span>
-                                )}
-                                {newest && (
-                                  <span style={{ color: "var(--muted)" }}>· {fmtDate(newest)}</span>
-                                )}
                               </>
                             ) : (
-                              <span style={{ fontStyle: "italic", color: "var(--muted)" }}>
-                                No truck entry (legacy rows)
-                              </span>
+                              <>
+                                <span style={{ fontSize: 13 }}>🚛</span>
+                                {hasTruck ? (
+                                  <>
+                                    <span style={{ fontWeight: 700, color: "var(--gold-dark)", fontFamily: "ui-monospace, monospace" }}>
+                                      {sample.truck_no || "(no truck no.)"}
+                                    </span>
+                                    {sample.vendor_name && (
+                                      <span style={{ color: "var(--text)", fontWeight: 600 }}>· {sample.vendor_name}</span>
+                                    )}
+                                    {sample.bill_no && (
+                                      <span style={{ color: "var(--muted)" }}>· bill {sample.bill_no}</span>
+                                    )}
+                                    {newest && (
+                                      <span style={{ color: "var(--muted)" }}>· {fmtDate(newest)}</span>
+                                    )}
+                                  </>
+                                ) : (
+                                  <span style={{ fontStyle: "italic", color: "var(--muted)" }}>
+                                    No truck entry (legacy rows)
+                                  </span>
+                                )}
+                              </>
                             )}
                             <span style={{ marginLeft: "auto", color: "var(--muted)" }}>
                               <strong style={{ color: "var(--text)" }}>
