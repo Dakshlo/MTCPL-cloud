@@ -205,14 +205,13 @@ export function TempleViewClient({ trees, imagesByNode, canManageImages, categor
   }
 
   // Immersive fullscreen card browser.
-  if (cardMode && current) {
+  if (cardMode) {
     return (
       <TempleCardBrowser
         trees={trees}
         imagesByNode={imagesByNode}
         canManageImages={canManageImages}
         categoryStruct={categoryStruct}
-        initialTemple={current.temple}
         onExit={() => setCardMode(false)}
       />
     );

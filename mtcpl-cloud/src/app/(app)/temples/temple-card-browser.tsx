@@ -1,11 +1,17 @@
 "use client";
 
-// Mig 123 follow-on (Daksh) — immersive fullscreen card browser for a
-// temple. Drill Category 1 → Category 2 → Label → Description → slabs as
-// big image-covered cards, with breadcrumb navigation. Images show ONLY
-// here (the list view stays text). A finder/gallery-style experience.
+// Mig 123 follow-on (Daksh) — immersive fullscreen card browser.
+//
+// Flow: enter Cards mode → fullscreen TEMPLE picker (big cards) → pick a
+// temple → its Category-1 cards (image covers, progress rings) → drill
+// Category 2 → Label → Description → slab cards. Breadcrumb + Esc to go
+// back up at every level. Component photos show ONLY here; clicking the
+// photo (🔍) opens a lightbox with ←/→ keyboard navigation.
+//
+// The polish: staggered card entrance, hover lift, progress rings,
+// gradient covers — gallery/finder feel rather than a database page.
 
-import { useState, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { deleteTempleComponentImageAction } from "./actions";
 import { AddTempleImageButton } from "./add-image-button";
@@ -14,155 +20,324 @@ import {
   type StageBucket, type TempleTree, type TempleTreeNode, type TempleSlabCard, type ComponentImage,
 } from "./temple-shared";
 
-function MiniBar({ counts, total }: { counts: Record<StageBucket, number>; total: number }) {
+// ── tiny shared bits ─────────────────────────────────────────────────
+
+function MiniBar({ counts, total, track = "rgba(0,0,0,0.08)" }: { counts: Record<StageBucket, number>; total: number; track?: string }) {
   if (total === 0) return null;
   return (
-    <div style={{ display: "flex", height: 8, borderRadius: 999, overflow: "hidden", background: "rgba(255,255,255,0.25)" }}>
-      {STAGE_ORDER.map((s) => counts[s] ? <div key={s} style={{ width: `${(counts[s] / total) * 100}%`, background: STAGE_META[s].color }} /> : null)}
+    <div style={{ display: "flex", height: 8, borderRadius: 999, overflow: "hidden", background: track }}>
+      {STAGE_ORDER.map((s) => counts[s] ? <div key={s} title={`${STAGE_META[s].label}: ${counts[s]}`} style={{ width: `${(counts[s] / total) * 100}%`, background: STAGE_META[s].color }} /> : null)}
     </div>
   );
 }
 
+/** Animated progress ring (SVG donut) — % done at a glance. */
+function Ring({ pct, size = 44, onImage = false }: { pct: number; size?: number; onImage?: boolean }) {
+  const stroke = 4.5;
+  const r = (size - stroke * 2) / 2;
+  const c = 2 * Math.PI * r;
+  const filled = Math.max(0, Math.min(100, pct)) / 100 * c;
+  return (
+    <div style={{ position: "relative", width: size, height: size, flexShrink: 0, borderRadius: "50%", background: onImage ? "rgba(15,23,42,0.55)" : "transparent", backdropFilter: onImage ? "blur(3px)" : undefined }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ display: "block" }}>
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={onImage ? "rgba(255,255,255,0.3)" : "rgba(148,163,184,0.3)"} strokeWidth={stroke} />
+        <circle
+          cx={size / 2} cy={size / 2} r={r} fill="none"
+          stroke={pct >= 100 ? STAGE_META.done.color : pct > 0 ? STAGE_META.done.color : "transparent"}
+          strokeWidth={stroke} strokeLinecap="round"
+          strokeDasharray={`${filled} ${c}`}
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+          style={{ transition: "stroke-dasharray .6s ease" }}
+        />
+      </svg>
+      <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: size * 0.26, fontWeight: 900, color: onImage ? "#fff" : "var(--text)" }}>
+        {pct}%
+      </span>
+    </div>
+  );
+}
+
+// ── lightbox ─────────────────────────────────────────────────────────
+
+function Lightbox({
+  images, index, canManage, onClose, onNav, onDeleted,
+}: {
+  images: ComponentImage[]; index: number; canManage: boolean;
+  onClose: () => void; onNav: (i: number) => void; onDeleted: () => void;
+}) {
+  const img = images[index];
+  const [deleting, setDeleting] = useState(false);
+  if (!img) return null;
+
+  async function del() {
+    if (deleting) return;
+    setDeleting(true);
+    try {
+      const fd = new FormData();
+      fd.set("id", img.id);
+      await deleteTempleComponentImageAction(fd);
+      onDeleted();
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 1700, background: "rgba(10,8,4,0.88)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24, animation: "tcFade .18s ease" }}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={img.url} alt={img.caption ?? ""} onClick={(e) => e.stopPropagation()} style={{ maxWidth: "92vw", maxHeight: "78vh", borderRadius: 14, boxShadow: "0 30px 80px rgba(0,0,0,0.6)", animation: "tcZoom .22s ease" }} />
+      <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 16, color: "#fff", flexWrap: "wrap", justifyContent: "center" }}>
+        {images.length > 1 && (
+          <button type="button" onClick={() => onNav((index - 1 + images.length) % images.length)} style={lbBtn}>←</button>
+        )}
+        <span style={{ fontSize: 13.5, fontWeight: 700, opacity: 0.9 }}>
+          {img.caption || "Reference photo"} {images.length > 1 && <span style={{ opacity: 0.6 }}>· {index + 1}/{images.length}</span>}
+        </span>
+        {images.length > 1 && (
+          <button type="button" onClick={() => onNav((index + 1) % images.length)} style={lbBtn}>→</button>
+        )}
+        {canManage && (
+          <button type="button" disabled={deleting} onClick={del} style={{ ...lbBtn, background: "rgba(220,38,38,0.85)", fontSize: 12.5 }}>
+            {deleting ? "Deleting…" : "🗑 Delete"}
+          </button>
+        )}
+        <button type="button" onClick={onClose} style={{ ...lbBtn, fontSize: 12.5 }}>Esc ✕</button>
+      </div>
+    </div>
+  );
+}
+
+const lbBtn: CSSProperties = { padding: "8px 16px", fontSize: 16, fontWeight: 800, borderRadius: 10, border: "1px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.12)", color: "#fff", cursor: "pointer" };
+
+// ── main browser ─────────────────────────────────────────────────────
+
 export function TempleCardBrowser({
-  trees, imagesByNode, canManageImages, categoryStruct, initialTemple, onExit,
+  trees, imagesByNode, canManageImages, categoryStruct, onExit,
 }: {
   trees: TempleTree[];
   imagesByNode: Record<string, ComponentImage[]>;
   canManageImages: boolean;
   categoryStruct: Record<string, Record<string, string[]>>;
-  initialTemple: string;
   onExit: () => void;
 }) {
   const router = useRouter();
-  const [temple, setTemple] = useState(initialTemple);
+  // temple === null → fullscreen temple picker (the landing screen).
+  const [temple, setTemple] = useState<string | null>(null);
   const [path, setPath] = useState<TempleTreeNode[]>([]);
-  const [deleting, setDeleting] = useState<string | null>(null);
+  const [lightbox, setLightbox] = useState<{ images: ComponentImage[]; index: number } | null>(null);
 
-  const tree = trees.find((t) => t.temple === temple) ?? trees[0];
+  const tree = temple ? trees.find((t) => t.temple === temple) ?? null : null;
   const currentNode = path[path.length - 1] ?? null;
   const children = currentNode ? currentNode.children : (tree?.roots ?? []);
   const isLeaf = currentNode != null && currentNode.children.length === 0;
 
-  function changeTemple(t: string) { setTemple(t); setPath([]); }
-  function drill(n: TempleTreeNode) { setPath((p) => [...p, n]); }
-  function goTo(keep: number) { setPath((p) => p.slice(0, keep)); }
-
-  async function delImage(id: string) {
-    if (deleting) return;
-    setDeleting(id);
-    try {
-      const fd = new FormData();
-      fd.set("id", id);
-      await deleteTempleComponentImageAction(fd);
-      router.refresh();
-    } finally { setDeleting(null); }
+  function goUp() {
+    if (path.length > 0) setPath((p) => p.slice(0, -1));
+    else if (temple) setTemple(null);
+    else onExit();
   }
 
-  const depth = path.length; // 0 = Category-1 level
-  const icon = depth === 0 ? "📂" : depth === 1 ? "📁" : depth === 2 ? "🏷️" : "📄";
+  // Esc = up one level (or close the lightbox first). Skips inputs/dialogs
+  // so the Add-image modal keeps its own Esc behaviour.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const t = e.target as HTMLElement | null;
+      if (t && t.closest("input, textarea, select, [role=dialog]")) return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        if (lightbox) setLightbox(null);
+        else goUp();
+      } else if (lightbox && lightbox.images.length > 1 && (e.key === "ArrowRight" || e.key === "ArrowLeft")) {
+        e.preventDefault();
+        const d = e.key === "ArrowRight" ? 1 : -1;
+        setLightbox((lb) => lb && { ...lb, index: (lb.index + d + lb.images.length) % lb.images.length });
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lightbox, path.length, temple]);
+
+  // First image anywhere under a temple → its landing-card cover.
+  function templeCover(t: string): ComponentImage | null {
+    for (const [k, imgs] of Object.entries(imagesByNode)) {
+      if (k.startsWith(`${t}/`) && imgs.length > 0) return imgs[0];
+    }
+    return null;
+  }
+
+  // Re-keys the grid per level so the stagger entrance replays on drill.
+  const levelKey = `${temple ?? "@temples"}/${path.map((p) => p.name).join("/")}`;
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 1500, background: "var(--bg)", display: "flex", flexDirection: "column" }}>
-      <style>{`.tc-card{transition:transform .14s ease,box-shadow .14s ease}.tc-card:hover{transform:translateY(-4px);box-shadow:0 14px 32px rgba(0,0,0,.18)}`}</style>
+      <style>{`
+        @keyframes tcIn { from { opacity: 0; transform: translateY(16px) scale(.97); } to { opacity: 1; transform: none; } }
+        @keyframes tcFade { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes tcZoom { from { opacity: 0; transform: scale(.92); } to { opacity: 1; transform: none; } }
+        .tc-card { opacity: 0; animation: tcIn .38s cubic-bezier(.2,.7,.3,1) forwards; transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease; }
+        .tc-card:hover { transform: translateY(-5px); box-shadow: 0 16px 40px rgba(0,0,0,.16); border-color: var(--gold-dark) !important; }
+        .tc-card:active { transform: translateY(-1px) scale(.99); }
+      `}</style>
 
       {/* ── Top bar ── */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 18px", borderBottom: "1px solid var(--border)", background: "var(--surface)", flexWrap: "wrap" }}>
-        <button type="button" onClick={onExit} style={{ fontSize: 13, fontWeight: 800, padding: "8px 14px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", cursor: "pointer" }}>✕ Exit cards view</button>
-        <select value={temple} onChange={(e) => changeTemple(e.target.value)} style={{ fontSize: 13.5, fontWeight: 800, padding: "8px 10px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", maxWidth: 320 }}>
-          {trees.map((t) => <option key={t.temple} value={t.temple}>{t.temple}</option>)}
-        </select>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 18px", borderBottom: "1px solid var(--border)", background: "var(--surface)", flexWrap: "wrap" }}>
+        <button type="button" onClick={goUp} title="Esc" style={{ fontSize: 13, fontWeight: 800, padding: "8px 14px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", cursor: "pointer" }}>
+          ← Back
+        </button>
+        {/* Breadcrumb */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", fontSize: 13, minWidth: 0 }}>
+          <button type="button" onClick={() => { setTemple(null); setPath([]); }} style={crumbStyle(!temple)}>🏛 Temples</button>
+          {temple && (
+            <>
+              <span style={{ color: "var(--muted)" }}>›</span>
+              <button type="button" onClick={() => setPath([])} style={crumbStyle(path.length === 0)}>{temple}</button>
+            </>
+          )}
+          {path.map((n, i) => (
+            <span key={n.id} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <span style={{ color: "var(--muted)" }}>›</span>
+              <button type="button" onClick={() => setPath((p) => p.slice(0, i + 1))} style={crumbStyle(i === path.length - 1)}>{n.name}</button>
+            </span>
+          ))}
+        </div>
         <span style={{ flex: 1 }} />
+        <span className="muted" style={{ fontSize: 11.5, whiteSpace: "nowrap" }}>Esc = back</span>
         {canManageImages && <AddTempleImageButton categoryStruct={categoryStruct} />}
-      </div>
-
-      {/* ── Breadcrumb ── */}
-      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "10px 18px", borderBottom: "1px solid var(--border)", background: "var(--surface-alt, rgba(0,0,0,0.02))", flexWrap: "wrap", fontSize: 13 }}>
-        <button type="button" onClick={() => goTo(0)} style={crumbStyle(path.length === 0)}>🏛 {temple}</button>
-        {path.map((n, i) => (
-          <span key={n.id} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-            <span style={{ color: "var(--muted)" }}>›</span>
-            <button type="button" onClick={() => goTo(i + 1)} style={crumbStyle(i === path.length - 1)}>{n.name}</button>
-          </span>
-        ))}
+        <button type="button" onClick={onExit} style={{ fontSize: 13, fontWeight: 800, padding: "8px 14px", borderRadius: 9, border: "none", background: "var(--gold-dark)", color: "#fff", cursor: "pointer" }}>✕ Exit</button>
       </div>
 
       {/* ── Body ── */}
-      <div style={{ flex: 1, overflowY: "auto", padding: 18 }}>
-        {isLeaf ? (
+      <div key={levelKey} style={{ flex: 1, overflowY: "auto", padding: "20px 22px 40px" }}>
+        {!temple ? (
+          /* ── Temple picker landing ── */
+          <>
+            <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 16, animation: "tcFade .3s ease" }}>Choose a temple</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 18 }}>
+              {trees.map((t, i) => {
+                const pct = t.total > 0 ? Math.round((t.counts.done / t.total) * 100) : 0;
+                const cover = templeCover(t.temple);
+                return (
+                  <button key={t.temple} type="button" className="tc-card" onClick={() => setTemple(t.temple)} style={{ ...cardShell, animationDelay: `${Math.min(i * 40, 480)}ms` }}>
+                    <div style={{ position: "relative", height: 130, background: cover ? "#0f172a" : "linear-gradient(135deg, #92400e22, #b8733344)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      {cover ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={cover.url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      ) : (
+                        <span style={{ fontSize: 46, opacity: 0.45 }}>🏛</span>
+                      )}
+                      <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, transparent 50%, rgba(0,0,0,0.45))" }} />
+                      <div style={{ position: "absolute", top: 10, right: 10 }}><Ring pct={pct} onImage /></div>
+                    </div>
+                    <div style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+                      <div style={{ fontWeight: 800, fontSize: 14.5, lineHeight: 1.25 }}>{t.temple}</div>
+                      <MiniBar counts={t.counts} total={t.total} />
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, fontWeight: 700 }}>
+                        <span style={{ color: STAGE_META.done.color }}>{t.counts.done}/{t.total} done</span>
+                        <span style={{ color: "var(--muted)" }}>{t.roots.length} categor{t.roots.length === 1 ? "y" : "ies"} →</span>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        ) : isLeaf ? (
+          /* ── Leaf: the actual slabs ── */
           <SlabCardsGrid node={currentNode!} />
         ) : children.length === 0 ? (
           <div className="muted" style={{ fontSize: 14, padding: 20 }}>Nothing here yet.</div>
         ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 16 }}>
-            {children.map((c) => {
+          /* ── Category / Label / Description cards ── */
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(235px, 1fr))", gap: 16 }}>
+            {children.map((c, i) => {
               const imgs = imagesByNode[c.id] ?? [];
               const cover = imgs[0];
               const pct = c.total > 0 ? Math.round((c.counts.done / c.total) * 100) : 0;
+              const depth = path.length;
+              const icon = depth === 0 ? "📂" : depth === 1 ? "📁" : depth === 2 ? "🏷️" : "📄";
               return (
-                <button
-                  key={c.id}
-                  type="button"
-                  className="tc-card"
-                  onClick={() => drill(c)}
-                  style={{ display: "flex", flexDirection: "column", textAlign: "left", padding: 0, border: "1px solid var(--border)", borderRadius: 16, overflow: "hidden", background: "var(--surface)", cursor: "pointer", color: "var(--text)" }}
-                >
-                  {/* cover */}
-                  <div style={{ position: "relative", height: 150, background: cover ? "#0f172a" : `linear-gradient(135deg, ${STAGE_META.cutting.color}22, ${STAGE_META.carving.color}22)`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <div key={c.id} className="tc-card" style={{ ...cardShell, animationDelay: `${Math.min(i * 35, 420)}ms`, cursor: "pointer", position: "relative" }} onClick={() => setPath((p) => [...p, c])} role="button" tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === "Enter") setPath((p) => [...p, c]); }}>
+                  <div style={{ position: "relative", height: 148, background: cover ? "#0f172a" : `linear-gradient(135deg, ${STAGE_META.cutting.color}18, ${STAGE_META.carving.color}22)`, display: "flex", alignItems: "center", justifyContent: "center" }}>
                     {cover ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={cover.url} alt={c.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                     ) : (
-                      <span style={{ fontSize: 44, opacity: 0.5 }}>{icon}</span>
+                      <span style={{ fontSize: 46, opacity: 0.45 }}>{icon}</span>
                     )}
-                    {imgs.length > 1 && <span style={{ position: "absolute", top: 8, right: 8, fontSize: 10.5, fontWeight: 800, color: "#fff", background: "rgba(0,0,0,0.55)", borderRadius: 999, padding: "2px 8px" }}>📷 {imgs.length}</span>}
-                    {canManageImages && cover && (
-                      <button type="button" onClick={(e) => { e.stopPropagation(); delImage(cover.id); }} title="Delete this image" style={{ position: "absolute", top: 8, left: 8, width: 22, height: 22, borderRadius: 999, border: "none", background: "rgba(220,38,38,0.92)", color: "#fff", fontSize: 13, cursor: "pointer", lineHeight: "20px", padding: 0 }}>×</button>
+                    <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, transparent 55%, rgba(0,0,0,0.4))" }} />
+                    <div style={{ position: "absolute", top: 10, right: 10 }}><Ring pct={pct} onImage /></div>
+                    {imgs.length > 0 && (
+                      <button
+                        type="button"
+                        title="View photos"
+                        onClick={(e) => { e.stopPropagation(); setLightbox({ images: imgs, index: 0 }); }}
+                        style={{ position: "absolute", bottom: 10, right: 10, fontSize: 11.5, fontWeight: 800, color: "#fff", background: "rgba(0,0,0,0.55)", border: "1px solid rgba(255,255,255,0.35)", borderRadius: 999, padding: "3px 10px", cursor: "zoom-in", backdropFilter: "blur(3px)" }}
+                      >
+                        🔍 {imgs.length} photo{imgs.length > 1 ? "s" : ""}
+                      </button>
                     )}
-                    <span style={{ position: "absolute", bottom: 8, right: 8, fontSize: 12, fontWeight: 900, color: "#fff", background: pct === 100 ? STAGE_META.done.color : "rgba(0,0,0,0.6)", borderRadius: 999, padding: "2px 9px" }}>{pct}%</span>
                   </div>
-                  {/* info */}
                   <div style={{ padding: "11px 13px", display: "flex", flexDirection: "column", gap: 7 }}>
-                    <div style={{ fontWeight: 800, fontSize: 14.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</div>
+                    <div style={{ fontWeight: 800, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</div>
                     <MiniBar counts={c.counts} total={c.total} />
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11.5 }}>
-                      <span style={{ color: STAGE_META.done.color, fontWeight: 800 }}>{c.counts.done}/{c.total} done</span>
-                      <span style={{ color: "var(--muted)", fontWeight: 700 }}>{c.children.length > 0 ? `${c.children.length} inside →` : `${c.total} slabs`}</span>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11.5, fontWeight: 700 }}>
+                      <span style={{ color: STAGE_META.done.color }}>{c.counts.done}/{c.total} done</span>
+                      <span style={{ color: "var(--muted)" }}>{c.children.length > 0 ? `${c.children.length} inside →` : `${c.total} slab${c.total === 1 ? "" : "s"} →`}</span>
                     </div>
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>
         )}
       </div>
+
+      {lightbox && (
+        <Lightbox
+          images={lightbox.images}
+          index={lightbox.index}
+          canManage={canManageImages}
+          onClose={() => setLightbox(null)}
+          onNav={(i) => setLightbox((lb) => lb && { ...lb, index: i })}
+          onDeleted={() => { setLightbox(null); router.refresh(); }}
+        />
+      )}
     </div>
   );
 }
 
+const cardShell: CSSProperties = {
+  display: "flex", flexDirection: "column", textAlign: "left", padding: 0,
+  border: "1px solid var(--border)", borderRadius: 16, overflow: "hidden",
+  background: "var(--surface)", color: "var(--text)",
+};
+
 function crumbStyle(active: boolean): CSSProperties {
-  return { fontSize: 12.5, fontWeight: active ? 800 : 600, padding: "5px 11px", borderRadius: 8, border: `1px solid ${active ? "var(--gold-dark)" : "var(--border)"}`, background: active ? "rgba(184,115,51,0.08)" : "var(--surface)", color: "var(--text)", cursor: "pointer", whiteSpace: "nowrap" };
+  return { fontSize: 12.5, fontWeight: active ? 800 : 600, padding: "5px 11px", borderRadius: 8, border: `1px solid ${active ? "var(--gold-dark)" : "var(--border)"}`, background: active ? "rgba(184,115,51,0.08)" : "var(--surface)", color: "var(--text)", cursor: "pointer", whiteSpace: "nowrap", maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis" };
 }
 
 function SlabCardsGrid({ node }: { node: TempleTreeNode }) {
   return (
     <div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14, animation: "tcFade .3s ease" }}>
         {STAGE_ORDER.filter((s) => node.counts[s] > 0).map((s) => (
-          <span key={s} style={{ fontSize: 11, fontWeight: 800, color: "#fff", background: STAGE_META[s].color, borderRadius: 999, padding: "2px 9px" }}>{node.counts[s]} {STAGE_META[s].label}</span>
+          <span key={s} style={{ fontSize: 11.5, fontWeight: 800, color: "#fff", background: STAGE_META[s].color, borderRadius: 999, padding: "3px 11px" }}>{node.counts[s]} {STAGE_META[s].label}</span>
         ))}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 10 }}>
-        {node.slabs.map((s) => <BigSlabCard key={s.id} s={s} />)}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(205px, 1fr))", gap: 10 }}>
+        {node.slabs.map((s, i) => <BigSlabCard key={s.id} s={s} delay={Math.min(i * 18, 360)} />)}
       </div>
     </div>
   );
 }
 
-function BigSlabCard({ s }: { s: TempleSlabCard }) {
+function BigSlabCard({ s, delay }: { s: TempleSlabCard; delay: number }) {
   const bucket = bucketOf(s.status);
   const color = STAGE_META[bucket].color;
   return (
-    <div style={{ border: "1px solid var(--border)", borderLeft: `5px solid ${color}`, borderRadius: 12, background: "var(--surface)", padding: "10px 12px", display: "flex", flexDirection: "column", gap: 4 }}>
+    <div className="tc-card" style={{ animationDelay: `${delay}ms`, border: "1px solid var(--border)", borderLeft: `5px solid ${color}`, borderRadius: 12, background: "var(--surface)", padding: "10px 12px", display: "flex", flexDirection: "column", gap: 4 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.id}</code>
         {s.priority && <span>⚡</span>}
