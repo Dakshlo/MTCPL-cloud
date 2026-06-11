@@ -17,7 +17,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
 
   const { data } = await admin
     .from("invoicing_work_order_docs")
-    .select("doc_date, vendor, address, vendor_gstin, vendor_category, vendor_email, vendor_mobile, job_description, job_work_no, unit, quantity, rate, total, line_items, gst_exclusive")
+    .select("doc_date, vendor, address, vendor_gstin, vendor_category, vendor_email, vendor_mobile, job_description, job_work_no, unit, quantity, rate, total, line_items, gst_exclusive, deleted_at")
     .eq("id", id)
     .maybeSingle();
   if (!data) return new Response("Document not found", { status: 404 });
@@ -37,6 +37,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     total: number | string;
     line_items: unknown;
     gst_exclusive: boolean | null;
+    deleted_at: string | null;
   };
 
   // Mig 114 — build the line-item list from the JSONB column when present;
@@ -82,6 +83,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     lineItems,
     grandTotal,
     gstExclusive: d.gst_exclusive !== false,
+    cancelled: d.deleted_at != null,
   });
 
   const inline = new URL(req.url).searchParams.get("print") === "1";

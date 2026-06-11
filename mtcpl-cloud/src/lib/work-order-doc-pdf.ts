@@ -35,6 +35,10 @@ export type WorkOrderDocInput = {
   lineItems: WorkOrderLineItem[];
   grandTotal: number;
   gstExclusive: boolean;
+  // When true (the doc was soft-deleted), stamp a red diagonal +
+  // "CANCELLED (NOT VALID)" across the page so the PDF can't be passed off
+  // as a live work order.
+  cancelled?: boolean;
 };
 
 const PAGE_W = 612;
@@ -242,6 +246,40 @@ export async function buildWorkOrderDocPdf(inp: WorkOrderDocInput): Promise<Uint
   text("For Mateshwari Temple Construction Pvt Ltd", MARGIN_X, sigLabelY, 8, font, muted);
   page.drawLine({ start: { x: PAGE_W - MARGIN_X - 210, y: sigLineY }, end: { x: PAGE_W - MARGIN_X, y: sigLineY }, thickness: 0.7, color: ink });
   text("Vendor signature", PAGE_W - MARGIN_X - 210, sigLabelY, 8, font, muted);
+
+  // ── CANCELLED stamp (deleted docs) — drawn last so it sits on top ─────
+  if (inp.cancelled) {
+    const red = rgb(0.85, 0.12, 0.12);
+    // Red diagonal: top-left corner → bottom-right corner.
+    page.drawLine({
+      start: { x: 28, y: PAGE_H - 28 },
+      end: { x: PAGE_W - 28, y: 28 },
+      thickness: 6,
+      color: red,
+      opacity: 0.45,
+    });
+    // Big bold "CANCELLED" + "(NOT VALID)", centred over the page.
+    const big = "CANCELLED";
+    const bigSize = 60;
+    page.drawText(big, {
+      x: (PAGE_W - bold.widthOfTextAtSize(big, bigSize)) / 2,
+      y: PAGE_H / 2 + 6,
+      size: bigSize,
+      font: bold,
+      color: red,
+      opacity: 0.5,
+    });
+    const sub = "(NOT VALID)";
+    const subSize = 26;
+    page.drawText(sub, {
+      x: (PAGE_W - bold.widthOfTextAtSize(sub, subSize)) / 2,
+      y: PAGE_H / 2 - 34,
+      size: subSize,
+      font: bold,
+      color: red,
+      opacity: 0.5,
+    });
+  }
 
   return await pdf.save();
 }
