@@ -133,7 +133,7 @@ export function ImportBatchesButton({ batches }: { batches: ImportBatch[] }) {
                           <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 560 }}>
                             <thead>
                               <tr style={{ borderBottom: "1px solid var(--border)", background: "var(--surface-alt, rgba(0,0,0,0.03))" }}>
-                                {["#", "Label", "Description", "L (in)", "W (in)", "H (in)", "Qty", "Quality", "Section", "Element", "⚡"].map((h) => (
+                                {["#", "Label", "Description", "L (in)", "W (in)", "H (in)", "Qty", "Quality", "Cat 1", "Cat 2", "⚡"].map((h) => (
                                   <th key={h} style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", textAlign: "left", padding: "6px 8px", whiteSpace: "nowrap" }}>{h}</th>
                                 ))}
                               </tr>

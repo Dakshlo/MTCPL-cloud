@@ -32,18 +32,20 @@ export async function GET(req: NextRequest) {
   const ws = wb.addWorksheet("Slabs");
   ws.columns = [
     { header: "Sr.No.", width: 8 },
-    { header: "Temple", width: 26 },
-    { header: "Stone", width: 14 },
-    { header: "Label", width: 20 },
-    { header: "Description", width: 30 },
-    { header: "Length (in)", width: 12 },
-    { header: "Width (in)", width: 12 },
-    { header: "Height (in)", width: 12 },
+    { header: "Temple", width: 24 },
+    { header: "Stone", width: 13 },
+    { header: "Category 1 (e.g. Floor)", width: 20 },
+    { header: "Category 2 (e.g. Cloister)", width: 20 },
+    { header: "Label", width: 18 },
+    { header: "Description", width: 28 },
+    { header: "Length (in)", width: 11 },
+    { header: "Width (in)", width: 11 },
+    { header: "Height (in)", width: 11 },
     { header: "Quantity", width: 10 },
     { header: "Quality (A/B/Both)", width: 16 },
   ];
   for (let i = 1; i <= TEMPLATE_ROWS; i++) {
-    ws.addRow([i, temple, stone, "", "", "", "", "", "", ""]);
+    ws.addRow([i, temple, stone, "", "", "", "", "", "", "", "", ""]);
   }
 
   // Header band — brand brown, white bold, centred.
@@ -61,17 +63,17 @@ export async function GET(req: NextRequest) {
   for (let r = 2; r <= TEMPLATE_ROWS + 1; r++) {
     const row = ws.getRow(r);
     row.height = 17;
-    for (let col = 1; col <= 10; col++) {
+    for (let col = 1; col <= 12; col++) {
       const c = row.getCell(col);
       const prefilled = col <= 3;
       c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: prefilled ? "FFFDE9C8" : "FFEAF4FF" } };
       c.font = { name: "Calibri", size: 11, bold: col === 2, color: { argb: prefilled ? "FF7C2D12" : "FF1F2937" } };
-      c.alignment = { horizontal: col === 1 || col >= 6 ? "center" : "left", vertical: "middle" };
+      c.alignment = { horizontal: col === 1 || col >= 8 ? "center" : "left", vertical: "middle" };
       c.border = thin(prefilled ? "FFE7C9A0" : "FFC7DEF5");
     }
-    // Quality column — dropdown so users pick A / B / Both instead of
-    // typing free text (blank = Both).
-    row.getCell(10).dataValidation = {
+    // Quality column (col 12) — dropdown so users pick A / B / Both instead
+    // of typing free text (blank = Both).
+    row.getCell(12).dataValidation = {
       type: "list",
       allowBlank: true,
       formulae: ['"A,B,Both"'],

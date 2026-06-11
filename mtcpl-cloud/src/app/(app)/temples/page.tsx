@@ -13,7 +13,7 @@ import { TempleViewClient, type TempleTree, type StageBucket } from "./temple-vi
 export const dynamic = "force-dynamic";
 
 type SlabRow = {
-  id: string; label: string | null; temple: string; status: string;
+  id: string; label: string | null; description: string | null; temple: string; status: string;
   component_section: string | null; component_element: string | null;
 };
 
@@ -85,7 +85,7 @@ export default async function TemplesPage() {
     for (let offset = 0; offset < SLAB_LIMIT; offset += PAGE) {
       const { data, error } = await admin
         .from("slab_requirements")
-        .select("id, label, temple, status, component_section, component_element")
+        .select("id, label, description, temple, status, component_section, component_element")
         .order("temple", { ascending: true })
         .range(offset, offset + PAGE - 1);
       if (error) throw new Error(error.message);
@@ -105,13 +105,21 @@ export default async function TemplesPage() {
     let root = byTemple.get(temple);
     if (!root) { root = newNode(temple); byTemple.set(temple, root); }
 
+    // Category 1 (section) › Category 2 (element) › Label › Description.
+    // section may carry a legacy '›'-path from older AI runs — split it.
     const sectionRaw = (s.component_section ?? "").trim();
     const element = (s.component_element ?? "").trim();
-    // path: section levels (split on › / >), then the element as the leaf.
-    const levels = sectionRaw
+    const label = (s.label ?? "").trim();
+    const description = (s.description ?? "").trim();
+    const cat1Levels = sectionRaw
       ? sectionRaw.split(/\s*[›>]\s*/).map((x) => x.trim()).filter(Boolean)
       : ["Unassigned"];
-    const path = [...levels, element || "— (no element)"];
+    const path = [
+      ...cat1Levels,
+      ...(element ? [element] : []),
+      label || "— (no label)",
+      ...(description ? [description] : []),
+    ];
 
     let cur = root;
     for (const part of path) {

@@ -340,8 +340,8 @@ const CATEGORIZE_SCHEMA = {
         type: "object",
         properties: {
           idx: { type: "integer", description: "Index of the slab in the input list" },
-          section: { type: "string", description: "WHERE in the temple this part sits — a location path. Use ' > ' to nest sub-levels, e.g. 'First Floor > Cloister-2'. Reuse an EXISTING section name exactly when it fits." },
-          element: { type: "string", description: "WHAT the part is — a standardised component type, e.g. Pillar, Chajja, Beam, Ceiling, Jali, Arch, Bracket, Coping, Step, Dome, Lintel. Reuse an EXISTING element name exactly when it fits." },
+          section: { type: "string", description: "CATEGORY 1 — the broad area of the temple this part belongs to (e.g. Floor, Ground Floor, First Floor, Sanctum, Mandap wing). Reuse an EXISTING Category-1 value exactly when it fits." },
+          element: { type: "string", description: "CATEGORY 2 — the narrower sub-area inside Category 1 (e.g. Cloister-1, Cloister-2, Garbhagriha, Sabha Mandap). Reuse an EXISTING Category-2 value exactly when it fits. Leave empty only if there genuinely is no sub-area." },
         },
         required: ["idx", "section", "element"],
         additionalProperties: false,
@@ -384,17 +384,18 @@ export async function categorizeImportRowsAction(payload: {
   const anthropic = new Anthropic();
   const model = process.env.SLAB_CATEGORIZE_MODEL || "claude-haiku-4-5-20251001";
 
-  const prompt = `You organise stone slabs for a temple-construction company (MTCPL). For each slab, decide WHERE it sits in the temple (section) and WHAT part it is (element), from its label + description.
+  const prompt = `You organise stone slabs for a temple-construction company (MTCPL). For each slab, place it under a two-level category from its label + description: Category 1 (broad area) and Category 2 (sub-area inside it).
 
 Temple: ${temple || "(unknown)"}
 
-${existSections.length ? `Existing sections for this temple (REUSE one of these exactly when it fits): ${existSections.join(" | ")}` : "No sections recorded for this temple yet."}
-${existElements.length ? `Existing elements (REUSE one exactly when it fits): ${existElements.join(" | ")}` : ""}
+${existSections.length ? `Existing Category-1 values for this temple (REUSE one exactly when it fits): ${existSections.join(" | ")}` : "No Category-1 values recorded for this temple yet."}
+${existElements.length ? `Existing Category-2 values (REUSE one exactly when it fits): ${existElements.join(" | ")}` : ""}
 
 Rules:
-- section = the location/area. Use ' > ' to nest (e.g. "Ground Floor > Cloister-2"). If the floor/area is unclear, use a single best guess (e.g. "Ground Floor") rather than leaving it blank.
-- element = the standardised part type, singular and title-case (Pillar, Chajja, Beam, Ceiling, Jali, Arch, Bracket, Coping, Step, Dome, Lintel, Bracket, Railing, Floor Slab, …). Map synonyms to the standard word (e.g. "khamba" → Pillar).
-- Be consistent across the list — identical descriptions get the identical section + element.
+- section = Category 1, the broad area (Floor / Ground Floor / First Floor / Sanctum / Mandap …). If unclear, make a single best guess rather than leaving it blank.
+- element = Category 2, the narrower sub-area inside Category 1 (Cloister-1, Cloister-2, Garbhagriha, Sabha Mandap …). Leave empty only if there is genuinely no sub-area.
+- Do NOT put the part type (pillar/chajja) here — the part is already in the Label.
+- Be consistent — identical descriptions get the identical Category 1 + Category 2.
 - Return one item per input idx.`;
 
   const cats: Array<{ section: string; element: string }> = rows.map(() => ({ section: "", element: "" }));

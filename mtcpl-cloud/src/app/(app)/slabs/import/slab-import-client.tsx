@@ -109,12 +109,24 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
   // which is a stronger gate than a shared password.
   const [stage, setStage] = useState<"idle" | "confirm">("idle");
   const [busy, setBusy] = useState(false);
+  // Lock temple + stone once a template is downloaded / a file is uploaded,
+  // so the chosen temple/stone can't drift from what the file was built for.
+  const [locked, setLocked] = useState(false);
   // Mig 123 — AI auto-categorize state.
   const [categorizing, setCategorizing] = useState(false);
   const [catNote, setCatNote] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+  // Hard guard against double-submit — a ref flips synchronously, so even a
+  // fast double-click can't fire two batches before React re-renders.
+  const submittingRef = useRef(false);
 
   const ready = !!temple && !!stone;
+
+  function clearTempleStone() {
+    setLocked(false);
+    setTemple("");
+    setStone("");
+  }
 
   function pickTemple(name: string) {
     setTemple(name);
@@ -136,6 +148,8 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
     document.body.appendChild(a);
     a.click();
     a.remove();
+    // Lock temple/stone now — the downloaded file is built for THIS pair.
+    setLocked(true);
   }
 
   async function onFile(file: File) {
@@ -153,17 +167,21 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
       for (let i = 1; i < aoa.length; i++) {
         const r = (aoa[i] ?? []) as unknown[];
         const cell = (idx: number) => String(r[idx] ?? "").trim();
-        const label = cell(3);
-        const description = cell(4);
-        const length = cell(5);
-        const width = cell(6);
-        const height = cell(7);
-        const quantity = cell(8);
-        // Quality column (template col J): A / B / Both (blank = Both).
-        // Tolerates "Grade A" style typing too.
-        const qRaw = cell(9).toUpperCase().replace(/GRADE/g, "").trim();
+        // Column order: Sr.No(0) Temple(1) Stone(2) Category1(3) Category2(4)
+        // Label(5) Description(6) Length(7) Width(8) Height(9) Quantity(10)
+        // Quality(11). Category 1/2 → component section/element.
+        const section = cell(3);
+        const element = cell(4);
+        const label = cell(5);
+        const description = cell(6);
+        const length = cell(7);
+        const width = cell(8);
+        const height = cell(9);
+        const quantity = cell(10);
+        // Quality: A / B / Both (blank = Both). Tolerates "Grade A" typing.
+        const qRaw = cell(11).toUpperCase().replace(/GRADE/g, "").trim();
         const quality = qRaw === "A" ? "A" : qRaw === "B" ? "B" : "";
-        if (!label && !description && !length && !width && !height && !quantity) continue; // blank row
+        if (!label && !description && !length && !width && !height && !quantity && !section && !element) continue; // blank row
         parsed.push({
           key: crypto.randomUUID(),
           label,
@@ -176,8 +194,8 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
           quantity,
           quality,
           priority: false,
-          section: "",
-          element: "",
+          section,
+          element,
         });
       }
       if (parsed.length === 0) {
@@ -187,6 +205,7 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
       setRows(parsed);
       setFileName(file.name);
       setFileObj(file);
+      setLocked(true);
       setStep(2);
     } catch {
       setError("Couldn't read that file. Make sure it's the .xlsx template you downloaded.");
@@ -257,11 +276,15 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
   const canAdd = issues.length === 0 && totalSlabs > 0;
 
   async function doImport() {
+    // Synchronous double-submit guard (the real fix for the duplicate-batch
+    // bug) — returns instantly on a second click before busy re-renders.
+    if (submittingRef.current) return;
     if (!fileObj) {
       setError("The Excel file is missing — go back and re-upload it.");
       setStage("idle");
       return;
     }
+    submittingRef.current = true;
     setBusy(true);
     setError("");
     const fd = new FormData();
@@ -286,14 +309,17 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
       ),
     );
     const res = await submitSlabImportBatchAction(fd);
-    setBusy(false);
     if (res.ok) {
+      // Keep the overlay up and DON'T release the guard — we're navigating
+      // away; releasing would briefly re-enable the button mid-redirect.
       router.push(
         `/slabs?toast=${encodeURIComponent(
           `Batch sent for approval — ${res.slabCount} slab${res.slabCount === 1 ? "" : "s"} will appear once approved`,
         )}`,
       );
     } else {
+      submittingRef.current = false;
+      setBusy(false);
       setError(res.error);
       setStage("idle");
     }
@@ -307,20 +333,29 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
       <section style={{ ...card, display: "flex", flexDirection: "column", gap: 16 }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
           <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span style={lbl}>1. Temple</span>
-            <select value={temple} onChange={(e) => pickTemple(e.target.value)} style={{ ...inp, fontWeight: 700 }}>
+            <span style={lbl}>1. Temple {locked && "🔒"}</span>
+            <select value={temple} disabled={locked} onChange={(e) => pickTemple(e.target.value)} style={{ ...inp, fontWeight: 700, ...(locked ? { background: "var(--surface-alt)", color: "var(--muted)", cursor: "not-allowed" } : {}) }}>
               <option value="">Select temple…</option>
               {temples.map((t) => <option key={t.name} value={t.name}>{t.name}</option>)}
             </select>
           </label>
           <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span style={lbl}>2. Stone (applies to all)</span>
-            <select value={stone} onChange={(e) => setStone(e.target.value)} style={{ ...inp, fontWeight: 700 }}>
+            <span style={lbl}>2. Stone (applies to all) {locked && "🔒"}</span>
+            <select value={stone} disabled={locked} onChange={(e) => setStone(e.target.value)} style={{ ...inp, fontWeight: 700, ...(locked ? { background: "var(--surface-alt)", color: "var(--muted)", cursor: "not-allowed" } : {}) }}>
               <option value="">Select stone…</option>
               {stones.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </label>
         </div>
+
+        {locked && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12.5, color: "var(--muted)", flexWrap: "wrap" }}>
+            🔒 Temple &amp; stone are locked to match your downloaded file.
+            <button type="button" onClick={clearTempleStone} style={{ fontSize: 12.5, fontWeight: 800, color: "#991b1b", background: "rgba(220,38,38,0.07)", border: "1px solid rgba(220,38,38,0.3)", borderRadius: 8, padding: "5px 12px", cursor: "pointer" }}>
+              ✕ Clear &amp; change
+            </button>
+          </div>
+        )}
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
           <button type="button" disabled={!ready} onClick={downloadTemplate} style={{ padding: "11px 18px", fontSize: 14, fontWeight: 800, color: "#fff", background: ready ? "var(--gold-dark)" : "var(--border)", border: "none", borderRadius: 8, cursor: ready ? "pointer" : "not-allowed" }}>
@@ -334,7 +369,8 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
 
         {!ready && <div style={{ fontSize: 12, color: "var(--muted)" }}>Pick a temple and stone first — the template comes with both pre-filled.</div>}
         <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.6, background: "var(--surface-alt)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px" }}>
-          <strong>Columns:</strong> Sr.No · Temple (filled) · Stone (filled) · Label · Description · Length · Width · Height · Quantity · Quality (A/B/Both — blank = Both).{" "}
+          <strong>Columns:</strong> Sr.No · Temple (filled) · Stone (filled) · <strong>Category 1</strong> · <strong>Category 2</strong> · Label · Description · Length · Width · Height · Quantity · Quality (A/B/Both — blank = Both).{" "}
+          Category 1 → Category 2 → Label organise the slabs in <strong>Temple View</strong> (leave them blank and use ✨ Auto-categorize instead if you prefer).{" "}
           Sizes are in <strong>inches</strong>. One row with quantity N becomes N slabs. After upload you can fix anything before it&apos;s added.
           {" "}In the file, <span style={{ color: "#7c2d12", fontWeight: 700 }}>gold columns</span> are pre-filled (leave them) and{" "}
           <span style={{ color: "#1d4ed8", fontWeight: 700 }}>blue columns</span> are for you to fill in.
@@ -409,8 +445,8 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
                 <th style={{ ...th, width: 80 }}>Hgt (in)</th>
                 <th style={{ ...th, width: 64 }}>Qty</th>
                 <th style={{ ...th, minWidth: 120 }}>Quality</th>
-                <th style={{ ...th, minWidth: 150 }}>✨ Section</th>
-                <th style={{ ...th, minWidth: 110 }}>✨ Element</th>
+                <th style={{ ...th, minWidth: 140 }}>Category 1</th>
+                <th style={{ ...th, minWidth: 140 }}>Category 2</th>
                 <th style={{ ...th, width: 60 }}>⚡</th>
                 <th style={{ ...th, width: 40 }}></th>
               </tr>
@@ -436,8 +472,8 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
                         <option value="B">Grade B</option>
                       </select>
                     </td>
-                    <td style={td}><input value={r.section} onChange={(e) => patch(r.key, "section", e.target.value)} placeholder="✨ or type" style={cellInp} /></td>
-                    <td style={td}><input value={r.element} onChange={(e) => patch(r.key, "element", e.target.value)} placeholder="✨ or type" style={cellInp} /></td>
+                    <td style={td}><input value={r.section} onChange={(e) => patch(r.key, "section", e.target.value)} placeholder="e.g. Floor" style={cellInp} /></td>
+                    <td style={td}><input value={r.element} onChange={(e) => patch(r.key, "element", e.target.value)} placeholder="e.g. Cloister" style={cellInp} /></td>
                     <td style={{ ...td, textAlign: "center" }}><input type="checkbox" checked={r.priority} onChange={(e) => patch(r.key, "priority", e.target.checked)} style={{ cursor: "pointer", width: 16, height: 16 }} /></td>
                     <td style={{ ...td, textAlign: "center" }}><button type="button" onClick={() => removeRow(r.key)} title="Remove row" style={{ fontSize: 14, color: "#991b1b", background: "none", border: "none", cursor: "pointer" }}>✕</button></td>
                   </tr>
