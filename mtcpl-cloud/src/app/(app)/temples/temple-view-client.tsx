@@ -4,62 +4,21 @@
 // (Section › … › Element), each node shows a stage progress bar + counts.
 // Leaf nodes expand to the slab list. Read-only.
 
-import { useMemo, useState, type CSSProperties } from "react";
-import { deleteTempleComponentImageAction } from "./actions";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { TempleCardBrowser } from "./temple-card-browser";
+import {
+  STAGE_META, STAGE_ORDER, bucketOf, stoneLabel, calcCft,
+  type StageBucket, type ComponentImage, type TempleSlabCard, type TempleTreeNode, type TempleTree,
+} from "./temple-shared";
 
-export type StageBucket = "pending" | "cutting" | "carving" | "done" | "rejected";
-
-export type ComponentImage = { id: string; url: string; caption: string | null };
-
-export type TempleSlabCard = {
-  id: string; status: string; stone: string | null; quality: string | null;
-  l: number; w: number; t: number; priority: boolean;
-};
-
-export type TempleTreeNode = {
-  id: string;
-  name: string;
-  total: number;
-  counts: Record<StageBucket, number>;
-  children: TempleTreeNode[];
-  slabs: TempleSlabCard[];
-};
-
-export type TempleTree = {
-  temple: string;
-  total: number;
-  counts: Record<StageBucket, number>;
-  roots: TempleTreeNode[];
-};
-
-const STAGE_META: Record<StageBucket, { label: string; color: string }> = {
-  pending: { label: "Pending", color: "#94a3b8" },   // slate
-  cutting: { label: "Cutting", color: "#3b82f6" },   // blue
-  carving: { label: "Carving", color: "#f59e0b" },   // amber
-  done: { label: "Done", color: "#16a34a" },         // green
-  rejected: { label: "Rejected", color: "#dc2626" }, // red
-};
-// Rejected slabs are filtered out of Temple View (server-side), so the
-// legend / bars don't show that stage.
-const STAGE_ORDER: StageBucket[] = ["done", "carving", "cutting", "pending"];
+// Re-export the types page.tsx imports from here.
+export type { StageBucket, ComponentImage, TempleSlabCard, TempleTreeNode, TempleTree };
 
 const STATUS_LABEL: Record<string, string> = {
   open: "Open", planned: "Planned", cutting: "Cutting", cut_done: "Cut done",
   carving_assigned: "Carving assigned", carving_in_progress: "Carving", completed: "Completed",
   dispatched: "Dispatched", rejected: "Rejected",
 };
-
-function bucketOf(status: string): StageBucket {
-  if (["open", "planned"].includes(status)) return "pending";
-  if (["cutting", "cut_done"].includes(status)) return "cutting";
-  if (["carving_assigned", "carving_in_progress"].includes(status)) return "carving";
-  if (status === "rejected") return "rejected";
-  return "done";
-}
-function stoneLabel(s: string | null): string {
-  return (s ?? "").replace(/Stone$/i, "");
-}
-const calcCft = (l: number, w: number, t: number) => (l * w * t) / 1728;
 
 // One slab card — mirrors the Ready Sizes card fields (code, dims, CFT,
 // stone, quality, priority) in a compact stage-coloured card.
@@ -125,30 +84,7 @@ function CountChips({ counts }: { counts: Record<StageBucket, number> }) {
   );
 }
 
-function ImageStrip({ images, canManage }: { images: ComponentImage[]; canManage: boolean }) {
-  if (images.length === 0) return null;
-  return (
-    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "2px 0 6px 26px" }}>
-      {images.map((img) => (
-        <div key={img.id} style={{ position: "relative" }}>
-          <a href={img.url} target="_blank" rel="noopener noreferrer" title={img.caption ?? "Open image"}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={img.url} alt={img.caption ?? ""} style={{ width: 84, height: 64, objectFit: "cover", borderRadius: 8, border: "1px solid var(--border)", display: "block" }} />
-          </a>
-          {img.caption && <div style={{ fontSize: 9.5, color: "var(--muted)", maxWidth: 84, textAlign: "center", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{img.caption}</div>}
-          {canManage && (
-            <form action={deleteTempleComponentImageAction} style={{ position: "absolute", top: -6, right: -6 }}>
-              <input type="hidden" name="id" value={img.id} />
-              <button type="submit" title="Delete image" style={{ width: 18, height: 18, borderRadius: 999, border: "none", background: "#dc2626", color: "#fff", fontSize: 11, lineHeight: "16px", cursor: "pointer", padding: 0 }}>×</button>
-            </form>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function TreeNode({ node, depth, imagesByNode, canManageImages, openMode }: { node: TempleTreeNode; depth: number; imagesByNode: Record<string, ComponentImage[]>; canManageImages: boolean; openMode: "default" | "all" | "none" }) {
+function TreeNode({ node, depth, imagesByNode, openMode }: { node: TempleTreeNode; depth: number; imagesByNode: Record<string, ComponentImage[]>; openMode: "default" | "all" | "none" }) {
   const isLeaf = node.children.length === 0;
   // Initial open state from the current expand mode (the parent remounts the
   // tree when the mode changes, so this initializer re-runs).
@@ -191,8 +127,7 @@ function TreeNode({ node, depth, imagesByNode, canManageImages, openMode }: { no
 
       {open && (
         <div style={{ marginTop: 5, display: "flex", flexDirection: "column", gap: 5 }}>
-          <ImageStrip images={images} canManage={canManageImages} />
-          {!isLeaf && node.children.map((c) => <TreeNode key={c.id} node={c} depth={depth + 1} imagesByNode={imagesByNode} canManageImages={canManageImages} openMode={openMode} />)}
+          {!isLeaf && node.children.map((c) => <TreeNode key={c.id} node={c} depth={depth + 1} imagesByNode={imagesByNode} openMode={openMode} />)}
           {isLeaf && (
             <div style={{ marginLeft: 22, marginBottom: 8 }}>
               <div style={{ marginBottom: 8 }}><CountChips counts={node.counts} /></div>
@@ -210,7 +145,8 @@ function TreeNode({ node, depth, imagesByNode, canManageImages, openMode }: { no
 // Stage legend — explains every colour, including what "Rejected" means.
 const STAGE_HELP: Record<StageBucket, string> = {
   pending: "Not started yet (open / planned).",
-  cutting: "Being cut, or cut and waiting for carving.",
+  cutting: "Actively being cut.",
+  cut_done: "Cut and ready to assign to carving (not yet sent to a vendor).",
   carving: "Out for carving (CNC / vendor).",
   done: "Finished — completed or dispatched.",
   rejected: "Rejected during a cutting or carving quality check — not usable, kept on record only.",
@@ -229,13 +165,25 @@ function StageLegend() {
   );
 }
 
-export function TempleViewClient({ trees, imagesByNode, canManageImages }: { trees: TempleTree[]; imagesByNode: Record<string, ComponentImage[]>; canManageImages: boolean }) {
+export function TempleViewClient({ trees, imagesByNode, canManageImages, categoryStruct }: { trees: TempleTree[]; imagesByNode: Record<string, ComponentImage[]>; canManageImages: boolean; categoryStruct: Record<string, Record<string, string[]>> }) {
   const [selected, setSelected] = useState<string>(trees[0]?.temple ?? "");
   const [q, setQ] = useState("");
   // Component browsing: filter within the selected temple + expand/collapse all.
   const [nodeQ, setNodeQ] = useState("");
   const [openMode, setOpenMode] = useState<"default" | "all" | "none">("default");
   const [treeKey, setTreeKey] = useState(0);
+  // View modes: list (default) or immersive fullscreen cards; plus a
+  // hide-menu toggle for a bigger list page.
+  const [cardMode, setCardMode] = useState(false);
+  const [menuHidden, setMenuHidden] = useState(false);
+  // Collapse the app sidebar (body class from globals.css) whenever the menu
+  // is hidden OR we're in fullscreen cards mode. Cleaned up on unmount.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const hide = menuHidden || cardMode;
+    document.body.classList.toggle("vendor-cockpit-fullscreen", hide);
+    return () => document.body.classList.remove("vendor-cockpit-fullscreen");
+  }, [menuHidden, cardMode]);
 
   const filteredTemples = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -256,8 +204,34 @@ export function TempleViewClient({ trees, imagesByNode, canManageImages }: { tre
     return <div className="banner">No slabs yet. Import slabs (and run ✨ Auto-categorize) to see them organised here.</div>;
   }
 
+  // Immersive fullscreen card browser.
+  if (cardMode && current) {
+    return (
+      <TempleCardBrowser
+        trees={trees}
+        imagesByNode={imagesByNode}
+        canManageImages={canManageImages}
+        categoryStruct={categoryStruct}
+        initialTemple={current.temple}
+        onExit={() => setCardMode(false)}
+      />
+    );
+  }
+
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 260px) minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {/* View controls */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 9, overflow: "hidden" }}>
+          <span style={{ padding: "7px 13px", fontSize: 12.5, fontWeight: 800, background: "var(--gold-dark)", color: "#fff" }}>📋 List</span>
+          <button type="button" onClick={() => setCardMode(true)} style={{ padding: "7px 13px", fontSize: 12.5, fontWeight: 800, background: "var(--surface)", color: "var(--text)", border: "none", borderLeft: "1px solid var(--border)", cursor: "pointer" }}>🖼 Cards (fullscreen)</button>
+        </div>
+        <button type="button" onClick={() => setMenuHidden((m) => !m)} style={{ padding: "7px 13px", fontSize: 12.5, fontWeight: 700, borderRadius: 9, border: "1px solid var(--border)", background: menuHidden ? "rgba(184,115,51,0.1)" : "var(--surface)", color: menuHidden ? "var(--gold-dark)" : "var(--text)", cursor: "pointer" }}>
+          {menuHidden ? "◧ Show menu" : "◨ Hide menu (bigger)"}
+        </button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 260px) minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
       {/* Temple list */}
       <div style={{ display: "flex", flexDirection: "column", gap: 8, position: "sticky", top: 8 }}>
         <input
@@ -327,13 +301,14 @@ export function TempleViewClient({ trees, imagesByNode, canManageImages }: { tre
               {visibleRoots.length === 0 ? (
                 <div className="muted" style={{ fontSize: 13, padding: "10px 2px" }}>No components match “{nodeQ}”.</div>
               ) : (
-                visibleRoots.map((r) => <TreeNode key={r.id} node={r} depth={0} imagesByNode={imagesByNode} canManageImages={canManageImages} openMode={nodeQ ? "all" : openMode} />)
+                visibleRoots.map((r) => <TreeNode key={r.id} node={r} depth={0} imagesByNode={imagesByNode} openMode={nodeQ ? "all" : openMode} />)
               )}
             </div>
           </>
         ) : (
           <div className="banner">Pick a temple on the left.</div>
         )}
+      </div>
       </div>
     </div>
   );
@@ -344,10 +319,23 @@ const ctrlBtn: CSSProperties = {
   border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", whiteSpace: "nowrap",
 };
 
-// Filter a node subtree by name — keep a node if it or any descendant matches.
+// Does a leaf's slab list contain a slab matching the query? Matches the
+// slab code and the size (e.g. "48x36x2" or "48 36 2").
+function slabMatch(node: TempleTreeNode, q: string): boolean {
+  if (node.children.length > 0) return false;
+  return node.slabs.some((s) =>
+    s.id.toLowerCase().includes(q) ||
+    `${s.l}x${s.w}x${s.t}`.includes(q) ||
+    `${s.l} ${s.w} ${s.t}`.includes(q) ||
+    String(s.l).includes(q) || String(s.w).includes(q) || String(s.t).includes(q),
+  );
+}
+
+// Filter a node subtree — keep a node if its NAME (Category / Label /
+// Description), or any descendant, or a slab under it (code / size) matches.
 function filterNode(node: TempleTreeNode, q: string): TempleTreeNode | null {
   if (!q) return node;
-  const selfMatch = node.name.toLowerCase().includes(q);
+  const selfMatch = node.name.toLowerCase().includes(q) || slabMatch(node, q);
   const kids = node.children.map((c) => filterNode(c, q)).filter((x): x is TempleTreeNode => x !== null);
   if (selfMatch || kids.length > 0) {
     return selfMatch ? node : { ...node, children: kids };

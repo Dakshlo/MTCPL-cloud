@@ -32,14 +32,15 @@ const SLAB_LIMIT = 30000;
 
 function stageBucket(status: string): StageBucket {
   if (status === "open" || status === "planned") return "pending";
-  if (status === "cutting" || status === "cut_done") return "cutting";
+  if (status === "cutting") return "cutting";
+  if (status === "cut_done") return "cut_done"; // cut, ready to assign to carving
   if (status === "carving_assigned" || status === "carving_in_progress") return "carving";
   if (status === "completed" || status === "dispatched") return "done";
   if (status === "rejected") return "rejected";
   return "pending";
 }
 
-const EMPTY_COUNTS = (): Record<StageBucket, number> => ({ pending: 0, cutting: 0, carving: 0, done: 0, rejected: 0 });
+const EMPTY_COUNTS = (): Record<StageBucket, number> => ({ pending: 0, cutting: 0, cut_done: 0, carving: 0, done: 0, rejected: 0 });
 
 // Mutable tree used while building; converted to the serializable shape below.
 type BuildNode = {
@@ -209,7 +210,7 @@ export default async function TemplesPage() {
         </div>
         {canWriteImages && <AddTempleImageButton categoryStruct={categoryStruct} />}
       </div>
-      <TempleViewClient trees={trees} imagesByNode={imagesByNode} canManageImages={canWriteImages} />
+      <TempleViewClient trees={trees} imagesByNode={imagesByNode} canManageImages={canWriteImages} categoryStruct={categoryStruct} />
     </div>
   );
 }
