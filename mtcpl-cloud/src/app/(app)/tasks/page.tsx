@@ -150,6 +150,16 @@ export default async function TasksPage() {
     if (error) return null;
     return count ?? 0;
   }
+  // Mig 122 — Excel slab-import batches waiting for approval.
+  async function fetchSlabImports(): Promise<number | null> {
+    if (!["owner", "developer", "senior_incharge", "carving_head"].includes(profile.role)) return null;
+    const { count, error } = await supabase
+      .from("slab_import_batches")
+      .select("*", { count: "exact", head: true })
+      .eq("status", "pending");
+    if (error) return null;
+    return count ?? 0;
+  }
 
   const [
     approvals,
@@ -161,6 +171,7 @@ export default async function TasksPage() {
     royaltyApproval,
     workOrderApproval,
     ownerReviews,
+    slabImports,
   ] = await Promise.all([
     fetchApprovals(),
     fetchBillsAudit(),
@@ -171,6 +182,7 @@ export default async function TasksPage() {
     fetchRoyaltyApproval(),
     fetchWorkOrderApproval(),
     fetchOwnerReviews(),
+    fetchSlabImports(),
   ]);
 
   const cards: TaskCard[] = [];
@@ -259,6 +271,17 @@ export default async function TasksPage() {
       description: "Carving slabs flagged to you during approval",
       count: ownerReviews,
       icon: "👤",
+      department: "production",
+    });
+  }
+  if (slabImports !== null) {
+    cards.push({
+      id: "slab-imports",
+      href: "/tasks/slab-imports",
+      label: "Slab Import Approvals",
+      description: "Excel import batches waiting for your approval",
+      count: slabImports,
+      icon: "🗂",
       department: "production",
     });
   }

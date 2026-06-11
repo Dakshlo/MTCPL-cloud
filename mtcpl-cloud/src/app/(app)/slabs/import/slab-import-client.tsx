@@ -7,17 +7,19 @@
  *         columns pre-filled) → fill label/description/size/quantity →
  *         upload it back. Parsing happens here with SheetJS.
  * Step 2: review + edit every row (fix anything, set quality, drop
- *         rows) → "Add N slabs" → confirm → password → commit.
+ *         rows) → "Send N slabs for approval" → confirm → password.
  *
- * The commit calls importSlabsAction (server) which re-validates,
- * verifies the password server-side, generates ids with the normal
- * scheme and inserts at status='open' under one batch_id (group).
+ * Mig 122 — the commit no longer inserts slabs. It calls
+ * submitSlabImportBatchAction, which stores the reviewed rows + the
+ * uploaded Excel (audit copy) as a PENDING batch. Slabs are created
+ * only when owner / senior incharge / carving head approves the batch
+ * from their Tasks panel.
  */
 
 import { useRouter } from "next/navigation";
 import { useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
-import { importSlabsAction } from "../actions";
+import { submitSlabImportBatchAction } from "../actions";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 
 export type TempleOpt = { name: string; default_stone: string | null };
@@ -94,6 +96,8 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
   const [step, setStep] = useState<1 | 2>(1);
   const [rows, setRows] = useState<Row[]>([]);
   const [fileName, setFileName] = useState("");
+  // The uploaded Excel itself — sent with the batch as the audit copy.
+  const [fileObj, setFileObj] = useState<File | null>(null);
   const [error, setError] = useState("");
   const [stage, setStage] = useState<"idle" | "confirm" | "password">("idle");
   const [password, setPassword] = useState("");
@@ -166,6 +170,7 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
       }
       setRows(parsed);
       setFileName(file.name);
+      setFileObj(file);
       setStep(2);
     } catch {
       setError("Couldn't read that file. Make sure it's the .xlsx template you downloaded.");
@@ -196,26 +201,41 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
   const canAdd = issues.length === 0 && totalSlabs > 0;
 
   async function doImport() {
+    if (!fileObj) {
+      setError("The Excel file is missing — go back and re-upload it.");
+      setStage("idle");
+      return;
+    }
     setBusy(true);
     setError("");
-    const res = await importSlabsAction({
-      temple,
-      stone,
-      password,
-      rows: rows.map((r) => ({
-        label: r.label,
-        description: r.description,
-        length: Number(r.length) || 0,
-        width: Number(r.width) || 0,
-        height: Number(r.height) || 0,
-        quantity: Number(r.quantity) || 1,
-        quality: r.quality,
-        priority: r.priority,
-      })),
-    });
+    const fd = new FormData();
+    fd.set("temple", temple);
+    fd.set("stone", stone);
+    fd.set("password", password);
+    fd.set("file", fileObj);
+    fd.set(
+      "rows",
+      JSON.stringify(
+        rows.map((r) => ({
+          label: r.label,
+          description: r.description,
+          length: Number(r.length) || 0,
+          width: Number(r.width) || 0,
+          height: Number(r.height) || 0,
+          quantity: Number(r.quantity) || 1,
+          quality: r.quality,
+          priority: r.priority,
+        })),
+      ),
+    );
+    const res = await submitSlabImportBatchAction(fd);
     setBusy(false);
     if (res.ok) {
-      router.push(`/slabs?toast=${encodeURIComponent(`${res.count} slab${res.count === 1 ? "" : "s"} imported`)}`);
+      router.push(
+        `/slabs?toast=${encodeURIComponent(
+          `Batch sent for approval — ${res.slabCount} slab${res.slabCount === 1 ? "" : "s"} will appear once approved`,
+        )}`,
+      );
     } else {
       setError(res.error);
       // Wrong password → keep them on the password prompt to retry;
@@ -276,7 +296,7 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
 
   return (
     <>
-      <FinanceLoadingOverlay show={busy} label="Adding slabs…" />
+      <FinanceLoadingOverlay show={busy} label="Sending for approval…" />
 
       {/* Per-row validation — every field is required; name the empties. */}
       {issues.length > 0 && (
@@ -362,13 +382,13 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
       <div style={{ position: "sticky", bottom: 0, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "12px 18px", boxShadow: "0 -2px 10px rgba(0,0,0,0.05)" }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: canAdd ? "var(--text)" : "var(--muted)" }}>
           {issues.length > 0
-            ? `Fix ${issues.length} incomplete row${issues.length === 1 ? "" : "s"} before adding`
+            ? `Fix ${issues.length} incomplete row${issues.length === 1 ? "" : "s"} before sending`
             : totalSlabs > 0
-              ? `Ready to add ${totalSlabs} slab${totalSlabs === 1 ? "" : "s"} to ${temple}`
+              ? `Ready to send ${totalSlabs} slab${totalSlabs === 1 ? "" : "s"} for approval (${temple})`
               : "Fill in at least one row"}
         </div>
         <button type="button" disabled={!canAdd} onClick={() => { setError(""); setStage("confirm"); }} style={{ padding: "11px 24px", fontSize: 14, fontWeight: 800, color: "#fff", background: canAdd ? "var(--gold-dark)" : "var(--border)", border: "none", borderRadius: 8, cursor: canAdd ? "pointer" : "not-allowed" }}>
-          Add {totalSlabs} slab{totalSlabs === 1 ? "" : "s"}
+          Send {totalSlabs} slab{totalSlabs === 1 ? "" : "s"} for approval
         </button>
       </div>
 
@@ -378,10 +398,11 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
           <div role="dialog" aria-modal="true" style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, boxShadow: "0 18px 60px rgba(0,0,0,0.45)", width: "100%", maxWidth: 440, padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
             {stage === "confirm" ? (
               <>
-                <div style={{ fontSize: 17, fontWeight: 800 }}>Add {totalSlabs} slab{totalSlabs === 1 ? "" : "s"}?</div>
+                <div style={{ fontSize: 17, fontWeight: 800 }}>Send {totalSlabs} slab{totalSlabs === 1 ? "" : "s"} for approval?</div>
                 <div style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>
-                  {validRows.length} row{validRows.length === 1 ? "" : "s"} → <strong>{totalSlabs}</strong> slab{totalSlabs === 1 ? "" : "s"} into <strong>{temple}</strong> ({stone}), status <strong>open</strong>.
-                  {" "}They&apos;ll be one group you can delete together later.
+                  {validRows.length} row{validRows.length === 1 ? "" : "s"} → <strong>{totalSlabs}</strong> slab{totalSlabs === 1 ? "" : "s"} into <strong>{temple}</strong> ({stone}).
+                  {" "}The batch goes to <strong>owner / senior incharge / carving head</strong> for approval — slabs appear at status <strong>open</strong> only after they approve.
+                  {" "}Your Excel file is kept on record with the batch.
                 </div>
                 <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                   <button type="button" onClick={() => setStage("idle")} className="ghost-button">Cancel</button>
@@ -396,7 +417,7 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
                 {error && <div style={{ fontSize: 13, fontWeight: 700, color: "#991b1b" }}>{error}</div>}
                 <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                   <button type="button" disabled={busy} onClick={() => { setStage("idle"); setPassword(""); setError(""); }} className="ghost-button">Cancel</button>
-                  <button type="button" disabled={!password || busy} onClick={doImport} style={{ padding: "9px 18px", fontSize: 14, fontWeight: 800, color: "#fff", background: !password || busy ? "var(--border)" : "#15803d", border: "none", borderRadius: 8, cursor: !password || busy ? "not-allowed" : "pointer" }}>{busy ? "Adding…" : `✓ Add ${totalSlabs}`}</button>
+                  <button type="button" disabled={!password || busy} onClick={doImport} style={{ padding: "9px 18px", fontSize: 14, fontWeight: 800, color: "#fff", background: !password || busy ? "var(--border)" : "#15803d", border: "none", borderRadius: 8, cursor: !password || busy ? "not-allowed" : "pointer" }}>{busy ? "Sending…" : `✓ Send ${totalSlabs} for approval`}</button>
                 </div>
               </>
             )}

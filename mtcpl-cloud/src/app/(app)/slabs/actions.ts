@@ -9,6 +9,7 @@ import { nextSlabCodeFromMaxId } from "./utils";
 import { logAudit } from "@/lib/audit";
 import { notify } from "@/lib/notifications";
 import { verifyBulkImportPassword } from "@/lib/bulk-import-password";
+import type { AppRole } from "@/lib/types";
 
 
 function num(fd: FormData, key: string, fallback = 0) {
@@ -196,40 +197,36 @@ export async function deleteSlabAction(formData: FormData) {
 // Returns a result (not a redirect) so the rich client can keep the
 // verify table on a wrong password / error.
 // ────────────────────────────────────────────────────────────────────────────
-export async function importSlabsAction(payload: {
-  temple: string;
-  stone: string;
-  password: string;
-  rows: Array<{
-    label?: string | null;
-    description?: string | null;
-    length?: number | string | null;
-    width?: number | string | null;
-    height?: number | string | null;
-    quantity?: number | string | null;
-    quality?: string | null;
-    priority?: boolean | null;
-  }>;
-}): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
-  const { profile } = await requireAuth([
-    "owner",
-    "team_head",
-    "senior_incharge",
-    "slab_entry",
-    "developer",
-  ]);
-  const supabase = createAdminSupabaseClient();
+// ────────────────────────────────────────────────────────────────────────────
+// Bulk import — batch + approval flow (mig 122, Daksh June 2026).
+// The manual Add-Slab form is retired; Import from Excel is the only way to
+// add slabs, and every import is a batch that must be APPROVED by owner /
+// senior_incharge / carving_head / developer before any slab row exists.
+// The uploaded Excel is kept as the audit copy.
+// ────────────────────────────────────────────────────────────────────────────
 
-  const temple = (payload?.temple ?? "").trim();
-  const stone = (payload?.stone ?? "").trim();
-  if (!temple) return { ok: false, error: "Temple is required" };
-  if (!stone) return { ok: false, error: "Stone is required" };
+const IMPORT_SUBMIT_ROLES: AppRole[] = ["owner", "team_head", "senior_incharge", "slab_entry", "developer"];
+const IMPORT_APPROVER_ROLES: AppRole[] = ["owner", "senior_incharge", "carving_head", "developer"];
+const IMPORT_FILE_BUCKET = "slab_import_files";
 
-  // Password gate — server-side comparison against the stored hash.
-  const okPw = await verifyBulkImportPassword(payload?.password ?? "");
-  if (!okPw) return { ok: false, error: "Wrong password" };
+type CleanImportRow = {
+  label: string;
+  description: string | null;
+  length: number;
+  width: number;
+  height: number;
+  quantity: number;
+  quality: string | null;
+  priority: boolean;
+};
 
-  const cleaned = (Array.isArray(payload?.rows) ? payload.rows : [])
+function cleanImportRows(rows: unknown): CleanImportRow[] {
+  type RawRow = {
+    label?: string | null; description?: string | null;
+    length?: number | string | null; width?: number | string | null; height?: number | string | null;
+    quantity?: number | string | null; quality?: string | null; priority?: boolean | null;
+  };
+  return (Array.isArray(rows) ? (rows as RawRow[]) : [])
     .map((r) => ({
       label: (r.label ?? "").toString().trim(),
       description: (r.description ?? "").toString().trim() || null,
@@ -242,15 +239,17 @@ export async function importSlabsAction(payload: {
     }))
     // Every slab needs all three dimensions (stored as inches in *_ft).
     .filter((r) => r.length > 0 && r.width > 0 && r.height > 0);
-  if (cleaned.length === 0) {
-    return { ok: false, error: "No valid rows — each slab needs length, width and height." };
-  }
+}
 
-  const totalSlabs = cleaned.reduce((s, r) => s + r.quantity, 0);
-  if (totalSlabs > 10000) {
-    return { ok: false, error: `Too many slabs in one import (${totalSlabs}). Max 10000 — split the file.` };
-  }
-
+/** Generate ids + insert the slabs of an approved batch. Same code scheme
+ *  and 23505-retry as the old direct import. Returns the slab group id. */
+async function insertApprovedSlabRows(
+  supabase: ReturnType<typeof createAdminSupabaseClient>,
+  actorId: string,
+  temple: string,
+  stone: string,
+  cleaned: CleanImportRow[],
+): Promise<{ ok: true; count: number; slabBatchId: string } | { ok: false; error: string }> {
   const { data: templeRow } = await supabase
     .from("temples")
     .select("code_prefix")
@@ -259,7 +258,7 @@ export async function importSlabsAction(payload: {
   const prefix = (templeRow as { code_prefix?: string } | null)?.code_prefix ?? "SLB";
 
   // One batch_id for the whole import = the deletable "group".
-  const batchId = randomUUID();
+  const slabBatchId = randomUUID();
   let inserted = 0;
   let lastError = "";
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -290,9 +289,9 @@ export async function importSlabsAction(payload: {
           thickness_ft: r.height,
           priority: r.priority,
           status: "open",
-          batch_id: batchId,
-          created_by: profile.id,
-          updated_by: profile.id,
+          batch_id: slabBatchId,
+          created_by: actorId,
+          updated_by: actorId,
         });
       }
       // Next row takes the next base number (children share this base's
@@ -311,17 +310,193 @@ export async function importSlabsAction(payload: {
     if (error.code !== "23505") break;
   }
   if (lastError) return { ok: false, error: lastError };
+  return { ok: true, count: inserted, slabBatchId };
+}
 
-  await logAudit(profile.id, "import_bulk", "slab", batchId, {
+/** Step 1 — submit an import batch for approval. Stores the reviewed rows
+ *  as JSONB + the uploaded Excel as the audit copy. NO slab rows are
+ *  created here — that happens at approval. */
+export async function submitSlabImportBatchAction(
+  formData: FormData,
+): Promise<{ ok: true; slabCount: number } | { ok: false; error: string }> {
+  const { profile } = await requireAuth(IMPORT_SUBMIT_ROLES);
+  const supabase = createAdminSupabaseClient();
+
+  const temple = text(formData, "temple");
+  const stone = text(formData, "stone");
+  if (!temple) return { ok: false, error: "Temple is required" };
+  if (!stone) return { ok: false, error: "Stone is required" };
+
+  // Password gate — server-side comparison against the stored hash.
+  const okPw = await verifyBulkImportPassword(String(formData.get("password") ?? ""));
+  if (!okPw) return { ok: false, error: "Wrong password" };
+
+  let rawRows: unknown;
+  try {
+    rawRows = JSON.parse(String(formData.get("rows") ?? "[]"));
+  } catch {
+    return { ok: false, error: "Bad rows payload — re-upload the file." };
+  }
+  const cleaned = cleanImportRows(rawRows);
+  if (cleaned.length === 0) {
+    return { ok: false, error: "No valid rows — each slab needs length, width and height." };
+  }
+  const totalSlabs = cleaned.reduce((s, r) => s + r.quantity, 0);
+  if (totalSlabs > 10000) {
+    return { ok: false, error: `Too many slabs in one import (${totalSlabs}). Max 10000 — split the file.` };
+  }
+
+  // The uploaded Excel — kept as the audit copy of this batch.
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) {
+    return { ok: false, error: "The Excel file is missing — re-upload it." };
+  }
+  if (file.size > 4 * 1024 * 1024) {
+    return { ok: false, error: "Excel file too large (max 4 MB)." };
+  }
+
+  const batchId = randomUUID();
+  const safeName = (file.name || "import.xlsx").replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120);
+  const filePath = `${batchId}/${safeName}`;
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const { error: upErr } = await supabase.storage
+    .from(IMPORT_FILE_BUCKET)
+    .upload(filePath, buffer, {
+      contentType: file.type || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      upsert: false,
+    });
+  if (upErr) return { ok: false, error: `Couldn't store the Excel copy: ${upErr.message}` };
+
+  const { error } = await supabase.from("slab_import_batches").insert({
+    id: batchId,
     temple,
     stone,
-    rows: cleaned.length,
-    slabs: inserted,
-    batch_id: batchId,
+    rows: cleaned,
+    row_count: cleaned.length,
+    slab_count: totalSlabs,
+    file_path: filePath,
+    file_name: file.name || safeName,
+    status: "pending",
+    submitted_by: profile.id,
+  });
+  if (error) return { ok: false, error: error.message };
+
+  await logAudit(profile.id, "slab_import_submitted", "slab_import_batch", batchId, {
+    temple, stone, rows: cleaned.length, slabs: totalSlabs,
+  });
+  revalidatePath("/slabs");
+  revalidatePath("/tasks");
+  return { ok: true, slabCount: totalSlabs };
+}
+
+/** Step 2a — approve a pending batch: the slabs are created at status
+ *  'open' (visible on Required Sizes), the batch is closed. */
+export async function approveSlabImportBatchAction(formData: FormData) {
+  const { profile } = await requireAuth(IMPORT_APPROVER_ROLES);
+  const supabase = createAdminSupabaseClient();
+  const batchId = text(formData, "batch_id");
+  if (!batchId) toast("/tasks/slab-imports", "Missing batch.");
+
+  const { data: batch } = await supabase
+    .from("slab_import_batches")
+    .select("id, temple, stone, rows, status, submitted_by")
+    .eq("id", batchId)
+    .maybeSingle();
+  if (!batch) toast("/tasks/slab-imports", "Batch not found.");
+  const b = batch as { id: string; temple: string; stone: string; rows: unknown; status: string; submitted_by: string | null };
+  if (b.status !== "pending") toast("/tasks/slab-imports", "This batch was already reviewed.");
+
+  const cleaned = cleanImportRows(b.rows);
+  if (cleaned.length === 0) toast("/tasks/slab-imports", "Batch has no valid rows — reject it instead.");
+
+  const res = await insertApprovedSlabRows(supabase, profile.id, b.temple, b.stone, cleaned);
+  if (!res.ok) toast("/tasks/slab-imports", `Approve failed: ${res.error}`);
+
+  await supabase
+    .from("slab_import_batches")
+    .update({
+      status: "approved",
+      reviewed_by: profile.id,
+      reviewed_at: new Date().toISOString(),
+      slab_batch_id: res.slabBatchId,
+    })
+    .eq("id", batchId)
+    .eq("status", "pending");
+
+  await logAudit(profile.id, "slab_import_approved", "slab_import_batch", batchId, {
+    temple: b.temple, stone: b.stone, slabs: res.count, slab_batch_id: res.slabBatchId,
+  });
+  // Record for the team — the submitter sees the status (and reviewer)
+  // in the 🗂 Batches modal on Required Sizes.
+  await notify("slab_import_approved", `Slab import approved — ${res.count} slabs for ${b.temple}`, {
+    entityType: "slab_import_batch",
+    entityId: batchId,
+    actorId: profile.id,
   });
   revalidatePath("/slabs");
   revalidatePath("/planning");
-  return { ok: true, count: inserted };
+  revalidatePath("/tasks");
+  toast("/tasks/slab-imports", `Approved — ${res.count} slab${res.count === 1 ? "" : "s"} added to ${b.temple}.`);
+}
+
+/** Step 2b — reject a pending batch (note optional). No slabs are created. */
+export async function rejectSlabImportBatchAction(formData: FormData) {
+  const { profile } = await requireAuth(IMPORT_APPROVER_ROLES);
+  const supabase = createAdminSupabaseClient();
+  const batchId = text(formData, "batch_id");
+  const note = text(formData, "note") || null;
+  if (!batchId) toast("/tasks/slab-imports", "Missing batch.");
+
+  const { data: batch } = await supabase
+    .from("slab_import_batches")
+    .select("id, temple, slab_count, status, submitted_by")
+    .eq("id", batchId)
+    .maybeSingle();
+  if (!batch) toast("/tasks/slab-imports", "Batch not found.");
+  const b = batch as { id: string; temple: string; slab_count: number; status: string; submitted_by: string | null };
+  if (b.status !== "pending") toast("/tasks/slab-imports", "This batch was already reviewed.");
+
+  await supabase
+    .from("slab_import_batches")
+    .update({
+      status: "rejected",
+      reviewed_by: profile.id,
+      reviewed_at: new Date().toISOString(),
+      review_note: note,
+    })
+    .eq("id", batchId)
+    .eq("status", "pending");
+
+  await logAudit(profile.id, "slab_import_rejected", "slab_import_batch", batchId, { note });
+  await notify("slab_import_rejected", `Slab import rejected — ${b.temple} (${b.slab_count} slabs)`, {
+    message: note ?? undefined,
+    entityType: "slab_import_batch",
+    entityId: batchId,
+    actorId: profile.id,
+  });
+  revalidatePath("/slabs");
+  revalidatePath("/tasks");
+  toast("/tasks/slab-imports", "Batch rejected.");
+}
+
+/** Signed URL to download a batch's stored Excel audit copy. */
+export async function getSlabImportFileUrlAction(
+  batchId: string,
+): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+  await requireAuth([...new Set([...IMPORT_SUBMIT_ROLES, ...IMPORT_APPROVER_ROLES])]);
+  const supabase = createAdminSupabaseClient();
+  const { data } = await supabase
+    .from("slab_import_batches")
+    .select("file_path")
+    .eq("id", (batchId ?? "").trim())
+    .maybeSingle();
+  const path = (data as { file_path?: string | null } | null)?.file_path;
+  if (!path) return { ok: false, error: "No file stored for this batch." };
+  const { data: signed, error } = await supabase.storage
+    .from(IMPORT_FILE_BUCKET)
+    .createSignedUrl(path, 600);
+  if (error || !signed?.signedUrl) return { ok: false, error: "Couldn't create the download link." };
+  return { ok: true, url: signed.signedUrl };
 }
 
 // ────────────────────────────────────────────────────────────────────────────

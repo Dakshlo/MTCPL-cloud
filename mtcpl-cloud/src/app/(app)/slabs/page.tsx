@@ -4,9 +4,9 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
 import { canReadRequiredSizes } from "@/lib/cutting-permissions";
-import { AddSlabForm } from "./add-slab-form";
 import { SlabGrid } from "./slab-grid";
 import { SlabSearchBar } from "./slab-search-bar";
+import { ImportBatchesButton, type ImportBatch, type ImportBatchRowPreview } from "./import-batches-button";
 
 // Entry roles see only their own additions; senior roles see everything
 const ENTRY_ROLES = ["slab_entry", "block_slab_entry"] as const;
@@ -93,31 +93,36 @@ export default async function SlabsPage() {
     : [{ id: "pink", name: "PinkStone" }, { id: "white", name: "WhiteStone" }];
   const labels = (labelRows ?? []).map(r => r.name);
 
-  // Per-prefix highest-ID lookup for the "next code" form preview.
-  // Fetched one row per prefix via ORDER BY id DESC LIMIT 1 — this
-  // sidesteps Supabase's PostgREST db-max-rows cap (which truncates
-  // any .select() over 1000 rows) by only asking for exactly one row
-  // per temple. Even with 10k+ slabs across all temples, this is
-  // ~10 parallel single-row queries. Zero-padded 4-digit numeric
-  // component means string DESC == numeric DESC.
-  const uniquePrefixes = [...new Set(templeList.map(t => t.code_prefix).filter(Boolean))];
-  const maxIdByPrefixEntries = await Promise.all(
-    uniquePrefixes.map(async (pfx) => {
-      const { data } = await admin
-        .from("slab_requirements")
-        .select("id")
-        .like("id", `${pfx}-%`)
-        .order("id", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      return [pfx, data?.id ?? null] as const;
-    })
-  );
-  const maxIdByPrefix: Record<string, string | null> = Object.fromEntries(maxIdByPrefixEntries);
-
-  const totalOpen = slabList.filter(s => s.status === "open").length;
-  const priorityCount = slabList.filter(s => s.priority).length;
-  const templeGroups = [...new Set(slabList.map(s => s.temple))].length;
+  // Mig 122 — import batches for the 🗂 Batches modal (newest first).
+  // Entry roles see their own submissions; senior roles see everything.
+  let batchQuery = admin
+    .from("slab_import_batches")
+    .select("id, temple, stone, rows, row_count, slab_count, file_name, status, submitted_by, submitted_at, reviewed_by, reviewed_at, review_note")
+    .order("submitted_at", { ascending: false })
+    .limit(40);
+  if (isEntryRole) batchQuery = batchQuery.eq("submitted_by", profile.id);
+  const { data: batchRows } = await batchQuery;
+  type BatchRow = {
+    id: string; temple: string; stone: string; rows: ImportBatchRowPreview[] | null;
+    row_count: number | null; slab_count: number | null; file_name: string | null;
+    status: string; submitted_by: string | null; submitted_at: string | null;
+    reviewed_by: string | null; reviewed_at: string | null; review_note: string | null;
+  };
+  const importBatches: ImportBatch[] = ((batchRows ?? []) as BatchRow[]).map((b) => ({
+    id: b.id,
+    temple: b.temple,
+    stone: b.stone,
+    rows: Array.isArray(b.rows) ? b.rows : [],
+    rowCount: b.row_count ?? 0,
+    slabCount: b.slab_count ?? 0,
+    fileName: b.file_name,
+    status: (["pending", "approved", "rejected"].includes(b.status) ? b.status : "pending") as ImportBatch["status"],
+    submittedByName: b.submitted_by ? (profilesMap[b.submitted_by] ?? null) : null,
+    submittedAt: b.submitted_at,
+    reviewedByName: b.reviewed_by ? (profilesMap[b.reviewed_by] ?? null) : null,
+    reviewedAt: b.reviewed_at,
+    reviewNote: b.review_note,
+  }));
 
   return (
     <>
@@ -132,15 +137,26 @@ export default async function SlabsPage() {
               📥 Import from Excel
             </Link>
           )}
+          {/* Mig 122 — all import batches (pending approval / approved /
+              rejected) with row preview + Excel download. */}
+          {(canImport || ["carving_head"].includes(profile.role)) && (
+            <ImportBatchesButton batches={importBatches} />
+          )}
           <Link href="/slabs/view" className="secondary-button">
             View Inventory →
           </Link>
         </div>
       </div>
 
-      {/* Add form */}
-      {canEdit && templeList.length > 0 && (
-        <AddSlabForm temples={templeList} maxIdByPrefix={maxIdByPrefix} stoneTypes={stoneList} labels={labels} />
+      {/* Mig 122 — the manual Add-Slab form is retired. Slabs are added
+          ONLY via Import from Excel, and each import needs approval from
+          owner / senior incharge / carving head before the slabs appear. */}
+      {canImport && (
+        <div className="banner">
+          ➕ Adding slabs now goes through <strong>📥 Import from Excel</strong> — fill the template, upload, review,
+          and the batch is sent for <strong>approval</strong> (owner / senior incharge / carving head). Slabs appear
+          here once approved. Track every batch under <strong>🗂 Batches</strong>.
+        </div>
       )}
       {canEdit && templeList.length === 0 && (
         <div className="banner">
@@ -148,7 +164,7 @@ export default async function SlabsPage() {
           <Link href="/settings" style={{ color: "var(--gold-dark)", fontWeight: 600 }}>
             Go to Settings → Temple Codes
           </Link>{" "}
-          to add temples before entering slabs.
+          to add temples before importing slabs.
         </div>
       )}
 
@@ -174,8 +190,8 @@ export default async function SlabsPage() {
       {slabList.length === 0 ? (
         <div className="banner">
           {isEntryRole
-            ? "You haven't added any slab requirements yet. Add your first one above."
-            : "No open slabs yet. Add your first slab requirement above."}
+            ? "You haven't added any slab requirements yet. Use 📥 Import from Excel above."
+            : "No open slabs yet. Use 📥 Import from Excel above — slabs appear once the batch is approved."}
         </div>
       ) : (
         <SlabGrid slabs={slabList} temples={templeList} stoneTypes={stoneList} canEdit={canEdit} profilesMap={profilesMap} labels={labels} />

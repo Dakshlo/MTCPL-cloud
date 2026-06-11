@@ -358,6 +358,16 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     if (orErr) return null;
     return count ?? 0;
   }
+  // Mig 122 — Excel slab-import batches waiting for approval.
+  async function fetchSlabImportBadge(): Promise<number | null> {
+    if (!["owner", "developer", "senior_incharge", "carving_head"].includes(profile.role)) return null;
+    const { count, error: siErr } = await supabase
+      .from("slab_import_batches")
+      .select("*", { count: "exact", head: true })
+      .eq("status", "pending");
+    if (siErr) return null;
+    return count ?? 0;
+  }
 
   const [
     approvalsBadge,
@@ -373,6 +383,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     bankDeclineBadge,
     workOrderApprovalBadge,
     ownerReviewBadge,
+    slabImportBadge,
   ] = await Promise.all([
     fetchApprovalsBadge(),
     fetchBillsAuditBadge(),
@@ -387,6 +398,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     fetchBankDeclineBadge(),
     fetchWorkOrderApprovalBadge(),
     fetchOwnerReviewBadge(),
+    fetchSlabImportBadge(),
   ]);
 
   return (
@@ -603,6 +615,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               bankDeclineBadge,
               workOrderApprovalBadge,
               ownerReviewBadge,
+              slabImportBadge,
             })} />
 
             {/* Mig 078 — Messenger pilot. canUseMessenger is locked
@@ -724,6 +737,7 @@ function buildTopbarTaskItems(counts: {
   /** Mig 118 — carving slabs escalated to the owner during approval.
    *  Owner / developer only; null otherwise. */
   ownerReviewBadge: number | null;
+  slabImportBadge: number | null;
 }): TopbarTask[] {
   const items: TopbarTask[] = [];
   // Mig 058 follow-on (Daksh) — per-user rejected-bills item.
@@ -900,6 +914,18 @@ function buildTopbarTaskItems(counts: {
       description: "Carving slabs flagged to you during approval",
       count: counts.ownerReviewBadge,
       icon: "👤",
+      department: "production",
+    });
+  }
+  // Mig 122 — Excel slab-import batches awaiting approval.
+  if (counts.slabImportBadge !== null) {
+    items.push({
+      id: "slab-imports",
+      href: "/tasks/slab-imports",
+      label: "Slab Import Approvals",
+      description: "Excel import batches waiting for your approval",
+      count: counts.slabImportBadge,
+      icon: "🗂",
       department: "production",
     });
   }
