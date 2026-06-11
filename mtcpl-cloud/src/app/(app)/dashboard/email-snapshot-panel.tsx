@@ -149,34 +149,42 @@ export function EmailSnapshotPanel({ snap, configured }: { snap: Snap | null; co
             padding: 0,
             cursor: "pointer",
             color: "var(--text)",
+            flex: "1 1 auto",
+            minWidth: 0,
+            overflow: "hidden",
+            textAlign: "left",
           }}
         >
-          <span style={{ fontSize: 12, color: "var(--muted)", transform: collapsed ? "rotate(-90deg)" : "none", transition: "transform 0.15s" }}>▼</span>
-          <span style={{ fontSize: 15, fontWeight: 800 }}>📧 Email Snapshot</span>
+          <span style={{ fontSize: 12, color: "var(--muted)", flexShrink: 0, transform: collapsed ? "rotate(-90deg)" : "none", transition: "transform 0.15s" }}>▼</span>
+          <span style={{ fontSize: 15, fontWeight: 800, flexShrink: 0 }}>📧 Email Snapshot</span>
           {snap && !snap.error && (
-            <span className="muted" style={{ fontSize: 11.5, fontWeight: 500 }}>
+            <span className="muted" style={{ fontSize: 11.5, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
               {fmtIst(snap.generatedAt)} · {RANGE_LABEL[snap.range] ?? "Today"} · {snap.scannedCount} scanned
             </span>
           )}
         </button>
 
-        <div style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end" }}>
           <Link
             href="/dashboard/emails"
             title="Browse every scanned email, newest first"
             style={{
-              padding: "6px 12px",
-              fontSize: 12,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              height: 28,
+              padding: "0 10px",
+              fontSize: 11.5,
               fontWeight: 700,
               color: "var(--text)",
               background: "var(--surface)",
               border: "1px solid var(--border)",
-              borderRadius: 8,
+              borderRadius: 7,
               textDecoration: "none",
               whiteSpace: "nowrap",
             }}
           >
-            📂 Open all emails
+            📂 All emails
           </Link>
           <select
             value={range}
@@ -184,10 +192,12 @@ export function EmailSnapshotPanel({ snap, configured }: { snap: Snap | null; co
             disabled={busy}
             title="How far back to fetch when you refresh"
             style={{
-              fontSize: 12,
+              height: 28,
+              maxWidth: 130,
+              fontSize: 11.5,
               fontWeight: 600,
-              padding: "6px 8px",
-              borderRadius: 8,
+              padding: "0 6px",
+              borderRadius: 7,
               border: "1px solid var(--border)",
               background: "var(--bg)",
               color: "var(--text)",
@@ -203,15 +213,19 @@ export function EmailSnapshotPanel({ snap, configured }: { snap: Snap | null; co
             onClick={refresh}
             disabled={busy}
             style={{
-              padding: "6px 14px",
-              fontSize: 12,
-              fontWeight: 700,
-              color: "var(--text)",
-              background: "var(--surface)",
-              border: "1px solid var(--border)",
-              borderRadius: 8,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              height: 28,
+              padding: "0 12px",
+              fontSize: 11.5,
+              fontWeight: 800,
+              color: "#fff",
+              background: "var(--accent, #4f46e5)",
+              border: "1px solid var(--accent, #4f46e5)",
+              borderRadius: 7,
               cursor: busy ? "wait" : "pointer",
-              opacity: busy ? 0.7 : 1,
+              opacity: busy ? 0.75 : 1,
               whiteSpace: "nowrap",
             }}
           >
