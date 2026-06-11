@@ -8,9 +8,12 @@ import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canReadRequiredSizes } from "@/lib/cutting-permissions";
-import { TempleViewClient, type TempleTree, type StageBucket } from "./temple-view-client";
+import { TempleViewClient, type TempleTree, type StageBucket, type ComponentImage } from "./temple-view-client";
+import { AddTempleImageButton } from "./add-image-button";
 
 export const dynamic = "force-dynamic";
+
+const IMAGE_WRITE_ROLES = ["owner", "developer", "team_head", "senior_incharge"];
 
 type SlabRow = {
   id: string; label: string | null; description: string | null; temple: string; status: string;
@@ -83,6 +86,7 @@ type TempleTreeNode = TempleTree["roots"][number];
 export default async function TemplesPage() {
   const { profile } = await requireAuth();
   if (!canReadRequiredSizes(profile)) redirect("/");
+  const canWriteImages = IMAGE_WRITE_ROLES.includes(profile.role);
   const admin = createAdminSupabaseClient();
 
   // Paginated fetch of every slab (all statuses) — mirrors the slabs page
@@ -165,16 +169,44 @@ export default async function TemplesPage() {
     })
     .filter((t) => t.total > 0);
 
+  // Per-temple Category 1 → Category 2[] structure, for the Add-image picker.
+  const categoryStruct: Record<string, Record<string, string[]>> = {};
+  for (const t of trees) {
+    const byCat1: Record<string, string[]> = {};
+    for (const c1 of t.roots) {
+      if (c1.name === "Unassigned") continue;
+      byCat1[c1.name] = c1.children.map((c2) => c2.name).filter((n) => !n.startsWith("—"));
+    }
+    categoryStruct[t.temple] = byCat1;
+  }
+
+  // Reference images (mig 124) → map each to its tree node path so the client
+  // can show a thumbnail on the matching node.
+  const { data: imgRows } = await admin
+    .from("temple_component_images")
+    .select("id, temple, section, element, caption, image_path")
+    .order("created_at", { ascending: true });
+  const pub = (p: string) => admin.storage.from("temple_component_images").getPublicUrl(p).data.publicUrl;
+  const imagesByNode: Record<string, ComponentImage[]> = {};
+  for (const r of (imgRows ?? []) as Array<{ id: string; temple: string; section: string; element: string | null; caption: string | null; image_path: string }>) {
+    const nodeId = r.element ? `${r.temple}/${r.section}/${r.element}` : `${r.temple}/${r.section}`;
+    (imagesByNode[nodeId] ??= []).push({ id: r.id, url: pub(r.image_path), caption: r.caption });
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16, paddingBottom: 40 }}>
-      <div>
-        <h1 style={{ margin: 0, fontSize: 22 }}>🏛 Temple View</h1>
-        <p className="muted" style={{ margin: "2px 0 0", fontSize: 13, maxWidth: 760 }}>
-          Browse every temple by component — Section (floor / area) → Element (pillar, chajja…), with progress at every level.
-          Click a group to see its slabs. Slabs added before AI categorization sit under <strong>Unassigned</strong>.
-        </p>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <h1 style={{ margin: 0, fontSize: 22 }}>🏛 Temple View</h1>
+          <p className="muted" style={{ margin: "2px 0 0", fontSize: 13, maxWidth: 760 }}>
+            Browse every temple by component — Category 1 (floor / area) → Category 2 (cloister / sub-area) → Label, with
+            progress at every level. Click a group to see its slab cards. Slabs added before categorization sit under{" "}
+            <strong>Unassigned</strong>. Add reference photos with <strong>📷 Add image</strong>.
+          </p>
+        </div>
+        {canWriteImages && <AddTempleImageButton categoryStruct={categoryStruct} />}
       </div>
-      <TempleViewClient trees={trees} />
+      <TempleViewClient trees={trees} imagesByNode={imagesByNode} canManageImages={canWriteImages} />
     </div>
   );
 }

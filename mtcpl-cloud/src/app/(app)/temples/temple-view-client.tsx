@@ -5,8 +5,11 @@
 // Leaf nodes expand to the slab list. Read-only.
 
 import { useMemo, useState } from "react";
+import { deleteTempleComponentImageAction } from "./actions";
 
 export type StageBucket = "pending" | "cutting" | "carving" | "done" | "rejected";
+
+export type ComponentImage = { id: string; url: string; caption: string | null };
 
 export type TempleSlabCard = {
   id: string; status: string; stone: string | null; quality: string | null;
@@ -120,11 +123,35 @@ function CountChips({ counts }: { counts: Record<StageBucket, number> }) {
   );
 }
 
-function TreeNode({ node, depth }: { node: TempleTreeNode; depth: number }) {
+function ImageStrip({ images, canManage }: { images: ComponentImage[]; canManage: boolean }) {
+  if (images.length === 0) return null;
+  return (
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "2px 0 6px 26px" }}>
+      {images.map((img) => (
+        <div key={img.id} style={{ position: "relative" }}>
+          <a href={img.url} target="_blank" rel="noopener noreferrer" title={img.caption ?? "Open image"}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={img.url} alt={img.caption ?? ""} style={{ width: 84, height: 64, objectFit: "cover", borderRadius: 8, border: "1px solid var(--border)", display: "block" }} />
+          </a>
+          {img.caption && <div style={{ fontSize: 9.5, color: "var(--muted)", maxWidth: 84, textAlign: "center", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{img.caption}</div>}
+          {canManage && (
+            <form action={deleteTempleComponentImageAction} style={{ position: "absolute", top: -6, right: -6 }}>
+              <input type="hidden" name="id" value={img.id} />
+              <button type="submit" title="Delete image" style={{ width: 18, height: 18, borderRadius: 999, border: "none", background: "#dc2626", color: "#fff", fontSize: 11, lineHeight: "16px", cursor: "pointer", padding: 0 }}>×</button>
+            </form>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TreeNode({ node, depth, imagesByNode, canManageImages }: { node: TempleTreeNode; depth: number; imagesByNode: Record<string, ComponentImage[]>; canManageImages: boolean }) {
   const isLeaf = node.children.length === 0;
   // Open the first two levels by default for a quick overview.
   const [open, setOpen] = useState(depth < 1);
   const done = node.counts.done;
+  const images = imagesByNode[node.id] ?? [];
   return (
     <div style={{ marginLeft: depth === 0 ? 0 : 14 }}>
       <button
@@ -148,6 +175,7 @@ function TreeNode({ node, depth }: { node: TempleTreeNode; depth: number }) {
         <span style={{ fontWeight: depth === 0 ? 800 : 700, fontSize: depth === 0 ? 14 : 13, flex: "0 1 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {isLeaf ? "🔹 " : depth === 0 ? "📂 " : "📁 "}{node.name}
         </span>
+        {images.length > 0 && <span title={`${images.length} photo(s)`} style={{ fontSize: 11, flexShrink: 0 }}>📷</span>}
         <span style={{ fontSize: 12.5, fontWeight: 800, color: "var(--muted)", flexShrink: 0 }}>
           {done}/{node.total}
         </span>
@@ -156,7 +184,8 @@ function TreeNode({ node, depth }: { node: TempleTreeNode; depth: number }) {
 
       {open && (
         <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 4 }}>
-          {!isLeaf && node.children.map((c) => <TreeNode key={c.id} node={c} depth={depth + 1} />)}
+          <ImageStrip images={images} canManage={canManageImages} />
+          {!isLeaf && node.children.map((c) => <TreeNode key={c.id} node={c} depth={depth + 1} imagesByNode={imagesByNode} canManageImages={canManageImages} />)}
           {isLeaf && (
             <div style={{ marginLeft: 26, marginBottom: 8 }}>
               <div style={{ marginBottom: 8 }}><CountChips counts={node.counts} /></div>
@@ -171,7 +200,7 @@ function TreeNode({ node, depth }: { node: TempleTreeNode; depth: number }) {
   );
 }
 
-export function TempleViewClient({ trees }: { trees: TempleTree[] }) {
+export function TempleViewClient({ trees, imagesByNode, canManageImages }: { trees: TempleTree[]; imagesByNode: Record<string, ComponentImage[]>; canManageImages: boolean }) {
   const [selected, setSelected] = useState<string>(trees[0]?.temple ?? "");
   const [q, setQ] = useState("");
 
@@ -236,7 +265,7 @@ export function TempleViewClient({ trees }: { trees: TempleTree[] }) {
             </div>
             <CountChips counts={current.counts} />
             <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
-              {current.roots.map((r) => <TreeNode key={r.id} node={r} depth={0} />)}
+              {current.roots.map((r) => <TreeNode key={r.id} node={r} depth={0} imagesByNode={imagesByNode} canManageImages={canManageImages} />)}
             </div>
           </>
         ) : (
