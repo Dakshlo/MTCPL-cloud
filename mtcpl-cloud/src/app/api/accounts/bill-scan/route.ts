@@ -41,11 +41,28 @@ const EXTRACT_SCHEMA = {
     sgst_percent: { type: ["number", "null"], description: "SGST rate percent (e.g. 9), null if not a CGST/SGST bill" },
     igst_percent: { type: ["number", "null"], description: "IGST rate percent (e.g. 18), null if not an IGST bill" },
     total: { type: ["number", "null"], description: "Grand total / invoice value INCLUDING GST" },
+    line_items: {
+      type: ["array", "null"],
+      description: "If the bill's particulars/items are a TABLE with multiple rows (e.g. a transport bill with LR numbers, or a goods invoice with several items), return EVERY row here. Otherwise null. Fill only the columns the bill has; leave the rest null.",
+      items: {
+        type: "object",
+        properties: {
+          particulars: { type: ["string", "null"], description: "Item / LR number / particulars text for this row" },
+          from: { type: ["string", "null"], description: "Origin, if the row has a From column" },
+          to: { type: ["string", "null"], description: "Destination, if the row has a To column" },
+          qty: { type: ["string", "null"], description: "Quantity or weight as printed (e.g. '19T', '8')" },
+          rate: { type: ["string", "null"], description: "Rate as printed" },
+          amount: { type: ["string", "null"], description: "Line amount as printed" },
+        },
+        required: ["particulars", "from", "to", "qty", "rate", "amount"],
+        additionalProperties: false,
+      },
+    },
     confidence: { type: "string", enum: ["high", "medium", "low"], description: "Your overall confidence in the extraction" },
   },
   required: [
     "vendor_name", "vendor_gstin", "bill_no", "bill_date", "description",
-    "subtotal", "cgst_percent", "sgst_percent", "igst_percent", "total", "confidence",
+    "subtotal", "cgst_percent", "sgst_percent", "igst_percent", "total", "line_items", "confidence",
   ],
   additionalProperties: false,
 } as const;
@@ -58,6 +75,7 @@ Rules:
 - subtotal is the taxable value BEFORE GST; total is the final amount INCLUDING GST.
 - GST: report the printed RATES (percent), not the rupee amounts. A bill has either CGST+SGST (intra-state) or IGST (inter-state), not both.
 - If the bill shows multiple line items, subtotal/total are the bill-level figures; description should capture the item/particulars text as fully as printed (list every line item — do not over-shorten to just a few words).
+- TABLE bills: when the particulars are laid out as a table with multiple rows, ALSO fill line_items with one entry per row (this is in addition to description). For a non-tabular bill, set line_items to null.
 - Use null for anything you cannot read confidently. Do not guess digits.
 
 DIGIT ACCURACY (critical — this feeds accounting records):
