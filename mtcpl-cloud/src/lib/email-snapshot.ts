@@ -32,6 +32,10 @@ export type SnapshotItem = {
   // snapshots that predate this still render.
   uid?: number;
   date?: string;
+  // Stable, globally-unique key (the email's Message-ID, or a fallback
+  // hash) — used to DEDUPE the archive so re-scanning overlapping ranges
+  // keeps just one copy of each email.
+  messageId?: string;
 };
 
 // The full email, fetched live when the owner opens a card. NEVER
@@ -46,13 +50,14 @@ export type FullMessage = {
 
 // How far back to read. The 5am/2pm crons always use "today"; the
 // dashboard Refresh button lets the owner pick a wider window.
-export type SnapshotRange = "today" | "yesterday" | "last_3_days" | "last_7_days";
+export type SnapshotRange = "today" | "yesterday" | "last_3_days" | "last_7_days" | "last_month";
 
 const RANGE_LABELS: Record<SnapshotRange, string> = {
   today: "Today",
   yesterday: "Yesterday onward",
   last_3_days: "Last 3 days",
   last_7_days: "Last 7 days",
+  last_month: "Last 1 month",
 };
 
 export function rangeLabel(r: string | null | undefined): string {
@@ -60,7 +65,7 @@ export function rangeLabel(r: string | null | undefined): string {
 }
 
 function normalizeRange(r: string | null | undefined): SnapshotRange {
-  return r === "yesterday" || r === "last_3_days" || r === "last_7_days" ? r : "today";
+  return r === "yesterday" || r === "last_3_days" || r === "last_7_days" || r === "last_month" ? r : "today";
 }
 
 const IST_OFFSET_MS = 5.5 * 3600 * 1000;
@@ -74,11 +79,21 @@ function istStartOfDay(daysAgo: number): Date {
 }
 
 function sinceForRange(range: SnapshotRange): Date {
-  const daysAgo = range === "today" ? 0 : range === "yesterday" ? 1 : range === "last_3_days" ? 2 : 6;
+  const daysAgo =
+    range === "today" ? 0 :
+    range === "yesterday" ? 1 :
+    range === "last_3_days" ? 2 :
+    range === "last_7_days" ? 6 :
+    30; // last_month
   return istStartOfDay(daysAgo);
 }
 
-const MAX_EMAILS = 60;
+// A 1-month manual pull can return many emails, so the cap scales with the
+// window (the cron's "today" stays small and cheap).
+function maxEmailsForRange(range: SnapshotRange): number {
+  return range === "last_month" ? 120 : range === "last_7_days" ? 80 : 50;
+}
+
 const MAX_BODY_CHARS = 1500;
 
 // Google's own service mail (sign-in alerts, security/policy notices,
@@ -133,8 +148,8 @@ For every email in the input, return an item with the same idx. Mark important t
 
 // fromName = clean display name (what we show in bold); fromText keeps
 // the full "Name <addr>" for the AI's context. uid lets us re-open the
-// full email later (read-only, on demand).
-type FetchedEmail = { uid: number; fromName: string; fromText: string; subject: string; date: string; body: string };
+// full email later (read-only, on demand). messageId is the dedup key.
+type FetchedEmail = { uid: number; messageId: string; fromName: string; fromText: string; subject: string; date: string; body: string };
 
 /** Read recent inbox mail over read-only IMAP, within the given range. */
 async function fetchRecentEmails(range: SnapshotRange): Promise<FetchedEmail[]> {
@@ -160,7 +175,7 @@ async function fetchRecentEmails(range: SnapshotRange): Promise<FetchedEmail[]> 
     try {
       const since = sinceForRange(range);
       const uids = await client.search({ since }, { uid: true });
-      const recent = (Array.isArray(uids) ? uids : []).slice(-MAX_EMAILS);
+      const recent = (Array.isArray(uids) ? uids : []).slice(-maxEmailsForRange(range));
       if (recent.length > 0) {
         for await (const msg of client.fetch(recent.join(","), { source: true, uid: true }, { uid: true })) {
           if (!msg.source) continue;
@@ -171,12 +186,18 @@ async function fetchRecentEmails(range: SnapshotRange): Promise<FetchedEmail[]> 
             if (isGoogleServiceSender(sender?.address)) continue;
             const fromName = (sender?.name ?? "").trim() || sender?.address || "(unknown sender)";
             const body = (parsed.text ?? "").replace(/\s+/g, " ").trim().slice(0, MAX_BODY_CHARS);
+            const subject = parsed.subject ?? "(no subject)";
+            const date = parsed.date ? parsed.date.toISOString() : "";
+            // Dedup key: the email's Message-ID (globally unique & stable);
+            // fall back to sender+subject+date when a header is missing.
+            const messageId = (parsed.messageId ?? "").trim() || `fallback:${fromName}|${subject}|${date}`;
             out.push({
               uid: typeof msg.uid === "number" ? msg.uid : 0,
+              messageId,
               fromName,
               fromText: parsed.from?.text ?? fromName,
-              subject: parsed.subject ?? "(no subject)",
-              date: parsed.date ? parsed.date.toISOString() : "",
+              subject,
+              date,
               body,
             });
           } catch {
@@ -325,6 +346,7 @@ async function summarize(emails: FetchedEmail[]): Promise<{ overview: string; it
       urgency: it.urgency === "action_needed" ? "action_needed" : "fyi",
       uid: src.uid,
       date: src.date,
+      messageId: src.messageId,
     });
   }
   // Action-needed first.
@@ -352,6 +374,32 @@ export async function runEmailSnapshot(
       range: effectiveRange,
     });
     if (error) return { ok: false, error: error.message };
+
+    // Persist each important email into the deduplicated archive (mig 121).
+    // Upsert on dedup_key so re-scanning overlapping ranges keeps ONE copy.
+    // Best-effort — never fail the run if the archive table isn't there yet.
+    if (items.length > 0) {
+      const rows = items
+        .filter((it) => it.messageId)
+        .map((it) => ({
+          dedup_key: it.messageId as string,
+          uid: it.uid ?? null,
+          from_name: it.from,
+          subject: it.subject,
+          summary: it.summary,
+          category: it.category,
+          urgency: it.urgency,
+          email_date: it.date || null,
+          last_scanned_at: new Date().toISOString(),
+        }));
+      if (rows.length > 0) {
+        await admin
+          .from("email_messages")
+          .upsert(rows, { onConflict: "dedup_key" })
+          .then(() => {}, () => {});
+      }
+    }
+
     return { ok: true, itemCount: items.length };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
