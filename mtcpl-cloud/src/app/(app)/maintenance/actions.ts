@@ -28,6 +28,11 @@ const PROOF_MIME_ALLOW = new Set<string>([
 function isAllowed(role: string): boolean {
   return role === "owner" || role === "developer";
 }
+// crosscheck (= "Manager") may flip a machine Working / Under-maintenance,
+// but not manage the registry. owner/developer can do everything.
+function canMarkStatus(role: string): boolean {
+  return isAllowed(role) || role === "crosscheck";
+}
 function txt(fd: FormData, key: string): string {
   return String(fd.get(key) || "").trim();
 }
@@ -349,11 +354,16 @@ export async function updateMachineAction(formData: FormData) {
 /** Manually set machine status (working / under_maintenance / retired). */
 export async function setMachineStatusAction(formData: FormData) {
   const { profile } = await requireAuth();
-  if (!isAllowed(profile.role)) redirect(back(formData, "Not allowed."));
+  if (!canMarkStatus(profile.role)) redirect(back(formData, "Not allowed."));
   const id = txt(formData, "id");
   const status = txt(formData, "status");
   if (!id || !["working", "under_maintenance", "retired"].includes(status)) {
     redirect(back(formData, "Invalid status change."));
+  }
+  // Retire is a management action — managers can't retire, only flip
+  // Working / Under-maintenance.
+  if (status === "retired" && !isAllowed(profile.role)) {
+    redirect(back(formData, "Not allowed."));
   }
   const admin = createAdminSupabaseClient();
   const now = new Date().toISOString();

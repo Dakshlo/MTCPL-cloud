@@ -358,18 +358,20 @@ const navEntries: NavEntry[] = [
   },
   // ── MAINTENANCE section (mig 108+) — company machine registry. The
   //    repair-ticket workflow is shelved for now; the board is a simple
-  //    Working / Under-maintenance view. Owner + developer only.
+  //    Working / Under-maintenance view. owner/developer manage; crosscheck
+  //    (Manager) is view + mark-maintenance only (the page hides the
+  //    Edit-machines controls for them).
   {
     type: "divider",
     label: "MAINTENANCE",
-    roles: ["developer", "owner"],
+    roles: ["developer", "owner", "crosscheck"],
     department: "maintenance",
   },
   {
     href: "/maintenance",
     label: "Machines",
     icon: "🛠️",
-    roles: ["developer", "owner"],
+    roles: ["developer", "owner", "crosscheck"],
     department: "maintenance",
   },
   // ── ACCOUNTS section (Finance department, mig 028 + 037 crosscheck) ──

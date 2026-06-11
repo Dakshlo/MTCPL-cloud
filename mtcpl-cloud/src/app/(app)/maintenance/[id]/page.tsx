@@ -7,12 +7,16 @@ import { MachineAdminControls } from "../machine-admin-controls";
 
 export const dynamic = "force-dynamic";
 
-const ALLOWED = ["owner", "developer"];
+// Mirror the board's access. crosscheck (= "Manager") can open a machine
+// and mark it Working / Under-maintenance, but not edit/retire/delete.
+const ALLOWED = ["owner", "developer", "crosscheck"];
+const MANAGE_ROLES = ["owner", "developer"];
 const IMG_BUCKET = "machine_images";
 
 export default async function MachineDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { profile } = await requireAuth();
   if (!ALLOWED.includes(profile.role)) redirect("/dashboard");
+  const canManage = MANAGE_ROLES.includes(profile.role);
   const { id } = await params;
   const admin = createAdminSupabaseClient();
   const pub = (path: string | null) => (path ? admin.storage.from(IMG_BUCKET).getPublicUrl(path).data.publicUrl : null);
@@ -79,17 +83,19 @@ export default async function MachineDetailPage({ params }: { params: Promise<{ 
                 </div>
                 {machine.notes && <p className="muted" style={{ fontSize: 13, margin: "8px 0 0" }}>{machine.notes}</p>}
               </div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <MachineFormModal mode="edit" machine={machine} groups={groupOpts} locations={locations} back={back}
-                  buttonLabel="Edit" buttonStyle={{ padding: "8px 14px", fontSize: 13, fontWeight: 700, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 9, cursor: "pointer", color: "var(--text)" }} />
-              </div>
+              {canManage && (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <MachineFormModal mode="edit" machine={machine} groups={groupOpts} locations={locations} back={back}
+                    buttonLabel="Edit" buttonStyle={{ padding: "8px 14px", fontSize: 13, fontWeight: 700, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 9, cursor: "pointer", color: "var(--text)" }} />
+                </div>
+              )}
             </div>
           </div>
         </div>
 
         {/* Manual status controls — Working / Under maintenance are instant;
-            Retire + Delete ask for in-app confirmation. */}
-        <MachineAdminControls machineId={machine.id} status={machine.status} back={back} />
+            Retire + Delete (manage-only) ask for in-app confirmation. */}
+        <MachineAdminControls machineId={machine.id} status={machine.status} back={back} canManage={canManage} />
       </div>
     </div>
   );

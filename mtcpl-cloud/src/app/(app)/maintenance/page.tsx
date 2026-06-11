@@ -5,12 +5,19 @@ import { MachinesGrid, type Machine, type Group, type GroupOpt } from "./machine
 
 export const dynamic = "force-dynamic";
 
-const ALLOWED = ["owner", "developer"];
+// Who can OPEN the maintenance board. owner/developer manage everything;
+// crosscheck (= "Manager" in the UI) is view + mark-maintenance only.
+// Add more view-only roles here to widen access.
+const ALLOWED = ["owner", "developer", "crosscheck"];
+// Who can ADD / EDIT / DELETE groups & machines (sees the Edit-machines
+// toggle and all CRUD buttons).
+const MANAGE_ROLES = ["owner", "developer"];
 const IMG_BUCKET = "machine_images";
 
 export default async function MaintenancePage() {
   const { profile } = await requireAuth();
   if (!ALLOWED.includes(profile.role)) redirect("/dashboard");
+  const canManage = MANAGE_ROLES.includes(profile.role);
 
   const admin = createAdminSupabaseClient();
   const pub = (path: string | null) => (path ? admin.storage.from(IMG_BUCKET).getPublicUrl(path).data.publicUrl : null);
@@ -78,7 +85,7 @@ export default async function MaintenancePage() {
           what&apos;s running at a glance, and how long anything has been down.
         </p>
       </div>
-      <MachinesGrid tree={tree} ungrouped={ungrouped} groupOpts={groupOpts} topGroupOpts={topGroupOpts} locations={locations} nowMs={Date.now()} />
+      <MachinesGrid tree={tree} ungrouped={ungrouped} groupOpts={groupOpts} topGroupOpts={topGroupOpts} locations={locations} nowMs={Date.now()} canManage={canManage} />
     </div>
   );
 }

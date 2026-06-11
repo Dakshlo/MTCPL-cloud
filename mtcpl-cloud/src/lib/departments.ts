@@ -175,8 +175,11 @@ export function allowedDepartmentsForRole(role: AppRole): Department[] {
     // Mig 076 round 2 — display renamed to MANAGER. Production
     // added so Mafat can enter CNC + Cutter expenses (Daksh's
     // ask). Now a 3-tile Finance / Production / Inventory switcher.
+    // June 2026 (Daksh) — Maintenance added: Manager gets the machine
+    // board to mark machines Under-maintenance (view-only on the
+    // registry; the page hides the Edit-machines controls).
     case "crosscheck":
-      return ["finance", "production", "inventory"];
+      return ["finance", "production", "inventory", "maintenance"];
     case "biller":
       return ["finance"];
     // Daksh (June 2026): plain accountant now also works in Invoicing —

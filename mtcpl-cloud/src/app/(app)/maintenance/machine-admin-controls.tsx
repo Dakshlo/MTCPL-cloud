@@ -11,12 +11,17 @@ const pill: React.CSSProperties = { padding: "6px 12px", fontSize: 12, fontWeigh
 const danger: React.CSSProperties = { padding: "6px 12px", fontSize: 12, fontWeight: 700, color: "#b91c1c", background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.3)", borderRadius: 8, cursor: "pointer" };
 const btnGhost: React.CSSProperties = { padding: "8px 14px", fontSize: 13, fontWeight: 700, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 9, cursor: "pointer", color: "var(--text)" };
 
-export function MachineAdminControls({ machineId, status, back }: { machineId: string; status: string; back: string }) {
+export function MachineAdminControls({ machineId, status, back, canManage }: { machineId: string; status: string; back: string; canManage: boolean }) {
   const [confirm, setConfirm] = useState<null | "retire" | "delete">(null);
   const retireRef = useRef<HTMLFormElement>(null);
   const deleteRef = useRef<HTMLFormElement>(null);
 
-  const others = (["working", "under_maintenance", "retired"] as const).filter((s) => s !== status);
+  // Everyone with access can flip Working / Under-maintenance. Retire is a
+  // management action — only owner/developer (canManage) get it.
+  const statuses = canManage
+    ? (["working", "under_maintenance", "retired"] as const)
+    : (["working", "under_maintenance"] as const);
+  const others = statuses.filter((s) => s !== status);
 
   return (
     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: "12px 18px", borderTop: "1px dashed var(--border)", alignItems: "center" }}>
@@ -34,7 +39,9 @@ export function MachineAdminControls({ machineId, status, back }: { machineId: s
         );
       })}
 
-      <button type="button" onClick={() => setConfirm("delete")} style={{ ...danger, marginLeft: "auto" }}>Delete machine</button>
+      {canManage && (
+        <button type="button" onClick={() => setConfirm("delete")} style={{ ...danger, marginLeft: "auto" }}>Delete machine</button>
+      )}
 
       {/* hidden forms driven by the confirm modal */}
       <form ref={retireRef} action={setMachineStatusAction} style={{ display: "none" }}>

@@ -315,11 +315,19 @@ function FilterChip({
 
 // ── Registry ────────────────────────────────────────────────────────
 export function MachinesGrid({
-  tree, ungrouped, groupOpts, topGroupOpts, locations, nowMs,
+  tree, ungrouped, groupOpts, topGroupOpts, locations, nowMs, canManage,
 }: {
   tree: Group[]; ungrouped: Machine[]; groupOpts: GroupOpt[]; topGroupOpts: GroupOpt[]; locations: string[]; nowMs: number;
+  // Only owner/developer can manage the registry (create/edit groups &
+  // machines). View-only roles (e.g. manager) get the board + the ability
+  // to mark a machine Under-maintenance from its page, nothing else.
+  canManage: boolean;
 }) {
   const [search, setSearch] = useState("");
+  // Management buttons live behind this toggle, and the toggle itself only
+  // shows for canManage roles — so view-only roles see a clean board.
+  const [editMode, setEditMode] = useState(false);
+  const manage = canManage && editMode;
   const [statusFilter, setStatusFilter] = useState<"all" | "working" | "under_maintenance" | "retired">("all");
   const q = search.trim().toLowerCase();
   const matchSearch = (m: Machine) => !q || [m.machine_code, m.name, m.location].some((v) => (v ?? "").toLowerCase().includes(q));
@@ -394,7 +402,20 @@ export function MachinesGrid({
       </div>
 
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-        <GroupFormModal mode="add" parentOptions={topGroupOpts} back="/maintenance" buttonLabel="＋ Create group" />
+        {/* Edit-machines toggle — owner/developer only. Reveals all the
+            add / edit / delete controls. View-only roles never see it. */}
+        {canManage && (
+          <button
+            type="button"
+            onClick={() => setEditMode((e) => !e)}
+            style={editMode ? { ...btnGold, background: "var(--gold-dark, #a16207)" } : btnGhost}
+          >
+            {editMode ? "✓ Done editing" : "✎ Edit machines"}
+          </button>
+        )}
+        {manage && (
+          <GroupFormModal mode="add" parentOptions={topGroupOpts} back="/maintenance" buttonLabel="＋ Create group" />
+        )}
         {tree.length > 0 && (
           <button type="button" onClick={allCollapsed ? expandAll : collapseAll} style={btnGhost}>
             {allCollapsed ? "Expand all" : "Collapse all"}
@@ -403,8 +424,18 @@ export function MachinesGrid({
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search machines — code, name, location…" style={{ ...inputStyle, flex: "1 1 260px", width: "auto" }} />
       </div>
 
+      {manage && (
+        <div style={{ fontSize: 12.5, fontWeight: 600, color: "#9a3412", background: "rgba(234,88,12,0.10)", border: "1px solid rgba(234,88,12,0.25)", borderRadius: 9, padding: "8px 12px" }}>
+          ✎ Editing mode — add or change groups & machines. Tap <strong>✓ Done editing</strong> when finished.
+        </div>
+      )}
+
       {tree.length === 0 && ungrouped.length === 0 ? (
-        <div className="banner">No groups yet. Tap <strong>＋ Create group</strong> (e.g. CNC, Cranes), then add machines into it. You can also nest a sub-group (e.g. CNC → Mohit CNC).</div>
+        canManage ? (
+          <div className="banner">No groups yet. Tap <strong>✎ Edit machines</strong> → <strong>＋ Create group</strong> (e.g. CNC, Cranes), then add machines into it. You can also nest a sub-group (e.g. CNC → Mohit CNC).</div>
+        ) : (
+          <div className="banner">No machines have been set up yet.</div>
+        )
       ) : (
         <p className="muted" style={{ fontSize: 13, margin: 0 }}>{tree.length} group(s) · {totalMachines} machine(s)</p>
       )}
@@ -427,11 +458,13 @@ export function MachinesGrid({
                 </div>
               </div>
             </button>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <MachineFormModal mode="add" groups={groupOpts} defaultGroupId={g.id} locations={locations} back="/maintenance" buttonLabel="＋ Machine" buttonStyle={{ ...btnGold, padding: "7px 12px" }} />
-              <GroupFormModal mode="add" parentOptions={topGroupOpts} defaultParentId={g.id} back="/maintenance" buttonLabel="＋ Sub-group" buttonStyle={{ ...btnGhost, padding: "7px 12px" }} />
-              <GroupFormModal mode="edit" group={{ id: g.id, name: g.name, imageUrl: g.imageUrl, parent_id: g.parent_id }} parentOptions={topGroupOpts} back="/maintenance" buttonLabel="Edit" buttonStyle={{ ...btnGhost, padding: "7px 12px" }} />
-            </div>
+            {manage && (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <MachineFormModal mode="add" groups={groupOpts} defaultGroupId={g.id} locations={locations} back="/maintenance" buttonLabel="＋ Machine" buttonStyle={{ ...btnGold, padding: "7px 12px" }} />
+                <GroupFormModal mode="add" parentOptions={topGroupOpts} defaultParentId={g.id} back="/maintenance" buttonLabel="＋ Sub-group" buttonStyle={{ ...btnGhost, padding: "7px 12px" }} />
+                <GroupFormModal mode="edit" group={{ id: g.id, name: g.name, imageUrl: g.imageUrl, parent_id: g.parent_id }} parentOptions={topGroupOpts} back="/maintenance" buttonLabel="Edit" buttonStyle={{ ...btnGhost, padding: "7px 12px" }} />
+              </div>
+            )}
           </div>
 
           {!isCollapsed && (
@@ -454,10 +487,12 @@ export function MachinesGrid({
                       <div className="muted" style={{ fontSize: 11.5 }}>{s.machines.length} machine(s)</div>
                     </div>
                   </button>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    <MachineFormModal mode="add" groups={groupOpts} defaultGroupId={s.id} locations={locations} back="/maintenance" buttonLabel="＋ Machine" buttonStyle={{ ...btnGold, padding: "6px 11px", fontSize: 12 }} />
-                    <GroupFormModal mode="edit" group={{ id: s.id, name: s.name, imageUrl: s.imageUrl, parent_id: s.parent_id }} parentOptions={topGroupOpts} back="/maintenance" buttonLabel="Edit" buttonStyle={{ ...btnGhost, padding: "6px 11px", fontSize: 12 }} />
-                  </div>
+                  {manage && (
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <MachineFormModal mode="add" groups={groupOpts} defaultGroupId={s.id} locations={locations} back="/maintenance" buttonLabel="＋ Machine" buttonStyle={{ ...btnGold, padding: "6px 11px", fontSize: 12 }} />
+                      <GroupFormModal mode="edit" group={{ id: s.id, name: s.name, imageUrl: s.imageUrl, parent_id: s.parent_id }} parentOptions={topGroupOpts} back="/maintenance" buttonLabel="Edit" buttonStyle={{ ...btnGhost, padding: "6px 11px", fontSize: 12 }} />
+                    </div>
+                  )}
                 </div>
                 {!subCollapsed && <MachineGrid machines={s.machines} nowMs={nowMs} />}
               </div>
