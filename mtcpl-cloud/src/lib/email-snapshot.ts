@@ -50,22 +50,28 @@ export type FullMessage = {
 
 // How far back to read. The 5am/2pm crons always use "today"; the
 // dashboard Refresh button lets the owner pick a wider window.
-export type SnapshotRange = "today" | "yesterday" | "last_3_days" | "last_7_days" | "last_month";
+// A full month is pulled in two smaller halves (last_15_days + days_15_30)
+// so each refresh stays fast and never times out.
+export type SnapshotRange =
+  | "today" | "yesterday" | "last_3_days" | "last_7_days" | "last_15_days" | "days_15_30";
 
-const RANGE_LABELS: Record<SnapshotRange, string> = {
+const RANGE_LABELS: Record<string, string> = {
   today: "Today",
   yesterday: "Yesterday onward",
   last_3_days: "Last 3 days",
   last_7_days: "Last 7 days",
-  last_month: "Last 1 month",
+  last_15_days: "Last 15 days",
+  days_15_30: "15–30 days ago",
+  last_month: "Last 1 month", // legacy label for any old stored snapshot rows
 };
 
 export function rangeLabel(r: string | null | undefined): string {
-  return RANGE_LABELS[(r ?? "today") as SnapshotRange] ?? "Today";
+  return RANGE_LABELS[r ?? "today"] ?? "Today";
 }
 
+const VALID_RANGES = new Set<string>(["yesterday", "last_3_days", "last_7_days", "last_15_days", "days_15_30"]);
 function normalizeRange(r: string | null | undefined): SnapshotRange {
-  return r === "yesterday" || r === "last_3_days" || r === "last_7_days" || r === "last_month" ? r : "today";
+  return (VALID_RANGES.has(r ?? "") ? r : "today") as SnapshotRange;
 }
 
 const IST_OFFSET_MS = 5.5 * 3600 * 1000;
@@ -78,21 +84,25 @@ function istStartOfDay(daysAgo: number): Date {
   return new Date(midnightIstAsUtc);
 }
 
-function sinceForRange(range: SnapshotRange): Date {
-  const daysAgo =
-    range === "today" ? 0 :
-    range === "yesterday" ? 1 :
-    range === "last_3_days" ? 2 :
-    range === "last_7_days" ? 6 :
-    30; // last_month
-  return istStartOfDay(daysAgo);
+// IMAP search window: { since } for the recent ranges, plus a `before`
+// bound for the older 15-30 day slice (so a month is two faster halves).
+function searchWindowForRange(range: SnapshotRange): { since: Date; before?: Date } {
+  switch (range) {
+    case "today": return { since: istStartOfDay(0) };
+    case "yesterday": return { since: istStartOfDay(1) };
+    case "last_3_days": return { since: istStartOfDay(2) };
+    case "last_7_days": return { since: istStartOfDay(6) };
+    case "last_15_days": return { since: istStartOfDay(14) };
+    case "days_15_30": return { since: istStartOfDay(30), before: istStartOfDay(15) };
+  }
 }
 
-// A 1-month manual pull can return many emails, so the cap scales with the
-// window (the cron's "today" stays small and cheap). Kept modest so the
-// whole run fits inside the serverless time budget.
+// Each window is ~15 days at most, so a modest cap keeps every run inside
+// the serverless time budget (the cron's "today" stays small and cheap).
 function maxEmailsForRange(range: SnapshotRange): number {
-  return range === "last_month" ? 70 : range === "last_7_days" ? 60 : 40;
+  if (range === "last_15_days" || range === "days_15_30") return 60;
+  if (range === "last_7_days") return 50;
+  return 40;
 }
 
 const MAX_BODY_CHARS = 1500;
@@ -174,8 +184,8 @@ async function fetchRecentEmails(range: SnapshotRange): Promise<FetchedEmail[]> 
     // readOnly — the session can't even set a \Seen flag.
     const lock = await client.getMailboxLock("INBOX", { readOnly: true });
     try {
-      const since = sinceForRange(range);
-      const uids = await client.search({ since }, { uid: true });
+      const { since, before } = searchWindowForRange(range);
+      const uids = await client.search(before ? { since, before } : { since }, { uid: true });
       const recent = (Array.isArray(uids) ? uids : []).slice(-maxEmailsForRange(range));
       if (recent.length > 0) {
         for await (const msg of client.fetch(recent.join(","), { source: true, uid: true }, { uid: true })) {
@@ -381,8 +391,8 @@ async function summarize(emails: FetchedEmail[]): Promise<{ overview: string; it
   if (items.length === 0 && firstError) {
     throw firstError instanceof Error ? firstError : new Error(String(firstError));
   }
-  // Action-needed first.
-  items.sort((a, b) => (a.urgency === b.urgency ? 0 : a.urgency === "action_needed" ? -1 : 1));
+  // Latest email on top (Daksh) — newest by email date first; undated last.
+  items.sort((a, b) => (b.date ? Date.parse(b.date) : 0) - (a.date ? Date.parse(a.date) : 0));
   const actionCount = items.filter((i) => i.urgency === "action_needed").length;
   const overview =
     items.length === 0

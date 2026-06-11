@@ -35,7 +35,8 @@ const RANGE_OPTIONS = [
   { value: "yesterday", label: "Yesterday" },
   { value: "last_3_days", label: "Last 3 days" },
   { value: "last_7_days", label: "Last 7 days" },
-  { value: "last_month", label: "Last 1 month" },
+  { value: "last_15_days", label: "Last 15 days" },
+  { value: "days_15_30", label: "15–30 days ago" },
 ] as const;
 
 const RANGE_LABEL: Record<string, string> = {
@@ -43,7 +44,9 @@ const RANGE_LABEL: Record<string, string> = {
   yesterday: "Yesterday onward",
   last_3_days: "Last 3 days",
   last_7_days: "Last 7 days",
-  last_month: "Last 1 month",
+  last_15_days: "Last 15 days",
+  days_15_30: "15–30 days ago",
+  last_month: "Last 1 month", // legacy
 };
 
 function fmtIst(iso: string): string {
