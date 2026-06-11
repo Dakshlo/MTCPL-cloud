@@ -22,14 +22,16 @@ const STATUS_LABEL: Record<string, string> = {
 
 // One slab card — mirrors the Ready Sizes card fields (code, dims, CFT,
 // stone, quality, priority) in a compact stage-coloured card.
-function SlabCard({ s }: { s: TempleSlabCard }) {
+function SlabCard({ s, delay = 0 }: { s: TempleSlabCard; delay?: number }) {
   const bucket = bucketOf(s.status);
   const color = STAGE_META[bucket].color;
   const cft = calcCft(s.l, s.w, s.t);
   return (
     <div
       title={STATUS_LABEL[s.status] ?? s.status}
+      className="tv-anim tv-slab"
       style={{
+        animationDelay: `${delay}ms`,
         border: `1px solid var(--border)`,
         borderLeft: `4px solid ${color}`,
         borderRadius: 10,
@@ -59,15 +61,38 @@ function SlabCard({ s }: { s: TempleSlabCard }) {
   );
 }
 
-function StageBar({ counts, total }: { counts: Record<StageBucket, number>; total: number }) {
+function StageBar({ counts, total, animate = true }: { counts: Record<StageBucket, number>; total: number; animate?: boolean }) {
   if (total === 0) return null;
   return (
-    <div style={{ display: "flex", height: 10, borderRadius: 999, overflow: "hidden", background: "var(--surface-alt, rgba(0,0,0,0.05))", minWidth: 120 }}>
+    <div className={animate ? "tv-bar" : undefined} style={{ display: "flex", height: 10, borderRadius: 999, overflow: "hidden", background: "var(--surface-alt, rgba(0,0,0,0.05))", minWidth: 120 }}>
       {STAGE_ORDER.map((s) => {
         const n = counts[s];
         if (!n) return null;
         return <div key={s} title={`${STAGE_META[s].label}: ${n}`} style={{ width: `${(n / total) * 100}%`, background: STAGE_META[s].color }} />;
       })}
+    </div>
+  );
+}
+
+/** Compact SVG progress ring for the temple header (% done at a glance). */
+function HeaderRing({ pct, size = 54 }: { pct: number; size?: number }) {
+  const stroke = 5;
+  const r = (size - stroke * 2) / 2;
+  const c = 2 * Math.PI * r;
+  const filled = Math.max(0, Math.min(100, pct)) / 100 * c;
+  return (
+    <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ display: "block" }}>
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(148,163,184,0.25)" strokeWidth={stroke} />
+        <circle
+          cx={size / 2} cy={size / 2} r={r} fill="none"
+          stroke={STAGE_META.done.color} strokeWidth={stroke} strokeLinecap="round"
+          strokeDasharray={`${filled} ${c}`}
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+          style={{ transition: "stroke-dasharray .7s cubic-bezier(.2,.7,.3,1)" }}
+        />
+      </svg>
+      <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: size * 0.26, fontWeight: 900 }}>{pct}%</span>
     </div>
   );
 }
@@ -84,7 +109,7 @@ function CountChips({ counts }: { counts: Record<StageBucket, number> }) {
   );
 }
 
-function TreeNode({ node, depth, imagesByNode, openMode }: { node: TempleTreeNode; depth: number; imagesByNode: Record<string, ComponentImage[]>; openMode: "default" | "all" | "none" }) {
+function TreeNode({ node, depth, idx = 0, imagesByNode, openMode }: { node: TempleTreeNode; depth: number; idx?: number; imagesByNode: Record<string, ComponentImage[]>; openMode: "default" | "all" | "none" }) {
   const isLeaf = node.children.length === 0;
   // Initial open state from the current expand mode (the parent remounts the
   // tree when the mode changes, so this initializer re-runs).
@@ -95,10 +120,11 @@ function TreeNode({ node, depth, imagesByNode, openMode }: { node: TempleTreeNod
   // Visual hierarchy: Category-1 = bold card; deeper = lighter, indented.
   const bg = depth === 0 ? "var(--surface)" : depth === 1 ? "var(--surface-alt, rgba(0,0,0,0.02))" : "transparent";
   return (
-    <div style={{ marginLeft: depth === 0 ? 0 : 16, borderLeft: depth > 0 ? "2px solid var(--border)" : "none", paddingLeft: depth > 0 ? 6 : 0 }}>
+    <div className="tv-anim" style={{ animationDelay: `${Math.min(idx * 35, 350)}ms`, marginLeft: depth === 0 ? 0 : 16, borderLeft: depth > 0 ? "2px solid var(--border)" : "none", paddingLeft: depth > 0 ? 6 : 0 }}>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
+        className="tv-row"
         style={{
           width: "100%",
           display: "flex",
@@ -106,33 +132,34 @@ function TreeNode({ node, depth, imagesByNode, openMode }: { node: TempleTreeNod
           gap: 10,
           padding: depth === 0 ? "11px 12px" : "7px 10px",
           background: bg,
-          border: depth <= 1 ? "1px solid var(--border)" : "none",
+          border: depth <= 1 ? "1px solid var(--border)" : "1px solid transparent",
           borderRadius: 10,
           cursor: "pointer",
           textAlign: "left",
           color: "var(--text)",
         }}
       >
-        <span style={{ fontSize: 11, color: "var(--muted)", width: 12, flexShrink: 0 }}>{open ? "▼" : "▶"}</span>
+        <span className={`tv-caret${open ? " open" : ""}`} style={{ fontSize: 11, color: open ? "var(--gold-dark)" : "var(--muted)", width: 12, flexShrink: 0 }}>▶</span>
         <span style={{ fontWeight: depth === 0 ? 800 : 700, fontSize: depth === 0 ? 14.5 : depth === 1 ? 13 : 12.5, flex: "0 1 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {isLeaf ? "🔹 " : depth === 0 ? "📂 " : "📁 "}{node.name}
         </span>
-        {images.length > 0 && <span title={`${images.length} photo(s)`} style={{ fontSize: 11, flexShrink: 0 }}>📷</span>}
+        {images.length > 0 && <span title={`${images.length} photo(s) — open 🖼 Cards view to see them`} style={{ fontSize: 11, flexShrink: 0 }}>📷</span>}
         <span style={{ flex: 1 }} />
+        {pct === 100 && <span style={{ fontSize: 12, flexShrink: 0 }}>✅</span>}
         <span style={{ fontSize: 12, fontWeight: 800, color: pct === 100 ? STAGE_META.done.color : "var(--muted)", flexShrink: 0, whiteSpace: "nowrap" }}>
           {done}/{node.total} · {pct}%
         </span>
-        <span style={{ width: 120, flexShrink: 0 }}><StageBar counts={node.counts} total={node.total} /></span>
+        <span style={{ width: 120, flexShrink: 0 }}><StageBar counts={node.counts} total={node.total} animate={false} /></span>
       </button>
 
       {open && (
         <div style={{ marginTop: 5, display: "flex", flexDirection: "column", gap: 5 }}>
-          {!isLeaf && node.children.map((c) => <TreeNode key={c.id} node={c} depth={depth + 1} imagesByNode={imagesByNode} openMode={openMode} />)}
+          {!isLeaf && node.children.map((c, i) => <TreeNode key={c.id} node={c} depth={depth + 1} idx={i} imagesByNode={imagesByNode} openMode={openMode} />)}
           {isLeaf && (
             <div style={{ marginLeft: 22, marginBottom: 8 }}>
-              <div style={{ marginBottom: 8 }}><CountChips counts={node.counts} /></div>
+              <div className="tv-anim" style={{ marginBottom: 8 }}><CountChips counts={node.counts} /></div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 8 }}>
-                {node.slabs.map((s) => <SlabCard key={s.id} s={s} />)}
+                {node.slabs.map((s, i) => <SlabCard key={s.id} s={s} delay={Math.min(i * 18, 300)} />)}
               </div>
             </div>
           )}
@@ -219,6 +246,22 @@ export function TempleViewClient({ trees, imagesByNode, canManageImages, categor
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {/* Motion polish — cascade entrance, rotating carets, bar fill, hover
+          lift. Pure CSS; replays when the temple / tree key changes. */}
+      <style>{`
+        @keyframes tvIn { from { opacity: 0; transform: translateY(9px); } to { opacity: 1; transform: none; } }
+        @keyframes tvBarIn { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+        .tv-anim { opacity: 0; animation: tvIn .34s cubic-bezier(.2,.7,.3,1) forwards; }
+        .tv-bar { transform-origin: left; animation: tvBarIn .65s cubic-bezier(.2,.7,.3,1); }
+        .tv-caret { display: inline-block; transition: transform .18s ease, color .18s ease; }
+        .tv-caret.open { transform: rotate(90deg); }
+        .tv-row { transition: background .15s ease, border-color .15s ease; }
+        .tv-row:hover { background: rgba(184,115,51,0.07) !important; border-color: var(--gold-dark) !important; }
+        .tv-slab { transition: transform .15s ease, box-shadow .15s ease; }
+        .tv-slab:hover { transform: translateY(-3px); box-shadow: 0 10px 22px rgba(0,0,0,.12); }
+        .tv-temple { transition: transform .15s ease, border-color .15s ease, background .15s ease; }
+        .tv-temple:hover { transform: translateX(3px); border-color: var(--gold-dark) !important; }
+      `}</style>
       {/* View controls */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <div style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 9, overflow: "hidden" }}>
@@ -240,25 +283,28 @@ export function TempleViewClient({ trees, imagesByNode, canManageImages, categor
           style={{ padding: "8px 11px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 9, background: "var(--bg)", color: "var(--text)" }}
         />
         <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: "72vh", overflowY: "auto" }}>
-          {filteredTemples.map((t) => {
+          {filteredTemples.map((t, i) => {
             const active = current?.temple === t.temple;
             return (
               <button
                 key={t.temple}
                 type="button"
                 onClick={() => setSelected(t.temple)}
+                className="tv-anim tv-temple"
                 style={{
+                  animationDelay: `${Math.min(i * 25, 300)}ms`,
                   display: "flex", flexDirection: "column", gap: 4, alignItems: "stretch",
                   padding: "8px 11px", borderRadius: 10, cursor: "pointer", textAlign: "left",
                   border: `1px solid ${active ? "var(--gold-dark)" : "var(--border)"}`,
-                  background: active ? "var(--surface)" : "transparent",
+                  borderLeft: `3px solid ${active ? "var(--gold-dark)" : "var(--border)"}`,
+                  background: active ? "rgba(184,115,51,0.07)" : "transparent",
                 }}
               >
                 <span style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
                   <span style={{ fontWeight: 800, fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.temple}</span>
                   <span style={{ fontSize: 11.5, fontWeight: 800, color: "var(--muted)", flexShrink: 0 }}>{t.counts.done}/{t.total}</span>
                 </span>
-                <StageBar counts={t.counts} total={t.total} />
+                <StageBar counts={t.counts} total={t.total} animate={false} />
               </button>
             );
           })}
@@ -266,20 +312,24 @@ export function TempleViewClient({ trees, imagesByNode, canManageImages, categor
       </div>
 
       {/* Selected temple tree */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div key={current?.temple ?? "none"} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {current ? (
           <>
-            {/* Big header: temple, overall progress %, full-width bar */}
-            <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
-              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                <div style={{ fontSize: 19, fontWeight: 800 }}>🏛 {current.temple}</div>
-                <div style={{ fontSize: 14, fontWeight: 800 }}>
-                  <span style={{ color: STAGE_META.done.color }}>{current.counts.done}</span>
-                  <span style={{ color: "var(--muted)" }}> of {current.total} done · {current.total > 0 ? Math.round((current.counts.done / current.total) * 100) : 0}%</span>
+            {/* Big header: ring + temple + animated full-width stage bar.
+                Sticky so the progress stays visible while scrolling the tree. */}
+            <div className="tv-anim" style={{ position: "sticky", top: 8, zIndex: 5, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "13px 16px", display: "flex", alignItems: "center", gap: 14, boxShadow: "0 4px 14px rgba(0,0,0,0.06)" }}>
+              <HeaderRing pct={current.total > 0 ? Math.round((current.counts.done / current.total) * 100) : 0} />
+              <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                  <div style={{ fontSize: 18, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>🏛 {current.temple}</div>
+                  <div style={{ fontSize: 13.5, fontWeight: 800, whiteSpace: "nowrap" }}>
+                    <span style={{ color: STAGE_META.done.color }}>{current.counts.done}</span>
+                    <span style={{ color: "var(--muted)" }}> of {current.total} done</span>
+                  </div>
                 </div>
+                <div style={{ height: 14 }}><StageBar counts={current.counts} total={current.total} /></div>
+                <CountChips counts={current.counts} />
               </div>
-              <div style={{ height: 14 }}><StageBar counts={current.counts} total={current.total} /></div>
-              <CountChips counts={current.counts} />
             </div>
 
             <StageLegend />
@@ -300,7 +350,7 @@ export function TempleViewClient({ trees, imagesByNode, canManageImages, categor
               {visibleRoots.length === 0 ? (
                 <div className="muted" style={{ fontSize: 13, padding: "10px 2px" }}>No components match “{nodeQ}”.</div>
               ) : (
-                visibleRoots.map((r) => <TreeNode key={r.id} node={r} depth={0} imagesByNode={imagesByNode} openMode={nodeQ ? "all" : openMode} />)
+                visibleRoots.map((r, i) => <TreeNode key={r.id} node={r} depth={0} idx={i} imagesByNode={imagesByNode} openMode={nodeQ ? "all" : openMode} />)
               )}
             </div>
           </>
