@@ -40,9 +40,10 @@ export async function GET(req: NextRequest) {
     { header: "Width (in)", width: 12 },
     { header: "Height (in)", width: 12 },
     { header: "Quantity", width: 10 },
+    { header: "Quality (A/B/Both)", width: 16 },
   ];
   for (let i = 1; i <= TEMPLATE_ROWS; i++) {
-    ws.addRow([i, temple, stone, "", "", "", "", "", ""]);
+    ws.addRow([i, temple, stone, "", "", "", "", "", "", ""]);
   }
 
   // Header band — brand brown, white bold, centred.
@@ -60,7 +61,7 @@ export async function GET(req: NextRequest) {
   for (let r = 2; r <= TEMPLATE_ROWS + 1; r++) {
     const row = ws.getRow(r);
     row.height = 17;
-    for (let col = 1; col <= 9; col++) {
+    for (let col = 1; col <= 10; col++) {
       const c = row.getCell(col);
       const prefilled = col <= 3;
       c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: prefilled ? "FFFDE9C8" : "FFEAF4FF" } };
@@ -68,6 +69,16 @@ export async function GET(req: NextRequest) {
       c.alignment = { horizontal: col === 1 || col >= 6 ? "center" : "left", vertical: "middle" };
       c.border = thin(prefilled ? "FFE7C9A0" : "FFC7DEF5");
     }
+    // Quality column — dropdown so users pick A / B / Both instead of
+    // typing free text (blank = Both).
+    row.getCell(10).dataValidation = {
+      type: "list",
+      allowBlank: true,
+      formulae: ['"A,B,Both"'],
+      showErrorMessage: true,
+      errorTitle: "Quality",
+      error: "Pick A, B or Both (or leave blank for Both).",
+    };
   }
 
   // Freeze the header row so it stays visible while filling.

@@ -7,13 +7,14 @@
  *         columns pre-filled) → fill label/description/size/quantity →
  *         upload it back. Parsing happens here with SheetJS.
  * Step 2: review + edit every row (fix anything, set quality, drop
- *         rows) → "Send N slabs for approval" → confirm → password.
+ *         rows) → "Send N slabs for approval" → confirm.
  *
  * Mig 122 — the commit no longer inserts slabs. It calls
  * submitSlabImportBatchAction, which stores the reviewed rows + the
  * uploaded Excel (audit copy) as a PENDING batch. Slabs are created
  * only when owner / senior incharge / carving head approves the batch
- * from their Tasks panel.
+ * from their Tasks panel. The old shared import password is retired —
+ * the human approval is the gate now.
  */
 
 import { useRouter } from "next/navigation";
@@ -99,8 +100,10 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
   // The uploaded Excel itself — sent with the batch as the audit copy.
   const [fileObj, setFileObj] = useState<File | null>(null);
   const [error, setError] = useState("");
-  const [stage, setStage] = useState<"idle" | "confirm" | "password">("idle");
-  const [password, setPassword] = useState("");
+  // Mig 122 follow-on — the import password is retired: every batch now
+  // goes through human approval (owner / senior incharge / carving head),
+  // which is a stronger gate than a shared password.
+  const [stage, setStage] = useState<"idle" | "confirm">("idle");
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -149,6 +152,10 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
         const width = cell(6);
         const height = cell(7);
         const quantity = cell(8);
+        // Quality column (template col J): A / B / Both (blank = Both).
+        // Tolerates "Grade A" style typing too.
+        const qRaw = cell(9).toUpperCase().replace(/GRADE/g, "").trim();
+        const quality = qRaw === "A" ? "A" : qRaw === "B" ? "B" : "";
         if (!label && !description && !length && !width && !height && !quantity) continue; // blank row
         parsed.push({
           key: crypto.randomUUID(),
@@ -160,7 +167,7 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
           // No silent default — a blank quantity is flagged as a missing
           // field in the review step so nothing is added with assumed data.
           quantity,
-          quality: "",
+          quality,
           priority: false,
         });
       }
@@ -211,7 +218,6 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
     const fd = new FormData();
     fd.set("temple", temple);
     fd.set("stone", stone);
-    fd.set("password", password);
     fd.set("file", fileObj);
     fd.set(
       "rows",
@@ -238,9 +244,7 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
       );
     } else {
       setError(res.error);
-      // Wrong password → keep them on the password prompt to retry;
-      // any other error → drop back to the table to fix.
-      if (res.error !== "Wrong password") setStage("idle");
+      setStage("idle");
     }
   }
 
@@ -279,7 +283,7 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
 
         {!ready && <div style={{ fontSize: 12, color: "var(--muted)" }}>Pick a temple and stone first — the template comes with both pre-filled.</div>}
         <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.6, background: "var(--surface-alt)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px" }}>
-          <strong>Columns:</strong> Sr.No · Temple (filled) · Stone (filled) · Label · Description · Length · Width · Height · Quantity.{" "}
+          <strong>Columns:</strong> Sr.No · Temple (filled) · Stone (filled) · Label · Description · Length · Width · Height · Quantity · Quality (A/B/Both — blank = Both).{" "}
           Sizes are in <strong>inches</strong>. One row with quantity N becomes N slabs. After upload you can fix anything before it&apos;s added.
           {" "}In the file, <span style={{ color: "#7c2d12", fontWeight: 700 }}>gold columns</span> are pre-filled (leave them) and{" "}
           <span style={{ color: "#1d4ed8", fontWeight: 700 }}>blue columns</span> are for you to fill in.
@@ -396,31 +400,17 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
       {stage !== "idle" && (
         <div onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) setStage("idle"); }} style={{ position: "fixed", inset: 0, left: "var(--content-left)", background: "rgba(15,12,6,0.55)", backdropFilter: "blur(2px)", zIndex: 1200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
           <div role="dialog" aria-modal="true" style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, boxShadow: "0 18px 60px rgba(0,0,0,0.45)", width: "100%", maxWidth: 440, padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
-            {stage === "confirm" ? (
-              <>
-                <div style={{ fontSize: 17, fontWeight: 800 }}>Send {totalSlabs} slab{totalSlabs === 1 ? "" : "s"} for approval?</div>
-                <div style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>
-                  {validRows.length} row{validRows.length === 1 ? "" : "s"} → <strong>{totalSlabs}</strong> slab{totalSlabs === 1 ? "" : "s"} into <strong>{temple}</strong> ({stone}).
-                  {" "}The batch goes to <strong>owner / senior incharge / carving head</strong> for approval — slabs appear at status <strong>open</strong> only after they approve.
-                  {" "}Your Excel file is kept on record with the batch.
-                </div>
-                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                  <button type="button" onClick={() => setStage("idle")} className="ghost-button">Cancel</button>
-                  <button type="button" onClick={() => { setStage("password"); }} style={{ padding: "9px 18px", fontSize: 14, fontWeight: 800, color: "#fff", background: "var(--gold-dark)", border: "none", borderRadius: 8, cursor: "pointer" }}>Yes, continue →</button>
-                </div>
-              </>
-            ) : (
-              <>
-                <div style={{ fontSize: 17, fontWeight: 800 }}>🔒 Enter import password</div>
-                <div style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>Required to commit the bulk add. Owner / developer / senior incharge can change it in Settings.</div>
-                <input type="password" autoFocus value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && password && !busy) doImport(); }} placeholder="Password" style={{ ...inp, fontSize: 15, padding: "11px 14px" }} />
-                {error && <div style={{ fontSize: 13, fontWeight: 700, color: "#991b1b" }}>{error}</div>}
-                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                  <button type="button" disabled={busy} onClick={() => { setStage("idle"); setPassword(""); setError(""); }} className="ghost-button">Cancel</button>
-                  <button type="button" disabled={!password || busy} onClick={doImport} style={{ padding: "9px 18px", fontSize: 14, fontWeight: 800, color: "#fff", background: !password || busy ? "var(--border)" : "#15803d", border: "none", borderRadius: 8, cursor: !password || busy ? "not-allowed" : "pointer" }}>{busy ? "Sending…" : `✓ Send ${totalSlabs} for approval`}</button>
-                </div>
-              </>
-            )}
+            <div style={{ fontSize: 17, fontWeight: 800 }}>Send {totalSlabs} slab{totalSlabs === 1 ? "" : "s"} for approval?</div>
+            <div style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>
+              {validRows.length} row{validRows.length === 1 ? "" : "s"} → <strong>{totalSlabs}</strong> slab{totalSlabs === 1 ? "" : "s"} into <strong>{temple}</strong> ({stone}).
+              {" "}The batch goes to <strong>owner / senior incharge / carving head</strong> for approval — slabs appear at status <strong>open</strong> only after they approve.
+              {" "}Your Excel file is kept on record with the batch.
+            </div>
+            {error && <div style={{ fontSize: 13, fontWeight: 700, color: "#991b1b" }}>{error}</div>}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button type="button" disabled={busy} onClick={() => setStage("idle")} className="ghost-button">Cancel</button>
+              <button type="button" disabled={busy} onClick={doImport} style={{ padding: "9px 18px", fontSize: 14, fontWeight: 800, color: "#fff", background: busy ? "var(--border)" : "#15803d", border: "none", borderRadius: 8, cursor: busy ? "not-allowed" : "pointer" }}>{busy ? "Sending…" : `✓ Send ${totalSlabs} for approval`}</button>
+            </div>
           </div>
         </div>
       )}

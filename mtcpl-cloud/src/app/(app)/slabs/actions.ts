@@ -8,7 +8,6 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { nextSlabCodeFromMaxId } from "./utils";
 import { logAudit } from "@/lib/audit";
 import { notify } from "@/lib/notifications";
-import { verifyBulkImportPassword } from "@/lib/bulk-import-password";
 import type { AppRole } from "@/lib/types";
 
 
@@ -327,9 +326,9 @@ export async function submitSlabImportBatchAction(
   if (!temple) return { ok: false, error: "Temple is required" };
   if (!stone) return { ok: false, error: "Stone is required" };
 
-  // Password gate — server-side comparison against the stored hash.
-  const okPw = await verifyBulkImportPassword(String(formData.get("password") ?? ""));
-  if (!okPw) return { ok: false, error: "Wrong password" };
+  // Mig 122 follow-on — no import password anymore: the batch can't
+  // create slabs until a human approver signs off, which is a stronger
+  // gate than the old shared password.
 
   let rawRows: unknown;
   try {
