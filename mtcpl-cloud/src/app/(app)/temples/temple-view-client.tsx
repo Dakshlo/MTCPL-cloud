@@ -4,7 +4,7 @@
 // (Section › … › Element), each node shows a stage progress bar + counts.
 // Leaf nodes expand to the slab list. Read-only.
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 import { deleteTempleComponentImageAction } from "./actions";
 
 export type StageBucket = "pending" | "cutting" | "carving" | "done" | "rejected";
@@ -146,14 +146,18 @@ function ImageStrip({ images, canManage }: { images: ComponentImage[]; canManage
   );
 }
 
-function TreeNode({ node, depth, imagesByNode, canManageImages }: { node: TempleTreeNode; depth: number; imagesByNode: Record<string, ComponentImage[]>; canManageImages: boolean }) {
+function TreeNode({ node, depth, imagesByNode, canManageImages, openMode }: { node: TempleTreeNode; depth: number; imagesByNode: Record<string, ComponentImage[]>; canManageImages: boolean; openMode: "default" | "all" | "none" }) {
   const isLeaf = node.children.length === 0;
-  // Open the first two levels by default for a quick overview.
-  const [open, setOpen] = useState(depth < 1);
+  // Initial open state from the current expand mode (the parent remounts the
+  // tree when the mode changes, so this initializer re-runs).
+  const [open, setOpen] = useState(openMode === "all" ? true : openMode === "none" ? false : depth < 1);
   const done = node.counts.done;
   const images = imagesByNode[node.id] ?? [];
+  const pct = node.total > 0 ? Math.round((done / node.total) * 100) : 0;
+  // Visual hierarchy: Category-1 = bold card; deeper = lighter, indented.
+  const bg = depth === 0 ? "var(--surface)" : depth === 1 ? "var(--surface-alt, rgba(0,0,0,0.02))" : "transparent";
   return (
-    <div style={{ marginLeft: depth === 0 ? 0 : 14 }}>
+    <div style={{ marginLeft: depth === 0 ? 0 : 16, borderLeft: depth > 0 ? "2px solid var(--border)" : "none", paddingLeft: depth > 0 ? 6 : 0 }}>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -162,9 +166,9 @@ function TreeNode({ node, depth, imagesByNode, canManageImages }: { node: Temple
           display: "flex",
           alignItems: "center",
           gap: 10,
-          padding: "8px 10px",
-          background: depth === 0 ? "var(--surface)" : "transparent",
-          border: depth === 0 ? "1px solid var(--border)" : "none",
+          padding: depth === 0 ? "11px 12px" : "7px 10px",
+          background: bg,
+          border: depth <= 1 ? "1px solid var(--border)" : "none",
           borderRadius: 10,
           cursor: "pointer",
           textAlign: "left",
@@ -172,22 +176,23 @@ function TreeNode({ node, depth, imagesByNode, canManageImages }: { node: Temple
         }}
       >
         <span style={{ fontSize: 11, color: "var(--muted)", width: 12, flexShrink: 0 }}>{open ? "▼" : "▶"}</span>
-        <span style={{ fontWeight: depth === 0 ? 800 : 700, fontSize: depth === 0 ? 14 : 13, flex: "0 1 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <span style={{ fontWeight: depth === 0 ? 800 : 700, fontSize: depth === 0 ? 14.5 : depth === 1 ? 13 : 12.5, flex: "0 1 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {isLeaf ? "🔹 " : depth === 0 ? "📂 " : "📁 "}{node.name}
         </span>
         {images.length > 0 && <span title={`${images.length} photo(s)`} style={{ fontSize: 11, flexShrink: 0 }}>📷</span>}
-        <span style={{ fontSize: 12.5, fontWeight: 800, color: "var(--muted)", flexShrink: 0 }}>
-          {done}/{node.total}
+        <span style={{ flex: 1 }} />
+        <span style={{ fontSize: 12, fontWeight: 800, color: pct === 100 ? STAGE_META.done.color : "var(--muted)", flexShrink: 0, whiteSpace: "nowrap" }}>
+          {done}/{node.total} · {pct}%
         </span>
-        <span style={{ flex: 1, minWidth: 80, maxWidth: 220 }}><StageBar counts={node.counts} total={node.total} /></span>
+        <span style={{ width: 120, flexShrink: 0 }}><StageBar counts={node.counts} total={node.total} /></span>
       </button>
 
       {open && (
-        <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 4 }}>
+        <div style={{ marginTop: 5, display: "flex", flexDirection: "column", gap: 5 }}>
           <ImageStrip images={images} canManage={canManageImages} />
-          {!isLeaf && node.children.map((c) => <TreeNode key={c.id} node={c} depth={depth + 1} imagesByNode={imagesByNode} canManageImages={canManageImages} />)}
+          {!isLeaf && node.children.map((c) => <TreeNode key={c.id} node={c} depth={depth + 1} imagesByNode={imagesByNode} canManageImages={canManageImages} openMode={openMode} />)}
           {isLeaf && (
-            <div style={{ marginLeft: 26, marginBottom: 8 }}>
+            <div style={{ marginLeft: 22, marginBottom: 8 }}>
               <div style={{ marginBottom: 8 }}><CountChips counts={node.counts} /></div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 8 }}>
                 {node.slabs.map((s) => <SlabCard key={s.id} s={s} />)}
@@ -200,9 +205,35 @@ function TreeNode({ node, depth, imagesByNode, canManageImages }: { node: Temple
   );
 }
 
+// Stage legend — explains every colour, including what "Rejected" means.
+const STAGE_HELP: Record<StageBucket, string> = {
+  pending: "Not started yet (open / planned).",
+  cutting: "Being cut, or cut and waiting for carving.",
+  carving: "Out for carving (CNC / vendor).",
+  done: "Finished — completed or dispatched.",
+  rejected: "Rejected during a cutting or carving quality check — not usable, kept on record only.",
+};
+function StageLegend() {
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 12, padding: "10px 14px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10 }}>
+      {STAGE_ORDER.map((s) => (
+        <span key={s} title={STAGE_HELP[s]} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--muted)", cursor: "help" }}>
+          <span style={{ width: 11, height: 11, borderRadius: 3, background: STAGE_META[s].color, flexShrink: 0 }} />
+          <strong style={{ color: "var(--text)" }}>{STAGE_META[s].label}</strong>
+          {s === "rejected" && <span style={{ fontSize: 10.5 }}>= failed quality check</span>}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export function TempleViewClient({ trees, imagesByNode, canManageImages }: { trees: TempleTree[]; imagesByNode: Record<string, ComponentImage[]>; canManageImages: boolean }) {
   const [selected, setSelected] = useState<string>(trees[0]?.temple ?? "");
   const [q, setQ] = useState("");
+  // Component browsing: filter within the selected temple + expand/collapse all.
+  const [nodeQ, setNodeQ] = useState("");
+  const [openMode, setOpenMode] = useState<"default" | "all" | "none">("default");
+  const [treeKey, setTreeKey] = useState(0);
 
   const filteredTemples = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -211,6 +242,13 @@ export function TempleViewClient({ trees, imagesByNode, canManageImages }: { tre
   }, [q, trees]);
 
   const current = trees.find((t) => t.temple === selected) ?? filteredTemples[0] ?? trees[0];
+
+  // Roots filtered by the component search box (keeps a branch if any
+  // descendant name matches).
+  const nq = nodeQ.trim().toLowerCase();
+  const visibleRoots = current
+    ? current.roots.map((r) => filterNode(r, nq)).filter((x): x is TempleTreeNode => x !== null)
+    : [];
 
   if (trees.length === 0) {
     return <div className="banner">No slabs yet. Import slabs (and run ✨ Auto-categorize) to see them organised here.</div>;
@@ -253,19 +291,42 @@ export function TempleViewClient({ trees, imagesByNode, canManageImages }: { tre
       </div>
 
       {/* Selected temple tree */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {current ? (
           <>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", paddingBottom: 6, borderBottom: "1px solid var(--border)" }}>
-              <div style={{ fontSize: 17, fontWeight: 800 }}>🏛 {current.temple}</div>
-              <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 13, fontWeight: 800, color: "var(--muted)" }}>{current.counts.done} of {current.total} done</span>
-                <div style={{ width: 160 }}><StageBar counts={current.counts} total={current.total} /></div>
+            {/* Big header: temple, overall progress %, full-width bar */}
+            <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                <div style={{ fontSize: 19, fontWeight: 800 }}>🏛 {current.temple}</div>
+                <div style={{ fontSize: 14, fontWeight: 800 }}>
+                  <span style={{ color: STAGE_META.done.color }}>{current.counts.done}</span>
+                  <span style={{ color: "var(--muted)" }}> of {current.total} done · {current.total > 0 ? Math.round((current.counts.done / current.total) * 100) : 0}%</span>
+                </div>
               </div>
+              <div style={{ height: 14 }}><StageBar counts={current.counts} total={current.total} /></div>
+              <CountChips counts={current.counts} />
             </div>
-            <CountChips counts={current.counts} />
-            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
-              {current.roots.map((r) => <TreeNode key={r.id} node={r} depth={0} imagesByNode={imagesByNode} canManageImages={canManageImages} />)}
+
+            <StageLegend />
+
+            {/* Browse controls: search components + expand/collapse all */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <input
+                value={nodeQ}
+                onChange={(e) => setNodeQ(e.target.value)}
+                placeholder="Filter components in this temple…"
+                style={{ flex: "1 1 240px", padding: "8px 11px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 9, background: "var(--bg)", color: "var(--text)" }}
+              />
+              <button type="button" onClick={() => { setOpenMode("all"); setTreeKey((k) => k + 1); }} style={ctrlBtn}>⊞ Expand all</button>
+              <button type="button" onClick={() => { setOpenMode("none"); setTreeKey((k) => k + 1); }} style={ctrlBtn}>⊟ Collapse all</button>
+            </div>
+
+            <div key={treeKey} style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+              {visibleRoots.length === 0 ? (
+                <div className="muted" style={{ fontSize: 13, padding: "10px 2px" }}>No components match “{nodeQ}”.</div>
+              ) : (
+                visibleRoots.map((r) => <TreeNode key={r.id} node={r} depth={0} imagesByNode={imagesByNode} canManageImages={canManageImages} openMode={nodeQ ? "all" : openMode} />)
+              )}
             </div>
           </>
         ) : (
@@ -274,4 +335,20 @@ export function TempleViewClient({ trees, imagesByNode, canManageImages }: { tre
       </div>
     </div>
   );
+}
+
+const ctrlBtn: CSSProperties = {
+  fontSize: 12, fontWeight: 700, padding: "8px 12px", borderRadius: 9, cursor: "pointer",
+  border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", whiteSpace: "nowrap",
+};
+
+// Filter a node subtree by name — keep a node if it or any descendant matches.
+function filterNode(node: TempleTreeNode, q: string): TempleTreeNode | null {
+  if (!q) return node;
+  const selfMatch = node.name.toLowerCase().includes(q);
+  const kids = node.children.map((c) => filterNode(c, q)).filter((x): x is TempleTreeNode => x !== null);
+  if (selfMatch || kids.length > 0) {
+    return selfMatch ? node : { ...node, children: kids };
+  }
+  return null;
 }

@@ -230,9 +230,13 @@ function cleanImportRows(rows: unknown): CleanImportRow[] {
     quantity?: number | string | null; quality?: string | null; priority?: boolean | null;
     componentSection?: string | null; componentElement?: string | null;
   };
+  // Label + Category 1/2 are stored UPPERCASE so they group consistently
+  // no matter how they were typed in Excel ("floor-1" → "FLOOR-1").
+  const up = (v: unknown) => (v ?? "").toString().trim().toUpperCase();
+  const upOrNull = (v: unknown) => up(v) || null;
   return (Array.isArray(rows) ? (rows as RawRow[]) : [])
     .map((r) => ({
-      label: (r.label ?? "").toString().trim(),
+      label: up(r.label),
       description: (r.description ?? "").toString().trim() || null,
       length: Number(r.length) || 0,
       width: Number(r.width) || 0,
@@ -240,8 +244,8 @@ function cleanImportRows(rows: unknown): CleanImportRow[] {
       quantity: Math.min(100, Math.max(1, Math.floor(Number(r.quantity) || 1))),
       quality: (r.quality ?? "").toString().trim() || null,
       priority: r.priority === true,
-      componentSection: (r.componentSection ?? "").toString().trim() || null,
-      componentElement: (r.componentElement ?? "").toString().trim() || null,
+      componentSection: upOrNull(r.componentSection),
+      componentElement: upOrNull(r.componentElement),
     }))
     // Every slab needs all three dimensions (stored as inches in *_ft).
     .filter((r) => r.length > 0 && r.width > 0 && r.height > 0);
@@ -340,8 +344,8 @@ const CATEGORIZE_SCHEMA = {
         type: "object",
         properties: {
           idx: { type: "integer", description: "Index of the slab in the input list" },
-          section: { type: "string", description: "CATEGORY 1 — the broad area of the temple this part belongs to (e.g. Floor, Ground Floor, First Floor, Sanctum, Mandap wing). Reuse an EXISTING Category-1 value exactly when it fits." },
-          element: { type: "string", description: "CATEGORY 2 — the narrower sub-area inside Category 1 (e.g. Cloister-1, Cloister-2, Garbhagriha, Sabha Mandap). Reuse an EXISTING Category-2 value exactly when it fits. Leave empty only if there genuinely is no sub-area." },
+          section: { type: "string", description: "FINAL Category 1 in UPPERCASE — the broad area (FLOOR, GROUND FLOOR, MANDAP, SANCTUM …). Keep/correct the typed value to match an existing canonical one, or infer from label." },
+          element: { type: "string", description: "FINAL Category 2 in UPPERCASE — the sub-area inside Category 1 (CLOISTER-1, GARBHAGRIHA …), or empty if none. Keep/correct the typed value to match an existing canonical one." },
         },
         required: ["idx", "section", "element"],
         additionalProperties: false,
@@ -352,57 +356,62 @@ const CATEGORIZE_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-/** Suggest a {section, element} for every import row, in input order.
- *  Read-only; returns "" / "" for anything it can't place. */
+/** Suggest / autocorrect a {section, element} for every import row, in input
+ *  order. If the user already typed a Category 1/2, it's KEPT but typos are
+ *  corrected against existing categories ("flor-1" → "FLOOR-1"); empty ones
+ *  are inferred from label + description. Returns UPPERCASE. Read-only. */
 export async function categorizeImportRowsAction(payload: {
   temple: string;
-  rows: Array<{ label?: string | null; description?: string | null }>;
+  rows: Array<{ label?: string | null; description?: string | null; section?: string | null; element?: string | null }>;
 }): Promise<{ ok: true; cats: Array<{ section: string; element: string }> } | { ok: false; error: string }> {
   await requireAuth(IMPORT_SUBMIT_ROLES);
   if (!process.env.ANTHROPIC_API_KEY) {
     return { ok: false, error: "AI categorization isn't configured — add ANTHROPIC_API_KEY in Vercel." };
   }
+  const up = (v: unknown) => (v ?? "").toString().trim().toUpperCase();
   const temple = (payload?.temple ?? "").trim();
   const rows = (Array.isArray(payload?.rows) ? payload.rows : []).map((r) => ({
     label: (r.label ?? "").toString().trim(),
     description: (r.description ?? "").toString().trim(),
+    section: up(r.section),
+    element: up(r.element),
   }));
   if (rows.length === 0) return { ok: true, cats: [] };
 
   const supabase = createAdminSupabaseClient();
-  // Existing categories for THIS temple — fed to the AI so re-imports of the
-  // same area reuse the same section/element instead of splitting groups.
+  // Existing categories for THIS temple — the canonical list the AI reuses /
+  // corrects typos against (so the same place isn't split into two groups).
   const { data: existingRows } = await supabase
     .from("slab_requirements")
     .select("component_section, component_element")
     .eq("temple", temple)
     .not("component_section", "is", null)
     .limit(2000);
-  const existSections = [...new Set(((existingRows ?? []) as Array<{ component_section: string | null }>).map((r) => (r.component_section ?? "").trim()).filter(Boolean))];
-  const existElements = [...new Set(((existingRows ?? []) as Array<{ component_element: string | null }>).map((r) => (r.component_element ?? "").trim()).filter(Boolean))];
+  const existSections = [...new Set(((existingRows ?? []) as Array<{ component_section: string | null }>).map((r) => up(r.component_section)).filter(Boolean))];
+  const existElements = [...new Set(((existingRows ?? []) as Array<{ component_element: string | null }>).map((r) => up(r.component_element)).filter(Boolean))];
 
   const anthropic = new Anthropic();
   const model = process.env.SLAB_CATEGORIZE_MODEL || "claude-haiku-4-5-20251001";
 
-  const prompt = `You organise stone slabs for a temple-construction company (MTCPL). For each slab, place it under a two-level category from its label + description: Category 1 (broad area) and Category 2 (sub-area inside it).
+  const prompt = `You organise stone slabs for a temple-construction company (MTCPL). Each slab has a Label + Description, and MAY already have a typed Category 1 (broad area) and Category 2 (sub-area). Decide the FINAL Category 1 and Category 2 for each, in UPPERCASE.
 
 Temple: ${temple || "(unknown)"}
 
-${existSections.length ? `Existing Category-1 values for this temple (REUSE one exactly when it fits): ${existSections.join(" | ")}` : "No Category-1 values recorded for this temple yet."}
-${existElements.length ? `Existing Category-2 values (REUSE one exactly when it fits): ${existElements.join(" | ")}` : ""}
+${existSections.length ? `Existing (canonical) Category-1 values for this temple — MATCH these exactly when the same place: ${existSections.join(" | ")}` : "No Category-1 values recorded for this temple yet."}
+${existElements.length ? `Existing (canonical) Category-2 values: ${existElements.join(" | ")}` : ""}
 
 Rules:
-- section = Category 1, the broad area (Floor / Ground Floor / First Floor / Sanctum / Mandap …). If unclear, make a single best guess rather than leaving it blank.
-- element = Category 2, the narrower sub-area inside Category 1 (Cloister-1, Cloister-2, Garbhagriha, Sabha Mandap …). Leave empty only if there is genuinely no sub-area.
-- Do NOT put the part type (pillar/chajja) here — the part is already in the Label.
-- Be consistent — identical descriptions get the identical Category 1 + Category 2.
-- Return one item per input idx.`;
+- If the slab already has a typed Category 1/2: KEEP the user's intent, but CORRECT obvious typos / spelling / spacing to match an existing canonical value when it's clearly the same place (e.g. typed "flor-1" or "floor 1" when "FLOOR-1" exists → return "FLOOR-1"; "mandp" → "MANDAP"). Do not change a value that is already correct.
+- If a Category is EMPTY: infer it from the Label + Description.
+- section = Category 1 (broad area: FLOOR, GROUND FLOOR, MANDAP, SANCTUM …). element = Category 2 (sub-area: CLOISTER-1, GARBHAGRIHA …) or empty if none.
+- Do NOT put the part type (PILLAR/CHAJJA) here — that's the Label.
+- ALWAYS return UPPERCASE. Identical inputs get identical output. One item per idx.`;
 
-  const cats: Array<{ section: string; element: string }> = rows.map(() => ({ section: "", element: "" }));
+  const cats: Array<{ section: string; element: string }> = rows.map((r) => ({ section: r.section, element: r.element }));
   try {
     for (let start = 0; start < rows.length; start += CATEGORIZE_BATCH) {
       const slice = rows.slice(start, start + CATEGORIZE_BATCH);
-      const input = slice.map((r, i) => ({ idx: i, label: r.label, description: r.description }));
+      const input = slice.map((r, i) => ({ idx: i, label: r.label, description: r.description, typed_category_1: r.section, typed_category_2: r.element }));
       const response = await anthropic.messages.create({
         model,
         max_tokens: 4000,
@@ -414,15 +423,12 @@ Rules:
       try {
         parsed = JSON.parse(txt);
       } catch {
-        continue; // skip this chunk, leave its rows blank for manual fill
+        continue; // skip this chunk, keep whatever the user typed
       }
       for (const it of parsed.items ?? []) {
         const globalIdx = start + it.idx;
         if (globalIdx >= 0 && globalIdx < cats.length) {
-          cats[globalIdx] = {
-            section: (it.section ?? "").toString().trim(),
-            element: (it.element ?? "").toString().trim(),
-          };
+          cats[globalIdx] = { section: up(it.section), element: up(it.element) };
         }
       }
     }

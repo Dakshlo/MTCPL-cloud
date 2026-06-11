@@ -97,16 +97,18 @@ export default async function SlabImportApprovalsPage({ searchParams }: { search
                 <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 560 }}>
                   <thead>
                     <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                      <th style={th}>#</th><th style={th}>Label</th><th style={th}>Description</th>
+                      <th style={th}>#</th><th style={th}>Cat 1</th><th style={th}>Cat 2</th>
+                      <th style={th}>Label</th><th style={th}>Description</th>
                       <th style={th}>L (in)</th><th style={th}>W (in)</th><th style={th}>H (in)</th>
-                      <th style={th}>Qty</th><th style={th}>Quality</th>
-                      <th style={th}>Cat 1</th><th style={th}>Cat 2</th><th style={th}>⚡</th>
+                      <th style={th}>Qty</th><th style={th}>Quality</th><th style={th}>⚡</th>
                     </tr>
                   </thead>
                   <tbody>
                     {rows.map((r, i) => (
                       <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}>
                         <td style={{ ...td, color: "var(--muted)", fontFamily: "ui-monospace, monospace", fontSize: 11.5 }}>{i + 1}</td>
+                        <td style={{ ...td, fontWeight: 600 }}>{r.componentSection || "—"}</td>
+                        <td style={td}>{r.componentElement || "—"}</td>
                         <td style={{ ...td, fontWeight: 600 }}>{r.label}</td>
                         <td style={td}>{r.description ?? "—"}</td>
                         <td style={td}>{r.length}</td>
@@ -114,8 +116,6 @@ export default async function SlabImportApprovalsPage({ searchParams }: { search
                         <td style={td}>{r.height}</td>
                         <td style={{ ...td, fontWeight: 700 }}>{r.quantity}</td>
                         <td style={td}>{r.quality || "Both"}</td>
-                        <td style={td}>{r.componentSection || "—"}</td>
-                        <td style={td}>{r.componentElement || "—"}</td>
                         <td style={td}>{r.priority ? "⚡" : ""}</td>
                       </tr>
                     ))}

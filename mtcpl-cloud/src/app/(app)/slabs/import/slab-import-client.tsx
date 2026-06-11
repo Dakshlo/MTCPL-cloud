@@ -115,6 +115,7 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
   // Mig 123 — AI auto-categorize state.
   const [categorizing, setCategorizing] = useState(false);
   const [catNote, setCatNote] = useState("");
+  const [catChanges, setCatChanges] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
   // Hard guard against double-submit — a ref flips synchronously, so even a
   // fast double-click can't fire two batches before React re-renders.
@@ -222,16 +223,16 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
     setRows((prev) => [...prev, { key: crypto.randomUUID(), label: "", description: "", length: "", width: "", height: "", quantity: "", quality: "", priority: false, section: "", element: "" }]);
   }
 
-  // Mig 123 — AI auto-categorize. Sends label + description for the rows
-  // that have content; fills the Section + Element columns. Read-only on
-  // the server (suggests only); the user can edit anything after.
+  // Mig 123 — AI auto-categorize. Sends label + description + whatever the
+  // user already typed in Category 1/2; the AI fills empties AND corrects
+  // typos against the temple's existing categories ("flor-1" → "FLOOR-1").
+  // It reports exactly what it changed. Read-only on the server.
   async function autoCategorize() {
     if (categorizing) return;
     setCategorizing(true);
     setCatNote("");
+    setCatChanges([]);
     setError("");
-    // Only send rows that have something to classify, but map results back
-    // to their exact row key so edits/removals don't misalign.
     const targets = rows.filter((r) => rowHasContent(r));
     if (targets.length === 0) {
       setCategorizing(false);
@@ -240,7 +241,7 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
     try {
       const res = await categorizeImportRowsAction({
         temple,
-        rows: targets.map((r) => ({ label: r.label, description: r.description })),
+        rows: targets.map((r) => ({ label: r.label, description: r.description, section: r.section, element: r.element })),
       });
       if (!res.ok) {
         setError(res.error);
@@ -248,15 +249,30 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
       }
       const byKey = new Map<string, { section: string; element: string }>();
       targets.forEach((r, i) => byKey.set(r.key, res.cats[i] ?? { section: "", element: "" }));
+      // Build a human list of corrections (typed → corrected) per row.
+      const changes: string[] = [];
+      targets.forEach((r, i) => {
+        const c = res.cats[i];
+        if (!c) return;
+        const before1 = r.section.trim().toUpperCase();
+        const before2 = r.element.trim().toUpperCase();
+        if (before1 && c.section && before1 !== c.section) changes.push(`Row ${rows.findIndex((x) => x.key === r.key) + 1}: Cat 1 “${r.section}” → “${c.section}”`);
+        if (before2 && c.element && before2 !== c.element) changes.push(`Row ${rows.findIndex((x) => x.key === r.key) + 1}: Cat 2 “${r.element}” → “${c.element}”`);
+      });
       setRows((prev) =>
         prev.map((r) => {
           const c = byKey.get(r.key);
           return c ? { ...r, section: c.section || r.section, element: c.element || r.element } : r;
         }),
       );
-      setCatNote(`Categorized ${targets.length} row${targets.length === 1 ? "" : "s"} — review & edit the Section / Element columns.`);
+      setCatChanges(changes);
+      setCatNote(
+        changes.length > 0
+          ? `Categorized ${targets.length} row${targets.length === 1 ? "" : "s"} and corrected ${changes.length} typo${changes.length === 1 ? "" : "s"}:`
+          : `Categorized ${targets.length} row${targets.length === 1 ? "" : "s"} — review & edit Category 1 / 2 if needed.`,
+      );
     } catch {
-      setError("Auto-categorize failed — you can still fill Section / Element by hand.");
+      setError("Auto-categorize failed — you can still fill Category 1 / 2 by hand.");
     } finally {
       setCategorizing(false);
     }
@@ -429,15 +445,25 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
 
         {catNote && (
           <div style={{ padding: "8px 18px", fontSize: 12.5, color: "#166534", background: "rgba(22,163,74,0.08)", borderBottom: "1px solid var(--border)" }}>
-            ✨ {catNote}
+            <div>✨ {catNote}</div>
+            {catChanges.length > 0 && (
+              <ul style={{ margin: "4px 0 0", paddingLeft: 18, lineHeight: 1.6, color: "#15803d" }}>
+                {catChanges.slice(0, 20).map((c, i) => <li key={i}>{c}</li>)}
+                {catChanges.length > 20 && <li>…and {catChanges.length - 20} more</li>}
+              </ul>
+            )}
           </div>
         )}
 
         <div style={{ overflowX: "auto" }}>
+          {/* Column order matches the Excel template: Category 1 · Category 2 ·
+              Label · Description · L · W · H · Qty · Quality. */}
           <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1160 }}>
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border)" }}>
                 <th style={{ ...th, width: 36 }}>#</th>
+                <th style={{ ...th, minWidth: 140 }}>Category 1</th>
+                <th style={{ ...th, minWidth: 140 }}>Category 2</th>
                 <th style={{ ...th, minWidth: 150 }}>Label</th>
                 <th style={{ ...th, minWidth: 180 }}>Description</th>
                 <th style={{ ...th, width: 80 }}>Len (in)</th>
@@ -445,8 +471,6 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
                 <th style={{ ...th, width: 80 }}>Hgt (in)</th>
                 <th style={{ ...th, width: 64 }}>Qty</th>
                 <th style={{ ...th, minWidth: 120 }}>Quality</th>
-                <th style={{ ...th, minWidth: 140 }}>Category 1</th>
-                <th style={{ ...th, minWidth: 140 }}>Category 2</th>
                 <th style={{ ...th, width: 60 }}>⚡</th>
                 <th style={{ ...th, width: 40 }}></th>
               </tr>
@@ -459,7 +483,9 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
                 return (
                   <tr key={r.key} style={{ borderBottom: "1px solid var(--border)", background: bad ? "rgba(220,38,38,0.05)" : undefined }}>
                     <td style={{ ...td, color: "var(--muted)", fontSize: 12, fontFamily: "ui-monospace, monospace" }}>{i + 1}</td>
-                    <td style={td}><input value={r.label} onChange={(e) => patch(r.key, "label", e.target.value)} placeholder="required" style={cell("label")} /></td>
+                    <td style={td}><input value={r.section} onChange={(e) => patch(r.key, "section", e.target.value)} placeholder="e.g. FLOOR" style={{ ...cellInp, textTransform: "uppercase" }} /></td>
+                    <td style={td}><input value={r.element} onChange={(e) => patch(r.key, "element", e.target.value)} placeholder="e.g. CLOISTER" style={{ ...cellInp, textTransform: "uppercase" }} /></td>
+                    <td style={td}><input value={r.label} onChange={(e) => patch(r.key, "label", e.target.value)} placeholder="required" style={{ ...cell("label"), textTransform: "uppercase" }} /></td>
                     <td style={td}><input value={r.description} onChange={(e) => patch(r.key, "description", e.target.value)} placeholder="required" style={cell("description")} /></td>
                     <td style={td}><input value={r.length} onChange={(e) => patch(r.key, "length", e.target.value)} inputMode="decimal" placeholder="req" style={cell("length")} /></td>
                     <td style={td}><input value={r.width} onChange={(e) => patch(r.key, "width", e.target.value)} inputMode="decimal" placeholder="req" style={cell("width")} /></td>
@@ -472,8 +498,6 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
                         <option value="B">Grade B</option>
                       </select>
                     </td>
-                    <td style={td}><input value={r.section} onChange={(e) => patch(r.key, "section", e.target.value)} placeholder="e.g. Floor" style={cellInp} /></td>
-                    <td style={td}><input value={r.element} onChange={(e) => patch(r.key, "element", e.target.value)} placeholder="e.g. Cloister" style={cellInp} /></td>
                     <td style={{ ...td, textAlign: "center" }}><input type="checkbox" checked={r.priority} onChange={(e) => patch(r.key, "priority", e.target.checked)} style={{ cursor: "pointer", width: 16, height: 16 }} /></td>
                     <td style={{ ...td, textAlign: "center" }}><button type="button" onClick={() => removeRow(r.key)} title="Remove row" style={{ fontSize: 14, color: "#991b1b", background: "none", border: "none", cursor: "pointer" }}>✕</button></td>
                   </tr>
