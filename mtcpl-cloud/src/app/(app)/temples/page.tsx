@@ -113,6 +113,9 @@ export default async function TemplesPage() {
   // Group by temple → build a Section(›-nested) → Element tree.
   const byTemple = new Map<string, BuildNode>();
   for (const s of slabs) {
+    // Daksh — rejected slabs are excluded from Temple View entirely
+    // (they were confusing). They stay in the DB, just not shown here.
+    if (s.status === "rejected") continue;
     const temple = (s.temple || "—").trim();
     let root = byTemple.get(temple);
     if (!root) { root = newNode(temple); byTemple.set(temple, root); }

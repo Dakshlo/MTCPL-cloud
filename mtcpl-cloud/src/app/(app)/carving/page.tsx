@@ -96,6 +96,8 @@ export default async function CarvingDashboardPage({
           "id, label, temple, stone, length_ft, width_ft, thickness_ft, status, priority, source_block_id, updated_at, stock_location",
         )
         .eq("status", "cut_done")
+        // Mig 125 — parked (temporary storage) slabs are hidden from Unassigned.
+        .eq("is_parked", false)
         .order("priority", { ascending: false })
         .order("created_at", { ascending: true })
         .range(offset, offset + PAGE - 1);
@@ -144,7 +146,7 @@ export default async function CarvingDashboardPage({
       // the carving, preserved at unload (cnc_machine_id is nulled
       // when the slab comes off the bed). The Carving Done Approval
       // card uses it to show which CNC produced the slab. (Daksh)
-      .select("id, slab_requirement_id, vendor_id, vendor_name, vendor_type, status, due_at, assigned_at, completed_at, cnc_machine_id, completed_on_cnc_machine_id, owner_review_status, owner_review_kind, owner_review_note")
+      .select("id, slab_requirement_id, vendor_id, vendor_name, vendor_type, status, due_at, assigned_at, completed_at, cnc_machine_id, completed_on_cnc_machine_id")
       .not("completed_at", "is", null)
       .is("review_approved_at", null)
       // Mig 097 — slabs marked "Still Pending Work" leave the approval
@@ -158,7 +160,7 @@ export default async function CarvingDashboardPage({
       // notes so the Carving Done card / peek can SHOW the photo the
       // reviewer took at sign-off. completed_on_cnc_machine_id is the
       // carving machine (cnc_machine_id is already nulled by now).
-      .select("id, slab_requirement_id, vendor_id, vendor_name, vendor_type, status, due_at, assigned_at, completed_at, review_approved_at, cnc_machine_id, completed_on_cnc_machine_id, location, ready_to_dispatch_at, review_image_path, review_image_paths, review_quality_flag, review_notes, depart_flag, depart_note, owner_review_status, owner_review_kind, owner_review_note")
+      .select("id, slab_requirement_id, vendor_id, vendor_name, vendor_type, status, due_at, assigned_at, completed_at, review_approved_at, cnc_machine_id, completed_on_cnc_machine_id, location, ready_to_dispatch_at, review_image_path, review_image_paths, review_quality_flag, review_notes, depart_flag, depart_note")
       .not("review_approved_at", "is", null)
       .order("review_approved_at", { ascending: false })
       .limit(200),
@@ -640,6 +642,18 @@ export default async function CarvingDashboardPage({
   // Tab badge = live orders (exclude cancelled / rejected).
   const workOrdersLiveCount = workOrdersForTab.filter((w) => w.status !== "cancelled" && w.status !== "rejected").length;
 
+  // Mig 125 — temporary-storage (parked) count + gate for the Storage link.
+  const canManageStorage = profile.role === "developer" || profile.role === "owner" || profile.role === "carving_head";
+  let parkedCount = 0;
+  if (canManageStorage) {
+    const { count } = await admin
+      .from("slab_requirements")
+      .select("*", { count: "exact", head: true })
+      .eq("status", "cut_done")
+      .eq("is_parked", true);
+    parkedCount = count ?? 0;
+  }
+
   const counts = {
     unassigned: (unassignedSlabsAll ?? []).length,
     active: activeForMode.length,
@@ -698,6 +712,21 @@ export default async function CarvingDashboardPage({
             profile.role === "carving_head" ||
             profile.role === "senior_incharge") && (
             <VendorsManagerPeek vendors={vendorsForPeek} />
+          )}
+          {/* Mig 125 — Temporary Storage: park the cut-done backlog out of
+              the Unassigned list. Owner / dev / carving_head. */}
+          {canManageStorage && (
+            <Link
+              href="/carving/storage"
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 6,
+                padding: "8px 14px", fontSize: 12, fontWeight: 700,
+                color: "var(--text)", background: "var(--surface)",
+                border: "1px solid var(--border)", borderRadius: 8, textDecoration: "none",
+              }}
+            >
+              🗄 Storage{parkedCount > 0 ? ` (${parkedCount})` : ""}
+            </Link>
           )}
           {/* Jobwork challans — Outsource mode only (owner/dev/head/senior).
               Mig 098 — Work Orders moved from a button to a tab below. */}

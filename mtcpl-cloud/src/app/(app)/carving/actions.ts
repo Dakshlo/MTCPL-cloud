@@ -6938,3 +6938,85 @@ export async function resolveOwnerReviewAction(formData: FormData) {
   revalidatePath("/tasks/owner-reviews");
   redirect("/tasks/owner-reviews?toast=Issue+resolved");
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// Temporary Storage / "park" (mig 125, Daksh June 2026)
+//
+// Move cut-done slabs that are "ready to assign to carving" into a temporary
+// Storage so they stop cluttering the Unassigned list (a historical backlog
+// that was, in reality, already carved & shipped). Parked slabs keep
+// status='cut_done' — nothing else changes — they're just hidden from the
+// assign list. Bringing one back clears the flag. Owner / dev / carving_head.
+// ────────────────────────────────────────────────────────────────────────────
+
+function canManageStorage(role: string): boolean {
+  return role === "owner" || role === "developer" || role === "carving_head";
+}
+
+/** Park selected cut-done slabs (hide from the carving Unassigned list). */
+export async function parkSlabsAction(
+  ids: string[],
+): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
+  const { profile } = await requireAuth();
+  if (!canManageStorage(profile.role)) return { ok: false, error: "Not allowed." };
+  const list = (Array.isArray(ids) ? ids : []).map((s) => String(s).trim()).filter(Boolean);
+  if (list.length === 0) return { ok: false, error: "No slabs selected." };
+  const admin = createAdminSupabaseClient();
+  // Only park slabs that are genuinely still ready-to-assign (cut_done,
+  // not already parked) — never touch in-flight or assigned slabs.
+  const { data, error } = await admin
+    .from("slab_requirements")
+    .update({ is_parked: true, parked_at: new Date().toISOString(), parked_by: profile.id })
+    .in("id", list)
+    .eq("status", "cut_done")
+    .eq("is_parked", false)
+    .select("id");
+  if (error) return { ok: false, error: error.message };
+  const count = (data ?? []).length;
+  void logAudit(profile.id, "slabs_parked", "slab", "batch", { count });
+  revalidatePath("/carving");
+  revalidatePath("/carving/storage");
+  return { ok: true, count };
+}
+
+/** Park EVERY currently-unassigned slab (one-click clear of the backlog). */
+export async function parkAllUnassignedAction(): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
+  const { profile } = await requireAuth();
+  if (!canManageStorage(profile.role)) return { ok: false, error: "Not allowed." };
+  const admin = createAdminSupabaseClient();
+  const { data, error } = await admin
+    .from("slab_requirements")
+    .update({ is_parked: true, parked_at: new Date().toISOString(), parked_by: profile.id })
+    .eq("status", "cut_done")
+    .eq("is_parked", false)
+    .select("id");
+  if (error) return { ok: false, error: error.message };
+  const count = (data ?? []).length;
+  void logAudit(profile.id, "slabs_parked_all", "slab", "batch", { count });
+  revalidatePath("/carving");
+  revalidatePath("/carving/storage");
+  return { ok: true, count };
+}
+
+/** Bring parked slabs back into the Unassigned list. */
+export async function unparkSlabsAction(
+  ids: string[],
+): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
+  const { profile } = await requireAuth();
+  if (!canManageStorage(profile.role)) return { ok: false, error: "Not allowed." };
+  const list = (Array.isArray(ids) ? ids : []).map((s) => String(s).trim()).filter(Boolean);
+  if (list.length === 0) return { ok: false, error: "No slabs selected." };
+  const admin = createAdminSupabaseClient();
+  const { data, error } = await admin
+    .from("slab_requirements")
+    .update({ is_parked: false, parked_at: null, parked_by: null })
+    .in("id", list)
+    .eq("is_parked", true)
+    .select("id");
+  if (error) return { ok: false, error: error.message };
+  const count = (data ?? []).length;
+  void logAudit(profile.id, "slabs_unparked", "slab", "batch", { count });
+  revalidatePath("/carving");
+  revalidatePath("/carving/storage");
+  return { ok: true, count };
+}

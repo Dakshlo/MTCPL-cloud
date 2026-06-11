@@ -39,7 +39,9 @@ const STAGE_META: Record<StageBucket, { label: string; color: string }> = {
   done: { label: "Done", color: "#16a34a" },         // green
   rejected: { label: "Rejected", color: "#dc2626" }, // red
 };
-const STAGE_ORDER: StageBucket[] = ["done", "carving", "cutting", "pending", "rejected"];
+// Rejected slabs are filtered out of Temple View (server-side), so the
+// legend / bars don't show that stage.
+const STAGE_ORDER: StageBucket[] = ["done", "carving", "cutting", "pending"];
 
 const STATUS_LABEL: Record<string, string> = {
   open: "Open", planned: "Planned", cutting: "Cutting", cut_done: "Cut done",
