@@ -20,6 +20,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 import { ACCOUNTS_TOKENS, INPUT_STYLE, BUTTON_STYLES } from "../../_ui/components";
 import { VendorPicker } from "../new/vendor-picker";
 import type { BillVendorOption } from "../new/bill-entry-form";
@@ -69,11 +70,25 @@ type Slot = {
   cgstPercent: string;
   sgstPercent: string;
   igstPercent: string;
+  // TDS/TCS are vendor-driven (the scan can't read them). "" = field hidden
+  // (vendor not TDS/TCS-applicable); "0" or a number = field shown & editable.
+  tdsPercent: string;
+  tcsPercent: string;
   // submit state
   submitStatus: SubmitStatus;
   submitError: string | null;
   token?: string;
 };
+
+// TDS/TCS defaults for a vendor: show the field (pre-filled with the
+// vendor's default, or "0") when the vendor is TDS/TCS-applicable; hide
+// it ("") otherwise. Mirrors the single Add-Bill form.
+function tdsForVendor(v: BillVendorOption | null | undefined): string {
+  return v?.tds_applicable ? String(v.default_tds_percent ?? 0) : "";
+}
+function tcsForVendor(v: BillVendorOption | null | undefined): string {
+  return v?.tcs_applicable ? String(v.default_tcs_percent ?? 0) : "";
+}
 
 const todayIso = () => {
   const d = new Date();
@@ -152,6 +167,10 @@ function applyScanToSlot(slot: Slot, d: ScanData, vendors: BillVendorOption[]): 
     notes.push("⚠ Handwritten / medium confidence — verify the bill number and amounts digit by digit.");
   }
 
+  if (matched && (matched.tds_applicable || matched.tcs_applicable)) {
+    notes.push("TDS/TCS field shown for this vendor — verify the % before adding.");
+  }
+
   return {
     ...slot,
     scanStatus: "scanned",
@@ -159,6 +178,8 @@ function applyScanToSlot(slot: Slot, d: ScanData, vendors: BillVendorOption[]): 
     confidence: d.confidence ?? null,
     notes,
     vendorId: matched?.id ?? "",
+    tdsPercent: tdsForVendor(matched),
+    tcsPercent: tcsForVendor(matched),
     billDate: d.bill_date && /^\d{4}-\d{2}-\d{2}$/.test(d.bill_date) ? d.bill_date : slot.billDate,
     vendorBillNo: d.bill_no ? String(d.bill_no) : "",
     description: d.description ? String(d.description) : "",
@@ -199,6 +220,14 @@ export function MultiBillScanner({
     setSlots((prev) => prev.map((s) => (s.uid === uid ? { ...s, ...patch } : s)));
   }
 
+  // Changing the vendor re-applies that vendor's TDS/TCS defaults so the
+  // field appears (set to the vendor rate, or 0) even when the scan
+  // couldn't read it.
+  function setSlotVendor(uid: string, vendorId: string) {
+    const v = vendors.find((x) => x.id === vendorId) ?? null;
+    updateSlot(uid, { vendorId, tdsPercent: tdsForVendor(v), tcsPercent: tcsForVendor(v) });
+  }
+
   function handleFiles(fileList: FileList | null) {
     setPickError(null);
     if (!fileList || fileList.length === 0) return;
@@ -230,6 +259,8 @@ export function MultiBillScanner({
         cgstPercent: "0",
         sgstPercent: "0",
         igstPercent: "0",
+        tdsPercent: "",
+        tcsPercent: "",
         submitStatus: "idle",
         submitError: null,
       });
@@ -308,10 +339,11 @@ export function MultiBillScanner({
     const cgst = s.gstMode === "intra" ? Number(s.cgstPercent) || 0 : 0;
     const sgst = s.gstMode === "intra" ? Number(s.sgstPercent) || 0 : 0;
     const igst = s.gstMode === "inter" ? Number(s.igstPercent) || 0 : 0;
-    // Vendor-driven TDS/TCS defaults — same as the single form's
-    // handleVendorChange. The user can adjust later on the bill page.
-    const tds = vendor?.tds_applicable && vendor.default_tds_percent != null ? vendor.default_tds_percent : 0;
-    const tcs = vendor?.tcs_applicable && vendor.default_tcs_percent != null ? vendor.default_tcs_percent : 0;
+    // TDS/TCS come from the (editable) field when the vendor is
+    // TDS/TCS-applicable; otherwise 0. The field defaults to the vendor's
+    // rate even when the scan couldn't read it, so it's never silently skipped.
+    const tds = vendor?.tds_applicable ? Number(s.tdsPercent) || 0 : 0;
+    const tcs = vendor?.tcs_applicable ? Number(s.tcsPercent) || 0 : 0;
 
     const fd = new FormData();
     fd.set("bill_vendor_id", s.vendorId);
@@ -332,9 +364,9 @@ export function MultiBillScanner({
     try {
       const result = await submitAction(fd);
       if (result.ok) {
+        // Stay on this bill and show the blinking token — the user notes it
+        // on the physical bill, then moves to the next one themselves.
         updateSlot(s.uid, { submitStatus: "added", submitError: null, token: result.token });
-        // auto-advance to the next bill that still needs a decision
-        setTimeout(() => goToNextPending(s.uid), 350);
       } else if (result.errorCode === "DUPLICATE_BILL") {
         updateSlot(s.uid, {
           submitStatus: "duplicate",
@@ -467,8 +499,13 @@ export function MultiBillScanner({
   const allDecided = slots.every((s) => s.submitStatus === "added");
   const slot = slots[current];
 
+  const hasNextPending = slots.some((s, i) => i !== current && (s.submitStatus === "idle" || s.submitStatus === "error" || s.submitStatus === "duplicate"));
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* Branded MTCPL overlay while this bill submits — same as single Add Bill. */}
+      <FinanceLoadingOverlay show={slot?.submitStatus === "submitting"} label="Submitting for audit…" />
+
       {/* progress strip */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         {slots.map((s, i) => {
@@ -538,9 +575,11 @@ export function MultiBillScanner({
           total={slots.length}
           vendors={vendors}
           onPatch={(patch) => updateSlot(slot.uid, patch)}
+          onVendorChange={(id) => setSlotVendor(slot.uid, id)}
           onAdd={() => addSlot(slot)}
           onPrev={current > 0 ? () => setCurrent(current - 1) : undefined}
           onNext={current < slots.length - 1 ? () => setCurrent(current + 1) : undefined}
+          onAdvance={hasNextPending ? () => goToNextPending(slot.uid) : undefined}
         />
       )}
 
@@ -570,18 +609,22 @@ function BillReviewCard({
   total,
   vendors,
   onPatch,
+  onVendorChange,
   onAdd,
   onPrev,
   onNext,
+  onAdvance,
 }: {
   slot: Slot;
   index: number;
   total: number;
   vendors: BillVendorOption[];
   onPatch: (patch: Partial<Slot>) => void;
+  onVendorChange: (id: string) => void;
   onAdd: () => void;
   onPrev?: () => void;
   onNext?: () => void;
+  onAdvance?: () => void;
 }) {
   const sub = Number(slot.subtotal) || 0;
   const cgst = slot.gstMode === "intra" ? Number(slot.cgstPercent) || 0 : 0;
@@ -592,6 +635,13 @@ function BillReviewCard({
   const scanning = slot.scanStatus === "scanning" || slot.scanStatus === "queued";
   const added = slot.submitStatus === "added";
   const busy = slot.submitStatus === "submitting";
+
+  // TDS/TCS fields show when the selected vendor is TDS/TCS-applicable —
+  // even if the scan couldn't read them (then they default to the vendor
+  // rate, or 0, and stay editable).
+  const selectedVendor = vendors.find((v) => v.id === slot.vendorId) ?? null;
+  const showTds = !!selectedVendor?.tds_applicable;
+  const showTcs = !!selectedVendor?.tcs_applicable;
 
   const inr = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 
@@ -672,7 +722,7 @@ function BillReviewCard({
               )}
 
               <Field label="Beneficiary (vendor)">
-                <VendorPicker vendors={vendors} selectedId={slot.vendorId} onChange={(id) => onPatch({ vendorId: id })} />
+                <VendorPicker vendors={vendors} selectedId={slot.vendorId} onChange={onVendorChange} />
               </Field>
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
@@ -685,7 +735,13 @@ function BillReviewCard({
               </div>
 
               <Field label="Description">
-                <input style={INPUT_STYLE} value={slot.description} onChange={(e) => onPatch({ description: e.target.value })} placeholder="What was billed" />
+                <textarea
+                  rows={3}
+                  style={{ ...INPUT_STYLE, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5, minHeight: 64 }}
+                  value={slot.description}
+                  onChange={(e) => onPatch({ description: e.target.value })}
+                  placeholder="What was billed (the scan captures as much as it can read — edit freely)"
+                />
               </Field>
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
@@ -715,6 +771,24 @@ function BillReviewCard({
                 </Field>
               )}
 
+              {/* TDS / TCS — shown whenever the vendor is TDS/TCS-applicable,
+                  pre-filled with the vendor rate (or 0) even if the scan
+                  couldn't read it, so it's never silently skipped. */}
+              {(showTds || showTcs) && (
+                <div style={{ display: "grid", gridTemplateColumns: showTds && showTcs ? "1fr 1fr" : "1fr", gap: 10 }}>
+                  {showTds && (
+                    <Field label="TDS %">
+                      <input type="number" inputMode="decimal" style={INPUT_STYLE} value={slot.tdsPercent} onChange={(e) => onPatch({ tdsPercent: e.target.value })} placeholder="0" />
+                    </Field>
+                  )}
+                  {showTcs && (
+                    <Field label="TCS %">
+                      <input type="number" inputMode="decimal" style={INPUT_STYLE} value={slot.tcsPercent} onChange={(e) => onPatch({ tcsPercent: e.target.value })} placeholder="0" />
+                    </Field>
+                  )}
+                </div>
+              )}
+
               <div style={{ fontSize: 13, color: "var(--text)", background: ACCOUNTS_TOKENS.accentLight, borderRadius: 8, padding: "8px 12px" }}>
                 Subtotal <b>{inr(sub)}</b> + GST <b>{inr(gstAmt)}</b> = Total <b>{inr(total$)}</b>
               </div>
@@ -723,12 +797,32 @@ function BillReviewCard({
                 <div style={{ fontSize: 12.5, color: "#991b1b", fontWeight: 600 }}>⚠ {slot.submitError}</div>
               )}
 
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                {added ? (
-                  <div style={{ fontSize: 14, fontWeight: 800, color: "#166534" }}>
-                    ✅ Added{slot.token ? ` — token ${slot.token}` : ""}
+              {added ? (
+                // Stay on this bill and show the token, bold + blinking, so it
+                // gets written on the physical bill before moving on.
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div
+                    style={{
+                      border: "2px solid #16a34a",
+                      background: "#ecfdf5",
+                      borderRadius: 10,
+                      padding: "12px 14px",
+                      textAlign: "center",
+                    }}
+                  >
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#166534" }}>✅ Added — write this token on the bill</div>
+                    <div className="token-blink" style={{ fontSize: 26, fontWeight: 900, color: "#15803d", letterSpacing: "0.04em", marginTop: 2 }}>
+                      {slot.token ?? "—"}
+                    </div>
                   </div>
-                ) : (
+                  {onAdvance && (
+                    <button type="button" onClick={onAdvance} style={{ ...BUTTON_STYLES.primary, fontSize: 14 }}>
+                      Go to next bill →
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <button
                     type="button"
                     onClick={onAdd}
@@ -737,18 +831,18 @@ function BillReviewCard({
                   >
                     {busy ? "Adding…" : "✓ Add this bill"}
                   </button>
-                )}
-                {onNext && !added && (
-                  <button type="button" onClick={onNext} style={{ ...BUTTON_STYLES.secondary, fontSize: 13 }}>
-                    Skip for now →
-                  </button>
-                )}
-              </div>
+                  {onNext && (
+                    <button type="button" onClick={onNext} style={{ ...BUTTON_STYLES.secondary, fontSize: 13 }}>
+                      Skip for now →
+                    </button>
+                  )}
+                </div>
+              )}
             </>
           )}
         </div>
       </div>
-      <style>{`.spin{display:inline-block;animation:spin 1.1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+      <style>{`.spin{display:inline-block;animation:spin 1.1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.token-blink{animation:tokenBlink 1s steps(1,end) infinite}@keyframes tokenBlink{50%{opacity:0.25}}`}</style>
     </div>
   );
 }

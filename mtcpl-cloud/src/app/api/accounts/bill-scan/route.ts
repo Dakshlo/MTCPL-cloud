@@ -35,7 +35,7 @@ const EXTRACT_SCHEMA = {
     vendor_gstin: { type: ["string", "null"], description: "Seller's 15-character GSTIN, if printed" },
     bill_no: { type: ["string", "null"], description: "Invoice / bill number as printed" },
     bill_date: { type: ["string", "null"], description: "Bill date in YYYY-MM-DD" },
-    description: { type: ["string", "null"], description: "Short summary of goods/services billed, max ~12 words" },
+    description: { type: ["string", "null"], description: "Description of the goods/services billed — capture as fully as the bill shows. If there are multiple line items, list them (comma or newline separated). Aim to include everything printed in the item/particulars section; up to ~60 words." },
     subtotal: { type: ["number", "null"], description: "Taxable value BEFORE GST" },
     cgst_percent: { type: ["number", "null"], description: "CGST rate percent (e.g. 9), null if not a CGST/SGST bill" },
     sgst_percent: { type: ["number", "null"], description: "SGST rate percent (e.g. 9), null if not a CGST/SGST bill" },
@@ -57,7 +57,7 @@ Rules:
 - Amounts are numbers without currency symbols or thousands separators.
 - subtotal is the taxable value BEFORE GST; total is the final amount INCLUDING GST.
 - GST: report the printed RATES (percent), not the rupee amounts. A bill has either CGST+SGST (intra-state) or IGST (inter-state), not both.
-- If the bill shows multiple line items, subtotal/total are the bill-level figures; description is a short summary.
+- If the bill shows multiple line items, subtotal/total are the bill-level figures; description should capture the item/particulars text as fully as printed (list every line item — do not over-shorten to just a few words).
 - Use null for anything you cannot read confidently. Do not guess digits.
 
 DIGIT ACCURACY (critical — this feeds accounting records):
