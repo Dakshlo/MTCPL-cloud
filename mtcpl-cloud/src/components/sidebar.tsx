@@ -112,6 +112,16 @@ const navEntries: NavEntry[] = [
     department: "production",
   },
   {
+    // Mig 123 — Temple View: slabs organised by component, per temple.
+    // Placed directly under Dashboard (Daksh). Same read audience as
+    // Required Sizes.
+    href: "/temples",
+    label: "Temple View",
+    icon: "🏛",
+    roles: ["developer", "owner", "team_head", "senior_incharge", "slab_entry", "block_slab_entry"],
+    department: "production",
+  },
+  {
     href: "/blocks",
     label: "Blocks",
     icon: "▣",
