@@ -174,10 +174,20 @@ export async function addTempleAction(formData: FormData) {
   const name = text(formData, "name");
   const code_prefix = text(formData, "code_prefix").toUpperCase();
   const default_stone = text(formData, "default_stone") || "PinkStone";
+  // Mig 130 — site details, auto-filled onto every dispatch challan
+  // for this temple. All optional.
+  const site_location = text(formData, "site_location") || null;
+  const site_incharge_name = text(formData, "site_incharge_name") || null;
+  const site_incharge_phone = text(formData, "site_incharge_phone") || null;
+  const installer_name = text(formData, "installer_name") || null;
+  const installer_phone = text(formData, "installer_phone") || null;
 
   if (!name || !code_prefix) redirect("/settings?toast=Name+and+prefix+required");
 
-  const { error } = await admin.from("temples").insert({ name, code_prefix, default_stone });
+  const { error } = await admin.from("temples").insert({
+    name, code_prefix, default_stone,
+    site_location, site_incharge_name, site_incharge_phone, installer_name, installer_phone,
+  });
   if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
 
   revalidatePath("/settings");
@@ -194,22 +204,59 @@ export async function updateTempleAction(formData: FormData) {
   // are now LOCKED after creation. Changing them mid-flow caused
   // problems (slab IDs, existing references). The edit form
   // surfaces them read-only; the server ignores any value the
-  // client tries to send and only updates is_active. Form still
-  // submits the original values via hidden inputs, but we don't
-  // trust them — we only PATCH the status column.
+  // client tries to send and only updates is_active + the mig-130
+  // site-info fields (those are freely editable — they only feed
+  // the dispatch challan).
   const is_active = formData.get("is_active") === "true";
+  const site_location = text(formData, "site_location") || null;
+  const site_incharge_name = text(formData, "site_incharge_name") || null;
+  const site_incharge_phone = text(formData, "site_incharge_phone") || null;
+  const installer_name = text(formData, "installer_name") || null;
+  const installer_phone = text(formData, "installer_phone") || null;
 
   if (!id) redirect("/settings?toast=Missing+ID");
 
   const { error } = await admin
     .from("temples")
-    .update({ is_active })
+    .update({
+      is_active,
+      site_location, site_incharge_name, site_incharge_phone, installer_name, installer_phone,
+    })
     .eq("id", id);
   if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
 
   revalidatePath("/settings");
   revalidatePath("/slabs");
-  redirect("/settings?toast=Temple+status+updated");
+  revalidatePath("/dispatch");
+  redirect("/settings?toast=Temple+updated");
+}
+
+// ── Dispatch Settings (mig 130) ─────────────────────────────────────────────
+// The fixed MTCPL site handling man shown on every dispatch challan
+// (default Posa Ram). Stored in app_settings under
+// 'dispatch_handling_man' so it's changeable without a deploy.
+export async function updateDispatchHandlingManAction(formData: FormData) {
+  const { profile } = await requireAuth(["owner", "team_head", "senior_incharge", "developer"]);
+  const admin = createAdminSupabaseClient();
+
+  const name = text(formData, "handling_name");
+  const phone = text(formData, "handling_phone");
+  if (!name) redirect("/settings?toast=Handling+man+name+required");
+
+  const { error } = await admin
+    .from("app_settings")
+    .upsert({
+      key: "dispatch_handling_man",
+      value: { name, phone },
+      updated_at: new Date().toISOString(),
+      updated_by: profile.id,
+    });
+  if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
+
+  await logAudit(profile.id, "dispatch_handling_man_updated", "app_setting", "dispatch_handling_man", { name, phone });
+  revalidatePath("/settings");
+  revalidatePath("/dispatch");
+  redirect("/settings?toast=Dispatch+handling+man+updated");
 }
 
 export async function deleteTempleAction(formData: FormData) {

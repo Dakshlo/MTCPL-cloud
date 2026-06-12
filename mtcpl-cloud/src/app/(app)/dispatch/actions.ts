@@ -61,6 +61,20 @@ export async function createDispatchAction(formData: FormData) {
   const expectedDeliveryDate = String(formData.get("expected_delivery_date") || "").trim() || null;
   const notes = String(formData.get("notes") || "").trim() || null;
   const slabIds = JSON.parse(String(formData.get("slab_ids") || "[]")) as string[];
+  // Mig 130 — optional per-slab weights (tonnes), entered on the truck
+  // form. Map slabId → tonnes; missing/invalid entries stay NULL.
+  let slabWeights: Record<string, number> = {};
+  try {
+    const parsed = JSON.parse(String(formData.get("slab_weights") || "{}"));
+    if (parsed && typeof parsed === "object") {
+      for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+        const n = Number(v);
+        if (Number.isFinite(n) && n > 0) slabWeights[k] = n;
+      }
+    }
+  } catch {
+    slabWeights = {};
+  }
 
   // ── Validation
   if (!temple) fail("/dispatch", "Temple is required");
@@ -91,7 +105,10 @@ export async function createDispatchAction(formData: FormData) {
   }
 
   // Fetch matching carving_items so we can mark them dispatched + create
-  // dispatch_logs rows (needs carving_item_id per schema).
+  // dispatch_logs rows. Mig 130 — a missing carving row is NO LONGER an
+  // error: direct-dispatch slabs (sent straight from cutting, never
+  // carved) legitimately have none; their dispatch_logs.carving_item_id
+  // stays NULL.
   const { data: carvingItems, error: carvingErr } = await admin
     .from("carving_items")
     .select("id, slab_requirement_id")
@@ -101,42 +118,60 @@ export async function createDispatchAction(formData: FormData) {
   for (const ci of carvingItems ?? []) {
     carvingBySlabId.set(ci.slab_requirement_id, ci.id);
   }
-  // Every completed slab should have a carving_items row — if one is
-  // missing we surface it rather than silently dropping.
-  for (const slabId of slabIds) {
-    if (!carvingBySlabId.has(slabId)) {
-      fail("/dispatch", `Slab ${slabId} has no carving record — its completion may be corrupted.`);
-    }
-  }
 
   // ── Create the dispatches row. approved_at stays NULL → lands in
   // Provisional tab awaiting senior review. challan_number is auto-
-  // assigned by the sequence default (migration 011).
-  const { data: dispatch, error: dispatchErr } = await admin
-    .from("dispatches")
-    .insert({
-      temple,
-      vehicle_no: vehicleNo,
-      driver_name: driverName,
-      driver_phone: driverPhone,
-      expected_delivery_date: expectedDeliveryDate,
-      notes,
-      dispatched_by: profile.id,
-    })
-    .select("id, challan_number")
-    .single();
-  if (dispatchErr || !dispatch) {
-    fail("/dispatch", `Failed to create dispatch: ${dispatchErr?.message ?? "unknown"}`);
-  }
-  const dispatchId = dispatch.id as string;
-  const challanNumber = (dispatch as { challan_number?: number }).challan_number ?? null;
+  // assigned by the sequence default (migration 011). load_number is
+  // the per-TEMPLE counter (mig 130): next = max+1 for this temple,
+  // retried on the unique-index collision if two dispatches race.
+  let dispatchId = "";
+  let challanNumber: number | null = null;
+  let loadNumber: number | null = null;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const { data: maxRow } = await admin
+      .from("dispatches")
+      .select("load_number")
+      .eq("temple", temple)
+      .not("load_number", "is", null)
+      .order("load_number", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const candidate = (Number((maxRow as { load_number?: number } | null)?.load_number) || 0) + 1 + attempt;
 
-  // ── Insert per-slab dispatch_logs
+    const { data: dispatch, error: dispatchErr } = await admin
+      .from("dispatches")
+      .insert({
+        temple,
+        vehicle_no: vehicleNo,
+        driver_name: driverName,
+        driver_phone: driverPhone,
+        expected_delivery_date: expectedDeliveryDate,
+        notes,
+        dispatched_by: profile.id,
+        load_number: candidate,
+      })
+      .select("id, challan_number, load_number")
+      .single();
+    if (dispatchErr) {
+      // 23505 = unique violation on (temple, load_number) — someone
+      // grabbed this load number between our read and insert. Retry.
+      if ((dispatchErr as { code?: string }).code === "23505" && attempt < 3) continue;
+      fail("/dispatch", `Failed to create dispatch: ${dispatchErr.message}`);
+    }
+    dispatchId = (dispatch as { id: string }).id;
+    challanNumber = (dispatch as { challan_number?: number }).challan_number ?? null;
+    loadNumber = (dispatch as { load_number?: number }).load_number ?? null;
+    break;
+  }
+  if (!dispatchId) fail("/dispatch", "Failed to create dispatch — load number collision. Retry.");
+
+  // ── Insert per-slab dispatch_logs (weight_tonnes — mig 130)
   const logRows = slabIds.map((slabId) => ({
-    carving_item_id: carvingBySlabId.get(slabId),
+    carving_item_id: carvingBySlabId.get(slabId) ?? null,
     slab_requirement_id: slabId,
     dispatched_by: profile.id,
     dispatch_id: dispatchId,
+    weight_tonnes: slabWeights[slabId] ?? null,
   }));
   const { error: logsErr } = await admin.from("dispatch_logs").insert(logRows);
   if (logsErr) {
@@ -166,6 +201,7 @@ export async function createDispatchAction(formData: FormData) {
     slab_count: slabIds.length,
     slab_ids: slabIds,
     challan_number: challanNumber,
+    load_number: loadNumber,
     state: "provisional",
   });
   await notify("dispatch_created", `Provisional dispatch to ${temple} (${chalanLabel})`, {
@@ -595,13 +631,10 @@ export async function editDispatchSlabsAction(formData: FormData) {
     for (const ci of addCarving ?? []) {
       carvingBySlab.set(ci.slab_requirement_id, ci.id);
     }
-    for (const slabId of addIds) {
-      if (!carvingBySlab.has(slabId)) {
-        fail("/dispatch", `Slab ${slabId} has no carving record — cannot add`);
-      }
-    }
+    // Mig 130 — direct-dispatch slabs have no carving record;
+    // carving_item_id stays NULL on their log rows.
     const newLogs = addIds.map((slabId) => ({
-      carving_item_id: carvingBySlab.get(slabId),
+      carving_item_id: carvingBySlab.get(slabId) ?? null,
       slab_requirement_id: slabId,
       dispatched_by: profile.id,
       dispatch_id: dispatchId,

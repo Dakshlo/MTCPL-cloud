@@ -31,19 +31,48 @@ export default async function DispatchChallanPrintPage({ params }: { params: Par
   const { data: dispatch, error } = await admin
     .from("dispatches")
     .select(
-      "id, challan_number, temple, vehicle_no, driver_name, driver_phone, expected_delivery_date, notes, dispatched_at, dispatched_by, delivered_at, delivered_by, receiver_name, delivery_note",
+      "id, challan_number, load_number, temple, vehicle_no, driver_name, driver_phone, expected_delivery_date, notes, dispatched_at, dispatched_by, delivered_at, delivered_by, receiver_name, delivery_note",
     )
     .eq("id", id)
     .maybeSingle();
 
   if (error || !dispatch) notFound();
 
-  // Pull the logs for this dispatch (itemised slab list).
+  // Pull the logs for this dispatch (itemised slab list + mig 130
+  // per-slab weights).
   const { data: logs } = await admin
     .from("dispatch_logs")
-    .select("slab_requirement_id")
+    .select("slab_requirement_id, weight_tonnes")
     .eq("dispatch_id", id);
   const slabIds = (logs ?? []).map((l) => l.slab_requirement_id).filter(Boolean) as string[];
+  const weightBySlab = new Map<string, number>();
+  for (const l of (logs ?? []) as Array<{ slab_requirement_id: string | null; weight_tonnes: number | null }>) {
+    if (l.slab_requirement_id && l.weight_tonnes != null && Number(l.weight_tonnes) > 0) {
+      weightBySlab.set(l.slab_requirement_id, Number(l.weight_tonnes));
+    }
+  }
+  const totalTonnes = [...weightBySlab.values()].reduce((a, b) => a + b, 0);
+  const hasWeights = totalTonnes > 0;
+
+  // Mig 130 — temple site info + the fixed MTCPL site handling man.
+  const [{ data: templeRow }, { data: handlingManRow }] = await Promise.all([
+    admin
+      .from("temples")
+      .select("site_location, site_incharge_name, site_incharge_phone, installer_name, installer_phone")
+      .eq("name", dispatch.temple)
+      .maybeSingle(),
+    admin.from("app_settings").select("value").eq("key", "dispatch_handling_man").maybeSingle(),
+  ]);
+  const site = (templeRow ?? {}) as {
+    site_location?: string | null;
+    site_incharge_name?: string | null;
+    site_incharge_phone?: string | null;
+    installer_name?: string | null;
+    installer_phone?: string | null;
+  };
+  const handlingMan =
+    ((handlingManRow as { value?: { name?: string; phone?: string } } | null)?.value) ?? null;
+  const loadNumber = (dispatch as { load_number?: number | null }).load_number ?? null;
 
   let slabs: Array<{
     id: string;
@@ -329,14 +358,79 @@ export default async function DispatchChallanPrintPage({ params }: { params: Par
           </div>
         </div>
 
-        {/* Destination */}
-        <div className="section-title">Destination</div>
-        <div style={{ fontSize: 17, fontWeight: 700, color: "#1a1a1a", marginBottom: 4 }}>
-          🏛 {dispatch.temple}
+        {/* Bill To Party — the temple + its site location (mig 130,
+            mirrors the office's Excel challan format). */}
+        <div className="section-title">Bill To Party</div>
+        <div
+          style={{
+            border: "1.5px solid #7c4a1e", borderRadius: 8, padding: "10px 14px",
+            display: "flex", justifyContent: "space-between", gap: 14, flexWrap: "wrap",
+            background: "#fdfaf4", marginBottom: 4,
+          }}
+        >
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 17, fontWeight: 800, color: "#1a1a1a" }}>🏛 {dispatch.temple}</div>
+            {site.site_location && (
+              <div style={{ fontSize: 12.5, color: "#444", marginTop: 3, fontWeight: 600 }}>
+                📍 {site.site_location}
+              </div>
+            )}
+            <div style={{ fontSize: 10.5, color: "#888", marginTop: 4 }}>
+              Site engineer / receiver to sign below upon receipt.
+            </div>
+          </div>
+          {loadNumber != null && (
+            <div
+              style={{
+                alignSelf: "center", textAlign: "center", border: "2px solid #1a1a1a", borderRadius: 8,
+                padding: "8px 18px", minWidth: 120,
+              }}
+            >
+              <div style={{ fontSize: 9.5, fontWeight: 800, color: "#666", letterSpacing: "0.1em" }}>LOAD NO.</div>
+              <div style={{ fontSize: 26, fontWeight: 800, fontFamily: "ui-monospace, monospace", lineHeight: 1.1 }}>
+                {loadNumber}
+              </div>
+              <div style={{ fontSize: 8.5, color: "#999", marginTop: 1 }}>temple-wise</div>
+            </div>
+          )}
         </div>
-        <div style={{ fontSize: 11, color: "#666" }}>
-          Site engineer / receiver to fill in their name below upon receipt.
-        </div>
+
+        {/* Site contacts (mig 130) — client incharge, our installation
+            contractor, and the fixed MTCPL handling man. */}
+        {(site.site_incharge_name || site.installer_name || handlingMan?.name) && (
+          <>
+            <div className="section-title">Site Contacts</div>
+            <div className="meta-grid">
+              {site.site_incharge_name && (
+                <div>
+                  <div className="meta-label">Site Incharge (Client)</div>
+                  <div className="meta-val">{site.site_incharge_name}</div>
+                  {site.site_incharge_phone && (
+                    <div style={{ fontSize: 11.5, color: "#555", fontFamily: "ui-monospace, monospace" }}>{site.site_incharge_phone}</div>
+                  )}
+                </div>
+              )}
+              {site.installer_name && (
+                <div>
+                  <div className="meta-label">Installation By</div>
+                  <div className="meta-val">{site.installer_name}</div>
+                  {site.installer_phone && (
+                    <div style={{ fontSize: 11.5, color: "#555", fontFamily: "ui-monospace, monospace" }}>{site.installer_phone}</div>
+                  )}
+                </div>
+              )}
+              {handlingMan?.name && (
+                <div>
+                  <div className="meta-label">MTCPL Site Handling</div>
+                  <div className="meta-val">{handlingMan.name}</div>
+                  {handlingMan.phone && (
+                    <div style={{ fontSize: 11.5, color: "#555", fontFamily: "ui-monospace, monospace" }}>{handlingMan.phone}</div>
+                  )}
+                </div>
+              )}
+            </div>
+          </>
+        )}
 
         {/* Vehicle + driver */}
         <div className="section-title">Transport</div>
@@ -353,6 +447,12 @@ export default async function DispatchChallanPrintPage({ params }: { params: Par
             <div className="meta-label">Driver Phone</div>
             <div className="meta-val">{dispatch.driver_phone ?? "—"}</div>
           </div>
+          {hasWeights && (
+            <div>
+              <div className="meta-label">Net Weight</div>
+              <div className="meta-val mono">{totalTonnes.toFixed(3)} T</div>
+            </div>
+          )}
           {expectedDelivery && (
             <div>
               <div className="meta-label">Expected Delivery</div>
@@ -383,11 +483,13 @@ export default async function DispatchChallanPrintPage({ params }: { params: Par
                 <th>Stone</th>
                 <th>Dimensions (in)</th>
                 <th style={{ textAlign: "right" }}>CFT</th>
+                {hasWeights && <th style={{ textAlign: "right" }}>Weight (T)</th>}
               </tr>
             </thead>
             <tbody>
               {slabs.map((s, idx) => {
                 const c = cft(s.length_ft, s.width_ft, s.thickness_ft);
+                const w = weightBySlab.get(s.id);
                 return (
                   <tr key={s.id}>
                     <td style={{ color: "#999" }}>{idx + 1}</td>
@@ -400,14 +502,24 @@ export default async function DispatchChallanPrintPage({ params }: { params: Par
                       {s.length_ft} × {s.width_ft} × {s.thickness_ft}
                     </td>
                     <td style={{ textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{c.toFixed(2)}</td>
+                    {hasWeights && (
+                      <td style={{ textAlign: "right", fontFamily: "ui-monospace, monospace" }}>
+                        {w != null ? w.toFixed(3) : "—"}
+                      </td>
+                    )}
                   </tr>
                 );
               })}
             </tbody>
             <tfoot>
               <tr>
-                <td colSpan={5} style={{ textAlign: "right" }}>Total CFT</td>
+                <td colSpan={5} style={{ textAlign: "right" }}>Total</td>
                 <td style={{ textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{totalCft.toFixed(2)}</td>
+                {hasWeights && (
+                  <td style={{ textAlign: "right", fontFamily: "ui-monospace, monospace" }}>
+                    {totalTonnes.toFixed(3)} T
+                  </td>
+                )}
               </tr>
             </tfoot>
           </table>

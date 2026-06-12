@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
+import { notify } from "@/lib/notifications";
 import {
   canAccessCarvingPage,
   canAddExternalCutSlab,
@@ -7019,4 +7020,84 @@ export async function unparkSlabsAction(
   revalidatePath("/carving");
   revalidatePath("/carving/storage");
   return { ok: true, count };
+}
+
+// ── Direct Dispatch (mig 130) ──────────────────────────────────────
+// Some slabs skip carving entirely — cut, then straight onto a truck.
+// This flips the selected cut_done slabs to 'completed' (so they appear
+// in Dispatch → Make Dispatch) and stamps direct_dispatched_at/by as the
+// permanent record. Flipping the status also removes them from CNC
+// Unassigned and from the Outsource work-order picker (both fetch
+// status='cut_done' only).
+//
+// PRE-CUT slabs (block still cutting, mig 126) are refused — their
+// block's final cutting approval hasn't run yet, so they can't leave.
+export async function directDispatchSlabsAction(
+  formData: FormData,
+): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge"]);
+  const admin = createAdminSupabaseClient();
+
+  const slabIds = JSON.parse(String(formData.get("slab_ids") || "[]")) as string[];
+
+  try {
+    if (!Array.isArray(slabIds) || slabIds.length === 0) {
+      throw new Error("Select at least one slab.");
+    }
+
+    // Race-guarded flip: only slabs still cut_done (and not pre-cut)
+    // move. Anything assigned/parked/changed since the page loaded is
+    // skipped and reported.
+    const now = new Date().toISOString();
+    const { data: flipped, error } = await admin
+      .from("slab_requirements")
+      .update({
+        status: "completed",
+        direct_dispatched_at: now,
+        direct_dispatched_by: profile.id,
+        updated_by: profile.id,
+        updated_at: now,
+      })
+      .in("id", slabIds)
+      .eq("status", "cut_done")
+      .is("precut_at", null)
+      .select("id, temple");
+    if (error) throw new Error(error.message);
+    const rows = (flipped ?? []) as Array<{ id: string; temple: string }>;
+    const count = rows.length;
+    if (count === 0) {
+      throw new Error(
+        "Nothing moved — the selected slabs are no longer cut-&-ready (already assigned, parked or pre-cut). Refresh and retry.",
+      );
+    }
+
+    const temples = [...new Set(rows.map((r) => r.temple))];
+    void Promise.all([
+      logAudit(profile.id, "slabs_direct_dispatched", "slab", "batch", {
+        slab_ids: rows.map((r) => r.id),
+        temples,
+        count,
+      }),
+      notify("direct_dispatch", `${count} slab(s) sent DIRECT to dispatch`, {
+        message: `Skipped carving — now in Dispatch → Make Dispatch. Temple(s): ${temples.join(", ")}.`,
+        entityType: "slab",
+        entityId: rows[0].id,
+        actorId: profile.id,
+        targetRoles: ["owner", "carving_head", "developer"],
+      }),
+    ]).catch((e) => console.warn("[directDispatchSlabsAction] audit/notify failed (non-fatal)", e));
+
+    revalidatePath("/carving");
+    revalidatePath("/dispatch");
+    revalidatePath("/slabs");
+    const skipped = slabIds.length - count;
+    if (skipped > 0) {
+      console.warn(`[directDispatchSlabsAction] ${skipped} of ${slabIds.length} slabs skipped (status changed)`);
+    }
+    return { ok: true, count };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[directDispatchSlabsAction] FAILED", { slabIds, error: msg });
+    return { ok: false, error: msg };
+  }
 }

@@ -8,6 +8,8 @@ import {
   canSeeAwaitingReview,
 } from "@/lib/cutting-permissions";
 import { CarvingDashboardClient } from "./dashboard-client";
+import { DirectDispatchTab } from "./direct-dispatch-tab";
+import { getProfilesMap } from "@/lib/profiles";
 import { WorkOrdersTab, type WorkOrderRow, type WorkOrderLineCounts, type WorkOrderTabRow, type WorkOrderLineChip } from "./work-orders-tab";
 import { VendorsManagerPeek } from "./vendors-manager-peek";
 import { CockpitSidebarToggle } from "@/components/cockpit-sidebar-toggle";
@@ -54,8 +56,15 @@ export default async function CarvingDashboardPage({
     profile.role === "owner" ||
     profile.role === "carving_head" ||
     profile.role === "senior_incharge";
-  const mode: "cnc" | "outsource" =
-    canUseOutsource && params.mode === "outsource" ? "outsource" : "cnc";
+  // Mig 130 — third lane: Direct Dispatch. Slabs that skip carving
+  // entirely (cut → straight onto a truck). Office team only, same
+  // gate as Outsource.
+  const mode: "cnc" | "outsource" | "direct" =
+    canUseOutsource && params.mode === "outsource"
+      ? "outsource"
+      : canUseOutsource && params.mode === "direct"
+        ? "direct"
+        : "cnc";
   const wantVendorType = mode === "outsource" ? "Outsource" : "CNC";
   // Mig 097 — the "Still Pending Work" tab exists only in Outsource mode.
   if (tab === "pending" && (mode !== "outsource" || !reviewAccess)) tab = "unassigned";
@@ -64,6 +73,48 @@ export default async function CarvingDashboardPage({
   // Mig 098 — Outsource has NO Unassigned tab: work orders are the only way
   // to give a vendor work, so its home tab is Work Orders.
   if (mode === "outsource" && tab === "unassigned") tab = "workorders";
+
+  // Mig 130 — Direct Dispatch history: every slab ever sent straight to
+  // dispatch (permanent record, shown under the picker). Only fetched in
+  // direct mode.
+  type DirectHistoryRow = {
+    id: string;
+    label: string | null;
+    temple: string;
+    status: string;
+    length_ft: number;
+    width_ft: number;
+    thickness_ft: number;
+    direct_dispatched_at: string;
+    byName: string | null;
+  };
+  let directHistory: DirectHistoryRow[] = [];
+  if (mode === "direct") {
+    const [{ data: histRows }, profilesMap] = await Promise.all([
+      admin
+        .from("slab_requirements")
+        .select("id, label, temple, status, length_ft, width_ft, thickness_ft, direct_dispatched_at, direct_dispatched_by")
+        .not("direct_dispatched_at", "is", null)
+        .order("direct_dispatched_at", { ascending: false })
+        .limit(300),
+      getProfilesMap(),
+    ]);
+    directHistory = ((histRows ?? []) as Array<{
+      id: string; label: string | null; temple: string; status: string;
+      length_ft: number; width_ft: number; thickness_ft: number;
+      direct_dispatched_at: string; direct_dispatched_by: string | null;
+    }>).map((r) => ({
+      id: r.id,
+      label: r.label,
+      temple: r.temple,
+      status: r.status,
+      length_ft: Number(r.length_ft),
+      width_ft: Number(r.width_ft),
+      thickness_ft: Number(r.thickness_ft),
+      direct_dispatched_at: r.direct_dispatched_at,
+      byName: r.direct_dispatched_by ? profilesMap[r.direct_dispatched_by] ?? null : null,
+    }));
+  }
 
   // Paginated fetcher for unassigned slabs — Supabase's PostgREST
   // caps single .select() at 1000 rows. Once cut_done count crosses
@@ -784,6 +835,8 @@ export default async function CarvingDashboardPage({
           [
             { key: "cnc", label: "🏭 CNC Carving" },
             { key: "outsource", label: "🤝 Outsource Carving" },
+            // Mig 130 — slabs that skip carving and go straight to dispatch.
+            { key: "direct", label: "🚚 Direct Dispatch" },
           ] as const
         ).map((m) => {
           const active = mode === m.key;
@@ -793,7 +846,14 @@ export default async function CarvingDashboardPage({
           // (its home, where outsource work is created). Otherwise keep the
           // current tab; the page bounces any tab not valid in the target
           // mode (e.g. workorders/pending → unassigned in CNC).
-          p.set("tab", m.key === "outsource" && mode !== "outsource" ? "workorders" : tab);
+          p.set(
+            "tab",
+            m.key === "outsource" && mode !== "outsource"
+              ? "workorders"
+              : m.key === "direct"
+                ? "unassigned"
+                : tab,
+          );
           if (templeFilter) p.set("temple", templeFilter);
           const href = `/carving?${p.toString()}`;
           return (
@@ -808,7 +868,9 @@ export default async function CarvingDashboardPage({
                 background: active
                   ? m.key === "outsource"
                     ? "#92400e"
-                    : "var(--gold-dark)"
+                    : m.key === "direct"
+                      ? "#0f766e"
+                      : "var(--gold-dark)"
                   : "transparent",
                 borderRadius: 8,
                 textDecoration: "none",
@@ -824,7 +886,9 @@ export default async function CarvingDashboardPage({
 
       {/* Tabs — solid pill style. Active tab = filled gold; inactive
           = soft hover. Single colour family so the carving head's eye
-          isn't pulled in four directions like the old per-tab tints. */}
+          isn't pulled in four directions like the old per-tab tints.
+          Hidden in Direct Dispatch mode — that lane is one screen. */}
+      {mode !== "direct" && (
       <div
         style={{
           display: "inline-flex",
@@ -911,11 +975,17 @@ export default async function CarvingDashboardPage({
           );
         })}
       </div>
+      )}
 
       {/* Mig 098 — Work Orders is a server-rendered tab (owner Approve/
           Reject are server-action forms); every other tab is the client
-          dashboard. */}
-      {tab === "workorders" ? (
+          dashboard. Mig 130 — Direct Dispatch renders its own lane. */}
+      {mode === "direct" ? (
+        <DirectDispatchTab
+          slabs={(unassignedSlabsAll ?? []).filter((s) => !s.precut_at)}
+          history={directHistory}
+        />
+      ) : tab === "workorders" ? (
         <WorkOrdersTab wos={workOrdersForTab} isOwner={isOwner} />
       ) : (
         <CarvingDashboardClient

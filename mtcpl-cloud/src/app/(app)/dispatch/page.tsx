@@ -56,7 +56,8 @@ export default async function DispatchPage({
     { data: closedDispatches },
     { data: allDispatchLogs },
     { data: stoneTypeRows },
-    { data: departSlabsRaw },
+    { data: templeRows },
+    { data: handlingManRow },
   ] = await Promise.all([
     // Ready ("Make Dispatch") = status=completed slabs waiting to be packed
     admin
@@ -101,14 +102,13 @@ export default async function DispatchPage({
       .order("dispatched_at", { ascending: false }),
     // Stone categories — needed to render marble separately in the UI
     admin.from("stone_types").select("name, stone_category"),
-    // Mig 097 — departed slabs: approved but held from dispatch. They now
-    // live on the Rework Tunnel page; here we only need their ids (to
-    // exclude from Make Dispatch) and the count for the header button.
+    // Mig 130 — temple site info (Bill-To location, client incharge,
+    // installer). Auto-fills the dispatch form + challan.
     admin
-      .from("slab_requirements")
-      .select("id")
-      .eq("status", "completed")
-      .eq("dispatch_hold", true),
+      .from("temples")
+      .select("name, site_location, site_incharge_name, site_incharge_phone, installer_name, installer_phone"),
+    // Mig 130 — fixed MTCPL site handling man (Settings-editable).
+    admin.from("app_settings").select("value").eq("key", "dispatch_handling_man").maybeSingle(),
   ]);
 
   const profilesMap = await getProfilesMap();
@@ -161,14 +161,33 @@ export default async function DispatchPage({
 
   // ── Shape data for the client component
 
-  // Mig 097 — departed (held) slab ids: excluded from Make Dispatch; the
-  // slabs themselves live on /dispatch/rework now.
-  const departIdSet = new Set(((departSlabsRaw ?? []) as Array<{ id: string }>).map((s) => s.id));
-  const reworkCount = departIdSet.size;
-
+  // Rework Tunnel DISCONNECTED (Daksh, June 2026) — depart-held slabs
+  // are no longer excluded: every completed slab flows straight into
+  // Make Dispatch. (/dispatch/rework still exists but is unlinked.)
   const readyRows = (completedSlabs ?? []).filter(
-    (s) => !dispatchedSlabIds.has(s.id) && !departIdSet.has(s.id),
+    (s) => !dispatchedSlabIds.has(s.id),
   );
+
+  // Mig 130 — per-temple site info + the global handling man.
+  type SiteInfo = {
+    site_location: string | null;
+    site_incharge_name: string | null;
+    site_incharge_phone: string | null;
+    installer_name: string | null;
+    installer_phone: string | null;
+  };
+  const siteInfoByTemple: Record<string, SiteInfo> = {};
+  for (const t of (templeRows ?? []) as Array<SiteInfo & { name: string }>) {
+    siteInfoByTemple[t.name] = {
+      site_location: t.site_location,
+      site_incharge_name: t.site_incharge_name,
+      site_incharge_phone: t.site_incharge_phone,
+      installer_name: t.installer_name,
+      installer_phone: t.installer_phone,
+    };
+  }
+  const handlingMan =
+    ((handlingManRow as { value?: { name?: string; phone?: string } } | null)?.value) ?? null;
 
   // Ready-since timer source: carving review approval time — or, if the
   // slab went through the Rework Tunnel, the moment the hold was cleared.
@@ -330,7 +349,8 @@ export default async function DispatchPage({
   return (
     <DispatchClient
       readySlabs={readySlabs}
-      reworkCount={reworkCount}
+      siteInfoByTemple={siteInfoByTemple}
+      handlingMan={handlingMan}
       provisional={provisional}
       provisionalSlabsByDispatch={provisionalSlabsByDispatch}
       outForDelivery={outForDelivery}

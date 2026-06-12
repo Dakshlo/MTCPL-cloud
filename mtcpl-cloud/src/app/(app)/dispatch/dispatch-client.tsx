@@ -99,6 +99,16 @@ export type TruckTrip = {
   status: "provisional" | "on_road" | "delivered";
 };
 
+/** Mig 130 — per-temple site info (Settings → Temple Codes). Auto-shown
+ *  on the dispatch form and printed on the challan. */
+export type SiteInfo = {
+  site_location: string | null;
+  site_incharge_name: string | null;
+  site_incharge_phone: string | null;
+  installer_name: string | null;
+  installer_phone: string | null;
+};
+
 // ─── tiny shared bits ────────────────────────────────────────────────────
 
 const peekOverlay: CSSProperties = {
@@ -222,7 +232,8 @@ function SlabCard({
 
 export function DispatchClient({
   readySlabs,
-  reworkCount,
+  siteInfoByTemple,
+  handlingMan,
   provisional,
   provisionalSlabsByDispatch,
   outForDelivery,
@@ -234,8 +245,10 @@ export function DispatchClient({
   error,
 }: {
   readySlabs: ReadySlab[];
-  /** Slabs held in the 🛠 Rework Tunnel (its own page now). */
-  reworkCount: number;
+  /** Mig 130 — temple name → site info, shown on the dispatch form. */
+  siteInfoByTemple: Record<string, SiteInfo>;
+  /** Mig 130 — fixed MTCPL site handling man (Settings-editable). */
+  handlingMan: { name?: string; phone?: string } | null;
   provisional: ProvisionalRow[];
   provisionalSlabsByDispatch: Record<string, ReadySlab[]>;
   outForDelivery: OutForDeliveryRow[];
@@ -278,24 +291,6 @@ export function DispatchClient({
           </p>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignSelf: "flex-start" }}>
-          <Link
-            href="/dispatch/rework"
-            style={{
-              textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 7,
-              padding: "10px 16px", borderRadius: 10, fontSize: 13.5, fontWeight: 800, whiteSpace: "nowrap",
-              background: reworkCount > 0 ? "rgba(180,83,9,0.1)" : "var(--bg)",
-              border: `1.5px solid ${reworkCount > 0 ? "rgba(180,83,9,0.45)" : "var(--border)"}`,
-              color: reworkCount > 0 ? "#92400e" : "var(--muted)",
-            }}
-            title="Slabs held for a finishing touch before they can ship"
-          >
-            🛠 Rework Tunnel
-            {reworkCount > 0 && (
-              <span style={{ background: "#b45309", color: "#fff", borderRadius: 999, fontSize: 11.5, fontWeight: 800, padding: "1px 9px" }}>
-                {reworkCount}
-              </span>
-            )}
-          </Link>
           <Link
             href="/challan"
             style={{
@@ -367,7 +362,9 @@ export function DispatchClient({
         })}
       </div>
 
-      {tab === "ready" && <ReadyTab slabs={readySlabs} truckHistory={truckHistory} />}
+      {tab === "ready" && (
+        <ReadyTab slabs={readySlabs} truckHistory={truckHistory} siteInfoByTemple={siteInfoByTemple} handlingMan={handlingMan} />
+      )}
       {tab === "provisional" && (
         <ProvisionalTab rows={provisional} slabsByDispatch={provisionalSlabsByDispatch} readySlabs={readySlabs} truckHistory={truckHistory} />
       )}
@@ -383,7 +380,14 @@ export function DispatchClient({
 
 type TempleGroup = { key: string; temple: string; isMarble: boolean; slabs: ReadySlab[] };
 
-function ReadyTab({ slabs, truckHistory }: { slabs: ReadySlab[]; truckHistory: TruckTrip[] }) {
+function ReadyTab({
+  slabs, truckHistory, siteInfoByTemple, handlingMan,
+}: {
+  slabs: ReadySlab[];
+  truckHistory: TruckTrip[];
+  siteInfoByTemple: Record<string, SiteInfo>;
+  handlingMan: { name?: string; phone?: string } | null;
+}) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [peekGroup, setPeekGroup] = useState<TempleGroup | null>(null);
@@ -524,6 +528,8 @@ function ReadyTab({ slabs, truckHistory }: { slabs: ReadySlab[]; truckHistory: T
         <TempleDispatchPeek
           group={peekGroup}
           truckHistory={truckHistory}
+          siteInfo={siteInfoByTemple[peekGroup.temple] ?? null}
+          handlingMan={handlingMan}
           onClose={() => setPeekGroup(null)}
         />
       )}
@@ -536,10 +542,12 @@ function ReadyTab({ slabs, truckHistory }: { slabs: ReadySlab[]; truckHistory: T
 // search), ② truck details (recent-truck quick fill) → create dispatch.
 
 function TempleDispatchPeek({
-  group, truckHistory, onClose,
+  group, truckHistory, siteInfo, handlingMan, onClose,
 }: {
   group: TempleGroup;
   truckHistory: TruckTrip[];
+  siteInfo: SiteInfo | null;
+  handlingMan: { name?: string; phone?: string } | null;
   onClose: () => void;
 }) {
   const [step, setStep] = useState<1 | 2>(1);
@@ -549,6 +557,9 @@ function TempleDispatchPeek({
   const [vehicleNo, setVehicleNo] = useState("");
   const [driverName, setDriverName] = useState("");
   const [driverPhone, setDriverPhone] = useState("");
+  // Mig 130 — optional per-slab weight (tonnes). Keyed by slab id;
+  // empty string = not entered (stored NULL).
+  const [weights, setWeights] = useState<Record<string, string>>({});
 
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
@@ -560,6 +571,14 @@ function TempleDispatchPeek({
   );
   const selSlabs = group.slabs.filter((s) => selected.has(s.id));
   const selCft = selSlabs.reduce((sum, s) => sum + s.cft, 0);
+
+  // Net weight = sum of the entered per-slab tonnes (blank rows skipped).
+  const weightsParsed: Record<string, number> = {};
+  for (const s of selSlabs) {
+    const n = Number(weights[s.id]);
+    if (Number.isFinite(n) && n > 0) weightsParsed[s.id] = n;
+  }
+  const totalTonnes = Object.values(weightsParsed).reduce((a, b) => a + b, 0);
 
   // Recent unique trucks (newest first) for one-tap fill.
   const recentTrucks = useMemo(() => {
@@ -676,8 +695,35 @@ function TempleDispatchPeek({
           >
             <input type="hidden" name="temple" value={group.temple} />
             <input type="hidden" name="slab_ids" value={JSON.stringify([...selected])} />
+            <input type="hidden" name="slab_weights" value={JSON.stringify(weightsParsed)} />
 
             <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
+              {/* Mig 130 — site info that will print on the challan,
+                  pulled from Settings → Temple Codes. */}
+              <div style={{ background: "rgba(184,115,51,0.06)", border: "1.5px solid rgba(184,115,51,0.3)", borderRadius: 10, padding: "10px 14px", fontSize: 12.5, lineHeight: 1.6 }}>
+                <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
+                  📍 Site info — prints on the challan
+                </div>
+                {siteInfo?.site_location || siteInfo?.site_incharge_name || siteInfo?.installer_name ? (
+                  <>
+                    {siteInfo.site_location && <div><strong>Site:</strong> {siteInfo.site_location}</div>}
+                    {siteInfo.site_incharge_name && (
+                      <div><strong>Client incharge:</strong> {siteInfo.site_incharge_name}{siteInfo.site_incharge_phone ? ` · ${siteInfo.site_incharge_phone}` : ""}</div>
+                    )}
+                    {siteInfo.installer_name && (
+                      <div><strong>Installation by:</strong> {siteInfo.installer_name}{siteInfo.installer_phone ? ` · ${siteInfo.installer_phone}` : ""}</div>
+                    )}
+                  </>
+                ) : (
+                  <div className="muted">
+                    No site info saved for this temple yet — add it in <strong>Settings → Temple Codes</strong> (site location, client incharge, installer) and it will auto-print on every challan.
+                  </div>
+                )}
+                {handlingMan?.name && (
+                  <div><strong>MTCPL site handling:</strong> {handlingMan.name}{handlingMan.phone ? ` · ${handlingMan.phone}` : ""}</div>
+                )}
+              </div>
+
               {/* Recent trucks quick-fill */}
               {recentTrucks.length > 0 && (
                 <div>
@@ -746,17 +792,35 @@ function TempleDispatchPeek({
                 <textarea name="notes" rows={2} style={{ resize: "vertical", fontFamily: "inherit", fontSize: 14 }} />
               </label>
 
-              {/* Selected slab recap */}
-              <div style={{ border: "1px solid var(--border)", borderRadius: 10, background: "var(--bg)", padding: "10px 12px", maxHeight: 170, overflowY: "auto", fontSize: 12.5, fontFamily: "ui-monospace, monospace" }}>
+              {/* Selected slab recap + per-slab weight (mig 130). Weight
+                  is optional — filled rows sum into the challan's Net
+                  Weight. */}
+              <div style={{ border: "1px solid var(--border)", borderRadius: 10, background: "var(--bg)", padding: "10px 12px", maxHeight: 240, overflowY: "auto", fontSize: 12.5, fontFamily: "ui-monospace, monospace" }}>
                 <div style={{ fontFamily: "inherit", fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
                   Going on this truck — {selSlabs.length} slab{selSlabs.length === 1 ? "" : "s"} · {selCft.toFixed(2)} CFT
+                  {totalTonnes > 0 && <span style={{ color: "#15803d" }}> · ⚖ {totalTonnes.toFixed(3)} T net</span>}
                 </div>
                 {selSlabs.map((s) => (
-                  <div key={s.id} style={{ padding: "3px 0", borderBottom: "1px dashed var(--border)" }}>
-                    <strong>{s.id}</strong>
-                    {s.label && <span style={{ color: "var(--muted)" }}> · {s.label}</span>}
-                    {" · "}{s.dimensions}
-                    <span style={{ color: "var(--muted)" }}> · {s.cft.toFixed(2)} CFT</span>
+                  <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0", borderBottom: "1px dashed var(--border)", flexWrap: "wrap" }}>
+                    <span style={{ minWidth: 0 }}>
+                      <strong>{s.id}</strong>
+                      {s.label && <span style={{ color: "var(--muted)" }}> · {s.label}</span>}
+                      {" · "}{s.dimensions}
+                      <span style={{ color: "var(--muted)" }}> · {s.cft.toFixed(2)} CFT</span>
+                    </span>
+                    <label style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 4, fontFamily: "inherit" }}>
+                      <span style={{ fontSize: 10.5, color: "var(--muted)", fontWeight: 700 }}>⚖</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.001"
+                        placeholder="tonne"
+                        value={weights[s.id] ?? ""}
+                        onChange={(e) => setWeights((prev) => ({ ...prev, [s.id]: e.target.value }))}
+                        style={{ width: 78, fontSize: 12, padding: "4px 6px" }}
+                      />
+                      <span style={{ fontSize: 10.5, color: "var(--muted)" }}>T</span>
+                    </label>
                   </div>
                 ))}
               </div>

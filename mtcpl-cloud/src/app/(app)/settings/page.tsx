@@ -1,6 +1,6 @@
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { addTempleAction, updateTempleAction, deleteTempleAction, updateUserAction, deleteUserAction, updateOwnNameAction, addStoneTypeAction, deleteStoneTypeAction, setStoneCategoryAction, setBulkImportPasswordAction } from "./actions";
+import { addTempleAction, updateTempleAction, deleteTempleAction, updateUserAction, deleteUserAction, updateOwnNameAction, addStoneTypeAction, deleteStoneTypeAction, setStoneCategoryAction, setBulkImportPasswordAction, updateDispatchHandlingManAction } from "./actions";
 import {
   takeSystemDownAction,
   bringSystemUpAction,
@@ -181,7 +181,7 @@ export default async function SettingsPage() {
   const todayStart = new Date(`${todayIST}T00:00:00+05:30`).toISOString();
   const todayEnd = new Date(`${todayIST}T23:59:59.999+05:30`).toISOString();
 
-  const [{ data: temples }, { data: users }, { data: stoneTypes }, { data: blockStones }, { data: slabStones }, { data: templeSlabCounts }, { data: vendorRows }] = await Promise.all([
+  const [{ data: temples }, { data: users }, { data: stoneTypes }, { data: blockStones }, { data: slabStones }, { data: templeSlabCounts }, { data: vendorRows }, { data: handlingManRow }] = await Promise.all([
     admin.from("temples").select("*").order("name"),
     // Admin client needed — RLS on profiles only returns the current user's own row.
     // vendor_id pulled so the row's vendor-picker can show the current binding.
@@ -201,7 +201,11 @@ export default async function SettingsPage() {
       .eq("is_active", true)
       .in("vendor_type", ["CNC", "Outsource"])
       .order("name"),
+    // Mig 130 — fixed MTCPL site handling man shown on every dispatch
+    // challan (default Posa Ram), editable below in Temple Codes.
+    admin.from("app_settings").select("value").eq("key", "dispatch_handling_man").maybeSingle(),
   ]);
+  const handlingMan = ((handlingManRow as { value?: { name?: string; phone?: string } } | null)?.value) ?? null;
   const vendorList = (vendorRows ?? []) as Array<{
     id: string;
     name: string;
@@ -882,36 +886,85 @@ export default async function SettingsPage() {
       >
         <div className="settings-card">
           <h3 className="settings-card-title">Add Temple</h3>
-          <form action={addTempleAction} className="settings-form-row">
-            <label className="stack" style={{ flex: 2 }}>
-              <span>Temple Name</span>
-              <input name="name" required />
-            </label>
-            <label className="stack" style={{ flex: 1 }}>
-              <span>Code Prefix</span>
-              <input
-                name="code_prefix"
+          <form action={addTempleAction}>
+            <div className="settings-form-row">
+              <label className="stack" style={{ flex: 2 }}>
+                <span>Temple Name</span>
+                <input name="name" required />
+              </label>
+              <label className="stack" style={{ flex: 1 }}>
+                <span>Code Prefix</span>
+                <input
+                  name="code_prefix"
 
-                maxLength={6}
-                required
-                style={{ textTransform: "uppercase", fontFamily: "ui-monospace, monospace", fontWeight: 700 }}
-              />
+                  maxLength={6}
+                  required
+                  style={{ textTransform: "uppercase", fontFamily: "ui-monospace, monospace", fontWeight: 700 }}
+                />
+              </label>
+              <label className="stack" style={{ flex: "0 0 auto" }}>
+                <span>Stone Type</span>
+                <select name="default_stone" defaultValue="PinkStone">
+                  {stoneList.length > 0
+                    ? stoneList.map(st => <option key={st.name} value={st.name}>{st.name}</option>)
+                    : <>
+                        <option value="PinkStone">PinkStone</option>
+                        <option value="WhiteStone">WhiteStone</option>
+                      </>
+                  }
+                </select>
+              </label>
+            </div>
+            {/* Mig 130 — site info, auto-filled onto every dispatch
+                challan for this temple. All optional; editable later. */}
+            <div className="settings-form-row" style={{ marginTop: 10 }}>
+              <label className="stack" style={{ flex: 2 }}>
+                <span>📍 Site Location (Bill-To address)</span>
+                <input name="site_location" placeholder="e.g. Math Asthal Bohar, Rohtak, Haryana" />
+              </label>
+              <label className="stack" style={{ flex: 1 }}>
+                <span>Site Incharge (client)</span>
+                <input name="site_incharge_name" placeholder="Name" />
+              </label>
+              <label className="stack" style={{ flex: "0 0 140px" }}>
+                <span>Incharge Mobile</span>
+                <input name="site_incharge_phone" type="tel" placeholder="98…" />
+              </label>
+              <label className="stack" style={{ flex: 1 }}>
+                <span>Installation By (our contractor)</span>
+                <input name="installer_name" placeholder="Name" />
+              </label>
+              <label className="stack" style={{ flex: "0 0 140px" }}>
+                <span>Installer Mobile</span>
+                <input name="installer_phone" type="tel" placeholder="98…" />
+              </label>
+              <div className="stack" style={{ flex: "0 0 auto", justifyContent: "flex-end" }}>
+                <span style={{ visibility: "hidden", fontSize: 12 }}>.</span>
+                <button className="primary-button" type="submit">Add Temple</button>
+              </div>
+            </div>
+          </form>
+        </div>
+
+        {/* Mig 130 — fixed MTCPL site handling man, printed on every
+            dispatch challan. One global value, editable here. */}
+        <div className="settings-card" style={{ marginTop: 12 }}>
+          <h3 className="settings-card-title">🚚 Dispatch Challan — MTCPL Site Handling Man</h3>
+          <p className="muted" style={{ fontSize: 12, margin: "2px 0 10px" }}>
+            Shown on every delivery challan as our man coordinating at site. Same for all temples — change it here anytime.
+          </p>
+          <form action={updateDispatchHandlingManAction} className="settings-form-row">
+            <label className="stack" style={{ flex: 1 }}>
+              <span>Name</span>
+              <input name="handling_name" defaultValue={handlingMan?.name ?? "POSA RAM"} required />
             </label>
-            <label className="stack" style={{ flex: "0 0 auto" }}>
-              <span>Stone Type</span>
-              <select name="default_stone" defaultValue="PinkStone">
-                {stoneList.length > 0
-                  ? stoneList.map(st => <option key={st.name} value={st.name}>{st.name}</option>)
-                  : <>
-                      <option value="PinkStone">PinkStone</option>
-                      <option value="WhiteStone">WhiteStone</option>
-                    </>
-                }
-              </select>
+            <label className="stack" style={{ flex: "0 0 180px" }}>
+              <span>Mobile</span>
+              <input name="handling_phone" type="tel" defaultValue={handlingMan?.phone ?? "8949783579"} />
             </label>
             <div className="stack" style={{ flex: "0 0 auto", justifyContent: "flex-end" }}>
               <span style={{ visibility: "hidden", fontSize: 12 }}>.</span>
-              <button className="primary-button" type="submit">Add Temple</button>
+              <button className="secondary-button" type="submit">Save</button>
             </div>
           </form>
         </div>
@@ -953,7 +1006,8 @@ export default async function SettingsPage() {
                     );
                     return null;
                   })()}
-                  <form action={updateTempleAction} className="settings-form-row">
+                  <form action={updateTempleAction}>
+                    <div className="settings-form-row">
                     <input type="hidden" name="id" value={temple.id} />
                     <input type="hidden" name="temple_name" value={temple.name} />
                     {/* Daksh: temple name / code prefix / stone type are
@@ -1018,11 +1072,37 @@ export default async function SettingsPage() {
                         <option value="false">Inactive</option>
                       </select>
                     </label>
-                    <div style={{ display: "flex", gap: 8, alignSelf: "flex-end" }}>
-                      <button className="secondary-button" type="submit">Save</button>
-                      <button className="ghost-button danger-ghost" formAction={deleteTempleAction} formNoValidate type="submit">
-                        Delete
-                      </button>
+                    </div>
+                    {/* Mig 130 — site info (EDITABLE, feeds the dispatch
+                        challan: Bill-To location, client incharge,
+                        installation contractor). */}
+                    <div className="settings-form-row" style={{ marginTop: 10 }}>
+                      <label className="stack" style={{ flex: 2 }}>
+                        <span>📍 Site Location</span>
+                        <input name="site_location" defaultValue={(temple as any).site_location ?? ""} placeholder="Bill-To address on challan" />
+                      </label>
+                      <label className="stack" style={{ flex: 1 }}>
+                        <span>Site Incharge (client)</span>
+                        <input name="site_incharge_name" defaultValue={(temple as any).site_incharge_name ?? ""} />
+                      </label>
+                      <label className="stack" style={{ flex: "0 0 130px" }}>
+                        <span>Incharge Mobile</span>
+                        <input name="site_incharge_phone" type="tel" defaultValue={(temple as any).site_incharge_phone ?? ""} />
+                      </label>
+                      <label className="stack" style={{ flex: 1 }}>
+                        <span>Installation By</span>
+                        <input name="installer_name" defaultValue={(temple as any).installer_name ?? ""} />
+                      </label>
+                      <label className="stack" style={{ flex: "0 0 130px" }}>
+                        <span>Installer Mobile</span>
+                        <input name="installer_phone" type="tel" defaultValue={(temple as any).installer_phone ?? ""} />
+                      </label>
+                      <div style={{ display: "flex", gap: 8, alignSelf: "flex-end" }}>
+                        <button className="secondary-button" type="submit">Save</button>
+                        <button className="ghost-button danger-ghost" formAction={deleteTempleAction} formNoValidate type="submit">
+                          Delete
+                        </button>
+                      </div>
                     </div>
                   </form>
                   <p style={{ fontSize: 11, color: "var(--muted)", margin: "8px 2px 0", lineHeight: 1.5 }}>
