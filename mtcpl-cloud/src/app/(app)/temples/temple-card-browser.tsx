@@ -14,10 +14,10 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { deleteTempleComponentImageAction } from "./actions";
-import { AddTempleImageButton } from "./add-image-button";
+import { MoveSlabModal, NodeImageUploader } from "./temple-node-modals";
 import {
   STAGE_META, STAGE_ORDER, bucketOf, calcCft, stoneLabel,
-  type StageBucket, type TempleTree, type TempleTreeNode, type TempleSlabCard, type ComponentImage,
+  type StageBucket, type TempleTree, type TempleTreeNode, type TempleSlabCard, type ComponentImage, type TempleCats,
 } from "./temple-shared";
 
 // ── tiny shared bits ─────────────────────────────────────────────────
@@ -112,12 +112,12 @@ const lbBtn: CSSProperties = { padding: "8px 16px", fontSize: 16, fontWeight: 80
 // ── main browser ─────────────────────────────────────────────────────
 
 export function TempleCardBrowser({
-  trees, imagesByNode, canManageImages, categoryStruct, onExit,
+  trees, imagesByNode, canManageImages, templeCats, onExit,
 }: {
   trees: TempleTree[];
   imagesByNode: Record<string, ComponentImage[]>;
   canManageImages: boolean;
-  categoryStruct: Record<string, Record<string, string[]>>;
+  templeCats: TempleCats;
   onExit: () => void;
 }) {
   const router = useRouter();
@@ -125,11 +125,15 @@ export function TempleCardBrowser({
   const [temple, setTemple] = useState<string | null>(null);
   const [path, setPath] = useState<TempleTreeNode[]>([]);
   const [lightbox, setLightbox] = useState<{ images: ComponentImage[]; index: number } | null>(null);
+  // Mig 128 — move-slab + per-node image-upload modals.
+  const [moveTarget, setMoveTarget] = useState<TempleSlabCard | null>(null);
+  const [uploadNode, setUploadNode] = useState<{ path: string; label: string } | null>(null);
 
   const tree = temple ? trees.find((t) => t.temple === temple) ?? null : null;
   const currentNode = path[path.length - 1] ?? null;
   const children = currentNode ? currentNode.children : (tree?.roots ?? []);
   const isLeaf = currentNode != null && currentNode.children.length === 0;
+  const cats = temple ? (templeCats[temple] ?? { cat1: [], cat2: [], labels: [] }) : { cat1: [], cat2: [], labels: [] };
 
   function goUp() {
     if (path.length > 0) setPath((p) => p.slice(0, -1));
@@ -141,6 +145,13 @@ export function TempleCardBrowser({
   // so the Add-image modal keeps its own Esc behaviour.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      // A modal (move / upload) owns Escape while it's open.
+      if (e.key === "Escape" && (moveTarget || uploadNode)) {
+        e.preventDefault();
+        setMoveTarget(null);
+        setUploadNode(null);
+        return;
+      }
       const t = e.target as HTMLElement | null;
       if (t && t.closest("input, textarea, select, [role=dialog]")) return;
       if (e.key === "Escape") {
@@ -156,7 +167,7 @@ export function TempleCardBrowser({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lightbox, path.length, temple]);
+  }, [lightbox, path.length, temple, moveTarget, uploadNode]);
 
   // First image anywhere under a temple → its landing-card cover.
   function templeCover(t: string): ComponentImage | null {
@@ -203,7 +214,19 @@ export function TempleCardBrowser({
         </div>
         <span style={{ flex: 1 }} />
         <span className="muted" style={{ fontSize: 11.5, whiteSpace: "nowrap" }}>Esc = back</span>
-        {canManageImages && <AddTempleImageButton categoryStruct={categoryStruct} />}
+        {/* Contextual photo upload — adds to the node you're currently in
+            (Category / Label / Description). Cat-1 cards have their own ＋
+            button at the temple root. */}
+        {canManageImages && temple && currentNode && (
+          <button
+            type="button"
+            onClick={() => setUploadNode({ path: currentNode.id, label: currentNode.name })}
+            title={`Add a photo to ${currentNode.name}`}
+            style={{ fontSize: 12.5, fontWeight: 800, padding: "8px 13px", borderRadius: 9, border: "1px solid var(--gold-dark)", background: "var(--surface)", color: "var(--gold-dark)", cursor: "pointer", whiteSpace: "nowrap" }}
+          >
+            📷 Add photo here
+          </button>
+        )}
         <button type="button" onClick={onExit} style={{ fontSize: 13, fontWeight: 800, padding: "8px 14px", borderRadius: 9, border: "none", background: "var(--gold-dark)", color: "#fff", cursor: "pointer" }}>✕ Exit</button>
       </div>
 
@@ -244,7 +267,12 @@ export function TempleCardBrowser({
           </>
         ) : isLeaf ? (
           /* ── Leaf: the actual slabs ── */
-          <SlabCardsGrid node={currentNode!} />
+          <SlabCardsGrid
+            node={currentNode!}
+            images={imagesByNode[currentNode!.id] ?? []}
+            onMove={canManageImages ? (s) => setMoveTarget(s) : undefined}
+            onViewImages={(imgs, idx) => setLightbox({ images: imgs, index: idx })}
+          />
         ) : children.length === 0 ? (
           <div className="muted" style={{ fontSize: 14, padding: 20 }}>Nothing here yet.</div>
         ) : (
@@ -268,6 +296,16 @@ export function TempleCardBrowser({
                     )}
                     <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, transparent 55%, rgba(0,0,0,0.4))" }} />
                     <div style={{ position: "absolute", top: 10, right: 10 }}><Ring pct={pct} onImage /></div>
+                    {canManageImages && (
+                      <button
+                        type="button"
+                        title={`Add a photo to ${c.name}`}
+                        onClick={(e) => { e.stopPropagation(); setUploadNode({ path: c.id, label: c.name }); }}
+                        style={{ position: "absolute", top: 10, left: 10, fontSize: 13, fontWeight: 800, color: "#fff", background: "rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.4)", borderRadius: 999, width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", backdropFilter: "blur(3px)" }}
+                      >
+                        📷
+                      </button>
+                    )}
                     {imgs.length > 0 && (
                       <button
                         type="button"
@@ -304,6 +342,28 @@ export function TempleCardBrowser({
           onDeleted={() => { setLightbox(null); router.refresh(); }}
         />
       )}
+
+      {/* Mig 128 — move a slab to a different category (with confirm step). */}
+      {moveTarget && temple && (
+        <MoveSlabModal
+          slab={moveTarget}
+          temple={temple}
+          cats={cats}
+          onClose={() => setMoveTarget(null)}
+          onMoved={() => { setMoveTarget(null); router.refresh(); }}
+        />
+      )}
+
+      {/* Mig 128 — attach a photo to the current / picked node (any level). */}
+      {uploadNode && temple && (
+        <NodeImageUploader
+          temple={temple}
+          nodePath={uploadNode.path}
+          nodeLabel={uploadNode.label}
+          onClose={() => setUploadNode(null)}
+          onUploaded={() => { setUploadNode(null); router.refresh(); }}
+        />
+      )}
     </div>
   );
 }
@@ -318,35 +378,66 @@ function crumbStyle(active: boolean): CSSProperties {
   return { fontSize: 12.5, fontWeight: active ? 800 : 600, padding: "5px 11px", borderRadius: 8, border: `1px solid ${active ? "var(--gold-dark)" : "var(--border)"}`, background: active ? "rgba(184,115,51,0.08)" : "var(--surface)", color: "var(--text)", cursor: "pointer", whiteSpace: "nowrap", maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis" };
 }
 
-function SlabCardsGrid({ node }: { node: TempleTreeNode }) {
+function SlabCardsGrid({
+  node, images, onMove, onViewImages,
+}: {
+  node: TempleTreeNode;
+  images: ComponentImage[];
+  onMove?: (s: TempleSlabCard) => void;
+  onViewImages: (imgs: ComponentImage[], index: number) => void;
+}) {
   return (
     <div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14, animation: "tcFade .3s ease" }}>
+      {/* This node's own reference photos (Description / Label / Additional). */}
+      {images.length > 0 && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14, animation: "tcFade .3s ease" }}>
+          {images.map((img, i) => (
+            <button key={img.id} type="button" onClick={() => onViewImages(images, i)} title={img.caption ?? "View photo"} style={{ padding: 0, border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", cursor: "zoom-in", width: 92, height: 70, background: "#0f172a" }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={img.url} alt={img.caption ?? ""} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            </button>
+          ))}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: onMove ? 8 : 14, animation: "tcFade .3s ease" }}>
         {STAGE_ORDER.filter((s) => node.counts[s] > 0).map((s) => (
           <span key={s} style={{ fontSize: 11.5, fontWeight: 800, color: "#fff", background: STAGE_META[s].color, borderRadius: 999, padding: "3px 11px" }}>{node.counts[s]} {STAGE_META[s].label}</span>
         ))}
       </div>
+      {onMove && (
+        <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>↔ Tap a slab to move it to a different category.</div>
+      )}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(205px, 1fr))", gap: 10 }}>
-        {node.slabs.map((s, i) => <BigSlabCard key={s.id} s={s} delay={Math.min(i * 18, 360)} />)}
+        {node.slabs.map((s, i) => <BigSlabCard key={s.id} s={s} delay={Math.min(i * 18, 360)} onMove={onMove} />)}
       </div>
     </div>
   );
 }
 
-function BigSlabCard({ s, delay }: { s: TempleSlabCard; delay: number }) {
+function BigSlabCard({ s, delay, onMove }: { s: TempleSlabCard; delay: number; onMove?: (s: TempleSlabCard) => void }) {
   const bucket = bucketOf(s.status);
   const color = STAGE_META[bucket].color;
+  const clickable = !!onMove;
   return (
-    <div className="tc-card" style={{ animationDelay: `${delay}ms`, border: "1px solid var(--border)", borderLeft: `5px solid ${color}`, borderRadius: 12, background: "var(--surface)", padding: "10px 12px", display: "flex", flexDirection: "column", gap: 4 }}>
+    <div
+      className="tc-card"
+      onClick={clickable ? () => onMove!(s) : undefined}
+      role={clickable ? "button" : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onKeyDown={clickable ? (e) => { if (e.key === "Enter") onMove!(s); } : undefined}
+      title={clickable ? "Move this slab to a different category" : undefined}
+      style={{ animationDelay: `${delay}ms`, border: "1px solid var(--border)", borderLeft: `5px solid ${color}`, borderRadius: 12, background: "var(--surface)", padding: "10px 12px", display: "flex", flexDirection: "column", gap: 4, cursor: clickable ? "pointer" : "default", position: "relative" }}
+    >
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.id}</code>
         {s.priority && <span>⚡</span>}
         <span style={{ marginLeft: "auto", fontSize: 9.5, fontWeight: 800, color: "#fff", background: color, borderRadius: 999, padding: "1px 8px", textTransform: "uppercase", whiteSpace: "nowrap" }}>{STAGE_META[bucket].label}</span>
       </div>
       <div style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}>{s.l}&quot; × {s.w}&quot; × {s.t}&quot; <span className="muted">· {calcCft(s.l, s.w, s.t).toFixed(2)} CFT</span></div>
-      <div style={{ display: "flex", gap: 8 }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         {s.stone && <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--muted)" }}>🗿 {stoneLabel(s.stone)}</span>}
         {s.quality && <span style={{ fontSize: 10.5, fontWeight: 700, color: s.quality === "A" ? "#15803d" : "#b45309" }}>Grade {s.quality}</span>}
+        {clickable && <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--gold-dark)", fontWeight: 800 }}>↔ move</span>}
       </div>
     </div>
   );

@@ -20,23 +20,31 @@
 import { useRouter } from "next/navigation";
 import { useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
-import { submitSlabImportBatchAction, categorizeImportRowsAction } from "../actions";
+import { submitSlabImportBatchAction } from "../actions";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 
 export type TempleOpt = { name: string; default_stone: string | null };
+
+// Existing category values per temple — powers the suggestion datalists in
+// the review table (type new OR pick one already used for this temple).
+export type ExistingCats = Record<string, { cat1: string[]; cat2: string[]; labels: string[] }>;
 
 type Row = {
   key: string;
   label: string;
   description: string;
+  // Mig 128 — optional extra description; becomes a folder level UNDER
+  // Description in Temple View (only when filled).
+  additional: string;
   length: string;
   width: string;
   height: string;
   quantity: string;
   quality: string;
   priority: boolean;
-  // Mig 123 — temple-component category (AI-filled, editable). Empty until
-  // "Auto-categorize" is run; the user can edit or fill by hand.
+  // Mig 123 — temple-component category (Category 1 / Category 2). Filled
+  // from the Excel columns; editable here with suggestions from existing
+  // categories. Stored UPPERCASE.
   section: string;
   element: string;
 };
@@ -61,6 +69,7 @@ function rowHasContent(r: Row): boolean {
   return !!(
     r.label.trim() ||
     r.description.trim() ||
+    r.additional.trim() ||
     r.length.trim() ||
     r.width.trim() ||
     r.height.trim() ||
@@ -94,7 +103,7 @@ function rowValid(r: Row): boolean {
   return rowHasContent(r) && rowProblems(r).length === 0;
 }
 
-export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; stones: string[] }) {
+export function SlabImportClient({ temples, stones, existingCats = {} }: { temples: TempleOpt[]; stones: string[]; existingCats?: ExistingCats }) {
   const router = useRouter();
   const [temple, setTemple] = useState("");
   const [stone, setStone] = useState("");
@@ -112,10 +121,6 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
   // Lock temple + stone once a template is downloaded / a file is uploaded,
   // so the chosen temple/stone can't drift from what the file was built for.
   const [locked, setLocked] = useState(false);
-  // Mig 123 — AI auto-categorize state.
-  const [categorizing, setCategorizing] = useState(false);
-  const [catNote, setCatNote] = useState("");
-  const [catChanges, setCatChanges] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
   // Hard guard against double-submit — a ref flips synchronously, so even a
   // fast double-click can't fire two batches before React re-renders.
@@ -169,24 +174,27 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
         const r = (aoa[i] ?? []) as unknown[];
         const cell = (idx: number) => String(r[idx] ?? "").trim();
         // Column order: Sr.No(0) Temple(1) Stone(2) Category1(3) Category2(4)
-        // Label(5) Description(6) Length(7) Width(8) Height(9) Quantity(10)
-        // Quality(11). Category 1/2 → component section/element.
+        // Label(5) Description(6) AdditionalDescription(7) Length(8) Width(9)
+        // Height(10) Quantity(11) Quality(12). Category 1/2 → component
+        // section/element; Additional Description → optional tree sub-level.
         const section = cell(3);
         const element = cell(4);
         const label = cell(5);
         const description = cell(6);
-        const length = cell(7);
-        const width = cell(8);
-        const height = cell(9);
-        const quantity = cell(10);
+        const additional = cell(7);
+        const length = cell(8);
+        const width = cell(9);
+        const height = cell(10);
+        const quantity = cell(11);
         // Quality: A / B / Both (blank = Both). Tolerates "Grade A" typing.
-        const qRaw = cell(11).toUpperCase().replace(/GRADE/g, "").trim();
+        const qRaw = cell(12).toUpperCase().replace(/GRADE/g, "").trim();
         const quality = qRaw === "A" ? "A" : qRaw === "B" ? "B" : "";
-        if (!label && !description && !length && !width && !height && !quantity && !section && !element) continue; // blank row
+        if (!label && !description && !additional && !length && !width && !height && !quantity && !section && !element) continue; // blank row
         parsed.push({
           key: crypto.randomUUID(),
           label,
           description,
+          additional,
           length,
           width,
           height,
@@ -220,63 +228,13 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
     setRows((prev) => prev.filter((r) => r.key !== key));
   }
   function addRow() {
-    setRows((prev) => [...prev, { key: crypto.randomUUID(), label: "", description: "", length: "", width: "", height: "", quantity: "", quality: "", priority: false, section: "", element: "" }]);
+    setRows((prev) => [...prev, { key: crypto.randomUUID(), label: "", description: "", additional: "", length: "", width: "", height: "", quantity: "", quality: "", priority: false, section: "", element: "" }]);
   }
 
-  // Mig 123 — AI auto-categorize. Sends label + description + whatever the
-  // user already typed in Category 1/2; the AI fills empties AND corrects
-  // typos against the temple's existing categories ("flor-1" → "FLOOR-1").
-  // It reports exactly what it changed. Read-only on the server.
-  async function autoCategorize() {
-    if (categorizing) return;
-    setCategorizing(true);
-    setCatNote("");
-    setCatChanges([]);
-    setError("");
-    const targets = rows.filter((r) => rowHasContent(r));
-    if (targets.length === 0) {
-      setCategorizing(false);
-      return;
-    }
-    try {
-      const res = await categorizeImportRowsAction({
-        temple,
-        rows: targets.map((r) => ({ label: r.label, description: r.description, section: r.section, element: r.element })),
-      });
-      if (!res.ok) {
-        setError(res.error);
-        return;
-      }
-      const byKey = new Map<string, { section: string; element: string }>();
-      targets.forEach((r, i) => byKey.set(r.key, res.cats[i] ?? { section: "", element: "" }));
-      // Build a human list of corrections (typed → corrected) per row.
-      const changes: string[] = [];
-      targets.forEach((r, i) => {
-        const c = res.cats[i];
-        if (!c) return;
-        const before1 = r.section.trim().toUpperCase();
-        const before2 = r.element.trim().toUpperCase();
-        if (before1 && c.section && before1 !== c.section) changes.push(`Row ${rows.findIndex((x) => x.key === r.key) + 1}: Cat 1 “${r.section}” → “${c.section}”`);
-        if (before2 && c.element && before2 !== c.element) changes.push(`Row ${rows.findIndex((x) => x.key === r.key) + 1}: Cat 2 “${r.element}” → “${c.element}”`);
-      });
-      setRows((prev) =>
-        prev.map((r) => {
-          const c = byKey.get(r.key);
-          return c ? { ...r, section: c.section || r.section, element: c.element || r.element } : r;
-        }),
-      );
-      setCatChanges(changes);
-      setCatNote(
-        changes.length > 0
-          ? `Categorized ${targets.length} row${targets.length === 1 ? "" : "s"} and corrected ${changes.length} typo${changes.length === 1 ? "" : "s"}:`
-          : `Categorized ${targets.length} row${targets.length === 1 ? "" : "s"} — review & edit Category 1 / 2 if needed.`,
-      );
-    } catch {
-      setError("Auto-categorize failed — you can still fill Category 1 / 2 by hand.");
-    } finally {
-      setCategorizing(false);
-    }
-  }
+  // Suggestion lists for the selected temple — fed to the <datalist>s so the
+  // user can type a NEW category/label or pick one already used here (keeps
+  // the same place from splitting into two near-identical groups).
+  const suggest = existingCats[temple] ?? { cat1: [], cat2: [], labels: [] };
 
   const validRows = useMemo(() => rows.filter(rowValid), [rows]);
   // Started-but-incomplete rows, with the exact empty fields named.
@@ -313,6 +271,7 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
         rows.map((r) => ({
           label: r.label,
           description: r.description,
+          additionalDescription: r.additional,
           length: Number(r.length) || 0,
           width: Number(r.width) || 0,
           height: Number(r.height) || 0,
@@ -385,8 +344,8 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
 
         {!ready && <div style={{ fontSize: 12, color: "var(--muted)" }}>Pick a temple and stone first — the template comes with both pre-filled.</div>}
         <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.6, background: "var(--surface-alt)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px" }}>
-          <strong>Columns:</strong> Sr.No · Temple (filled) · Stone (filled) · <strong>Category 1</strong> · <strong>Category 2</strong> · Label · Description · Length · Width · Height · Quantity · Quality (A/B/Both — blank = Both).{" "}
-          Category 1 → Category 2 → Label organise the slabs in <strong>Temple View</strong> (leave them blank and use ✨ Auto-categorize instead if you prefer).{" "}
+          <strong>Columns:</strong> Sr.No · Temple (filled) · Stone (filled) · <strong>Category 1</strong> · <strong>Category 2</strong> · Label · Description · Additional Description (optional) · Length · Width · Height · Quantity · Quality (A/B/Both — blank = Both).{" "}
+          Category 1 → Category 2 → Label → Description → Additional Description organise the slabs in <strong>Temple View</strong>. In the review step you can pick from categories already used for this temple.{" "}
           Sizes are in <strong>inches</strong>. One row with quantity N becomes N slabs. After upload you can fix anything before it&apos;s added.
           {" "}In the file, <span style={{ color: "#7c2d12", fontWeight: 700 }}>gold columns</span> are pre-filled (leave them) and{" "}
           <span style={{ color: "#1d4ed8", fontWeight: 700 }}>blue columns</span> are for you to fill in.
@@ -430,35 +389,26 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <button
-              type="button"
-              onClick={autoCategorize}
-              disabled={categorizing}
-              title="AI fills the Section + Element columns from each slab's label & description"
-              style={{ fontSize: 12.5, fontWeight: 800, color: "#fff", background: categorizing ? "var(--border)" : "var(--gold-dark)", border: "none", borderRadius: 8, padding: "7px 14px", cursor: categorizing ? "wait" : "pointer", whiteSpace: "nowrap" }}
-            >
-              {categorizing ? "✨ Categorizing…" : "✨ Auto-categorize"}
-            </button>
-            <button type="button" onClick={() => { setStep(1); setRows([]); setError(""); setCatNote(""); }} style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", background: "none", border: "1px solid var(--border)", borderRadius: 8, padding: "7px 12px", cursor: "pointer" }}>← Upload a different file</button>
+            <button type="button" onClick={() => { setStep(1); setRows([]); setError(""); }} style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", background: "none", border: "1px solid var(--border)", borderRadius: 8, padding: "7px 12px", cursor: "pointer" }}>← Upload a different file</button>
           </div>
         </div>
 
-        {catNote && (
-          <div style={{ padding: "8px 18px", fontSize: 12.5, color: "#166534", background: "rgba(22,163,74,0.08)", borderBottom: "1px solid var(--border)" }}>
-            <div>✨ {catNote}</div>
-            {catChanges.length > 0 && (
-              <ul style={{ margin: "4px 0 0", paddingLeft: 18, lineHeight: 1.6, color: "#15803d" }}>
-                {catChanges.slice(0, 20).map((c, i) => <li key={i}>{c}</li>)}
-                {catChanges.length > 20 && <li>…and {catChanges.length - 20} more</li>}
-              </ul>
-            )}
+        {(suggest.cat1.length > 0 || suggest.cat2.length > 0) && (
+          <div style={{ padding: "8px 18px", fontSize: 12, color: "var(--muted)", background: "var(--surface-alt)", borderBottom: "1px solid var(--border)" }}>
+            💡 Category 1 / 2 and Label show <strong>suggestions already used in {temple}</strong> as you type — pick one to keep the same place from splitting, or type a brand-new value.
           </div>
         )}
 
+        {/* Suggestion lists — native autocomplete for Category 1/2 + Label. */}
+        <datalist id="dl-cat1">{suggest.cat1.map((v) => <option key={v} value={v} />)}</datalist>
+        <datalist id="dl-cat2">{suggest.cat2.map((v) => <option key={v} value={v} />)}</datalist>
+        <datalist id="dl-label">{suggest.labels.map((v) => <option key={v} value={v} />)}</datalist>
+
         <div style={{ overflowX: "auto" }}>
           {/* Column order matches the Excel template: Category 1 · Category 2 ·
-              Label · Description · L · W · H · Qty · Quality. */}
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1160 }}>
+              Label · Description · Additional Description · L · W · H · Qty ·
+              Quality. */}
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1340 }}>
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border)" }}>
                 <th style={{ ...th, width: 36 }}>#</th>
@@ -466,6 +416,7 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
                 <th style={{ ...th, minWidth: 140 }}>Category 2</th>
                 <th style={{ ...th, minWidth: 150 }}>Label</th>
                 <th style={{ ...th, minWidth: 180 }}>Description</th>
+                <th style={{ ...th, minWidth: 170 }}>Additional Desc <span style={{ fontWeight: 600, textTransform: "none" }}>(optional)</span></th>
                 <th style={{ ...th, width: 80 }}>Len (in)</th>
                 <th style={{ ...th, width: 80 }}>Wid (in)</th>
                 <th style={{ ...th, width: 80 }}>Hgt (in)</th>
@@ -483,10 +434,11 @@ export function SlabImportClient({ temples, stones }: { temples: TempleOpt[]; st
                 return (
                   <tr key={r.key} style={{ borderBottom: "1px solid var(--border)", background: bad ? "rgba(220,38,38,0.05)" : undefined }}>
                     <td style={{ ...td, color: "var(--muted)", fontSize: 12, fontFamily: "ui-monospace, monospace" }}>{i + 1}</td>
-                    <td style={td}><input value={r.section} onChange={(e) => patch(r.key, "section", e.target.value)} placeholder="e.g. FLOOR" style={{ ...cellInp, textTransform: "uppercase" }} /></td>
-                    <td style={td}><input value={r.element} onChange={(e) => patch(r.key, "element", e.target.value)} placeholder="e.g. CLOISTER" style={{ ...cellInp, textTransform: "uppercase" }} /></td>
-                    <td style={td}><input value={r.label} onChange={(e) => patch(r.key, "label", e.target.value)} placeholder="required" style={{ ...cell("label"), textTransform: "uppercase" }} /></td>
+                    <td style={td}><input list="dl-cat1" value={r.section} onChange={(e) => patch(r.key, "section", e.target.value)} placeholder="e.g. FLOOR" style={{ ...cellInp, textTransform: "uppercase" }} /></td>
+                    <td style={td}><input list="dl-cat2" value={r.element} onChange={(e) => patch(r.key, "element", e.target.value)} placeholder="e.g. CLOISTER" style={{ ...cellInp, textTransform: "uppercase" }} /></td>
+                    <td style={td}><input list="dl-label" value={r.label} onChange={(e) => patch(r.key, "label", e.target.value)} placeholder="required" style={{ ...cell("label"), textTransform: "uppercase" }} /></td>
                     <td style={td}><input value={r.description} onChange={(e) => patch(r.key, "description", e.target.value)} placeholder="required" style={cell("description")} /></td>
+                    <td style={td}><input value={r.additional} onChange={(e) => patch(r.key, "additional", e.target.value)} placeholder="optional" style={cellInp} /></td>
                     <td style={td}><input value={r.length} onChange={(e) => patch(r.key, "length", e.target.value)} inputMode="decimal" placeholder="req" style={cell("length")} /></td>
                     <td style={td}><input value={r.width} onChange={(e) => patch(r.key, "width", e.target.value)} inputMode="decimal" placeholder="req" style={cell("width")} /></td>
                     <td style={td}><input value={r.height} onChange={(e) => patch(r.key, "height", e.target.value)} inputMode="decimal" placeholder="req" style={cell("height")} /></td>

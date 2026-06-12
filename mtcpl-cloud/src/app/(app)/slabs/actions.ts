@@ -9,7 +9,6 @@ import { nextSlabCodeFromMaxId } from "./utils";
 import { logAudit } from "@/lib/audit";
 import { notify } from "@/lib/notifications";
 import type { AppRole } from "@/lib/types";
-import Anthropic from "@anthropic-ai/sdk";
 
 
 function num(fd: FormData, key: string, fallback = 0) {
@@ -212,32 +211,36 @@ const IMPORT_FILE_BUCKET = "slab_import_files";
 type CleanImportRow = {
   label: string;
   description: string | null;
+  // Mig 128 — optional extra description (further tree level under Description).
+  additionalDescription: string | null;
   length: number;
   width: number;
   height: number;
   quantity: number;
   quality: string | null;
   priority: boolean;
-  // Mig 123 — temple-component category (AI-filled, editable). Optional.
+  // Mig 123 — temple-component category (Category 1 / Category 2). Optional.
   componentSection: string | null;
   componentElement: string | null;
 };
 
 function cleanImportRows(rows: unknown): CleanImportRow[] {
   type RawRow = {
-    label?: string | null; description?: string | null;
+    label?: string | null; description?: string | null; additionalDescription?: string | null;
     length?: number | string | null; width?: number | string | null; height?: number | string | null;
     quantity?: number | string | null; quality?: string | null; priority?: boolean | null;
     componentSection?: string | null; componentElement?: string | null;
   };
   // Label + Category 1/2 are stored UPPERCASE so they group consistently
   // no matter how they were typed in Excel ("floor-1" → "FLOOR-1").
+  // Description + Additional Description keep their original casing (prose).
   const up = (v: unknown) => (v ?? "").toString().trim().toUpperCase();
   const upOrNull = (v: unknown) => up(v) || null;
   return (Array.isArray(rows) ? (rows as RawRow[]) : [])
     .map((r) => ({
       label: up(r.label),
       description: (r.description ?? "").toString().trim() || null,
+      additionalDescription: (r.additionalDescription ?? "").toString().trim() || null,
       length: Number(r.length) || 0,
       width: Number(r.width) || 0,
       height: Number(r.height) || 0,
@@ -291,6 +294,7 @@ async function insertApprovedSlabRows(
           id: i === 0 ? baseId : `${baseId}-${i}`,
           label: r.label || temple,
           description: r.description,
+          additional_description: r.additionalDescription,
           temple,
           stone,
           quality: r.quality,
@@ -323,119 +327,6 @@ async function insertApprovedSlabRows(
   }
   if (lastError) return { ok: false, error: lastError };
   return { ok: true, count: inserted, slabBatchId };
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// AI temple-component categorization (mig 123). Read-only — classifies each
-// import row into a component_section (location) + component_element (part
-// type) so the slabs organise inside their temple. NEVER writes to the DB
-// here; it just suggests, the user edits in the review step, and the values
-// ride along the batch → approval. Existing slabs are never touched.
-// ────────────────────────────────────────────────────────────────────────────
-
-const CATEGORIZE_BATCH = 60;
-
-const CATEGORIZE_SCHEMA = {
-  type: "object",
-  properties: {
-    items: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          idx: { type: "integer", description: "Index of the slab in the input list" },
-          section: { type: "string", description: "FINAL Category 1 in UPPERCASE — the broad area (FLOOR, GROUND FLOOR, MANDAP, SANCTUM …). Keep/correct the typed value to match an existing canonical one, or infer from label." },
-          element: { type: "string", description: "FINAL Category 2 in UPPERCASE — the sub-area inside Category 1 (CLOISTER-1, GARBHAGRIHA …), or empty if none. Keep/correct the typed value to match an existing canonical one." },
-        },
-        required: ["idx", "section", "element"],
-        additionalProperties: false,
-      },
-    },
-  },
-  required: ["items"],
-  additionalProperties: false,
-} as const;
-
-/** Suggest / autocorrect a {section, element} for every import row, in input
- *  order. If the user already typed a Category 1/2, it's KEPT but typos are
- *  corrected against existing categories ("flor-1" → "FLOOR-1"); empty ones
- *  are inferred from label + description. Returns UPPERCASE. Read-only. */
-export async function categorizeImportRowsAction(payload: {
-  temple: string;
-  rows: Array<{ label?: string | null; description?: string | null; section?: string | null; element?: string | null }>;
-}): Promise<{ ok: true; cats: Array<{ section: string; element: string }> } | { ok: false; error: string }> {
-  await requireAuth(IMPORT_SUBMIT_ROLES);
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return { ok: false, error: "AI categorization isn't configured — add ANTHROPIC_API_KEY in Vercel." };
-  }
-  const up = (v: unknown) => (v ?? "").toString().trim().toUpperCase();
-  const temple = (payload?.temple ?? "").trim();
-  const rows = (Array.isArray(payload?.rows) ? payload.rows : []).map((r) => ({
-    label: (r.label ?? "").toString().trim(),
-    description: (r.description ?? "").toString().trim(),
-    section: up(r.section),
-    element: up(r.element),
-  }));
-  if (rows.length === 0) return { ok: true, cats: [] };
-
-  const supabase = createAdminSupabaseClient();
-  // Existing categories for THIS temple — the canonical list the AI reuses /
-  // corrects typos against (so the same place isn't split into two groups).
-  const { data: existingRows } = await supabase
-    .from("slab_requirements")
-    .select("component_section, component_element")
-    .eq("temple", temple)
-    .not("component_section", "is", null)
-    .limit(2000);
-  const existSections = [...new Set(((existingRows ?? []) as Array<{ component_section: string | null }>).map((r) => up(r.component_section)).filter(Boolean))];
-  const existElements = [...new Set(((existingRows ?? []) as Array<{ component_element: string | null }>).map((r) => up(r.component_element)).filter(Boolean))];
-
-  const anthropic = new Anthropic();
-  const model = process.env.SLAB_CATEGORIZE_MODEL || "claude-haiku-4-5-20251001";
-
-  const prompt = `You organise stone slabs for a temple-construction company (MTCPL). Each slab has a Label + Description, and MAY already have a typed Category 1 (broad area) and Category 2 (sub-area). Decide the FINAL Category 1 and Category 2 for each, in UPPERCASE.
-
-Temple: ${temple || "(unknown)"}
-
-${existSections.length ? `Existing (canonical) Category-1 values for this temple — MATCH these exactly when the same place: ${existSections.join(" | ")}` : "No Category-1 values recorded for this temple yet."}
-${existElements.length ? `Existing (canonical) Category-2 values: ${existElements.join(" | ")}` : ""}
-
-Rules:
-- If the slab already has a typed Category 1/2: KEEP the user's intent, but CORRECT obvious typos / spelling / spacing to match an existing canonical value when it's clearly the same place (e.g. typed "flor-1" or "floor 1" when "FLOOR-1" exists → return "FLOOR-1"; "mandp" → "MANDAP"). Do not change a value that is already correct.
-- If a Category is EMPTY: infer it from the Label + Description.
-- section = Category 1 (broad area: FLOOR, GROUND FLOOR, MANDAP, SANCTUM …). element = Category 2 (sub-area: CLOISTER-1, GARBHAGRIHA …) or empty if none.
-- Do NOT put the part type (PILLAR/CHAJJA) here — that's the Label.
-- ALWAYS return UPPERCASE. Identical inputs get identical output. One item per idx.`;
-
-  const cats: Array<{ section: string; element: string }> = rows.map((r) => ({ section: r.section, element: r.element }));
-  try {
-    for (let start = 0; start < rows.length; start += CATEGORIZE_BATCH) {
-      const slice = rows.slice(start, start + CATEGORIZE_BATCH);
-      const input = slice.map((r, i) => ({ idx: i, label: r.label, description: r.description, typed_category_1: r.section, typed_category_2: r.element }));
-      const response = await anthropic.messages.create({
-        model,
-        max_tokens: 4000,
-        output_config: { format: { type: "json_schema", schema: CATEGORIZE_SCHEMA } },
-        messages: [{ role: "user", content: `${prompt}\n\nSLABS (JSON):\n${JSON.stringify(input)}` }],
-      });
-      const txt = response.content.find((b) => b.type === "text")?.text ?? "";
-      let parsed: { items?: Array<{ idx: number; section: string; element: string }> };
-      try {
-        parsed = JSON.parse(txt);
-      } catch {
-        continue; // skip this chunk, keep whatever the user typed
-      }
-      for (const it of parsed.items ?? []) {
-        const globalIdx = start + it.idx;
-        if (globalIdx >= 0 && globalIdx < cats.length) {
-          cats[globalIdx] = { section: up(it.section), element: up(it.element) };
-        }
-      }
-    }
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "AI categorization failed." };
-  }
-  return { ok: true, cats };
 }
 
 /** Step 1 — submit an import batch for approval. Stores the reviewed rows

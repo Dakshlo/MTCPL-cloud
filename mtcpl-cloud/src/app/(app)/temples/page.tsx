@@ -18,6 +18,7 @@ const IMAGE_WRITE_ROLES = ["owner", "developer", "team_head", "senior_incharge"]
 type SlabRow = {
   id: string; label: string | null; description: string | null; temple: string; status: string;
   component_section: string | null; component_element: string | null;
+  additional_description: string | null;
   stone: string | null; quality: string | null;
   length_ft: number | null; width_ft: number | null; thickness_ft: number | null;
   priority: boolean | null;
@@ -26,6 +27,8 @@ type SlabRow = {
 export type TempleSlabCard = {
   id: string; status: string; stone: string | null; quality: string | null;
   l: number; w: number; t: number; priority: boolean;
+  // Mig 128 — raw component-path fields for the "move slab" modal.
+  section: string; element: string; label: string; description: string; additional: string;
 };
 
 const SLAB_LIMIT = 30000;
@@ -98,7 +101,7 @@ export default async function TemplesPage() {
     for (let offset = 0; offset < SLAB_LIMIT; offset += PAGE) {
       const { data, error } = await admin
         .from("slab_requirements")
-        .select("id, label, description, temple, status, component_section, component_element, stone, quality, length_ft, width_ft, thickness_ft, priority")
+        .select("id, label, description, temple, status, component_section, component_element, additional_description, stone, quality, length_ft, width_ft, thickness_ft, priority")
         .order("temple", { ascending: true })
         .range(offset, offset + PAGE - 1);
       if (error) throw new Error(error.message);
@@ -127,6 +130,9 @@ export default async function TemplesPage() {
     const element = (s.component_element ?? "").trim();
     const label = (s.label ?? "").trim();
     const description = (s.description ?? "").trim();
+    // Mig 128 — Additional Description adds a further folder level UNDER
+    // Description, but ONLY when it has a value (empty = no extra level).
+    const additional = (s.additional_description ?? "").trim();
     const cat1Levels = sectionRaw
       ? sectionRaw.split(/\s*[›>]\s*/).map((x) => x.trim()).filter(Boolean)
       : ["Unassigned"];
@@ -135,6 +141,7 @@ export default async function TemplesPage() {
       ...(element ? [element] : []),
       label || "— (no label)",
       ...(description ? [description] : []),
+      ...(additional ? [additional] : []),
     ];
 
     let cur = root;
@@ -152,6 +159,11 @@ export default async function TemplesPage() {
       w: Number(s.width_ft) || 0,
       t: Number(s.thickness_ft) || 0,
       priority: s.priority === true,
+      section: sectionRaw,
+      element,
+      label,
+      description,
+      additional,
     });
   }
 
@@ -184,17 +196,43 @@ export default async function TemplesPage() {
     categoryStruct[t.temple] = byCat1;
   }
 
-  // Reference images (mig 124) → map each to its tree node path so the client
-  // can show a thumbnail on the matching node.
+  // Reference images (mig 124 + 128) → map each to its tree node by the full
+  // node path (any level). Older rows without node_path fall back to the
+  // legacy temple/section[/element] key (back-filled by mig 128 anyway).
   const { data: imgRows } = await admin
     .from("temple_component_images")
-    .select("id, temple, section, element, caption, image_path")
+    .select("id, temple, section, element, node_path, caption, image_path")
     .order("created_at", { ascending: true });
   const pub = (p: string) => admin.storage.from("temple_component_images").getPublicUrl(p).data.publicUrl;
   const imagesByNode: Record<string, ComponentImage[]> = {};
-  for (const r of (imgRows ?? []) as Array<{ id: string; temple: string; section: string; element: string | null; caption: string | null; image_path: string }>) {
-    const nodeId = r.element ? `${r.temple}/${r.section}/${r.element}` : `${r.temple}/${r.section}`;
+  for (const r of (imgRows ?? []) as Array<{ id: string; temple: string; section: string; element: string | null; node_path: string | null; caption: string | null; image_path: string }>) {
+    const nodeId = (r.node_path && r.node_path.trim())
+      ? r.node_path.trim()
+      : r.element ? `${r.temple}/${r.section}/${r.element}` : `${r.temple}/${r.section}`;
     (imagesByNode[nodeId] ??= []).push({ id: r.id, url: pub(r.image_path), caption: r.caption });
+  }
+
+  // Per-temple distinct Category 1 / Category 2 / Label values — feed the
+  // "move slab" modal's suggestion datalists in the card browser.
+  const templeCats: Record<string, { cat1: string[]; cat2: string[]; labels: string[] }> = {};
+  {
+    const acc: Record<string, { c1: Set<string>; c2: Set<string>; lb: Set<string> }> = {};
+    for (const s of slabs) {
+      if (s.status === "rejected") continue;
+      const t = (s.temple || "").trim();
+      if (!t) continue;
+      const b = (acc[t] ??= { c1: new Set(), c2: new Set(), lb: new Set() });
+      const c1 = (s.component_section || "").trim();
+      const c2 = (s.component_element || "").trim();
+      const lb = (s.label || "").trim();
+      if (c1) b.c1.add(c1);
+      if (c2) b.c2.add(c2);
+      if (lb) b.lb.add(lb);
+    }
+    const srt = (set: Set<string>) => [...set].sort((a, c) => a.localeCompare(c, undefined, { numeric: true }));
+    for (const [t, b] of Object.entries(acc)) {
+      templeCats[t] = { cat1: srt(b.c1), cat2: srt(b.c2), labels: srt(b.lb) };
+    }
   }
 
   return (
@@ -210,7 +248,7 @@ export default async function TemplesPage() {
         </div>
         {canWriteImages && <AddTempleImageButton categoryStruct={categoryStruct} />}
       </div>
-      <TempleViewClient trees={trees} imagesByNode={imagesByNode} canManageImages={canWriteImages} categoryStruct={categoryStruct} />
+      <TempleViewClient trees={trees} imagesByNode={imagesByNode} canManageImages={canWriteImages} templeCats={templeCats} />
     </div>
   );
 }

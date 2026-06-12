@@ -8,11 +8,11 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { TempleCardBrowser } from "./temple-card-browser";
 import {
   STAGE_META, STAGE_ORDER, bucketOf, stoneLabel, calcCft,
-  type StageBucket, type ComponentImage, type TempleSlabCard, type TempleTreeNode, type TempleTree,
+  type StageBucket, type ComponentImage, type TempleSlabCard, type TempleTreeNode, type TempleTree, type TempleCats,
 } from "./temple-shared";
 
 // Re-export the types page.tsx imports from here.
-export type { StageBucket, ComponentImage, TempleSlabCard, TempleTreeNode, TempleTree };
+export type { StageBucket, ComponentImage, TempleSlabCard, TempleTreeNode, TempleTree, TempleCats };
 
 const STATUS_LABEL: Record<string, string> = {
   open: "Open", planned: "Planned", cutting: "Cutting", cut_done: "Cut done",
@@ -192,7 +192,7 @@ function StageLegend() {
   );
 }
 
-export function TempleViewClient({ trees, imagesByNode, canManageImages, categoryStruct }: { trees: TempleTree[]; imagesByNode: Record<string, ComponentImage[]>; canManageImages: boolean; categoryStruct: Record<string, Record<string, string[]>> }) {
+export function TempleViewClient({ trees, imagesByNode, canManageImages, templeCats }: { trees: TempleTree[]; imagesByNode: Record<string, ComponentImage[]>; canManageImages: boolean; templeCats: TempleCats }) {
   const [selected, setSelected] = useState<string>(trees[0]?.temple ?? "");
   const [q, setQ] = useState("");
   // Component browsing: filter within the selected temple + expand/collapse all.
@@ -228,7 +228,7 @@ export function TempleViewClient({ trees, imagesByNode, canManageImages, categor
     : [];
 
   if (trees.length === 0) {
-    return <div className="banner">No slabs yet. Import slabs (and run ✨ Auto-categorize) to see them organised here.</div>;
+    return <div className="banner">No slabs yet. Import slabs (with Category 1 / 2 / Label filled) to see them organised here.</div>;
   }
 
   // Immersive fullscreen card browser.
@@ -238,7 +238,7 @@ export function TempleViewClient({ trees, imagesByNode, canManageImages, categor
         trees={trees}
         imagesByNode={imagesByNode}
         canManageImages={canManageImages}
-        categoryStruct={categoryStruct}
+        templeCats={templeCats}
         onExit={() => setCardMode(false)}
       />
     );

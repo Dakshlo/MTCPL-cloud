@@ -19,7 +19,7 @@ type BatchRow = {
   temple: string;
   stone: string;
   rows: Array<{
-    label: string; description: string | null;
+    label: string; description: string | null; additionalDescription?: string | null;
     length: number; width: number; height: number;
     quantity: number; quality: string | null; priority: boolean;
     componentSection?: string | null; componentElement?: string | null;
@@ -94,11 +94,11 @@ export default async function SlabImportApprovalsPage({ searchParams }: { search
               </div>
 
               <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: 10, background: "var(--surface)" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 560 }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 640 }}>
                   <thead>
                     <tr style={{ borderBottom: "1px solid var(--border)" }}>
                       <th style={th}>#</th><th style={th}>Cat 1</th><th style={th}>Cat 2</th>
-                      <th style={th}>Label</th><th style={th}>Description</th>
+                      <th style={th}>Label</th><th style={th}>Description</th><th style={th}>Add&apos;l Desc</th>
                       <th style={th}>L (in)</th><th style={th}>W (in)</th><th style={th}>H (in)</th>
                       <th style={th}>Qty</th><th style={th}>Quality</th><th style={th}>⚡</th>
                     </tr>
@@ -111,6 +111,7 @@ export default async function SlabImportApprovalsPage({ searchParams }: { search
                         <td style={td}>{r.componentElement || "—"}</td>
                         <td style={{ ...td, fontWeight: 600 }}>{r.label}</td>
                         <td style={td}>{r.description ?? "—"}</td>
+                        <td style={td}>{r.additionalDescription ?? "—"}</td>
                         <td style={td}>{r.length}</td>
                         <td style={td}>{r.width}</td>
                         <td style={td}>{r.height}</td>
