@@ -421,7 +421,7 @@ export default async function DispatchChallanPrintPage({ params }: { params: Par
               )}
               {handlingMan?.name && (
                 <div>
-                  <div className="meta-label">MTCPL Site Handling</div>
+                  <div className="meta-label">Dispatch Incharge (MTCPL)</div>
                   <div className="meta-val">{handlingMan.name}</div>
                   {handlingMan.phone && (
                     <div style={{ fontSize: 11.5, color: "#555", fontFamily: "ui-monospace, monospace" }}>{handlingMan.phone}</div>

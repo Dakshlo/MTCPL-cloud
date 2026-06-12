@@ -712,3 +712,32 @@ export async function clearDispatchHoldAction(formData: FormData) {
   const dest = from === "rework" ? "/dispatch/rework" : "/dispatch";
   redirect(`${dest}?dispatch_toast=${encodeURIComponent(`✓ ${slabId} released — now in Make Dispatch`)}`);
 }
+
+// ── updateDispatchInchargeAction (mig 130 follow-on) ─────────────────────
+// The Dispatch Incharge (MTCPL plant side) printed on every challan —
+// default POSA RAM · 8949783579. Edited from the Dispatch page header
+// (moved out of Settings → Temple Codes at Daksh's request). Stored in
+// app_settings under the original 'dispatch_handling_man' key so the
+// value carries over.
+export async function updateDispatchInchargeAction(formData: FormData) {
+  const { profile } = await requireAuth([...STATION_ROLES]);
+  const admin = createAdminSupabaseClient();
+
+  const name = String(formData.get("incharge_name") || "").trim();
+  const phone = String(formData.get("incharge_phone") || "").trim();
+  if (!name) fail("/dispatch", "Dispatch incharge name is required");
+
+  const { error } = await admin
+    .from("app_settings")
+    .upsert({
+      key: "dispatch_handling_man",
+      value: { name, phone },
+      updated_at: new Date().toISOString(),
+      updated_by: profile.id,
+    });
+  if (error) fail("/dispatch", `Failed to save dispatch incharge: ${error.message}`);
+
+  await logAudit(profile.id, "dispatch_incharge_updated", "app_setting", "dispatch_handling_man", { name, phone });
+  revalidatePath("/dispatch");
+  redirect(`/dispatch?dispatch_toast=${encodeURIComponent(`✓ Dispatch incharge updated — ${name}${phone ? ` (${phone})` : ""}`)}`);
+}

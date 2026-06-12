@@ -26,6 +26,10 @@ export type DirectSlab = {
   thickness_ft: number;
   priority: boolean | null;
   stock_location: string | null;
+  /** Mig 126 — set while the slab is PRE-CUT (released early; its block
+   *  is still cutting). Direct dispatch is allowed; the chip just tells
+   *  the office the block's audit hasn't closed yet. */
+  precut_at: string | null;
 };
 
 export type DirectHistoryRow = {
@@ -190,7 +194,7 @@ export function DirectDispatchTab({
       {visibleCount === 0 ? (
         <div className="muted" style={{ padding: "34px 16px", textAlign: "center", fontSize: 14, background: "var(--surface)", border: "1px dashed var(--border)", borderRadius: 12 }}>
           {slabs.length === 0
-            ? "No cut-&-ready slabs right now. (Pre-cut slabs from still-cutting blocks can't be direct-dispatched.)"
+            ? "No cut-&-ready slabs right now."
             : `No slab matches “${query}”.`}
         </div>
       ) : (
@@ -248,6 +252,14 @@ export function DirectDispatchTab({
                         </span>
                         <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 12.5 }}>{s.id}</code>
                         {s.priority && <span title="Urgent" style={{ fontSize: 12 }}>⚡</span>}
+                        {s.precut_at && (
+                          <span
+                            title="Pre-cut — released early; its block is still cutting. Can still be dispatched."
+                            style={{ marginLeft: "auto", fontSize: 9, fontWeight: 800, color: "#92400e", background: "rgba(180,83,9,0.12)", border: "1px solid rgba(180,83,9,0.35)", borderRadius: 999, padding: "1px 7px", whiteSpace: "nowrap" }}
+                          >
+                            ⏳ block cutting
+                          </span>
+                        )}
                       </div>
                       {s.label && <div style={{ fontSize: 12, fontWeight: 600 }}>{s.label}</div>}
                       <div className="muted" style={{ fontSize: 11, fontFamily: "ui-monospace, monospace" }}>

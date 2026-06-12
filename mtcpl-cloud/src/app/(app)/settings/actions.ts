@@ -231,33 +231,9 @@ export async function updateTempleAction(formData: FormData) {
   redirect("/settings?toast=Temple+updated");
 }
 
-// ── Dispatch Settings (mig 130) ─────────────────────────────────────────────
-// The fixed MTCPL site handling man shown on every dispatch challan
-// (default Posa Ram). Stored in app_settings under
-// 'dispatch_handling_man' so it's changeable without a deploy.
-export async function updateDispatchHandlingManAction(formData: FormData) {
-  const { profile } = await requireAuth(["owner", "team_head", "senior_incharge", "developer"]);
-  const admin = createAdminSupabaseClient();
-
-  const name = text(formData, "handling_name");
-  const phone = text(formData, "handling_phone");
-  if (!name) redirect("/settings?toast=Handling+man+name+required");
-
-  const { error } = await admin
-    .from("app_settings")
-    .upsert({
-      key: "dispatch_handling_man",
-      value: { name, phone },
-      updated_at: new Date().toISOString(),
-      updated_by: profile.id,
-    });
-  if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
-
-  await logAudit(profile.id, "dispatch_handling_man_updated", "app_setting", "dispatch_handling_man", { name, phone });
-  revalidatePath("/settings");
-  revalidatePath("/dispatch");
-  redirect("/settings?toast=Dispatch+handling+man+updated");
-}
+// (Mig 130 follow-on: the dispatch-incharge editor moved to the
+// Dispatch page itself — see dispatch/actions.ts
+// updateDispatchInchargeAction.)
 
 export async function deleteTempleAction(formData: FormData) {
   await requireAuth(["owner", "team_head", "senior_incharge", "developer"]);

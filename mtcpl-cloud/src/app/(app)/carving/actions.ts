@@ -7030,8 +7030,10 @@ export async function unparkSlabsAction(
 // Unassigned and from the Outsource work-order picker (both fetch
 // status='cut_done' only).
 //
-// PRE-CUT slabs (block still cutting, mig 126) are refused — their
-// block's final cutting approval hasn't run yet, so they can't leave.
+// PRE-CUT slabs (block still cutting, mig 126) are ALLOWED too (Daksh):
+// the slab is physically cut, so it can roll. Mig 131 guards the final
+// finish_block_cut so the eventual cutting approval never drags an
+// already-advanced slab back to cut_done.
 export async function directDispatchSlabsAction(
   formData: FormData,
 ): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
@@ -7045,9 +7047,9 @@ export async function directDispatchSlabsAction(
       throw new Error("Select at least one slab.");
     }
 
-    // Race-guarded flip: only slabs still cut_done (and not pre-cut)
-    // move. Anything assigned/parked/changed since the page loaded is
-    // skipped and reported.
+    // Race-guarded flip: only slabs still cut_done move. Anything
+    // assigned/parked/changed since the page loaded is skipped and
+    // reported.
     const now = new Date().toISOString();
     const { data: flipped, error } = await admin
       .from("slab_requirements")
@@ -7060,14 +7062,13 @@ export async function directDispatchSlabsAction(
       })
       .in("id", slabIds)
       .eq("status", "cut_done")
-      .is("precut_at", null)
       .select("id, temple");
     if (error) throw new Error(error.message);
     const rows = (flipped ?? []) as Array<{ id: string; temple: string }>;
     const count = rows.length;
     if (count === 0) {
       throw new Error(
-        "Nothing moved — the selected slabs are no longer cut-&-ready (already assigned, parked or pre-cut). Refresh and retry.",
+        "Nothing moved — the selected slabs are no longer cut-&-ready (already assigned or parked). Refresh and retry.",
       );
     }
 

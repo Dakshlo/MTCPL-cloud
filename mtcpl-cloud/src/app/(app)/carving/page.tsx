@@ -982,7 +982,7 @@ export default async function CarvingDashboardPage({
           dashboard. Mig 130 — Direct Dispatch renders its own lane. */}
       {mode === "direct" ? (
         <DirectDispatchTab
-          slabs={(unassignedSlabsAll ?? []).filter((s) => !s.precut_at)}
+          slabs={unassignedSlabsAll ?? []}
           history={directHistory}
         />
       ) : tab === "workorders" ? (

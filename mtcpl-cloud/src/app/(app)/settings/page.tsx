@@ -1,6 +1,6 @@
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { addTempleAction, updateTempleAction, deleteTempleAction, updateUserAction, deleteUserAction, updateOwnNameAction, addStoneTypeAction, deleteStoneTypeAction, setStoneCategoryAction, setBulkImportPasswordAction, updateDispatchHandlingManAction } from "./actions";
+import { addTempleAction, updateTempleAction, deleteTempleAction, updateUserAction, deleteUserAction, updateOwnNameAction, addStoneTypeAction, deleteStoneTypeAction, setStoneCategoryAction, setBulkImportPasswordAction } from "./actions";
 import {
   takeSystemDownAction,
   bringSystemUpAction,
@@ -181,7 +181,7 @@ export default async function SettingsPage() {
   const todayStart = new Date(`${todayIST}T00:00:00+05:30`).toISOString();
   const todayEnd = new Date(`${todayIST}T23:59:59.999+05:30`).toISOString();
 
-  const [{ data: temples }, { data: users }, { data: stoneTypes }, { data: blockStones }, { data: slabStones }, { data: templeSlabCounts }, { data: vendorRows }, { data: handlingManRow }] = await Promise.all([
+  const [{ data: temples }, { data: users }, { data: stoneTypes }, { data: blockStones }, { data: slabStones }, { data: templeSlabCounts }, { data: vendorRows }] = await Promise.all([
     admin.from("temples").select("*").order("name"),
     // Admin client needed — RLS on profiles only returns the current user's own row.
     // vendor_id pulled so the row's vendor-picker can show the current binding.
@@ -201,11 +201,7 @@ export default async function SettingsPage() {
       .eq("is_active", true)
       .in("vendor_type", ["CNC", "Outsource"])
       .order("name"),
-    // Mig 130 — fixed MTCPL site handling man shown on every dispatch
-    // challan (default Posa Ram), editable below in Temple Codes.
-    admin.from("app_settings").select("value").eq("key", "dispatch_handling_man").maybeSingle(),
   ]);
-  const handlingMan = ((handlingManRow as { value?: { name?: string; phone?: string } } | null)?.value) ?? null;
   const vendorList = (vendorRows ?? []) as Array<{
     id: string;
     name: string;
@@ -946,28 +942,8 @@ export default async function SettingsPage() {
           </form>
         </div>
 
-        {/* Mig 130 — fixed MTCPL site handling man, printed on every
-            dispatch challan. One global value, editable here. */}
-        <div className="settings-card" style={{ marginTop: 12 }}>
-          <h3 className="settings-card-title">🚚 Dispatch Challan — MTCPL Site Handling Man</h3>
-          <p className="muted" style={{ fontSize: 12, margin: "2px 0 10px" }}>
-            Shown on every delivery challan as our man coordinating at site. Same for all temples — change it here anytime.
-          </p>
-          <form action={updateDispatchHandlingManAction} className="settings-form-row">
-            <label className="stack" style={{ flex: 1 }}>
-              <span>Name</span>
-              <input name="handling_name" defaultValue={handlingMan?.name ?? "POSA RAM"} required />
-            </label>
-            <label className="stack" style={{ flex: "0 0 180px" }}>
-              <span>Mobile</span>
-              <input name="handling_phone" type="tel" defaultValue={handlingMan?.phone ?? "8949783579"} />
-            </label>
-            <div className="stack" style={{ flex: "0 0 auto", justifyContent: "flex-end" }}>
-              <span style={{ visibility: "hidden", fontSize: 12 }}>.</span>
-              <button className="secondary-button" type="submit">Save</button>
-            </div>
-          </form>
-        </div>
+        {/* (Mig 130 follow-on: the dispatch-incharge editor lives on the
+            Dispatch page header now, not here.) */}
 
         {templeList.length === 0 ? (
           <div className="banner">No temples configured yet. Add your first temple above.</div>
