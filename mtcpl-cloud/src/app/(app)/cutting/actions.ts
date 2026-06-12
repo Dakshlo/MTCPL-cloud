@@ -795,6 +795,135 @@ export async function finishBlockAction(formData: FormData): Promise<FinishBlock
 }
 
 // ──────────────────────────────────────────────────────────────────
+// Pre-cut / provisional release (mig 126, Daksh June 2026)
+//
+// A big block takes days to finish, but its first slabs are physically
+// cut (and taken by carving) on day one. Pre-cut lets the office release
+// already-cut PLANNED slabs early: they flip to status='cut_done' (so
+// carving can assign them) with a precut stamp, while the block stays
+// In Progress. The final Cutting Done + audit happens later as normal —
+// the form shows pre-cut slabs locked-in, the payload still includes
+// them, and approveCutAction's RPC re-applies the same values
+// idempotently, so efficiency math / block journey stay correct.
+// Extras & transfers stay in the FINAL Cutting Done flow (they carry
+// donor-earmark / restock implications that belong to the final
+// reconciliation).
+// ──────────────────────────────────────────────────────────────────
+
+export async function precutSlabsAction(
+  formData: FormData,
+): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
+  const { profile } = await requireAuth([
+    "owner", "team_head", "senior_incharge", "cutting_operator", "developer",
+  ]);
+  const supabase = createAdminSupabaseClient();
+
+  const sessionBlockId = String(formData.get("session_block_id") || "");
+  const slabIds = JSON.parse(String(formData.get("slab_ids") || "[]")) as string[];
+  const stockLocation = String(formData.get("stock_location") || "").trim() || null;
+
+  try {
+    if (!sessionBlockId) throw new Error("Missing block.");
+    if (!Array.isArray(slabIds) || slabIds.length === 0) {
+      throw new Error("Select at least one slab that is already cut.");
+    }
+
+    // Block must still be live-cutting — pre-cut makes no sense after
+    // the cutter has submitted for audit.
+    const { data: csb, error: csbErr } = await supabase
+      .from("cut_session_blocks")
+      .select("id, status, block_id, cut_session_id, precut_count")
+      .eq("id", sessionBlockId)
+      .maybeSingle();
+    if (csbErr) throw new Error(csbErr.message);
+    if (!csb) throw new Error("Block not found.");
+    const blockRow = csb as { id: string; status: string; block_id: string; cut_session_id: string; precut_count: number | null };
+    if (!["cutting", "done_prompt"].includes(blockRow.status)) {
+      throw new Error("Pre-cut is only available while the block is In Progress (cutting).");
+    }
+
+    // Only THIS block's PLANNED slabs are eligible (extras/transfers go
+    // through the final Cutting Done).
+    const { data: planRows, error: planErr } = await supabase
+      .from("cut_session_slabs")
+      .select("slab_requirement_id")
+      .eq("cut_session_block_id", sessionBlockId);
+    if (planErr) throw new Error(planErr.message);
+    const planIds = new Set(
+      ((planRows ?? []) as Array<{ slab_requirement_id: string }>).map((r) => r.slab_requirement_id),
+    );
+    const outsidePlan = slabIds.filter((id) => !planIds.has(id));
+    if (outsidePlan.length > 0) {
+      throw new Error(
+        `These slabs are not in this block's plan: ${outsidePlan.join(", ")}. ` +
+          `Extra / transferred sizes are released at the final Cutting Done.`,
+      );
+    }
+
+    // Race-guarded flip: planned → cut_done with the precut stamp. Same
+    // field semantics as the final finish_block_cut RPC so downstream
+    // (carving unassigned, block journey, ready boards) just works.
+    const now = new Date().toISOString();
+    const { data: flipped, error: flipErr } = await supabase
+      .from("slab_requirements")
+      .update({
+        status: "cut_done",
+        cut_source_kind: "planned",
+        ...(stockLocation ? { stock_location: stockLocation } : {}),
+        precut_at: now,
+        precut_by: profile.id,
+        updated_by: profile.id,
+        updated_at: now,
+      })
+      .in("id", slabIds)
+      .eq("status", "planned")
+      .is("precut_at", null)
+      .select("id");
+    if (flipErr) throw new Error(flipErr.message);
+    const count = (flipped ?? []).length;
+    if (count === 0) {
+      throw new Error(
+        "Nothing released — the selected slabs are no longer 'planned' (already pre-cut or moved on). Refresh and retry.",
+      );
+    }
+
+    await supabase
+      .from("cut_session_blocks")
+      .update({
+        precut_count: (Number(blockRow.precut_count) || 0) + count,
+        last_precut_at: now,
+        updated_at: now,
+      })
+      .eq("id", sessionBlockId);
+
+    void Promise.all([
+      logAudit(profile.id, "cut_precut_released", "cut_session_block", sessionBlockId, {
+        block_id: blockRow.block_id,
+        session_id: blockRow.cut_session_id,
+        slab_ids: (flipped ?? []).map((r) => (r as { id: string }).id),
+        stock_location: stockLocation,
+      }),
+      notify("cut_precut", `${count} slab(s) pre-cut from ${blockRow.block_id}`, {
+        message: `Released early for carving assignment — block is still cutting. Stock: ${stockLocation ?? "—"}.`,
+        entityType: "cut_session_block",
+        entityId: sessionBlockId,
+        actorId: profile.id,
+        targetRoles: ["carving_head", "developer", "owner"],
+      }),
+    ]).catch((e) => console.warn("[precutSlabsAction] audit/notify failed (non-fatal)", e));
+
+    await refreshPaths();
+    revalidatePath("/carving");
+    revalidatePath("/slabs/ready/for-carving");
+    return { ok: true, count };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[precutSlabsAction] FAILED", { sessionBlockId, slabIds, error: msg });
+    return { ok: false, error: msg };
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────
 // Cut-approval actions (migration 027)
 // ──────────────────────────────────────────────────────────────────
 
@@ -1033,6 +1162,19 @@ export async function approveCutAction(
         updated_at: new Date().toISOString(),
       })
       .eq("id", sessionBlockId);
+
+    // Mig 126 — the block is now fully done: clear the precut stamp on
+    // its early-released slabs so they stop blinking/tinting on the
+    // carving + ready boards. precut_by stays as the historical trace.
+    await supabase
+      .from("slab_requirements")
+      .update({ precut_at: null })
+      .eq("source_block_id", block.block_id)
+      .not("precut_at", "is", null)
+      .then(
+        () => {},
+        (e: unknown) => console.warn("[approveCutAction] precut clear failed (non-fatal)", e),
+      );
 
     // Donor notifications + audit (fire-and-forget — copy of the
     // old logic, just on this side of the timeline).
@@ -1539,6 +1681,22 @@ export async function undoApproveAction(formData: FormData) {
   const supabase = createAdminSupabaseClient();
   const sessionBlockId = String(formData.get("session_block_id") || "");
   const sessionId = String(formData.get("session_id") || "");
+
+  // Mig 126 guard — a block with pre-cut slabs already released (some may
+  // even be in carving) cannot be cancelled back to pending; finish it
+  // through Cutting Done instead.
+  {
+    const { data: pc } = await supabase
+      .from("cut_session_blocks")
+      .select("precut_count")
+      .eq("id", sessionBlockId)
+      .maybeSingle();
+    if (Number((pc as { precut_count?: number } | null)?.precut_count) > 0) {
+      throw new Error(
+        "This block has pre-cut slabs already released to carving — it can't be cancelled. Finish it with Cutting Done instead.",
+      );
+    }
+  }
 
   // Only undo if currently pending_cut or cutting (NOT done/done_prompt/rejected)
   const { data, error } = await supabase

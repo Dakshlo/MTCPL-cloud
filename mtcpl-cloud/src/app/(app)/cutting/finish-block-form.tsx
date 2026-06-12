@@ -66,6 +66,8 @@ export function FinishBlockForm({
   editMode = false,
   redirectTo,
   submitLabelOverride,
+  precutIds = [],
+  precutAction,
 }: {
   sessionBlockId: string;
   sessionId: string;
@@ -110,16 +112,40 @@ export function FinishBlockForm({
   /** Custom button label for the primary submit. The approval edit
    *  path uses "Save changes" instead of "Done". */
   submitLabelOverride?: string;
+  /** Mig 126 — slab ids of THIS block's plan already pre-cut (released
+   *  early to carving). Shown locked-in: always counted as cut, can't
+   *  be unchecked. */
+  precutIds?: string[];
+  /** Mig 126 — server action for the Pre-Cut (provisional) release.
+   *  When provided (live cutting-done path only), the form offers a
+   *  Pre-Cut mode that releases already-cut planned slabs early. */
+  precutAction?: (
+    formData: FormData,
+  ) => Promise<{ ok: true; count: number } | { ok: false; error: string }>;
 }) {
+  // Mig 126 — slabs already pre-cut (released early). Locked-in: always
+  // part of cut_slab_ids, never uncheckable.
+  const precutSet = new Set(precutIds);
+
   // Initial cut-checked set — when editing, use the staged
   // cut_slab_ids; otherwise fall back to "everything cut" which is
-  // the friendly default for a first submission.
+  // the friendly default for a first submission. Pre-cut slabs are
+  // force-included either way.
   const [checkedIds, setCheckedIds] = useState<Set<string>>(() => {
-    if (initialPayload?.cut_slab_ids) {
-      return new Set(initialPayload.cut_slab_ids);
-    }
-    return new Set(allSlabs.map((s) => s.id));
+    const base = initialPayload?.cut_slab_ids
+      ? new Set(initialPayload.cut_slab_ids)
+      : new Set(allSlabs.map((s) => s.id));
+    for (const id of precutIds) base.add(id);
+    return base;
   });
+
+  // Mig 126 — Pre-Cut (provisional) mode: the office marks which slabs
+  // are ALREADY physically cut today; those release early to carving
+  // while the block keeps cutting. Selection is separate from the
+  // final cutting-done checklist.
+  const [precutMode, setPrecutMode] = useState(false);
+  const [precutSel, setPrecutSel] = useState<Set<string>>(new Set());
+  const [precutMsg, setPrecutMsg] = useState<string | null>(null);
   const [remainders, setRemainders] = useState<RemainderEntry[]>(() => {
     const seeds = initialPayload?.remainders ?? [];
     return seeds.map((r) => ({
@@ -158,12 +184,74 @@ export function FinishBlockForm({
   const router = useRouter();
 
   function toggle(id: string) {
+    // Pre-cut slabs are locked-in — they were already released to carving.
+    if (precutSet.has(id)) return;
     setCheckedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
+  }
+
+  function togglePrecutSel(id: string) {
+    if (precutSet.has(id)) return; // already released
+    setPrecutSel((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  // Mig 126 — release the selected slabs as pre-cut. The block stays In
+  // Progress; released slabs become assignable on the carving board.
+  function savePrecut() {
+    if (!precutAction || precutSel.size === 0 || submitting) return;
+    setSubmitError(null);
+    setPrecutMsg(null);
+    const fd = new FormData();
+    fd.set("session_block_id", sessionBlockId);
+    fd.set("slab_ids", JSON.stringify([...precutSel]));
+    fd.set("stock_location", stockLocation);
+    startSubmit(async () => {
+      try {
+        const res = await precutAction(fd);
+        if (!res.ok) {
+          setSubmitError(res.error);
+          return;
+        }
+        setPrecutMsg(
+          `✓ ${res.count} slab${res.count === 1 ? "" : "s"} released as pre-cut — carving can assign them now. Block stays In Progress.`,
+        );
+        setPrecutSel(new Set());
+        setPrecutMode(false);
+        router.refresh();
+      } catch (err) {
+        setSubmitError(err instanceof Error ? err.message : String(err));
+      }
+    });
+  }
+
+  // Mig 126 — download the codes of already pre-cut slabs (only those)
+  // as a CSV the office can print/share with the cutter operator.
+  function downloadPrecutCsv() {
+    const rows = allSlabs.filter((s) => precutSet.has(s.id));
+    if (rows.length === 0) return;
+    const esc = (v: string) => `"${(v ?? "").replace(/"/g, '""')}"`;
+    const csv = [
+      "Slab Code,Size (in),Temple,Label",
+      ...rows.map((s) => [esc(s.id), esc(`${s.sw} x ${s.sh}`), esc(s.temple ?? ""), esc(s.label ?? "")].join(",")),
+    ].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `precut-codes-${blockId}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   }
 
   function toggleExtra(id: string) {
@@ -337,29 +425,78 @@ export function FinishBlockForm({
     });
   }
 
+  const precutCount = precutIds.length;
+  const showPrecutControls = !!precutAction && !editMode;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 8 }}>
+      {/* ── Pre-cut controls (mig 126) — release already-cut slabs early ── */}
+      {showPrecutControls && (
+        <div
+          style={{
+            display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+            background: precutMode ? "rgba(217,119,6,0.08)" : "var(--bg)",
+            border: `1.5px ${precutMode ? "solid #d97706" : "dashed var(--border)"}`,
+            borderRadius: 8, padding: "10px 14px",
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => { setPrecutMode((m) => !m); setPrecutSel(new Set()); setPrecutMsg(null); setSubmitError(null); }}
+            className={precutMode ? "secondary-button" : "primary-button"}
+            style={{ fontSize: 13 }}
+          >
+            {precutMode ? "✕ Cancel pre-cut" : "⏳ Pre-Cut (provisional)"}
+          </button>
+          <span className="muted" style={{ fontSize: 12, flex: 1, minWidth: 200 }}>
+            {precutMode
+              ? "Tick ONLY the slabs already physically cut — they release to carving now; the block keeps cutting."
+              : precutCount > 0
+                ? `${precutCount} slab${precutCount === 1 ? "" : "s"} already pre-cut (locked below).`
+                : "Block not finished yet, but some slabs already cut? Release them early so carving can start."}
+          </span>
+          {precutCount > 0 && (
+            <button type="button" className="ghost-button" style={{ fontSize: 12 }} onClick={downloadPrecutCsv}>
+              ⬇ Pre-cut codes ({precutCount})
+            </button>
+          )}
+        </div>
+      )}
+      {precutMsg && (
+        <div style={{ padding: "10px 14px", background: "rgba(22,163,74,0.08)", border: "1px solid rgba(22,163,74,0.4)", borderRadius: 8, fontSize: 13, color: "#15803d", fontWeight: 600 }}>
+          {precutMsg}
+        </div>
+      )}
+
       {/* Slab checklist — bilingual header for floor staff */}
       <div style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, padding: "12px 14px" }}>
         <div style={{ marginBottom: 10 }}>
           <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text)", lineHeight: 1.2 }}>
-            ✂️ Kati hui slabs
+            {precutMode ? "⏳ Aaj kati hui slabs (pre-cut)" : "✂️ Kati hui slabs"}
           </div>
           <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-            Mark slabs that were actually cut · <strong>{cutCount}/{totalCount}</strong>
+            {precutMode ? (
+              <>Tick what is already cut · <strong>{precutSel.size} new</strong>{precutCount > 0 ? ` + ${precutCount} released earlier` : ""}</>
+            ) : (
+              <>Mark slabs that were actually cut · <strong>{cutCount}/{totalCount}</strong></>
+            )}
           </div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-          {allSlabs.map((slab) => (
+          {allSlabs.map((slab) => {
+            const locked = precutSet.has(slab.id);
+            const isChecked = precutMode ? (locked || precutSel.has(slab.id)) : checkedIds.has(slab.id);
+            return (
             <label
               key={slab.id}
-              style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13 }}
+              style={{ display: "flex", alignItems: "center", gap: 8, cursor: locked ? "not-allowed" : "pointer", fontSize: 13, ...(locked ? { background: "rgba(217,119,6,0.06)", borderRadius: 6, padding: "2px 6px", margin: "0 -6px" } : {}) }}
             >
               <input
                 type="checkbox"
-                checked={checkedIds.has(slab.id)}
-                onChange={() => toggle(slab.id)}
-                style={{ width: 15, height: 15, cursor: "pointer" }}
+                checked={isChecked}
+                disabled={locked}
+                onChange={() => (precutMode ? togglePrecutSel(slab.id) : toggle(slab.id))}
+                style={{ width: 15, height: 15, cursor: locked ? "not-allowed" : "pointer" }}
               />
               <code style={{ fontSize: 12, fontWeight: 600 }}>{slab.id}</code>
               {slab.temple && (
@@ -370,16 +507,23 @@ export function FinishBlockForm({
               <span className="muted" style={{ fontSize: 11 }}>
                 {slab.sw}×{slab.sh} in
               </span>
-              <span
-                className={`role-pill ${checkedIds.has(slab.id) ? "badge-available" : "badge-discarded"}`}
-                style={{ fontSize: 10, marginLeft: "auto" }}
-              >
-                {checkedIds.has(slab.id) ? "Cut ✓" : "Not cut"}
-              </span>
+              {locked ? (
+                <span className="role-pill" style={{ fontSize: 10, marginLeft: "auto", background: "rgba(217,119,6,0.15)", color: "#92400e", border: "1px solid rgba(217,119,6,0.4)" }}>
+                  🔒 Pre-cut
+                </span>
+              ) : (
+                <span
+                  className={`role-pill ${isChecked ? "badge-available" : "badge-discarded"}`}
+                  style={{ fontSize: 10, marginLeft: "auto" }}
+                >
+                  {precutMode ? (isChecked ? "✂️ Cut today" : "—") : isChecked ? "Cut ✓" : "Not cut"}
+                </span>
+              )}
             </label>
-          ))}
+            );
+          })}
         </div>
-        {cutCount < totalCount && (
+        {!precutMode && cutCount < totalCount && (
           <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>
             {totalCount - cutCount} unchecked slab{totalCount - cutCount > 1 ? "s" : ""} will go back to Open in inventory.
           </p>
@@ -394,7 +538,7 @@ export function FinishBlockForm({
           label / size / donor block), selected-on-top sorting, and
           status badges for planned rows. Submission split is still
           done internally via extraIds vs transferIds. */}
-      {(openSlabs.length > 0 || (allowTransfer && transferableSlabs.length > 0)) && (
+      {!precutMode && (openSlabs.length > 0 || (allowTransfer && transferableSlabs.length > 0)) && (
         <ExtraSizePicker
           openSlabs={openSlabs}
           transferableSlabs={transferableSlabs}
@@ -409,7 +553,9 @@ export function FinishBlockForm({
       {/* Remaining block pieces — bilingual header + per-row Grade
           selector. Operator can override the parent block's grade
           when the inside of the block turned out to be a different
-          quality than the outside. */}
+          quality than the outside. Hidden in pre-cut mode (remainders
+          belong to the FINAL cutting done). */}
+      {!precutMode && (
       <div style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, padding: "12px 14px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: remainders.length ? 10 : 0 }}>
           <div>
@@ -548,6 +694,7 @@ export function FinishBlockForm({
           </p>
         )}
       </div>
+      )}
 
       {/* Stock location — where the operator is physically placing
           the cut slabs. Required so carving/dispatch teams can find
@@ -615,11 +762,24 @@ export function FinishBlockForm({
         </div>
       )}
 
-      {/* Action buttons. When editing a staged approval payload
-          (editMode=true) the buttons say "Save" — the cut is already
-          pending and the cutter/approver is updating the staged form,
-          not committing fresh. Otherwise it's the normal Cutting-Done
-          flow ("Done"). */}
+      {/* Pre-cut mode submit (mig 126) — releases the ticked slabs early;
+          the block stays In Progress and Cutting Done happens later. */}
+      {precutMode ? (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <button
+            type="button"
+            className="primary-button"
+            disabled={submitting || precutSel.size === 0}
+            onClick={savePrecut}
+            style={{ background: "#d97706", borderColor: "#b45309" }}
+          >
+            {submitting ? "Releasing…" : `⏳ Release ${precutSel.size} pre-cut slab${precutSel.size === 1 ? "" : "s"}`}
+          </button>
+          <span className="muted" style={{ fontSize: 12 }}>
+            Block stays In Progress — final Cutting Done (with extras / remainders) comes later.
+          </span>
+        </div>
+      ) : (
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {validRemainders.length > 0 ? (
           <>
@@ -657,6 +817,7 @@ export function FinishBlockForm({
           </form>
         )}
       </div>
+      )}
     </div>
   );
 }

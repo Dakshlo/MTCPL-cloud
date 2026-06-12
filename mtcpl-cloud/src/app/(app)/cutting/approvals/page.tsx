@@ -66,7 +66,7 @@ export default async function CuttingApprovalsPage() {
   const { data: rowsRaw, error } = await supabase
     .from("cut_session_blocks")
     .select(
-      "id, status, block_id, cut_session_id, layout, pending_approval_payload, cutter_edit_unlocked, submitted_for_approval_at, submitted_for_approval_by, sent_back_at, sent_back_by, sent_back_note, approval_edited_at, approval_edited_by, operator_id, operators(id, name), cut_sessions(session_code, kerf_mm, planned_by)",
+      "id, status, block_id, cut_session_id, layout, pending_approval_payload, cutter_edit_unlocked, submitted_for_approval_at, submitted_for_approval_by, sent_back_at, sent_back_by, sent_back_note, approval_edited_at, approval_edited_by, operator_id, precut_count, operators(id, name), cut_sessions(session_code, kerf_mm, planned_by)",
     )
     .in("status", ["awaiting_approval", "awaiting_cutter_edit"])
     .order("submitted_for_approval_at", { ascending: false })
@@ -91,6 +91,7 @@ export default async function CuttingApprovalsPage() {
     approval_edited_at: string | null;
     approval_edited_by: string | null;
     operator_id: string | null;
+    precut_count: number | null;
     operators: { id: string; name: string } | null;
     cut_sessions: { session_code: string; kerf_mm: number; planned_by: string | null } | null;
   };
@@ -148,6 +149,7 @@ export default async function CuttingApprovalsPage() {
       sessionCode: r.cut_sessions?.session_code ?? null,
       stone: r.layout?.blk?.stone ?? null,
       yard: r.layout?.blk?.yard ?? null,
+      precutCount: Number(r.precut_count) || 0,
       cutterEditUnlocked: unlocked,
       submittedAt: r.submitted_for_approval_at,
       submittedByName: r.submitted_for_approval_by

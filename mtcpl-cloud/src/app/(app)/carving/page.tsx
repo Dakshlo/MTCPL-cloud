@@ -85,6 +85,10 @@ export default async function CarvingDashboardPage({
      *  at finish-block time. Shows as a 📍 chip on each card so the
      *  carving head can scan where every cut slab currently sits. */
     stock_location: string | null;
+    /** Mig 126 — set while the slab is PRE-CUT: released early from a
+     *  block that is still cutting. Blinking dot on the card; cleared
+     *  automatically when the block's cutting is fully approved. */
+    precut_at: string | null;
   };
   async function fetchAllUnassignedSlabs(): Promise<UnassignedRow[]> {
     const PAGE = 1000;
@@ -93,7 +97,7 @@ export default async function CarvingDashboardPage({
       const { data, error } = await admin
         .from("slab_requirements")
         .select(
-          "id, label, temple, stone, length_ft, width_ft, thickness_ft, status, priority, source_block_id, updated_at, stock_location",
+          "id, label, temple, stone, length_ft, width_ft, thickness_ft, status, priority, source_block_id, updated_at, stock_location, precut_at",
         )
         .eq("status", "cut_done")
         // Mig 125 — parked (temporary storage) slabs are hidden from Unassigned.

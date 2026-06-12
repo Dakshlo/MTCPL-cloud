@@ -1253,6 +1253,68 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
           </div>
         </div>
 
+        {/* ── PRE-CUT LOG (mig 126) — the paper loop for big blocks.
+            The operator writes the date against each slab as it's cut,
+            sends the sheet to the office, the office releases those
+            slabs as Pre-Cut in the system (so carving can start) and
+            returns the sheet. Repeats until the whole block is done,
+            then the final Cutting Done is entered. ── */}
+        {placed.length > 0 && (
+          <div style={{ pageBreakBefore: "always", paddingTop: 12 }}>
+            <div className="section-head">
+              ⏳ Pre-Cut Log · रोज़ की कटाई
+            </div>
+            <div style={{ fontSize: 11, color: "#555", margin: "4px 0 10px", lineHeight: 1.5 }}>
+              जो slab आज कटे, उसके सामने <strong>तारीख़ लिखें और sign करें</strong> — sheet office को दें।
+              Office उन्हें system में <strong>Pre-Cut</strong> करेगा (carving तुरंत शुरू हो सकती है) और sheet वापस देगा।
+              पूरा block कटने के बाद ही final Cutting Done होगा।
+            </div>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+              <thead>
+                <tr>
+                  {["#", "Slab Code", "Size (in)", "कटने की तारीख़", "Operator Sign", "Office Entry ✓"].map((h, i) => (
+                    <th
+                      key={h}
+                      style={{
+                        border: "1px solid #1a1a1a", padding: "6px 8px", textAlign: i <= 2 ? "left" : "center",
+                        background: "#f0ece4", fontWeight: 800, fontSize: 10.5, textTransform: "uppercase", letterSpacing: "0.03em",
+                      }}
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {placed.map((s, i) => (
+                  <tr key={s.id}>
+                    <td style={{ border: "1px solid #444", padding: "7px 8px", width: 28, color: "#666", fontFamily: "ui-monospace, monospace" }}>{i + 1}</td>
+                    <td style={{ border: "1px solid #444", padding: "7px 8px", fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>{s.id}</td>
+                    <td style={{ border: "1px solid #444", padding: "7px 8px", fontFamily: "ui-monospace, monospace" }}>{s.sw} × {s.sh}</td>
+                    <td style={{ border: "1px solid #444", padding: "7px 8px", width: 110 }} />
+                    <td style={{ border: "1px solid #444", padding: "7px 8px", width: 110 }} />
+                    <td style={{ border: "1px solid #444", padding: "7px 8px", width: 90 }} />
+                  </tr>
+                ))}
+                {/* Spare rows for extra / live-added sizes */}
+                {[0, 1, 2, 3].map((i) => (
+                  <tr key={`spare-${i}`}>
+                    <td style={{ border: "1px solid #444", padding: "7px 8px", color: "#666", fontFamily: "ui-monospace, monospace" }}>{placed.length + i + 1}</td>
+                    <td style={{ border: "1px solid #444", padding: "12px 8px" }} />
+                    <td style={{ border: "1px solid #444", padding: "12px 8px" }} />
+                    <td style={{ border: "1px solid #444", padding: "12px 8px" }} />
+                    <td style={{ border: "1px solid #444", padding: "12px 8px" }} />
+                    <td style={{ border: "1px solid #444", padding: "12px 8px" }} />
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{ fontSize: 10, color: "#777", marginTop: 6 }}>
+              Spare rows = extra size cutting (plan के बाहर के sizes भी यहाँ लिखें).
+            </div>
+          </div>
+        )}
+
         {/* Footer */}
         <div className="doc-footer">
           <span>MTCPL · Cutting Plan · {block.block_id}</span>

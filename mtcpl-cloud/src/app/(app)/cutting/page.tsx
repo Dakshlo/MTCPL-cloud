@@ -24,7 +24,7 @@ import { PendingApprovalActions } from "./pending-approval-actions";
 import { canApproveCuts, canManageOperators } from "@/lib/cutting-permissions";
 
 type Tab = "pending" | "waiting" | "in_progress" | "done";
-type SearchParams = Promise<{ tab?: string }>;
+type SearchParams = Promise<{ tab?: string; sub?: string }>;
 
 type BlockRow = {
   id: string;
@@ -46,6 +46,9 @@ type BlockRow = {
   /** Donor block needs reprint after a slab was claimed away. */
   needs_reprint?: boolean | null;
   reprint_reason?: string | null;
+  /** Mig 126 — slabs of this plan released early as PRE-CUT (carving can
+   *  already assign them) while the block keeps cutting. */
+  precut_count?: number | null;
   /** Cutter operator assignment — added by team_head when sending the
    *  block to Waiting to Cut (or pre-tagged from Pending Approval).
    *  Joined operators row for display. Both nullable: a block may
@@ -243,7 +246,7 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
       const { data, error } = await supabase
         .from("cut_session_blocks")
         .select(
-          "id, status, block_id, restocked_block_id, layout, updated_at, cut_session_id, cutting_seq, needs_reprint, reprint_reason, operator_id, approved_by, approved_at, operators(id, name), cut_sessions(session_code, kerf_mm, planned_by), cut_session_slabs(slab_requirement_id)"
+          "id, status, block_id, restocked_block_id, layout, updated_at, cut_session_id, cutting_seq, needs_reprint, reprint_reason, operator_id, approved_by, approved_at, precut_count, operators(id, name), cut_sessions(session_code, kerf_mm, planned_by), cut_session_slabs(slab_requirement_id)"
         )
         .in("status", statusFilter)
         .order("updated_at", { ascending })
@@ -270,8 +273,16 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
         const bP = b.needs_reprint ? 1 : 0;
         return bP - aP; // needs_reprint=true first
       });
-  const rows = activeTab === "done" ? allRows.filter(b => b.status !== "rejected") : allRows;
-  const rejectedRows = activeTab === "done" ? allRows.filter(b => b.status === "rejected") : [];
+  // Mig 126 — In Progress sub-filter: "Pre-cut" shows only blocks that
+  // have released slabs early. Counts computed before filtering so the
+  // chips show real numbers.
+  const precutSub = activeTab === "in_progress" && params.sub === "precut";
+  const inProgressPrecutCount =
+    activeTab === "in_progress" ? allRows.filter((b) => Number(b.precut_count) > 0).length : 0;
+  const subFiltered = precutSub ? allRows.filter((b) => Number(b.precut_count) > 0) : allRows;
+
+  const rows = activeTab === "done" ? subFiltered.filter(b => b.status !== "rejected") : subFiltered;
+  const rejectedRows = activeTab === "done" ? subFiltered.filter(b => b.status === "rejected") : [];
 
   // For DONE rows, enrich with the real post-cut data: which slabs were
   // actually cut (from slab_requirements where source_block_id = our
@@ -596,6 +607,38 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
           );
         })()}
 
+        {/* Mig 126 — In Progress sub-filter: all blocks vs blocks with
+            pre-cut (early-released) slabs. */}
+        {activeTab === "in_progress" && inProgressPrecutCount > 0 && (
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
+            <Link
+              href="/cutting?tab=in_progress"
+              style={{
+                textDecoration: "none", fontSize: 12.5, fontWeight: 800, padding: "6px 14px", borderRadius: 999,
+                border: `1.5px solid ${!precutSub ? "var(--gold-dark)" : "var(--border)"}`,
+                background: !precutSub ? "rgba(184,115,51,0.10)" : "var(--surface)",
+                color: !precutSub ? "var(--gold-dark)" : "var(--text)",
+              }}
+            >
+              All ({allRows.length})
+            </Link>
+            <Link
+              href="/cutting?tab=in_progress&sub=precut"
+              style={{
+                textDecoration: "none", fontSize: 12.5, fontWeight: 800, padding: "6px 14px", borderRadius: 999,
+                border: `1.5px solid ${precutSub ? "#d97706" : "var(--border)"}`,
+                background: precutSub ? "rgba(217,119,6,0.12)" : "var(--surface)",
+                color: precutSub ? "#92400e" : "var(--text)",
+              }}
+            >
+              ⏳ Pre-cut ({inProgressPrecutCount})
+            </Link>
+            <span className="muted" style={{ fontSize: 11.5 }}>
+              Pre-cut = slabs released early to carving while the block is still cutting.
+            </span>
+          </div>
+        )}
+
         {rows.length === 0 && rejectedRows.length === 0 && (
           <div className="banner">{emptyMessages[activeTab]}</div>
         )}
@@ -841,6 +884,20 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
                     )}
                     {block.updated_at && (isLive || block.status === "done_prompt") && (
                       <CuttingTimer startedAt={block.updated_at} prefix="Cutting from last" />
+                    )}
+                    {Number(block.precut_count) > 0 && (
+                      <span
+                        className="role-pill"
+                        title="Slabs released early (pre-cut) — carving can already assign them; block is still cutting"
+                        style={{
+                          background: "rgba(217,119,6,0.15)",
+                          color: "#92400e",
+                          border: "1px solid rgba(217,119,6,0.45)",
+                          fontWeight: 800,
+                        }}
+                      >
+                        ⏳ Pre-cut {block.precut_count}
+                      </span>
                     )}
                     <span
                       className="role-pill"

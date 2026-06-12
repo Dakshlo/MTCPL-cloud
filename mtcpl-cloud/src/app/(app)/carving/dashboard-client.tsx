@@ -63,6 +63,10 @@ type UnassignedSlab = {
    *  finish-block time. Surfaced as a 📍 chip on each unassigned
    *  card so the carving head knows where each cut slab sits. */
   stock_location?: string | null;
+  /** Mig 126 — set while the slab is PRE-CUT (released early; its block
+   *  is still cutting). Blinking dot on the card; cleared when the
+   *  block's cutting is fully approved. */
+  precut_at?: string | null;
 };
 
 type JobRow = {
@@ -638,6 +642,10 @@ export function CarvingDashboardClient({
         >
           ⚡ Priority
         </button>
+
+        {/* Mig 126 — blink keyframes for the pre-cut dot on unassigned
+            cards (defined once here, used by every card). */}
+        <style>{`@keyframes precutBlink{50%{opacity:0.15}}`}</style>
 
         {/* Bulk-select toggle — only on Unassigned tab. Lets the
             carving head pick up to 10 slabs at once for a batch
@@ -1325,6 +1333,15 @@ function UnassignedByTemple({
       />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
         <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {/* Mig 126 — blinking dot: this slab was released early (pre-cut);
+              its block is still cutting. Goes normal once the block's
+              cutting is fully approved. */}
+          {s.precut_at && (
+            <span
+              title="Pre-cut — released early; its block is still cutting"
+              style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: "#d97706", marginRight: 5, animation: "precutBlink 1.1s steps(1,end) infinite", verticalAlign: "middle" }}
+            />
+          )}
           {s.priority && "⚡ "}
           {s.id}
         </span>
@@ -1334,6 +1351,11 @@ function UnassignedByTemple({
           </span>
         )}
       </div>
+      {s.precut_at && (
+        <div style={{ fontSize: 9.5, fontWeight: 800, color: "#92400e", background: "rgba(217,119,6,0.12)", border: "1px solid rgba(217,119,6,0.35)", borderRadius: 4, padding: "1px 6px", alignSelf: "flex-start" }}>
+          ⏳ block still cutting
+        </div>
+      )}
       {/* In flat view we surface temple under the slab id since the
           temple group header is gone. In grouped view temple is in
           the accordion header so we hide it here. */}

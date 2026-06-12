@@ -58,6 +58,9 @@ export default async function ReadyForCarvingPage() {
     updated_at: string | null;
     created_by: string | null;
     source_block_id: string | null;
+    /** Mig 126 — set while the slab is PRE-CUT (released early; its
+     *  block is still cutting). Drives the amber tint + legend entry. */
+    precut_at: string | null;
   };
 
   // Paginated fetch — PostgREST caps a single query at 1000 rows; the
@@ -70,7 +73,7 @@ export default async function ReadyForCarvingPage() {
       const { data, error } = await admin
         .from("slab_requirements")
         .select(
-          "id, label, description, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority, created_at, updated_at, created_by, source_block_id",
+          "id, label, description, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority, created_at, updated_at, created_by, source_block_id, precut_at",
         )
         .in("status", ALIVE_STATUSES)
         .order("created_at", { ascending: false })
@@ -163,6 +166,9 @@ export default async function ReadyForCarvingPage() {
     } else if (ci?.vendor_type === "Outsource" || woVendor) {
       colorKind = "outsource";
       vendorName = ci?.vendor_name ?? woVendor;
+    } else if (s.precut_at) {
+      // Mig 126 — pre-cut: released early, block still cutting.
+      colorKind = "precut";
     } else {
       colorKind = "normal";
     }

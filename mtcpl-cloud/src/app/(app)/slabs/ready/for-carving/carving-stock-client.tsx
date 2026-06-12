@@ -19,7 +19,7 @@
 import { useMemo, useState } from "react";
 import { slabSearchMatch } from "@/lib/slab-search";
 
-export type ColorKind = "normal" | "cnc" | "outsource" | "done";
+export type ColorKind = "normal" | "precut" | "cnc" | "outsource" | "done";
 
 export type StockSlab = {
   id: string;
@@ -76,12 +76,15 @@ function fmtDate(iso: string | null) {
 // Card colour overrides per assignment kind.
 const KIND_STYLE: Record<ColorKind, React.CSSProperties> = {
   normal: {},
+  // Mig 126 — pre-cut: released early; its block is still cutting.
+  precut: { background: "rgba(217,119,6,0.10)", borderColor: "rgba(217,119,6,0.6)", borderStyle: "dashed" },
   cnc: { background: "rgba(37,99,235,0.10)", borderColor: "rgba(37,99,235,0.5)" },
   outsource: { background: "rgba(234,179,8,0.13)", borderColor: "rgba(202,138,4,0.55)" },
   done: { filter: "grayscale(1)", opacity: 0.55 },
 };
 const KIND_LABEL: Record<ColorKind, string> = {
   normal: "Not assigned",
+  precut: "Pre-cut (block cutting)",
   cnc: "CNC carving",
   outsource: "Outsource",
   done: "Carving done",
@@ -96,6 +99,7 @@ function Swatch({ kind }: { kind: ColorKind }) {
     border: "1px solid var(--border)",
     flexShrink: 0,
   };
+  if (kind === "precut") return <span style={{ ...base, background: "rgba(217,119,6,0.18)", borderColor: "rgba(217,119,6,0.65)", borderStyle: "dashed" }} />;
   if (kind === "cnc") return <span style={{ ...base, background: "rgba(37,99,235,0.18)", borderColor: "rgba(37,99,235,0.6)" }} />;
   if (kind === "outsource") return <span style={{ ...base, background: "rgba(234,179,8,0.22)", borderColor: "rgba(202,138,4,0.6)" }} />;
   if (kind === "done") return <span style={{ ...base, background: "var(--surface-alt, #e5e7eb)", filter: "grayscale(1)", opacity: 0.6 }} />;
@@ -167,7 +171,7 @@ export function CarvingStockClient({
 
   // Counts for the legend (over the full set, not the filtered view).
   const counts = useMemo(() => {
-    const c = { normal: 0, cnc: 0, outsource: 0, done: 0 } as Record<ColorKind, number>;
+    const c = { normal: 0, precut: 0, cnc: 0, outsource: 0, done: 0 } as Record<ColorKind, number>;
     for (const s of slabs) c[s.colorKind] += 1;
     return c;
   }, [slabs]);
@@ -226,7 +230,7 @@ export function CarvingStockClient({
         <span style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
           Colour key · tap to filter
         </span>
-        {(["normal", "cnc", "outsource", "done"] as ColorKind[]).map((k) => {
+        {(["normal", "precut", "cnc", "outsource", "done"] as ColorKind[]).map((k) => {
           const on = kinds.has(k);
           return (
             <button

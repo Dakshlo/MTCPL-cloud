@@ -27,6 +27,7 @@ import {
   acknowledgeReprintAction,
   approveCutFormAction,
   editPendingApprovalAction,
+  precutSlabsAction,
 } from "../actions";
 import { canApproveCuts, canTransferPlannedSlabs } from "@/lib/cutting-permissions";
 import { NeedsReprintBanner } from "@/components/needs-reprint-banner";
@@ -104,6 +105,18 @@ export default async function CuttingDetailPage({
   const blk = layout?.blk;
   const placed = layout?.placed ?? [];
   const blockStone = blk?.stone ?? null;
+
+  // Mig 126 — slabs of this plan already PRE-CUT (released early to
+  // carving while the block keeps cutting). Shown locked in the form.
+  let precutIds: string[] = [];
+  if (placed.length > 0) {
+    const { data: pcRows } = await supabase
+      .from("slab_requirements")
+      .select("id")
+      .in("id", placed.map((s: { id: string }) => s.id))
+      .not("precut_at", "is", null);
+    precutIds = ((pcRows ?? []) as Array<{ id: string }>).map((r) => r.id);
+  }
   // Type for slab rows used by both open and transferable lists
   type SlabRow = {
     id: string;
@@ -979,6 +992,8 @@ export default async function CuttingDetailPage({
             allowTransfer={allowTransfer}
             parentQuality={parentQuality}
             finishAction={finishBlockAction}
+            precutIds={precutIds}
+            precutAction={precutSlabsAction}
           />
         </>
       )}
@@ -1051,6 +1066,7 @@ export default async function CuttingDetailPage({
                 allowTransfer={allowTransfer}
                 parentQuality={parentQuality}
                 finishAction={editPendingApprovalAction}
+                precutIds={precutIds}
                 initialPayload={{
                   cut_slab_ids: stagedPayload.cut_slab_ids ?? [],
                   extra_slab_ids: stagedPayload.extra_slab_ids ?? [],

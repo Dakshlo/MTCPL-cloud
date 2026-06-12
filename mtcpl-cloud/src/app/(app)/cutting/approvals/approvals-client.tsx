@@ -31,6 +31,9 @@ export type ApprovalRow = {
   sessionCode: string | null;
   stone: string | null;
   yard: number | null;
+  /** Mig 126 — slabs of this block released early as PRE-CUT before the
+   *  final submission. >0 colours the card so the auditor knows. */
+  precutCount?: number;
   cutterEditUnlocked: boolean;
   submittedAt: string | null;
   submittedByName: string | null;
@@ -226,13 +229,19 @@ function ApprovalCard({
     });
   }
 
+  const hasPrecut = (row.precutCount ?? 0) > 0;
   return (
     <div
       className="plan-card"
       style={
         unlocked
           ? { borderLeft: "5px solid #16a34a", background: "rgba(34, 197, 94, 0.05)" }
-          : { borderLeft: "5px solid var(--gold-dark)" }
+          : hasPrecut
+            // Mig 126 — amber card: this block released pre-cut slabs early
+            // (some may already be carving); the auditor should know the
+            // history before approving.
+            ? { borderLeft: "5px solid #d97706", background: "rgba(217, 119, 6, 0.06)" }
+            : { borderLeft: "5px solid var(--gold-dark)" }
       }
     >
       <div className="record-head" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-start" }}>
@@ -240,6 +249,15 @@ function ApprovalCard({
           <strong style={{ fontFamily: "ui-monospace, monospace", fontSize: 15 }}>
             {row.blockId}
           </strong>
+          {hasPrecut && (
+            <span
+              className="role-pill"
+              title="Some slabs of this block were released early (pre-cut) and may already be in carving — they were locked-in on the cutter's submission."
+              style={{ marginLeft: 8, fontSize: 10, fontWeight: 800, background: "rgba(217,119,6,0.15)", color: "#92400e", border: "1px solid rgba(217,119,6,0.45)", verticalAlign: "middle" }}
+            >
+              ⏳ PRE-CUT · {row.precutCount} released early
+            </span>
+          )}
           <p className="muted" style={{ margin: "2px 0 0", fontSize: 12 }}>
             {row.sessionCode ?? "—"}
             {row.stone ? ` · ${row.stone}` : ""}
