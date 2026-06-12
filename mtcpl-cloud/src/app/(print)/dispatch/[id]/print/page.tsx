@@ -143,40 +143,56 @@ export default async function DispatchChallanPrintPage({ params }: { params: Par
         }
         .print-action-btn:hover { background: #a06428; }
 
-        .header-row {
+        /* ── MTCPL letterhead (matches the payment-voucher letterhead) ── */
+        .letterhead {
           display: flex;
           justify-content: space-between;
           align-items: flex-start;
-          border-bottom: 2px solid #1a1a1a;
-          padding-bottom: 14px;
-          margin-bottom: 18px;
-        }
-        .brand-eyebrow {
-          font-size: 10px;
-          font-weight: 700;
-          color: #888;
-          text-transform: uppercase;
-          letter-spacing: 0.12em;
-          margin-bottom: 4px;
+          gap: 16px;
+          border-bottom: 3px double #7c4a1e;
+          padding-bottom: 12px;
         }
         .brand-logo {
-          height: 44px;
+          height: 52px;
           width: auto;
-          margin-bottom: 8px;
           display: block;
         }
-        .brand-tagline {
-          font-size: 10px;
-          font-weight: 600;
-          color: #888;
-          letter-spacing: 0.08em;
-          margin-bottom: 2px;
+        .company-block { text-align: right; }
+        .company-name {
+          font-size: 15px;
+          font-weight: 800;
+          color: #5b2e0a;
+          letter-spacing: 0.03em;
         }
-        .doc-title { font-size: 26px; font-weight: 700; color: #1a1a1a; letter-spacing: -0.01em; }
-        .doc-sub { font-size: 12px; color: #666; margin-top: 3px; }
+        .company-line {
+          font-size: 10px;
+          color: #666;
+          margin-top: 2px;
+          line-height: 1.5;
+        }
+        .title-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-end;
+          gap: 16px;
+          margin: 16px 0 18px;
+        }
+        .doc-title-pill {
+          display: inline-block;
+          font-size: 16px;
+          font-weight: 800;
+          color: #5b2e0a;
+          letter-spacing: 0.14em;
+          text-transform: uppercase;
+          border: 2px solid #7c4a1e;
+          border-radius: 8px;
+          padding: 7px 22px;
+          background: #faf4ea;
+        }
+        .doc-sub { font-size: 12px; color: #666; margin-top: 6px; }
         .doc-ref { text-align: right; }
         .doc-ref-num {
-          font-size: 20px; font-weight: 700; color: #1a1a1a;
+          font-size: 22px; font-weight: 800; color: #1a1a1a;
           font-family: ui-monospace, monospace; letter-spacing: 0.02em;
         }
         .doc-ref-date { font-size: 11px; color: #888; margin-top: 4px; line-height: 1.5; }
@@ -274,13 +290,27 @@ export default async function DispatchChallanPrintPage({ params }: { params: Par
       </div>
 
       <div className="print-wrap">
-        {/* Header */}
-        <div className="header-row">
+        {/* MTCPL letterhead — same company block as the payment voucher */}
+        <div className="letterhead">
           <div>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/logo-dark.png" alt="MTCPL" className="brand-logo" />
-            <div className="brand-tagline">Stone · Precision · Scale</div>
-            <div className="doc-title">Delivery Challan</div>
+          </div>
+          <div className="company-block">
+            <div className="company-name">MATESHWARI TEMPLE CONSTRUCTION PVT LTD</div>
+            <div className="company-line">
+              NH-27, Opposite Ajari Gate, Pindwara, Dist. Sirohi, Rajasthan
+            </div>
+            <div className="company-line">
+              ☎ +91 94141 52740 / +91 94143 74979 · 🌐 mtcpl.org · mateshwaritemples.com
+            </div>
+          </div>
+        </div>
+
+        {/* Title + reference */}
+        <div className="title-row">
+          <div>
+            <span className="doc-title-pill">Delivery Challan</span>
             <div className="doc-sub">Outgoing shipment to {dispatch.temple}</div>
           </div>
           <div className="doc-ref">
@@ -424,11 +454,14 @@ export default async function DispatchChallanPrintPage({ params }: { params: Par
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="doc-footer">
-          <span>MTCPL · Delivery Challan · {shortId}</span>
+        {/* Letterhead footer */}
+        <div className="doc-footer" style={{ flexDirection: "column", gap: 2, textAlign: "center", alignItems: "center" }}>
+          <span style={{ fontWeight: 700, color: "#7c4a1e" }}>
+            Mateshwari Temple Construction Pvt Ltd · NH-27, Opposite Ajari Gate, Pindwara, Dist. Sirohi, Rajasthan
+          </span>
+          <span>☎ +91 94141 52740 / +91 94143 74979 · 🌐 mtcpl.org · mateshwaritemples.com</span>
           <span>
-            {slabs.length} slab{slabs.length !== 1 ? "s" : ""} · {totalCft.toFixed(2)} CFT
+            Delivery Challan {shortId} · {slabs.length} slab{slabs.length !== 1 ? "s" : ""} · {totalCft.toFixed(2)} CFT · Computer-generated document
           </span>
         </div>
       </div>

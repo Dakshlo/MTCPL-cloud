@@ -1,14 +1,28 @@
 /**
  * Dispatch Station — server component.
  *
- * Loads everything needed for all three tabs in parallel and hands it
- * to the client component. Developer-only access.
+ * Loads everything needed for all four tabs in parallel and hands it
+ * to the client component. Roles: developer / owner / carving_head.
+ *
+ * June 2026 makeover (Daksh): slab cards carry description + a
+ * ready-since timer (carving approval time, or rework-cleared time if
+ * the slab went through the Rework Tunnel), truck history feeds the
+ * Provisional tab + the dispatch peek's quick-fill, and delivered rows
+ * carry their two mandatory proof photos (mig 129).
  */
 
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
-import { DispatchClient, type ReadySlab, type ProvisionalRow, type OutForDeliveryRow, type DeliveredRow, type LegacyDispatch } from "./dispatch-client";
+import {
+  DispatchClient,
+  type ReadySlab,
+  type ProvisionalRow,
+  type OutForDeliveryRow,
+  type DeliveredRow,
+  type LegacyDispatch,
+  type TruckTrip,
+} from "./dispatch-client";
 import type { StoneCategory } from "@/lib/stone-categories";
 
 type Tab = "ready" | "provisional" | "out_for_delivery" | "delivered";
@@ -47,12 +61,11 @@ export default async function DispatchPage({
     // Ready ("Make Dispatch") = status=completed slabs waiting to be packed
     admin
       .from("slab_requirements")
-      .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, priority, status")
+      .select("id, label, description, temple, stone, quality, length_ft, width_ft, thickness_ft, priority, status")
       .eq("status", "completed")
       .order("priority", { ascending: false })
       .order("updated_at", { ascending: true }),
     // Provisional = dispatch created but senior hasn't approved yet.
-    // Derived state: approved_at IS NULL AND delivered_at IS NULL.
     admin
       .from("dispatches")
       .select(
@@ -70,11 +83,12 @@ export default async function DispatchPage({
       .not("approved_at", "is", null)
       .is("delivered_at", null)
       .order("dispatched_at", { ascending: false }),
-    // Delivered archive (last 200 by delivered_at).
+    // Delivered archive (last 200 by delivered_at). Mig 129 — includes
+    // the two delivery-proof photo paths.
     admin
       .from("dispatches")
       .select(
-        "id, challan_number, temple, vehicle_no, driver_name, driver_phone, dispatched_at, expected_delivery_date, dispatched_by, notes, approved_at, approved_by, delivered_at, delivered_by, receiver_name, delivery_note",
+        "id, challan_number, temple, vehicle_no, driver_name, driver_phone, dispatched_at, expected_delivery_date, dispatched_by, notes, approved_at, approved_by, delivered_at, delivered_by, receiver_name, delivery_note, proof_site_path, proof_challan_path",
       )
       .not("delivered_at", "is", null)
       .order("delivered_at", { ascending: false })
@@ -87,15 +101,14 @@ export default async function DispatchPage({
       .order("dispatched_at", { ascending: false }),
     // Stone categories — needed to render marble separately in the UI
     admin.from("stone_types").select("name, stone_category"),
-    // Mig 097 — departed slabs: approved but held from dispatch, waiting
-    // for a finishing touch. Shown in the "Needs work" section with a
-    // "Correct" button that releases the hold back into Make Dispatch.
+    // Mig 097 — departed slabs: approved but held from dispatch. They now
+    // live on the Rework Tunnel page; here we only need their ids (to
+    // exclude from Make Dispatch) and the count for the header button.
     admin
       .from("slab_requirements")
-      .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, priority, status")
+      .select("id")
       .eq("status", "completed")
-      .eq("dispatch_hold", true)
-      .order("updated_at", { ascending: true }),
+      .eq("dispatch_hold", true),
   ]);
 
   const profilesMap = await getProfilesMap();
@@ -107,9 +120,7 @@ export default async function DispatchPage({
     stoneCategoryMap[(s as { name: string }).name] = cat === "marble" ? "marble" : "sandstone";
   }
 
-  // Map dispatch_id → count of slabs (and their CFT). Also fetch slab dims
-  // for any slab that appears in an open dispatch so we can show "N slabs
-  // · X CFT".
+  // Map dispatch_id → slab ids; also collect every dispatched slab id.
   const logsByDispatch = new Map<string, string[]>();
   for (const log of allDispatchLogs ?? []) {
     if (!log.dispatch_id || !log.slab_requirement_id) continue;
@@ -123,7 +134,7 @@ export default async function DispatchPage({
 
   // Pull dims for all slabs that appear in any dispatch (open or closed)
   // so we can render CFT totals.
-  let dispatchedSlabsMap = new Map<string, { l: number; w: number; t: number }>();
+  const dispatchedSlabsMap = new Map<string, { l: number; w: number; t: number }>();
   if (dispatchedSlabIds.size > 0) {
     const { data: dispatchedSlabs } = await admin
       .from("slab_requirements")
@@ -150,51 +161,56 @@ export default async function DispatchPage({
 
   // ── Shape data for the client component
 
-  // Mig 097 — departed (held) slab ids, excluded from Make Dispatch.
-  // Built from the separate depart query so the Ready query itself never
-  // references dispatch_hold (stays safe if the migration runs late).
+  // Mig 097 — departed (held) slab ids: excluded from Make Dispatch; the
+  // slabs themselves live on /dispatch/rework now.
   const departIdSet = new Set(((departSlabsRaw ?? []) as Array<{ id: string }>).map((s) => s.id));
-  const readySlabs: ReadySlab[] = (completedSlabs ?? [])
-    // Defensive filter: if somehow a completed slab is on an open
-    // dispatch (shouldn't happen), exclude it. Departed slabs are held
-    // out too — they live in the Needs-work section.
-    .filter((s) => !dispatchedSlabIds.has(s.id) && !departIdSet.has(s.id))
-    .map((s) => {
-      const L = Number(s.length_ft);
-      const W = Number(s.width_ft);
-      const T = Number(s.thickness_ft);
-      return {
-        id: s.id,
-        label: s.label,
-        temple: s.temple,
-        stone: s.stone,
-        quality: s.quality ?? null,
-        dimensions: `${L}×${W}×${T} in`,
-        cft: toCftFromFtNums(L, W, T),
-        priority: Boolean(s.priority),
-        isMarble: stoneCategoryMap[s.stone ?? ""] === "marble",
-      };
-    });
+  const reworkCount = departIdSet.size;
 
-  // Mig 097 — departed slabs (held for a touch-up) for the Needs-work section.
-  const departSlabs: ReadySlab[] = (departSlabsRaw ?? [])
-    .filter((s) => !dispatchedSlabIds.has(s.id))
-    .map((s) => {
-      const L = Number(s.length_ft);
-      const W = Number(s.width_ft);
-      const T = Number(s.thickness_ft);
-      return {
-        id: s.id,
-        label: s.label,
-        temple: s.temple,
-        stone: s.stone,
-        quality: s.quality ?? null,
-        dimensions: `${L}×${W}×${T} in`,
-        cft: toCftFromFtNums(L, W, T),
-        priority: Boolean(s.priority),
-        isMarble: stoneCategoryMap[s.stone ?? ""] === "marble",
-      };
-    });
+  const readyRows = (completedSlabs ?? []).filter(
+    (s) => !dispatchedSlabIds.has(s.id) && !departIdSet.has(s.id),
+  );
+
+  // Ready-since timer source: carving review approval time — or, if the
+  // slab went through the Rework Tunnel, the moment the hold was cleared.
+  const readySinceBySlab = new Map<string, { since: string | null; reworked: boolean }>();
+  if (readyRows.length > 0) {
+    const { data: ciRows } = await admin
+      .from("carving_items")
+      .select("slab_requirement_id, review_approved_at, depart_cleared_at")
+      .in("slab_requirement_id", readyRows.map((s) => s.id));
+    for (const r of (ciRows ?? []) as Array<{ slab_requirement_id: string; review_approved_at: string | null; depart_cleared_at: string | null }>) {
+      readySinceBySlab.set(r.slab_requirement_id, {
+        since: r.depart_cleared_at ?? r.review_approved_at,
+        reworked: r.depart_cleared_at != null,
+      });
+    }
+  }
+
+  function shapeReadySlab(s: {
+    id: string; label: string | null; description?: string | null; temple: string; stone: string | null;
+    quality: string | null; length_ft: number; width_ft: number; thickness_ft: number; priority: boolean | null;
+  }): ReadySlab {
+    const L = Number(s.length_ft);
+    const W = Number(s.width_ft);
+    const T = Number(s.thickness_ft);
+    const timer = readySinceBySlab.get(s.id);
+    return {
+      id: s.id,
+      label: s.label,
+      description: s.description ?? null,
+      temple: s.temple,
+      stone: s.stone,
+      quality: s.quality ?? null,
+      dimensions: `${L}×${W}×${T} in`,
+      cft: toCftFromFtNums(L, W, T),
+      priority: Boolean(s.priority),
+      isMarble: stoneCategoryMap[s.stone ?? ""] === "marble",
+      readySince: timer?.since ?? null,
+      reworked: timer?.reworked ?? false,
+    };
+  }
+
+  const readySlabs: ReadySlab[] = readyRows.map(shapeReadySlab);
 
   const provisional: ProvisionalRow[] = (provisionalDispatches ?? []).map((d) => {
     const { count, cft } = cftForDispatch(d.id);
@@ -232,6 +248,9 @@ export default async function DispatchPage({
     };
   });
 
+  const proofUrl = (p: string | null | undefined) =>
+    p ? admin.storage.from("dispatch_delivery_proofs").getPublicUrl(p).data.publicUrl : null;
+
   const delivered: DeliveredRow[] = (closedDispatches ?? []).map((d) => {
     const { count, cft } = cftForDispatch(d.id);
     return {
@@ -251,11 +270,32 @@ export default async function DispatchPage({
       delivered_by_name: d.delivered_by ? profilesMap[d.delivered_by] ?? null : null,
       receiver_name: d.receiver_name,
       delivery_note: d.delivery_note,
+      proofSiteUrl: proofUrl((d as { proof_site_path?: string | null }).proof_site_path),
+      proofChallanUrl: proofUrl((d as { proof_challan_path?: string | null }).proof_challan_path),
     };
   });
 
+  // Truck history — every trip ever sent, newest first. Drives the
+  // 🚚 Truck history peek (Provisional tab) and the recent-truck
+  // quick-fill chips on the new-dispatch form.
+  const truckHistory: TruckTrip[] = [
+    ...(provisionalDispatches ?? []).map((d) => ({ d, status: "provisional" as const, when: d.dispatched_at })),
+    ...(openDispatches ?? []).map((d) => ({ d, status: "on_road" as const, when: d.dispatched_at })),
+    ...(closedDispatches ?? []).map((d) => ({ d, status: "delivered" as const, when: d.dispatched_at })),
+  ]
+    .filter((x) => x.d.vehicle_no)
+    .sort((a, b) => new Date(b.when).getTime() - new Date(a.when).getTime())
+    .map((x) => ({
+      vehicle_no: x.d.vehicle_no as string,
+      driver_name: x.d.driver_name,
+      driver_phone: x.d.driver_phone,
+      temple: x.d.temple,
+      dispatched_at: x.d.dispatched_at,
+      challan_number: (x.d as { challan_number?: number }).challan_number ?? null,
+      status: x.status,
+    }));
+
   // Legacy one-off dispatches: dispatch_logs rows with NULL dispatch_id.
-  // They predate the station so they don't have a batch record.
   const legacyDispatches: LegacyDispatch[] = (allDispatchLogs ?? [])
     .filter((l) => !l.dispatch_id)
     .map((l) => ({
@@ -265,33 +305,17 @@ export default async function DispatchPage({
       note: l.dispatch_note ?? null,
     }));
 
-  // Per-provisional slab details for the EditSlabsModal. Pulls the slab
-  // rows that each provisional dispatch currently holds so the modal can
-  // render a "current slabs" list with remove buttons without an extra
-  // client-side round-trip. Shaped like ReadySlab for symmetry.
+  // Per-provisional slab details for the EditSlabsModal.
   const provisionalSlabIds = (provisionalDispatches ?? [])
     .flatMap((d) => logsByDispatch.get(d.id) ?? []);
   const provisionalSlabDetails = new Map<string, ReadySlab>();
   if (provisionalSlabIds.length > 0) {
     const { data: slabRows } = await admin
       .from("slab_requirements")
-      .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, priority")
+      .select("id, label, description, temple, stone, quality, length_ft, width_ft, thickness_ft, priority")
       .in("id", provisionalSlabIds);
     for (const s of slabRows ?? []) {
-      const L = Number(s.length_ft);
-      const W = Number(s.width_ft);
-      const T = Number(s.thickness_ft);
-      provisionalSlabDetails.set(s.id, {
-        id: s.id,
-        label: s.label,
-        temple: s.temple,
-        stone: s.stone,
-        quality: s.quality ?? null,
-        dimensions: `${L}×${W}×${T} in`,
-        cft: toCftFromFtNums(L, W, T),
-        priority: Boolean(s.priority),
-        isMarble: stoneCategoryMap[s.stone ?? ""] === "marble",
-      });
+      provisionalSlabDetails.set(s.id, shapeReadySlab(s));
     }
   }
 
@@ -306,12 +330,13 @@ export default async function DispatchPage({
   return (
     <DispatchClient
       readySlabs={readySlabs}
-      departSlabs={departSlabs}
+      reworkCount={reworkCount}
       provisional={provisional}
       provisionalSlabsByDispatch={provisionalSlabsByDispatch}
       outForDelivery={outForDelivery}
       delivered={delivered}
       legacyDispatches={legacyDispatches}
+      truckHistory={truckHistory}
       initialTab={initialTab}
       toast={toastParam ?? null}
       error={errorParam ?? null}

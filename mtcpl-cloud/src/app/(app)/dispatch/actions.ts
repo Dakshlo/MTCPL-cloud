@@ -34,10 +34,24 @@ function fail(path: string, message: string): never {
   redirect(`${path}?dispatch_error=${encodeURIComponent(message)}`);
 }
 
+// Roles allowed to operate the station — matches the /dispatch page guard
+// (carving_head runs the station day-to-day; previously the actions were
+// developer/owner-only and silently bounced them).
+const STATION_ROLES = ["developer", "owner", "carving_head"] as const;
+
+// Delivery-proof photo upload (mig 129).
+const PROOF_BUCKET = "dispatch_delivery_proofs";
+const PROOF_MAX_BYTES = 10 * 1024 * 1024; // 10 MB per photo
+const PROOF_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
+
+function proofExt(mime: string): string {
+  return mime === "image/png" ? "png" : mime === "image/webp" ? "webp" : "jpg";
+}
+
 // ─── createDispatchAction ────────────────────────────────────────────────
 
 export async function createDispatchAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner"]);
+  const { profile } = await requireAuth([...STATION_ROLES]);
   const admin = createAdminSupabaseClient();
 
   const temple = String(formData.get("temple") || "").trim();
@@ -174,7 +188,7 @@ export async function createDispatchAction(formData: FormData) {
 // ─── markDeliveredAction ─────────────────────────────────────────────────
 
 export async function markDeliveredAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner"]);
+  const { profile } = await requireAuth([...STATION_ROLES]);
   const admin = createAdminSupabaseClient();
 
   const dispatchId = String(formData.get("dispatch_id") || "").trim();
@@ -182,6 +196,22 @@ export async function markDeliveredAction(formData: FormData) {
   const deliveryNote = String(formData.get("delivery_note") || "").trim() || null;
 
   if (!dispatchId) fail("/dispatch", "Dispatch id is required");
+
+  // Mig 129 — delivery proof is MANDATORY: (1) the truck at the site and
+  // (2) the signed challan. No photos → cannot mark delivered.
+  const proofSite = formData.get("proof_site");
+  const proofChallan = formData.get("proof_challan");
+  if (!(proofSite instanceof File) || proofSite.size === 0) {
+    fail("/dispatch?tab=out_for_delivery", "Photo 1 missing — truck at the site (proof slabs reached). Both photos are required.");
+  }
+  if (!(proofChallan instanceof File) || proofChallan.size === 0) {
+    fail("/dispatch?tab=out_for_delivery", "Photo 2 missing — the signed challan. Both photos are required.");
+  }
+  for (const [label, f] of [["Site photo", proofSite], ["Challan photo", proofChallan]] as const) {
+    if (f.size > PROOF_MAX_BYTES) fail("/dispatch?tab=out_for_delivery", `${label} is too large — max 10 MB.`);
+    const mime = (f.type || "").toLowerCase();
+    if (!PROOF_TYPES.has(mime)) fail("/dispatch?tab=out_for_delivery", `${label} must be a JPG / PNG / WEBP / HEIC image.`);
+  }
 
   // Guard: only approved (i.e. out-for-delivery) rows can be marked
   // delivered. Cannot mark a still-provisional row delivered.
@@ -198,6 +228,24 @@ export async function markDeliveredAction(formData: FormData) {
     fail("/dispatch", "Dispatch is already marked delivered");
   }
 
+  // Upload both proofs BEFORE flipping the row — if an upload fails, the
+  // dispatch stays out-for-delivery and the operator simply retries.
+  const sitePath = `${dispatchId}/site-${Date.now()}.${proofExt((proofSite.type || "").toLowerCase())}`;
+  const challanPath = `${dispatchId}/challan-${Date.now()}.${proofExt((proofChallan.type || "").toLowerCase())}`;
+  const siteBuf = Buffer.from(await proofSite.arrayBuffer());
+  const challanBuf = Buffer.from(await proofChallan.arrayBuffer());
+  const { error: upSiteErr } = await admin.storage
+    .from(PROOF_BUCKET)
+    .upload(sitePath, siteBuf, { contentType: proofSite.type || "image/jpeg", upsert: false });
+  if (upSiteErr) fail("/dispatch?tab=out_for_delivery", `Site photo upload failed: ${upSiteErr.message}`);
+  const { error: upChallanErr } = await admin.storage
+    .from(PROOF_BUCKET)
+    .upload(challanPath, challanBuf, { contentType: proofChallan.type || "image/jpeg", upsert: false });
+  if (upChallanErr) {
+    await admin.storage.from(PROOF_BUCKET).remove([sitePath]).catch(() => {});
+    fail("/dispatch?tab=out_for_delivery", `Challan photo upload failed: ${upChallanErr.message}`);
+  }
+
   const { error } = await admin
     .from("dispatches")
     .update({
@@ -205,6 +253,8 @@ export async function markDeliveredAction(formData: FormData) {
       delivered_by: profile.id,
       receiver_name: receiverName,
       delivery_note: deliveryNote,
+      proof_site_path: sitePath,
+      proof_challan_path: challanPath,
     })
     .eq("id", dispatchId);
   if (error) fail("/dispatch", `Failed to mark delivered: ${error.message}`);
@@ -230,7 +280,7 @@ export async function markDeliveredAction(formData: FormData) {
 // ─── undoDispatchAction ──────────────────────────────────────────────────
 
 export async function undoDispatchAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner"]);
+  const { profile } = await requireAuth([...STATION_ROLES]);
   const admin = createAdminSupabaseClient();
 
   const dispatchId = String(formData.get("dispatch_id") || "").trim();
@@ -297,7 +347,7 @@ export async function undoDispatchAction(formData: FormData) {
 // Sets approved_at + approved_by; row moves from Provisional → Out for Delivery.
 
 export async function approveDispatchAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner"]);
+  const { profile } = await requireAuth([...STATION_ROLES]);
   const admin = createAdminSupabaseClient();
 
   const dispatchId = String(formData.get("id") || "").trim();
@@ -350,7 +400,7 @@ export async function approveDispatchAction(formData: FormData) {
 // deleted. Sequence number is consumed (gap), same as a voided paper challan.
 
 export async function cancelDispatchAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner"]);
+  const { profile } = await requireAuth([...STATION_ROLES]);
   const admin = createAdminSupabaseClient();
 
   const dispatchId = String(formData.get("id") || "").trim();
@@ -431,7 +481,7 @@ export async function cancelDispatchAction(formData: FormData) {
 // dispatch if the edit leaves it with zero slabs.
 
 export async function editDispatchSlabsAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner"]);
+  const { profile } = await requireAuth([...STATION_ROLES]);
   const admin = createAdminSupabaseClient();
 
   const dispatchId = String(formData.get("id") || "").trim();
@@ -608,6 +658,9 @@ export async function clearDispatchHoldAction(formData: FormData) {
   const { profile } = await requireAuth(["developer", "owner", "senior_incharge", "carving_head"]);
   const admin = createAdminSupabaseClient();
   const slabId = String(formData.get("slab_id") || "").trim();
+  // "rework" → the button was pressed on the Rework Tunnel page; bounce
+  // back there instead of the main station so the list flow continues.
+  const from = String(formData.get("from") || "").trim();
   if (!slabId) fail("/dispatch", "Missing slab id");
   const now = new Date().toISOString();
   await admin
@@ -621,6 +674,8 @@ export async function clearDispatchHoldAction(formData: FormData) {
     .eq("slab_requirement_id", slabId);
   await logAudit(profile.id, "dispatch_hold_cleared", "slab", slabId, {});
   revalidatePath("/dispatch");
+  revalidatePath("/dispatch/rework");
   revalidatePath("/carving");
-  redirect(`/dispatch?dispatch_toast=${encodeURIComponent("Released for dispatch")}`);
+  const dest = from === "rework" ? "/dispatch/rework" : "/dispatch";
+  redirect(`${dest}?dispatch_toast=${encodeURIComponent(`✓ ${slabId} released — now in Make Dispatch`)}`);
 }
