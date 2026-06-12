@@ -146,6 +146,13 @@ export function FinishBlockForm({
   const [precutMode, setPrecutMode] = useState(false);
   const [precutSel, setPrecutSel] = useState<Set<string>>(new Set());
   const [precutMsg, setPrecutMsg] = useState<string | null>(null);
+  // Mig 127 — pre-cut can ALSO release extras (open inventory) and
+  // transfers (slabs claimed from another block's plan), exactly like
+  // the final Cutting Done. Kept SEPARATE from the final-done extraIds /
+  // transferIds so a pre-cut selection never leaks into the final
+  // submission and vice-versa.
+  const [precutExtraIds, setPrecutExtraIds] = useState<Set<string>>(new Set());
+  const [precutTransferIds, setPrecutTransferIds] = useState<Set<string>>(new Set());
   const [remainders, setRemainders] = useState<RemainderEntry[]>(() => {
     const seeds = initialPayload?.remainders ?? [];
     return seeds.map((r) => ({
@@ -204,15 +211,45 @@ export function FinishBlockForm({
     });
   }
 
-  // Mig 126 — release the selected slabs as pre-cut. The block stays In
-  // Progress; released slabs become assignable on the carving board.
+  function togglePrecutExtra(id: string) {
+    setPrecutExtraIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function togglePrecutTransfer(id: string) {
+    setPrecutTransferIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  // Total slabs queued for THIS pre-cut release: planned (from the
+  // checklist) + extras (open inventory) + transfers (other blocks).
+  const precutTotalSel = precutSel.size + precutExtraIds.size + precutTransferIds.size;
+
+  // Mig 126/127 — release the selected slabs as pre-cut. The block stays
+  // In Progress; released slabs become assignable on the carving board.
+  // Sends planned (this block) + extras (open) + transfers (other blocks)
+  // the same way the final Cutting Done splits them.
   function savePrecut() {
-    if (!precutAction || precutSel.size === 0 || submitting) return;
+    if (!precutAction || precutTotalSel === 0 || submitting) return;
+    // Same cutting-donor confirmation the final Done uses — claiming a
+    // slab from a block that's actively being cut needs a heads-up.
+    if (!confirmIfCuttingDonors(precutTransferIds)) return;
     setSubmitError(null);
     setPrecutMsg(null);
     const fd = new FormData();
     fd.set("session_block_id", sessionBlockId);
-    fd.set("slab_ids", JSON.stringify([...precutSel]));
+    fd.set("block_id", blockId);
+    fd.set("planned_slab_ids", JSON.stringify([...precutSel]));
+    fd.set("extra_slab_ids", JSON.stringify([...precutExtraIds]));
+    fd.set("transferred_slab_ids", JSON.stringify([...precutTransferIds]));
     fd.set("stock_location", stockLocation);
     startSubmit(async () => {
       try {
@@ -225,6 +262,8 @@ export function FinishBlockForm({
           `✓ ${res.count} slab${res.count === 1 ? "" : "s"} released as pre-cut — carving can assign them now. Block stays In Progress.`,
         );
         setPrecutSel(new Set());
+        setPrecutExtraIds(new Set());
+        setPrecutTransferIds(new Set());
         setPrecutMode(false);
         router.refresh();
       } catch (err) {
@@ -351,9 +390,9 @@ export function FinishBlockForm({
   // confirmation before submitting. Less risky donor states (pending)
   // submit silently. Returns true if the operator confirmed (or no
   // confirmation needed); false if they cancelled.
-  function confirmIfCuttingDonors(): boolean {
+  function confirmIfCuttingDonors(ids: Set<string> = transferIds): boolean {
     const selectedFromCutting = transferableSlabs.filter(
-      (s) => transferIds.has(s.id) && s.donor_status === "cutting",
+      (s) => ids.has(s.id) && s.donor_status === "cutting",
     );
     if (selectedFromCutting.length === 0) return true;
     const list = selectedFromCutting
@@ -442,7 +481,7 @@ export function FinishBlockForm({
         >
           <button
             type="button"
-            onClick={() => { setPrecutMode((m) => !m); setPrecutSel(new Set()); setPrecutMsg(null); setSubmitError(null); }}
+            onClick={() => { setPrecutMode((m) => !m); setPrecutSel(new Set()); setPrecutExtraIds(new Set()); setPrecutTransferIds(new Set()); setPrecutMsg(null); setSubmitError(null); }}
             className={precutMode ? "secondary-button" : "primary-button"}
             style={{ fontSize: 13 }}
           >
@@ -476,7 +515,7 @@ export function FinishBlockForm({
           </div>
           <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
             {precutMode ? (
-              <>Tick what is already cut · <strong>{precutSel.size} new</strong>{precutCount > 0 ? ` + ${precutCount} released earlier` : ""}</>
+              <>Tick what is already cut · <strong>{precutSel.size} planned</strong>{precutExtraIds.size + precutTransferIds.size > 0 ? ` + ${precutExtraIds.size + precutTransferIds.size} extra/transfer` : ""}{precutCount > 0 ? ` · ${precutCount} released earlier` : ""}</>
             ) : (
               <>Mark slabs that were actually cut · <strong>{cutCount}/{totalCount}</strong></>
             )}
@@ -538,16 +577,23 @@ export function FinishBlockForm({
           label / size / donor block), selected-on-top sorting, and
           status badges for planned rows. Submission split is still
           done internally via extraIds vs transferIds. */}
-      {!precutMode && (openSlabs.length > 0 || (allowTransfer && transferableSlabs.length > 0)) && (
-        <ExtraSizePicker
-          openSlabs={openSlabs}
-          transferableSlabs={transferableSlabs}
-          allowTransfer={allowTransfer}
-          selectedExtraIds={extraIds}
-          selectedTransferIds={transferIds}
-          onToggleExtra={toggleExtra}
-          onToggleTransfer={toggleTransfer}
-        />
+      {(openSlabs.length > 0 || (allowTransfer && transferableSlabs.length > 0)) && (
+        <>
+          {precutMode && (
+            <div className="muted" style={{ fontSize: 12, margin: "-2px 2px -6px", fontWeight: 600, color: "#92400e" }}>
+              ⏳ Extra / transferred sizes cut today? Pick them below — they release early too (final Cutting Done still records remainders).
+            </div>
+          )}
+          <ExtraSizePicker
+            openSlabs={openSlabs}
+            transferableSlabs={transferableSlabs}
+            allowTransfer={allowTransfer}
+            selectedExtraIds={precutMode ? precutExtraIds : extraIds}
+            selectedTransferIds={precutMode ? precutTransferIds : transferIds}
+            onToggleExtra={precutMode ? togglePrecutExtra : toggleExtra}
+            onToggleTransfer={precutMode ? togglePrecutTransfer : toggleTransfer}
+          />
+        </>
       )}
 
       {/* Remaining block pieces — bilingual header + per-row Grade
@@ -769,11 +815,11 @@ export function FinishBlockForm({
           <button
             type="button"
             className="primary-button"
-            disabled={submitting || precutSel.size === 0}
+            disabled={submitting || precutTotalSel === 0}
             onClick={savePrecut}
             style={{ background: "#d97706", borderColor: "#b45309" }}
           >
-            {submitting ? "Releasing…" : `⏳ Release ${precutSel.size} pre-cut slab${precutSel.size === 1 ? "" : "s"}`}
+            {submitting ? "Releasing…" : `⏳ Release ${precutTotalSel} pre-cut slab${precutTotalSel === 1 ? "" : "s"}`}
           </button>
           <span className="muted" style={{ fontSize: 12 }}>
             Block stays In Progress — final Cutting Done (with extras / remainders) comes later.

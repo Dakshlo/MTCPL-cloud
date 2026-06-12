@@ -1265,7 +1265,7 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
               ⏳ Pre-Cut Log · रोज़ की कटाई
             </div>
             <div style={{ fontSize: 11, color: "#555", margin: "4px 0 10px", lineHeight: 1.5 }}>
-              जो slab आज कटे, उसके सामने <strong>तारीख़ लिखें और sign करें</strong> — sheet office को दें।
+              जो slab आज कटे, उसका <strong>code, size, तारीख़ खुद लिखें और sign करें</strong> — sheet office को दें।
               Office उन्हें system में <strong>Pre-Cut</strong> करेगा (carving तुरंत शुरू हो सकती है) और sheet वापस देगा।
               पूरा block कटने के बाद ही final Cutting Done होगा।
             </div>
@@ -1286,31 +1286,24 @@ export default async function CuttingPrintPage({ params }: { params: Params }) {
                 </tr>
               </thead>
               <tbody>
-                {placed.map((s, i) => (
-                  <tr key={s.id}>
-                    <td style={{ border: "1px solid #444", padding: "7px 8px", width: 28, color: "#666", fontFamily: "ui-monospace, monospace" }}>{i + 1}</td>
-                    <td style={{ border: "1px solid #444", padding: "7px 8px", fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>{s.id}</td>
-                    <td style={{ border: "1px solid #444", padding: "7px 8px", fontFamily: "ui-monospace, monospace" }}>{s.sw} × {s.sh}</td>
-                    <td style={{ border: "1px solid #444", padding: "7px 8px", width: 110 }} />
-                    <td style={{ border: "1px solid #444", padding: "7px 8px", width: 110 }} />
-                    <td style={{ border: "1px solid #444", padding: "7px 8px", width: 90 }} />
-                  </tr>
-                ))}
-                {/* Spare rows for extra / live-added sizes */}
-                {[0, 1, 2, 3].map((i) => (
-                  <tr key={`spare-${i}`}>
-                    <td style={{ border: "1px solid #444", padding: "7px 8px", color: "#666", fontFamily: "ui-monospace, monospace" }}>{placed.length + i + 1}</td>
+                {/* Fully blank rows — the cutter operator writes the slab
+                    code + size themselves as each one is cut (planned,
+                    extra or transferred). Office fills the rest on entry.
+                    Row count tracks the plan size so there's always room. */}
+                {Array.from({ length: Math.max(placed.length + 4, 14) }).map((_, i) => (
+                  <tr key={`pc-${i}`}>
+                    <td style={{ border: "1px solid #444", padding: "12px 8px", width: 28, color: "#666", fontFamily: "ui-monospace, monospace" }}>{i + 1}</td>
                     <td style={{ border: "1px solid #444", padding: "12px 8px" }} />
                     <td style={{ border: "1px solid #444", padding: "12px 8px" }} />
-                    <td style={{ border: "1px solid #444", padding: "12px 8px" }} />
-                    <td style={{ border: "1px solid #444", padding: "12px 8px" }} />
-                    <td style={{ border: "1px solid #444", padding: "12px 8px" }} />
+                    <td style={{ border: "1px solid #444", padding: "12px 8px", width: 110 }} />
+                    <td style={{ border: "1px solid #444", padding: "12px 8px", width: 110 }} />
+                    <td style={{ border: "1px solid #444", padding: "12px 8px", width: 90 }} />
                   </tr>
                 ))}
               </tbody>
             </table>
             <div style={{ fontSize: 10, color: "#777", marginTop: 6 }}>
-              Spare rows = extra size cutting (plan के बाहर के sizes भी यहाँ लिखें).
+              हर slab का code खुद लिखें — जो भी आज कटे (plan के अंदर या बाहर / दूसरे block से आया size भी यहीं लिखें).
             </div>
           </div>
         )}

@@ -819,92 +819,162 @@ export async function precutSlabsAction(
   const supabase = createAdminSupabaseClient();
 
   const sessionBlockId = String(formData.get("session_block_id") || "");
-  const slabIds = JSON.parse(String(formData.get("slab_ids") || "[]")) as string[];
+  const blockId = String(formData.get("block_id") || "");
+  const plannedIds = JSON.parse(String(formData.get("planned_slab_ids") || "[]")) as string[];
+  const extraIds = JSON.parse(String(formData.get("extra_slab_ids") || "[]")) as string[];
+  const transferIds = JSON.parse(String(formData.get("transferred_slab_ids") || "[]")) as string[];
   const stockLocation = String(formData.get("stock_location") || "").trim() || null;
 
   try {
     if (!sessionBlockId) throw new Error("Missing block.");
-    if (!Array.isArray(slabIds) || slabIds.length === 0) {
+    if (!blockId) throw new Error("Missing block id.");
+    const totalSel = plannedIds.length + extraIds.length + transferIds.length;
+    if (totalSel === 0) {
       throw new Error("Select at least one slab that is already cut.");
     }
 
     // Block must still be live-cutting — pre-cut makes no sense after
-    // the cutter has submitted for audit.
+    // the cutter has submitted for audit. (The RPC re-checks this, but
+    // we want a clean error + the block_id for the notification.)
     const { data: csb, error: csbErr } = await supabase
       .from("cut_session_blocks")
-      .select("id, status, block_id, cut_session_id, precut_count")
+      .select("id, status, block_id, cut_session_id")
       .eq("id", sessionBlockId)
       .maybeSingle();
     if (csbErr) throw new Error(csbErr.message);
     if (!csb) throw new Error("Block not found.");
-    const blockRow = csb as { id: string; status: string; block_id: string; cut_session_id: string; precut_count: number | null };
+    const blockRow = csb as { id: string; status: string; block_id: string; cut_session_id: string };
     if (!["cutting", "done_prompt"].includes(blockRow.status)) {
       throw new Error("Pre-cut is only available while the block is In Progress (cutting).");
     }
 
-    // Only THIS block's PLANNED slabs are eligible (extras/transfers go
-    // through the final Cutting Done).
-    const { data: planRows, error: planErr } = await supabase
-      .from("cut_session_slabs")
-      .select("slab_requirement_id")
-      .eq("cut_session_block_id", sessionBlockId);
-    if (planErr) throw new Error(planErr.message);
-    const planIds = new Set(
-      ((planRows ?? []) as Array<{ slab_requirement_id: string }>).map((r) => r.slab_requirement_id),
-    );
-    const outsidePlan = slabIds.filter((id) => !planIds.has(id));
-    if (outsidePlan.length > 0) {
-      throw new Error(
-        `These slabs are not in this block's plan: ${outsidePlan.join(", ")}. ` +
-          `Extra / transferred sizes are released at the final Cutting Done.`,
-      );
+    // Permission gate — claiming a slab from another block's plan is a
+    // privileged action even when releasing it early. Same gate the
+    // final Cutting Done applies.
+    if (transferIds.length > 0) {
+      const { canTransferPlannedSlabs } = await import("@/lib/cutting-permissions");
+      if (!canTransferPlannedSlabs(profile)) {
+        throw new Error(
+          "You do not have permission to transfer slabs from another block's plan. Contact a developer or authorised owner.",
+        );
+      }
     }
 
-    // Race-guarded flip: planned → cut_done with the precut stamp. Same
-    // field semantics as the final finish_block_cut RPC so downstream
-    // (carving unassigned, block journey, ready boards) just works.
-    const now = new Date().toISOString();
-    const { data: flipped, error: flipErr } = await supabase
-      .from("slab_requirements")
-      .update({
-        status: "cut_done",
-        cut_source_kind: "planned",
-        ...(stockLocation ? { stock_location: stockLocation } : {}),
-        precut_at: now,
-        precut_by: profile.id,
-        updated_by: profile.id,
-        updated_at: now,
-      })
-      .in("id", slabIds)
-      .eq("status", "planned")
-      .is("precut_at", null)
-      .select("id");
-    if (flipErr) throw new Error(flipErr.message);
-    const count = (flipped ?? []).length;
+    // Double-claim pre-checks for extras / transfers — symmetric to
+    // finishBlockAction. The RPC has its own final guards, but catching
+    // the conflict here gives the operator a clear message AND stops a
+    // slab that is already sitting in another block's pending audit
+    // payload from being stolen (the RPC can't see those JSONB payloads
+    // cheaply). Two flavours:
+    //   1. ALREADY-CUT  — slab is cut_done owned by a DIFFERENT block.
+    //   2. ALREADY-PENDING — slab is in another awaiting_approval block's
+    //      pending_approval_payload (extra or transfer).
+    if (extraIds.length > 0 || transferIds.length > 0) {
+      const allClaims = [...extraIds, ...transferIds];
+
+      const { data: doneRows } = await supabase
+        .from("slab_requirements")
+        .select("id, source_block_id, status")
+        .in("id", allClaims)
+        .eq("status", "cut_done");
+      const stolen = ((doneRows ?? []) as Array<{
+        id: string;
+        source_block_id: string | null;
+        status: string;
+      }>).filter((r) => r.source_block_id && r.source_block_id !== blockId);
+      if (stolen.length > 0) {
+        const list = stolen.map((r) => `${r.id} (already cut by ${r.source_block_id})`).join(", ");
+        throw new Error(
+          `Cannot pre-cut — these slabs were already cut by another block: ${list}. ` +
+            `Refresh and pick different inventory slabs.`,
+        );
+      }
+
+      const { data: pendingPeers } = await supabase
+        .from("cut_session_blocks")
+        .select("id, block_id, pending_approval_payload")
+        .eq("status", "awaiting_approval")
+        .neq("id", sessionBlockId);
+      type Peer = {
+        id: string;
+        block_id: string;
+        pending_approval_payload:
+          | (PendingApprovalPayload & Record<string, unknown>)
+          | null;
+      };
+      const conflicts: Array<{ slabId: string; otherBlockId: string }> = [];
+      const claimSet = new Set(allClaims);
+      for (const p of (pendingPeers ?? []) as Peer[]) {
+        const pp = p.pending_approval_payload;
+        if (!pp) continue;
+        const peerClaims = [...(pp.extra_slab_ids ?? []), ...(pp.transferred_slab_ids ?? [])];
+        for (const sid of peerClaims) {
+          if (claimSet.has(sid)) conflicts.push({ slabId: sid, otherBlockId: p.block_id });
+        }
+      }
+      if (conflicts.length > 0) {
+        const list = conflicts
+          .map((c) => `${c.slabId} (already on block ${c.otherBlockId}'s pending audit)`)
+          .join(", ");
+        throw new Error(
+          `Cannot pre-cut — these slabs are already claimed by another block waiting for audit: ${list}. ` +
+            `Pick different inventory slabs.`,
+        );
+      }
+    }
+
+    // Atomic release via the RPC (mig 127) — commits planned + extras +
+    // transfers (incl. donor reprint) in ONE transaction, stamps the
+    // pre-cut marker, bumps precut_count. Same field semantics as
+    // finish_block_cut so downstream (carving unassigned, block journey,
+    // ready boards) just works. The block status is left untouched.
+    const { data: rpcData, error: rpcErr } = await supabase.rpc("precut_release_slabs", {
+      p_session_block_id: sessionBlockId,
+      p_block_id: blockId,
+      p_actor: profile.id,
+      p_planned_slab_ids: plannedIds,
+      p_extra_slab_ids: extraIds,
+      p_transferred_slab_ids: transferIds,
+      p_stock_location: stockLocation,
+    });
+    if (rpcErr) throw new Error(rpcErr.message);
+    const result = (rpcData ?? {}) as {
+      total?: number;
+      planned?: number;
+      extras?: number;
+      transfers?: number;
+      donor_blocks?: string[];
+    };
+    const count = Number(result.total) || 0;
     if (count === 0) {
       throw new Error(
-        "Nothing released — the selected slabs are no longer 'planned' (already pre-cut or moved on). Refresh and retry.",
+        "Nothing released — the selected slabs are no longer eligible (already pre-cut or moved on). Refresh and retry.",
       );
     }
+    const donorBlocks = Array.isArray(result.donor_blocks) ? result.donor_blocks : [];
 
-    await supabase
-      .from("cut_session_blocks")
-      .update({
-        precut_count: (Number(blockRow.precut_count) || 0) + count,
-        last_precut_at: now,
-        updated_at: now,
-      })
-      .eq("id", sessionBlockId);
+    const breakdown = [
+      result.planned ? `${result.planned} planned` : "",
+      result.extras ? `${result.extras} extra` : "",
+      result.transfers ? `${result.transfers} transferred` : "",
+    ].filter(Boolean).join(" · ");
 
     void Promise.all([
       logAudit(profile.id, "cut_precut_released", "cut_session_block", sessionBlockId, {
         block_id: blockRow.block_id,
         session_id: blockRow.cut_session_id,
-        slab_ids: (flipped ?? []).map((r) => (r as { id: string }).id),
+        planned_slab_ids: plannedIds,
+        extra_slab_ids: extraIds,
+        transferred_slab_ids: transferIds,
+        donor_blocks: donorBlocks,
         stock_location: stockLocation,
       }),
       notify("cut_precut", `${count} slab(s) pre-cut from ${blockRow.block_id}`, {
-        message: `Released early for carving assignment — block is still cutting. Stock: ${stockLocation ?? "—"}.`,
+        message:
+          `Released early for carving assignment — block is still cutting. ` +
+          `${breakdown ? `(${breakdown}). ` : ""}` +
+          `${donorBlocks.length ? `Donor block(s): ${donorBlocks.join(", ")} — reprint flagged. ` : ""}` +
+          `Stock: ${stockLocation ?? "—"}.`,
         entityType: "cut_session_block",
         entityId: sessionBlockId,
         actorId: profile.id,
@@ -918,7 +988,7 @@ export async function precutSlabsAction(
     return { ok: true, count };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error("[precutSlabsAction] FAILED", { sessionBlockId, slabIds, error: msg });
+    console.error("[precutSlabsAction] FAILED", { sessionBlockId, plannedIds, extraIds, transferIds, error: msg });
     return { ok: false, error: msg };
   }
 }
