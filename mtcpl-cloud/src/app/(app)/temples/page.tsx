@@ -13,7 +13,9 @@ import { AddTempleImageButton } from "./add-image-button";
 
 export const dynamic = "force-dynamic";
 
-const IMAGE_WRITE_ROLES = ["owner", "developer", "team_head", "senior_incharge"];
+// Daksh (June 2026) — carving_head gets FULL Temple View access (read +
+// add/delete images at any node + move slabs between categories).
+const IMAGE_WRITE_ROLES = ["owner", "developer", "team_head", "senior_incharge", "carving_head"];
 
 type SlabRow = {
   id: string; label: string | null; description: string | null; temple: string; status: string;
@@ -89,7 +91,9 @@ type TempleTreeNode = TempleTree["roots"][number];
 
 export default async function TemplesPage() {
   const { profile } = await requireAuth();
-  if (!canReadRequiredSizes(profile)) redirect("/");
+  // carving_head can read Temple View (kept separate from canReadRequiredSizes
+  // so Required Sizes / Slabs stays as-is for them).
+  if (!canReadRequiredSizes(profile) && profile.role !== "carving_head") redirect("/");
   const canWriteImages = IMAGE_WRITE_ROLES.includes(profile.role);
   const admin = createAdminSupabaseClient();
 

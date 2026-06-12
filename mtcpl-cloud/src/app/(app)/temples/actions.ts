@@ -11,7 +11,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
 import type { AppRole } from "@/lib/types";
 
-const WRITE_ROLES: AppRole[] = ["owner", "developer", "team_head", "senior_incharge"];
+const WRITE_ROLES: AppRole[] = ["owner", "developer", "team_head", "senior_incharge", "carving_head"];
 const BUCKET = "temple_component_images";
 const MAX_BYTES = 8 * 1024 * 1024; // 8 MB
 const IMG_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "image/heic", "image/heif"]);

@@ -118,7 +118,8 @@ const navEntries: NavEntry[] = [
     href: "/temples",
     label: "Temple View",
     icon: "🏛",
-    roles: ["developer", "owner", "team_head", "senior_incharge", "slab_entry", "block_slab_entry"],
+    // Daksh (June 2026) — carving_head added: full Temple View access.
+    roles: ["developer", "owner", "team_head", "senior_incharge", "slab_entry", "block_slab_entry", "carving_head"],
     department: "production",
   },
   {
