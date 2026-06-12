@@ -51,7 +51,15 @@ export type CncVendorRow = {
   vendorName: string;
   cft: number;
   sft: number;
+  /** sft + cft — combined carved output. */
+  combined: number;
   slabsCount: number;
+  /** Number of CNC machines assigned to this vendor. */
+  machineCount: number;
+  /** combined output ÷ days in the window (vendor's daily average). */
+  perDay: number;
+  /** combined ÷ machines ÷ days (per machine per day). NaN with no machines. */
+  perMachinePerDay: number;
   /** Operational expenses for this vendor in the period (prorated). */
   operationalCost: number;
   /** Depreciation for this vendor's machines, prorated to the period. */
@@ -62,6 +70,8 @@ export type CncVendorRow = {
   costPerSft: number;
   /** totalCost / cft. NaN when no production. */
   costPerCft: number;
+  /** totalCost / combined. NaN when no production. */
+  costPerCombined: number;
 };
 
 export type CncExpenseBreakdownRow = {
@@ -88,6 +98,9 @@ export type CncVariousCostReport = {
   costPerSft: number;
   /** totalCostForPeriod / totalCft. NaN when no production. */
   costPerCft: number;
+  /** Effective days in the window (clamped to "today" for current/future
+   *  periods) — powers the per-day / per-machine-per-day columns. */
+  daysInWindow: number;
   /** Aggregate per-category operational breakdown across all CNC
    *  vendors. (Depreciation is shown as a single line in the UI,
    *  not split by category.) */
@@ -527,6 +540,13 @@ export async function buildCncVariousCostReport(
     );
   if (machinesErr) throw new Error(`cnc_machines query failed: ${machinesErr.message}`);
 
+  // How many machines each vendor has (for the per-machine-per-day column).
+  const machineCountByVendor = new Map<string, number>();
+  for (const raw of machines ?? []) {
+    const vid = raw.vendor_id as string;
+    if (vid) machineCountByVendor.set(vid, (machineCountByVendor.get(vid) ?? 0) + 1);
+  }
+
   const depreciationByVendor = new Map<string, number>();
   let depreciationForPeriod = 0;
   for (const raw of machines ?? []) {
@@ -585,6 +605,16 @@ export async function buildCncVariousCostReport(
     }
   }
 
+  // Effective days in the window — clamped to "today" so a current month
+  // (or week/year) divides by days ELAPSED, not the full calendar span.
+  const nowIst = new Date(Date.now() + 5.5 * 3600 * 1000);
+  const todayKey = `${nowIst.getUTCFullYear()}-${String(nowIst.getUTCMonth() + 1).padStart(2, "0")}-${String(nowIst.getUTCDate()).padStart(2, "0")}`;
+  const effEnd = period.endDate < todayKey ? period.endDate : (todayKey < period.startDate ? period.startDate : todayKey);
+  const dayMs = 86400000;
+  const startMs = Date.UTC(+period.startDate.slice(0, 4), +period.startDate.slice(5, 7) - 1, +period.startDate.slice(8, 10));
+  const endMs = Date.UTC(+effEnd.slice(0, 4), +effEnd.slice(5, 7) - 1, +effEnd.slice(8, 10));
+  const daysInWindow = Math.max(1, Math.floor((endMs - startMs) / dayMs) + 1);
+
   // ── 4. Compose per-vendor rows ────────────────────────────────
   const totalCombinedOutput = totalSft + totalCft;
   const perVendor: CncVendorRow[] = Array.from(allVendorIds).map((vendorId) => {
@@ -606,17 +636,24 @@ export async function buildCncVariousCostReport(
     const operationalCost = (exp?.cost ?? 0) + electricShare;
     const depreciationCost = depreciationByVendor.get(vendorId) ?? 0;
     const totalCost = operationalCost + depreciationCost;
+    const combined = sft + cft;
+    const machineCount = machineCountByVendor.get(vendorId) ?? 0;
     return {
       vendorId,
       vendorName: knownNames.get(vendorId) || "Unknown",
       cft,
       sft,
+      combined,
       slabsCount,
+      machineCount,
+      perDay: combined / daysInWindow,
+      perMachinePerDay: machineCount > 0 ? combined / machineCount / daysInWindow : NaN,
       operationalCost,
       depreciationCost,
       totalCost,
       costPerSft: sft > 0 ? totalCost / sft : NaN,
       costPerCft: cft > 0 ? totalCost / cft : NaN,
+      costPerCombined: combined > 0 ? totalCost / combined : NaN,
     };
   });
   // Sort by total cost desc — biggest contributors at the top.
@@ -648,6 +685,7 @@ export async function buildCncVariousCostReport(
     totalCostForPeriod,
     costPerSft: totalSft > 0 ? totalCostForPeriod / totalSft : NaN,
     costPerCft: totalCft > 0 ? totalCostForPeriod / totalCft : NaN,
+    daysInWindow,
     expenseBreakdown,
     perVendor,
   };

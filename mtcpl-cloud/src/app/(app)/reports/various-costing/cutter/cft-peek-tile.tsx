@@ -35,7 +35,6 @@ function fmtNum(n: number, decimals = 2): string {
 }
 
 const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 type ViewMode = "detail" | "summary";
 /** Daksh — drill-down grouping mode. The user picks ONE level of
@@ -865,10 +864,11 @@ function bucketSlabs(
       hint = "";
       isToday = row.key === todayMonthKey;
     } else {
-      const dow = DAY_SHORT[row.date.getDay()];
-      const d = row.date.getDate();
-      const m = MONTH_SHORT[row.date.getMonth()];
-      label = `${dow} · ${d} ${m}`;
+      // Daksh — numeric DD/MM/YYYY (date / month / year), no weekday.
+      const d = String(row.date.getDate()).padStart(2, "0");
+      const m = String(row.date.getMonth() + 1).padStart(2, "0");
+      const y = row.date.getFullYear();
+      label = `${d}/${m}/${y}`;
       hint = "";
       isToday = row.key === todayKey;
     }

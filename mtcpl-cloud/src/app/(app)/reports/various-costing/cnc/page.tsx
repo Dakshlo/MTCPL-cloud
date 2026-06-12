@@ -308,9 +308,9 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
         {dailyAvg && (
           <DualKpiTile
             label="Daily Average"
-            primary={`${fmtNum(dailyAvg.sftPerDay)} SFT/day`}
+            primary={`${fmtNum(dailyAvg.sftPerDay + dailyAvg.cftPerDay)} units/day`}
             secondary={`${fmtINR(dailyAvg.costPerDay)}/day`}
-            hint={`${dailyAvg.daysElapsed} day${dailyAvg.daysElapsed === 1 ? "" : "s"} · ${fmtNum(dailyAvg.cftPerDay)} CFT/day`}
+            hint={`${dailyAvg.daysElapsed} day${dailyAvg.daysElapsed === 1 ? "" : "s"} · SFT + CFT combined`}
             tone="accent"
           />
         )}
@@ -329,12 +329,17 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
                 <th style={th()}>Vendor</th>
                 <th style={{ ...th(), textAlign: "right" }}>SFT</th>
                 <th style={{ ...th(), textAlign: "right" }}>CFT</th>
+                <th style={{ ...th(), textAlign: "right" }} title="SFT + CFT combined output">Total (S+C)</th>
+                <th style={{ ...th(), textAlign: "right" }} title="Combined output ÷ days in this period">Per day</th>
+                <th style={{ ...th(), textAlign: "right" }} title="Combined output ÷ machines ÷ days">Per mach/day</th>
+                <th style={{ ...th(), textAlign: "right" }} title="CNC machines assigned to this vendor">Mach</th>
                 <th style={{ ...th(), textAlign: "right" }}>Slabs</th>
                 <th style={{ ...th(), textAlign: "right" }}>Op. Cost</th>
                 <th style={{ ...th(), textAlign: "right" }}>Dep.</th>
                 <th style={{ ...th(), textAlign: "right" }}>Total</th>
                 <th style={{ ...th(), textAlign: "right" }}>₹ / SFT</th>
                 <th style={{ ...th(), textAlign: "right" }}>₹ / CFT</th>
+                <th style={{ ...th(), textAlign: "right" }} title="Total cost ÷ combined output">₹ / unit</th>
               </tr>
             </thead>
             <tbody>
@@ -346,6 +351,18 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
                   </td>
                   <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace" }}>
                     {fmtNum(v.cft)}
+                  </td>
+                  <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>
+                    {fmtNum(v.combined)}
+                  </td>
+                  <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace" }}>
+                    {fmtNum(v.perDay)}
+                  </td>
+                  <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace" }}>
+                    {Number.isFinite(v.perMachinePerDay) ? fmtNum(v.perMachinePerDay) : "—"}
+                  </td>
+                  <td style={{ ...td(), textAlign: "right", color: "var(--muted)" }}>
+                    {v.machineCount}
                   </td>
                   <td style={{ ...td(), textAlign: "right", color: "var(--muted)" }}>
                     {v.slabsCount}
@@ -365,8 +382,18 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
                   <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace" }}>
                     {fmtINR(v.costPerCft)}
                   </td>
+                  <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 600 }}>
+                    {fmtINR(v.costPerCombined)}
+                  </td>
                 </tr>
               ))}
+              {(() => {
+                const totalCombined = report.totalSft + report.totalCft;
+                const totalMachines = report.perVendor.reduce((s, v) => s + v.machineCount, 0);
+                const totalPerDay = report.daysInWindow > 0 ? totalCombined / report.daysInWindow : 0;
+                const totalPerMachDay = totalMachines > 0 && report.daysInWindow > 0 ? totalCombined / totalMachines / report.daysInWindow : NaN;
+                const costPerCombined = totalCombined > 0 ? report.totalCostForPeriod / totalCombined : NaN;
+                return (
               <tr style={{ background: "#fffbeb", borderTop: "2px solid var(--gold)" }}>
                 <td style={{ ...td(), fontWeight: 800 }}>Total</td>
                 <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>
@@ -374,6 +401,18 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
                 </td>
                 <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>
                   {fmtNum(report.totalCft)}
+                </td>
+                <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>
+                  {fmtNum(totalCombined)}
+                </td>
+                <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>
+                  {fmtNum(totalPerDay)}
+                </td>
+                <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>
+                  {Number.isFinite(totalPerMachDay) ? fmtNum(totalPerMachDay) : "—"}
+                </td>
+                <td style={{ ...td(), textAlign: "right", color: "var(--muted)", fontWeight: 800 }}>
+                  {totalMachines}
                 </td>
                 <td style={{ ...td(), textAlign: "right", color: "var(--muted)", fontWeight: 700 }}>
                   {report.slabsCount}
@@ -393,7 +432,12 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
                 <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>
                   {fmtINR(report.costPerCft)}
                 </td>
+                <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>
+                  {fmtINR(costPerCombined)}
+                </td>
               </tr>
+                );
+              })()}
             </tbody>
           </table>
         )}
