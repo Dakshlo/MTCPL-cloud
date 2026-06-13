@@ -958,7 +958,7 @@ function TempleDispatchPeek({
               {/* Per-slab weight (mig 130) — entered ONCE per identical
                   group (same label + size). Optional; fills the challan's
                   Net Weight. */}
-              <div style={{ border: "1px solid var(--border)", borderRadius: 12, background: "var(--bg)", padding: "12px 14px", maxHeight: 280, overflowY: "auto" }}>
+              <div style={{ border: "1px solid var(--border)", borderRadius: 12, background: "var(--bg)", padding: "12px 14px" }}>
                 <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
                   <span style={{ fontSize: 11.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
                     ⚖ Weight per slab <span style={{ fontWeight: 600, textTransform: "none" }}>(kg · optional)</span>
