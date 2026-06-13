@@ -4,8 +4,10 @@
 // (Section › … › Element), each node shows a stage progress bar + counts.
 // Leaf nodes expand to the slab list. Read-only.
 
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, useTransition, type CSSProperties } from "react";
+import { useRouter } from "next/navigation";
 import { TempleCardBrowser } from "./temple-card-browser";
+import { decideCancelledSlabAction } from "../slabs/cancel-actions";
 import {
   STAGE_META, STAGE_ORDER, bucketOf, stoneLabel, calcCft,
   type StageBucket, type ComponentImage, type TempleSlabCard, type TempleTreeNode, type TempleTree, type TempleCats,
@@ -17,25 +19,57 @@ export type { StageBucket, ComponentImage, TempleSlabCard, TempleTreeNode, Templ
 const STATUS_LABEL: Record<string, string> = {
   open: "Open", planned: "Planned", cutting: "Cutting", cut_done: "Cut done",
   carving_assigned: "Carving assigned", carving_in_progress: "Carving", completed: "Completed",
-  dispatched: "Dispatched", rejected: "Rejected",
+  dispatched: "Dispatched", rejected: "Rejected", cancelled: "Cancelled",
 };
 
 // One slab card — mirrors the Ready Sizes card fields (code, dims, CFT,
 // stone, quality, priority) in a compact stage-coloured card.
-function SlabCard({ s, delay = 0 }: { s: TempleSlabCard; delay?: number }) {
+// Mig 132 — a CANCELLED slab card carries the replace / no-replace
+// decision buttons until resolved; a replacement slab shows a
+// "needs to cut" chip.
+function SlabCard({ s, delay = 0, canDecide = false }: { s: TempleSlabCard; delay?: number; canDecide?: boolean }) {
+  const router = useRouter();
+  const [busy, startBusy] = useTransition();
+  const [err, setErr] = useState<string | null>(null);
   const bucket = bucketOf(s.status);
   const color = STAGE_META[bucket].color;
   const cft = calcCft(s.l, s.w, s.t);
+  const isCancelled = s.status === "cancelled";
+  const needsDecision = isCancelled && !s.cancelResolution;
+
+  function decide(choice: "no_replacement" | "create_new") {
+    if (busy) return;
+    if (choice === "create_new" && !confirm(`Create a NEW slab identical to ${s.id} (new code, status Open — goes through cutting again)?`)) return;
+    if (choice === "no_replacement" && !confirm(`Close ${s.id} with NO replacement slab?`)) return;
+    setErr(null);
+    const fd = new FormData();
+    fd.set("slab_id", s.id);
+    fd.set("choice", choice);
+    startBusy(async () => {
+      try {
+        const res = await decideCancelledSlabAction(fd);
+        if (!res.ok) {
+          setErr(res.error);
+          return;
+        }
+        router.refresh();
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : String(e));
+      }
+    });
+  }
+
   return (
     <div
+      id={`tv-slab-${s.id}`}
       title={STATUS_LABEL[s.status] ?? s.status}
       className="tv-anim tv-slab"
       style={{
         animationDelay: `${delay}ms`,
-        border: `1px solid var(--border)`,
+        border: isCancelled ? "1.5px solid rgba(127,29,29,0.55)" : `1px solid var(--border)`,
         borderLeft: `4px solid ${color}`,
         borderRadius: 10,
-        background: "var(--surface)",
+        background: isCancelled ? "rgba(127,29,29,0.06)" : "var(--surface)",
         padding: "8px 10px",
         display: "flex",
         flexDirection: "column",
@@ -56,7 +90,56 @@ function SlabCard({ s, delay = 0 }: { s: TempleSlabCard; delay?: number }) {
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         {s.stone && <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)" }}>🗿 {stoneLabel(s.stone)}</span>}
         {s.quality && <span style={{ fontSize: 10, fontWeight: 700, color: s.quality === "A" ? "#15803d" : "#b45309" }}>Grade {s.quality}</span>}
+        {/* Mig 132 — this slab is the replacement of a cancelled one. */}
+        {s.replacementOf && (
+          <span title={`Replacement of cancelled ${s.replacementOf}`} style={{ fontSize: 9.5, fontWeight: 800, color: "#92400e", background: "rgba(180,83,9,0.12)", border: "1px solid rgba(180,83,9,0.35)", borderRadius: 999, padding: "1px 7px", whiteSpace: "nowrap" }}>
+            🪨 new — needs to cut
+          </span>
+        )}
       </div>
+
+      {/* Mig 132 — cancelled-slab block: reason + decision / outcome. */}
+      {isCancelled && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 3, borderTop: "1px dashed rgba(127,29,29,0.4)", paddingTop: 5 }}>
+          {s.cancelReason && (
+            <div style={{ fontSize: 10.5, color: "#7f1d1d", lineHeight: 1.4 }}>📝 {s.cancelReason}</div>
+          )}
+          {needsDecision ? (
+            <>
+              <div style={{ fontSize: 10.5, fontWeight: 800, color: "#7f1d1d" }}>
+                ❌ Cancelled — create a new slab in its place?
+              </div>
+              {err && <div style={{ fontSize: 10.5, color: "#b91c1c", fontWeight: 700 }}>⚠ {err}</div>}
+              {canDecide && (
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => decide("create_new")}
+                    style={{ flex: 1, fontSize: 11, fontWeight: 800, padding: "7px 8px", borderRadius: 7, border: "none", background: busy ? "var(--border)" : "#15803d", color: "#fff", cursor: busy ? "wait" : "pointer" }}
+                  >
+                    ➕ Create new
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => decide("no_replacement")}
+                    style={{ flex: 1, fontSize: 11, fontWeight: 800, padding: "7px 8px", borderRadius: 7, border: "1.5px solid rgba(127,29,29,0.45)", background: "transparent", color: "#7f1d1d", cursor: busy ? "wait" : "pointer" }}
+                  >
+                    No need of new
+                  </button>
+                </div>
+              )}
+            </>
+          ) : (
+            <div style={{ fontSize: 10.5, fontWeight: 800, color: "#7f1d1d" }}>
+              {s.cancelResolution === "replaced"
+                ? <>✓ Replaced by <code style={{ fontFamily: "ui-monospace, monospace" }}>{s.replacementSlabId}</code></>
+                : "✓ Closed — no replacement needed"}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -109,7 +192,7 @@ function CountChips({ counts }: { counts: Record<StageBucket, number> }) {
   );
 }
 
-function TreeNode({ node, depth, idx = 0, imagesByNode, openMode }: { node: TempleTreeNode; depth: number; idx?: number; imagesByNode: Record<string, ComponentImage[]>; openMode: "default" | "all" | "none" }) {
+function TreeNode({ node, depth, idx = 0, imagesByNode, openMode, canDecide = false }: { node: TempleTreeNode; depth: number; idx?: number; imagesByNode: Record<string, ComponentImage[]>; openMode: "default" | "all" | "none"; canDecide?: boolean }) {
   const isLeaf = node.children.length === 0;
   // Initial open state from the current expand mode (the parent remounts the
   // tree when the mode changes, so this initializer re-runs).
@@ -154,12 +237,12 @@ function TreeNode({ node, depth, idx = 0, imagesByNode, openMode }: { node: Temp
 
       {open && (
         <div style={{ marginTop: 5, display: "flex", flexDirection: "column", gap: 5 }}>
-          {!isLeaf && node.children.map((c, i) => <TreeNode key={c.id} node={c} depth={depth + 1} idx={i} imagesByNode={imagesByNode} openMode={openMode} />)}
+          {!isLeaf && node.children.map((c, i) => <TreeNode key={c.id} node={c} depth={depth + 1} idx={i} imagesByNode={imagesByNode} openMode={openMode} canDecide={canDecide} />)}
           {isLeaf && (
             <div style={{ marginLeft: 22, marginBottom: 8 }}>
               <div className="tv-anim" style={{ marginBottom: 8 }}><CountChips counts={node.counts} /></div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 8 }}>
-                {node.slabs.map((s, i) => <SlabCard key={s.id} s={s} delay={Math.min(i * 18, 300)} />)}
+                {node.slabs.map((s, i) => <SlabCard key={s.id} s={s} delay={Math.min(i * 18, 300)} canDecide={canDecide} />)}
               </div>
             </div>
           )}
@@ -177,6 +260,7 @@ const STAGE_HELP: Record<StageBucket, string> = {
   carving: "Out for carving (CNC / vendor).",
   done: "Finished — completed or dispatched.",
   rejected: "Rejected during a cutting or carving quality check — not usable, kept on record only.",
+  cancelled: "Broken / unusable — cancel approved by the owner. Decide here whether to create a replacement slab.",
 };
 function StageLegend() {
   return (
@@ -192,9 +276,12 @@ function StageLegend() {
   );
 }
 
-export function TempleViewClient({ trees, imagesByNode, canManageImages, templeCats }: { trees: TempleTree[]; imagesByNode: Record<string, ComponentImage[]>; canManageImages: boolean; templeCats: TempleCats }) {
+export function TempleViewClient({ trees, imagesByNode, canManageImages, templeCats, cancelAlerts = [] }: { trees: TempleTree[]; imagesByNode: Record<string, ComponentImage[]>; canManageImages: boolean; templeCats: TempleCats; cancelAlerts?: Array<{ slabId: string; temple: string }> }) {
   const [selected, setSelected] = useState<string>(trees[0]?.temple ?? "");
   const [q, setQ] = useState("");
+  // Mig 132 — the replace / no-replace decision uses the same write
+  // circle as image management (owner / dev / heads / senior).
+  const canDecide = canManageImages;
   // Component browsing: filter within the selected temple + expand/collapse all.
   const [nodeQ, setNodeQ] = useState("");
   const [openMode, setOpenMode] = useState<"default" | "all" | "none">("default");
@@ -211,6 +298,26 @@ export function TempleViewClient({ trees, imagesByNode, canManageImages, templeC
     document.body.classList.toggle("vendor-cockpit-fullscreen", hide);
     return () => document.body.classList.remove("vendor-cockpit-fullscreen");
   }, [menuHidden, cardMode]);
+
+  // Mig 132 — jump from the cancel alert to the exact slab in the tree:
+  // select its temple, expand everything, then scroll the card into view.
+  function jumpToSlab(slabId: string, temple: string) {
+    setCardMode(false);
+    setSelected(temple);
+    setNodeQ("");
+    setOpenMode("all");
+    setTreeKey((k) => k + 1);
+    // Wait for the remount, then scroll + flash the card.
+    setTimeout(() => {
+      const el = document.getElementById(`tv-slab-${slabId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.style.transition = "box-shadow .25s ease";
+        el.style.boxShadow = "0 0 0 3px rgba(185,28,28,0.6)";
+        setTimeout(() => { el.style.boxShadow = ""; }, 1800);
+      }
+    }, 120);
+  }
 
   const filteredTemples = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -262,6 +369,30 @@ export function TempleViewClient({ trees, imagesByNode, canManageImages, templeC
         .tv-temple { transition: transform .15s ease, border-color .15s ease, background .15s ease; }
         .tv-temple:hover { transform: translateX(3px); border-color: var(--gold-dark) !important; }
       `}</style>
+      {/* Mig 132 — cancelled-slab alert. Lists every cancelled slab still
+          awaiting the replace / no-replace decision; tap one to jump to it
+          in the tree. */}
+      {cancelAlerts.length > 0 && (
+        <div style={{ background: "rgba(127,29,29,0.07)", border: "1.5px solid rgba(127,29,29,0.45)", borderRadius: 12, padding: "11px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 800, color: "#7f1d1d" }}>
+            🚫 {cancelAlerts.length} cancelled slab{cancelAlerts.length === 1 ? "" : "s"} need a decision — create a replacement or close it out
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {cancelAlerts.map((a) => (
+              <button
+                key={a.slabId}
+                type="button"
+                onClick={() => jumpToSlab(a.slabId, a.temple)}
+                style={{ fontSize: 12, fontWeight: 800, padding: "6px 12px", borderRadius: 999, border: "1.5px solid rgba(127,29,29,0.5)", background: "var(--surface)", color: "#7f1d1d", cursor: "pointer", whiteSpace: "nowrap" }}
+                title={`Jump to ${a.slabId} in ${a.temple}`}
+              >
+                <code style={{ fontFamily: "ui-monospace, monospace" }}>{a.slabId}</code> · 🏛 {a.temple} →
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* View controls */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <div style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 9, overflow: "hidden" }}>
@@ -350,7 +481,7 @@ export function TempleViewClient({ trees, imagesByNode, canManageImages, templeC
               {visibleRoots.length === 0 ? (
                 <div className="muted" style={{ fontSize: 13, padding: "10px 2px" }}>No components match “{nodeQ}”.</div>
               ) : (
-                visibleRoots.map((r, i) => <TreeNode key={r.id} node={r} depth={0} idx={i} imagesByNode={imagesByNode} openMode={nodeQ ? "all" : openMode} />)
+                visibleRoots.map((r, i) => <TreeNode key={r.id} node={r} depth={0} idx={i} imagesByNode={imagesByNode} openMode={nodeQ ? "all" : openMode} canDecide={canDecide} />)
               )}
             </div>
           </>

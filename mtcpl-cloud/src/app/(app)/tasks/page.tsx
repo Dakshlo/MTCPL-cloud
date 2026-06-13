@@ -160,6 +160,17 @@ export default async function TasksPage() {
     if (error) return null;
     return count ?? 0;
   }
+  // Mig 132 — broken-slab cancel requests awaiting the owner's verdict.
+  async function fetchSlabCancels(): Promise<number | null> {
+    if (profile.role !== "owner" && profile.role !== "developer") return null;
+    const { count, error } = await supabase
+      .from("slab_requirements")
+      .select("*", { count: "exact", head: true })
+      .not("cancel_requested_at", "is", null)
+      .neq("status", "cancelled");
+    if (error) return null;
+    return count ?? 0;
+  }
 
   const [
     approvals,
@@ -172,6 +183,7 @@ export default async function TasksPage() {
     workOrderApproval,
     ownerReviews,
     slabImports,
+    slabCancels,
   ] = await Promise.all([
     fetchApprovals(),
     fetchBillsAudit(),
@@ -183,6 +195,7 @@ export default async function TasksPage() {
     fetchWorkOrderApproval(),
     fetchOwnerReviews(),
     fetchSlabImports(),
+    fetchSlabCancels(),
   ]);
 
   const cards: TaskCard[] = [];
@@ -282,6 +295,17 @@ export default async function TasksPage() {
       description: "Excel import batches waiting for your approval",
       count: slabImports,
       icon: "🗂",
+      department: "production",
+    });
+  }
+  if (slabCancels !== null) {
+    cards.push({
+      id: "slab-cancels",
+      href: "/tasks/slab-cancels",
+      label: "Slab Cancel Requests",
+      description: "Broken slabs reported by the team — approve or reject the cancel",
+      count: slabCancels,
+      icon: "🚫",
       department: "production",
     });
   }

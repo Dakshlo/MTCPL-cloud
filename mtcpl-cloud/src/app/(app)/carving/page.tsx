@@ -140,6 +140,9 @@ export default async function CarvingDashboardPage({
      *  block that is still cutting. Blinking dot on the card; cleared
      *  automatically when the block's cutting is fully approved. */
     precut_at: string | null;
+    /** Mig 132 — a cancel request is pending on this slab. Card shows
+     *  RED + locked (no assign) until the owner approves/rejects. */
+    cancel_requested_at: string | null;
   };
   async function fetchAllUnassignedSlabs(): Promise<UnassignedRow[]> {
     const PAGE = 1000;
@@ -148,7 +151,7 @@ export default async function CarvingDashboardPage({
       const { data, error } = await admin
         .from("slab_requirements")
         .select(
-          "id, label, temple, stone, length_ft, width_ft, thickness_ft, status, priority, source_block_id, updated_at, stock_location, precut_at",
+          "id, label, temple, stone, length_ft, width_ft, thickness_ft, status, priority, source_block_id, updated_at, stock_location, precut_at, cancel_requested_at",
         )
         .eq("status", "cut_done")
         // Mig 125 — parked (temporary storage) slabs are hidden from Unassigned.
@@ -384,12 +387,13 @@ export default async function CarvingDashboardPage({
       width_ft: number;
       thickness_ft: number;
       stock_location: string | null;
+      cancel_requested_at: string | null;
     }
   >();
   if (uniqueSlabReqIds.length > 0) {
     const { data: slabRows } = await admin
       .from("slab_requirements")
-      .select("id, temple, label, description, stone, length_ft, width_ft, thickness_ft, stock_location")
+      .select("id, temple, label, description, stone, length_ft, width_ft, thickness_ft, stock_location, cancel_requested_at")
       .in("id", uniqueSlabReqIds);
     for (const s of slabRows ?? []) {
       slabInfoMap.set(s.id, {
@@ -401,6 +405,7 @@ export default async function CarvingDashboardPage({
         width_ft: Number(s.width_ft) || 0,
         thickness_ft: Number(s.thickness_ft) || 0,
         stock_location: (s as { stock_location?: string | null }).stock_location ?? null,
+        cancel_requested_at: (s as { cancel_requested_at?: string | null }).cancel_requested_at ?? null,
       });
     }
   }
@@ -421,6 +426,8 @@ export default async function CarvingDashboardPage({
       // pills so the carving head / vendor know where to fetch
       // the slab from before it lands at the shade.
       slab_stock_location: info?.stock_location ?? null,
+      // Mig 132 — pending cancel request → red card + locked actions.
+      slab_cancel_pending: !!info?.cancel_requested_at,
       vendor_type: (job as unknown as { vendor_type: string }).vendor_type as "CNC" | "Outsource",
     };
   }
@@ -982,7 +989,8 @@ export default async function CarvingDashboardPage({
           dashboard. Mig 130 — Direct Dispatch renders its own lane. */}
       {mode === "direct" ? (
         <DirectDispatchTab
-          slabs={unassignedSlabsAll ?? []}
+          // Mig 132 — pending-cancel slabs are locked out of direct dispatch.
+          slabs={(unassignedSlabsAll ?? []).filter((s) => !s.cancel_requested_at)}
           history={directHistory}
         />
       ) : tab === "workorders" ? (
@@ -1001,6 +1009,8 @@ export default async function CarvingDashboardPage({
           templeNames={templeNames}
           templeFilter={templeFilter}
           stoneTypes={stoneTypes ?? []}
+          // Mig 132 — who can long-press a slab to request a cancel.
+          canRequestCancel={["developer", "owner", "carving_head", "senior_incharge"].includes(profile.role)}
         />
       )}
     </div>

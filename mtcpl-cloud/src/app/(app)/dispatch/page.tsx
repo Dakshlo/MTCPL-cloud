@@ -62,7 +62,7 @@ export default async function DispatchPage({
     // Ready ("Make Dispatch") = status=completed slabs waiting to be packed
     admin
       .from("slab_requirements")
-      .select("id, label, description, temple, stone, quality, length_ft, width_ft, thickness_ft, priority, status")
+      .select("id, label, description, temple, stone, quality, length_ft, width_ft, thickness_ft, priority, status, cancel_requested_at")
       .eq("status", "completed")
       .order("priority", { ascending: false })
       .order("updated_at", { ascending: true }),
@@ -208,6 +208,7 @@ export default async function DispatchPage({
   function shapeReadySlab(s: {
     id: string; label: string | null; description?: string | null; temple: string; stone: string | null;
     quality: string | null; length_ft: number; width_ft: number; thickness_ft: number; priority: boolean | null;
+    cancel_requested_at?: string | null;
   }): ReadySlab {
     const L = Number(s.length_ft);
     const W = Number(s.width_ft);
@@ -226,6 +227,8 @@ export default async function DispatchPage({
       isMarble: stoneCategoryMap[s.stone ?? ""] === "marble",
       readySince: timer?.since ?? null,
       reworked: timer?.reworked ?? false,
+      // Mig 132 — pending cancel request: red card, can't be dispatched.
+      cancelPending: !!s.cancel_requested_at,
     };
   }
 

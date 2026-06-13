@@ -2,7 +2,7 @@
 // card browser. Kept here so both components import from one place (no
 // duplication, no circular import).
 
-export type StageBucket = "pending" | "cutting" | "cut_done" | "carving" | "done" | "rejected";
+export type StageBucket = "pending" | "cutting" | "cut_done" | "carving" | "done" | "rejected" | "cancelled";
 
 export type ComponentImage = { id: string; url: string; caption: string | null };
 
@@ -16,6 +16,13 @@ export type TempleSlabCard = {
   // Mig 128 — raw component-path fields, so the card browser's "move slab"
   // modal can pre-fill the form and re-categorize the slab in place.
   section: string; element: string; label: string; description: string; additional: string;
+  // Mig 132 — slab cancellation. On a CANCELLED slab: why + the
+  // replacement decision (null = still undecided → Temple View alert).
+  // On a replacement slab: replacementOf = the cancelled slab it replaces.
+  cancelReason?: string | null;
+  cancelResolution?: "no_replacement" | "replaced" | null;
+  replacementSlabId?: string | null;
+  replacementOf?: string | null;
 };
 
 export type TempleTreeNode = {
@@ -41,11 +48,13 @@ export const STAGE_META: Record<StageBucket, { label: string; color: string }> =
   carving: { label: "Carving", color: "#f59e0b" },      // amber
   done: { label: "Done", color: "#16a34a" },            // green
   rejected: { label: "Rejected", color: "#dc2626" },    // red
+  cancelled: { label: "Cancelled", color: "#7f1d1d" },  // dark red (mig 132 — broken, owner-approved exit)
 };
 
 // Rejected slabs are filtered out of Temple View (server-side), so the
-// legend / bars don't show that stage.
-export const STAGE_ORDER: StageBucket[] = ["done", "carving", "cut_done", "cutting", "pending"];
+// legend / bars don't show that stage. Cancelled (mig 132) IS shown —
+// the office decides on a replacement from here.
+export const STAGE_ORDER: StageBucket[] = ["done", "carving", "cut_done", "cutting", "pending", "cancelled"];
 
 export function bucketOf(status: string): StageBucket {
   if (["open", "planned"].includes(status)) return "pending";
@@ -53,6 +62,7 @@ export function bucketOf(status: string): StageBucket {
   if (status === "cut_done") return "cut_done"; // cut, ready to assign to carving
   if (["carving_assigned", "carving_in_progress"].includes(status)) return "carving";
   if (status === "rejected") return "rejected";
+  if (status === "cancelled") return "cancelled"; // mig 132
   return "done";
 }
 

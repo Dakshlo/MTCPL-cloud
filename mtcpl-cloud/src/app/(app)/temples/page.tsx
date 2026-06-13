@@ -24,6 +24,12 @@ type SlabRow = {
   stone: string | null; quality: string | null;
   length_ft: number | null; width_ft: number | null; thickness_ft: number | null;
   priority: boolean | null;
+  // Mig 132 — cancellation fields (cancelled slabs show in Temple View
+  // with a replace / no-replace decision).
+  cancel_reason: string | null;
+  cancel_resolution: "no_replacement" | "replaced" | null;
+  replacement_slab_id: string | null;
+  replacement_of: string | null;
 };
 
 export type TempleSlabCard = {
@@ -31,6 +37,11 @@ export type TempleSlabCard = {
   l: number; w: number; t: number; priority: boolean;
   // Mig 128 — raw component-path fields for the "move slab" modal.
   section: string; element: string; label: string; description: string; additional: string;
+  // Mig 132 — see temple-shared.ts.
+  cancelReason?: string | null;
+  cancelResolution?: "no_replacement" | "replaced" | null;
+  replacementSlabId?: string | null;
+  replacementOf?: string | null;
 };
 
 const SLAB_LIMIT = 30000;
@@ -42,10 +53,11 @@ function stageBucket(status: string): StageBucket {
   if (status === "carving_assigned" || status === "carving_in_progress") return "carving";
   if (status === "completed" || status === "dispatched") return "done";
   if (status === "rejected") return "rejected";
+  if (status === "cancelled") return "cancelled"; // mig 132
   return "pending";
 }
 
-const EMPTY_COUNTS = (): Record<StageBucket, number> => ({ pending: 0, cutting: 0, cut_done: 0, carving: 0, done: 0, rejected: 0 });
+const EMPTY_COUNTS = (): Record<StageBucket, number> => ({ pending: 0, cutting: 0, cut_done: 0, carving: 0, done: 0, rejected: 0, cancelled: 0 });
 
 // Mutable tree used while building; converted to the serializable shape below.
 type BuildNode = {
@@ -105,7 +117,7 @@ export default async function TemplesPage() {
     for (let offset = 0; offset < SLAB_LIMIT; offset += PAGE) {
       const { data, error } = await admin
         .from("slab_requirements")
-        .select("id, label, description, temple, status, component_section, component_element, additional_description, stone, quality, length_ft, width_ft, thickness_ft, priority")
+        .select("id, label, description, temple, status, component_section, component_element, additional_description, stone, quality, length_ft, width_ft, thickness_ft, priority, cancel_reason, cancel_resolution, replacement_slab_id, replacement_of")
         .order("temple", { ascending: true })
         .range(offset, offset + PAGE - 1);
       if (error) throw new Error(error.message);
@@ -117,6 +129,12 @@ export default async function TemplesPage() {
   }
 
   const slabs = await fetchAll();
+
+  // Mig 132 — cancelled slabs still waiting for the replace / no-replace
+  // decision. Drives the red alert strip at the top of Temple View.
+  const cancelAlerts = slabs
+    .filter((s) => s.status === "cancelled" && !s.cancel_resolution)
+    .map((s) => ({ slabId: s.id, temple: (s.temple || "—").trim() }));
 
   // Group by temple → build a Section(›-nested) → Element tree.
   const byTemple = new Map<string, BuildNode>();
@@ -168,6 +186,11 @@ export default async function TemplesPage() {
       label,
       description,
       additional,
+      // Mig 132 — cancellation context for the card UI.
+      cancelReason: s.cancel_reason,
+      cancelResolution: s.cancel_resolution,
+      replacementSlabId: s.replacement_slab_id,
+      replacementOf: s.replacement_of,
     });
   }
 
@@ -252,7 +275,7 @@ export default async function TemplesPage() {
         </div>
         {canWriteImages && <AddTempleImageButton categoryStruct={categoryStruct} />}
       </div>
-      <TempleViewClient trees={trees} imagesByNode={imagesByNode} canManageImages={canWriteImages} templeCats={templeCats} />
+      <TempleViewClient trees={trees} imagesByNode={imagesByNode} canManageImages={canWriteImages} templeCats={templeCats} cancelAlerts={cancelAlerts} />
     </div>
   );
 }

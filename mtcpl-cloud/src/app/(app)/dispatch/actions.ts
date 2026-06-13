@@ -89,7 +89,7 @@ export async function createDispatchAction(formData: FormData) {
   // POST. `.in()` + `.eq()` together gives an atomic-ish check.
   const { data: slabs, error: slabErr } = await admin
     .from("slab_requirements")
-    .select("id, temple, status, length_ft, width_ft, thickness_ft")
+    .select("id, temple, status, length_ft, width_ft, thickness_ft, cancel_requested_at")
     .in("id", slabIds);
   if (slabErr) fail("/dispatch", `Could not verify slabs: ${slabErr.message}`);
   if (!slabs || slabs.length !== slabIds.length) {
@@ -101,6 +101,10 @@ export async function createDispatchAction(formData: FormData) {
     }
     if (s.temple !== temple) {
       fail("/dispatch", `Slab ${s.id} belongs to a different temple (${s.temple}). One dispatch = one temple.`);
+    }
+    // Mig 132 — pending-cancel slabs are locked out of dispatch.
+    if ((s as { cancel_requested_at?: string | null }).cancel_requested_at) {
+      fail("/dispatch", `Slab ${s.id} has a pending CANCEL request — locked until the owner decides.`);
     }
   }
 
@@ -566,7 +570,7 @@ export async function editDispatchSlabsAction(formData: FormData) {
   if (addIds.length > 0) {
     const { data: addSlabs } = await admin
       .from("slab_requirements")
-      .select("id, temple, status")
+      .select("id, temple, status, cancel_requested_at")
       .in("id", addIds);
     if (!addSlabs || addSlabs.length !== addIds.length) {
       fail("/dispatch", "One or more slabs to add no longer exist");
@@ -577,6 +581,10 @@ export async function editDispatchSlabsAction(formData: FormData) {
       }
       if (s.status !== "completed") {
         fail("/dispatch", `Slab ${s.id} is not in 'completed' status (is '${s.status}')`);
+      }
+      // Mig 132 — pending-cancel slabs are locked out of dispatch.
+      if ((s as { cancel_requested_at?: string | null }).cancel_requested_at) {
+        fail("/dispatch", `Slab ${s.id} has a pending CANCEL request — locked until the owner decides.`);
       }
     }
     // Reject if any add-slab is already on a different dispatch

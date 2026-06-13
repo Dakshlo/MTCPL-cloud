@@ -24,7 +24,6 @@ import { BulkAssignModal } from "./bulk-assign-modal";
 import { ReceiveModal } from "./receive-modal";
 import {
   approveCarvingJobAction,
-  rejectCarvingJobAction,
   reworkCarvingJobAction,
   stillPendingWorkAction,
   involveOwnerAction,
@@ -43,6 +42,10 @@ import { CameraCaptureModal } from "@/components/camera-capture-modal";
 // are baked into the uploaded image so they show on every surface
 // (Carving Done card + peek, rework cockpit, Carving Rejected page).
 import { ImageAnnotateModal } from "@/components/image-annotate-modal";
+// Mig 132 — slab cancellation: long-press a card (or 🚫 in the peek) to
+// request a cancel; owner approves/rejects on /tasks/slab-cancels.
+import { SlabCancelRequestModal, longPressHandlers } from "@/components/slab-cancel-request-modal";
+import { requestSlabCancelAction } from "@/app/(app)/slabs/cancel-actions";
 
 type UnassignedSlab = {
   id: string;
@@ -67,6 +70,9 @@ type UnassignedSlab = {
    *  is still cutting). Blinking dot on the card; cleared when the
    *  block's cutting is fully approved. */
   precut_at?: string | null;
+  /** Mig 132 — a cancel request is pending (slab reported broken). Card
+   *  shows RED + locked (no assign) until the owner decides. */
+  cancel_requested_at?: string | null;
 };
 
 type JobRow = {
@@ -160,6 +166,9 @@ type JobRow = {
   owner_review_status?: string | null;
   owner_review_kind?: string | null;
   owner_review_note?: string | null;
+  /** Mig 132 — the slab under this job has a pending cancel request.
+   *  Red card + lock banner until the owner approves/rejects. */
+  slab_cancel_pending?: boolean;
 };
 
 type Vendor = {
@@ -199,6 +208,7 @@ export function CarvingDashboardClient({
   templeNames,
   templeFilter,
   stoneTypes,
+  canRequestCancel = false,
 }: {
   tab: "unassigned" | "active" | "review" | "done" | "pending";
   /** Daksh June 2026 — CNC vs Outsource view. Drives assign-vendor
@@ -218,6 +228,9 @@ export function CarvingDashboardClient({
   templeFilter: string;
   /** Stone palette definitions for the 3D thumbnails on cards. */
   stoneTypes: StoneTypeDef[];
+  /** Mig 132 — long-press a slab card to request a cancel (broken slab).
+   *  carving_head / senior_incharge / owner / developer. */
+  canRequestCancel?: boolean;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -230,6 +243,9 @@ export function CarvingDashboardClient({
   // Awaiting Review / Carving Done. Center modal with slab info,
   // assignment, and inline approve/reject forms.
   const [peekJob, setPeekJob] = useState<JobRow | null>(null);
+  // Mig 132 — slab whose cancel-request modal is open (long-press on a
+  // card, or the 🚫 button in the job peek).
+  const [cancelTarget, setCancelTarget] = useState<{ id: string; temple?: string | null; label?: string | null } | null>(null);
 
   // Bulk-select mode on the Unassigned tab. The carving head taps
   // "📋 Bulk select" to enter, then taps up to 10 slabs (a 2-head
@@ -908,6 +924,8 @@ export function CarvingDashboardClient({
             stoneTypes={stoneTypes}
             viewMode={viewMode}
             onAssign={(s) => setAssigning(s)}
+            // Mig 132 — long-press a card to request a cancel.
+            onRequestCancel={canRequestCancel ? (s) => setCancelTarget({ id: s.id, temple: s.temple, label: s.label }) : undefined}
             bulkMode={bulkMode}
             bulkSelected={bulkSelected}
             onBulkToggle={(slabId) => {
@@ -1172,6 +1190,22 @@ export function CarvingDashboardClient({
           machineCodeById={machineCodeById}
           stoneTypes={stoneTypes}
           onClose={() => setPeekJob(null)}
+          // Mig 132 — 🚫 Request slab cancel from the peek (active jobs).
+          onRequestCancel={
+            canRequestCancel && !peekJob.slab_cancel_pending && peekJob.status !== "dispatched" && peekJob.status !== "cancelled"
+              ? () => setCancelTarget({ id: peekJob.slab_requirement_id, temple: peekJob.temple, label: peekJob.slab_label })
+              : undefined
+          }
+        />
+      )}
+
+      {/* Mig 132 — request-cancel modal (long-press on a card / 🚫 in peek). */}
+      {cancelTarget && (
+        <SlabCancelRequestModal
+          slabId={cancelTarget.id}
+          temple={cancelTarget.temple}
+          label={cancelTarget.label}
+          onClose={() => setCancelTarget(null)}
         />
       )}
     </>
@@ -1199,6 +1233,7 @@ function UnassignedByTemple({
   stoneTypes,
   viewMode,
   onAssign,
+  onRequestCancel,
   bulkMode,
   bulkSelected,
   onBulkToggle,
@@ -1210,6 +1245,9 @@ function UnassignedByTemple({
   stoneTypes: StoneTypeDef[];
   viewMode: "grouped" | "flat";
   onAssign: (s: UnassignedSlab) => void;
+  /** Mig 132 — long-press (or right-click) a card to request a cancel.
+   *  Undefined = viewer can't request cancels. */
+  onRequestCancel?: (s: UnassignedSlab) => void;
   /** Bulk-select mode on the Unassigned tab. When true, clicking a
    *  card toggles its membership in `bulkSelected` instead of opening
    *  the single-slab assign modal. Capped at `bulkMax` selections. */
@@ -1247,6 +1285,9 @@ function UnassignedByTemple({
   const renderCard = (s: UnassignedSlab) => {
     const isSelected = bulkSelected.has(s.id);
     const atLimit = !isSelected && bulkSelected.size >= bulkMax;
+    // Mig 132 — pending cancel request: card goes RED + fully locked
+    // (no bulk toggle, no Assign) until the owner decides.
+    const cancelPending = !!s.cancel_requested_at;
     // Same-dim constraint: if a bulk batch has been started, only
     // cards matching the anchor's L×W×T can join. Non-matching cards
     // get the dim/disabled treatment so the user understands why.
@@ -1257,21 +1298,31 @@ function UnassignedByTemple({
       (Number(s.length_ft) !== anchorDims.length_ft ||
         Number(s.width_ft) !== anchorDims.width_ft ||
         Number(s.thickness_ft) !== anchorDims.thickness_ft);
-    const cardClickable = bulkMode && !dimMismatch;
-    const isDisabled = bulkMode && (atLimit || !!dimMismatch);
+    const cardClickable = bulkMode && !dimMismatch && !cancelPending;
+    const isDisabled = bulkMode && (atLimit || !!dimMismatch || cancelPending);
+    // Mig 132 — long-press (or right-click) to request a cancel.
+    const pressHandlers =
+      onRequestCancel && !cancelPending && !bulkMode
+        ? longPressHandlers(() => onRequestCancel(s))
+        : {};
     return (
     <div
       key={s.id}
       onClick={cardClickable ? () => onBulkToggle(s.id) : undefined}
+      {...pressHandlers}
       style={{
         padding: "8px 10px",
-        background: bulkMode && isSelected
+        background: cancelPending
+          ? "rgba(185,28,28,0.07)"
+          : bulkMode && isSelected
           ? "rgba(180,115,51,0.12)"
           : s.priority
             ? "rgba(220,38,38,0.04)"
             : "var(--surface)",
         border: `2px solid ${
-          bulkMode && isSelected
+          cancelPending
+            ? "#b91c1c"
+            : bulkMode && isSelected
             ? "var(--gold-dark)"
             : s.priority
               ? "rgba(220,38,38,0.2)"
@@ -1356,6 +1407,12 @@ function UnassignedByTemple({
           ⏳ block still cutting
         </div>
       )}
+      {/* Mig 132 — cancel-in-process banner. Locked until owner decides. */}
+      {cancelPending && (
+        <div style={{ fontSize: 9.5, fontWeight: 800, color: "#fff", background: "#b91c1c", borderRadius: 4, padding: "2px 7px", alignSelf: "flex-start", letterSpacing: "0.03em" }}>
+          🚫 CANCEL REQUESTED — waiting for owner
+        </div>
+      )}
       {/* In flat view we surface temple under the slab id since the
           temple group header is gone. In grouped view temple is in
           the accordion header so we hide it here. */}
@@ -1436,8 +1493,9 @@ function UnassignedByTemple({
         );
       })()}
       {/* Single-slab Assign button — only shown when NOT in bulk
-          mode. In bulk mode the whole card acts as a toggle. */}
-      {!bulkMode && (
+          mode. In bulk mode the whole card acts as a toggle.
+          Mig 132 — hidden while a cancel request is pending (locked). */}
+      {!bulkMode && !cancelPending && (
         <button
           type="button"
           onClick={(e) => {
@@ -2595,9 +2653,14 @@ function JobsByTemple({
                     padding: "10px 12px",
                     // Mig 097 — departed (approved-but-held) slabs get a
                     // distinct amber card on Carving Done so they stand apart.
-                    background: j.depart_flag ? "rgba(180,83,9,0.07)" : "var(--surface)",
-                    border: j.depart_flag ? "1px solid rgba(180,83,9,0.4)" : "1px solid var(--border)",
-                    borderLeft: `4px solid ${j.depart_flag ? "#b45309" : statusStripe}`,
+                    // Mig 132 — pending-cancel slabs go RED (locked).
+                    background: j.slab_cancel_pending
+                      ? "rgba(185,28,28,0.07)"
+                      : j.depart_flag ? "rgba(180,83,9,0.07)" : "var(--surface)",
+                    border: j.slab_cancel_pending
+                      ? "1.5px solid #b91c1c"
+                      : j.depart_flag ? "1px solid rgba(180,83,9,0.4)" : "1px solid var(--border)",
+                    borderLeft: `4px solid ${j.slab_cancel_pending ? "#b91c1c" : j.depart_flag ? "#b45309" : statusStripe}`,
                     borderRadius: 10,
                     display: "flex",
                     flexDirection: "column",
@@ -2627,15 +2690,21 @@ function JobsByTemple({
                       "0 4px 12px rgba(15,23,42,0.08)";
                   }}
                   onMouseLeave={(e) => {
-                    e.currentTarget.style.background = "var(--surface)";
-                    e.currentTarget.style.borderTopColor = "var(--border)";
-                    e.currentTarget.style.borderRightColor = "var(--border)";
-                    e.currentTarget.style.borderBottomColor = "var(--border)";
+                    e.currentTarget.style.background = j.slab_cancel_pending ? "rgba(185,28,28,0.07)" : "var(--surface)";
+                    e.currentTarget.style.borderTopColor = j.slab_cancel_pending ? "#b91c1c" : "var(--border)";
+                    e.currentTarget.style.borderRightColor = j.slab_cancel_pending ? "#b91c1c" : "var(--border)";
+                    e.currentTarget.style.borderBottomColor = j.slab_cancel_pending ? "#b91c1c" : "var(--border)";
                     e.currentTarget.style.transform = "translateY(0)";
                     e.currentTarget.style.boxShadow =
                       "0 1px 2px rgba(15,23,42,0.04)";
                   }}
                 >
+                  {/* Mig 132 — pending cancel: red banner, job locked. */}
+                  {j.slab_cancel_pending && (
+                    <div style={{ fontSize: 10, fontWeight: 800, color: "#fff", background: "#b91c1c", borderRadius: 5, padding: "3px 8px", alignSelf: "flex-start", letterSpacing: "0.03em" }}>
+                      🚫 CANCEL REQUESTED — waiting for owner
+                    </div>
+                  )}
                   {/* 3D slab thumbnail */}
                   <SlabThumb
                     stone={j.stone}
@@ -3414,11 +3483,15 @@ function JobDetailPeek({
   machineCodeById,
   stoneTypes,
   onClose,
+  onRequestCancel,
 }: {
   job: JobRow;
   machineCodeById: Record<string, string>;
   stoneTypes: StoneTypeDef[];
   onClose: () => void;
+  /** Mig 132 — opens the request-cancel modal for this job's slab.
+   *  Undefined = viewer can't request / request already pending. */
+  onRequestCancel?: () => void;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
 
@@ -3519,6 +3592,26 @@ function JobDetailPeek({
                 {job.slab_requirement_id}
               </code>
               <StatusPill status={job.status} />
+              {/* Mig 132 — pending cancel: red lock banner. */}
+              {job.slab_cancel_pending && (
+                <span style={{ fontSize: 10.5, fontWeight: 800, color: "#fff", background: "#b91c1c", borderRadius: 999, padding: "3px 10px", letterSpacing: "0.03em" }}>
+                  🚫 CANCEL REQUESTED — locked until owner decides
+                </span>
+              )}
+              {/* Mig 132 — request a cancel for this slab (broken). */}
+              {onRequestCancel && (
+                <button
+                  type="button"
+                  onClick={onRequestCancel}
+                  title="Slab broken / unusable? Send a cancel request to the owner"
+                  style={{
+                    fontSize: 11.5, fontWeight: 800, color: "#b91c1c", background: "rgba(185,28,28,0.07)",
+                    border: "1.5px solid rgba(185,28,28,0.4)", borderRadius: 999, padding: "4px 12px", cursor: "pointer",
+                  }}
+                >
+                  🚫 Request cancel
+                </button>
+              )}
             </div>
             <div style={{ fontSize: 13, fontWeight: 600, marginTop: 4, color: "var(--text)" }}>
               🏛 {job.temple}
@@ -3978,6 +4071,7 @@ function JobDetailPeek({
           {inReview && (
             <ApproveRejectForms
               jobId={job.id}
+              slabId={job.slab_requirement_id}
               isOutsource={job.vendor_type === "Outsource"}
               ownerReviewStatus={job.owner_review_status ?? null}
               ownerReviewKind={job.owner_review_kind ?? null}
@@ -4152,7 +4246,7 @@ function OwnerInvolveSection({
   );
 }
 
-function ApproveRejectForms({ jobId, isOutsource, onDone, ownerReviewStatus, ownerReviewKind, ownerReviewNote }: { jobId: string; isOutsource: boolean; onDone: () => void; ownerReviewStatus?: string | null; ownerReviewKind?: string | null; ownerReviewNote?: string | null }) {
+function ApproveRejectForms({ jobId, slabId, isOutsource, onDone, ownerReviewStatus, ownerReviewKind, ownerReviewNote }: { jobId: string; slabId: string; isOutsource: boolean; onDone: () => void; ownerReviewStatus?: string | null; ownerReviewKind?: string | null; ownerReviewNote?: string | null }) {
   const router = useRouter();
   // Mig 080 — three outcomes. The selected mode drives which form
   // is open and which server action gets called on submit. Image
@@ -4345,14 +4439,39 @@ function ApproveRejectForms({ jobId, isOutsource, onDone, ownerReviewStatus, own
     if (mode === "approve" && depart) {
       fd.set("depart", "1");
     }
+    // Mig 132 — the old hard-Reject is replaced by the slab-cancel
+    // REQUEST flow: reason + photo go to the owner's task panel; the
+    // slab stays here (red, locked) until the owner approves/rejects.
+    if (mode === "reject") {
+      const fd2 = new FormData();
+      fd2.set("slab_id", slabId);
+      fd2.set("reason", notes);
+      if (images[0]) fd2.set("photo", images[0].file);
+      requestSlabCancelAction(fd2)
+        .then((res) => {
+          if (!res.ok) {
+            setErr(res.error);
+            setPending(false);
+            setConfirmStage(0);
+            return;
+          }
+          onDone();
+          router.refresh();
+        })
+        .catch((e: unknown) => {
+          const msg = e instanceof Error ? e.message : String(e);
+          setErr(msg);
+          setPending(false);
+          setConfirmStage(0);
+        });
+      return;
+    }
     const action =
       mode === "approve"
         ? approveCarvingJobAction
         : mode === "rework"
           ? reworkCarvingJobAction
-          : mode === "reject"
-            ? rejectCarvingJobAction
-            : stillPendingWorkAction;
+          : stillPendingWorkAction;
     action(fd)
       .then(() => {
         onDone();
@@ -4449,9 +4568,11 @@ function ApproveRejectForms({ jobId, isOutsource, onDone, ownerReviewStatus, own
       accentSolid: "#b91c1c",
       tintBg: "linear-gradient(180deg, rgba(185,28,28,0.06) 0%, rgba(185,28,28,0) 80%)",
       tintBorder: "rgba(185,28,28,0.32)",
-      label: "Reject",
-      icon: "✕",
-      tagline: "Hard reject — out of the active loop",
+      // Mig 132 — the hard-Reject became a CANCEL REQUEST: it goes to
+      // the owner's task panel for approval instead of acting instantly.
+      label: "Request Cancel",
+      icon: "🚫",
+      tagline: "Slab broken? Sends a cancel request to the owner",
       submitGradient: "linear-gradient(180deg, #dc2626 0%, #991b1b 100%)",
       shadow: "0 6px 18px rgba(185,28,28,0.4)",
     },
@@ -4475,7 +4596,7 @@ function ApproveRejectForms({ jobId, isOutsource, onDone, ownerReviewStatus, own
       : mode === "rework"
         ? "What exactly needs to be fixed? (required)"
         : mode === "reject"
-          ? "Why is this slab being rejected? (required)"
+          ? "Why should this slab be cancelled? (required — goes to the owner)"
           : "What still needs work? (helps the vendor)";
 
   return (
@@ -4543,9 +4664,9 @@ function ApproveRejectForms({ jobId, isOutsource, onDone, ownerReviewStatus, own
                   },
                   {
                     key: "reject" as const,
-                    icon: "✕",
-                    label: "Reject",
-                    sub: "Hard stop",
+                    icon: "🚫",
+                    label: "Request Cancel",
+                    sub: "Owner approves",
                     tone: "#b91c1c",
                     toneSolid: "#b91c1c",
                     activeBg:

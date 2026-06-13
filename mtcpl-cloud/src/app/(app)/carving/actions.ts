@@ -1096,6 +1096,19 @@ export async function assignCarvingJobAction(formData: FormData) {
     redirect("/carving?toast=Missing+slab+or+vendor");
   }
 
+  // Mig 132 — a slab with a pending cancel request is LOCKED: no new
+  // assignment until the owner approves or rejects the cancel.
+  {
+    const { data: cancelCheck } = await admin
+      .from("slab_requirements")
+      .select("cancel_requested_at")
+      .eq("id", slabId)
+      .maybeSingle();
+    if ((cancelCheck as { cancel_requested_at?: string | null } | null)?.cancel_requested_at) {
+      redirect(`/carving?toast=${encodeURIComponent(`${slabId} has a pending CANCEL request — locked until the owner decides`)}`);
+    }
+  }
+
   // Load vendor so we can snapshot name/type into carving_items.
   // CNC + Manual are both allowed. Manual vendors skip the receive /
   // load / unload lifecycle — the carving head fires
@@ -1346,6 +1359,19 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
   }
   if (!vendorId) {
     redirect("/carving?toast=Pick+a+vendor");
+  }
+
+  // Mig 132 — pending-cancel slabs are locked out of new assignments.
+  {
+    const { data: lockedRows } = await admin
+      .from("slab_requirements")
+      .select("id")
+      .in("id", slabIds)
+      .not("cancel_requested_at", "is", null);
+    const locked = ((lockedRows ?? []) as Array<{ id: string }>).map((r) => r.id);
+    if (locked.length > 0) {
+      redirect(`/carving?toast=${encodeURIComponent(`Cancel request pending on ${locked.join(", ")} — locked until the owner decides`)}`);
+    }
   }
 
   const { data: vendor } = await admin
@@ -7062,13 +7088,15 @@ export async function directDispatchSlabsAction(
       })
       .in("id", slabIds)
       .eq("status", "cut_done")
+      // Mig 132 — pending-cancel slabs are locked.
+      .is("cancel_requested_at", null)
       .select("id, temple");
     if (error) throw new Error(error.message);
     const rows = (flipped ?? []) as Array<{ id: string; temple: string }>;
     const count = rows.length;
     if (count === 0) {
       throw new Error(
-        "Nothing moved — the selected slabs are no longer cut-&-ready (already assigned or parked). Refresh and retry.",
+        "Nothing moved — the selected slabs are no longer cut-&-ready (already assigned, parked or pending a cancel request). Refresh and retry.",
       );
     }
 

@@ -28,6 +28,9 @@ import { DeliverModal } from "./deliver-modal";
 import { EditSlabsModal } from "./edit-slabs-modal";
 import { createDispatchAction, undoDispatchAction, approveDispatchAction, cancelDispatchAction, updateDispatchInchargeAction } from "./actions";
 import { timeAgoLabel } from "./time-ago";
+// Mig 132 — long-press a slab card to request a cancel (broken slab);
+// the owner approves/rejects on /tasks/slab-cancels.
+import { SlabCancelRequestModal, longPressHandlers } from "@/components/slab-cancel-request-modal";
 
 type Tab = "ready" | "provisional" | "out_for_delivery" | "delivered";
 
@@ -53,6 +56,9 @@ export type ReadySlab = {
    *  slab went through the Rework Tunnel. */
   readySince: string | null;
   reworked: boolean;
+  /** Mig 132 — a cancel request is pending: red card, locked out of
+   *  dispatch until the owner approves/rejects. */
+  cancelPending: boolean;
 };
 
 export type ProvisionalRow = {
@@ -160,30 +166,35 @@ function ReadyTimer({ since, reworked }: { since: string | null; reworked: boole
 }
 
 /** One slab card — used in the browse grid (read-only) and inside the
- *  dispatch peek (tap to select). */
+ *  dispatch peek (tap to select). Mig 132 — pending-cancel slabs render
+ *  RED + locked; long-press (where wired) opens the request modal. */
 function SlabCard({
-  s, selected, onToggle,
+  s, selected, onToggle, onLongPress,
 }: {
   s: ReadySlab;
   selected?: boolean;
   onToggle?: () => void;
+  onLongPress?: () => void;
 }) {
-  const selectable = !!onToggle;
+  const selectable = !!onToggle && !s.cancelPending;
+  const pressHandlers = onLongPress && !s.cancelPending ? longPressHandlers(onLongPress) : {};
   return (
     <div
-      onClick={onToggle}
+      onClick={selectable ? onToggle : undefined}
+      {...pressHandlers}
       role={selectable ? "button" : undefined}
       tabIndex={selectable ? 0 : undefined}
       onKeyDown={selectable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle!(); } } : undefined}
       style={{
-        background: selected ? "rgba(184,115,51,0.1)" : "var(--surface)",
-        border: selected ? "2px solid var(--gold-dark)" : "1px solid var(--border)",
-        borderLeft: selected ? "6px solid var(--gold-dark)" : `5px solid ${s.isMarble ? "#b45309" : "#0d9488"}`,
+        background: s.cancelPending ? "rgba(185,28,28,0.07)" : selected ? "rgba(184,115,51,0.1)" : "var(--surface)",
+        border: s.cancelPending ? "2px solid #b91c1c" : selected ? "2px solid var(--gold-dark)" : "1px solid var(--border)",
+        borderLeft: s.cancelPending ? "6px solid #b91c1c" : selected ? "6px solid var(--gold-dark)" : `5px solid ${s.isMarble ? "#b45309" : "#0d9488"}`,
         borderRadius: 12, padding: "10px 12px",
         display: "flex", flexDirection: "column", gap: 5,
-        cursor: selectable ? "pointer" : "default", userSelect: "none",
+        cursor: selectable ? "pointer" : s.cancelPending ? "not-allowed" : "default", userSelect: "none",
         transition: "border-color .12s ease, background .12s ease, transform .12s ease",
       }}
+      title={s.cancelPending ? "Cancel requested — locked until the owner decides" : undefined}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
         {selectable && (
@@ -204,6 +215,12 @@ function SlabCard({
         {s.priority && <span title="Urgent" style={{ fontSize: 13 }}>⚡</span>}
         <span style={{ marginLeft: "auto" }}><ReadyTimer since={s.readySince} reworked={s.reworked} /></span>
       </div>
+      {/* Mig 132 — cancel-in-process banner. */}
+      {s.cancelPending && (
+        <div style={{ fontSize: 9.5, fontWeight: 800, color: "#fff", background: "#b91c1c", borderRadius: 4, padding: "2px 7px", alignSelf: "flex-start", letterSpacing: "0.03em" }}>
+          🚫 CANCEL REQUESTED — waiting for owner
+        </div>
+      )}
       {(s.label || s.description) && (
         <div style={{ fontSize: 12.5, lineHeight: 1.35 }}>
           <strong>{s.label ?? ""}</strong>
@@ -442,6 +459,9 @@ function ReadyTab({
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [peekGroup, setPeekGroup] = useState<TempleGroup | null>(null);
+  // Mig 132 — slab whose cancel-request modal is open (long-press on a
+  // card). Everyone with dispatch access can request (dev/owner/carving_head).
+  const [cancelTarget, setCancelTarget] = useState<ReadySlab | null>(null);
 
   const groups: TempleGroup[] = useMemo(() => {
     const map = new Map<string, TempleGroup>();
@@ -563,10 +583,13 @@ function ReadyTab({
                   </button>
                 </div>
 
-                {/* Slab cards (browse-only — selection happens in the peek) */}
+                {/* Slab cards (browse-only — selection happens in the peek).
+                    Mig 132 — long-press a card to request a cancel. */}
                 {expanded && (
                   <div style={{ padding: "12px 14px", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 10, borderTop: "1px solid var(--border)" }}>
-                    {g.matched.map((s) => <SlabCard key={s.id} s={s} />)}
+                    {g.matched.map((s) => (
+                      <SlabCard key={s.id} s={s} onLongPress={() => setCancelTarget(s)} />
+                    ))}
                   </div>
                 )}
               </div>
@@ -582,6 +605,16 @@ function ReadyTab({
           siteInfo={siteInfoByTemple[peekGroup.temple] ?? null}
           handlingMan={handlingMan}
           onClose={() => setPeekGroup(null)}
+        />
+      )}
+
+      {/* Mig 132 — request-cancel modal (long-press on a card). */}
+      {cancelTarget && (
+        <SlabCancelRequestModal
+          slabId={cancelTarget.id}
+          temple={cancelTarget.temple}
+          label={cancelTarget.label}
+          onClose={() => setCancelTarget(null)}
         />
       )}
     </>
@@ -653,7 +686,9 @@ function TempleDispatchPeek({
     });
   }
 
-  const allMatchedSelected = matched.length > 0 && matched.every((s) => selected.has(s.id));
+  // Mig 132 — pending-cancel slabs can't go on a truck; Select-all skips them.
+  const selectableMatched = matched.filter((s) => !s.cancelPending);
+  const allMatchedSelected = selectableMatched.length > 0 && selectableMatched.every((s) => selected.has(s.id));
 
   return (
     <div style={peekOverlay} onMouseDown={(e) => { if (e.target === e.currentTarget && !submitting) onClose(); }}>
@@ -694,14 +729,14 @@ function TempleDispatchPeek({
                 onClick={() => {
                   setSelected((prev) => {
                     const next = new Set(prev);
-                    if (allMatchedSelected) for (const s of matched) next.delete(s.id);
-                    else for (const s of matched) next.add(s.id);
+                    if (allMatchedSelected) for (const s of selectableMatched) next.delete(s.id);
+                    else for (const s of selectableMatched) next.add(s.id);
                     return next;
                   });
                 }}
                 style={{ padding: "10px 16px", fontSize: 13, fontWeight: 800, borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--text)", cursor: "pointer", whiteSpace: "nowrap" }}
               >
-                {allMatchedSelected ? "✕ Clear all" : `✓ Select all (${matched.length})`}
+                {allMatchedSelected ? "✕ Clear all" : `✓ Select all (${selectableMatched.length})`}
               </button>
             </div>
 

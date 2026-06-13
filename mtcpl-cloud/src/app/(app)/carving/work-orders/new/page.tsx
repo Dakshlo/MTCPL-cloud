@@ -48,6 +48,9 @@ export default async function NewWorkOrderPage() {
         "id, label, temple, stone, status, length_ft, width_ft, thickness_ft, stock_location, updated_at",
       )
       .in("status", ["open", "planned", "cut_done"])
+      // Mig 132 — slabs with a pending cancel request are locked: they
+      // can't be put on a new work order until the owner decides.
+      .is("cancel_requested_at", null)
       .order("created_at", { ascending: false })
       .range(off, off + 999);
     if (!data || data.length === 0) break;
