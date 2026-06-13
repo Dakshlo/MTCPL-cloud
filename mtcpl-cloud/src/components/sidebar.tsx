@@ -123,16 +123,6 @@ const navEntries: NavEntry[] = [
     department: "production",
   },
   {
-    // Mig 133 — Site / Installation: the stage after dispatch. Unload
-    // delivered trucks into yards, keep stock, mark slabs installed.
-    // (Per-temple site_incharge scoping comes later.)
-    href: "/site",
-    label: "Site / Installation",
-    icon: "🧱",
-    roles: ["developer", "owner", "team_head", "senior_incharge", "carving_head"],
-    department: "production",
-  },
-  {
     href: "/blocks",
     label: "Blocks",
     icon: "▣",
@@ -271,16 +261,6 @@ const navEntries: NavEntry[] = [
     department: "production",
   },
   {
-    href: "/dispatch",
-    label: "Dispatch",
-    // Mig 076 round 2 — Daksh asked to drop Dispatch from Rajesh's
-    // sidebar. He doesn't run the dispatch step; keeping it would
-    // surface a queue he never acts on.
-    icon: "🚚",
-    roles: ["developer", "owner", "carving_head"],
-    department: "production",
-  },
-  {
     // Mig 060 follow-on (Daksh): CNC Expenses, like Cutter Expenses,
     // is the data-entry user's work surface only. Owner / carving_head
     // reach the report via the dashboard's Various Costing card. Dev
@@ -291,6 +271,36 @@ const navEntries: NavEntry[] = [
     label: "CNC Expenses",
     icon: "💸",
     roles: ["cnc_expense_entry", "crosscheck"],
+    department: "production",
+  },
+  {
+    // Mig 133 (Daksh) — Dispatch + Site pulled out of CARVING into
+    // their own section: the post-carving "leave the workshop → reach
+    // the temple site" flow. Roles = union of the two children below so
+    // the header never orphans (each role here has ≥1 visible child).
+    type: "divider",
+    label: "DISPATCH & SITE",
+    roles: ["developer", "owner", "carving_head", "team_head", "senior_incharge"],
+    department: "production",
+  },
+  {
+    href: "/dispatch",
+    label: "Dispatch",
+    // Mig 076 round 2 — Daksh asked to drop Dispatch from Rajesh's
+    // sidebar. He doesn't run the dispatch step; keeping it would
+    // surface a queue he never acts on.
+    icon: "🚚",
+    roles: ["developer", "owner", "carving_head"],
+    department: "production",
+  },
+  {
+    // Mig 133 — Site / Installation: the stage after dispatch. Unload
+    // delivered trucks into yards, keep stock, mark slabs installed.
+    // (Per-temple site_incharge scoping comes later.)
+    href: "/site",
+    label: "Site / Installation",
+    icon: "🧱",
+    roles: ["developer", "owner", "team_head", "senior_incharge", "carving_head"],
     department: "production",
   },
   {
