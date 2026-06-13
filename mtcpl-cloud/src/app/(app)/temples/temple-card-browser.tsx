@@ -341,39 +341,9 @@ export function TempleCardBrowser({
           ))}
         </div>
         <span style={{ flex: 1 }} />
+        {/* Rename / photos live on each card itself (the ✏️ and 📷 on every
+            category card), so there are no duplicate buttons up here. */}
         <span className="muted" style={{ fontSize: 11.5, whiteSpace: "nowrap" }}>Esc = back</span>
-        {/* Rename the group you're currently inside (Category / Label /
-            Description) — applies to every slab under it. */}
-        {canEditCategories && temple && currentNode && (
-          <button
-            type="button"
-            onClick={() => {
-              const siblings = (path.length > 1 ? path[path.length - 2].children : (tree?.roots ?? []));
-              setRenameNode({
-                segments: path.map((n) => n.name),
-                options: siblings.map((n) => n.name).filter((n) => n !== currentNode.name),
-                count: currentNode.total,
-              });
-            }}
-            title={`Rename ${currentNode.name}`}
-            style={{ fontSize: 12.5, fontWeight: 800, padding: "8px 13px", borderRadius: 9, border: "1px solid var(--gold-dark)", background: "var(--surface)", color: "var(--gold-dark)", cursor: "pointer", whiteSpace: "nowrap" }}
-          >
-            ✏️ Rename
-          </button>
-        )}
-        {/* Contextual photo upload — adds to the node you're currently in
-            (Category / Label / Description). Cat-1 cards have their own ＋
-            button at the temple root. */}
-        {canManageImages && temple && currentNode && (
-          <button
-            type="button"
-            onClick={() => setUploadNode({ path: currentNode.id, label: currentNode.name })}
-            title={`Add a photo to ${currentNode.name}`}
-            style={{ fontSize: 12.5, fontWeight: 800, padding: "8px 13px", borderRadius: 9, border: "1px solid var(--gold-dark)", background: "var(--surface)", color: "var(--gold-dark)", cursor: "pointer", whiteSpace: "nowrap" }}
-          >
-            📷 Add photo here
-          </button>
-        )}
         <button type="button" onClick={onExit} style={{ fontSize: 13, fontWeight: 800, padding: "8px 14px", borderRadius: 9, border: "none", background: "var(--gold-dark)", color: "#fff", cursor: "pointer" }}>✕ Exit</button>
       </div>
 
