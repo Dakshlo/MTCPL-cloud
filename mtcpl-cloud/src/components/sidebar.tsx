@@ -280,7 +280,7 @@ const navEntries: NavEntry[] = [
     // the header never orphans (each role here has ≥1 visible child).
     type: "divider",
     label: "DISPATCH & SITE",
-    roles: ["developer", "owner", "carving_head", "team_head", "senior_incharge"],
+    roles: ["developer", "owner", "carving_head"],
     department: "production",
   },
   {
@@ -296,11 +296,12 @@ const navEntries: NavEntry[] = [
   {
     // Mig 133 — Site / Installation: the stage after dispatch. Unload
     // delivered trucks into yards, keep stock, mark slabs installed.
-    // (Per-temple site_incharge scoping comes later.)
+    // Daksh (June 2026) — owner + developer only for now; per-temple
+    // site_incharge scoping (and wider access) comes later.
     href: "/site",
     label: "Site / Installation",
     icon: "🧱",
-    roles: ["developer", "owner", "team_head", "senior_incharge", "carving_head"],
+    roles: ["developer", "owner"],
     department: "production",
   },
   {
