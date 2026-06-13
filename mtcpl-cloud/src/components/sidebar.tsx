@@ -350,27 +350,11 @@ const navEntries: NavEntry[] = [
         roles: ["developer", "slab_transfer"],
         department: "production",
       },
-      {
-        href: "/carving/expenses",
-        label: "CNC Expenses",
-        icon: "💸",
-        roles: ["developer"],
-        department: "production",
-      },
-      {
-        href: "/cutting/expenses",
-        label: "Cutter Expenses",
-        icon: "💸",
-        roles: ["developer"],
-        department: "production",
-      },
-      {
-        href: "/reports/various-costing",
-        label: "Various Costing",
-        icon: "📊",
-        roles: ["developer"],
-        department: "production",
-      },
+      // Daksh (June 2026) — CNC Expenses / Cutter Expenses / Various
+      // Costing removed from the developer "More" group: each is already
+      // reachable elsewhere (dashboard Various Costing card → drill into
+      // the CNC / cutter reports; the expense-entry roles have their own
+      // direct sidebar links). Keeping only My Jobs + Slab Transfer here.
     ],
   },
   // ── REGISTER department (Mig 101 + 102) — its own switcher tile ──────
