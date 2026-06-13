@@ -44,17 +44,19 @@ export type TempleTree = {
 export const STAGE_META: Record<StageBucket, { label: string; color: string }> = {
   pending: { label: "Pending", color: "#94a3b8" },      // slate
   cutting: { label: "Cutting", color: "#3b82f6" },      // blue (actively being cut)
-  cut_done: { label: "Cut · ready", color: "#0d9488" }, // teal (cut, ready to assign to carving)
+  cut_done: { label: "Cut · ready", color: "#a855f7" }, // violet — deliberately NOT green, so it's never mistaken for Done
   carving: { label: "Carving", color: "#f59e0b" },      // amber
   done: { label: "Done", color: "#16a34a" },            // green
   rejected: { label: "Rejected", color: "#dc2626" },    // red
   cancelled: { label: "Cancelled", color: "#7f1d1d" },  // dark red (mig 132 — broken, owner-approved exit)
 };
 
+// Bar + chip + legend order follows the production flow, left → right:
+//   Pending → Cutting → Cut · ready → Carving → Done → Cancelled.
 // Rejected slabs are filtered out of Temple View (server-side), so the
 // legend / bars don't show that stage. Cancelled (mig 132) IS shown —
 // the office decides on a replacement from here.
-export const STAGE_ORDER: StageBucket[] = ["done", "carving", "cut_done", "cutting", "pending", "cancelled"];
+export const STAGE_ORDER: StageBucket[] = ["pending", "cutting", "cut_done", "carving", "done", "cancelled"];
 
 export function bucketOf(status: string): StageBucket {
   if (["open", "planned"].includes(status)) return "pending";
