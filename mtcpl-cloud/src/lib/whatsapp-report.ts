@@ -18,8 +18,10 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 
 // ── Config ──────────────────────────────────────────────────────────
 const WA_BULK_URL = "https://control.msg91.com/api/v5/whatsapp/whatsapp-outbound-message/bulk/";
-const TEMPLATE_NAME = "daily_work_report";
-const TEMPLATE_LANG = "en";
+// Template name + language are env-overridable so a rename in MSG91 (e.g.
+// after a stuck edit) needs no redeploy — set MSG91_WA_TEMPLATE / _LANG.
+const TEMPLATE_NAME = process.env.MSG91_WA_TEMPLATE || "daily_work_report";
+const TEMPLATE_LANG = process.env.MSG91_WA_TEMPLATE_LANG || "en";
 // The WhatsApp sender number registered on MSG91 (env override allowed).
 const INTEGRATED_NUMBER = process.env.MSG91_WA_NUMBER || "917627065482";
 // Recipients (env override: comma-separated). Country code added if a
