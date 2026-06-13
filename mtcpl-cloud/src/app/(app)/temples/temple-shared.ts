@@ -2,7 +2,7 @@
 // card browser. Kept here so both components import from one place (no
 // duplication, no circular import).
 
-export type StageBucket = "pending" | "cutting" | "cut_done" | "carving" | "done" | "rejected" | "cancelled";
+export type StageBucket = "pending" | "cutting" | "cut_done" | "carving" | "ready_dispatch" | "done" | "rejected" | "cancelled";
 
 export type ComponentImage = { id: string; url: string; caption: string | null };
 
@@ -46,26 +46,32 @@ export const STAGE_META: Record<StageBucket, { label: string; color: string }> =
   cutting: { label: "Cutting", color: "#3b82f6" },      // blue (actively being cut)
   cut_done: { label: "Cut · ready", color: "#06b6d4" }, // cyan — NOT green (never mistaken for Done) and calmer than violet as the biggest bucket
   carving: { label: "Carving", color: "#f59e0b" },      // amber
-  done: { label: "Done", color: "#16a34a" },            // green
+  // 'completed' — carving done & approved, staged in Dispatch Station but NOT
+  // shipped yet. Deliberately not green so it isn't read as the final "done".
+  ready_dispatch: { label: "Ready to dispatch", color: "#ec4899" }, // pink
+  // 'dispatched' — the real done: shipped out. Green = truly finished.
+  done: { label: "Dispatched", color: "#16a34a" },      // green
   rejected: { label: "Rejected", color: "#dc2626" },    // red
   cancelled: { label: "Cancelled", color: "#7f1d1d" },  // dark red (mig 132 — broken, owner-approved exit)
 };
 
 // Bar + chip + legend order follows the production flow, left → right:
-//   Pending → Cutting → Cut · ready → Carving → Done → Cancelled.
+//   Pending → Cutting → Cut · ready → Carving → Ready to dispatch → Dispatched → Cancelled.
 // Rejected slabs are filtered out of Temple View (server-side), so the
 // legend / bars don't show that stage. Cancelled (mig 132) IS shown —
 // the office decides on a replacement from here.
-export const STAGE_ORDER: StageBucket[] = ["pending", "cutting", "cut_done", "carving", "done", "cancelled"];
+export const STAGE_ORDER: StageBucket[] = ["pending", "cutting", "cut_done", "carving", "ready_dispatch", "done", "cancelled"];
 
 export function bucketOf(status: string): StageBucket {
   if (["open", "planned"].includes(status)) return "pending";
   if (status === "cutting") return "cutting";
   if (status === "cut_done") return "cut_done"; // cut, ready to assign to carving
   if (["carving_assigned", "carving_in_progress"].includes(status)) return "carving";
+  if (status === "completed") return "ready_dispatch"; // carving done & approved → staged in Dispatch Station
+  if (status === "dispatched") return "done";          // shipped → the real done
   if (status === "rejected") return "rejected";
   if (status === "cancelled") return "cancelled"; // mig 132
-  return "done";
+  return "pending";
 }
 
 export function stoneLabel(s: string | null): string {

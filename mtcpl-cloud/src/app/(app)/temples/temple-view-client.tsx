@@ -258,7 +258,8 @@ const STAGE_HELP: Record<StageBucket, string> = {
   cutting: "Actively being cut.",
   cut_done: "Cut and ready to assign to carving (not yet sent to a vendor).",
   carving: "Out for carving (CNC / vendor).",
-  done: "Finished — completed or dispatched.",
+  ready_dispatch: "Carving done & approved — staged in the Dispatch Station, not shipped yet.",
+  done: "Dispatched — shipped out (the real done).",
   rejected: "Rejected during a cutting or carving quality check — not usable, kept on record only.",
   cancelled: "Broken / unusable — cancel approved by the owner. Decide here whether to create a replacement slab.",
 };

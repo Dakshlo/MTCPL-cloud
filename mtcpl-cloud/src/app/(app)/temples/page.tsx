@@ -54,13 +54,14 @@ function stageBucket(status: string): StageBucket {
   if (status === "cutting") return "cutting";
   if (status === "cut_done") return "cut_done"; // cut, ready to assign to carving
   if (status === "carving_assigned" || status === "carving_in_progress") return "carving";
-  if (status === "completed" || status === "dispatched") return "done";
+  if (status === "completed") return "ready_dispatch"; // carving done & approved → staged in Dispatch Station
+  if (status === "dispatched") return "done";          // shipped → the real done
   if (status === "rejected") return "rejected";
   if (status === "cancelled") return "cancelled"; // mig 132
   return "pending";
 }
 
-const EMPTY_COUNTS = (): Record<StageBucket, number> => ({ pending: 0, cutting: 0, cut_done: 0, carving: 0, done: 0, rejected: 0, cancelled: 0 });
+const EMPTY_COUNTS = (): Record<StageBucket, number> => ({ pending: 0, cutting: 0, cut_done: 0, carving: 0, ready_dispatch: 0, done: 0, rejected: 0, cancelled: 0 });
 
 // Mutable tree used while building; converted to the serializable shape below.
 type BuildNode = {
