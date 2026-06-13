@@ -860,7 +860,7 @@ function TempleDispatchPeek({
             <input type="hidden" name="slab_ids" value={JSON.stringify([...selected])} />
             <input type="hidden" name="slab_weights" value={JSON.stringify(weightsParsed)} />
 
-            <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ flex: 1, minHeight: 0, maxHeight: "calc(92vh - 168px)", overflowY: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14, WebkitOverflowScrolling: "touch" }}>
               {/* Mig 130 — site info that will print on the challan,
                   pulled from Settings → Temple Codes. */}
               <div style={{ background: "rgba(184,115,51,0.06)", border: "1.5px solid rgba(184,115,51,0.3)", borderRadius: 10, padding: "10px 14px", fontSize: 12.5, lineHeight: 1.6 }}>
