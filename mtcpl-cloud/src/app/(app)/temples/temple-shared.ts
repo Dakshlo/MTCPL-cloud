@@ -44,7 +44,7 @@ export type TempleTree = {
 export const STAGE_META: Record<StageBucket, { label: string; color: string }> = {
   pending: { label: "Pending", color: "#94a3b8" },      // slate
   cutting: { label: "Cutting", color: "#3b82f6" },      // blue (actively being cut)
-  cut_done: { label: "Cut · ready", color: "#a855f7" }, // violet — deliberately NOT green, so it's never mistaken for Done
+  cut_done: { label: "Cut · ready", color: "#06b6d4" }, // cyan — NOT green (never mistaken for Done) and calmer than violet as the biggest bucket
   carving: { label: "Carving", color: "#f59e0b" },      // amber
   done: { label: "Done", color: "#16a34a" },            // green
   rejected: { label: "Rejected", color: "#dc2626" },    // red
