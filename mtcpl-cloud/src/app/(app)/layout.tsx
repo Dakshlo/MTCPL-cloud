@@ -308,19 +308,18 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     if (reviewErr) return null;
     return count ?? 0;
   }
-  // Mig 080 — Carving Rejected queue. Rare but critical: the
-  // reviewer hit Reject on a slab (hard reject — out of the active
-  // loop entirely, status='carving_rejected'). Same audience as
-  // Carving Done Approval. Surface lives at /carving/rejected; it's
-  // read-only for now ("we don't know yet what we'll do when reject
-  // is there" — Daksh).
-  async function fetchCarvingRejectedBadge(): Promise<number | null> {
-    if (!canSeeAwaitingReview(profile)) return null;
-    const { count, error: rejErr } = await supabase
-      .from("carving_items")
+  // Mig 132 — Slab Cancel Requests. Broken slabs flagged by carving_head
+  // / senior_incharge anywhere in Carving Jobs or Make Dispatch; the
+  // owner approves or rejects each one. Owner / developer only.
+  // (Replaced the old "Carving Rejected" queue, which mig 132 retired.)
+  async function fetchSlabCancelBadge(): Promise<number | null> {
+    if (profile.role !== "owner" && profile.role !== "developer") return null;
+    const { count, error: scErr } = await supabase
+      .from("slab_requirements")
       .select("*", { count: "exact", head: true })
-      .eq("status", "carving_rejected");
-    if (rejErr) return null;
+      .not("cancel_requested_at", "is", null)
+      .neq("status", "cancelled");
+    if (scErr) return null;
     return count ?? 0;
   }
   // Mig 090 — Bank Decline approval queue. Owner / developer only —
@@ -378,7 +377,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     finalAuditBadge,
     royaltyApprovalBadge,
     awaitingReviewBadge,
-    carvingRejectedBadge,
+    slabCancelBadge,
     debitApprovalBadge,
     bankDeclineBadge,
     workOrderApprovalBadge,
@@ -393,7 +392,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     fetchFinalAuditBadge(),
     fetchRoyaltyApprovalBadge(),
     fetchAwaitingReviewBadge(),
-    fetchCarvingRejectedBadge(),
+    fetchSlabCancelBadge(),
     fetchDebitApprovalBadge(),
     fetchBankDeclineBadge(),
     fetchWorkOrderApprovalBadge(),
@@ -610,7 +609,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               finalAuditBadge,
               royaltyApprovalBadge,
               awaitingReviewBadge,
-              carvingRejectedBadge,
+              slabCancelBadge,
               debitApprovalBadge,
               bankDeclineBadge,
               workOrderApprovalBadge,
@@ -721,10 +720,9 @@ function buildTopbarTaskItems(counts: {
   finalAuditBadge: number | null;
   royaltyApprovalBadge: number | null;
   awaitingReviewBadge: number | null;
-  /** Mig 080 — count of carving_items with status='carving_rejected'.
-   *  Audience same as awaitingReviewBadge (dev/owner/carving_head/
-   *  senior_incharge); null when role isn't permitted. */
-  carvingRejectedBadge: number | null;
+  /** Mig 132 — pending slab cancel requests awaiting the owner's verdict.
+   *  Owner / developer only; null otherwise. */
+  slabCancelBadge: number | null;
   /** Mig 085 — pending debit settlements awaiting owner approval.
    *  Owner / developer only; null otherwise. */
   debitApprovalBadge: number | null;
@@ -789,18 +787,17 @@ function buildTopbarTaskItems(counts: {
       department: "production",
     });
   }
-  // Mig 080 — Carving Rejected queue. Rare but critical: surfaced
-  // as its own item so the count doesn't get lost inside the
-  // Carving Done Approval pile. Read-only landing for now per
-  // Daksh's "we'll figure out what to do with rejects later".
-  if (counts.carvingRejectedBadge !== null) {
+  // Mig 132 — Slab Cancel Requests. Broken slabs flagged by the team;
+  // the owner approves (slab exits) or rejects (slab stays). Owner /
+  // developer only.
+  if (counts.slabCancelBadge !== null) {
     items.push({
-      id: "carving-rejected",
-      href: "/carving/rejected",
-      label: "Carving Rejected",
-      description: "Slabs the reviewer rejected — read-only, for reference",
-      count: counts.carvingRejectedBadge,
-      icon: "✗",
+      id: "slab-cancels",
+      href: "/tasks/slab-cancels",
+      label: "Slab Cancel Requests",
+      description: "Broken slabs awaiting your approve / reject",
+      count: counts.slabCancelBadge,
+      icon: "🚫",
       department: "production",
     });
   }
