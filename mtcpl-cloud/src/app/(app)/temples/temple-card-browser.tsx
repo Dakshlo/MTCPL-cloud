@@ -142,6 +142,9 @@ export function TempleCardBrowser({
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   function exitSelect() { setSelectMode(false); setSelectedIds(new Set()); }
+  // The currently-rendered card grid (temple picker OR folder cards) — used
+  // for full keyboard navigation (arrow keys move focus, Enter drills in).
+  const gridRef = useRef<HTMLDivElement>(null);
 
   const tree = temple ? trees.find((t) => t.temple === temple) ?? null : null;
   // Re-resolve the live node objects from the fresh tree by walking pathIds.
@@ -243,6 +246,53 @@ export function TempleCardBrowser({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedIds.join(""), pathIds.length, temple]);
 
+  // ── Full keyboard navigation of the card grid ──
+  // Arrow keys move focus card-to-card (2D, columns auto-detected); Enter
+  // (handled natively by the focused card) drills in; Esc goes back. Disabled
+  // while a modal / lightbox / select-mode owns the keyboard.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (lightbox || moveSlabs || uploadNode || renameNode || selectMode) return;
+      if (e.key !== "ArrowRight" && e.key !== "ArrowLeft" && e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+      const t = e.target as HTMLElement | null;
+      if (t && t.closest("input, textarea, select, [role=dialog]")) return;
+      const grid = gridRef.current;
+      if (!grid) return;
+      const cards = Array.from(grid.children).filter((c) => (c as HTMLElement).offsetParent !== null) as HTMLElement[];
+      if (cards.length === 0) return;
+      e.preventDefault();
+      const active = document.activeElement as HTMLElement | null;
+      const cur = cards.findIndex((c) => c === active || c.contains(active));
+      let next: number;
+      if (cur < 0) {
+        next = 0; // nothing focused yet → land on the first card
+      } else {
+        const top0 = cards[0].offsetTop;
+        let cols = 0;
+        for (const c of cards) { if (c.offsetTop === top0) cols++; else break; }
+        cols = Math.max(1, cols);
+        if (e.key === "ArrowRight") next = Math.min(cards.length - 1, cur + 1);
+        else if (e.key === "ArrowLeft") next = Math.max(0, cur - 1);
+        else if (e.key === "ArrowDown") next = Math.min(cards.length - 1, cur + cols);
+        else next = Math.max(0, cur - cols);
+      }
+      cards[next]?.focus();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lightbox, moveSlabs, uploadNode, renameNode, selectMode]);
+
+  // When the level changes, put keyboard focus on the first card so arrow keys
+  // work right away (preventScroll + :focus-visible → mouse users see no ring).
+  useEffect(() => {
+    if (lightbox || moveSlabs || uploadNode || renameNode || selectMode || isLeaf) return;
+    const id = window.setTimeout(() => {
+      (gridRef.current?.children?.[0] as HTMLElement | undefined)?.focus({ preventScroll: true });
+    }, 60);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [temple, pathIds, isLeaf]);
+
   // First image anywhere under a temple → its landing-card cover.
   function templeCover(t: string): ComponentImage | null {
     for (const [k, imgs] of Object.entries(imagesByNode)) {
@@ -263,6 +313,10 @@ export function TempleCardBrowser({
         .tc-card { opacity: 0; animation: tcIn .38s cubic-bezier(.2,.7,.3,1) forwards; transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease; }
         .tc-card:hover { transform: translateY(-5px); box-shadow: 0 16px 40px rgba(0,0,0,.16); border-color: var(--gold-dark) !important; }
         .tc-card:active { transform: translateY(-1px) scale(.99); }
+        /* Keyboard focus ring (arrow-key navigation). focus-visible keeps it
+           off for mouse clicks. */
+        .tc-card:focus { outline: none; }
+        .tc-card:focus-visible { outline: 3px solid var(--gold-dark); outline-offset: 3px; box-shadow: 0 0 0 5px rgba(184,115,51,0.20), 0 16px 40px rgba(0,0,0,.16); transform: translateY(-3px); }
       `}</style>
 
       {/* ── Top bar ── */}
@@ -328,8 +382,8 @@ export function TempleCardBrowser({
         {!temple ? (
           /* ── Temple picker landing ── */
           <>
-            <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 16, animation: "tcFade .3s ease" }}>Choose a temple</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 18 }}>
+            <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 16, animation: "tcFade .3s ease" }}>Choose a temple <span className="muted" style={{ fontSize: 12, fontWeight: 600 }}>· arrow keys to move · Enter to open</span></div>
+            <div ref={gridRef} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 18 }}>
               {trees.map((t, i) => {
                 const pct = t.total > 0 ? Math.round((t.counts.done / t.total) * 100) : 0;
                 const cover = templeCover(t.temple);
@@ -375,7 +429,7 @@ export function TempleCardBrowser({
           <div className="muted" style={{ fontSize: 14, padding: 20 }}>Nothing here yet.</div>
         ) : (
           /* ── Category / Label / Description cards ── */
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(235px, 1fr))", gap: 16 }}>
+          <div ref={gridRef} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(235px, 1fr))", gap: 16 }}>
             {children.map((c, i) => {
               const imgs = imagesByNode[c.id] ?? [];
               const cover = imgs[0];
@@ -511,14 +565,16 @@ export function TempleCardBrowser({
         </div>
       )}
 
-      {/* Mig 128 — attach a photo to the current / picked node (any level). */}
+      {/* Mig 128 — manage photos on the current / picked node (any level):
+          view current photos, remove them, or add a new one. */}
       {uploadNode && temple && (
         <NodeImageUploader
           temple={temple}
           nodePath={uploadNode.path}
           nodeLabel={uploadNode.label}
+          images={imagesByNode[uploadNode.path] ?? []}
           onClose={() => setUploadNode(null)}
-          onUploaded={() => { setUploadNode(null); router.refresh(); }}
+          onChanged={() => router.refresh()}
         />
       )}
     </div>

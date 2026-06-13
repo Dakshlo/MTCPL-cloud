@@ -9,8 +9,8 @@
 //     the node you're looking at — no re-picking the category.
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { moveSlabsComponentAction, renameTempleNodeAction, addTempleComponentImageAction } from "./actions";
-import type { TempleSlabCard } from "./temple-shared";
+import { moveSlabsComponentAction, renameTempleNodeAction, addTempleComponentImageAction, deleteTempleComponentImageAction } from "./actions";
+import type { TempleSlabCard, ComponentImage } from "./temple-shared";
 
 const overlay: CSSProperties = {
   position: "fixed", inset: 0, zIndex: 1800, background: "rgba(10,8,4,0.6)",
@@ -372,28 +372,33 @@ export function RenameNodeModal({
   );
 }
 
-// ── Attach a photo to the current node ───────────────────────────────
+// ── Manage photos on the current node (view · remove · add) ──────────
 export function NodeImageUploader({
-  temple, nodePath, nodeLabel, onClose, onUploaded,
+  temple, nodePath, nodeLabel, images, onClose, onChanged,
 }: {
   temple: string;
   nodePath: string;
   nodeLabel: string;
+  images: ComponentImage[];
   onClose: () => void;
-  onUploaded: () => void;
+  /** Refresh the page data but KEEP this modal open. */
+  onChanged: () => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [fileName, setFileName] = useState("");
   const [caption, setCaption] = useState("");
   const [busy, setBusy] = useState(false);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  const [okMsg, setOkMsg] = useState("");
   const [error, setError] = useState("");
 
   async function submit() {
     if (busy) return;
     const file = fileRef.current?.files?.[0];
-    if (!file) { setError("Choose an image."); return; }
+    if (!file) { setError("Choose an image first."); return; }
     setBusy(true);
     setError("");
+    setOkMsg("");
     try {
       const fd = new FormData();
       fd.set("temple", temple);
@@ -403,40 +408,91 @@ export function NodeImageUploader({
       fd.set("image", file);
       const res = await addTempleComponentImageAction(fd);
       if (!res.ok) { setError(res.error); setBusy(false); return; }
-      onUploaded();
+      // Keep the modal open so they see it land and can add/remove more.
+      setBusy(false);
+      setFileName("");
+      setCaption("");
+      if (fileRef.current) fileRef.current.value = "";
+      setOkMsg("✓ Photo added");
+      onChanged();
     } catch {
       setError("Upload failed — check your connection.");
       setBusy(false);
     }
   }
 
+  async function remove(id: string) {
+    if (removingId) return;
+    if (!confirm("Remove this photo? This permanently deletes it.")) return;
+    setRemovingId(id);
+    setError("");
+    setOkMsg("");
+    try {
+      const fd = new FormData();
+      fd.set("id", id);
+      await deleteTempleComponentImageAction(fd);
+      setOkMsg("✓ Photo removed");
+      onChanged();
+    } catch {
+      setError("Remove failed — check your connection.");
+    } finally {
+      setRemovingId(null);
+    }
+  }
+
   return (
-    <div role="dialog" aria-modal="true" onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }} style={overlay}>
-      <div style={{ ...dialog, maxWidth: 440 }}>
+    <div role="dialog" aria-modal="true" onMouseDown={(e) => { if (e.target === e.currentTarget && !busy && !removingId) onClose(); }} style={overlay}>
+      <div style={{ ...dialog, maxWidth: 460 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-          <div style={{ fontSize: 16, fontWeight: 800 }}>📷 Add photo</div>
+          <div style={{ fontSize: 16, fontWeight: 800 }}>📷 Photos</div>
           <button type="button" onClick={onClose} aria-label="Close" style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "var(--muted)" }}>×</button>
         </div>
         <div style={{ fontSize: 12.5, color: "var(--muted)" }}>
-          Attaching to <strong style={{ color: "var(--text)" }}>{nodeLabel}</strong>
+          On <strong style={{ color: "var(--text)" }}>{nodeLabel}</strong>
           <div style={{ fontSize: 11, marginTop: 2, opacity: 0.8, wordBreak: "break-word" }}>{nodePath.split("/").slice(1).join("  ›  ")}</div>
         </div>
 
-        <div>
-          <span style={lbl}>Image</span>
+        {/* Current photos — each with a Remove button. */}
+        {images.length > 0 && (
+          <div>
+            <span style={lbl}>Current photos ({images.length})</span>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              {images.map((img) => (
+                <div key={img.id} style={{ position: "relative", width: 96, height: 96, borderRadius: 10, overflow: "hidden", border: "1px solid var(--border)", background: "#0f172a" }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={img.url} alt={img.caption ?? ""} style={{ width: "100%", height: "100%", objectFit: "cover", opacity: removingId === img.id ? 0.4 : 1 }} />
+                  <button
+                    type="button"
+                    title="Remove this photo"
+                    disabled={!!removingId}
+                    onClick={() => remove(img.id)}
+                    style={{ position: "absolute", top: 4, right: 4, width: 24, height: 24, borderRadius: 999, border: "none", background: "rgba(220,38,38,0.92)", color: "#fff", fontSize: 13, fontWeight: 900, cursor: removingId ? "wait" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}
+                  >
+                    {removingId === img.id ? "…" : "🗑"}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Add a new photo. */}
+        <div style={{ borderTop: images.length > 0 ? "1px solid var(--border)" : "none", paddingTop: images.length > 0 ? 12 : 0 }}>
+          <span style={lbl}>Add a photo</span>
           <button type="button" onClick={() => fileRef.current?.click()} style={{ ...inp, textAlign: "left", cursor: "pointer", color: fileName ? "var(--text)" : "var(--muted)" }}>
             {fileName || "Choose an image (JPG/PNG, max 8 MB)…"}
           </button>
-          <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => { setFileName(e.target.files?.[0]?.name ?? ""); setError(""); }} />
+          <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => { setFileName(e.target.files?.[0]?.name ?? ""); setError(""); setOkMsg(""); }} />
         </div>
         <label><span style={lbl}>Caption (optional)</span>
           <input value={caption} onChange={(e) => setCaption(e.target.value)} placeholder="e.g. carved pillar reference" style={inp} />
         </label>
 
+        {okMsg && <div style={{ fontSize: 13, fontWeight: 700, color: "#15803d" }}>{okMsg}</div>}
         {error && <div style={{ fontSize: 13, fontWeight: 700, color: "#991b1b" }}>{error}</div>}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button type="button" disabled={busy} onClick={onClose} className="ghost-button">Cancel</button>
-          <button type="button" disabled={busy} onClick={submit} style={primaryBtn(true)}>{busy ? "Uploading…" : "✓ Add photo"}</button>
+          <button type="button" disabled={busy || !!removingId} onClick={onClose} className="ghost-button">Done</button>
+          <button type="button" disabled={busy || !fileName} onClick={submit} style={primaryBtn(!busy && !!fileName)}>{busy ? "Uploading…" : "✓ Add photo"}</button>
         </div>
       </div>
     </div>
