@@ -9,7 +9,7 @@
 //     the node you're looking at — no re-picking the category.
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { moveSlabsComponentAction, addTempleComponentImageAction } from "./actions";
+import { moveSlabsComponentAction, renameTempleNodeAction, addTempleComponentImageAction } from "./actions";
 import type { TempleSlabCard } from "./temple-shared";
 
 const overlay: CSSProperties = {
@@ -248,6 +248,98 @@ export function MoveSlabModal({
             <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
               <button type="button" disabled={busy} onClick={() => setConfirming(false)} className="ghost-button">← Edit</button>
               <button type="button" disabled={busy} onClick={commit} style={primaryBtn(true)}>{busy ? "Moving…" : "✓ Confirm move"}</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Rename a whole tree-head node (Category / Label / Description) ────
+// Renames the group for EVERY slab under it; choosing an existing sibling
+// name merges the two groups together.
+export function RenameNodeModal({
+  temple, segments, options, count, onClose, onDone,
+}: {
+  temple: string;
+  /** Path segments below the temple — the last one is the node being renamed. */
+  segments: string[];
+  /** Sibling names at this level — pick one to merge, or type a new name. */
+  options: string[];
+  count: number;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const current = segments[segments.length - 1] ?? "";
+  const parentPath = segments.slice(0, -1);
+  const [name, setName] = useState(current);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(0);
+  const [error, setError] = useState("");
+
+  const trimmed = name.trim();
+  const changed = trimmed.length > 0 && trimmed.toUpperCase() !== current.trim().toUpperCase();
+  const merges = changed && options.some((o) => o.trim().toUpperCase() === trimmed.toUpperCase());
+
+  async function commit() {
+    if (busy || !changed) return;
+    setBusy(true);
+    setError("");
+    try {
+      const fd = new FormData();
+      fd.set("temple", temple);
+      fd.set("segments", JSON.stringify(segments));
+      fd.set("new_name", trimmed);
+      const res = await renameTempleNodeAction(fd);
+      if (!res.ok) { setError(res.error); setBusy(false); return; }
+      setBusy(false);
+      setDone(res.count || count);
+      setTimeout(() => onDone(), 950);
+    } catch {
+      setError("Rename failed — check your connection.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div role="dialog" aria-modal="true" onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }} style={overlay}>
+      <div style={{ ...dialog, maxWidth: 460 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+          <div style={{ fontSize: 16, fontWeight: 800 }}>✏️ Rename category</div>
+          <button type="button" onClick={onClose} aria-label="Close" style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "var(--muted)" }}>×</button>
+        </div>
+
+        {done > 0 ? (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "22px 8px 8px", textAlign: "center" }}>
+            <div style={{ width: 54, height: 54, borderRadius: "50%", background: "#16a34a", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 30, fontWeight: 900, animation: "tcZoom .25s ease" }}>✓</div>
+            <div style={{ fontSize: 15.5, fontWeight: 800 }}>Renamed to “{trimmed}”</div>
+            <div style={{ fontSize: 12.5, color: "var(--muted)" }}>Updated {done} slab{done === 1 ? "" : "s"}.</div>
+          </div>
+        ) : (
+          <>
+            <div style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5 }}>
+              Renaming <strong style={{ color: "var(--text)" }}>{current}</strong> changes it for all{" "}
+              <strong style={{ color: "var(--text)" }}>{count} slab{count === 1 ? "" : "s"}</strong> under it in <strong>{temple}</strong>.
+              {parentPath.length > 0 && (
+                <div style={{ fontSize: 11, marginTop: 4, opacity: 0.85 }}>in {parentPath.join("  ›  ")}</div>
+              )}
+            </div>
+
+            <ComboField label="New name" value={name} onChange={setName} options={options} placeholder="Type a new name, or pick one to merge into" />
+
+            {merges && (
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#92400e", background: "rgba(180,83,9,0.1)", border: "1px solid rgba(180,83,9,0.3)", borderRadius: 9, padding: "8px 11px" }}>
+                ⚠ “{trimmed}” already exists here — these {count} slab{count === 1 ? "" : "s"} will be <strong>merged</strong> into it.
+              </div>
+            )}
+
+            {error && <div style={{ fontSize: 13, fontWeight: 700, color: "#991b1b" }}>{error}</div>}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button type="button" onClick={onClose} className="ghost-button">Cancel</button>
+              <button type="button" disabled={!changed || busy} onClick={commit} style={primaryBtn(changed && !busy)}>
+                {busy ? "Renaming…" : merges ? "✓ Merge" : "✓ Rename"}
+              </button>
             </div>
           </>
         )}

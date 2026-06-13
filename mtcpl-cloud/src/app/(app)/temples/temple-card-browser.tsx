@@ -14,7 +14,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { deleteTempleComponentImageAction } from "./actions";
-import { MoveSlabModal, NodeImageUploader } from "./temple-node-modals";
+import { MoveSlabModal, RenameNodeModal, NodeImageUploader } from "./temple-node-modals";
 import {
   STAGE_META, STAGE_ORDER, bucketOf, calcCft, stoneLabel,
   type StageBucket, type TempleTree, type TempleTreeNode, type TempleSlabCard, type ComponentImage, type TempleCats,
@@ -112,11 +112,12 @@ const lbBtn: CSSProperties = { padding: "8px 16px", fontSize: 16, fontWeight: 80
 // ── main browser ─────────────────────────────────────────────────────
 
 export function TempleCardBrowser({
-  trees, imagesByNode, canManageImages, templeCats, onExit,
+  trees, imagesByNode, canManageImages, canEditCategories, templeCats, onExit,
 }: {
   trees: TempleTree[];
   imagesByNode: Record<string, ComponentImage[]>;
   canManageImages: boolean;
+  canEditCategories: boolean;
   templeCats: TempleCats;
   onExit: () => void;
 }) {
@@ -132,6 +133,9 @@ export function TempleCardBrowser({
   // moveSlabs holds 1 (single tap) OR many (multi-select) slabs to move.
   const [moveSlabs, setMoveSlabs] = useState<TempleSlabCard[] | null>(null);
   const [uploadNode, setUploadNode] = useState<{ path: string; label: string } | null>(null);
+  // Rename a tree-head node (Category 1 / 2 / Label / Description) for every
+  // slab under it. segments = path below the temple; options = sibling names.
+  const [renameNode, setRenameNode] = useState<{ segments: string[]; options: string[]; count: number } | null>(null);
   // Mig 128 follow-on — multi-select inside the current leaf. Press-and-hold
   // a slab card for ~0.6s to enter select mode, then tap to pick several (all
   // in the SAME leaf), and move them together.
@@ -169,11 +173,12 @@ export function TempleCardBrowser({
   // so the Add-image modal keeps its own Esc behaviour.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      // A modal (move / upload) owns Escape while it's open.
-      if (e.key === "Escape" && (moveSlabs || uploadNode)) {
+      // A modal (move / rename / upload) owns Escape while it's open.
+      if (e.key === "Escape" && (moveSlabs || uploadNode || renameNode)) {
         e.preventDefault();
         setMoveSlabs(null);
         setUploadNode(null);
+        setRenameNode(null);
         return;
       }
       const t = e.target as HTMLElement | null;
@@ -192,7 +197,7 @@ export function TempleCardBrowser({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lightbox, pathIds.length, temple, moveSlabs, uploadNode, selectMode]);
+  }, [lightbox, pathIds.length, temple, moveSlabs, uploadNode, renameNode, selectMode]);
 
   // Leaving a leaf (drill in/out or switch temple) drops the selection — it
   // only ever applies to slabs in the leaf you're looking at.
@@ -228,6 +233,15 @@ export function TempleCardBrowser({
       else sessionStorage.removeItem("mtcpl_tv_card");
     } catch { /* ignore */ }
   }, [temple, pathIds]);
+
+  // After a refresh that renamed/removed a node in the current path, the walk
+  // above truncates `path` but pathIds still holds the dead tail — trim it back
+  // to what actually resolved so further drilling keeps working.
+  const resolvedIds = path.map((n) => n.id);
+  useEffect(() => {
+    if (temple && resolvedIds.length !== pathIds.length) setPathIds(resolvedIds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedIds.join(""), pathIds.length, temple]);
 
   // First image anywhere under a temple → its landing-card cover.
   function templeCover(t: string): ComponentImage | null {
@@ -274,6 +288,25 @@ export function TempleCardBrowser({
         </div>
         <span style={{ flex: 1 }} />
         <span className="muted" style={{ fontSize: 11.5, whiteSpace: "nowrap" }}>Esc = back</span>
+        {/* Rename the group you're currently inside (Category / Label /
+            Description) — applies to every slab under it. */}
+        {canEditCategories && temple && currentNode && (
+          <button
+            type="button"
+            onClick={() => {
+              const siblings = (path.length > 1 ? path[path.length - 2].children : (tree?.roots ?? []));
+              setRenameNode({
+                segments: path.map((n) => n.name),
+                options: siblings.map((n) => n.name).filter((n) => n !== currentNode.name),
+                count: currentNode.total,
+              });
+            }}
+            title={`Rename ${currentNode.name}`}
+            style={{ fontSize: 12.5, fontWeight: 800, padding: "8px 13px", borderRadius: 9, border: "1px solid var(--gold-dark)", background: "var(--surface)", color: "var(--gold-dark)", cursor: "pointer", whiteSpace: "nowrap" }}
+          >
+            ✏️ Rename
+          </button>
+        )}
         {/* Contextual photo upload — adds to the node you're currently in
             (Category / Label / Description). Cat-1 cards have their own ＋
             button at the temple root. */}
@@ -371,6 +404,23 @@ export function TempleCardBrowser({
                         📷
                       </button>
                     )}
+                    {canEditCategories && (
+                      <button
+                        type="button"
+                        title={`Rename ${c.name}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRenameNode({
+                            segments: [...path.map((n) => n.name), c.name],
+                            options: children.map((n) => n.name).filter((n) => n !== c.name),
+                            count: c.total,
+                          });
+                        }}
+                        style={{ position: "absolute", top: 10, left: canManageImages ? 46 : 10, fontSize: 13, fontWeight: 800, color: "#fff", background: "rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.4)", borderRadius: 999, width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", backdropFilter: "blur(3px)" }}
+                      >
+                        ✏️
+                      </button>
+                    )}
                     {imgs.length > 0 && (
                       <button
                         type="button"
@@ -416,6 +466,18 @@ export function TempleCardBrowser({
           cats={cats}
           onClose={() => setMoveSlabs(null)}
           onMoved={() => { setMoveSlabs(null); exitSelect(); router.refresh(); }}
+        />
+      )}
+
+      {/* Mig 128 follow-on — rename a whole category / label / description. */}
+      {renameNode && temple && (
+        <RenameNodeModal
+          temple={temple}
+          segments={renameNode.segments}
+          options={renameNode.options}
+          count={renameNode.count}
+          onClose={() => setRenameNode(null)}
+          onDone={() => { setRenameNode(null); router.refresh(); }}
         />
       )}
 

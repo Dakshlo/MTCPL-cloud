@@ -12,6 +12,9 @@ import { logAudit } from "@/lib/audit";
 import type { AppRole } from "@/lib/types";
 
 const WRITE_ROLES: AppRole[] = ["owner", "developer", "team_head", "senior_incharge", "carving_head"];
+// Daksh — renaming a whole category (a tree-head node) is a heavier edit, so
+// it's limited to owner / developer / carving head / slab incharge (senior).
+const CAT_EDIT_ROLES: AppRole[] = ["owner", "developer", "carving_head", "senior_incharge"];
 const BUCKET = "temple_component_images";
 const MAX_BYTES = 8 * 1024 * 1024; // 8 MB
 const IMG_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "image/heic", "image/heif"]);
@@ -120,6 +123,131 @@ export async function moveSlabsComponentAction(
 
   await logAudit(profile.id, "slabs_recategorized", "slab", "batch", {
     count, slab_ids: ids, to: { component_section: section || null, component_element: element || null, label },
+  });
+  revalidatePath("/temples");
+  revalidatePath("/slabs");
+  return { ok: true, count };
+}
+
+// Mig 128 follow-on — RENAME a whole tree-head node. Daksh: from the card
+// browser you can rename a Category 1 / Category 2 / Label / Description group
+// in one go (and renaming it to an EXISTING sibling merges them). We rebuild
+// each slab's path EXACTLY like the Temple View tree does, so the segment at
+// the node's depth maps back to the right DB field — even when Category 1 is
+// a '›'-nested path or the element/description levels are absent.
+function decomposePath(s: {
+  component_section: string | null; component_element: string | null;
+  label: string | null; description: string | null; additional_description: string | null;
+}) {
+  const sectionRaw = (s.component_section ?? "").trim();
+  const element = (s.component_element ?? "").trim();
+  const label = (s.label ?? "").trim();
+  const description = (s.description ?? "").trim();
+  const additional = (s.additional_description ?? "").trim();
+  const cat1Levels = sectionRaw
+    ? sectionRaw.split(/\s*[›>]\s*/).map((x) => x.trim()).filter(Boolean)
+    : ["Unassigned"];
+  const segs = [
+    ...cat1Levels,
+    ...(element ? [element] : []),
+    label || "— (no label)",
+    ...(description ? [description] : []),
+    ...(additional ? [additional] : []),
+  ];
+  return { cat1Levels, element, description, additional, segs };
+}
+
+export async function renameTempleNodeAction(
+  formData: FormData,
+): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
+  const { profile } = await requireAuth(CAT_EDIT_ROLES);
+  const admin = createAdminSupabaseClient();
+
+  const temple = String(formData.get("temple") || "").trim();
+  let segments: string[] = [];
+  try { segments = JSON.parse(String(formData.get("segments") || "[]")); } catch { segments = []; }
+  segments = (Array.isArray(segments) ? segments : []).map((x) => String(x));
+  const rawNew = String(formData.get("new_name") || "").trim();
+  if (!temple || segments.length === 0) return { ok: false, error: "Bad request." };
+  if (!rawNew) return { ok: false, error: "Name can't be empty." };
+  const depth = segments.length - 1; // 0-indexed position of the segment to rename
+
+  // Pull this temple's slabs (everything the tree shows — i.e. not rejected).
+  type Row = {
+    id: string; component_section: string | null; component_element: string | null;
+    label: string | null; description: string | null; additional_description: string | null;
+  };
+  const rows: Row[] = [];
+  const PAGE = 1000;
+  for (let off = 0; off < 30000; off += PAGE) {
+    const { data, error } = await admin
+      .from("slab_requirements")
+      .select("id, component_section, component_element, label, description, additional_description")
+      .eq("temple", temple)
+      .neq("status", "rejected")
+      .range(off, off + PAGE - 1);
+    if (error) return { ok: false, error: error.message };
+    if (!data || data.length === 0) break;
+    rows.push(...(data as Row[]));
+    if (data.length < PAGE) break;
+  }
+
+  const SEP = " › ";
+  // Group identical resulting patches so we issue one UPDATE per distinct value
+  // (label/element renames collapse to a single value; section renames vary by
+  // the slab's deeper levels, so they group naturally too).
+  const groups = new Map<string, string[]>();
+  let renamedKind = "";
+  for (const s of rows) {
+    const p = decomposePath(s);
+    if (p.segs.length <= depth) continue;
+    let match = true;
+    for (let i = 0; i <= depth; i++) { if (p.segs[i] !== segments[i]) { match = false; break; } }
+    if (!match) continue;
+
+    const C = p.cat1Levels.length;
+    const elementIdx = p.element ? C : -1;
+    const labelIdx = C + (p.element ? 1 : 0);
+    const descIdx = p.description ? labelIdx + 1 : -1;
+    const addIdx = p.additional ? labelIdx + 1 + (p.description ? 1 : 0) : -1;
+
+    let kind = "";
+    let set: Record<string, string | null> = {};
+    if (depth < C) {
+      kind = "section";
+      const lv = [...p.cat1Levels];
+      lv[depth] = rawNew.toUpperCase();
+      set = { component_section: lv.join(SEP) };
+    } else if (depth === elementIdx) {
+      kind = "element"; set = { component_element: rawNew.toUpperCase() };
+    } else if (depth === labelIdx) {
+      kind = "label"; set = { label: rawNew.toUpperCase() };
+    } else if (depth === descIdx) {
+      kind = "description"; set = { description: rawNew };
+    } else if (depth === addIdx) {
+      kind = "additional"; set = { additional_description: rawNew };
+    } else {
+      continue;
+    }
+    renamedKind = kind;
+    const key = JSON.stringify(set);
+    const arr = groups.get(key);
+    if (arr) arr.push(s.id); else groups.set(key, [s.id]);
+  }
+
+  if (groups.size === 0) return { ok: false, error: "No slabs found under this category." };
+
+  let count = 0;
+  const nowIso = new Date().toISOString();
+  for (const [key, ids] of groups) {
+    const set = { ...(JSON.parse(key) as Record<string, string | null>), updated_by: profile.id, updated_at: nowIso };
+    const { data, error } = await admin.from("slab_requirements").update(set).in("id", ids).select("id");
+    if (error) return { ok: false, error: error.message };
+    count += (data ?? []).length;
+  }
+
+  await logAudit(profile.id, "temple_node_renamed", "slab", "batch", {
+    temple, from: segments[depth], to: rawNew, kind: renamedKind, depth, count,
   });
   revalidatePath("/temples");
   revalidatePath("/slabs");

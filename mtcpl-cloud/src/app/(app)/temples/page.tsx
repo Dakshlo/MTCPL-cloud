@@ -16,6 +16,9 @@ export const dynamic = "force-dynamic";
 // Daksh (June 2026) — carving_head gets FULL Temple View access (read +
 // add/delete images at any node + move slabs between categories).
 const IMAGE_WRITE_ROLES = ["owner", "developer", "team_head", "senior_incharge", "carving_head"];
+// Renaming a whole category (tree-head node) is limited to owner / developer /
+// carving head / slab incharge (senior) — must match CAT_EDIT_ROLES in actions.ts.
+const CATEGORY_EDIT_ROLES = ["owner", "developer", "carving_head", "senior_incharge"];
 
 type SlabRow = {
   id: string; label: string | null; description: string | null; temple: string; status: string;
@@ -107,6 +110,7 @@ export default async function TemplesPage() {
   // canReadRequiredSizes so Required Sizes / Slabs stays as-is for them).
   if (!canReadRequiredSizes(profile) && profile.role !== "carving_head" && profile.role !== "tender_manager") redirect("/");
   const canWriteImages = IMAGE_WRITE_ROLES.includes(profile.role);
+  const canEditCategories = CATEGORY_EDIT_ROLES.includes(profile.role);
   const admin = createAdminSupabaseClient();
 
   // Paginated fetch of every slab (all statuses) — mirrors the slabs page
@@ -279,7 +283,7 @@ export default async function TemplesPage() {
         </div>
         {canWriteImages && <AddTempleImageButton categoryStruct={categoryStruct} />}
       </div>
-      <TempleViewClient trees={trees} imagesByNode={imagesByNode} canManageImages={canWriteImages} templeCats={templeCats} cancelAlerts={cancelAlerts} />
+      <TempleViewClient trees={trees} imagesByNode={imagesByNode} canManageImages={canWriteImages} canEditCategories={canEditCategories} templeCats={templeCats} cancelAlerts={cancelAlerts} />
     </div>
   );
 }

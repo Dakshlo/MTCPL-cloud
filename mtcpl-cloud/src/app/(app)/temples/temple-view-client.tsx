@@ -276,7 +276,7 @@ function StageLegend() {
   );
 }
 
-export function TempleViewClient({ trees, imagesByNode, canManageImages, templeCats, cancelAlerts = [] }: { trees: TempleTree[]; imagesByNode: Record<string, ComponentImage[]>; canManageImages: boolean; templeCats: TempleCats; cancelAlerts?: Array<{ slabId: string; temple: string }> }) {
+export function TempleViewClient({ trees, imagesByNode, canManageImages, canEditCategories = false, templeCats, cancelAlerts = [] }: { trees: TempleTree[]; imagesByNode: Record<string, ComponentImage[]>; canManageImages: boolean; canEditCategories?: boolean; templeCats: TempleCats; cancelAlerts?: Array<{ slabId: string; temple: string }> }) {
   const [selected, setSelected] = useState<string>(trees[0]?.temple ?? "");
   const [q, setQ] = useState("");
   // Mig 132 — the replace / no-replace decision uses the same write
@@ -353,6 +353,7 @@ export function TempleViewClient({ trees, imagesByNode, canManageImages, templeC
         trees={trees}
         imagesByNode={imagesByNode}
         canManageImages={canManageImages}
+        canEditCategories={canEditCategories}
         templeCats={templeCats}
         onExit={() => setCardMode(false)}
       />
