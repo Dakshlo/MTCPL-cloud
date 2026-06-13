@@ -379,7 +379,15 @@ function BookValuePanel({
                   <span style={{ color: "var(--muted)" }}>{h.usefulLifeYears}y life</span>
                   {h.note && <span style={{ color: "var(--muted)", fontStyle: "italic" }}>· {h.note}</span>}
                   {canEdit && (
-                    <form action={async (fd) => { await cancelAction(fd); }} style={{ marginLeft: "auto" }}>
+                    <form
+                      action={async (fd) => { await cancelAction(fd); }}
+                      onSubmit={(e) => {
+                        if (!confirm(`Cancel this book-value entry (${fmtINR(h.bookValue)}, from ${h.effectiveFrom})? It stays in audit history.`)) {
+                          e.preventDefault();
+                        }
+                      }}
+                      style={{ marginLeft: "auto" }}
+                    >
                       <input type="hidden" name="id" value={h.id} />
                       <button
                         type="submit"
@@ -542,6 +550,7 @@ function AddExpenseRow({
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [added, setAdded] = useState(false);
 
   return (
     <>
@@ -560,12 +569,19 @@ function AddExpenseRow({
           {monthLabel}
         </span>
       </div>
+      {added && (
+        <div role="status" style={{ marginBottom: 6, padding: "8px 12px", background: "rgba(22,163,74,0.1)", border: "1px solid rgba(22,163,74,0.4)", color: "#15803d", fontSize: 12.5, fontWeight: 700, borderRadius: 7 }}>
+          ✓ Expense added.
+        </div>
+      )}
       <form
         action={(fd) => {
           setError(null);
           start(async () => {
             const r = await addAction(fd);
             if (r.ok) {
+              setAdded(true);
+              setTimeout(() => setAdded(false), 2600);
               router.refresh();
               (document.getElementById("cutter-add-form") as HTMLFormElement | null)?.reset();
             } else {

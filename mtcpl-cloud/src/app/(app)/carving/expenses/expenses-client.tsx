@@ -233,6 +233,7 @@ function VendorCard({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [added, setAdded] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
 
   // Add form state
@@ -260,6 +261,8 @@ function VendorCard({
         setError(r.error);
         return;
       }
+      setAdded(`✓ ${fmtINR(amount)} added to ${vendor.name}`);
+      setTimeout(() => setAdded(null), 2600);
       setAddAmount("");
       setAddNote("");
       setAddCategory("tools");
@@ -388,6 +391,22 @@ function VendorCard({
             }}
           >
             {error}
+          </div>
+        )}
+        {added && (
+          <div
+            role="status"
+            style={{
+              padding: "8px 12px",
+              background: "rgba(22,163,74,0.1)",
+              border: "1px solid rgba(22,163,74,0.4)",
+              color: "#15803d",
+              fontSize: 12.5,
+              fontWeight: 700,
+              borderRadius: 7,
+            }}
+          >
+            {added}
           </div>
         )}
 

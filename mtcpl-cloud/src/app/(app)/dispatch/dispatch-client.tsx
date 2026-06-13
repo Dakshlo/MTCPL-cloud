@@ -704,6 +704,29 @@ function TempleDispatchPeek({
   const totalKg = Object.values(weightsParsed).reduce((a, b) => a + b, 0);
   const totalTonnes = totalKg / 1000;
 
+  // Group selected slabs that are IDENTICAL (same label + description +
+  // size) — they weigh the same, so the operator enters ONE weight per
+  // group and it auto-fills every slab in it (no per-slab repetition,
+  // far fewer mistakes).
+  const weightGroups: Array<{ key: string; sample: ReadySlab; ids: string[] }> = [];
+  {
+    const m = new Map<string, { key: string; sample: ReadySlab; ids: string[] }>();
+    for (const s of selSlabs) {
+      const key = `${(s.label ?? "").trim().toLowerCase()}|${(s.description ?? "").trim().toLowerCase()}|${s.dimensions}`;
+      const g = m.get(key);
+      if (g) g.ids.push(s.id);
+      else m.set(key, { key, sample: s, ids: [s.id] });
+    }
+    weightGroups.push(...m.values());
+  }
+  function setGroupWeight(ids: string[], val: string) {
+    setWeights((prev) => {
+      const next = { ...prev };
+      for (const id of ids) next[id] = val;
+      return next;
+    });
+  }
+
   // Recent unique trucks (newest first) for one-tap fill.
   const recentTrucks = useMemo(() => {
     const seen = new Set<string>();
@@ -918,37 +941,61 @@ function TempleDispatchPeek({
                 <textarea name="notes" rows={2} style={{ resize: "vertical", fontFamily: "inherit", fontSize: 14 }} />
               </label>
 
-              {/* Selected slab recap + per-slab weight (mig 130). Weight
-                  is optional — filled rows sum into the challan's Net
-                  Weight. */}
-              <div style={{ border: "1px solid var(--border)", borderRadius: 10, background: "var(--bg)", padding: "10px 12px", maxHeight: 240, overflowY: "auto", fontSize: 12.5, fontFamily: "ui-monospace, monospace" }}>
-                <div style={{ fontFamily: "inherit", fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
-                  Going on this truck — {selSlabs.length} slab{selSlabs.length === 1 ? "" : "s"} · {selCft.toFixed(2)} CFT
-                  {totalKg > 0 && <span style={{ color: "#15803d" }}> · ⚖ {Math.round(totalKg)} kg ({totalTonnes.toFixed(3)} T)</span>}
+              {/* Per-slab weight (mig 130) — entered ONCE per identical
+                  group (same label + size). Optional; fills the challan's
+                  Net Weight. */}
+              <div style={{ border: "1px solid var(--border)", borderRadius: 12, background: "var(--bg)", padding: "12px 14px", maxHeight: 280, overflowY: "auto" }}>
+                <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+                  <span style={{ fontSize: 11.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    ⚖ Weight per slab <span style={{ fontWeight: 600, textTransform: "none" }}>(kg · optional)</span>
+                  </span>
+                  <span style={{ fontSize: 12.5, fontWeight: 700 }}>
+                    {selSlabs.length} slab{selSlabs.length === 1 ? "" : "s"} · {selCft.toFixed(2)} CFT
+                    {totalKg > 0 && <span style={{ color: "#15803d" }}> · {Math.round(totalKg).toLocaleString("en-IN")} kg ({totalTonnes.toFixed(3)} T)</span>}
+                  </span>
                 </div>
-                {selSlabs.map((s) => (
-                  <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0", borderBottom: "1px dashed var(--border)", flexWrap: "wrap" }}>
-                    <span style={{ minWidth: 0 }}>
-                      <strong>{s.id}</strong>
-                      {s.label && <span style={{ color: "var(--muted)" }}> · {s.label}</span>}
-                      {" · "}{s.dimensions}
-                      <span style={{ color: "var(--muted)" }}> · {s.cft.toFixed(2)} CFT</span>
-                    </span>
-                    <label style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 4, fontFamily: "inherit" }}>
-                      <span style={{ fontSize: 10.5, color: "var(--muted)", fontWeight: 700 }}>⚖</span>
-                      <input
-                        type="number"
-                        min="0"
-                        step="1"
-                        placeholder="kg"
-                        value={weights[s.id] ?? ""}
-                        onChange={(e) => setWeights((prev) => ({ ...prev, [s.id]: e.target.value }))}
-                        style={{ width: 72, fontSize: 12, padding: "4px 6px" }}
-                      />
-                      <span style={{ fontSize: 10.5, color: "var(--muted)" }}>kg</span>
-                    </label>
-                  </div>
-                ))}
+                <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 8 }}>
+                  Enter the weight of ONE slab — same-size slabs auto-fill. Challan totals in tonnes.
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {weightGroups.map((g) => {
+                    const each = Number(weights[g.ids[0]]) || 0;
+                    const lineKg = each > 0 ? each * g.ids.length : 0;
+                    return (
+                      <div key={g.key} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 11px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, flexWrap: "wrap" }}>
+                        <div style={{ minWidth: 0, flex: "1 1 200px" }}>
+                          <div style={{ fontSize: 13, fontWeight: 700 }}>
+                            {g.sample.label || "—"}
+                            <span style={{ fontFamily: "ui-monospace, monospace", color: "var(--muted)", fontWeight: 500 }}> · {g.sample.dimensions}</span>
+                            {g.ids.length > 1 && (
+                              <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 800, color: "#b45309", background: "rgba(180,83,9,0.12)", borderRadius: 999, padding: "1px 9px" }}>× {g.ids.length}</span>
+                            )}
+                          </div>
+                          {g.sample.description && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{g.sample.description}</div>}
+                          <div style={{ fontSize: 11, color: "var(--muted)", fontFamily: "ui-monospace, monospace", marginTop: 1 }}>
+                            {g.ids.join(", ")}
+                          </div>
+                        </div>
+                        <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            inputMode="numeric"
+                            placeholder="0"
+                            value={weights[g.ids[0]] ?? ""}
+                            onChange={(e) => setGroupWeight(g.ids, e.target.value)}
+                            style={{ width: 92, fontSize: 14, padding: "8px 10px", textAlign: "right", fontFamily: "ui-monospace, monospace" }}
+                          />
+                          <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--muted)" }}>kg / slab</span>
+                          {lineKg > 0 && g.ids.length > 1 && (
+                            <span style={{ fontSize: 11, color: "var(--muted)", whiteSpace: "nowrap" }}>= {lineKg.toLocaleString("en-IN")} kg</span>
+                          )}
+                        </label>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
@@ -1249,6 +1296,9 @@ function DispatchRow({
   row: OutForDeliveryRow;
   onMarkDelivered: () => void;
 }) {
+  // Reliable in-app confirm for Undo (native confirm() can be suppressed
+  // by the browser after repeated dialogs).
+  const [confirmUndo, setConfirmUndo] = useState(false);
   const chalan = chalanLabel(row.challan_number, row.id);
   const dispatchedAt = new Date(row.dispatched_at);
   const expected = row.expected_delivery_date
@@ -1334,25 +1384,30 @@ function DispatchRow({
         >
           📸 Reached — mark delivered
         </button>
-        <form
-          action={undoDispatchAction}
-          onSubmit={(e) => {
-            if (!confirm(`Undo this dispatch to ${row.temple}? Slabs will return to Make Dispatch.`)) {
-              e.preventDefault();
-            }
-          }}
-          style={{ display: "inline" }}
-        >
-          <input type="hidden" name="dispatch_id" value={row.id} />
+        {confirmUndo ? (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(220,38,38,0.07)", border: "1px solid rgba(220,38,38,0.35)", borderRadius: 8, padding: "5px 8px" }}>
+            <span style={{ fontSize: 11.5, fontWeight: 700, color: "#b91c1c" }}>Undo &amp; return slabs?</span>
+            <form action={undoDispatchAction} style={{ display: "inline" }}>
+              <input type="hidden" name="dispatch_id" value={row.id} />
+              <button type="submit" style={{ fontSize: 12, fontWeight: 800, color: "#fff", background: "#dc2626", border: "none", borderRadius: 6, padding: "5px 12px", cursor: "pointer" }}>
+                ✓ Yes, undo
+              </button>
+            </form>
+            <button type="button" onClick={() => setConfirmUndo(false)} style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", background: "transparent", border: "none", cursor: "pointer", padding: "5px 4px" }}>
+              ✕
+            </button>
+          </span>
+        ) : (
           <button
-            type="submit"
+            type="button"
+            onClick={() => setConfirmUndo(true)}
             className="ghost-button danger-ghost"
             style={{ fontSize: 12, padding: "8px 12px" }}
             title="Revert this dispatch — slabs go back to Make Dispatch"
           >
             Undo
           </button>
-        </form>
+        )}
       </div>
     </div>
   );

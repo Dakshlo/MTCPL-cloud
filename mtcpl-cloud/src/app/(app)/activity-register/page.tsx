@@ -65,10 +65,6 @@ export default async function ActivityRegisterHome({ searchParams }: { searchPar
         <div style={{ flex: 1, minWidth: 220 }}>
           <div style={{ fontSize: 11, fontWeight: 700, opacity: 0.7, letterSpacing: "0.1em", textTransform: "uppercase" }}>Register</div>
           <div style={{ fontSize: 24, fontWeight: 900, lineHeight: 1.15 }}>Activity Register</div>
-          <p style={{ margin: "6px 0 0", fontSize: 13, opacity: 0.9, maxWidth: 640, lineHeight: 1.5 }}>
-            A dated, searchable record of company activities with proof — organised by site. Each site has its own
-            code scheme (e.g. <code style={{ background: "rgba(255,255,255,0.15)", padding: "1px 6px", borderRadius: 4 }}>Lnt/OOS/001</code>). Attach any file as proof.
-          </p>
         </div>
         <div style={{ display: "flex", gap: 22, flexShrink: 0 }}>
           <div style={{ textAlign: "center" }}>
