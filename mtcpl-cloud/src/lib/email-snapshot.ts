@@ -188,7 +188,14 @@ async function fetchRecentEmails(range: SnapshotRange): Promise<FetchedEmail[]> 
       const uids = await client.search(before ? { since, before } : { since }, { uid: true });
       const recent = (Array.isArray(uids) ? uids : []).slice(-maxEmailsForRange(range));
       if (recent.length > 0) {
-        for await (const msg of client.fetch(recent.join(","), { source: true, uid: true }, { uid: true })) {
+        // Fetch only the FIRST 64 KB of each email's raw source, not the
+        // whole thing. Headers + the plain-text body live at the top; the
+        // heavy attachments (base64, often several MB each) come after and
+        // get truncated away. We only keep 1500 chars of body anyway, so
+        // this loses nothing useful — but it stops a large inbox from
+        // downloading tens of MB per run, which was blowing the 60s budget
+        // (Vercel 504). simpleParser tolerates a truncated MIME source.
+        for await (const msg of client.fetch(recent.join(","), { source: { maxLength: 65536 }, uid: true }, { uid: true })) {
           if (!msg.source) continue;
           try {
             const parsed = await simpleParser(msg.source);
@@ -322,8 +329,10 @@ async function summarizeBatch(anthropic: Anthropic, model: string, emails: Fetch
   const input = emails.map((e, idx) => ({ idx, from: e.fromText, subject: e.subject, date: e.date, body: e.body }));
   const response = await anthropic.messages.create({
     model,
-    max_tokens: 8000,
-    thinking: { type: "adaptive" },
+    max_tokens: 4096,
+    // No extended thinking — this is a screen-and-summarize task, and
+    // adaptive thinking added a lot of latency per batch (a big part of
+    // why the run blew the 60s budget). Direct answers are plenty here.
     output_config: { format: { type: "json_schema", schema: SUMMARY_SCHEMA } },
     messages: [{ role: "user", content: `${SUMMARY_PROMPT}\n\nEMAILS (JSON):\n${JSON.stringify(input)}` }],
   });

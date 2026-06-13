@@ -16,8 +16,11 @@ import { runEmailSnapshot, recordSnapshotDiagnostic } from "@/lib/email-snapshot
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// IMAP fetch + AI summarize can take ~20-40s.
-export const maxDuration = 60;
+// IMAP fetch + AI summarize. Give it headroom: on Vercel Pro this allows
+// up to 300s (Hobby caps at 60s, where the value is simply clamped). The
+// fetch/AI speedups in email-snapshot.ts keep a normal run well under a
+// minute regardless — this just stops a heavy day from 504-ing.
+export const maxDuration = 300;
 
 function isCronRequest(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
