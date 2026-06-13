@@ -9,6 +9,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canReadRequiredSizes } from "@/lib/cutting-permissions";
 import { TempleViewClient, type TempleTree, type StageBucket, type ComponentImage } from "./temple-view-client";
+import { STAGE_ORDER } from "./temple-shared";
 import { AddTempleImageButton } from "./add-image-button";
 
 export const dynamic = "force-dynamic";
@@ -63,6 +64,13 @@ function stageBucket(status: string): StageBucket {
 
 const EMPTY_COUNTS = (): Record<StageBucket, number> => ({ pending: 0, cutting: 0, cut_done: 0, carving: 0, ready_dispatch: 0, done: 0, rejected: 0, cancelled: 0 });
 
+// Order slabs inside a leaf by production stage (matching the bar / legend):
+// Pending → Cutting → Cut·ready → Carving → Ready to dispatch → Dispatched → Cancelled.
+function stageRank(status: string): number {
+  const i = STAGE_ORDER.indexOf(stageBucket(status));
+  return i < 0 ? STAGE_ORDER.length : i;
+}
+
 // Mutable tree used while building; converted to the serializable shape below.
 type BuildNode = {
   name: string;
@@ -88,7 +96,10 @@ function rollup(node: BuildNode, path: string): { node: TempleTreeNode; counts: 
   const total = (Object.values(counts) as number[]).reduce((s, n) => s + n, 0);
   const slabs = node.slabs
     .slice()
-    .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+    .sort((a, b) => {
+      const r = stageRank(a.status) - stageRank(b.status);
+      return r !== 0 ? r : a.id.localeCompare(b.id, undefined, { numeric: true });
+    });
   return {
     node: {
       id: path,
