@@ -267,6 +267,7 @@ export default async function DispatchPage({
       notes: d.notes,
       slabCount: count,
       slabCftTotal: cft,
+      approvedAt: (d as { approved_at?: string | null }).approved_at ?? null,
     };
   });
 
@@ -288,6 +289,7 @@ export default async function DispatchPage({
       notes: d.notes,
       slabCount: count,
       slabCftTotal: cft,
+      approvedAt: (d as { approved_at?: string | null }).approved_at ?? null,
       delivered_at: d.delivered_at!,
       delivered_by_name: d.delivered_by ? profilesMap[d.delivered_by] ?? null : null,
       receiver_name: d.receiver_name,

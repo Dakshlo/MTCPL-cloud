@@ -279,12 +279,12 @@ export default async function DispatchChallanPrintPage({ params }: { params: Par
 
         .signoff-row {
           display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 28px;
-          margin-top: 40px;
+          grid-template-columns: 1fr 1fr 1fr;
+          gap: 20px;
+          margin-top: 46px;
         }
         .signoff-field {
-          display: flex; flex-direction: column; gap: 40px;
+          display: flex; flex-direction: column; gap: 38px;
           padding-top: 10px;
           border-top: 1.5px solid #888;
         }
@@ -483,7 +483,7 @@ export default async function DispatchChallanPrintPage({ params }: { params: Par
                 <th>Stone</th>
                 <th>Dimensions (in)</th>
                 <th style={{ textAlign: "right" }}>CFT</th>
-                {hasWeights && <th style={{ textAlign: "right" }}>Weight (T)</th>}
+                {hasWeights && <th style={{ textAlign: "right" }}>Weight (kg)</th>}
               </tr>
             </thead>
             <tbody>
@@ -504,7 +504,7 @@ export default async function DispatchChallanPrintPage({ params }: { params: Par
                     <td style={{ textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{c.toFixed(2)}</td>
                     {hasWeights && (
                       <td style={{ textAlign: "right", fontFamily: "ui-monospace, monospace" }}>
-                        {w != null ? w.toFixed(3) : "—"}
+                        {w != null ? Math.round(w * 1000).toLocaleString("en-IN") : "—"}
                       </td>
                     )}
                   </tr>
@@ -548,8 +548,17 @@ export default async function DispatchChallanPrintPage({ params }: { params: Par
           </div>
         )}
 
-        {/* Sign-off row */}
+        {/* Sign-off row — three signatures: MTCPL plant representative,
+            the driver, and the site engineer who receives at site. */}
         <div className="signoff-row">
+          <div className="signoff-field">
+            <div>
+              <div className="signoff-label">For MTCPL · Representative</div>
+              <div className="signoff-sub">
+                {handlingMan?.name ? handlingMan.name : "Authorised signatory"}
+              </div>
+            </div>
+          </div>
           <div className="signoff-field">
             <div>
               <div className="signoff-label">Driver Signature</div>
@@ -558,7 +567,7 @@ export default async function DispatchChallanPrintPage({ params }: { params: Par
           </div>
           <div className="signoff-field">
             <div>
-              <div className="signoff-label">Receiver Signature (Site Engineer)</div>
+              <div className="signoff-label">Received · Site Engineer</div>
               <div className="signoff-sub">
                 {dispatch.receiver_name || "Name & date of receipt"}
               </div>

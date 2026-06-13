@@ -41,6 +41,41 @@ function chalanLabel(n: number | null, fallbackId: string): string {
   return `DISP-${fallbackId.slice(0, 8).toUpperCase()}`;
 }
 
+/** Group dispatch rows by temple, alphabetical. */
+function groupByTemple<T extends { temple: string; slabCftTotal: number }>(rows: T[]): Array<{ temple: string; rows: T[]; cft: number }> {
+  const map = new Map<string, T[]>();
+  for (const r of rows) {
+    const arr = map.get(r.temple) ?? [];
+    arr.push(r);
+    map.set(r.temple, arr);
+  }
+  return [...map.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([temple, rs]) => ({ temple, rows: rs, cft: rs.reduce((n, r) => n + r.slabCftTotal, 0) }));
+}
+
+/** Temple section header for the grouped tabs. */
+function TempleHeader({ temple, count, cft }: { temple: string; count: number; cft: number }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 4px", flexWrap: "wrap" }}>
+      <span style={{ fontSize: 15.5, fontWeight: 800 }}>🏛 {temple}</span>
+      <span className="muted" style={{ fontSize: 12.5 }}>· {count} dispatch{count === 1 ? "" : "es"} · {cft.toFixed(2)} CFT</span>
+    </div>
+  );
+}
+
+/** Humanized duration between two timestamps — for delivered transit. */
+function durationBetween(fromIso: string, toIso: string): string {
+  const ms = new Date(toIso).getTime() - new Date(fromIso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return "—";
+  const min = Math.floor(ms / 60000);
+  if (min < 60) return `${Math.max(1, min)} min`;
+  const hrs = Math.floor(min / 60);
+  if (hrs < 24) return `${hrs} h ${min % 60} m`;
+  const days = Math.floor(hrs / 24);
+  return `${days} d ${hrs % 24} h`;
+}
+
 export type ReadySlab = {
   id: string;
   label: string | null;
@@ -76,7 +111,10 @@ export type ProvisionalRow = {
   slabCftTotal: number;
 };
 
-export type OutForDeliveryRow = ProvisionalRow;
+export type OutForDeliveryRow = ProvisionalRow & {
+  /** When the senior approved it (truck left). Drives the transit timer. */
+  approvedAt?: string | null;
+};
 
 export type DeliveredRow = OutForDeliveryRow & {
   delivered_at: string;
@@ -656,13 +694,15 @@ function TempleDispatchPeek({
   const selSlabs = group.slabs.filter((s) => selected.has(s.id));
   const selCft = selSlabs.reduce((sum, s) => sum + s.cft, 0);
 
-  // Net weight = sum of the entered per-slab tonnes (blank rows skipped).
+  // Per-slab weight is entered in KG (blank rows skipped). The challan
+  // shows the net total in tonnes; weightsParsed maps slabId → kg.
   const weightsParsed: Record<string, number> = {};
   for (const s of selSlabs) {
     const n = Number(weights[s.id]);
     if (Number.isFinite(n) && n > 0) weightsParsed[s.id] = n;
   }
-  const totalTonnes = Object.values(weightsParsed).reduce((a, b) => a + b, 0);
+  const totalKg = Object.values(weightsParsed).reduce((a, b) => a + b, 0);
+  const totalTonnes = totalKg / 1000;
 
   // Recent unique trucks (newest first) for one-tap fill.
   const recentTrucks = useMemo(() => {
@@ -884,7 +924,7 @@ function TempleDispatchPeek({
               <div style={{ border: "1px solid var(--border)", borderRadius: 10, background: "var(--bg)", padding: "10px 12px", maxHeight: 240, overflowY: "auto", fontSize: 12.5, fontFamily: "ui-monospace, monospace" }}>
                 <div style={{ fontFamily: "inherit", fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
                   Going on this truck — {selSlabs.length} slab{selSlabs.length === 1 ? "" : "s"} · {selCft.toFixed(2)} CFT
-                  {totalTonnes > 0 && <span style={{ color: "#15803d" }}> · ⚖ {totalTonnes.toFixed(3)} T net</span>}
+                  {totalKg > 0 && <span style={{ color: "#15803d" }}> · ⚖ {Math.round(totalKg)} kg ({totalTonnes.toFixed(3)} T)</span>}
                 </div>
                 {selSlabs.map((s) => (
                   <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0", borderBottom: "1px dashed var(--border)", flexWrap: "wrap" }}>
@@ -899,13 +939,13 @@ function TempleDispatchPeek({
                       <input
                         type="number"
                         min="0"
-                        step="0.001"
-                        placeholder="tonne"
+                        step="1"
+                        placeholder="kg"
                         value={weights[s.id] ?? ""}
                         onChange={(e) => setWeights((prev) => ({ ...prev, [s.id]: e.target.value }))}
-                        style={{ width: 78, fontSize: 12, padding: "4px 6px" }}
+                        style={{ width: 72, fontSize: 12, padding: "4px 6px" }}
                       />
-                      <span style={{ fontSize: 10.5, color: "var(--muted)" }}>T</span>
+                      <span style={{ fontSize: 10.5, color: "var(--muted)" }}>kg</span>
                     </label>
                   </div>
                 ))}
@@ -974,8 +1014,11 @@ function ProvisionalTab({
           🕒 Create a dispatch on the <strong>Make Dispatch</strong> tab — it lands here for senior review before the truck leaves.
         </div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {rows.map((r) => (
+        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          {groupByTemple(rows).map((g) => (
+          <div key={g.temple} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <TempleHeader temple={g.temple} count={g.rows.length} cft={g.cft} />
+          {g.rows.map((r) => (
             <div
               key={r.id}
               style={{
@@ -1037,6 +1080,8 @@ function ProvisionalTab({
                 </div>
               </div>
             </div>
+          ))}
+          </div>
           ))}
         </div>
       )}
@@ -1177,8 +1222,13 @@ function OutForDeliveryTab({ rows }: { rows: OutForDeliveryRow[] }) {
       <div className="muted" style={{ fontSize: 12.5, marginBottom: 12 }}>
         जब slab site पर पहुँच जाए: <strong>Reached — mark delivered</strong> दबाएँ और दो photo लगाएँ (truck on site + signed challan).
       </div>
-      {rows.map((r) => (
-        <DispatchRow key={r.id} row={r} onMarkDelivered={() => setDeliverRow(r)} />
+      {groupByTemple(rows).map((g) => (
+        <div key={g.temple} style={{ marginBottom: 8 }}>
+          <TempleHeader temple={g.temple} count={g.rows.length} cft={g.cft} />
+          {g.rows.map((r) => (
+            <DispatchRow key={r.id} row={r} onMarkDelivered={() => setDeliverRow(r)} />
+          ))}
+        </div>
       ))}
       {deliverRow && (
         <DeliverModal
@@ -1232,6 +1282,12 @@ function DispatchRow({
           <span className="muted" style={{ fontSize: 12.5 }}>
             · {row.slabCount} slab{row.slabCount !== 1 ? "s" : ""} · {row.slabCftTotal.toFixed(2)} CFT
           </span>
+          {/* Transit timer — running since the senior approved (truck left). */}
+          {row.approvedAt && (
+            <span style={{ fontSize: 11, fontWeight: 800, color: "#1d4ed8", background: "rgba(37,99,235,0.1)", border: "1px solid rgba(37,99,235,0.3)", borderRadius: 999, padding: "2px 9px", whiteSpace: "nowrap" }}>
+              ⏱ on road {timeAgoLabel(row.approvedAt)}
+            </span>
+          )}
         </div>
         <div style={{ marginTop: 5, fontSize: 13, color: "var(--muted)" }}>
           {row.vehicle_no && (
@@ -1315,7 +1371,10 @@ function DeliveredTab({ rows, legacy }: { rows: DeliveredRow[]; legacy: LegacyDi
 
   return (
     <>
-      {rows.map((r) => {
+      {groupByTemple(rows).map((g) => (
+      <div key={g.temple} style={{ marginBottom: 10 }}>
+      <TempleHeader temple={g.temple} count={g.rows.length} cft={g.cft} />
+      {g.rows.map((r) => {
         const chalan = chalanLabel(r.challan_number, r.id);
         const dispatchedAt = new Date(r.dispatched_at);
         const deliveredAt = new Date(r.delivered_at);
@@ -1343,6 +1402,7 @@ function DeliveredTab({ rows, legacy }: { rows: DeliveredRow[]; legacy: LegacyDi
                 {r.vehicle_no ? <>🚛 {r.vehicle_no} · </> : null}
                 Left {dispatchedAt.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" })}
                 {" · "}Delivered {deliveredAt.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}
+                {r.approvedAt ? <> · ⏱ transit {durationBetween(r.approvedAt, r.delivered_at)}</> : null}
                 {r.delivered_by_name ? ` · confirmed by ${r.delivered_by_name}` : ""}
                 {r.receiver_name ? ` · received by ${r.receiver_name}` : ""}
               </div>
@@ -1383,6 +1443,8 @@ function DeliveredTab({ rows, legacy }: { rows: DeliveredRow[]; legacy: LegacyDi
           </div>
         );
       })}
+      </div>
+      ))}
 
       {legacy.length > 0 && (
         <details style={{ marginTop: 16 }}>

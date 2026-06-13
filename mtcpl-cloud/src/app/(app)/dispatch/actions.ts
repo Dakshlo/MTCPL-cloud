@@ -61,19 +61,21 @@ export async function createDispatchAction(formData: FormData) {
   const expectedDeliveryDate = String(formData.get("expected_delivery_date") || "").trim() || null;
   const notes = String(formData.get("notes") || "").trim() || null;
   const slabIds = JSON.parse(String(formData.get("slab_ids") || "[]")) as string[];
-  // Mig 130 — optional per-slab weights (tonnes), entered on the truck
-  // form. Map slabId → tonnes; missing/invalid entries stay NULL.
-  let slabWeights: Record<string, number> = {};
+  // Mig 130 — optional per-slab weights, entered in KG on the truck form.
+  // Stored as TONNES in dispatch_logs.weight_tonnes (canonical) — the
+  // challan prints per-slab kg + a net total in tonnes. Map slabId → kg;
+  // missing/invalid entries stay NULL.
+  let slabWeightsKg: Record<string, number> = {};
   try {
     const parsed = JSON.parse(String(formData.get("slab_weights") || "{}"));
     if (parsed && typeof parsed === "object") {
       for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
         const n = Number(v);
-        if (Number.isFinite(n) && n > 0) slabWeights[k] = n;
+        if (Number.isFinite(n) && n > 0) slabWeightsKg[k] = n;
       }
     }
   } catch {
-    slabWeights = {};
+    slabWeightsKg = {};
   }
 
   // ── Validation
@@ -169,13 +171,14 @@ export async function createDispatchAction(formData: FormData) {
   }
   if (!dispatchId) fail("/dispatch", "Failed to create dispatch — load number collision. Retry.");
 
-  // ── Insert per-slab dispatch_logs (weight_tonnes — mig 130)
+  // ── Insert per-slab dispatch_logs (weight_tonnes — mig 130).
+  // Input is kg → store tonnes (kg / 1000).
   const logRows = slabIds.map((slabId) => ({
     carving_item_id: carvingBySlabId.get(slabId) ?? null,
     slab_requirement_id: slabId,
     dispatched_by: profile.id,
     dispatch_id: dispatchId,
-    weight_tonnes: slabWeights[slabId] ?? null,
+    weight_tonnes: slabWeightsKg[slabId] != null ? slabWeightsKg[slabId] / 1000 : null,
   }));
   const { error: logsErr } = await admin.from("dispatch_logs").insert(logRows);
   if (logsErr) {
