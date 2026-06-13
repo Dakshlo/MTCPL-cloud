@@ -9,7 +9,7 @@
 //     the node you're looking at — no re-picking the category.
 
 import { useRef, useState, type CSSProperties } from "react";
-import { moveSlabComponentAction, addTempleComponentImageAction } from "./actions";
+import { moveSlabsComponentAction, addTempleComponentImageAction } from "./actions";
 import type { TempleSlabCard } from "./temple-shared";
 
 const overlay: CSSProperties = {
@@ -33,14 +33,19 @@ const lbl: CSSProperties = {
 
 // ── Move / re-categorize a slab ──────────────────────────────────────
 export function MoveSlabModal({
-  slab, temple, cats, onClose, onMoved,
+  slabs, temple, cats, onClose, onMoved,
 }: {
-  slab: TempleSlabCard;
+  /** One or many slabs — multi-select moves them all to the same path.
+   *  They share a leaf (same Cat1›Cat2›Label›Desc), so slabs[0] seeds the
+   *  form. */
+  slabs: TempleSlabCard[];
   temple: string;
   cats: { cat1: string[]; cat2: string[]; labels: string[] };
   onClose: () => void;
   onMoved: () => void;
 }) {
+  const slab = slabs[0];
+  const many = slabs.length > 1;
   const [section, setSection] = useState(slab.section);
   const [element, setElement] = useState(slab.element);
   const [label, setLabel] = useState(slab.label);
@@ -63,13 +68,13 @@ export function MoveSlabModal({
     setError("");
     try {
       const fd = new FormData();
-      fd.set("slab_id", slab.id);
+      fd.set("slab_ids", JSON.stringify(slabs.map((s) => s.id)));
       fd.set("section", section);
       fd.set("element", element);
       fd.set("label", label);
       fd.set("description", description);
       fd.set("additional", additional);
-      const res = await moveSlabComponentAction(fd);
+      const res = await moveSlabsComponentAction(fd);
       if (!res.ok) { setError(res.error); setBusy(false); return; }
       onMoved();
     } catch {
@@ -82,7 +87,9 @@ export function MoveSlabModal({
     <div role="dialog" aria-modal="true" onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }} style={overlay}>
       <div style={dialog}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-          <div style={{ fontSize: 16, fontWeight: 800 }}>↔ Move slab <code style={{ fontFamily: "ui-monospace, monospace" }}>{slab.id}</code></div>
+          <div style={{ fontSize: 16, fontWeight: 800 }}>
+            {many ? <>↔ Move <span style={{ color: "var(--gold-dark)" }}>{slabs.length} slabs</span></> : <>↔ Move slab <code style={{ fontFamily: "ui-monospace, monospace" }}>{slab.id}</code></>}
+          </div>
           <button type="button" onClick={onClose} aria-label="Close" style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "var(--muted)" }}>×</button>
         </div>
 

@@ -11,7 +11,7 @@
 // The polish: staggered card entrance, hover lift, progress rings,
 // gradient covers — gallery/finder feel rather than a database page.
 
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { deleteTempleComponentImageAction } from "./actions";
 import { MoveSlabModal, NodeImageUploader } from "./temple-node-modals";
@@ -126,8 +126,15 @@ export function TempleCardBrowser({
   const [path, setPath] = useState<TempleTreeNode[]>([]);
   const [lightbox, setLightbox] = useState<{ images: ComponentImage[]; index: number } | null>(null);
   // Mig 128 — move-slab + per-node image-upload modals.
-  const [moveTarget, setMoveTarget] = useState<TempleSlabCard | null>(null);
+  // moveSlabs holds 1 (single tap) OR many (multi-select) slabs to move.
+  const [moveSlabs, setMoveSlabs] = useState<TempleSlabCard[] | null>(null);
   const [uploadNode, setUploadNode] = useState<{ path: string; label: string } | null>(null);
+  // Mig 128 follow-on — multi-select inside the current leaf. Press-and-hold
+  // a slab card for ~0.6s to enter select mode, then tap to pick several (all
+  // in the SAME leaf), and move them together.
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  function exitSelect() { setSelectMode(false); setSelectedIds(new Set()); }
 
   const tree = temple ? trees.find((t) => t.temple === temple) ?? null : null;
   const currentNode = path[path.length - 1] ?? null;
@@ -146,9 +153,9 @@ export function TempleCardBrowser({
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       // A modal (move / upload) owns Escape while it's open.
-      if (e.key === "Escape" && (moveTarget || uploadNode)) {
+      if (e.key === "Escape" && (moveSlabs || uploadNode)) {
         e.preventDefault();
-        setMoveTarget(null);
+        setMoveSlabs(null);
         setUploadNode(null);
         return;
       }
@@ -157,6 +164,7 @@ export function TempleCardBrowser({
       if (e.key === "Escape") {
         e.preventDefault();
         if (lightbox) setLightbox(null);
+        else if (selectMode) exitSelect();
         else goUp();
       } else if (lightbox && lightbox.images.length > 1 && (e.key === "ArrowRight" || e.key === "ArrowLeft")) {
         e.preventDefault();
@@ -167,7 +175,11 @@ export function TempleCardBrowser({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lightbox, path.length, temple, moveTarget, uploadNode]);
+  }, [lightbox, path.length, temple, moveSlabs, uploadNode, selectMode]);
+
+  // Leaving a leaf (drill in/out or switch temple) drops the selection — it
+  // only ever applies to slabs in the leaf you're looking at.
+  useEffect(() => { exitSelect(); }, [temple, path]);
 
   // First image anywhere under a temple → its landing-card cover.
   function templeCover(t: string): ComponentImage | null {
@@ -270,7 +282,12 @@ export function TempleCardBrowser({
           <SlabCardsGrid
             node={currentNode!}
             images={imagesByNode[currentNode!.id] ?? []}
-            onMove={canManageImages ? (s) => setMoveTarget(s) : undefined}
+            canSelect={canManageImages}
+            selectMode={selectMode}
+            selectedIds={selectedIds}
+            onSingleMove={(s) => setMoveSlabs([s])}
+            onEnterSelect={(s) => { setSelectMode(true); setSelectedIds(new Set([s.id])); }}
+            onToggle={(id) => setSelectedIds((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; })}
             onViewImages={(imgs, idx) => setLightbox({ images: imgs, index: idx })}
           />
         ) : children.length === 0 ? (
@@ -343,15 +360,45 @@ export function TempleCardBrowser({
         />
       )}
 
-      {/* Mig 128 — move a slab to a different category (with confirm step). */}
-      {moveTarget && temple && (
+      {/* Mig 128 — move one or many slabs to a different category. */}
+      {moveSlabs && temple && (
         <MoveSlabModal
-          slab={moveTarget}
+          slabs={moveSlabs}
           temple={temple}
           cats={cats}
-          onClose={() => setMoveTarget(null)}
-          onMoved={() => { setMoveTarget(null); router.refresh(); }}
+          onClose={() => setMoveSlabs(null)}
+          onMoved={() => { setMoveSlabs(null); exitSelect(); router.refresh(); }}
         />
+      )}
+
+      {/* Multi-select action bar — floats while picking slabs in a leaf. */}
+      {selectMode && currentNode && (
+        <div style={{ position: "fixed", left: "50%", bottom: 22, transform: "translateX(-50%)", zIndex: 1650, display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 14, background: "var(--surface)", border: "1px solid var(--gold-dark)", boxShadow: "0 14px 44px rgba(0,0,0,0.28)", maxWidth: "calc(100vw - 28px)", flexWrap: "wrap", justifyContent: "center", animation: "tcIn .2s ease" }}>
+          <span style={{ fontSize: 13.5, fontWeight: 800 }}>
+            <span style={{ color: "var(--gold-dark)" }}>{selectedIds.size}</span> selected
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              const all = currentNode.slabs.map((s) => s.id);
+              setSelectedIds((prev) => prev.size === all.length ? new Set() : new Set(all));
+            }}
+            style={{ fontSize: 12.5, fontWeight: 800, padding: "8px 13px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", cursor: "pointer", whiteSpace: "nowrap" }}
+          >
+            {selectedIds.size === currentNode.slabs.length ? "Clear all" : `Select all ${currentNode.slabs.length}`}
+          </button>
+          <button
+            type="button"
+            disabled={selectedIds.size === 0}
+            onClick={() => setMoveSlabs(currentNode.slabs.filter((s) => selectedIds.has(s.id)))}
+            style={{ fontSize: 13.5, fontWeight: 800, padding: "8px 16px", borderRadius: 9, border: "none", background: selectedIds.size === 0 ? "var(--border)" : "var(--gold-dark)", color: "#fff", cursor: selectedIds.size === 0 ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}
+          >
+            ↔ Move {selectedIds.size > 0 ? selectedIds.size : ""} →
+          </button>
+          <button type="button" onClick={exitSelect} style={{ fontSize: 12.5, fontWeight: 800, padding: "8px 13px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--muted)", cursor: "pointer" }}>
+            Cancel
+          </button>
+        </div>
       )}
 
       {/* Mig 128 — attach a photo to the current / picked node (any level). */}
@@ -379,11 +426,16 @@ function crumbStyle(active: boolean): CSSProperties {
 }
 
 function SlabCardsGrid({
-  node, images, onMove, onViewImages,
+  node, images, canSelect, selectMode, selectedIds, onSingleMove, onEnterSelect, onToggle, onViewImages,
 }: {
   node: TempleTreeNode;
   images: ComponentImage[];
-  onMove?: (s: TempleSlabCard) => void;
+  canSelect: boolean;
+  selectMode: boolean;
+  selectedIds: Set<string>;
+  onSingleMove: (s: TempleSlabCard) => void;
+  onEnterSelect: (s: TempleSlabCard) => void;
+  onToggle: (id: string) => void;
   onViewImages: (imgs: ComponentImage[], index: number) => void;
 }) {
   return (
@@ -399,36 +451,118 @@ function SlabCardsGrid({
           ))}
         </div>
       )}
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: onMove ? 8 : 14, animation: "tcFade .3s ease" }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: canSelect ? 8 : 14, animation: "tcFade .3s ease" }}>
         {STAGE_ORDER.filter((s) => node.counts[s] > 0).map((s) => (
           <span key={s} style={{ fontSize: 11.5, fontWeight: 800, color: "#fff", background: STAGE_META[s].color, borderRadius: 999, padding: "3px 11px" }}>{node.counts[s]} {STAGE_META[s].label}</span>
         ))}
       </div>
-      {onMove && (
-        <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>↔ Tap a slab to move it to a different category.</div>
+      {canSelect && !selectMode && (
+        <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>↔ Tap a slab to move it · <strong>press &amp; hold</strong> a slab to select several at once.</div>
       )}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(205px, 1fr))", gap: 10 }}>
-        {node.slabs.map((s, i) => <BigSlabCard key={s.id} s={s} delay={Math.min(i * 18, 360)} onMove={onMove} />)}
+      {selectMode && (
+        <div style={{ fontSize: 12, fontWeight: 700, color: "var(--gold-dark)", marginBottom: 12 }}>✓ Tap slabs to select, then move them together. (Esc to cancel)</div>
+      )}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(205px, 1fr))", gap: 10, paddingBottom: selectMode ? 76 : 0 }}>
+        {node.slabs.map((s, i) => (
+          <BigSlabCard
+            key={s.id}
+            s={s}
+            delay={Math.min(i * 18, 360)}
+            canSelect={canSelect}
+            selectMode={selectMode}
+            selected={selectedIds.has(s.id)}
+            onSingleMove={onSingleMove}
+            onEnterSelect={onEnterSelect}
+            onToggle={onToggle}
+          />
+        ))}
       </div>
     </div>
   );
 }
 
-function BigSlabCard({ s, delay, onMove }: { s: TempleSlabCard; delay: number; onMove?: (s: TempleSlabCard) => void }) {
+const LONG_PRESS_MS = 600; // press-and-hold to enter multi-select
+
+function BigSlabCard({
+  s, delay, canSelect, selectMode, selected, onSingleMove, onEnterSelect, onToggle,
+}: {
+  s: TempleSlabCard;
+  delay: number;
+  canSelect: boolean;
+  selectMode: boolean;
+  selected: boolean;
+  onSingleMove: (s: TempleSlabCard) => void;
+  onEnterSelect: (s: TempleSlabCard) => void;
+  onToggle: (id: string) => void;
+}) {
   const bucket = bucketOf(s.status);
   const color = STAGE_META[bucket].color;
-  const clickable = !!onMove;
+  const clickable = canSelect;
+
+  // Long-press → enter select mode. A move beyond ~10px (scroll) or an early
+  // release cancels it; a fired long-press suppresses the click that follows.
+  const timer = useRef<number | null>(null);
+  const firedRef = useRef(false);
+  const startPos = useRef<{ x: number; y: number } | null>(null);
+
+  function clearTimer() {
+    if (timer.current != null) { window.clearTimeout(timer.current); timer.current = null; }
+  }
+  function onPointerDown(e: React.PointerEvent) {
+    if (!canSelect || selectMode) return; // hold only matters to ENTER select mode
+    firedRef.current = false;
+    startPos.current = { x: e.clientX, y: e.clientY };
+    clearTimer();
+    timer.current = window.setTimeout(() => {
+      firedRef.current = true;
+      try { navigator.vibrate?.(18); } catch { /* unsupported */ }
+      onEnterSelect(s);
+    }, LONG_PRESS_MS);
+  }
+  function onPointerMove(e: React.PointerEvent) {
+    if (timer.current == null || !startPos.current) return;
+    const dx = e.clientX - startPos.current.x;
+    const dy = e.clientY - startPos.current.y;
+    if (dx * dx + dy * dy > 100) clearTimer(); // moved >10px → treat as scroll
+  }
+  function onClick() {
+    if (firedRef.current) { firedRef.current = false; return; } // hold already handled it
+    if (selectMode) onToggle(s.id);
+    else if (canSelect) onSingleMove(s);
+  }
+
   return (
     <div
       className="tc-card"
-      onClick={clickable ? () => onMove!(s) : undefined}
+      onClick={clickable ? onClick : undefined}
+      onPointerDown={clickable ? onPointerDown : undefined}
+      onPointerMove={clickable ? onPointerMove : undefined}
+      onPointerUp={clickable ? clearTimer : undefined}
+      onPointerLeave={clickable ? clearTimer : undefined}
+      onPointerCancel={clickable ? clearTimer : undefined}
+      onContextMenu={clickable ? (e) => e.preventDefault() : undefined}
       role={clickable ? "button" : undefined}
       tabIndex={clickable ? 0 : undefined}
-      onKeyDown={clickable ? (e) => { if (e.key === "Enter") onMove!(s); } : undefined}
-      title={clickable ? "Move this slab to a different category" : undefined}
-      style={{ animationDelay: `${delay}ms`, border: "1px solid var(--border)", borderLeft: `5px solid ${color}`, borderRadius: 12, background: "var(--surface)", padding: "10px 12px", display: "flex", flexDirection: "column", gap: 4, cursor: clickable ? "pointer" : "default", position: "relative" }}
+      onKeyDown={clickable ? (e) => { if (e.key === "Enter") { if (selectMode) onToggle(s.id); else onSingleMove(s); } } : undefined}
+      title={clickable ? (selectMode ? "Tap to select / unselect" : "Tap to move · hold to select several") : undefined}
+      style={{
+        animationDelay: `${delay}ms`,
+        border: `1px solid ${selected ? "var(--gold-dark)" : "var(--border)"}`,
+        borderLeft: `5px solid ${color}`,
+        borderRadius: 12,
+        background: selected ? "rgba(184,115,51,0.12)" : "var(--surface)",
+        boxShadow: selected ? "0 0 0 2px var(--gold-dark)" : undefined,
+        padding: "10px 12px", display: "flex", flexDirection: "column", gap: 4,
+        cursor: clickable ? "pointer" : "default", position: "relative",
+        WebkitTouchCallout: "none", WebkitUserSelect: "none", userSelect: "none",
+      }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        {selectMode && (
+          <span style={{ width: 18, height: 18, flexShrink: 0, borderRadius: "50%", border: `2px solid ${selected ? "var(--gold-dark)" : "var(--border)"}`, background: selected ? "var(--gold-dark)" : "transparent", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 900 }}>
+            {selected ? "✓" : ""}
+          </span>
+        )}
         <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.id}</code>
         {s.priority && <span>⚡</span>}
         <span style={{ marginLeft: "auto", fontSize: 9.5, fontWeight: 800, color: "#fff", background: color, borderRadius: 999, padding: "1px 8px", textTransform: "uppercase", whiteSpace: "nowrap" }}>{STAGE_META[bucket].label}</span>
@@ -437,7 +571,7 @@ function BigSlabCard({ s, delay, onMove }: { s: TempleSlabCard; delay: number; o
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         {s.stone && <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--muted)" }}>🗿 {stoneLabel(s.stone)}</span>}
         {s.quality && <span style={{ fontSize: 10.5, fontWeight: 700, color: s.quality === "A" ? "#15803d" : "#b45309" }}>Grade {s.quality}</span>}
-        {clickable && <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--gold-dark)", fontWeight: 800 }}>↔ move</span>}
+        {clickable && !selectMode && <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--gold-dark)", fontWeight: 800 }}>↔ move</span>}
       </div>
     </div>
   );

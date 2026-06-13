@@ -77,18 +77,21 @@ export async function addTempleComponentImageAction(
   return { ok: true };
 }
 
-// Mig 128 — re-categorize a slab from the card browser. Changes where the
-// slab lives in Temple View (Category 1 / 2 / Label / Description / Additional)
-// without touching its size, stone, status or code. Cat 1/2 + Label are
-// stored UPPERCASE (same as import); Description / Additional keep their case.
-export async function moveSlabComponentAction(
+// Mig 128 — re-categorize slabs from the card browser. Moves one OR many
+// slabs (multi-select) from the SAME leaf to a new spot in Temple View
+// (Category 1 / 2 / Label / Description / Additional) without touching size,
+// stone, status or code. Cat 1/2 + Label are stored UPPERCASE (same as
+// import); Description / Additional keep their case.
+export async function moveSlabsComponentAction(
   formData: FormData,
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
   const { profile } = await requireAuth(WRITE_ROLES);
   const admin = createAdminSupabaseClient();
 
-  const id = String(formData.get("slab_id") || "").trim();
-  if (!id) return { ok: false, error: "Missing slab id." };
+  let ids: string[] = [];
+  try { ids = JSON.parse(String(formData.get("slab_ids") || "[]")); } catch { ids = []; }
+  ids = (Array.isArray(ids) ? ids : []).filter(Boolean);
+  if (ids.length === 0) return { ok: false, error: "No slabs selected." };
 
   const up = (k: string) => String(formData.get(k) || "").trim().toUpperCase();
   const asis = (k: string) => String(formData.get(k) || "").trim();
@@ -99,14 +102,7 @@ export async function moveSlabComponentAction(
   const additional = asis("additional");
   if (!label) return { ok: false, error: "Label can't be empty." };
 
-  const { data: before } = await admin
-    .from("slab_requirements")
-    .select("temple, component_section, component_element, label")
-    .eq("id", id)
-    .maybeSingle();
-  if (!before) return { ok: false, error: "Slab not found." };
-
-  const { error } = await admin
+  const { data: updated, error } = await admin
     .from("slab_requirements")
     .update({
       component_section: section || null,
@@ -117,16 +113,17 @@ export async function moveSlabComponentAction(
       updated_by: profile.id,
       updated_at: new Date().toISOString(),
     })
-    .eq("id", id);
+    .in("id", ids)
+    .select("id");
   if (error) return { ok: false, error: error.message };
+  const count = (updated ?? []).length;
 
-  await logAudit(profile.id, "slab_recategorized", "slab", id, {
-    from: before,
-    to: { component_section: section || null, component_element: element || null, label },
+  await logAudit(profile.id, "slabs_recategorized", "slab", "batch", {
+    count, slab_ids: ids, to: { component_section: section || null, component_element: element || null, label },
   });
   revalidatePath("/temples");
   revalidatePath("/slabs");
-  return { ok: true };
+  return { ok: true, count };
 }
 
 // Redirect-style (returns void) so it can be used directly as a <form action>.
