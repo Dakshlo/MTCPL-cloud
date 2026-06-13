@@ -8,7 +8,7 @@
 //     (Category 1 / Category 2 / Label / Description / Additional), bound to
 //     the node you're looking at — no re-picking the category.
 
-import { useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { moveSlabsComponentAction, addTempleComponentImageAction } from "./actions";
 import type { TempleSlabCard } from "./temple-shared";
 
@@ -31,6 +31,108 @@ const lbl: CSSProperties = {
   letterSpacing: "0.05em", display: "block", marginBottom: 4,
 };
 
+// ── Searchable dropdown (combobox) ───────────────────────────────────
+// Daksh — clicking the field shows EVERY value used for that level in the
+// SAME temple (even when the field is already filled); typing filters; a
+// click fills it. You can still type a brand-new value (free text).
+function ComboField({
+  label, value, onChange, options, placeholder, upper = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: string[];
+  placeholder: string;
+  upper?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [openUp, setOpenUp] = useState(false);
+  // query === null → just opened (show ALL); a string → user is filtering.
+  const [query, setQuery] = useState<string | null>(null);
+  const wrap = useRef<HTMLDivElement>(null);
+
+  // Open the menu, choosing up/down so it isn't clipped by the dialog when
+  // the field sits low in the viewport.
+  function openMenu(resetQuery = true) {
+    const r = wrap.current?.getBoundingClientRect();
+    if (r) setOpenUp(r.bottom > window.innerHeight * 0.58);
+    if (resetQuery) setQuery(null);
+    setOpen(true);
+  }
+
+  // Close when clicking anywhere outside this field.
+  useEffect(() => {
+    if (!open) return;
+    function onDown(e: MouseEvent) {
+      if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  const q = (query ?? "").trim().toLowerCase();
+  const filtered = q ? options.filter((o) => o.toLowerCase().includes(q)) : options;
+
+  function pick(v: string) {
+    onChange(upper ? v.toUpperCase() : v);
+    setQuery(null);
+    setOpen(false);
+  }
+
+  return (
+    <div ref={wrap} style={{ position: "relative" }}>
+      <span style={lbl}>{label}</span>
+      <div style={{ position: "relative" }}>
+        <input
+          value={value}
+          onChange={(e) => { onChange(upper ? e.target.value.toUpperCase() : e.target.value); setQuery(e.target.value); if (!open) openMenu(false); }}
+          onFocus={() => openMenu()}
+          onClick={() => openMenu()}
+          placeholder={placeholder}
+          style={{ ...inp, paddingRight: 34, textTransform: upper ? "uppercase" : "none" }}
+          autoComplete="off"
+        />
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label="Show options"
+          onClick={() => { if (open) setOpen(false); else openMenu(); }}
+          style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", border: "none", background: "transparent", color: "var(--muted)", cursor: "pointer", fontSize: 11, transition: "transform .15s ease", rotate: open ? "180deg" : "0deg" }}
+        >
+          ▼
+        </button>
+      </div>
+
+      {open && (
+        <div style={{ position: "absolute", ...(openUp ? { bottom: "100%", marginBottom: 4 } : { top: "100%", marginTop: 4 }), left: 0, right: 0, zIndex: 30, background: "var(--surface)", border: "1px solid var(--gold-dark)", borderRadius: 10, boxShadow: "0 14px 36px rgba(0,0,0,0.22)", maxHeight: 208, overflowY: "auto", padding: 4 }}>
+          {options.length === 0 ? (
+            <div style={{ padding: "9px 11px", fontSize: 12.5, color: "var(--muted)" }}>No values yet — type to add one.</div>
+          ) : filtered.length === 0 ? (
+            <div style={{ padding: "9px 11px", fontSize: 12.5, color: "var(--muted)" }}>No match — “{query}” will be added as new.</div>
+          ) : (
+            filtered.map((o) => {
+              const active = o.toLowerCase() === value.trim().toLowerCase();
+              return (
+                <button
+                  key={o}
+                  type="button"
+                  onClick={() => pick(o)}
+                  style={{ width: "100%", textAlign: "left", display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", fontSize: 13, fontWeight: active ? 800 : 600, color: "var(--text)", background: active ? "rgba(184,115,51,0.12)" : "transparent", border: "none", borderRadius: 7, cursor: "pointer" }}
+                  onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = "var(--surface-alt, rgba(0,0,0,0.04))"; }}
+                  onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = "transparent"; }}
+                >
+                  <span style={{ width: 14, flexShrink: 0, color: "var(--gold-dark)", fontWeight: 900 }}>{active ? "✓" : ""}</span>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o}</span>
+                </button>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Move / re-categorize a slab ──────────────────────────────────────
 export function MoveSlabModal({
   slabs, temple, cats, onClose, onMoved,
@@ -40,7 +142,7 @@ export function MoveSlabModal({
    *  form. */
   slabs: TempleSlabCard[];
   temple: string;
-  cats: { cat1: string[]; cat2: string[]; labels: string[] };
+  cats: { cat1: string[]; cat2: string[]; labels: string[]; descriptions: string[] };
   onClose: () => void;
   onMoved: () => void;
 }) {
@@ -53,6 +155,7 @@ export function MoveSlabModal({
   const [additional, setAdditional] = useState(slab.additional);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(0); // >0 → success view (count moved)
   const [error, setError] = useState("");
 
   const pathStr = (s: string, e: string, l: string, d: string, a: string) =>
@@ -76,7 +179,11 @@ export function MoveSlabModal({
       fd.set("additional", additional);
       const res = await moveSlabsComponentAction(fd);
       if (!res.ok) { setError(res.error); setBusy(false); return; }
-      onMoved();
+      // Show a clear success tick, then refresh the page underneath (which
+      // re-fetches the tree so the moved slabs leave this leaf).
+      setBusy(false);
+      setDone(res.count || slabs.length);
+      setTimeout(() => onMoved(), 950);
     } catch {
       setError("Move failed — check your connection.");
       setBusy(false);
@@ -93,28 +200,24 @@ export function MoveSlabModal({
           <button type="button" onClick={onClose} aria-label="Close" style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "var(--muted)" }}>×</button>
         </div>
 
-        {!confirming ? (
+        {done > 0 ? (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "22px 8px 8px", textAlign: "center" }}>
+            <div style={{ width: 54, height: 54, borderRadius: "50%", background: "#16a34a", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 30, fontWeight: 900, animation: "tcZoom .25s ease" }}>✓</div>
+            <div style={{ fontSize: 15.5, fontWeight: 800 }}>{done === 1 ? "Slab moved" : `${done} slabs moved`}</div>
+            <div style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5 }}>Now under<br /><strong style={{ color: "var(--text)" }}>{toPath}</strong></div>
+          </div>
+        ) : !confirming ? (
           <>
             <div style={{ fontSize: 12.5, color: "var(--muted)" }}>
-              Change where this slab sits in <strong>{temple}</strong>. Type a new value or pick one already used here.
+              {many
+                ? <>Move these <strong>{slabs.length} slabs</strong> in <strong>{temple}</strong> to a new place. Tap a field to pick a value already used here, or type a new one.</>
+                : <>Change where this slab sits in <strong>{temple}</strong>. Tap a field to pick a value already used here, or type a new one.</>}
             </div>
 
-            <datalist id="mv-cat1">{cats.cat1.map((v) => <option key={v} value={v} />)}</datalist>
-            <datalist id="mv-cat2">{cats.cat2.map((v) => <option key={v} value={v} />)}</datalist>
-            <datalist id="mv-label">{cats.labels.map((v) => <option key={v} value={v} />)}</datalist>
-
-            <label><span style={lbl}>Category 1 (area / floor)</span>
-              <input list="mv-cat1" value={section} onChange={(e) => setSection(e.target.value)} placeholder="e.g. FLOOR-1" style={{ ...inp, textTransform: "uppercase" }} />
-            </label>
-            <label><span style={lbl}>Category 2 (sub-area, optional)</span>
-              <input list="mv-cat2" value={element} onChange={(e) => setElement(e.target.value)} placeholder="e.g. CLOISTER" style={{ ...inp, textTransform: "uppercase" }} />
-            </label>
-            <label><span style={lbl}>Label</span>
-              <input list="mv-label" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. PILLAR" style={{ ...inp, textTransform: "uppercase" }} />
-            </label>
-            <label><span style={lbl}>Description (optional)</span>
-              <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g. lotus base" style={inp} />
-            </label>
+            <ComboField label="Category 1 (area / floor)" value={section} onChange={setSection} options={cats.cat1} placeholder="e.g. FLOOR-1" upper />
+            <ComboField label="Category 2 (sub-area, optional)" value={element} onChange={setElement} options={cats.cat2} placeholder="e.g. CLOISTER" upper />
+            <ComboField label="Label" value={label} onChange={setLabel} options={cats.labels} placeholder="e.g. PILLAR" upper />
+            <ComboField label="Description (optional)" value={description} onChange={setDescription} options={cats.descriptions} placeholder="e.g. lotus base" />
             <label><span style={lbl}>Additional description (optional)</span>
               <input value={additional} onChange={(e) => setAdditional(e.target.value)} placeholder="extra sub-group" style={inp} />
             </label>
@@ -129,7 +232,7 @@ export function MoveSlabModal({
           </>
         ) : (
           <>
-            <div style={{ fontSize: 13, color: "var(--muted)" }}>Confirm this move — the slab will appear under the new path in Temple View.</div>
+            <div style={{ fontSize: 13, color: "var(--muted)" }}>Confirm this move — {many ? <>all <strong>{slabs.length} slabs</strong> will</> : "the slab will"} appear under the new path in Temple View.</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               <div style={{ background: "var(--surface-alt)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px" }}>
                 <div style={lbl}>From</div>

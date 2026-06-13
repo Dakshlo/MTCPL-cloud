@@ -239,26 +239,30 @@ export default async function TemplesPage() {
     (imagesByNode[nodeId] ??= []).push({ id: r.id, url: pub(r.image_path), caption: r.caption });
   }
 
-  // Per-temple distinct Category 1 / Category 2 / Label values — feed the
-  // "move slab" modal's suggestion datalists in the card browser.
-  const templeCats: Record<string, { cat1: string[]; cat2: string[]; labels: string[] }> = {};
+  // Per-temple distinct Category 1 / Category 2 / Label / Description values —
+  // feed the "move slab" modal's searchable dropdowns in the card browser.
+  // Category-1 sections may carry a legacy '›'-path, so split them into the
+  // individual levels (matching how the tree is built above).
+  const templeCats: Record<string, { cat1: string[]; cat2: string[]; labels: string[]; descriptions: string[] }> = {};
   {
-    const acc: Record<string, { c1: Set<string>; c2: Set<string>; lb: Set<string> }> = {};
+    const acc: Record<string, { c1: Set<string>; c2: Set<string>; lb: Set<string>; ds: Set<string> }> = {};
     for (const s of slabs) {
       if (s.status === "rejected") continue;
       const t = (s.temple || "").trim();
       if (!t) continue;
-      const b = (acc[t] ??= { c1: new Set(), c2: new Set(), lb: new Set() });
+      const b = (acc[t] ??= { c1: new Set(), c2: new Set(), lb: new Set(), ds: new Set() });
       const c1 = (s.component_section || "").trim();
       const c2 = (s.component_element || "").trim();
       const lb = (s.label || "").trim();
-      if (c1) b.c1.add(c1);
+      const ds = (s.description || "").trim();
+      if (c1) for (const lvl of c1.split(/\s*[›>]\s*/).map((x) => x.trim()).filter(Boolean)) b.c1.add(lvl);
       if (c2) b.c2.add(c2);
       if (lb) b.lb.add(lb);
+      if (ds) b.ds.add(ds);
     }
     const srt = (set: Set<string>) => [...set].sort((a, c) => a.localeCompare(c, undefined, { numeric: true }));
     for (const [t, b] of Object.entries(acc)) {
-      templeCats[t] = { cat1: srt(b.c1), cat2: srt(b.c2), labels: srt(b.lb) };
+      templeCats[t] = { cat1: srt(b.c1), cat2: srt(b.c2), labels: srt(b.lb), descriptions: srt(b.ds) };
     }
   }
 

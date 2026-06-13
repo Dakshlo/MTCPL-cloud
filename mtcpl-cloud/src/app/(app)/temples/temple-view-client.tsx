@@ -290,6 +290,14 @@ export function TempleViewClient({ trees, imagesByNode, canManageImages, templeC
   // hide-menu toggle for a bigger list page.
   const [cardMode, setCardMode] = useState(false);
   const [menuHidden, setMenuHidden] = useState(false);
+  // Survive a full page reload in fullscreen cards mode (restore runs once on
+  // mount, after hydration; the card browser restores the temple/leaf itself).
+  useEffect(() => {
+    try { if (sessionStorage.getItem("mtcpl_tv_cardmode") === "1") setCardMode(true); } catch { /* ignore */ }
+  }, []);
+  useEffect(() => {
+    try { sessionStorage.setItem("mtcpl_tv_cardmode", cardMode ? "1" : "0"); } catch { /* ignore */ }
+  }, [cardMode]);
   // Collapse the app sidebar (body class from globals.css) whenever the menu
   // is hidden OR we're in fullscreen cards mode. Cleaned up on unmount.
   useEffect(() => {

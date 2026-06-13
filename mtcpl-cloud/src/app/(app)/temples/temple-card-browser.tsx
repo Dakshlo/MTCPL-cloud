@@ -123,7 +123,10 @@ export function TempleCardBrowser({
   const router = useRouter();
   // temple === null → fullscreen temple picker (the landing screen).
   const [temple, setTemple] = useState<string | null>(null);
-  const [path, setPath] = useState<TempleTreeNode[]>([]);
+  // Navigation is stored as node IDS (not node objects) so it survives a
+  // router.refresh(): after a move re-fetches the tree, we re-resolve the
+  // live nodes from the FRESH data and the moved slabs leave this leaf.
+  const [pathIds, setPathIds] = useState<string[]>([]);
   const [lightbox, setLightbox] = useState<{ images: ComponentImage[]; index: number } | null>(null);
   // Mig 128 — move-slab + per-node image-upload modals.
   // moveSlabs holds 1 (single tap) OR many (multi-select) slabs to move.
@@ -137,13 +140,27 @@ export function TempleCardBrowser({
   function exitSelect() { setSelectMode(false); setSelectedIds(new Set()); }
 
   const tree = temple ? trees.find((t) => t.temple === temple) ?? null : null;
+  // Re-resolve the live node objects from the fresh tree by walking pathIds.
+  // If a node id is gone (e.g. the leaf emptied out after a move), the walk
+  // truncates there, landing the user on the nearest surviving parent.
+  const path: TempleTreeNode[] = [];
+  if (tree) {
+    let level: TempleTreeNode[] = tree.roots;
+    for (const id of pathIds) {
+      const n = level.find((x) => x.id === id);
+      if (!n) break;
+      path.push(n);
+      level = n.children;
+    }
+  }
   const currentNode = path[path.length - 1] ?? null;
   const children = currentNode ? currentNode.children : (tree?.roots ?? []);
   const isLeaf = currentNode != null && currentNode.children.length === 0;
-  const cats = temple ? (templeCats[temple] ?? { cat1: [], cat2: [], labels: [] }) : { cat1: [], cat2: [], labels: [] };
+  const EMPTY_CATS = { cat1: [], cat2: [], labels: [], descriptions: [] };
+  const cats = temple ? (templeCats[temple] ?? EMPTY_CATS) : EMPTY_CATS;
 
   function goUp() {
-    if (path.length > 0) setPath((p) => p.slice(0, -1));
+    if (pathIds.length > 0) setPathIds((p) => p.slice(0, -1));
     else if (temple) setTemple(null);
     else onExit();
   }
@@ -175,11 +192,42 @@ export function TempleCardBrowser({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lightbox, path.length, temple, moveSlabs, uploadNode, selectMode]);
+  }, [lightbox, pathIds.length, temple, moveSlabs, uploadNode, selectMode]);
 
   // Leaving a leaf (drill in/out or switch temple) drops the selection — it
   // only ever applies to slabs in the leaf you're looking at.
-  useEffect(() => { exitSelect(); }, [temple, path]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { exitSelect(); }, [temple, pathIds]);
+
+  // Remember where you were so a full page reload reopens the SAME temple /
+  // leaf instead of dumping you back to the temple list. Restore runs once on
+  // mount; persist keeps the saved spot in step with navigation.
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem("mtcpl_tv_card");
+      if (!raw) return;
+      const saved = JSON.parse(raw) as { temple?: string; pathIds?: string[] };
+      const t = saved.temple ? trees.find((x) => x.temple === saved.temple) : null;
+      if (!t) return;
+      setTemple(t.temple);
+      const valid: string[] = [];
+      let level = t.roots;
+      for (const id of saved.pathIds ?? []) {
+        const n = level.find((x) => x.id === id);
+        if (!n) break;
+        valid.push(id);
+        level = n.children;
+      }
+      setPathIds(valid);
+    } catch { /* ignore corrupt/unavailable storage */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    try {
+      if (temple) sessionStorage.setItem("mtcpl_tv_card", JSON.stringify({ temple, pathIds }));
+      else sessionStorage.removeItem("mtcpl_tv_card");
+    } catch { /* ignore */ }
+  }, [temple, pathIds]);
 
   // First image anywhere under a temple → its landing-card cover.
   function templeCover(t: string): ComponentImage | null {
@@ -190,7 +238,7 @@ export function TempleCardBrowser({
   }
 
   // Re-keys the grid per level so the stagger entrance replays on drill.
-  const levelKey = `${temple ?? "@temples"}/${path.map((p) => p.name).join("/")}`;
+  const levelKey = `${temple ?? "@temples"}/${pathIds.join("|")}`;
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 1500, background: "var(--bg)", display: "flex", flexDirection: "column" }}>
@@ -210,17 +258,17 @@ export function TempleCardBrowser({
         </button>
         {/* Breadcrumb */}
         <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", fontSize: 13, minWidth: 0 }}>
-          <button type="button" onClick={() => { setTemple(null); setPath([]); }} style={crumbStyle(!temple)}>🏛 Temples</button>
+          <button type="button" onClick={() => { setTemple(null); setPathIds([]); }} style={crumbStyle(!temple)}>🏛 Temples</button>
           {temple && (
             <>
               <span style={{ color: "var(--muted)" }}>›</span>
-              <button type="button" onClick={() => setPath([])} style={crumbStyle(path.length === 0)}>{temple}</button>
+              <button type="button" onClick={() => setPathIds([])} style={crumbStyle(path.length === 0)}>{temple}</button>
             </>
           )}
           {path.map((n, i) => (
             <span key={n.id} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
               <span style={{ color: "var(--muted)" }}>›</span>
-              <button type="button" onClick={() => setPath((p) => p.slice(0, i + 1))} style={crumbStyle(i === path.length - 1)}>{n.name}</button>
+              <button type="button" onClick={() => setPathIds((p) => p.slice(0, i + 1))} style={crumbStyle(i === path.length - 1)}>{n.name}</button>
             </span>
           ))}
         </div>
@@ -302,8 +350,8 @@ export function TempleCardBrowser({
               const depth = path.length;
               const icon = depth === 0 ? "📂" : depth === 1 ? "📁" : depth === 2 ? "🏷️" : "📄";
               return (
-                <div key={c.id} className="tc-card" style={{ ...cardShell, animationDelay: `${Math.min(i * 35, 420)}ms`, cursor: "pointer", position: "relative" }} onClick={() => setPath((p) => [...p, c])} role="button" tabIndex={0}
-                  onKeyDown={(e) => { if (e.key === "Enter") setPath((p) => [...p, c]); }}>
+                <div key={c.id} className="tc-card" style={{ ...cardShell, animationDelay: `${Math.min(i * 35, 420)}ms`, cursor: "pointer", position: "relative" }} onClick={() => setPathIds((p) => [...p, c.id])} role="button" tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === "Enter") setPathIds((p) => [...p, c.id]); }}>
                   <div style={{ position: "relative", height: 148, background: cover ? "#0f172a" : `linear-gradient(135deg, ${STAGE_META.cutting.color}18, ${STAGE_META.carving.color}22)`, display: "flex", alignItems: "center", justifyContent: "center" }}>
                     {cover ? (
                       // eslint-disable-next-line @next/next/no-img-element

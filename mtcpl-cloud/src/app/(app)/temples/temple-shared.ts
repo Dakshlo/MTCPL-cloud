@@ -6,9 +6,9 @@ export type StageBucket = "pending" | "cutting" | "cut_done" | "carving" | "done
 
 export type ComponentImage = { id: string; url: string; caption: string | null };
 
-// Per-temple distinct Category 1 / Category 2 / Label values — powers the
-// suggestion datalists in the card browser's "move slab" modal.
-export type TempleCats = Record<string, { cat1: string[]; cat2: string[]; labels: string[] }>;
+// Per-temple distinct Category 1 / Category 2 / Label / Description values —
+// powers the searchable dropdowns in the card browser's "move slab" modal.
+export type TempleCats = Record<string, { cat1: string[]; cat2: string[]; labels: string[]; descriptions: string[] }>;
 
 export type TempleSlabCard = {
   id: string; status: string; stone: string | null; quality: string | null;
