@@ -401,6 +401,21 @@ async function summarize(emails: FetchedEmail[]): Promise<{ overview: string; it
   return { overview, items };
 }
 
+/** Write a standalone diagnostic row (no fetch/summarize) so a problem
+ *  that happens BEFORE the run even starts — e.g. the cron being rejected
+ *  at the auth gate — still surfaces on the dashboard instead of leaving
+ *  it silently stuck on the last good snapshot. */
+export async function recordSnapshotDiagnostic(
+  trigger: "cron" | "manual",
+  message: string,
+): Promise<void> {
+  const admin = createAdminSupabaseClient();
+  await admin
+    .from("email_snapshots")
+    .insert({ items: [], overview: null, scanned_count: 0, trigger, range: "today", error: message })
+    .then(() => {}, () => {});
+}
+
 /** Full run: fetch → summarize → store. Always writes a row (with `error`
  *  set on failure) so the dashboard can show what happened. */
 export async function runEmailSnapshot(

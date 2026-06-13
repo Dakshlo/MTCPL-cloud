@@ -12,7 +12,7 @@
 
 import { NextResponse, type NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth";
-import { runEmailSnapshot } from "@/lib/email-snapshot";
+import { runEmailSnapshot, recordSnapshotDiagnostic } from "@/lib/email-snapshot";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,6 +23,14 @@ function isCronRequest(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false;
   return req.headers.get("authorization") === `Bearer ${secret}`;
+}
+
+// Vercel stamps every cron invocation with this user-agent (and an
+// x-vercel-cron header). We use it ONLY to tell "the cron fired but auth
+// failed" apart from "the cron never fired" — not to authorise anything.
+function looksLikeVercelCron(req: NextRequest): boolean {
+  const ua = (req.headers.get("user-agent") ?? "").toLowerCase();
+  return ua.includes("vercel-cron") || req.headers.has("x-vercel-cron");
 }
 
 async function isOwnerSession(): Promise<boolean> {
@@ -37,6 +45,17 @@ async function isOwnerSession(): Promise<boolean> {
 export async function GET(req: NextRequest) {
   // Cron path — always reads just today (range is fixed server-side).
   if (!isCronRequest(req) && !(await isOwnerSession())) {
+    // If this WAS a Vercel cron but the CRON_SECRET check failed, record a
+    // visible diagnostic so the dashboard stops looking "stuck with no
+    // error". The usual cause: the CRON_SECRET env var is missing or was
+    // changed (Vercel then can't send the matching Bearer token).
+    if (looksLikeVercelCron(req)) {
+      const why = process.env.CRON_SECRET
+        ? "Cron fired but the Authorization token didn't match CRON_SECRET — re-set CRON_SECRET in Vercel and redeploy."
+        : "Cron fired but CRON_SECRET is not set in Vercel — add it (any random string) so the cron can authenticate, then redeploy.";
+      await recordSnapshotDiagnostic("cron", why).catch(() => {});
+      return NextResponse.json({ ok: false, error: why }, { status: 401 });
+    }
     return NextResponse.json({ ok: false, error: "Not allowed." }, { status: 403 });
   }
   const result = await runEmailSnapshot("cron", "today");
