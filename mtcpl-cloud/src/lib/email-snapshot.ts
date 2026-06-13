@@ -150,12 +150,22 @@ const SUMMARY_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-const SUMMARY_PROMPT = `You are screening the inbox of the OWNER of MATESHWARI TEMPLE CONSTRUCTION PVT LTD (MTCPL), a stone/marble temple-construction business in India, so he sees only what matters on his dashboard.
+const SUMMARY_PROMPT = `You are screening the inbox of the OWNER of MATESHWARI TEMPLE CONSTRUCTION PVT LTD (MTCPL), a stone/marble temple-construction business in India. Show ONLY emails that actually concern the BUSINESS and need his attention. Be strict — when in doubt, drop it.
 
-IMPORTANT emails (keep): bank/payment alerts and statements, UPI/NEFT/RTGS confirmations, GST/income-tax/government notices, clients or temples writing about projects or payments, vendors asking for something, legal/insurance/compliance, anything with money amounts or deadlines that concern the business or the owner personally.
-NOT important (drop): promotions, marketing, newsletters, social media notifications, OTP/verification codes, app notifications, spam. ALSO drop any email sent BY Google itself (sign-in/security alerts, account or policy notices, Google Workspace/Maps/Drive notifications) — mark these important=false even if they look urgent.
+KEEP (important=true) — only these kinds:
+  • Bank / payment / finance: bank alerts, statements, UPI/NEFT/RTGS confirmations, anything debited/credited or due.
+  • Government: GST, income-tax, e-way bill, any government/regulatory notice.
+  • Client / project: clients, temples, or main contractors (e.g. L&T) writing about a project, drawing, approval, dispatch, or payment.
+  • Vendor / supplier: a vendor asking for something, sending an invoice/PO, or chasing payment.
+  • Legal / insurance / compliance.
+  • Anything with a real business amount, invoice/PO number, or a deadline that affects the company.
 
-For every email in the input, return an item with the same idx. Mark important true/false. For important ones, write a 1-2 sentence summary that states EXACTLY what is in the email — concrete amounts, dates, account/invoice numbers, names, and what (if anything) the owner must do. Do not be vague ("a bank update") — be specific ("HDFC: Rs. 4,41,513 debited to Shree Marble on 9 Jun, balance Rs. 12,30,000"). urgency = action_needed only when he must actually do something.`;
+DROP (important=false) — even if they contain names, dates, amounts, PNRs or look urgent:
+  • TRAVEL & LOGISTICS: flight / train / bus / hotel / cab bookings, itineraries, e-tickets, boarding passes, PNR or booking confirmations (IndiGo, Air India, SpiceJet, Vistara, IRCTC, MakeMyTrip, Goibibo, Yatra, OYO, Uber, Ola, etc.). These are personal travel logistics, NOT a business action — always drop them.
+  • Promotions, marketing, offers, newsletters, social-media notifications, OTP/verification codes, app/account notifications, calendar invites for personal events, receipts for personal purchases, spam.
+  • Any email sent BY Google itself (sign-in/security alerts, account or policy notices, Workspace/Maps/Drive notifications).
+
+For every email return an item with the same idx and important true/false. For the KEEP ones, write a 1-2 sentence summary stating EXACTLY what is in it — concrete amounts, dates, invoice/PO numbers, names, and what (if anything) the owner must do. Be specific, never vague ("a bank update" is bad; "HDFC: Rs. 4,41,513 debited to Shree Marble on 9 Jun, balance Rs. 12,30,000" is good). urgency = action_needed ONLY when he must actually do something.`;
 
 // fromName = clean display name (what we show in bold); fromText keeps
 // the full "Name <addr>" for the AI's context. uid lets us re-open the
