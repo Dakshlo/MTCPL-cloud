@@ -1,7 +1,56 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { batchTint } from "@/lib/batch-colours";
+
+// Light / dark theme variable packs for the TV overlay. The wall display
+// must NOT inherit the app's global [data-theme="dark"] — otherwise the
+// idle/offline machine tiles (which use var(--surface)/var(--border))
+// render dark on a "light" slide, the weird mixed look Daksh saw. We
+// pin these vars on the overlay so the whole subtree is self-consistent.
+const TV_LIGHT_VARS = {
+  "--bg": "#F4F1EC", "--surface": "#FFFFFF", "--surface-alt": "#FAF8F5",
+  "--border": "#E4DDD2", "--border-light": "#EDE8E0",
+  "--text": "#2D2410", "--muted": "#7A6A52", "--muted-light": "#A89A84",
+} as const;
+const TV_DARK_VARS = {
+  "--bg": "#1A1611", "--surface": "#242019", "--surface-alt": "#2C2720",
+  "--border": "#3A3228", "--border-light": "#2F2820",
+  "--text": "#E8E2D6", "--muted": "#A89A84", "--muted-light": "#7A705C",
+} as const;
+
+// Scale-to-fit wrapper — shrinks its child uniformly so the whole
+// operator board fits the viewport with NO scroll. transform doesn't
+// reflow layout, so measuring scrollWidth/Height stays stable (no loop).
+function TvFit({ children, dep }: { children: React.ReactNode; dep: unknown }) {
+  const outerRef = useRef<HTMLDivElement>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
+  useEffect(() => {
+    const recompute = () => {
+      const o = outerRef.current, i = innerRef.current;
+      if (!o || !i) return;
+      const ow = o.clientWidth, oh = o.clientHeight;
+      const iw = i.scrollWidth, ih = i.scrollHeight;
+      if (!iw || !ih) return;
+      const s = Math.min(1, ow / iw, oh / ih);
+      setScale(Number.isFinite(s) && s > 0 ? s : 1);
+    };
+    recompute();
+    const ro = new ResizeObserver(recompute);
+    if (outerRef.current) ro.observe(outerRef.current);
+    if (innerRef.current) ro.observe(innerRef.current);
+    const t = setTimeout(recompute, 80); // after slide-in animation settles
+    return () => { ro.disconnect(); clearTimeout(t); };
+  }, [dep]);
+  return (
+    <div ref={outerRef} style={{ flex: 1, minHeight: 0, overflow: "hidden", display: "flex", justifyContent: "center", alignItems: "flex-start" }}>
+      <div ref={innerRef} style={{ width: "100%", transformOrigin: "top center", transform: `scale(${scale})` }}>
+        {children}
+      </div>
+    </div>
+  );
+}
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -191,6 +240,9 @@ export function FloorViewClient({
     return (
       <div
         style={{
+          // Pin theme vars so the wall display never inherits the app's
+          // global dark mode (the "weird colours" fix).
+          ...(isDark ? TV_DARK_VARS : TV_LIGHT_VARS),
           position: "fixed",
           top: 0,
           left: 0,
@@ -200,13 +252,14 @@ export function FloorViewClient({
             ? "linear-gradient(180deg, #0f0c06 0%, #1a1a1a 100%)"
             : "linear-gradient(180deg, #fafaf5 0%, #f0ece1 100%)",
           color: isDark ? "#fff" : "#1a1a1a",
-          padding: "16px 24px 24px",
+          colorScheme: isDark ? "dark" : "light",
+          padding: "14px 22px 18px",
           display: "flex",
           flexDirection: "column",
-          gap: 16,
+          gap: 12,
           zIndex: 9999,
-          overflowY: "auto",
-        }}
+          overflow: "hidden", // the slide scales to fit — no page scroll
+        } as React.CSSProperties}
       >
         <TvHeader
           mode={mode}
@@ -223,7 +276,10 @@ export function FloorViewClient({
           setTvTheme={setTvTheme}
         />
 
-        <VendorTvSlide vendor={v} now={now} slideKey={tvIndex} dark={isDark} />
+        {/* Scale the whole operator board to fit the screen — no scroll. */}
+        <TvFit dep={`${v.id}:${vendors.length}:${v.machines.length}`}>
+          <VendorTvSlide vendor={v} now={now} slideKey={tvIndex} dark={isDark} />
+        </TvFit>
       </div>
     );
   }
@@ -1086,8 +1142,8 @@ function VendorTvSlide({ vendor, now, slideKey, dark }: { vendor: FloorVendor; n
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
-                gap: 12,
+                gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))",
+                gap: 10,
               }}
             >
               {g.machines.map((m) => (
