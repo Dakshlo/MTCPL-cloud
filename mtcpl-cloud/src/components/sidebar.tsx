@@ -123,6 +123,16 @@ const navEntries: NavEntry[] = [
     department: "production",
   },
   {
+    // Mig 133 — Site / Installation: the stage after dispatch. Unload
+    // delivered trucks into yards, keep stock, mark slabs installed.
+    // (Per-temple site_incharge scoping comes later.)
+    href: "/site",
+    label: "Site / Installation",
+    icon: "🧱",
+    roles: ["developer", "owner", "team_head", "senior_incharge", "carving_head"],
+    department: "production",
+  },
+  {
     href: "/blocks",
     label: "Blocks",
     icon: "▣",
