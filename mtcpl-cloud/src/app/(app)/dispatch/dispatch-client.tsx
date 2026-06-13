@@ -22,7 +22,7 @@
  */
 
 import Link from "next/link";
-import { useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, useTransition, type CSSProperties } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { DeliverModal } from "./deliver-modal";
 import { EditSlabsModal } from "./edit-slabs-modal";
@@ -54,12 +54,19 @@ function groupByTemple<T extends { temple: string; slabCftTotal: number }>(rows:
     .map(([temple, rs]) => ({ temple, rows: rs, cft: rs.reduce((n, r) => n + r.slabCftTotal, 0) }));
 }
 
-/** Temple section header for the grouped tabs. */
+/** Temple section header for the grouped tabs — a clear sticky-ish bar
+ *  so each temple's dispatches read as one block. */
 function TempleHeader({ temple, count, cft }: { temple: string; count: number; cft: number }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 4px", flexWrap: "wrap" }}>
+    <div
+      style={{
+        display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+        padding: "9px 14px", marginBottom: 4,
+        background: "var(--bg)", borderLeft: "4px solid var(--gold-dark)", borderRadius: "0 8px 8px 0",
+      }}
+    >
       <span style={{ fontSize: 15.5, fontWeight: 800 }}>🏛 {temple}</span>
-      <span className="muted" style={{ fontSize: 12.5 }}>· {count} dispatch{count === 1 ? "" : "es"} · {cft.toFixed(2)} CFT</span>
+      <span className="muted" style={{ fontSize: 12.5, fontWeight: 600 }}>{count} dispatch{count === 1 ? "" : "es"} · {cft.toFixed(2)} CFT</span>
     </div>
   );
 }
@@ -316,19 +323,26 @@ export function DispatchClient({
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const tab: Tab = initialTab;
+  // Tab is LOCAL state so switching is instant (every tab's data is
+  // already passed as props — no server round-trip needed). The URL is
+  // synced in the background for deep-linking. Kept in sync if the
+  // server hands us a new initialTab (e.g. an action redirect).
+  const [tab, setTabState] = useState<Tab>(initialTab);
+  useEffect(() => { setTabState(initialTab); }, [initialTab]);
+  const [, startNav] = useTransition();
   // Mig 130 follow-on — edit the Dispatch Incharge (MTCPL plant side)
   // right here on the dispatch page (moved out of Settings).
   const [editIncharge, setEditIncharge] = useState(false);
 
   function setTab(next: Tab) {
+    setTabState(next); // instant highlight + content switch
     const params = new URLSearchParams(searchParams.toString());
     params.delete("dispatch_toast");
     params.delete("dispatch_error");
     if (next === "ready") params.delete("tab");
     else params.set("tab", next);
     const q = params.toString();
-    router.replace(q ? `/dispatch?${q}` : "/dispatch");
+    startNav(() => router.replace(q ? `/dispatch?${q}` : "/dispatch", { scroll: false }));
   }
 
   const counts = {
@@ -959,39 +973,40 @@ function TempleDispatchPeek({
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {weightGroups.map((g) => {
-                    const each = Number(weights[g.ids[0]]) || 0;
+                    const each = Number((weights[g.ids[0]] ?? "").replace(/[^\d]/g, "")) || 0;
                     const lineKg = each > 0 ? each * g.ids.length : 0;
+                    const multi = g.ids.length > 1;
                     return (
                       <div key={g.key} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 11px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, flexWrap: "wrap" }}>
                         <div style={{ minWidth: 0, flex: "1 1 200px" }}>
                           <div style={{ fontSize: 13, fontWeight: 700 }}>
                             {g.sample.label || "—"}
                             <span style={{ fontFamily: "ui-monospace, monospace", color: "var(--muted)", fontWeight: 500 }}> · {g.sample.dimensions}</span>
-                            {g.ids.length > 1 && (
-                              <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 800, color: "#b45309", background: "rgba(180,83,9,0.12)", borderRadius: 999, padding: "1px 9px" }}>× {g.ids.length}</span>
-                            )}
                           </div>
                           {g.sample.description && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{g.sample.description}</div>}
-                          <div style={{ fontSize: 11, color: "var(--muted)", fontFamily: "ui-monospace, monospace", marginTop: 1 }}>
-                            {g.ids.join(", ")}
+                          {/* All slabs in the group, shown as chips (not collapsed to ×N). */}
+                          <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 4 }}>
+                            {g.ids.map((id) => (
+                              <span key={id} style={{ fontSize: 10.5, fontFamily: "ui-monospace, monospace", fontWeight: 700, color: "var(--text)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 6, padding: "1px 7px" }}>{id}</span>
+                            ))}
                           </div>
                         </div>
-                        <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                          <input
-                            type="number"
-                            min="0"
-                            step="1"
-                            inputMode="numeric"
-                            placeholder="0"
-                            value={weights[g.ids[0]] ?? ""}
-                            onChange={(e) => setGroupWeight(g.ids, e.target.value)}
-                            style={{ width: 92, fontSize: 14, padding: "8px 10px", textAlign: "right", fontFamily: "ui-monospace, monospace" }}
-                          />
-                          <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--muted)" }}>kg / slab</span>
-                          {lineKg > 0 && g.ids.length > 1 && (
-                            <span style={{ fontSize: 11, color: "var(--muted)", whiteSpace: "nowrap" }}>= {lineKg.toLocaleString("en-IN")} kg</span>
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+                          <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              placeholder="0"
+                              value={weights[g.ids[0]] ?? ""}
+                              onChange={(e) => setGroupWeight(g.ids, e.target.value.replace(/[^\d]/g, ""))}
+                              style={{ width: 92, fontSize: 14, padding: "8px 10px", textAlign: "right", fontFamily: "ui-monospace, monospace" }}
+                            />
+                            <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--muted)", whiteSpace: "nowrap" }}>kg{multi ? " / slab" : ""}</span>
+                          </label>
+                          {lineKg > 0 && multi && (
+                            <span style={{ fontSize: 11, color: "var(--muted)", whiteSpace: "nowrap" }}>{g.ids.length} × {each.toLocaleString("en-IN")} = {lineKg.toLocaleString("en-IN")} kg</span>
                           )}
-                        </label>
+                        </div>
                       </div>
                     );
                   })}
@@ -1079,7 +1094,6 @@ function ProvisionalTab({
                     <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, color: "#D97706", fontSize: 14.5 }}>
                       📋 {chalanLabel(r.challan_number, r.id)}
                     </span>
-                    <span style={{ fontWeight: 800, fontSize: 15 }}>{r.temple}</span>
                     <span style={{ background: "rgba(217,119,6,0.15)", color: "#D97706", border: "1px solid rgba(217,119,6,0.35)", fontSize: 10, fontWeight: 800, borderRadius: 999, padding: "2px 9px" }}>
                       WAITING APPROVAL
                     </span>
@@ -1327,10 +1341,9 @@ function DispatchRow({
         title="Open the printed challan"
       >
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-          <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 12, color: "var(--muted)", fontWeight: 700 }}>{chalan}</span>
-          <span style={{ fontSize: 16, fontWeight: 800 }}>🏛 {row.temple}</span>
+          <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 14, fontWeight: 800 }}>{chalan}</span>
           <span className="muted" style={{ fontSize: 12.5 }}>
-            · {row.slabCount} slab{row.slabCount !== 1 ? "s" : ""} · {row.slabCftTotal.toFixed(2)} CFT
+            {row.slabCount} slab{row.slabCount !== 1 ? "s" : ""} · {row.slabCftTotal.toFixed(2)} CFT
           </span>
           {/* Transit timer — running since the senior approved (truck left). */}
           {row.approvedAt && (
@@ -1444,10 +1457,9 @@ function DeliveredTab({ rows, legacy }: { rows: DeliveredRow[]; legacy: LegacyDi
           >
             <div style={{ flex: "1 1 300px", minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-                <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 11.5, color: "var(--muted)", fontWeight: 700 }}>{chalan}</span>
-                <span style={{ fontSize: 14.5, fontWeight: 700 }}>🏛 {r.temple}</span>
+                <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 13, fontWeight: 800 }}>{chalan}</span>
                 <span className="muted" style={{ fontSize: 12 }}>
-                  · {r.slabCount} slab{r.slabCount !== 1 ? "s" : ""} · {r.slabCftTotal.toFixed(2)} CFT
+                  {r.slabCount} slab{r.slabCount !== 1 ? "s" : ""} · {r.slabCftTotal.toFixed(2)} CFT
                 </span>
                 <span style={{ fontSize: 10, fontWeight: 800, color: "#15803d", background: "rgba(22,101,52,0.12)", padding: "1px 9px", borderRadius: 999, letterSpacing: "0.04em" }}>
                   ✓ DELIVERED
