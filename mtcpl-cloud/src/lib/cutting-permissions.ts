@@ -113,6 +113,9 @@ export function canAccessCarvingPage(
   if (profile.role === "carving_head") return true;
   if (profile.role === "senior_incharge") return true;
   if (profile.role === "team_head") return true;
+  // Daksh (June 2026) — Tender Manager gets full carving access
+  // (assign + Carving Done Approval), same tier as senior_incharge.
+  if (profile.role === "tender_manager") return true;
   if (profile.can_assign_carving === true) return true;
   return false;
 }
@@ -137,6 +140,7 @@ export function canAddExternalCutSlab(profile: Pick<Profile, "role">): boolean {
   if (profile.role === "carving_head") return true;
   if (profile.role === "senior_incharge") return true;
   if (profile.role === "team_head") return true;
+  if (profile.role === "tender_manager") return true;
   return false;
 }
 
@@ -155,6 +159,9 @@ export function canSeeAwaitingReview(
   // sign-off responsibility (the rename Daksh asked for; the
   // server-side query keys stay 'review' for backward compat).
   if (profile.role === "senior_incharge") return true;
+  // Daksh (June 2026) — Tender Manager can do Carving Done Approval
+  // (approve / rework / reject), same as senior_incharge.
+  if (profile.role === "tender_manager") return true;
   return false;
 }
 

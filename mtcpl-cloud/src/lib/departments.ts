@@ -198,10 +198,12 @@ export function allowedDepartmentsForRole(role: AppRole): Department[] {
       return ["production"];
     case "storekeeper":
       return ["inventory"];
-    // Mig 104 — Tender Manager owns the Register department only (no
-    // switcher; lands straight on the Activity Register).
+    // Mig 104 — Tender Manager owns the Register department. Daksh
+    // (June 2026) — also given Production access (Temple View + carving
+    // assign/approval), so it now gets a 2-tile switcher. Register stays
+    // first = its home / default landing.
     case "tender_manager":
-      return ["register"];
+      return ["register", "production"];
     // Mig 104 — Register access added for senior_incharge + carving_head,
     // alongside their Production room → they get a 2-tile switcher.
     case "senior_incharge":

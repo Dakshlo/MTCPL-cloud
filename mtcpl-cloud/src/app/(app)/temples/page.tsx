@@ -103,9 +103,9 @@ type TempleTreeNode = TempleTree["roots"][number];
 
 export default async function TemplesPage() {
   const { profile } = await requireAuth();
-  // carving_head can read Temple View (kept separate from canReadRequiredSizes
-  // so Required Sizes / Slabs stays as-is for them).
-  if (!canReadRequiredSizes(profile) && profile.role !== "carving_head") redirect("/");
+  // carving_head + tender_manager can read Temple View (kept separate from
+  // canReadRequiredSizes so Required Sizes / Slabs stays as-is for them).
+  if (!canReadRequiredSizes(profile) && profile.role !== "carving_head" && profile.role !== "tender_manager") redirect("/");
   const canWriteImages = IMAGE_WRITE_ROLES.includes(profile.role);
   const admin = createAdminSupabaseClient();
 

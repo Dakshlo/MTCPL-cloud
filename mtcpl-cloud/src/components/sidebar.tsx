@@ -118,8 +118,8 @@ const navEntries: NavEntry[] = [
     href: "/temples",
     label: "Temple View",
     icon: "🏛",
-    // Daksh (June 2026) — carving_head added: full Temple View access.
-    roles: ["developer", "owner", "team_head", "senior_incharge", "slab_entry", "block_slab_entry", "carving_head"],
+    // Daksh (June 2026) — carving_head + tender_manager: full Temple View access.
+    roles: ["developer", "owner", "team_head", "senior_incharge", "slab_entry", "block_slab_entry", "carving_head", "tender_manager"],
     department: "production",
   },
   {
@@ -225,7 +225,8 @@ const navEntries: NavEntry[] = [
     // role (they're each role-gated independently).
     // Mig 076 round 2 — Manager (crosscheck) added so the CNC
     // Expenses entry below renders under a CARVING header for them.
-    roles: ["developer", "owner", "vendor", "carving_head", "senior_incharge", "cnc_expense_entry", "crosscheck"],
+    // Daksh (June 2026) — tender_manager added (Production carving access).
+    roles: ["developer", "owner", "vendor", "carving_head", "senior_incharge", "cnc_expense_entry", "crosscheck", "tender_manager"],
     department: "production",
   },
   {
@@ -233,7 +234,8 @@ const navEntries: NavEntry[] = [
     label: "Ready Sizes Stock",
     icon: "📦",
     // Mig 076 — senior_incharge also lands here for the assign flow.
-    roles: ["developer", "owner", "carving_head", "senior_incharge"],
+    // Daksh (June 2026) — tender_manager added (Production carving access).
+    roles: ["developer", "owner", "carving_head", "senior_incharge", "tender_manager"],
     // Mig 074 — also visible to carving-head-lite (vendors who
     // assign their own work, e.g. Mohit). Daksh May 2026 round 2 —
     // swapped from Required Sizes to this page in Mohit's sidebar:
@@ -253,7 +255,8 @@ const navEntries: NavEntry[] = [
     //
     // Mig 076 — senior_incharge has full carving access (assign +
     // approve Awaiting Review, now "Carving Done Approval").
-    roles: ["developer", "owner", "carving_head", "senior_incharge", "team_head"],
+    // Daksh (June 2026) — tender_manager added (full carving access).
+    roles: ["developer", "owner", "carving_head", "senior_incharge", "team_head", "tender_manager"],
     // Mig 074 — also visible to carving-head-lite. The page itself
     // hides the Awaiting Review tab for flag-only holders so they
     // don't sign off on their own work.

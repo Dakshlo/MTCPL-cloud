@@ -48,16 +48,40 @@ export default async function ActivityRegisterHome({ searchParams }: { searchPar
     codePad: s.code_pad,
     count: counts[i] ?? 0,
   }));
+  const totalEntries = counts.reduce((a, b) => a + b, 0);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14, paddingBottom: 32 }}>
-      <div>
-        <h1 style={{ margin: 0, fontSize: 22 }}>📒 Activity Register</h1>
-        <p className="muted" style={{ margin: "2px 0 0", fontSize: 13, maxWidth: 760 }}>
-          A dated, searchable record of company activities with proof — organised by site. Open a site to see
-          its register and add entries; each site has its own code scheme (e.g. <code>Lnt/OOS/001</code>).
-        </p>
+    <div style={{ display: "flex", flexDirection: "column", gap: 16, paddingBottom: 36 }}>
+      {/* Hero */}
+      <div
+        style={{
+          background: "linear-gradient(135deg, #2D2410 0%, #5a4420 100%)",
+          borderRadius: 18, padding: "20px 24px", color: "#fff",
+          display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap",
+          boxShadow: "0 12px 30px rgba(45,36,16,0.28)",
+        }}
+      >
+        <div style={{ fontSize: 40, lineHeight: 1 }}>📒</div>
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, opacity: 0.7, letterSpacing: "0.1em", textTransform: "uppercase" }}>Register</div>
+          <div style={{ fontSize: 24, fontWeight: 900, lineHeight: 1.15 }}>Activity Register</div>
+          <p style={{ margin: "6px 0 0", fontSize: 13, opacity: 0.9, maxWidth: 640, lineHeight: 1.5 }}>
+            A dated, searchable record of company activities with proof — organised by site. Each site has its own
+            code scheme (e.g. <code style={{ background: "rgba(255,255,255,0.15)", padding: "1px 6px", borderRadius: 4 }}>Lnt/OOS/001</code>). Attach any file as proof.
+          </p>
+        </div>
+        <div style={{ display: "flex", gap: 22, flexShrink: 0 }}>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 30, fontWeight: 900, lineHeight: 1 }}>{rows.length}</div>
+            <div style={{ fontSize: 11, fontWeight: 700, opacity: 0.75, marginTop: 3 }}>SITES</div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 30, fontWeight: 900, lineHeight: 1, color: "#E8C572" }}>{totalEntries}</div>
+            <div style={{ fontSize: 11, fontWeight: 700, opacity: 0.75, marginTop: 3 }}>ENTRIES</div>
+          </div>
+        </div>
       </div>
+
       <SitesList sites={sites} toast={sp?.toast ?? null} />
     </div>
   );

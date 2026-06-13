@@ -20,44 +20,32 @@ import { logAudit } from "@/lib/audit";
 
 const ROUTE = "/activity-register";
 const PROOF_BUCKET = "activity_proofs";
-const PROOF_MAX_BYTES = 15 * 1024 * 1024; // 15 MB
-const PROOF_MIME_ALLOW = new Set<string>([
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/heic",
-  "image/heif",
-  "application/pdf",
-]);
+const PROOF_MAX_BYTES = 25 * 1024 * 1024; // 25 MB
 
-// Reference = how the activity was communicated / handed over. The UI
-// offers Email / WhatsApp / Hand to hand; the value is stored verbatim.
+// Daksh (June 2026) — ANY file type is allowed now (Excel, Word, DWG,
+// PDF, photos…). We only guard size + non-empty. The original
+// extension is preserved so downloads open in the right app.
 
-function proofExt(mime: string): string {
-  switch (mime) {
-    case "image/jpeg":
-      return "jpg";
-    case "image/png":
-      return "png";
-    case "image/webp":
-      return "webp";
-    case "image/heic":
-      return "heic";
-    case "image/heif":
-      return "heif";
-    case "application/pdf":
-      return "pdf";
-    default:
-      return "bin";
-  }
+/** Pick a safe storage extension from the file name, else the mime,
+ *  else "bin". Lower-cased, alnum only, ≤8 chars. */
+function proofExt(file: File): string {
+  const fromName = (file.name || "").split(".").pop() ?? "";
+  const clean = fromName.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 8);
+  if (clean) return clean;
+  const mime = (file.type || "").toLowerCase();
+  const map: Record<string, string> = {
+    "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
+    "image/heic": "heic", "image/heif": "heif", "application/pdf": "pdf",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+    "application/vnd.ms-excel": "xls",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+    "application/msword": "doc",
+  };
+  return map[mime] ?? "bin";
 }
 function validateProof(file: File): string | null {
-  const mime = (file.type || "").toLowerCase();
-  if (!PROOF_MIME_ALLOW.has(mime)) {
-    return "Proof must be a photo (JPG / PNG / WebP / HEIC) or a PDF.";
-  }
-  if (file.size === 0) return "Proof file is empty.";
-  if (file.size > PROOF_MAX_BYTES) return "Proof file too large (max 15 MB).";
+  if (file.size === 0) return "File is empty.";
+  if (file.size > PROOF_MAX_BYTES) return "File too large (max 25 MB).";
   return null;
 }
 async function uploadProof(
@@ -65,15 +53,17 @@ async function uploadProof(
   entryId: string,
   file: File,
 ): Promise<{ path: string; mime: string }> {
-  const mime = (file.type || "").toLowerCase();
+  // Default to a generic binary type when the browser didn't set one
+  // (some send "" for .dwg / .xlsx) so the upload still succeeds.
+  const mime = (file.type || "").toLowerCase() || "application/octet-stream";
   const err = validateProof(file);
   if (err) throw new Error(err);
-  const path = `${entryId}/${randomUUID()}.${proofExt(mime)}`;
+  const path = `${entryId}/${randomUUID()}.${proofExt(file)}`;
   const buffer = Buffer.from(await file.arrayBuffer());
   const { error } = await admin.storage
     .from(PROOF_BUCKET)
     .upload(path, buffer, { contentType: mime, cacheControl: "3600", upsert: false });
-  if (error) throw new Error(`Proof upload failed: ${error.message}`);
+  if (error) throw new Error(`File upload failed: ${error.message}`);
   return { path, mime };
 }
 

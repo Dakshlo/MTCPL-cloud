@@ -23,6 +23,14 @@ const inputStyle: React.CSSProperties = {
   width: "100%",
 };
 
+// Deterministic per-site accent so each card has its own colour.
+const SITE_ACCENTS = ["#b87333", "#0f766e", "#2563eb", "#9333ea", "#dc2626", "#15803d", "#b45309", "#0891b2"];
+function hashStr(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h;
+}
+
 export function SitesList({ sites, toast }: { sites: SiteCard[]; toast: string | null }) {
   const [showNew, setShowNew] = useState(false);
 
@@ -48,26 +56,44 @@ export function SitesList({ sites, toast }: { sites: SiteCard[]; toast: string |
       </div>
 
       {sites.length === 0 ? (
-        <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 28, textAlign: "center", color: "var(--muted)" }}>
+        <div style={{ background: "var(--surface)", border: "1px dashed var(--border)", borderRadius: 14, padding: 36, textAlign: "center", color: "var(--muted)" }}>
+          <div style={{ fontSize: 34, marginBottom: 8 }}>🗂</div>
           No sites yet. Tap <strong>＋ New site</strong> to create your first one (e.g. name “L&amp;T”, code prefix “Lnt/OOS”).
         </div>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
-          {sites.map((s) => (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 13 }}>
+          <style>{`.ar-site{transition:transform .14s ease,box-shadow .14s ease,border-color .14s ease}.ar-site:hover{transform:translateY(-3px);box-shadow:0 12px 26px rgba(0,0,0,.1);border-color:var(--gold-dark)}.ar-site:hover .ar-go{transform:translateX(3px)}.ar-go{display:inline-block;transition:transform .14s ease}`}</style>
+          {sites.map((s) => {
+            const accent = SITE_ACCENTS[hashStr(s.id) % SITE_ACCENTS.length];
+            return (
             <div
               key={s.id}
-              style={{ position: "relative", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}
+              className="ar-site"
+              style={{ position: "relative", background: "var(--surface)", border: "1px solid var(--border)", borderTop: `4px solid ${accent}`, borderRadius: 14, overflow: "hidden" }}
             >
               <Link
                 href={`/activity-register/${s.id}`}
                 style={{ display: "block", padding: "16px 16px 14px", textDecoration: "none", color: "var(--text)" }}
               >
-                <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 4 }}>{s.name}</div>
-                <div style={{ fontSize: 12, color: "var(--muted)", fontFamily: "ui-monospace, monospace" }}>
-                  {s.codePrefix}/{"0".repeat(Math.max(0, s.codePad - 1))}1
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span
+                    style={{ width: 36, height: 36, flexShrink: 0, borderRadius: 10, background: `${accent}1f`, color: accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 900 }}
+                    aria-hidden
+                  >
+                    {s.name.trim().charAt(0).toUpperCase() || "•"}
+                  </span>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 16, fontWeight: 800, lineHeight: 1.15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</div>
+                    <div style={{ fontSize: 11.5, color: "var(--muted)", fontFamily: "ui-monospace, monospace" }}>
+                      {s.codePrefix}/{"0".repeat(Math.max(0, s.codePad - 1))}1
+                    </div>
+                  </div>
                 </div>
-                <div style={{ marginTop: 10, fontSize: 12, fontWeight: 700, color: "var(--gold-dark)" }}>
-                  {s.count} {s.count === 1 ? "entry" : "entries"} · Open →
+                <div style={{ marginTop: 12, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: 11.5, fontWeight: 800, color: accent, background: `${accent}14`, borderRadius: 999, padding: "3px 11px" }}>
+                    {s.count} {s.count === 1 ? "entry" : "entries"}
+                  </span>
+                  <span style={{ fontSize: 12.5, fontWeight: 800, color: "var(--gold-dark)" }}>Open <span className="ar-go">→</span></span>
                 </div>
               </Link>
               {/* Delete (owner/dev) — server blocks it unless the site is empty. */}
@@ -81,7 +107,8 @@ export function SitesList({ sites, toast }: { sites: SiteCard[]; toast: string |
                 </ConfirmButton>
               </form>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

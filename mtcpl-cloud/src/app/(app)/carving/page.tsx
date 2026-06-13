@@ -55,7 +55,8 @@ export default async function CarvingDashboardPage({
     profile.role === "developer" ||
     profile.role === "owner" ||
     profile.role === "carving_head" ||
-    profile.role === "senior_incharge";
+    profile.role === "senior_incharge" ||
+    profile.role === "tender_manager";
   // Mig 130 — third lane: Direct Dispatch. Slabs that skip carving
   // entirely (cut → straight onto a truck). Office team only, same
   // gate as Outsource.
@@ -772,7 +773,8 @@ export default async function CarvingDashboardPage({
           {(profile.role === "developer" ||
             profile.role === "owner" ||
             profile.role === "carving_head" ||
-            profile.role === "senior_incharge") && (
+            profile.role === "senior_incharge" ||
+            profile.role === "tender_manager") && (
             <VendorsManagerPeek vendors={vendorsForPeek} />
           )}
           {/* Mig 125 — Temporary Storage: park the cut-done backlog out of
@@ -796,7 +798,8 @@ export default async function CarvingDashboardPage({
             (profile.role === "developer" ||
               profile.role === "owner" ||
               profile.role === "carving_head" ||
-              profile.role === "senior_incharge") && (
+              profile.role === "senior_incharge" ||
+              profile.role === "tender_manager") && (
               <>
                 <Link
                   href="/carving/challans"

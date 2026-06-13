@@ -251,16 +251,19 @@ function EntryModal({
               ))}
             </select>
           </Field>
-          <Field label={isEdit ? "Proof — choose a file to replace" : "Proof (photo / PDF, optional)"}>
+          <Field label={isEdit ? "Attachment — choose a file to replace" : "Attachment (any file, optional)"}>
             {isEdit && entry!.hasProof && (
               <div style={{ fontSize: 12, marginBottom: 6 }}>
                 <a href={`/api/activity-register/proof/${entry!.id}`} target="_blank" rel="noopener noreferrer" style={{ color: "var(--gold-dark)", fontWeight: 700 }}>
-                  📎 Current proof
+                  📎 Current file
                 </a>
                 <span style={{ color: "var(--muted)" }}> — pick a file below to replace it</span>
               </div>
             )}
-            <input name="proof" type="file" accept="image/*,application/pdf" style={{ fontSize: 13 }} />
+            <input name="proof" type="file" style={{ fontSize: 13 }} />
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+              Any file type — Excel, Word, PDF, photo, DWG… (max 25 MB)
+            </div>
           </Field>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
             <button type="button" onClick={onClose} style={{ padding: "9px 16px", fontSize: 13, fontWeight: 700, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, cursor: "pointer", color: "var(--text)" }}>Cancel</button>
