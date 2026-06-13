@@ -46,28 +46,51 @@ function ComboField({
   upper?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const [openUp, setOpenUp] = useState(false);
   // query === null → just opened (show ALL); a string → user is filtering.
   const [query, setQuery] = useState<string | null>(null);
+  // Dropdown is positioned with FIXED coords anchored to the input, so the
+  // dialog's own overflow:auto can't clip it (that caused the double-scrollbar).
+  const [menu, setMenu] = useState<{ left: number; width: number; top?: number; bottom?: number; maxH: number }>({ left: 0, width: 0, maxH: 240 });
   const wrap = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  // Open the menu, choosing up/down so it isn't clipped by the dialog when
-  // the field sits low in the viewport.
+  function place() {
+    const el = inputRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const below = window.innerHeight - r.bottom;
+    const above = r.top;
+    const openUp = below < 240 && above > below;
+    const maxH = Math.max(150, Math.min(300, (openUp ? above : below) - 16));
+    setMenu({
+      left: r.left,
+      width: r.width,
+      maxH,
+      top: openUp ? undefined : r.bottom + 4,
+      bottom: openUp ? window.innerHeight - r.top + 4 : undefined,
+    });
+  }
   function openMenu(resetQuery = true) {
-    const r = wrap.current?.getBoundingClientRect();
-    if (r) setOpenUp(r.bottom > window.innerHeight * 0.58);
+    place();
     if (resetQuery) setQuery(null);
     setOpen(true);
   }
 
-  // Close when clicking anywhere outside this field.
+  // Close on outside click, and on scroll/resize (the fixed menu would drift).
   useEffect(() => {
     if (!open) return;
     function onDown(e: MouseEvent) {
       if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false);
     }
+    function onShift() { setOpen(false); }
     document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
+    window.addEventListener("scroll", onShift, true);
+    window.addEventListener("resize", onShift);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      window.removeEventListener("scroll", onShift, true);
+      window.removeEventListener("resize", onShift);
+    };
   }, [open]);
 
   const q = (query ?? "").trim().toLowerCase();
@@ -84,6 +107,7 @@ function ComboField({
       <span style={lbl}>{label}</span>
       <div style={{ position: "relative" }}>
         <input
+          ref={inputRef}
           value={value}
           onChange={(e) => { onChange(upper ? e.target.value.toUpperCase() : e.target.value); setQuery(e.target.value); if (!open) openMenu(false); }}
           onFocus={() => openMenu()}
@@ -104,7 +128,7 @@ function ComboField({
       </div>
 
       {open && (
-        <div style={{ position: "absolute", ...(openUp ? { bottom: "100%", marginBottom: 4 } : { top: "100%", marginTop: 4 }), left: 0, right: 0, zIndex: 30, background: "var(--surface)", border: "1px solid var(--gold-dark)", borderRadius: 10, boxShadow: "0 14px 36px rgba(0,0,0,0.22)", maxHeight: 208, overflowY: "auto", padding: 4 }}>
+        <div style={{ position: "fixed", left: menu.left, width: menu.width, ...(menu.top != null ? { top: menu.top } : { bottom: menu.bottom }), zIndex: 2200, background: "var(--surface)", border: "1px solid var(--gold-dark)", borderRadius: 10, boxShadow: "0 14px 36px rgba(0,0,0,0.28)", maxHeight: menu.maxH, overflowY: "auto", overscrollBehavior: "contain", padding: 4, WebkitOverflowScrolling: "touch" }}>
           {options.length === 0 ? (
             <div style={{ padding: "9px 11px", fontSize: 12.5, color: "var(--muted)" }}>No values yet — type to add one.</div>
           ) : filtered.length === 0 ? (
