@@ -16,6 +16,7 @@ import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { getReportRecipientNumbers } from "@/lib/wa-recipients";
 
 type AdminClient = ReturnType<typeof createAdminSupabaseClient>;
 
@@ -24,15 +25,12 @@ const WA_BULK_URL = "https://control.msg91.com/api/v5/whatsapp/whatsapp-outbound
 const TEMPLATE_NAME = process.env.MSG91_WA_TEMPLATE || "mtcpl_daily_report";
 const TEMPLATE_LANG = process.env.MSG91_WA_TEMPLATE_LANG || "en";
 const INTEGRATED_NUMBER = process.env.MSG91_WA_NUMBER || "917627065482";
-const DEFAULT_RECIPIENTS = ["8003689760", "9929277566"];
 
-function recipients(): string[] {
-  const raw = process.env.MSG91_WA_REPORT_TO;
-  const list = raw ? raw.split(",").map((s) => s.trim()).filter(Boolean) : DEFAULT_RECIPIENTS;
-  return list.map((n) => {
-    const d = n.replace(/\D/g, "");
-    return d.length === 10 ? `91${d}` : d;
-  });
+// Recipients are managed from Settings (app_settings) — see lib/wa-recipients.
+// Here we just add the country code to bare 10-digit numbers.
+async function recipients(): Promise<string[]> {
+  const nums = await getReportRecipientNumbers();
+  return nums.map((d) => (d.length === 10 ? `91${d}` : d));
 }
 
 const cft = (l: number, w: number, t: number) => (l * w * t) / 1728;
@@ -342,15 +340,25 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
   top = Math.min(y1, y2, y3) - 14;
 
   // ── payments box ──
+  // Total today (big) → a clear "vs yesterday" line with the +/- change →
+  // a divider → the per-vendor breakdown. (Earlier the yesterday figure sat
+  // up by the title and read ambiguously.)
   const payRows = data.payments.byVendor.slice(0, 6);
-  const payH = 52 + Math.max(1, payRows.length) * 14 + 6;
+  const hasRows = payRows.length > 0;
+  const payH = 70 + (hasRows ? payRows.length * 14 + 10 : 16);
   page.drawRectangle({ x: M, y: top - payH, width: W - 2 * M, height: payH, color: COL.gold });
-  text("PAYMENTS TODAY  (suppliers)", M + 13, top - 18, 10, bold, white);
-  right(`Yesterday ${inr(data.payments.prevTotal)}`, W - M - 13, top - 18, 9, font, white);
-  text(inr(data.payments.total), M + 12, top - 42, 21, bold, white);
-  let py = top - 60;
-  if (payRows.length === 0) { text("No payments recorded today.", M + 13, py, 9.5, font, white); }
-  else for (const v of payRows) { text(clip(v.vendor, 40), M + 13, py, 9.5, font, white); right(inr(v.amount), W - M - 13, py, 9.5, font, white); py -= 14; }
+  text("PAYMENTS TO SUPPLIERS TODAY", M + 13, top - 18, 10, bold, white);
+  text(inr(data.payments.total), M + 12, top - 43, 21, bold, white);
+  const pd = data.payments.total - data.payments.prevTotal;
+  text(`Yesterday ${inr(data.payments.prevTotal)}    (${pd >= 0 ? "+" : "-"}${inr(Math.abs(pd))})`, M + 13, top - 57, 9, font, white);
+  let py = top - 70;
+  if (!hasRows) {
+    text("No supplier payments recorded today.", M + 13, py - 4, 9.5, font, white);
+  } else {
+    page.drawLine({ start: { x: M + 13, y: py }, end: { x: W - M - 13, y: py }, thickness: 0.6, color: white, opacity: 0.35 });
+    py -= 14;
+    for (const v of payRows) { text(clip(v.vendor, 40), M + 13, py, 9.5, font, white); right(inr(v.amount), W - M - 13, py, 9.5, font, white); py -= 14; }
+  }
 
   // ── footer ──
   page.drawLine({ start: { x: M, y: 52 }, end: { x: W - M, y: 52 }, thickness: 0.8, color: line });
@@ -419,7 +427,7 @@ export async function sendDailyWhatsAppReport(): Promise<{
   if (upErr) throw new Error(`Report PDF upload failed: ${upErr.message}`);
   const pdfUrl = admin.storage.from("whatsapp_reports").getPublicUrl(path2).data.publicUrl;
 
-  const to = recipients();
+  const to = await recipients();
   await sendTemplate(to, pdfUrl, data.label);
 
   return {

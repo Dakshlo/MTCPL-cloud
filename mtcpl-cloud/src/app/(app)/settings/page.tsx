@@ -14,6 +14,8 @@ import { getProfilesMap } from "@/lib/profiles";
 import { SystemStatusSection } from "./system-status-section";
 import { MaintenanceCollapsible } from "./maintenance-collapsible";
 import { UserRoleVendorPicker } from "./user-role-vendor-picker";
+import { WaRecipientsEditor } from "./wa-recipients-editor";
+import { getReportRecipientNumbers } from "@/lib/wa-recipients";
 
 // All assignable roles — only shown to developer.
 //
@@ -133,6 +135,10 @@ function fmtAuditDate(iso: string) {
 export default async function SettingsPage() {
   const { profile: currentUser } = await requireAuth(["owner", "team_head", "senior_incharge", "developer"]);
   const admin = createAdminSupabaseClient();
+
+  // Daily WhatsApp report recipients (owner/developer manage these below).
+  const canManageWaReport = currentUser.role === "owner" || currentUser.role === "developer";
+  const waReportRecipients = canManageWaReport ? await getReportRecipientNumbers() : [];
 
   // System Status — load global + per-department flags (Migration 036).
   // Each falls back to `down: false` if the relevant migration hasn't
@@ -377,6 +383,14 @@ export default async function SettingsPage() {
               <button type="submit" className="primary-button" style={{ padding: "10px 18px" }}>Save password</button>
             </form>
           </div>
+        </PeekSection>
+      )}
+
+      {/* Daily WhatsApp work-report recipients — owner / developer manage who
+          gets the 6 PM PDF, no redeploy needed (stored in app_settings). */}
+      {canManageWaReport && (
+        <PeekSection icon="📲" title="WhatsApp report recipients" subtitle={`Daily 6 PM work-report · ${waReportRecipients.length} number${waReportRecipients.length === 1 ? "" : "s"}`} modalMaxWidth={520}>
+          <WaRecipientsEditor initial={waReportRecipients} />
         </PeekSection>
       )}
 
