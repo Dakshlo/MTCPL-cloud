@@ -7,7 +7,6 @@ import { AskAiEntryCard } from "@/components/ask-ai-entry-card";
 import { BlockJourneyEntryCard } from "@/components/block-journey-entry-card";
 import { TvModeEntryCard } from "@/components/tv-mode-entry-card";
 import { EmailSnapshotCard } from "./email-snapshot-card";
-import { WhatsAppReportTest } from "./wa-report-test";
 import { VariousCostingEntryCard } from "@/components/various-costing-entry-card";
 import { PeekIframe } from "@/components/peek-iframe";
 
@@ -279,9 +278,8 @@ export default async function DashboardPage() {
       {(profile.role === "owner" || profile.role === "developer") && (
         <EmailSnapshotCard />
       )}
-      {(profile.role === "owner" || profile.role === "developer") && (
-        <WhatsAppReportTest />
-      )}
+      {/* Daily WhatsApp work-report controls live in Settings → "Daily
+          WhatsApp report" (recipients, preview, send test). */}
 
       {/* ── REPORT BUTTONS ──
           Both reports open as center-peek iframe modals over /embed

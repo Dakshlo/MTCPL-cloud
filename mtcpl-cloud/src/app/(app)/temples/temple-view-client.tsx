@@ -180,14 +180,32 @@ function HeaderRing({ pct, size = 54 }: { pct: number; size?: number }) {
   );
 }
 
-function CountChips({ counts }: { counts: Record<StageBucket, number> }) {
+function CountChips({ counts, onPick, active = null }: { counts: Record<StageBucket, number>; onPick?: (s: StageBucket) => void; active?: StageBucket | null }) {
+  const clickable = !!onPick;
   return (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-      {STAGE_ORDER.filter((s) => counts[s] > 0).map((s) => (
-        <span key={s} style={{ fontSize: 10.5, fontWeight: 800, color: "#fff", background: STAGE_META[s].color, borderRadius: 999, padding: "1px 7px", whiteSpace: "nowrap" }}>
-          {counts[s]} {STAGE_META[s].label}
-        </span>
-      ))}
+      {STAGE_ORDER.filter((s) => counts[s] > 0).map((s) => {
+        const isActive = active === s;
+        const dim = active != null && !isActive;
+        return (
+          <button
+            key={s}
+            type="button"
+            onClick={clickable ? () => onPick!(s) : undefined}
+            title={clickable ? (isActive ? "Showing only this — click to show all" : `Show only ${STAGE_META[s].label} slabs`) : undefined}
+            style={{
+              fontSize: 10.5, fontWeight: 800, color: "#fff", background: STAGE_META[s].color,
+              borderRadius: 999, padding: "2px 9px", whiteSpace: "nowrap", border: "none",
+              cursor: clickable ? "pointer" : "default",
+              opacity: dim ? 0.38 : 1,
+              boxShadow: isActive ? "0 0 0 2px var(--text)" : "none",
+              transition: "opacity .15s ease, box-shadow .15s ease",
+            }}
+          >
+            {counts[s]} {STAGE_META[s].label}{isActive ? "  ✕" : ""}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -287,6 +305,10 @@ export function TempleViewClient({ trees, imagesByNode, canManageImages, canEdit
   const [nodeQ, setNodeQ] = useState("");
   const [openMode, setOpenMode] = useState<"default" | "all" | "none">("default");
   const [treeKey, setTreeKey] = useState(0);
+  // Click a stage chip to show ONLY that stage's slabs (toggle off to clear).
+  const [stageFilter, setStageFilter] = useState<StageBucket | null>(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { setStageFilter(null); }, [selected]);
   // View modes: list (default) or immersive fullscreen cards; plus a
   // hide-menu toggle for a bigger list page.
   const [cardMode, setCardMode] = useState(false);
@@ -339,9 +361,12 @@ export function TempleViewClient({ trees, imagesByNode, canManageImages, canEdit
   // Roots filtered by the component search box (keeps a branch if any
   // descendant name matches).
   const nq = nodeQ.trim().toLowerCase();
-  const visibleRoots = current
+  let visibleRoots = current
     ? current.roots.map((r) => filterNode(r, nq)).filter((x): x is TempleTreeNode => x !== null)
     : [];
+  if (stageFilter) {
+    visibleRoots = visibleRoots.map((r) => filterNodeByStage(r, stageFilter)).filter((x): x is TempleTreeNode => x !== null);
+  }
 
   if (trees.length === 0) {
     return <div className="banner">No slabs yet. Import slabs (with Category 1 / 2 / Label filled) to see them organised here.</div>;
@@ -469,7 +494,7 @@ export function TempleViewClient({ trees, imagesByNode, canManageImages, canEdit
                   </div>
                 </div>
                 <div style={{ height: 14 }}><StageBar counts={current.counts} total={current.total} /></div>
-                <CountChips counts={current.counts} />
+                <CountChips counts={current.counts} active={stageFilter} onPick={(s) => setStageFilter((prev) => (prev === s ? null : s))} />
               </div>
             </div>
 
@@ -485,13 +510,20 @@ export function TempleViewClient({ trees, imagesByNode, canManageImages, canEdit
               />
               <button type="button" onClick={() => { setOpenMode("all"); setTreeKey((k) => k + 1); }} style={ctrlBtn}>⊞ Expand all</button>
               <button type="button" onClick={() => { setOpenMode("none"); setTreeKey((k) => k + 1); }} style={ctrlBtn}>⊟ Collapse all</button>
+              {stageFilter && (
+                <button type="button" onClick={() => setStageFilter(null)} style={{ ...ctrlBtn, color: "#fff", background: STAGE_META[stageFilter].color, borderColor: STAGE_META[stageFilter].color }}>
+                  ✕ Showing only {STAGE_META[stageFilter].label}
+                </button>
+              )}
             </div>
 
-            <div key={treeKey} style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+            <div key={`${treeKey}-${stageFilter ?? "_"}`} style={{ display: "flex", flexDirection: "column", gap: 7 }}>
               {visibleRoots.length === 0 ? (
-                <div className="muted" style={{ fontSize: 13, padding: "10px 2px" }}>No components match “{nodeQ}”.</div>
+                <div className="muted" style={{ fontSize: 13, padding: "10px 2px" }}>
+                  {stageFilter ? `No ${STAGE_META[stageFilter].label} slabs in this temple.` : `No components match “${nodeQ}”.`}
+                </div>
               ) : (
-                visibleRoots.map((r, i) => <TreeNode key={r.id} node={r} depth={0} idx={i} imagesByNode={imagesByNode} openMode={nodeQ ? "all" : openMode} canDecide={canDecide} />)
+                visibleRoots.map((r, i) => <TreeNode key={r.id} node={r} depth={0} idx={i} imagesByNode={imagesByNode} openMode={(nodeQ || stageFilter) ? "all" : openMode} canDecide={canDecide} />)
               )}
             </div>
           </>
@@ -531,4 +563,31 @@ function filterNode(node: TempleTreeNode, q: string): TempleTreeNode | null {
     return selfMatch ? node : { ...node, children: kids };
   }
   return null;
+}
+
+// Stage filter — keep only slabs in `stage`, pruning empty branches and
+// recomputing counts/total bottom-up so every bar / chip / % reflects the
+// filter (clicking a stage chip in the header drives this).
+function zeroCounts(ref: Record<StageBucket, number>): Record<StageBucket, number> {
+  const c = {} as Record<StageBucket, number>;
+  for (const k of Object.keys(ref) as StageBucket[]) c[k] = 0;
+  return c;
+}
+function filterNodeByStage(node: TempleTreeNode, stage: StageBucket): TempleTreeNode | null {
+  if (node.children.length === 0) {
+    const slabs = node.slabs.filter((s) => bucketOf(s.status) === stage);
+    if (slabs.length === 0) return null;
+    const counts = zeroCounts(node.counts);
+    counts[stage] = slabs.length;
+    return { ...node, slabs, counts, total: slabs.length };
+  }
+  const kids = node.children.map((c) => filterNodeByStage(c, stage)).filter((x): x is TempleTreeNode => x !== null);
+  if (kids.length === 0) return null;
+  const counts = zeroCounts(node.counts);
+  let total = 0;
+  for (const k of kids) {
+    for (const key of Object.keys(counts) as StageBucket[]) counts[key] += k.counts[key];
+    total += k.total;
+  }
+  return { ...node, children: kids, counts, total };
 }

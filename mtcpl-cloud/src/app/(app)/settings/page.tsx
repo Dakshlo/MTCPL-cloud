@@ -389,7 +389,7 @@ export default async function SettingsPage() {
       {/* Daily WhatsApp work-report recipients — owner / developer manage who
           gets the 6 PM PDF, no redeploy needed (stored in app_settings). */}
       {canManageWaReport && (
-        <PeekSection icon="📲" title="WhatsApp report recipients" subtitle={`Daily 6 PM work-report · ${waReportRecipients.length} number${waReportRecipients.length === 1 ? "" : "s"}`} modalMaxWidth={520}>
+        <PeekSection icon="📲" title="Daily WhatsApp report" subtitle={`Recipients, preview & test · ${waReportRecipients.length} number${waReportRecipients.length === 1 ? "" : "s"}`} modalMaxWidth={520}>
           <WaRecipientsEditor initial={waReportRecipients} />
         </PeekSection>
       )}
