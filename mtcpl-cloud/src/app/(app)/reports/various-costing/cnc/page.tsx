@@ -323,7 +323,8 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
             No carving output and no expenses logged in this period.
           </div>
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+          <table style={{ width: "100%", minWidth: 880, borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
               <tr style={{ background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>
                 <th style={th()}>Vendor</th>
@@ -440,6 +441,7 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
               })()}
             </tbody>
           </table>
+          </div>
         )}
       </Panel>
 
