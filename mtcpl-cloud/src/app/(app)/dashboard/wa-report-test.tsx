@@ -19,7 +19,8 @@ export function WhatsAppReportTest() {
       const res = await fetch("/api/whatsapp-report/run", { method: "POST" });
       const j = await res.json();
       if (!res.ok || !j.ok) { setErr(j.error || `HTTP ${res.status}`); return; }
-      setMsg(`✓ Sent for ${j.label} to ${(j.recipients ?? []).join(", ")}. (Cutting ${Number(j.totals?.cuttingCft ?? 0).toFixed(1)} CFT · Carving ${Number(j.totals?.carvingCft ?? 0).toFixed(1)} CFT · Dispatch ${j.totals?.dispatchSlabs ?? 0} slabs.)`);
+      const t = j.totals ?? {};
+      setMsg(`✓ Sent for ${j.label} to ${(j.recipients ?? []).join(", ")}. (Blocks ${t.blocks ?? 0} · Cutting ${t.cuttingSlabs ?? 0} · Carving ${t.carvingSlabs ?? 0} · Dispatch ${t.dispatchSlabs ?? 0} slabs.)`);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -33,17 +34,27 @@ export function WhatsAppReportTest() {
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontWeight: 700, fontSize: 14 }}>📲 Daily WhatsApp work-report</div>
           <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-            Auto-sends a PDF (cutting by stone · carving by vendor · dispatch) every evening at 6 PM. Send a test now to verify.
+            Auto-sends a colourful PDF (blocks added · cutting · carving · dispatch · payments, vs yesterday) every evening at 6 PM. Preview the PDF with today&apos;s data, or send a test now.
           </div>
         </div>
-        <button
-          type="button"
-          onClick={send}
-          disabled={busy}
-          style={{ padding: "9px 16px", fontSize: 13, fontWeight: 800, color: "#fff", background: busy ? "var(--border)" : "#16A34A", border: "none", borderRadius: 8, cursor: busy ? "wait" : "pointer", whiteSpace: "nowrap" }}
-        >
-          {busy ? "Sending…" : "Send test now"}
-        </button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <a
+            href="/api/whatsapp-report/preview"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ padding: "9px 16px", fontSize: 13, fontWeight: 800, color: "var(--gold-dark)", background: "var(--surface)", border: "1px solid var(--gold-dark)", borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap", textDecoration: "none" }}
+          >
+            👁 Preview PDF
+          </a>
+          <button
+            type="button"
+            onClick={send}
+            disabled={busy}
+            style={{ padding: "9px 16px", fontSize: 13, fontWeight: 800, color: "#fff", background: busy ? "var(--border)" : "#16A34A", border: "none", borderRadius: 8, cursor: busy ? "wait" : "pointer", whiteSpace: "nowrap" }}
+          >
+            {busy ? "Sending…" : "Send test now"}
+          </button>
+        </div>
       </div>
       {msg && <div style={{ marginTop: 10, padding: "8px 12px", background: "rgba(22,163,74,0.1)", border: "1px solid rgba(22,163,74,0.4)", color: "#15803d", fontSize: 12.5, fontWeight: 600, borderRadius: 7 }}>{msg}</div>}
       {err && <div style={{ marginTop: 10, padding: "8px 12px", background: "rgba(185,28,28,0.08)", border: "1px solid rgba(185,28,28,0.3)", color: "#b91c1c", fontSize: 12.5, borderRadius: 7 }}>⚠ {err}</div>}
