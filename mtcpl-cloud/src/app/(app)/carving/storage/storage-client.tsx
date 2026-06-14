@@ -27,7 +27,14 @@ export function StorageClient({ parked, unassignedCount }: { parked: ParkedSlab[
   const filtered = useMemo(() => {
     const n = q.trim().toLowerCase();
     if (!n) return parked;
-    return parked.filter((s) => [s.id, s.label, s.temple, s.stone].some((v) => (v ?? "").toLowerCase().includes(n)));
+    // Dimension-friendly needle: 64x61x19 / 64 61 19 / 64"×61" all match.
+    const nd = n.replace(/×/g, "x").replace(/["\s]/g, "");
+    return parked.filter((s) => {
+      if ([s.id, s.label, s.temple, s.stone].some((v) => (v ?? "").toLowerCase().includes(n))) return true;
+      const dims = `${s.l}x${s.w}x${s.t}`;
+      const cft = calcCft(s.l, s.w, s.t).toFixed(2);
+      return !!nd && (dims.includes(nd) || cft.includes(nd));
+    });
   }, [q, parked]);
 
   // Group filtered slabs by temple.
@@ -58,6 +65,10 @@ export function StorageClient({ parked, unassignedCount }: { parked: ParkedSlab[
 
   async function bringBack(ids: string[]) {
     if (busy || ids.length === 0) return;
+    const confirmMsg = ids.length === 1
+      ? `Bring slab ${ids[0]} back to Carving Unassigned?`
+      : `Bring ${ids.length} selected slabs back to Carving Unassigned?`;
+    if (!window.confirm(confirmMsg)) return;
     setBusy(true); setErr(null); setMsg(null);
     try {
       const res = await unparkSlabsAction(ids);
@@ -95,7 +106,7 @@ export function StorageClient({ parked, unassignedCount }: { parked: ParkedSlab[
 
       {/* Search + bring-back-selected */}
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search parked slabs — code, label, temple, stone…" style={{ flex: "1 1 280px", padding: "9px 12px", fontSize: 13.5, border: "1px solid var(--border)", borderRadius: 9, background: "var(--bg)", color: "var(--text)" }} />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search parked slabs — code, label, temple, stone, size (e.g. 64x61x19)…" style={{ flex: "1 1 280px", padding: "9px 12px", fontSize: 13.5, border: "1px solid var(--border)", borderRadius: 9, background: "var(--bg)", color: "var(--text)" }} />
         <span className="muted" style={{ fontSize: 12.5 }}>{parked.length} in storage · {filtered.length} shown</span>
         {selected.size > 0 && (
           <button type="button" disabled={busy} onClick={() => bringBack([...selected])} style={btn("#15803d")}>↩ Bring back {selected.size} selected</button>
