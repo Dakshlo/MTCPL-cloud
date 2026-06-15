@@ -154,7 +154,7 @@ export function NewCarvingChallanForm({ billable }: { billable: BillableSlab[] }
                       {b.label ? ` · ${b.label}` : ""}
                     </div>
                     <div style={{ fontSize: 11, color: "var(--muted)" }}>
-                      {b.temple} · {b.dims} · {b.cft} cft / {b.sft} sft
+                      {b.temple} · {b.dims} · {b.snapUnit === "sft" ? `${b.sft} sft` : `${b.cft} cft`}
                     </div>
                   </div>
                   {/* Unit chip (from the work order — not editable here) */}

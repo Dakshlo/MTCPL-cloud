@@ -6081,7 +6081,7 @@ async function sendSlabToOutsourceVendor(
     vendorId: string;
     vendorName: string;
     rate: number | null;
-    unit: "cft" | "sft";
+    unit: "cft" | "sft" | "job";
     profileId: string;
   },
 ): Promise<{ ok: true; id: string } | { ok: false; reason: string }> {
@@ -6432,7 +6432,8 @@ export async function sendWorkOrderLineToVendorAction(formData: FormData) {
       : wo!.jobwork_rate != null
         ? Number(wo!.jobwork_rate)
         : null;
-  const unit = (line!.jobwork_unit ?? wo!.jobwork_unit) === "sft" ? "sft" : "cft";
+  const uSingle = line!.jobwork_unit ?? wo!.jobwork_unit;
+  const unit = uSingle === "sft" ? "sft" : uSingle === "job" ? "job" : "cft";
 
   const res = await sendSlabToOutsourceVendor(admin, {
     slabId: line!.slab_requirement_id,
@@ -6524,7 +6525,8 @@ export async function sendAllReadyWorkOrderLinesAction(formData: FormData) {
         : wo!.jobwork_rate != null
           ? Number(wo!.jobwork_rate)
           : null;
-    const unit = (line.jobwork_unit ?? wo!.jobwork_unit) === "sft" ? "sft" : "cft";
+    const u = line.jobwork_unit ?? wo!.jobwork_unit;
+    const unit = u === "sft" ? "sft" : u === "job" ? "job" : "cft";
     const res = await sendSlabToOutsourceVendor(admin, {
       slabId: line.slab_requirement_id,
       vendorId: wo!.vendor_id,
@@ -6610,7 +6612,8 @@ export async function sendSelectedWorkOrderLinesAction(formData: FormData) {
     const rate =
       line.jobwork_rate != null ? Number(line.jobwork_rate)
         : wo!.jobwork_rate != null ? Number(wo!.jobwork_rate) : null;
-    const unit = (line.jobwork_unit ?? wo!.jobwork_unit) === "sft" ? "sft" : "cft";
+    const u = line.jobwork_unit ?? wo!.jobwork_unit;
+    const unit = u === "sft" ? "sft" : u === "job" ? "job" : "cft";
     const res = await sendSlabToOutsourceVendor(admin, {
       slabId: line.slab_requirement_id,
       vendorId: wo!.vendor_id,
@@ -6720,21 +6723,47 @@ export async function cancelWorkOrderAction(formData: FormData) {
   const reason = txt(formData, "reason") || null;
   if (!woId) redirect("/carving/work-orders?toast=Missing+work+order");
   const now = new Date().toISOString();
-  await admin
-    .from("carving_work_orders")
-    .update({ status: "cancelled", cancelled_at: now, cancel_reason: reason, updated_at: now, updated_by: profile.id })
-    .eq("id", woId)
-    .neq("status", "cancelled");
-  // Cancel only the lines that haven't been sent (sent lines have live
-  // carving_items — those continue through the normal carving flow).
+
+  // Cancel only the un-sent (planned) lines — sent lines have live carving_items
+  // and continue through the normal flow.
   await admin
     .from("carving_work_order_items")
     .update({ line_status: "cancelled" })
     .eq("work_order_id", woId)
     .eq("line_status", "planned");
-  await logAudit(profile.id, "work_order_cancelled", "carving_work_order", woId, { reason });
+
+  // Daksh — a work order is only "cancelled" when NOTHING is left in it. If
+  // slabs are still out at the vendor it isn't cancelled: completed if they're
+  // all approved, else in_progress. Removable-from-list ⟺ truly empty.
+  const { data: remaining } = await admin
+    .from("carving_work_order_items")
+    .select("carving_item_id")
+    .eq("work_order_id", woId)
+    .neq("line_status", "cancelled");
+  const active = (remaining ?? []) as Array<{ carving_item_id: string | null }>;
+  let status = "cancelled";
+  let cancelledAt: string | null = now;
+  let cancelReason: string | null = reason;
+  if (active.length > 0) {
+    cancelledAt = null;
+    cancelReason = null;
+    const ciIds = active.map((a) => a.carving_item_id).filter(Boolean) as string[];
+    let allApproved = ciIds.length === active.length && ciIds.length > 0;
+    if (allApproved) {
+      const { data: cis } = await admin.from("carving_items").select("review_approved_at").in("id", ciIds);
+      const rows = (cis ?? []) as Array<{ review_approved_at: string | null }>;
+      allApproved = rows.length === ciIds.length && rows.every((c) => !!c.review_approved_at);
+    }
+    status = allApproved ? "completed" : "in_progress";
+  }
+
+  await admin
+    .from("carving_work_orders")
+    .update({ status, cancelled_at: cancelledAt, cancel_reason: cancelReason, updated_at: now, updated_by: profile.id })
+    .eq("id", woId);
+  await logAudit(profile.id, "work_order_cancelled", "carving_work_order", woId, { reason, kept_active: active.length, status });
   refreshAll();
-  redirect(`/carving/work-orders?toast=Work+order+cancelled`);
+  redirect(`/carving/work-orders?toast=${encodeURIComponent(active.length === 0 ? "Work order cancelled" : `Un-sent lines cancelled · ${active.length} still at vendor`)}`);
 }
 
 // Mig 135 — soft-hide a cancelled / rejected work order from the Outsource

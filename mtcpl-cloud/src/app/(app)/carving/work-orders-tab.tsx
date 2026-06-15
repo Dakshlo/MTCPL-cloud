@@ -437,8 +437,9 @@ export function WorkOrdersTab({ wos, isOwner }: { wos: WorkOrderTabRow[]; isOwne
                           <Link href={`/carving/work-orders/${w.id}`} style={{ alignSelf: "flex-start", fontSize: 12, fontWeight: 700, color: "#92400e", textDecoration: "none" }}>
                             Open order →
                           </Link>
-                          {/* Mig 135 — clear a dead order off the list. */}
-                          {isOwner && (w.status === "cancelled" || w.status === "rejected") && (
+                          {/* Mig 135 — clear a DEAD order (rejected, or cancelled
+                              with nothing left in it) off the list. */}
+                          {isOwner && (w.status === "rejected" || (w.status === "cancelled" && w.counts.total === 0)) && (
                             <form action={dismissWorkOrderAction}>
                               <input type="hidden" name="work_order_id" value={w.id} />
                               <button type="submit" style={{ fontSize: 11.5, fontWeight: 700, color: "#991b1b", background: "none", border: "1px solid rgba(220,38,38,0.35)", borderRadius: 7, padding: "4px 10px", cursor: "pointer" }}>🗑 Remove from list</button>
