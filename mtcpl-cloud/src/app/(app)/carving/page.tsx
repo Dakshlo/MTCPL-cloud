@@ -596,16 +596,16 @@ export default async function CarvingDashboardPage({
     // Slab meta (label / description / dims) for bound slabs — shown as chips
     // on the card + folded into each line's search haystack.
     const woSlabIds = [...new Set(lineRowsT.map((l) => l.slab_requirement_id).filter(Boolean) as string[])];
-    const woSlabMeta = new Map<string, { label: string | null; description: string | null; dims: string; cft: number; sft: number }>();
+    const woSlabMeta = new Map<string, { label: string | null; description: string | null; dims: string; cft: number; sft: number; status: string }>();
     if (woSlabIds.length > 0) {
       const { data: sRows } = await admin
         .from("slab_requirements")
-        .select("id, label, description, length_ft, width_ft, thickness_ft")
+        .select("id, label, description, status, length_ft, width_ft, thickness_ft")
         .in("id", woSlabIds);
-      for (const s of (sRows ?? []) as Array<{ id: string; label: string | null; description: string | null; length_ft: number | string; width_ft: number | string; thickness_ft: number | string }>) {
+      for (const s of (sRows ?? []) as Array<{ id: string; label: string | null; description: string | null; status: string; length_ft: number | string; width_ft: number | string; thickness_ft: number | string }>) {
         const l = Number(s.length_ft) || 0, w = Number(s.width_ft) || 0, t = Number(s.thickness_ft) || 0;
         // Dims are stored in INCHES → CFT = l*w*t/1728, SFT = l*w/144.
-        woSlabMeta.set(s.id, { label: s.label, description: s.description, dims: `${l}×${w}×${t}`, cft: (l * w * t) / 1728, sft: (l * w) / 144 });
+        woSlabMeta.set(s.id, { label: s.label, description: s.description, dims: `${l}×${w}×${t}`, cft: (l * w * t) / 1728, sft: (l * w) / 144, status: s.status });
       }
     }
     // Real stage comes from the carving_item, not line_status (which only
@@ -626,6 +626,7 @@ export default async function CarvingDashboardPage({
     const countsByWo = new Map<string, WorkOrderLineCounts>();
     const cftByWo = new Map<string, number>();
     const sftByWo = new Map<string, number>();
+    const readyByWo = new Map<string, number>(); // planned line + slab cut_done = ready to assign
     for (const r of lineRowsT) {
       const cc = countsByWo.get(r.work_order_id) ?? { total: 0, planned: 0, sent: 0, received: 0, approved: 0 };
       if (r.line_status === "cancelled") {
@@ -646,6 +647,10 @@ export default async function CarvingDashboardPage({
       countsByWo.set(r.work_order_id, cc);
 
       const meta = r.slab_requirement_id ? woSlabMeta.get(r.slab_requirement_id) : null;
+      // "Ready to assign" = a planned line whose bound slab is cut-done.
+      if (eff === "planned" && meta?.status === "cut_done") {
+        readyByWo.set(r.work_order_id, (readyByWo.get(r.work_order_id) ?? 0) + 1);
+      }
       const plannedDims =
         r.planned_length_ft != null
           ? `${Number(r.planned_length_ft)}×${Number(r.planned_width_ft ?? 0)}×${Number(r.planned_thickness_ft ?? 0)}`
@@ -676,8 +681,17 @@ export default async function CarvingDashboardPage({
     for (const r of (hoRows ?? []) as Array<{ id: string; handed_over_at: string | null }>) {
       if (r.handed_over_at) handedOverIds.add(r.id);
     }
+    // Mig 135 — soft-hidden (dismissed) cancelled/rejected orders. Guarded so
+    // the page still works before the migration runs (missing column → none).
+    const dismissedIds = new Set<string>();
+    {
+      const { data: dRows } = await admin.from("carving_work_orders").select("id, dismissed_at");
+      for (const r of (dRows ?? []) as Array<{ id: string; dismissed_at: string | null }>) {
+        if (r.dismissed_at) dismissedIds.add(r.id);
+      }
+    }
     const zeroCounts: WorkOrderLineCounts = { total: 0, planned: 0, sent: 0, received: 0, approved: 0 };
-    workOrdersForTab = woRowsT.map((w) => {
+    workOrdersForTab = woRowsT.filter((w) => !dismissedIds.has(w.id)).map((w) => {
       const cnt = countsByWo.get(w.id) ?? zeroCounts;
       const totalCft = Math.round((cftByWo.get(w.id) ?? 0) * 100) / 100;
       const totalSft = Math.round((sftByWo.get(w.id) ?? 0) * 100) / 100;
@@ -699,6 +713,7 @@ export default async function CarvingDashboardPage({
         totalCft,
         totalSft,
         tentativeCost,
+        readyToSend: readyByWo.get(w.id) ?? 0,
       };
     });
   }

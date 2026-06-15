@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { approveWorkOrderAction, rejectWorkOrderAction, handoverWorkOrderAction } from "./actions";
+import { approveWorkOrderAction, rejectWorkOrderAction, handoverWorkOrderAction, dismissWorkOrderAction } from "./actions";
 
 /**
  * Work Orders tab (Daksh June 2026) — renders inside /carving in Outsource
@@ -59,6 +59,8 @@ export type WorkOrderTabRow = WorkOrderRow & {
   totalSft: number;
   /** Tentative total cost from the agreed rate (null until owner sets a price). */
   tentativeCost: number | null;
+  /** Planned lines whose slab is cut-done = ready to send to the vendor. */
+  readyToSend: number;
 };
 
 const STATUS_META: Record<string, { label: string; emoji: string; bg: string; fg: string }> = {
@@ -319,6 +321,14 @@ export function WorkOrdersTab({ wos, isOwner }: { wos: WorkOrderTabRow[]; isOwne
                         </span>
                       </div>
 
+                      {/* Ready to assign (cut-done, not yet sent) — so you know
+                          there's work to send without opening the order. */}
+                      {w.readyToSend > 0 && (
+                        <div style={{ fontSize: 12, fontWeight: 800, color: "#15803d", background: "rgba(22,163,74,0.10)", border: "1px solid rgba(22,163,74,0.3)", borderRadius: 7, padding: "5px 9px", alignSelf: "flex-start" }}>
+                          🟢 {w.readyToSend} ready to assign
+                        </div>
+                      )}
+
                       {/* Order totals — CFT in the order + tentative cost at the agreed rate. */}
                       <div style={{ fontSize: 12, color: "var(--muted)" }}>
                         📦 <strong style={{ color: "var(--text)" }}>{w.totalCft.toFixed(2)} cft</strong>
@@ -396,9 +406,18 @@ export function WorkOrdersTab({ wos, isOwner }: { wos: WorkOrderTabRow[]; isOwne
                         <div style={{ fontSize: 12, color: "#b45309", fontWeight: 600 }}>⏳ Waiting for owner price approval.</div>
                       ) : null}
 
-                        <Link href={`/carving/work-orders/${w.id}`} style={{ marginTop: "auto", alignSelf: "flex-start", fontSize: 12, fontWeight: 700, color: "#92400e", textDecoration: "none" }}>
-                          Open order →
-                        </Link>
+                        <div style={{ marginTop: "auto", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                          <Link href={`/carving/work-orders/${w.id}`} style={{ alignSelf: "flex-start", fontSize: 12, fontWeight: 700, color: "#92400e", textDecoration: "none" }}>
+                            Open order →
+                          </Link>
+                          {/* Mig 135 — clear a dead order off the list. */}
+                          {isOwner && (w.status === "cancelled" || w.status === "rejected") && (
+                            <form action={dismissWorkOrderAction}>
+                              <input type="hidden" name="work_order_id" value={w.id} />
+                              <button type="submit" style={{ fontSize: 11.5, fontWeight: 700, color: "#991b1b", background: "none", border: "1px solid rgba(220,38,38,0.35)", borderRadius: 7, padding: "4px 10px", cursor: "pointer" }}>🗑 Remove from list</button>
+                            </form>
+                          )}
+                        </div>
                       </div>
 
                       {/* Mig 100 — first approval: blur the card + one centred

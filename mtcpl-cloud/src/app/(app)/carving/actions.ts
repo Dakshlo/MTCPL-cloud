@@ -6656,6 +6656,29 @@ export async function cancelWorkOrderAction(formData: FormData) {
   redirect(`/carving/work-orders?toast=Work+order+cancelled`);
 }
 
+// Mig 135 — soft-hide a cancelled / rejected work order from the Outsource
+// list. Owner/dev only; the record + its history are kept (audit), it just
+// stops cluttering the list. Guarded so it never hides a live order.
+export async function dismissWorkOrderAction(formData: FormData) {
+  const { profile } = await requireAuth(["developer", "owner"]);
+  const admin = createAdminSupabaseClient();
+  const woId = txt(formData, "work_order_id");
+  if (!woId) redirect("/carving?mode=outsource&tab=workorders&toast=Missing+work+order");
+  const { data: row } = await admin.from("carving_work_orders").select("status").eq("id", woId).maybeSingle();
+  const status = (row as { status?: string } | null)?.status;
+  if (status !== "cancelled" && status !== "rejected") {
+    redirect(`/carving?mode=outsource&tab=workorders&toast=${encodeURIComponent("Only cancelled / rejected orders can be removed")}`);
+  }
+  const { error } = await admin
+    .from("carving_work_orders")
+    .update({ dismissed_at: new Date().toISOString(), dismissed_by: profile.id })
+    .eq("id", woId);
+  if (error) redirect(`/carving?mode=outsource&tab=workorders&toast=${encodeURIComponent(error.message)}`);
+  await logAudit(profile.id, "work_order_dismissed", "carving_work_order", woId, {});
+  refreshAll();
+  redirect("/carving?mode=outsource&tab=workorders&toast=Removed+from+list");
+}
+
 // ── Job event timeline — used by JobDetailPeek modal ─────────────
 //
 // Returns the carving_job_events for a single carving_item, with
