@@ -160,6 +160,13 @@ export function WorkOrdersTab({ wos, isOwner }: { wos: WorkOrderTabRow[]; isOwne
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <style>{`
+        @keyframes woCardPulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(22,163,74,0); }
+          50% { box-shadow: 0 0 0 4px rgba(22,163,74,0.35); }
+        }
+        .wo-card-blink { animation: woCardPulse 1.5s ease-in-out infinite; border-color: rgba(22,163,74,0.6) !important; }
+      `}</style>
       {/* Action bar */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
         <p className="muted" style={{ margin: 0, fontSize: 13 }}>
@@ -278,9 +285,13 @@ export function WorkOrdersTab({ wos, isOwner }: { wos: WorkOrderTabRow[]; isOwne
                   // Mig 100 — approved but not yet handed over: blur the card
                   // and show one centred Handover action.
                   const handoverPending = (w.status === "open" || w.status === "in_progress") && !w.handedOver;
+                  // Blink the whole card when there's cut-done work ready to
+                  // send (and the order is actionable — approved + handed over).
+                  const blink = w.readyToSend > 0 && !isPending && !handoverPending;
                   return (
                     <div
                       key={w.id}
+                      className={blink ? "wo-card-blink" : undefined}
                       style={{
                         position: "relative",
                         padding: 12,

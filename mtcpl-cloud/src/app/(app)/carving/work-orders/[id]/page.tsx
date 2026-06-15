@@ -270,7 +270,7 @@ export default async function WorkOrderDetailPage({ params, searchParams }: { pa
       {lines.length === 0 ? (
         <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 24, color: "var(--muted)", fontSize: 13, textAlign: "center" }}>No lines on this work order.</div>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(168px, 1fr))", gap: 9 }}>
           {lines.map((l) => {
             const slab = l.slab_requirement_id ? slabMeta.get(l.slab_requirement_id) : null;
             const ci = l.carving_item_id ? ciMeta.get(l.carving_item_id) : null;
@@ -284,11 +284,11 @@ export default async function WorkOrderDetailPage({ params, searchParams }: { pa
             const isReady = !isSent && !cancelled && slab?.status === "cut_done";
             const accent = isSent ? "#1d4ed8" : isReady ? "#15803d" : slab ? "#94a3b8" : "#cbd5e1";
             return (
-              <div key={l.id} className={isReady ? "wo-ready-blink" : undefined} style={{ display: "flex", flexDirection: "column", gap: 6, padding: 10, background: "var(--surface)", border: "1px solid var(--border)", borderLeft: `4px solid ${accent}`, borderRadius: 12 }}>
+              <div key={l.id} className={isReady ? "wo-ready-blink" : undefined} style={{ display: "flex", flexDirection: "column", gap: 4, padding: 8, background: "var(--surface)", border: "1px solid var(--border)", borderLeft: `4px solid ${accent}`, borderRadius: 10 }}>
                 {l.slab_requirement_id && slab ? (
-                  <SlabThumb stone={slab.stone} l={slab.l} w={slab.w} t={slab.t} stoneTypes={stoneTypes} />
+                  <SlabThumb stone={slab.stone} l={slab.l} w={slab.w} t={slab.t} stoneTypes={stoneTypes} size={56} height={46} />
                 ) : (
-                  <div style={{ height: 80, background: "var(--surface-alt)", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted-light)", fontSize: 11 }}>📝 future need</div>
+                  <div style={{ height: 46, background: "var(--surface-alt)", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted-light)", fontSize: 10 }}>📝 future</div>
                 )}
 
                 {l.slab_requirement_id ? (
