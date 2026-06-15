@@ -123,10 +123,8 @@ const lbl: React.CSSProperties = { fontSize: 10, fontWeight: 700, textTransform:
 
 export function WorkOrdersTab({ wos, isOwner }: { wos: WorkOrderTabRow[]; isOwner: boolean }) {
   const [q, setQ] = useState("");
-  // Collapse state — vendor groups (default open) + individual work-order
-  // cards (default open only when they need attention). Keyed by name / id.
+  // Vendor groups are collapsed by default — tap a vendor to expand it.
   const [vendorOpen, setVendorOpen] = useState<Record<string, boolean>>({});
-  const [woOpen, setWoOpen] = useState<Record<string, boolean>>({});
   const query = q.trim().toLowerCase();
 
   const filtered = useMemo(() => {
@@ -230,7 +228,7 @@ export function WorkOrdersTab({ wos, isOwner }: { wos: WorkOrderTabRow[]; isOwne
             m[w.status] = (m[w.status] ?? 0) + 1;
             return m;
           }, {});
-          const vOpen = vendorOpen[vendor] ?? true;
+          const vOpen = vendorOpen[vendor] ?? false;
           const vendorReady = list.reduce((s, w) => s + w.readyToSend, 0);
           return (
             <div key={vendor}>
@@ -306,11 +304,6 @@ export function WorkOrdersTab({ wos, isOwner }: { wos: WorkOrderTabRow[]; isOwne
                   // Blink the whole card when there's cut-done work ready to
                   // send (and the order is actionable — approved + handed over).
                   const blink = w.readyToSend > 0 && !isPending && !handoverPending;
-                  // Collapsible (not while the handover overlay is up). Default
-                  // open only when the card needs attention; collapsed → summary.
-                  const collapsible = !handoverPending;
-                  const defaultOpen = isPending || w.readyToSend > 0;
-                  const open = !collapsible || (woOpen[w.id] ?? defaultOpen);
                   return (
                     <div
                       key={w.id}
@@ -337,18 +330,9 @@ export function WorkOrdersTab({ wos, isOwner }: { wos: WorkOrderTabRow[]; isOwne
                       >
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
                         <span style={{ fontSize: 14, fontWeight: 700, fontFamily: "ui-monospace, monospace" }}>{w.wo_number}</span>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <StatusBadge status={w.status} />
-                          {collapsible && (
-                            <button type="button" onClick={() => setWoOpen((o) => ({ ...o, [w.id]: !open }))} title={open ? "Collapse" : "Expand"} style={{ background: "none", border: "1px solid var(--border)", borderRadius: 6, cursor: "pointer", color: "var(--muted)", fontSize: 11, fontWeight: 800, padding: "2px 7px", lineHeight: 1 }}>
-                              {open ? "▾" : "▸"}
-                            </button>
-                          )}
-                        </div>
+                        <StatusBadge status={w.status} />
                       </div>
 
-                      {open ? (
-                      <>
                       <div style={{ fontSize: 12, color: "var(--muted)" }}>
                         {w.title ? `${w.title} · ` : ""}{w.temple ? `${w.temple} · ` : ""}{fmtDate(w.created_at)}
                       </div>
@@ -461,18 +445,6 @@ export function WorkOrdersTab({ wos, isOwner }: { wos: WorkOrderTabRow[]; isOwne
                             </form>
                           )}
                         </div>
-                      </>
-                      ) : (
-                      <div onClick={() => setWoOpen((o) => ({ ...o, [w.id]: true }))} style={{ cursor: "pointer", display: "flex", flexDirection: "column", gap: 6 }}>
-                        <div style={{ fontSize: 12, color: "var(--muted)" }}>{w.title ? `${w.title} · ` : ""}{w.temple ? `${w.temple} · ` : ""}{fmtDate(w.created_at)}</div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12 }}>
-                          <span style={{ fontWeight: 700, color: "#7c2d12", background: "rgba(180,115,51,0.10)", border: "1px solid rgba(180,115,51,0.25)", borderRadius: 6, padding: "1px 7px" }}>{fmtRate(w.jobwork_rate, w.jobwork_unit)}</span>
-                          <span style={{ color: "var(--muted)" }}><strong style={{ color: "var(--text)" }}>{assigned}/{c.total}</strong> sent{c.planned > 0 ? ` · ${c.planned} waiting` : ""}{c.approved > 0 ? ` · ${c.approved} ✓` : ""}</span>
-                        </div>
-                        {w.readyToSend > 0 && <span style={{ alignSelf: "flex-start", fontSize: 11.5, fontWeight: 800, color: "#15803d", background: "rgba(22,163,74,0.10)", border: "1px solid rgba(22,163,74,0.3)", borderRadius: 7, padding: "3px 8px" }}>🟢 {w.readyToSend} ready to assign</span>}
-                        <div style={{ fontSize: 11.5, color: "var(--muted)" }}>📦 {w.totalCft.toFixed(2)} cft{w.tentativeCost != null ? ` · 💰 ₹${w.tentativeCost.toLocaleString("en-IN")}` : ""} · {w.lines.length} slab{w.lines.length === 1 ? "" : "s"} · <span style={{ color: "#92400e", fontWeight: 700 }}>tap to expand ▸</span></div>
-                      </div>
-                      )}
                       </div>
 
                       {/* Mig 100 — first approval: blur the card + one centred
