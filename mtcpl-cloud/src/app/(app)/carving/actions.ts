@@ -6449,7 +6449,7 @@ export async function sendWorkOrderLineToVendorAction(formData: FormData) {
 
   await admin
     .from("carving_work_order_items")
-    .update({ carving_item_id: res.id, line_status: "sent" })
+    .update({ carving_item_id: res.id, line_status: "sent", sent_batch_at: new Date().toISOString() })
     .eq("id", lineId);
   await admin
     .from("carving_work_orders")
@@ -6518,6 +6518,7 @@ export async function sendAllReadyWorkOrderLinesAction(formData: FormData) {
 
   let sent = 0;
   const sentCodes: string[] = [];
+  const batchAt = new Date().toISOString(); // one gate-pass batch per send action
   for (const line of lines) {
     const rate =
       line.jobwork_rate != null
@@ -6538,7 +6539,7 @@ export async function sendAllReadyWorkOrderLinesAction(formData: FormData) {
     if (res.ok) {
       await admin
         .from("carving_work_order_items")
-        .update({ carving_item_id: res.id, line_status: "sent" })
+        .update({ carving_item_id: res.id, line_status: "sent", sent_batch_at: batchAt })
         .eq("id", line.id);
       sent += 1;
       sentCodes.push(line.slab_requirement_id);
@@ -6608,6 +6609,7 @@ export async function sendSelectedWorkOrderLinesAction(formData: FormData) {
 
   let sent = 0;
   const sentCodes: string[] = [];
+  const batchAt = new Date().toISOString(); // one gate-pass batch per send action
   for (const line of lines) {
     const rate =
       line.jobwork_rate != null ? Number(line.jobwork_rate)
@@ -6623,7 +6625,7 @@ export async function sendSelectedWorkOrderLinesAction(formData: FormData) {
       profileId: profile.id,
     });
     if (res.ok) {
-      await admin.from("carving_work_order_items").update({ carving_item_id: res.id, line_status: "sent" }).eq("id", line.id);
+      await admin.from("carving_work_order_items").update({ carving_item_id: res.id, line_status: "sent", sent_batch_at: batchAt }).eq("id", line.id);
       sent += 1;
       sentCodes.push(line.slab_requirement_id);
     }

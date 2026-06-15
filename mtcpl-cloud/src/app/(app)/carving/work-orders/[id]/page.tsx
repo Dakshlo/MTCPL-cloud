@@ -28,6 +28,15 @@ const SLAB_TONE: Record<string, { bg: string; fg: string; label: string; icon: s
   cut_done: { bg: "rgba(22,163,74,0.14)", fg: "#15803d", label: "Ready", icon: "✅" },
 };
 
+// Friendly label for a send-batch timestamp.
+function fmtBatch(at: string): string {
+  if (at === "unknown") return "earlier";
+  try {
+    return new Date(at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" });
+  } catch { return at; }
+}
+const gpBtn = { padding: "8px 14px", fontSize: 12, fontWeight: 700, color: "#1d4ed8", background: "rgba(37,99,235,0.1)", border: "1px solid rgba(37,99,235,0.35)", borderRadius: 8, textDecoration: "none" } as const;
+
 export default async function WorkOrderDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const { profile } = await requireAuth();
   if (!ALLOWED.includes(profile.role)) redirect("/carving");
@@ -51,13 +60,13 @@ export default async function WorkOrderDetailPage({ params, searchParams }: { pa
 
   const { data: lineRows } = await admin
     .from("carving_work_order_items")
-    .select("id, slab_requirement_id, carving_item_id, description, planned_length_ft, planned_width_ft, planned_thickness_ft, qty, line_status, position")
+    .select("id, slab_requirement_id, carving_item_id, description, planned_length_ft, planned_width_ft, planned_thickness_ft, qty, line_status, position, sent_batch_at")
     .eq("work_order_id", id)
     .order("position", { ascending: true });
   const lines = ((lineRows ?? []) as Array<{
     id: string; slab_requirement_id: string | null; carving_item_id: string | null;
     description: string | null; planned_length_ft: number | null; planned_width_ft: number | null;
-    planned_thickness_ft: number | null; qty: number; line_status: string;
+    planned_thickness_ft: number | null; qty: number; line_status: string; sent_batch_at: string | null;
   }>).filter((l) => l.line_status !== "cancelled");
 
   // Slab meta (status + dims + stone + stock loc) for lines that reference a slab.
@@ -149,6 +158,17 @@ export default async function WorkOrderDetailPage({ params, searchParams }: { pa
   const readyToSend = readyLines.length;
   // Slabs currently OUT at the vendor → reprintable gate pass.
   const outCount = lines.filter((l) => l.line_status === "sent" && l.slab_requirement_id).length;
+  // Group sent slabs into the BATCHES they left in (one gate pass per batch).
+  const batchMap = new Map<string, string[]>();
+  for (const l of lines) {
+    if (l.line_status !== "sent" || !l.slab_requirement_id) continue;
+    const key = l.sent_batch_at ?? "unknown";
+    const arr = batchMap.get(key);
+    if (arr) arr.push(l.slab_requirement_id); else batchMap.set(key, [l.slab_requirement_id]);
+  }
+  const batches = [...batchMap.entries()]
+    .map(([at, codes]) => ({ at, codes }))
+    .sort((a, b) => (a.at < b.at ? -1 : 1));
 
   const btn = (bg: string) => ({ width: "100%", padding: "7px 10px", fontSize: 11.5, fontWeight: 700, color: "#fff", background: bg, border: "none", borderRadius: 6, cursor: "pointer" } as const);
 
@@ -160,6 +180,8 @@ export default async function WorkOrderDetailPage({ params, searchParams }: { pa
           50% { box-shadow: 0 0 0 3px rgba(22,163,74,0.30); }
         }
         .wo-ready-blink { animation: woReadyPulse 1.5s ease-in-out infinite; }
+        .gp-summary { list-style: none; cursor: pointer; }
+        .gp-summary::-webkit-details-marker { display: none; }
       `}</style>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
         <div>
@@ -177,8 +199,26 @@ export default async function WorkOrderDetailPage({ params, searchParams }: { pa
           {(approved || wo.status === "completed") && (
             <a href={`/api/carving/work-order-pdf/${id}`} target="_blank" rel="noopener noreferrer" style={{ padding: "8px 14px", fontSize: 12, fontWeight: 700, color: "#92400e", background: "rgba(146,64,14,0.1)", border: "1px solid rgba(146,64,14,0.35)", borderRadius: 8, textDecoration: "none" }}>⬇ Work order doc</a>
           )}
-          {outCount > 0 && (
-            <a href={`/api/carving/gate-pass/${id}`} target="_blank" rel="noopener noreferrer" title="Gate pass for everything currently out at the vendor" style={{ padding: "8px 14px", fontSize: 12, fontWeight: 700, color: "#1d4ed8", background: "rgba(37,99,235,0.1)", border: "1px solid rgba(37,99,235,0.35)", borderRadius: 8, textDecoration: "none" }}>🪪 Gate pass ({outCount})</a>
+          {/* One batch → a single gate pass; several → a dropdown so you can
+              print the respective gate pass for each assignment batch. */}
+          {batches.length === 1 && (
+            <a href={`/api/carving/gate-pass/${id}`} target="_blank" rel="noopener noreferrer" title="Gate pass for the slabs out at the vendor" style={gpBtn}>🪪 Gate pass ({outCount})</a>
+          )}
+          {batches.length > 1 && (
+            <details style={{ position: "relative" }}>
+              <summary className="gp-summary" style={{ ...gpBtn, display: "inline-block" }}>🪪 Gate pass · {batches.length} batches ▾</summary>
+              <div style={{ position: "absolute", right: 0, top: "100%", marginTop: 4, zIndex: 20, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, boxShadow: "0 12px 30px rgba(0,0,0,0.18)", padding: 6, minWidth: 240 }}>
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em", padding: "4px 8px 6px" }}>Print gate pass for…</div>
+                {batches.map((b, i) => (
+                  <a key={b.at} href={`/api/carving/gate-pass/${id}?slabs=${encodeURIComponent(b.codes.join(","))}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", padding: "7px 9px", fontSize: 12.5, color: "var(--text)", textDecoration: "none", borderRadius: 6 }}>
+                    🪪 Batch {i + 1} · {fmtBatch(b.at)} · {b.codes.length} slab{b.codes.length === 1 ? "" : "s"}
+                  </a>
+                ))}
+                <a href={`/api/carving/gate-pass/${id}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", padding: "7px 9px", fontSize: 12.5, fontWeight: 700, color: "#1d4ed8", textDecoration: "none", borderTop: "1px solid var(--border)", marginTop: 4 }}>
+                  📋 All out ({outCount})
+                </a>
+              </div>
+            </details>
           )}
           <Link href="/carving/challans/new" style={{ padding: "8px 14px", fontSize: 12, fontWeight: 700, color: "#92400e", background: "rgba(146,64,14,0.1)", borderRadius: 8, textDecoration: "none" }}>🧾 Generate challan</Link>
         </div>
