@@ -28,10 +28,13 @@ const SLAB_TONE: Record<string, { bg: string; fg: string; label: string; icon: s
   cut_done: { bg: "rgba(22,163,74,0.14)", fg: "#15803d", label: "Ready", icon: "✅" },
 };
 
-export default async function WorkOrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function WorkOrderDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const { profile } = await requireAuth();
   if (!ALLOWED.includes(profile.role)) redirect("/carving");
   const { id } = await params;
+  const sp = await searchParams;
+  // ?sent=CODE1,CODE2 — slabs just sent in the last batch → offer a gate pass.
+  const justSentCodes = String(sp.sent ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   const admin = createAdminSupabaseClient();
 
   const { data: woRow } = await admin
@@ -140,11 +143,20 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
   const readyToSend = lines.filter(
     (l) => !l.carving_item_id && l.line_status === "planned" && l.slab_requirement_id && slabMeta.get(l.slab_requirement_id)?.status === "cut_done",
   ).length;
+  // Slabs currently OUT at the vendor → reprintable gate pass.
+  const outCount = lines.filter((l) => l.line_status === "sent" && l.slab_requirement_id).length;
 
   const btn = (bg: string) => ({ width: "100%", padding: "7px 10px", fontSize: 11.5, fontWeight: 700, color: "#fff", background: bg, border: "none", borderRadius: 6, cursor: "pointer" } as const);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16, paddingBottom: 32, maxWidth: 1180 }}>
+      <style>{`
+        @keyframes woReadyPulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(22,163,74,0); }
+          50% { box-shadow: 0 0 0 3px rgba(22,163,74,0.30); }
+        }
+        .wo-ready-blink { animation: woReadyPulse 1.5s ease-in-out infinite; }
+      `}</style>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
         <div>
           <Link href="/carving?mode=outsource&tab=workorders" style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", textDecoration: "none" }}>← Work orders</Link>
@@ -161,9 +173,24 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
           {(approved || wo.status === "completed") && (
             <a href={`/api/carving/work-order-pdf/${id}`} target="_blank" rel="noopener noreferrer" style={{ padding: "8px 14px", fontSize: 12, fontWeight: 700, color: "#92400e", background: "rgba(146,64,14,0.1)", border: "1px solid rgba(146,64,14,0.35)", borderRadius: 8, textDecoration: "none" }}>⬇ Work order doc</a>
           )}
+          {outCount > 0 && (
+            <a href={`/api/carving/gate-pass/${id}`} target="_blank" rel="noopener noreferrer" title="Gate pass for everything currently out at the vendor" style={{ padding: "8px 14px", fontSize: 12, fontWeight: 700, color: "#1d4ed8", background: "rgba(37,99,235,0.1)", border: "1px solid rgba(37,99,235,0.35)", borderRadius: 8, textDecoration: "none" }}>🪪 Gate pass ({outCount})</a>
+          )}
           <Link href="/carving/challans/new" style={{ padding: "8px 14px", fontSize: 12, fontWeight: 700, color: "#92400e", background: "rgba(146,64,14,0.1)", borderRadius: 8, textDecoration: "none" }}>🧾 Generate challan</Link>
         </div>
       </div>
+
+      {/* Batch just sent → prominent gate-pass print (for exactly those slabs). */}
+      {justSentCodes.length > 0 && (
+        <div style={{ background: "rgba(37,99,235,0.07)", border: "1px solid rgba(37,99,235,0.4)", borderRadius: 12, padding: "13px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#1e40af" }}>
+            📤 {justSentCodes.length} slab{justSentCodes.length === 1 ? "" : "s"} sent to {wo.vendor_name}. Print the gate pass to hand at the main gate for exit.
+          </div>
+          <a href={`/api/carving/gate-pass/${id}?slabs=${encodeURIComponent(justSentCodes.join(","))}`} target="_blank" rel="noopener noreferrer" style={{ padding: "9px 18px", fontSize: 13, fontWeight: 800, color: "#fff", background: "#1d4ed8", border: "none", borderRadius: 8, textDecoration: "none", whiteSpace: "nowrap" }}>
+            🪪 Print gate pass ({justSentCodes.length})
+          </a>
+        </div>
+      )}
 
       {/* Mig 098 — owner price-approval gate. Nothing can be sent until approved. */}
       {wo.status === "pending_approval" && (
@@ -253,8 +280,11 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
               ? ci.review_approved_at ? "Approved ✓" : ci.completed_at ? "Received — awaiting approval" : "At vendor (carving)"
               : "";
             const tn = slab ? (SLAB_TONE[slab.status] ?? SLAB_TONE.open) : null;
+            // Cut-done + not yet sent → "needs attention": blink + green accent.
+            const isReady = !isSent && !cancelled && slab?.status === "cut_done";
+            const accent = isSent ? "#1d4ed8" : isReady ? "#15803d" : slab ? "#94a3b8" : "#cbd5e1";
             return (
-              <div key={l.id} style={{ display: "flex", flexDirection: "column", gap: 6, padding: 10, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12 }}>
+              <div key={l.id} className={isReady ? "wo-ready-blink" : undefined} style={{ display: "flex", flexDirection: "column", gap: 6, padding: 10, background: "var(--surface)", border: "1px solid var(--border)", borderLeft: `4px solid ${accent}`, borderRadius: 12 }}>
                 {l.slab_requirement_id && slab ? (
                   <SlabThumb stone={slab.stone} l={slab.l} w={slab.w} t={slab.t} stoneTypes={stoneTypes} />
                 ) : (

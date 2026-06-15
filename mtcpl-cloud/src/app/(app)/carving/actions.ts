@@ -6460,7 +6460,8 @@ export async function sendWorkOrderLineToVendorAction(formData: FormData) {
     carving_item_id: res.id,
   });
   refreshAll();
-  redirect(`/carving/work-orders/${woId}?toast=Sent+to+vendor`);
+  // ?sent=<code> → the detail page offers a gate pass for the batch just sent.
+  redirect(`/carving/work-orders/${woId}?toast=Sent+to+vendor&sent=${encodeURIComponent(line!.slab_requirement_id!)}`);
 }
 
 // Daksh June 2026 — send EVERY ready (cut-done, un-sent) line of a work
@@ -6515,6 +6516,7 @@ export async function sendAllReadyWorkOrderLinesAction(formData: FormData) {
   }
 
   let sent = 0;
+  const sentCodes: string[] = [];
   for (const line of lines) {
     const rate =
       line.jobwork_rate != null
@@ -6537,6 +6539,7 @@ export async function sendAllReadyWorkOrderLinesAction(formData: FormData) {
         .update({ carving_item_id: res.id, line_status: "sent" })
         .eq("id", line.id);
       sent += 1;
+      sentCodes.push(line.slab_requirement_id);
     }
     // Not cut-done yet → skip; the line stays planned for next time.
   }
@@ -6549,10 +6552,11 @@ export async function sendAllReadyWorkOrderLinesAction(formData: FormData) {
   }
   await logAudit(profile.id, "work_order_send_all", "carving_work_order", woId, { sent });
   refreshAll();
+  // ?sent=<codes> → the detail page offers a gate pass for the batch just sent.
   redirect(
     `/carving/work-orders/${woId}?toast=${encodeURIComponent(
       sent > 0 ? `📤 Sent ${sent} to vendor` : "Nothing ready to send yet",
-    )}`,
+    )}${sent > 0 ? `&sent=${encodeURIComponent(sentCodes.join(","))}` : ""}`,
   );
 }
 
