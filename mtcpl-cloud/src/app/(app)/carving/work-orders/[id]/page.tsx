@@ -7,7 +7,6 @@ import { ConfirmButton } from "@/components/confirm-button";
 import type { StoneTypeDef } from "@/lib/stone-utils";
 import {
   sendWorkOrderLineToVendorAction,
-  sendAllReadyWorkOrderLinesAction,
   bindSlabToWorkOrderLineAction,
   removeWorkOrderLineAction,
   recallWorkOrderLineAction,
@@ -17,6 +16,7 @@ import {
   handoverWorkOrderAction,
   markCarvingCompleteManuallyAction,
 } from "../../actions";
+import { ReadySendPanel } from "./ready-send-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -139,10 +139,14 @@ export default async function WorkOrderDetailPage({ params, searchParams }: { pa
       .maybeSingle();
     handedOver = !!(hoRow as { handed_over_at?: string | null } | null)?.handed_over_at;
   }
-  // Lines that are cut-done + not yet sent → eligible for "Send all ready".
-  const readyToSend = lines.filter(
-    (l) => !l.carving_item_id && l.line_status === "planned" && l.slab_requirement_id && slabMeta.get(l.slab_requirement_id)?.status === "cut_done",
-  ).length;
+  // Lines that are cut-done + not yet sent → eligible to send (all / selected).
+  const readyLines = lines
+    .filter((l) => !l.carving_item_id && l.line_status === "planned" && l.slab_requirement_id && slabMeta.get(l.slab_requirement_id)?.status === "cut_done")
+    .map((l) => {
+      const m = slabMeta.get(l.slab_requirement_id!)!;
+      return { lineId: l.id, code: l.slab_requirement_id!, dims: `${m.l}×${m.w}×${m.t}` };
+    });
+  const readyToSend = readyLines.length;
   // Slabs currently OUT at the vendor → reprintable gate pass.
   const outCount = lines.filter((l) => l.line_status === "sent" && l.slab_requirement_id).length;
 
@@ -252,17 +256,9 @@ export default async function WorkOrderDetailPage({ params, searchParams }: { pa
         </div>
       )}
 
-      {/* Send-all bar — sends every cut-done, un-sent slab to the vendor at once. */}
-      {approved && handedOver && !cancelled && readyToSend > 0 && (
-        <form action={sendAllReadyWorkOrderLinesAction} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", background: "rgba(146,64,14,0.06)", border: "1px solid rgba(146,64,14,0.3)", borderRadius: 12, padding: "12px 16px" }}>
-          <input type="hidden" name="work_order_id" value={id} />
-          <div style={{ fontSize: 13, fontWeight: 700, color: "#7c2d12" }}>
-            {readyToSend} ready slab{readyToSend === 1 ? "" : "s"} can be sent to {wo.vendor_name} now.
-          </div>
-          <button type="submit" style={{ padding: "9px 18px", fontSize: 13, fontWeight: 800, color: "#fff", background: "#92400e", border: "none", borderRadius: 8, cursor: "pointer" }}>
-            📤 Send all ready ({readyToSend})
-          </button>
-        </form>
+      {/* Pick which ready slabs to send (defaults to all) — with confirm. */}
+      {approved && handedOver && !cancelled && readyLines.length > 0 && (
+        <ReadySendPanel workOrderId={id} vendorName={wo.vendor_name} ready={readyLines} />
       )}
 
       <div style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)" }}>Lines ({lines.length})</div>
@@ -351,7 +347,7 @@ export default async function WorkOrderDetailPage({ params, searchParams }: { pa
                       <form action={sendWorkOrderLineToVendorAction}>
                         <input type="hidden" name="line_id" value={l.id} />
                         <input type="hidden" name="work_order_id" value={id} />
-                        <button type="submit" style={btn("#92400e")}>📤 Send to vendor</button>
+                        <ConfirmButton message={`Send ${l.slab_requirement_id} to ${wo.vendor_name} for carving?`} style={btn("#92400e")}>📤 Send to vendor</ConfirmButton>
                       </form>
                     ) : (
                       <span style={{ fontSize: 11, color: "#b45309", fontWeight: 600 }}>{approved ? "⏳ hand over WO to send" : "⏳ approve WO to send"}</span>

@@ -6560,6 +6560,87 @@ export async function sendAllReadyWorkOrderLinesAction(formData: FormData) {
   );
 }
 
+// Daksh — send a SELECTED subset of a work order's ready lines (checkbox pick
+// on the detail page), not just all-or-one. Same gates as send-all; only the
+// chosen, cut-done, un-sent lines go.
+export async function sendSelectedWorkOrderLinesAction(formData: FormData) {
+  const { profile } = await requireAuth([...WO_ROLES]);
+  const admin = createAdminSupabaseClient();
+  const woId = txt(formData, "work_order_id");
+  if (!woId) redirect("/carving/work-orders?toast=Missing+work+order");
+  let lineIds: string[] = [];
+  try { lineIds = JSON.parse(txt(formData, "line_ids") || "[]"); } catch { lineIds = []; }
+  lineIds = (Array.isArray(lineIds) ? lineIds : []).filter(Boolean);
+  if (lineIds.length === 0) redirect(`/carving/work-orders/${woId}?toast=No+slabs+selected`);
+
+  const { data: woRow } = await admin
+    .from("carving_work_orders")
+    .select("id, vendor_id, vendor_name, jobwork_rate, jobwork_unit, status, handed_over_at")
+    .eq("id", woId)
+    .maybeSingle();
+  const wo = woRow as {
+    vendor_id: string; vendor_name: string; jobwork_rate: number | string | null;
+    jobwork_unit: string | null; status: string; handed_over_at: string | null;
+  } | null;
+  if (!wo) redirect(`/carving/work-orders/${woId}?toast=Work+order+not+found`);
+  if (wo!.status !== "open" && wo!.status !== "in_progress") {
+    redirect(`/carving/work-orders/${woId}?toast=${encodeURIComponent("Needs owner approval before sending")}`);
+  }
+  if (!wo!.handed_over_at) {
+    redirect(`/carving/work-orders/${woId}?toast=${encodeURIComponent("Hand over to the vendor first, then send")}`);
+  }
+
+  const { data: lineRows } = await admin
+    .from("carving_work_order_items")
+    .select("id, slab_requirement_id, carving_item_id, line_status, jobwork_rate, jobwork_unit")
+    .eq("work_order_id", woId)
+    .in("id", lineIds)
+    .eq("line_status", "planned")
+    .is("carving_item_id", null)
+    .not("slab_requirement_id", "is", null);
+  const lines = (lineRows ?? []) as Array<{
+    id: string; slab_requirement_id: string;
+    jobwork_rate: number | string | null; jobwork_unit: string | null;
+  }>;
+  if (lines.length === 0) redirect(`/carving/work-orders/${woId}?toast=No+ready+lines+to+send`);
+
+  let sent = 0;
+  const sentCodes: string[] = [];
+  for (const line of lines) {
+    const rate =
+      line.jobwork_rate != null ? Number(line.jobwork_rate)
+        : wo!.jobwork_rate != null ? Number(wo!.jobwork_rate) : null;
+    const unit = (line.jobwork_unit ?? wo!.jobwork_unit) === "sft" ? "sft" : "cft";
+    const res = await sendSlabToOutsourceVendor(admin, {
+      slabId: line.slab_requirement_id,
+      vendorId: wo!.vendor_id,
+      vendorName: wo!.vendor_name,
+      rate,
+      unit,
+      profileId: profile.id,
+    });
+    if (res.ok) {
+      await admin.from("carving_work_order_items").update({ carving_item_id: res.id, line_status: "sent" }).eq("id", line.id);
+      sent += 1;
+      sentCodes.push(line.slab_requirement_id);
+    }
+  }
+  if (sent > 0) {
+    await admin
+      .from("carving_work_orders")
+      .update({ status: "in_progress", updated_at: new Date().toISOString(), updated_by: profile.id })
+      .eq("id", woId)
+      .eq("status", "open");
+  }
+  await logAudit(profile.id, "work_order_send_selected", "carving_work_order", woId, { sent, requested: lineIds.length });
+  refreshAll();
+  redirect(
+    `/carving/work-orders/${woId}?toast=${encodeURIComponent(
+      sent > 0 ? `📤 Sent ${sent} to vendor` : "Nothing ready to send",
+    )}${sent > 0 ? `&sent=${encodeURIComponent(sentCodes.join(","))}` : ""}`,
+  );
+}
+
 // Mig 098 follow-up — owner/dev can pull a slab back OFF the vendor and
 // return its work-order line to 'planned' (assigned in the work order but
 // NOT yet shipped). Works even when the slab is active (being carved) or
