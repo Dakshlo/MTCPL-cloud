@@ -293,12 +293,12 @@ export function TempleCardBrowser({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [temple, pathIds, isLeaf]);
 
-  // First image anywhere under a temple → its landing-card cover.
+  // Temple landing-card cover = an image attached at the TEMPLE level only
+  // (node_path === the temple). Sub-branch images no longer leak up as the
+  // temple cover.
   function templeCover(t: string): ComponentImage | null {
-    for (const [k, imgs] of Object.entries(imagesByNode)) {
-      if (k.startsWith(`${t}/`) && imgs.length > 0) return imgs[0];
-    }
-    return null;
+    const imgs = imagesByNode[t];
+    return imgs && imgs.length > 0 ? imgs[0] : null;
   }
 
   // Re-keys the grid per level so the stagger entrance replays on drill.
@@ -358,7 +358,7 @@ export function TempleCardBrowser({
                 const pct = t.total > 0 ? Math.round((t.counts.done / t.total) * 100) : 0;
                 const cover = templeCover(t.temple);
                 return (
-                  <button key={t.temple} type="button" className="tc-card" onClick={() => setTemple(t.temple)} style={{ ...cardShell, animationDelay: `${Math.min(i * 40, 480)}ms` }}>
+                  <div key={t.temple} className="tc-card" role="button" tabIndex={0} onClick={() => setTemple(t.temple)} onKeyDown={(e) => { if (e.key === "Enter") setTemple(t.temple); }} style={{ ...cardShell, animationDelay: `${Math.min(i * 40, 480)}ms`, cursor: "pointer", position: "relative" }}>
                     <div style={{ position: "relative", height: 130, background: cover ? "#0f172a" : "linear-gradient(135deg, #92400e22, #b8733344)", display: "flex", alignItems: "center", justifyContent: "center" }}>
                       {cover ? (
                         // eslint-disable-next-line @next/next/no-img-element
@@ -368,6 +368,17 @@ export function TempleCardBrowser({
                       )}
                       <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, transparent 50%, rgba(0,0,0,0.45))" }} />
                       <div style={{ position: "absolute", top: 10, right: 10 }}><Ring pct={pct} onImage /></div>
+                      {/* Temple-LEVEL photo (the landing cover). */}
+                      {canManageImages && (
+                        <button
+                          type="button"
+                          title={`Add / manage the temple photo for ${t.temple}`}
+                          onClick={(e) => { e.stopPropagation(); setUploadNode({ path: t.temple, label: t.temple }); }}
+                          style={{ position: "absolute", top: 10, left: 10, fontSize: 13, fontWeight: 800, color: "#fff", background: "rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.4)", borderRadius: 999, width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", backdropFilter: "blur(3px)" }}
+                        >
+                          📷
+                        </button>
+                      )}
                     </div>
                     <div style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
                       <div style={{ fontWeight: 800, fontSize: 14.5, lineHeight: 1.25 }}>{t.temple}</div>
@@ -377,7 +388,7 @@ export function TempleCardBrowser({
                         <span style={{ color: "var(--muted)" }}>{t.roots.length} categor{t.roots.length === 1 ? "y" : "ies"} →</span>
                       </div>
                     </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>
@@ -535,11 +546,11 @@ export function TempleCardBrowser({
         </div>
       )}
 
-      {/* Mig 128 — manage photos on the current / picked node (any level):
-          view current photos, remove them, or add a new one. */}
-      {uploadNode && temple && (
+      {/* Mig 128 — manage photos on the current / picked node (any level,
+          including the TEMPLE level from the picker). View / remove / add. */}
+      {uploadNode && (
         <NodeImageUploader
-          temple={temple}
+          temple={temple ?? uploadNode.path}
           nodePath={uploadNode.path}
           nodeLabel={uploadNode.label}
           images={imagesByNode[uploadNode.path] ?? []}
