@@ -18,6 +18,7 @@ import path from "node:path";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getReportRecipientNumbers } from "@/lib/wa-recipients";
 import { buildCncVariousCostReport, cncPeriodFromSearch } from "@/lib/cnc-various-cost-report";
+import { buildCutterCostReport, cutterPeriodFromSearch } from "@/lib/cutter-cost-report";
 
 type AdminClient = ReturnType<typeof createAdminSupabaseClient>;
 
@@ -37,6 +38,9 @@ async function recipients(): Promise<string[]> {
 const cft = (l: number, w: number, t: number) => (l * w * t) / 1728;
 const stoneLabel = (s: string | null) => (s ?? "Other").replace(/Stone$/i, "") || "Other";
 const inr = (n: number) => `Rs ${Math.round(n).toLocaleString("en-IN")}`;
+// 2-decimal money — for per-unit rates (e.g. "Rs 148.25 / unit") where the
+// paise matter and rounding to whole rupees would look wrong.
+const inr2 = (n: number) => `Rs ${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /** IST day window [startUTC, endUTC] + a human label. offset 0 = today, -1 = yesterday. */
@@ -49,6 +53,12 @@ function istDay(offset = 0) {
   const endUTC = new Date(Date.UTC(y, m, d, 23, 59, 59, 999) - 5.5 * 3600 * 1000).toISOString();
   const ref = new Date(Date.UTC(y, m, d));
   return { startUTC, endUTC, label: `${ref.getUTCDate()} ${MONTHS[ref.getUTCMonth()]} ${ref.getUTCFullYear()}` };
+}
+
+/** IST "today" as YYYY-MM-DD (for clamping the cutter report to month-to-date). */
+function istDateKey(): string {
+  const ist = new Date(Date.now() + 5.5 * 3600 * 1000);
+  return `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, "0")}-${String(ist.getUTCDate()).padStart(2, "0")}`;
 }
 
 // ── Data ────────────────────────────────────────────────────────────
@@ -81,11 +91,27 @@ export type DailyReport = {
     depreciation: number;
     sft: number;
     cft: number;
-    costPerSft: number;   // may be NaN when no production
+    costPerSft: number;     // may be NaN when no production
     costPerCft: number;
+    costPerCombined: number; // totalCost ÷ (sft + cft) — the headline "/unit"
     machines: number;
     slabs: number;
   } | null;
+  /** Month-to-date cutter (block-cutting plant) costing — elapsed days
+   *  only, same as the CNC snapshot. Cutting output is volume (CFT) only. */
+  cutter: {
+    label: string;
+    days: number;
+    monthLen: number;
+    totalCost: number;
+    operational: number;
+    depreciation: number;
+    cft: number;
+    costPerCft: number;   // may be NaN when no production
+    slabs: number;
+  } | null;
+  /** Last 10 IST days of activity for the trend chart — counts per day. */
+  trend: Array<{ label: string; short: string; blocks: number; cutting: number; carving: number }>;
 };
 
 // dims for a set of slab ids → map id → cft.
@@ -261,6 +287,60 @@ async function paymentsForWindow(admin: AdminClient, startUTC: string, endUTC: s
   return { total, byVendor };
 }
 
+/** Per-day activity counts for the last `days` IST days (oldest → newest).
+ *  One windowed query per metric + bucket in JS — cheap, no N×day fan-out.
+ *  blocks = blocks added, cutting = slabs cut (block became done), carving =
+ *  slabs approved. Counts (not CFT) so the three series share a clean scale. */
+async function trendForDays(admin: AdminClient, days = 10) {
+  const list = Array.from({ length: days }, (_, i) => {
+    const d = istDay(i - (days - 1)); // -(days-1) … 0
+    return { ...d, startMs: Date.parse(d.startUTC), endMs: Date.parse(d.endUTC), blocks: 0, cutting: 0, carving: 0 };
+  });
+  const windowStart = list[0].startUTC;
+  const windowEnd = list[list.length - 1].endUTC;
+  const bucketOf = (iso: string | null): number => {
+    if (!iso) return -1;
+    const ms = Date.parse(iso);
+    for (let i = 0; i < list.length; i++) if (ms >= list[i].startMs && ms <= list[i].endMs) return i;
+    return -1;
+  };
+
+  // Blocks added.
+  {
+    const { data } = await admin.from("blocks").select("created_at").gte("created_at", windowStart).lte("created_at", windowEnd);
+    for (const b of (data ?? []) as Array<{ created_at: string }>) { const i = bucketOf(b.created_at); if (i >= 0) list[i].blocks += 1; }
+  }
+  // Cutting done — blocks that turned 'done' in the window; count their cut slabs against the done-day.
+  {
+    const { data: db } = await admin.from("cut_session_blocks").select("block_id, updated_at").eq("status", "done").gte("updated_at", windowStart).lte("updated_at", windowEnd);
+    const blockBucket = new Map<string, number>();
+    for (const r of (db ?? []) as Array<{ block_id: string | null; updated_at: string }>) {
+      if (!r.block_id) continue;
+      const i = bucketOf(r.updated_at);
+      if (i >= 0) blockBucket.set(r.block_id, i);
+    }
+    const blockIds = [...blockBucket.keys()];
+    for (let k = 0; k < blockIds.length; k += 200) {
+      const { data: slabs } = await admin
+        .from("slab_requirements")
+        .select("source_block_id, status")
+        .in("source_block_id", blockIds.slice(k, k + 200))
+        .not("status", "in", "(open,rejected,cancelled)");
+      for (const s of (slabs ?? []) as Array<{ source_block_id: string | null }>) {
+        const i = s.source_block_id != null ? blockBucket.get(s.source_block_id) : undefined;
+        if (i != null) list[i].cutting += 1;
+      }
+    }
+  }
+  // Carving done — carving_items approved in the window.
+  {
+    const { data } = await admin.from("carving_items").select("review_approved_at").not("review_approved_at", "is", null).gte("review_approved_at", windowStart).lte("review_approved_at", windowEnd);
+    for (const r of (data ?? []) as Array<{ review_approved_at: string }>) { const i = bucketOf(r.review_approved_at); if (i >= 0) list[i].carving += 1; }
+  }
+
+  return list.map((d) => ({ label: d.label, short: d.label.split(" ")[0], blocks: d.blocks, cutting: d.cutting, carving: d.carving }));
+}
+
 export async function buildDailyReportData(): Promise<DailyReport> {
   const admin = createAdminSupabaseClient();
   const t = istDay(0);
@@ -289,12 +369,42 @@ export async function buildDailyReportData(): Promise<DailyReport> {
       cft: rep.totalCft,
       costPerSft: rep.costPerSft,
       costPerCft: rep.costPerCft,
+      // Combined "/unit" headline — matches the CNC costing page's
+      // "COST PER UNIT" card (totalCost ÷ summed SFT+CFT output).
+      costPerCombined: rep.totalSft + rep.totalCft > 0 ? rep.totalCostForPeriod / (rep.totalSft + rep.totalCft) : NaN,
       machines,
       slabs: rep.slabsCount,
     };
   } catch {
     cnc = null;
   }
+
+  // Month-to-date cutter costing. The cutter report doesn't self-clamp to
+  // "today" like the CNC one, so we hand it a period whose end is today —
+  // its day-weighted proration then counts only the elapsed days.
+  let cutter: DailyReport["cutter"] = null;
+  try {
+    const period = cutterPeriodFromSearch({}); // current month, full
+    const todayKey = istDateKey();
+    const monthLen = Number(period.endDate.slice(8, 10)) || 30;
+    const days = Number(todayKey.slice(8, 10)) || monthLen;
+    const rep = await buildCutterCostReport({ ...period, endDate: todayKey });
+    cutter = {
+      label: period.label,
+      days,
+      monthLen,
+      totalCost: rep.totalCost,
+      operational: rep.operationalForPeriod,
+      depreciation: rep.depreciationForPeriod,
+      cft: rep.totalCft,
+      costPerCft: rep.costPerCft,
+      slabs: rep.slabsCount,
+    };
+  } catch {
+    cutter = null;
+  }
+
+  const trend = await trendForDays(admin, 10);
 
   return {
     label: t.label,
@@ -307,6 +417,8 @@ export async function buildDailyReportData(): Promise<DailyReport> {
     dispatchByTemple: today.det.dispatchByTemple,
     payments: { total: payToday.total, byVendor: payToday.byVendor },
     cnc,
+    cutter,
+    trend,
   };
 }
 
@@ -328,6 +440,7 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
     green: rgb(0.086, 0.639, 0.290),
     gold: rgb(0.706, 0.325, 0.035),
     indigo: rgb(0.282, 0.255, 0.604),  // CNC costing
+    teal: rgb(0.086, 0.412, 0.388),    // cutter costing
   };
 
   // Warm paper background — softer than stark white, makes the colour cards pop.
@@ -421,23 +534,41 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
   const y3 = drawList(colX[2], "DISPATCH BY TEMPLE", COL.green, data.dispatchByTemple.map((r) => ({ name: r.temple, val: `${r.slabs} · ${r.tonnes.toFixed(1)} T` })));
   top = Math.min(y1, y2, y3) - 16;
 
-  // ── CNC costing — month to date (elapsed days only) ──
+  // ── CNC costing — month to date, combined "/unit" headline ──
   if (data.cnc) {
     const c = data.cnc;
-    const cncH = 92;
-    card(M, top, W - 2 * M, cncH, 10, COL.indigo);
+    const h = 96;
+    card(M, top, W - 2 * M, h, 10, COL.indigo);
     text("CNC COSTING  ·  MONTH TO DATE", M + 15, top - 19, 10, bold, white);
     right(`${c.label}   ·   ${c.days} of ${c.monthLen} days`, W - M - 15, top - 19, 9, font, white);
-    // big spend so far + cost-per-SFT on the right
-    text(inr(c.totalCost), M + 14, top - 47, 21, bold, white);
-    text("spent so far", M + 14 + bold.widthOfTextAtSize(inr(c.totalCost), 21) + 8, top - 47, 9, font, white);
-    const perSft = Number.isFinite(c.costPerSft) ? `${inr(c.costPerSft)} / SFT` : "-- / SFT";
-    right(perSft, W - M - 15, top - 46, 14, bold, white);
-    page.drawLine({ start: { x: M + 15, y: top - 57 }, end: { x: W - M - 15, y: top - 57 }, thickness: 0.6, color: white, opacity: 0.32 });
-    const perCft = Number.isFinite(c.costPerCft) ? `${inr(c.costPerCft)} / CFT` : "-- / CFT";
-    text(`Operational ${inr(c.operational)}      Depreciation ${inr(c.depreciation)}      ${perCft}`, M + 15, top - 73, 9, font, white);
-    text(`Output ${c.sft.toFixed(0)} SFT / ${c.cft.toFixed(0)} CFT      ${c.slabs} slabs carved      ${c.machines} machine${c.machines === 1 ? "" : "s"}`, M + 15, top - 85, 9, font, white);
-    top -= cncH + 16;
+    // spend so far (left) + combined cost-per-unit headline (right, matches the
+    // CNC costing page's "COST PER UNIT · SFT + CFT combined" card)
+    text(inr(c.totalCost), M + 14, top - 46, 20, bold, white);
+    text("spent so far", M + 18 + bold.widthOfTextAtSize(inr(c.totalCost), 20), top - 46, 9, font, white);
+    right(Number.isFinite(c.costPerCombined) ? `${inr2(c.costPerCombined)} / unit` : "-- / unit", W - M - 15, top - 44, 16, bold, white);
+    right("SFT + CFT combined", W - M - 15, top - 55, 7.5, font, white);
+    page.drawLine({ start: { x: M + 15, y: top - 61 }, end: { x: W - M - 15, y: top - 61 }, thickness: 0.6, color: white, opacity: 0.32 });
+    const ps = Number.isFinite(c.costPerSft) ? inr2(c.costPerSft) : "--";
+    const pc = Number.isFinite(c.costPerCft) ? inr2(c.costPerCft) : "--";
+    text(`${ps} / SFT      ${pc} / CFT      Operational ${inr(c.operational)}      Depreciation ${inr(c.depreciation)}`, M + 15, top - 76, 8.5, font, white);
+    text(`Output ${c.sft.toFixed(0)} SFT / ${c.cft.toFixed(0)} CFT      ${c.slabs} slabs carved      ${c.machines} machine${c.machines === 1 ? "" : "s"}`, M + 15, top - 88, 8.5, font, white);
+    top -= h + 14;
+  }
+
+  // ── Cutter (block-cutting plant) costing — month to date ──
+  if (data.cutter) {
+    const c = data.cutter;
+    const h = 82;
+    card(M, top, W - 2 * M, h, 10, COL.teal);
+    text("CUTTER COSTING  ·  MONTH TO DATE", M + 15, top - 19, 10, bold, white);
+    right(`${c.label}   ·   ${c.days} of ${c.monthLen} days`, W - M - 15, top - 19, 9, font, white);
+    text(inr(c.totalCost), M + 14, top - 46, 20, bold, white);
+    text("spent so far", M + 18 + bold.widthOfTextAtSize(inr(c.totalCost), 20), top - 46, 9, font, white);
+    right(Number.isFinite(c.costPerCft) ? `${inr2(c.costPerCft)} / CFT` : "-- / CFT", W - M - 15, top - 44, 16, bold, white);
+    right("per CFT cut", W - M - 15, top - 55, 7.5, font, white);
+    page.drawLine({ start: { x: M + 15, y: top - 61 }, end: { x: W - M - 15, y: top - 61 }, thickness: 0.6, color: white, opacity: 0.32 });
+    text(`Operational ${inr(c.operational)}      Depreciation ${inr(c.depreciation)}      Output ${c.cft.toFixed(0)} CFT      ${c.slabs} slabs`, M + 15, top - 76, 8.5, font, white);
+    top -= h + 14;
   }
 
   // ── payments card (yesterday comparison removed per request) ──
@@ -461,6 +592,69 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
   text("Automated daily report · MTCPL", M, 40, 8.5, font, muted);
   const gen = new Date(Date.now() + 5.5 * 3600 * 1000);
   right(`Generated ${gen.getUTCDate()} ${MONTHS[gen.getUTCMonth()]} ${gen.getUTCFullYear()}, ${String(gen.getUTCHours()).padStart(2, "0")}:${String(gen.getUTCMinutes()).padStart(2, "0")} IST`, W - M, 40, 8.5, font, muted);
+
+  // ════════════════════════════════════════════════════════════════
+  // Page 2 — 10-day activity trend (blocks / cutting / carving lines)
+  // ════════════════════════════════════════════════════════════════
+  const p2 = pdf.addPage([W, H]);
+  p2.drawRectangle({ x: 0, y: 0, width: W, height: H, color: paper });
+  const t2 = (s: string, x: number, y: number, size: number, f = font, c = ink) => p2.drawText(s, { x, y, size, font: f, color: c });
+  const r2 = (s: string, xr: number, y: number, size: number, f = font, c = ink) => p2.drawText(s, { x: xr - f.widthOfTextAtSize(s, size), y, size, font: f, color: c });
+  const c2 = (s: string, cx: number, y: number, size: number, f = font, c = ink) => p2.drawText(s, { x: cx - f.widthOfTextAtSize(s, size) / 2, y, size, font: f, color: c });
+
+  let h2 = H - 44;
+  t2("MATESHWARI TEMPLE CONSTRUCTION PVT LTD", M, h2, 10, bold, brown);
+  t2("10-Day Activity Trend", M, h2 - 21, 16, bold, ink);
+  const tr = data.trend;
+  if (tr.length > 0) r2(`${tr[0].label}  -  ${tr[tr.length - 1].label}`, W - M, h2 - 5, 9, font, muted);
+  h2 -= 32;
+  p2.drawLine({ start: { x: M, y: h2 }, end: { x: W - M, y: h2 }, thickness: 3, color: COL.gold });
+  p2.drawLine({ start: { x: M, y: h2 - 2.4 }, end: { x: W - M, y: h2 - 2.4 }, thickness: 0.6, color: brown });
+  h2 -= 24;
+
+  // legend
+  const series = [
+    { name: "Blocks added", color: COL.blue, key: "blocks" as const },
+    { name: "Cutting done", color: COL.cyan, key: "cutting" as const },
+    { name: "Carving done", color: COL.amber, key: "carving" as const },
+  ];
+  let lx = M;
+  for (const s of series) {
+    p2.drawRectangle({ x: lx, y: h2 - 2, width: 16, height: 4, color: s.color });
+    p2.drawCircle({ x: lx + 8, y: h2, size: 3, color: s.color });
+    t2(s.name, lx + 22, h2 - 3, 10, bold, ink);
+    lx += 22 + bold.widthOfTextAtSize(s.name, 10) + 28;
+  }
+  h2 -= 20;
+
+  // plot frame
+  const left = M + 30, rightX = W - M - 6;
+  const plotTop = h2, plotBottom = 120;
+  const plotW = rightX - left, plotH = plotTop - plotBottom;
+  const n = tr.length;
+  const maxRaw = Math.max(1, ...tr.flatMap((d) => [d.blocks, d.cutting, d.carving]));
+  const niceMax = Math.max(5, Math.ceil(maxRaw / 5) * 5);
+  const STEPS = 5;
+  for (let g = 0; g <= STEPS; g++) {
+    const yy = plotBottom + (plotH * g) / STEPS;
+    p2.drawLine({ start: { x: left, y: yy }, end: { x: rightX, y: yy }, thickness: g === 0 ? 1 : 0.5, color: line, opacity: g === 0 ? 1 : 0.55 });
+    r2(String(Math.round((niceMax * g) / STEPS)), left - 7, yy - 3, 8, font, muted);
+  }
+  const xAt = (i: number) => left + (n <= 1 ? 0 : (plotW * i) / (n - 1));
+  const yAt = (v: number) => plotBottom + plotH * Math.min(1, v / niceMax);
+  for (let i = 0; i < n; i++) c2(tr[i].short, xAt(i), plotBottom - 14, 8, font, muted);
+  c2("count per day", left + plotW / 2, plotBottom - 28, 8.5, bold, muted);
+  for (const s of series) {
+    for (let i = 0; i < n - 1; i++) {
+      p2.drawLine({ start: { x: xAt(i), y: yAt(tr[i][s.key]) }, end: { x: xAt(i + 1), y: yAt(tr[i + 1][s.key]) }, thickness: 2, color: s.color });
+    }
+    for (let i = 0; i < n; i++) p2.drawCircle({ x: xAt(i), y: yAt(tr[i][s.key]), size: 2.4, color: s.color });
+  }
+
+  // footer (page 2)
+  p2.drawLine({ start: { x: M, y: 52 }, end: { x: W - M, y: 52 }, thickness: 0.8, color: line });
+  t2("Automated daily report · MTCPL", M, 40, 8.5, font, muted);
+  r2("Page 2 of 2", W - M, 40, 8.5, font, muted);
 
   return pdf.save();
 }
