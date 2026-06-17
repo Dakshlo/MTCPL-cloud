@@ -594,7 +594,7 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
   right(`Generated ${gen.getUTCDate()} ${MONTHS[gen.getUTCMonth()]} ${gen.getUTCFullYear()}, ${String(gen.getUTCHours()).padStart(2, "0")}:${String(gen.getUTCMinutes()).padStart(2, "0")} IST`, W - M, 40, 8.5, font, muted);
 
   // ════════════════════════════════════════════════════════════════
-  // Page 2 — 10-day activity trend (blocks / cutting / carving lines)
+  // Page 2 — three separate trend charts (one metric each, own scale)
   // ════════════════════════════════════════════════════════════════
   const p2 = pdf.addPage([W, H]);
   p2.drawRectangle({ x: 0, y: 0, width: W, height: H, color: paper });
@@ -604,52 +604,48 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
 
   let h2 = H - 44;
   t2("MATESHWARI TEMPLE CONSTRUCTION PVT LTD", M, h2, 10, bold, brown);
-  t2("10-Day Activity Trend", M, h2 - 21, 16, bold, ink);
+  t2("10-Day Activity Trends", M, h2 - 21, 16, bold, ink);
   const tr = data.trend;
   if (tr.length > 0) r2(`${tr[0].label}  -  ${tr[tr.length - 1].label}`, W - M, h2 - 5, 9, font, muted);
   h2 -= 32;
   p2.drawLine({ start: { x: M, y: h2 }, end: { x: W - M, y: h2 }, thickness: 3, color: COL.gold });
   p2.drawLine({ start: { x: M, y: h2 - 2.4 }, end: { x: W - M, y: h2 - 2.4 }, thickness: 0.6, color: brown });
-  h2 -= 24;
+  h2 -= 26;
 
-  // legend
-  const series = [
-    { name: "Blocks added", color: COL.blue, key: "blocks" as const },
-    { name: "Cutting done", color: COL.cyan, key: "cutting" as const },
-    { name: "Carving done", color: COL.amber, key: "carving" as const },
-  ];
-  let lx = M;
-  for (const s of series) {
-    p2.drawRectangle({ x: lx, y: h2 - 2, width: 16, height: 4, color: s.color });
-    p2.drawCircle({ x: lx + 8, y: h2, size: 3, color: s.color });
-    t2(s.name, lx + 22, h2 - 3, 10, bold, ink);
-    lx += 22 + bold.widthOfTextAtSize(s.name, 10) + 28;
-  }
-  h2 -= 20;
-
-  // plot frame
-  const left = M + 30, rightX = W - M - 6;
-  const plotTop = h2, plotBottom = 120;
-  const plotW = rightX - left, plotH = plotTop - plotBottom;
+  // One chart per metric, each on its OWN y-scale, so a quiet series isn't
+  // flattened by a busy one — far easier to read than three lines overlaid.
   const n = tr.length;
-  const maxRaw = Math.max(1, ...tr.flatMap((d) => [d.blocks, d.cutting, d.carving]));
-  const niceMax = Math.max(5, Math.ceil(maxRaw / 5) * 5);
-  const STEPS = 5;
-  for (let g = 0; g <= STEPS; g++) {
-    const yy = plotBottom + (plotH * g) / STEPS;
-    p2.drawLine({ start: { x: left, y: yy }, end: { x: rightX, y: yy }, thickness: g === 0 ? 1 : 0.5, color: line, opacity: g === 0 ? 1 : 0.55 });
-    r2(String(Math.round((niceMax * g) / STEPS)), left - 7, yy - 3, 8, font, muted);
-  }
-  const xAt = (i: number) => left + (n <= 1 ? 0 : (plotW * i) / (n - 1));
-  const yAt = (v: number) => plotBottom + plotH * Math.min(1, v / niceMax);
-  for (let i = 0; i < n; i++) c2(tr[i].short, xAt(i), plotBottom - 14, 8, font, muted);
-  c2("count per day", left + plotW / 2, plotBottom - 28, 8.5, bold, muted);
-  for (const s of series) {
-    for (let i = 0; i < n - 1; i++) {
-      p2.drawLine({ start: { x: xAt(i), y: yAt(tr[i][s.key]) }, end: { x: xAt(i + 1), y: yAt(tr[i + 1][s.key]) }, thickness: 2, color: s.color });
+  const PLOTH = 145;
+  const drawMini = (yTop: number, title: string, color: ReturnType<typeof rgb>, key: "blocks" | "cutting" | "carving"): number => {
+    const vals = tr.map((d) => d[key]);
+    const total = vals.reduce((a, b) => a + b, 0);
+    const todayV = vals.length ? vals[vals.length - 1] : 0;
+    const peak = vals.length ? Math.max(...vals) : 0;
+    // title row: colour dot + name (left), quick stats (right)
+    p2.drawCircle({ x: M + 4, y: yTop - 3, size: 3.4, color });
+    t2(title, M + 13, yTop - 6, 11.5, bold, ink);
+    r2(`today ${todayV}      peak ${peak}      10-day total ${total}`, W - M, yTop - 6, 8.5, font, muted);
+    const left = M + 28, rightX = W - M - 6;
+    const plotTop = yTop - 20, plotBottom = plotTop - PLOTH;
+    const plotW = rightX - left, plotH = plotTop - plotBottom;
+    const niceMax = Math.max(5, Math.ceil(peak / 5) * 5);
+    const STEPS = 4;
+    for (let g = 0; g <= STEPS; g++) {
+      const yy = plotBottom + (plotH * g) / STEPS;
+      p2.drawLine({ start: { x: left, y: yy }, end: { x: rightX, y: yy }, thickness: g === 0 ? 1 : 0.5, color: line, opacity: g === 0 ? 1 : 0.5 });
+      r2(String(Math.round((niceMax * g) / STEPS)), left - 7, yy - 3, 8, font, muted);
     }
-    for (let i = 0; i < n; i++) p2.drawCircle({ x: xAt(i), y: yAt(tr[i][s.key]), size: 2.4, color: s.color });
-  }
+    const xAt = (i: number) => left + (n <= 1 ? 0 : (plotW * i) / (n - 1));
+    const yAt = (v: number) => plotBottom + plotH * Math.min(1, v / niceMax);
+    for (let i = 0; i < n; i++) c2(tr[i].short, xAt(i), plotBottom - 13, 8, font, muted);
+    for (let i = 0; i < n - 1; i++) p2.drawLine({ start: { x: xAt(i), y: yAt(vals[i]) }, end: { x: xAt(i + 1), y: yAt(vals[i + 1]) }, thickness: 2.2, color });
+    for (let i = 0; i < n; i++) p2.drawCircle({ x: xAt(i), y: yAt(vals[i]), size: 2.5, color });
+    return plotBottom - 13 - 26; // y for the next chart's title row
+  };
+
+  let cy = drawMini(h2, "Blocks added", COL.blue, "blocks");
+  cy = drawMini(cy, "Cutting done", COL.cyan, "cutting");
+  drawMini(cy, "Carving done", COL.amber, "carving");
 
   // footer (page 2)
   p2.drawLine({ start: { x: M, y: 52 }, end: { x: W - M, y: 52 }, thickness: 0.8, color: line });
