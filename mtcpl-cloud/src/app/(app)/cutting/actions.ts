@@ -1549,17 +1549,14 @@ export async function editPendingApprovalAction(
   const stone = String(formData.get("stone") || "PinkStone");
   const yard = Number(formData.get("yard") || 1);
 
-  // Permission gate for transfers (same as finishBlockAction).
-  if (transferredSlabIds.length > 0) {
-    const { canTransferPlannedSlabs } = await import("@/lib/cutting-permissions");
-    if (!canTransferPlannedSlabs(profile)) {
-      return {
-        ok: false,
-        error:
-          "You do not have permission to transfer slabs from another block's plan.",
-      };
-    }
-  }
+  // Transfer permission is checked further down — but only against
+  // NEWLY added transfers (see addedTransfers below). Re-saving an
+  // edit that merely preserves transfers already in the staged payload
+  // must NOT require transfer rights, or an unlocked cutter
+  // (cutting_operator / senior_incharge) could never resubmit a block
+  // that happens to contain a transfer. (Was a blanket
+  // `transferredSlabIds.length > 0` gate here — that blocked the cutter
+  // on every resubmit of such a block, which read as "edit won't work".)
 
   // Authorise this specific edit attempt.
   const { data: blockRow } = await supabase
@@ -1664,6 +1661,21 @@ export async function editPendingApprovalAction(
   const newTransfers = new Set(transferredSlabIds);
   const removedTransfers = [...oldTransfers].filter((id) => !newTransfers.has(id));
   const addedTransfers = [...newTransfers].filter((id) => !oldTransfers.has(id));
+
+  // Transfer permission gate — only INTRODUCING a new cross-block
+  // transfer needs the right. Preserving or removing transfers already
+  // staged is fine for anyone authorised to edit (incl. an unlocked
+  // cutting_operator / senior_incharge cutter).
+  if (addedTransfers.length > 0) {
+    const { canTransferPlannedSlabs } = await import("@/lib/cutting-permissions");
+    if (!canTransferPlannedSlabs(profile)) {
+      return {
+        ok: false,
+        error:
+          "You can edit and resubmit, but adding a cross-block transfer needs a team head. Remove the newly added transfer, or ask a team head to add it.",
+      };
+    }
+  }
 
   if (removedTransfers.length > 0) {
     const cleared = await clearTransferEarmarks(

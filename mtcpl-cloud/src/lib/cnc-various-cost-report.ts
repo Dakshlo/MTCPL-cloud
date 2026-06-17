@@ -345,6 +345,32 @@ export async function buildCncVariousCostReport(
   const exclusiveEndMs = isoUtcMidnight(endParts) + 86_400_000 - 5.5 * 60 * 60 * 1000;
   const endIso = new Date(exclusiveEndMs).toISOString();
 
+  // ── 0. Defunct CNC vendors to exclude (Daksh, June 2026) ──────
+  // A vendor that is BOTH deactivated AND owns zero CNC machines is a
+  // dead cost-centre (e.g. ALKESH) — it should not clutter the CNC
+  // costing table or skew the per-unit cost. Resolve the set up front
+  // and skip it in every aggregation loop below (same posture as the
+  // Outsource skip) so the displayed rows and the totals stay in
+  // agreement. A deactivated vendor that STILL owns machines keeps
+  // showing — its depreciation is real and worth tracking.
+  const excludedVendorIds = new Set<string>();
+  {
+    const [{ data: vendorActive }, { data: machineVendors }] = await Promise.all([
+      admin.from("vendors").select("id, is_active"),
+      admin.from("cnc_machines").select("vendor_id"),
+    ]);
+    const machineCountEarly = new Map<string, number>();
+    for (const r of machineVendors ?? []) {
+      const vid = (r as { vendor_id: string | null }).vendor_id;
+      if (vid) machineCountEarly.set(vid, (machineCountEarly.get(vid) ?? 0) + 1);
+    }
+    for (const v of vendorActive ?? []) {
+      const id = v.id as string;
+      const active = (v as { is_active?: boolean | null }).is_active !== false;
+      if (!active && (machineCountEarly.get(id) ?? 0) === 0) excludedVendorIds.add(id);
+    }
+  }
+
   // ── 1. Carving APPROVED within the window ─────────────────────
   // Daksh (June 2026) — output is counted at REVIEW APPROVAL, not at
   // unload. review_approved_at is stamped when the reviewer approves a
@@ -420,6 +446,7 @@ export async function buildCncVariousCostReport(
     const cft = slabCft(slab.length_ft, slab.width_ft, slab.thickness_ft) * sides;
     const sft = slabSft(slab.length_ft, slab.width_ft) * sides;
     const vendorId = item.vendor_id as string;
+    if (excludedVendorIds.has(vendorId)) continue; // defunct vendor — skip output + totals
     const existing = carvedByVendor.get(vendorId) ?? {
       vendorName: (item.vendor_name as string) || "Unknown",
       cft: 0,
@@ -485,6 +512,7 @@ export async function buildCncVariousCostReport(
         const amt = Number(r.amount) * shareFactor;
         const cat = r.category as CncExpenseBreakdownRow["category"];
         const vendorId = r.vendor_id as string;
+        if (excludedVendorIds.has(vendorId)) continue; // defunct vendor — skip its expenses + totals
         const va = expensesByVendor.get(vendorId) ?? emptyAgg();
         va.cost += amt;
         va.byCategory[cat] = (va.byCategory[cat] || 0) + amt;
