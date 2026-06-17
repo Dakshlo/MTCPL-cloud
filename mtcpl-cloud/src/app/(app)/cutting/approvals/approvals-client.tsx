@@ -62,12 +62,16 @@ type ServerResult = { ok: true } | { ok: false; error: string };
 
 export function ApprovalsClient({
   canApprove,
+  canEditUnlockedAsCutter = false,
   rows,
   approveAction,
   unlockAction,
   lockAction,
 }: {
   canApprove: boolean;
+  /** True for team_head / senior_incharge / cutting_operator — they may
+   *  edit an unlocked block even if they didn't submit it (shift handoff). */
+  canEditUnlockedAsCutter?: boolean;
   rows: ApprovalRow[];
   approveAction: (formData: FormData) => Promise<ServerResult>;
   unlockAction: (formData: FormData) => Promise<ServerResult>;
@@ -124,6 +128,7 @@ export function ApprovalsClient({
               key={row.id}
               row={row}
               canApprove={canApprove}
+              canEditUnlockedAsCutter={canEditUnlockedAsCutter}
               approveAction={approveAction}
               unlockAction={unlockAction}
               lockAction={lockAction}
@@ -138,12 +143,14 @@ export function ApprovalsClient({
 function ApprovalCard({
   row,
   canApprove,
+  canEditUnlockedAsCutter,
   approveAction,
   unlockAction,
   lockAction,
 }: {
   row: ApprovalRow;
   canApprove: boolean;
+  canEditUnlockedAsCutter: boolean;
   approveAction: (formData: FormData) => Promise<ServerResult>;
   unlockAction: (formData: FormData) => Promise<ServerResult>;
   lockAction: (formData: FormData) => Promise<ServerResult>;
@@ -157,8 +164,14 @@ function ApprovalCard({
   const summary = row.payloadSummary;
   const unlocked = row.cutterEditUnlocked;
 
-  // Cutters edit only when unlocked. Approvers edit any time.
-  const cutterCanEdit = !canApprove && unlocked && row.isOwnSubmission;
+  // Cutters edit only when unlocked. Approvers edit any time. A
+  // cutter-role user (team_head / senior_incharge / cutting_operator)
+  // can pick up an unlocked block even if a colleague submitted it —
+  // shift handoff, same rule the edit action enforces. Previously this
+  // required isOwnSubmission, so a team_head who didn't personally
+  // submit the block saw no Edit button after the auditor unlocked it.
+  const cutterCanEdit =
+    !canApprove && unlocked && (row.isOwnSubmission || canEditUnlockedAsCutter);
 
   function runApprove() {
     // Daksh (May 2026) — guard against the wrong click. An auditor

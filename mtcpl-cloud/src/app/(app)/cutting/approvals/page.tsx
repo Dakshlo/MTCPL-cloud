@@ -57,6 +57,16 @@ export default async function CuttingApprovalsPage() {
     "cutting_operator",
   ]);
   const canApprove = canApproveCuts(profile);
+  // Shift-handoff (mirrors editPendingApprovalAction's authorisation):
+  // a team_head / senior_incharge / cutting_operator may edit an
+  // UNLOCKED block even if they didn't personally submit it. Without
+  // this, the approvals list hid every block this team_head hadn't
+  // submitted himself, so after the auditor pressed "Allow cutter to
+  // edit" no "Edit submission" button ever appeared for him.
+  const canEditUnlockedAsCutter =
+    profile.role === "team_head" ||
+    profile.role === "senior_incharge" ||
+    profile.role === "cutting_operator";
   const supabase = createAdminSupabaseClient();
   const profilesMap = await getProfilesMap();
 
@@ -100,7 +110,16 @@ export default async function CuttingApprovalsPage() {
 
   const visible = canApprove
     ? dbRows
-    : dbRows.filter((r) => r.submitted_for_approval_by === profile.id);
+    : dbRows.filter(
+        (r) =>
+          r.submitted_for_approval_by === profile.id ||
+          // Shift-handoff: surface blocks the auditor has unlocked for
+          // cutter editing to any cutter-role user, not only the
+          // original submitter — matches what the edit action allows.
+          (canEditUnlockedAsCutter &&
+            (r.cutter_edit_unlocked === true ||
+              r.status === "awaiting_cutter_edit")),
+      );
 
   // Projected-recovery data for the audit cards: fetch the dims of every
   // cut + extra slab in the visible submissions so each card can show the
@@ -215,6 +234,7 @@ export default async function CuttingApprovalsPage() {
 
       <ApprovalsClient
         canApprove={canApprove}
+        canEditUnlockedAsCutter={canEditUnlockedAsCutter}
         rows={rows}
         approveAction={approveCutAction}
         unlockAction={requestCutterEditAction}
