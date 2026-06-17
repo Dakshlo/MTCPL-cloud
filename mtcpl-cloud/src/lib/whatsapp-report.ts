@@ -17,6 +17,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getReportRecipientNumbers } from "@/lib/wa-recipients";
+import { buildCncVariousCostReport, cncPeriodFromSearch } from "@/lib/cnc-various-cost-report";
 
 type AdminClient = ReturnType<typeof createAdminSupabaseClient>;
 
@@ -68,7 +69,23 @@ export type DailyReport = {
   cuttingByStone: Array<{ stone: string; slabs: number; cft: number }>;
   carvingByVendor: Array<{ vendor: string; slabs: number; cft: number }>;
   dispatchByTemple: Array<{ temple: string; slabs: number; tonnes: number }>;
-  payments: { total: number; prevTotal: number; byVendor: Array<{ vendor: string; amount: number }> };
+  payments: { total: number; byVendor: Array<{ vendor: string; amount: number }> };
+  /** Month-to-date CNC costing snapshot (elapsed days only). null if the
+   *  report couldn't be built — never blocks the daily report. */
+  cnc: {
+    label: string;        // "June 2026"
+    days: number;         // elapsed days of the month so far
+    monthLen: number;     // total days in the month
+    totalCost: number;    // operational + depreciation, prorated to elapsed days
+    operational: number;
+    depreciation: number;
+    sft: number;
+    cft: number;
+    costPerSft: number;   // may be NaN when no production
+    costPerCft: number;
+    machines: number;
+    slabs: number;
+  } | null;
 };
 
 // dims for a set of slab ids → map id → cft.
@@ -251,7 +268,34 @@ export async function buildDailyReportData(): Promise<DailyReport> {
   const today = await aggregateDay(admin, t.startUTC, t.endUTC, true);
   const prev = await aggregateDay(admin, p.startUTC, p.endUTC, false);
   const payToday = await paymentsForWindow(admin, t.startUTC, t.endUTC, true);
-  const payPrev = await paymentsForWindow(admin, p.startUTC, p.endUTC, false);
+
+  // Month-to-date CNC costing — same prorated-to-elapsed-days engine as the
+  // /reports/various-costing/cnc page. Wrapped so a CNC hiccup never blocks
+  // the daily report.
+  let cnc: DailyReport["cnc"] = null;
+  try {
+    const period = cncPeriodFromSearch({}); // defaults to the current month
+    const rep = await buildCncVariousCostReport(period);
+    const monthLen = Number(period.endDate.slice(8, 10)) || 30;
+    const machines = rep.perVendor.reduce((s, v) => s + (v.machineCount || 0), 0);
+    cnc = {
+      label: period.label,
+      days: rep.daysInWindow,
+      monthLen,
+      totalCost: rep.totalCostForPeriod,
+      operational: rep.operationalForPeriod,
+      depreciation: rep.depreciationForPeriod,
+      sft: rep.totalSft,
+      cft: rep.totalCft,
+      costPerSft: rep.costPerSft,
+      costPerCft: rep.costPerCft,
+      machines,
+      slabs: rep.slabsCount,
+    };
+  } catch {
+    cnc = null;
+  }
+
   return {
     label: t.label,
     prevLabel: p.label,
@@ -261,7 +305,8 @@ export async function buildDailyReportData(): Promise<DailyReport> {
     cuttingByStone: today.det.cuttingByStone,
     carvingByVendor: today.det.carvingByVendor,
     dispatchByTemple: today.det.dispatchByTemple,
-    payments: { total: payToday.total, prevTotal: payPrev.total, byVendor: payToday.byVendor },
+    payments: { total: payToday.total, byVendor: payToday.byVendor },
+    cnc,
   };
 }
 
@@ -274,46 +319,78 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
   const W = 595.28, H = 841.89, M = 40;
   const white = rgb(1, 1, 1), ink = rgb(0.12, 0.12, 0.12), muted = rgb(0.45, 0.43, 0.4), line = rgb(0.84, 0.81, 0.76), brown = rgb(0.486, 0.231, 0.047);
+  const paper = rgb(0.984, 0.980, 0.972);   // warm off-white page
+  const rowTint = rgb(0.953, 0.945, 0.929);  // alternating list row
   const COL = {
     blue: rgb(0.145, 0.388, 0.922),
     cyan: rgb(0.031, 0.569, 0.698),
     amber: rgb(0.851, 0.467, 0.024),
     green: rgb(0.086, 0.639, 0.290),
     gold: rgb(0.706, 0.325, 0.035),
+    indigo: rgb(0.282, 0.255, 0.604),  // CNC costing
   };
+
+  // Warm paper background — softer than stark white, makes the colour cards pop.
+  page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: paper });
 
   const text = (s: string, x: number, y: number, size: number, f = font, c = ink) => page.drawText(s, { x, y, size, font: f, color: c });
   const right = (s: string, xr: number, y: number, size: number, f = font, c = ink) => page.drawText(s, { x: xr - f.widthOfTextAtSize(s, size), y, size, font: f, color: c });
+  const centre = (s: string, cx: number, y: number, size: number, f = font, c = ink) => page.drawText(s, { x: cx - f.widthOfTextAtSize(s, size) / 2, y, size, font: f, color: c });
   const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 2)}..` : s);
 
-  let top = H - 34;
+  // Rounded-rectangle card via an SVG path. (x, yTop) is the TOP-LEFT corner;
+  // the card extends downward. pdf-lib flips SVG-y, so yTop is the top edge.
+  const roundPath = (w: number, h: number, r: number) => {
+    const rr = Math.min(r, w / 2, h / 2);
+    return `M ${rr} 0 L ${w - rr} 0 Q ${w} 0 ${w} ${rr} L ${w} ${h - rr} Q ${w} ${h} ${w - rr} ${h} L ${rr} ${h} Q 0 ${h} 0 ${h - rr} L 0 ${rr} Q 0 0 ${rr} 0 Z`;
+  };
+  const card = (
+    x: number, yTop: number, w: number, h: number, r: number,
+    color: ReturnType<typeof rgb>,
+    o?: { opacity?: number; border?: ReturnType<typeof rgb>; borderWidth?: number },
+  ) => page.drawSvgPath(roundPath(w, h, r), {
+    x, y: yTop, color, opacity: o?.opacity,
+    borderColor: o?.border, borderWidth: o?.borderWidth,
+  });
+
+  let top = H - 30;
 
   // ── Logo + header ──
   try {
     const png = await pdf.embedPng(await readFile(path.join(process.cwd(), "public", "logo-dark.png")));
     const lh = 34, lw = (png.width / png.height) * lh;
-    page.drawImage(png, { x: M, y: top - lh + 4, width: lw, height: lh });
+    page.drawImage(png, { x: M, y: top - lh + 2, width: lw, height: lh });
   } catch { /* logo optional */ }
   const tx = M + 86;
-  text("MATESHWARI TEMPLE CONSTRUCTION PVT LTD", tx, top - 4, 10, bold, brown);
-  text("Daily Work Report", tx, top - 22, 17, bold, ink);
-  right(data.label, W - M, top - 4, 12, bold, ink);
-  right(`vs ${data.prevLabel}`, W - M, top - 19, 9, font, muted);
-  top -= 44;
-  page.drawLine({ start: { x: M, y: top }, end: { x: W - M, y: top }, thickness: 1.5, color: brown });
-  top -= 16;
+  text("MATESHWARI TEMPLE CONSTRUCTION PVT LTD", tx, top - 6, 10, bold, brown);
+  text("Daily Work Report", tx, top - 24, 17, bold, ink);
+  // Date in a rounded brand pill, with the comparison day beneath it.
+  const dpw = bold.widthOfTextAtSize(data.label, 12) + 24;
+  card(W - M - dpw, top + 3, dpw, 23, 6, brown);
+  centre(data.label, W - M - dpw / 2, top - 12, 12, bold, white);
+  right(`vs ${data.prevLabel}`, W - M, top - 30, 9, font, muted);
+  top -= 46;
+  // Two-tone rule: a bold gold band over a thin brown baseline.
+  page.drawLine({ start: { x: M, y: top }, end: { x: W - M, y: top }, thickness: 3, color: COL.gold });
+  page.drawLine({ start: { x: M, y: top - 2.4 }, end: { x: W - M, y: top - 2.4 }, thickness: 0.6, color: brown });
+  top -= 18;
 
-  // ── 4 big metric boxes (2×2) ──
+  // ── 4 big metric cards (2×2) ──
   const gap = 12;
   const bw = (W - 2 * M - gap) / 2;
-  const bh = 82;
+  const bh = 88;
   const delta = (cur: number, prev: number) => { const d = cur - prev; return `Yesterday ${prev}   (${d > 0 ? "+" : ""}${d})`; };
   const box = (x: number, ytop: number, color: ReturnType<typeof rgb>, label: string, big: string, sub: string, compare: string) => {
-    page.drawRectangle({ x, y: ytop - bh, width: bw, height: bh, color });
-    text(label, x + 13, ytop - 18, 10, bold, white);
-    text(big, x + 12, ytop - 49, 27, bold, white);
-    text(sub, x + 13, ytop - 63, 9.5, font, white);
-    text(compare, x + 13, ytop - 75, 8.5, font, white);
+    card(x, ytop, bw, bh, 10, color);
+    // soft accent tab top-left for a designed feel
+    card(x + 13, ytop - 11, 26, 4, 2, white, { opacity: 0.5 });
+    text(label, x + 14, ytop - 26, 10, bold, white);
+    text(big, x + 13, ytop - 54, 26, bold, white);
+    text(sub, x + 14, ytop - 68, 9.5, font, white);
+    // translucent pill holding the vs-yesterday delta
+    const cw2 = font.widthOfTextAtSize(compare, 8) + 14;
+    card(x + 13, ytop - 70, cw2, 15, 5, white, { opacity: 0.16 });
+    text(compare, x + 20, ytop - 80, 8, font, white);
   };
   box(M, top, COL.blue, "BLOCKS ADDED", String(data.today.blocks.count), `${data.today.blocks.cft.toFixed(1)} CFT`, delta(data.today.blocks.count, data.prev.blocks.count));
   box(M + bw + gap, top, COL.cyan, "CUTTING DONE", String(data.today.cutting.slabs), `${data.today.cutting.cft.toFixed(1)} CFT`, delta(data.today.cutting.slabs, data.prev.cutting.slabs));
@@ -328,36 +405,55 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
   const colTop = top;
   const drawList = (x: number, title: string, color: ReturnType<typeof rgb>, rows: Array<{ name: string; val: string }>) => {
     let yy = colTop;
-    text(title, x, yy, 9, bold, color); yy -= 5;
-    page.drawLine({ start: { x, y: yy }, end: { x: x + cw, y: yy }, thickness: 0.8, color: line }); yy -= 13;
-    if (rows.length === 0) { text("None today", x, yy, 9, font, muted); yy -= 13; }
-    else for (const r of rows.slice(0, 8)) { text(clip(r.name, 16), x, yy, 9, font, ink); right(r.val, x + cw, yy, 9, font, muted); yy -= 13; }
+    // colour bullet + title
+    page.drawRectangle({ x, y: yy - 1, width: 7, height: 7, color });
+    text(title, x + 11, yy, 8.5, bold, color); yy -= 6;
+    page.drawLine({ start: { x, y: yy }, end: { x: x + cw, y: yy }, thickness: 1, color }); yy -= 14;
+    if (rows.length === 0) { text("None today", x, yy, 9, font, muted); yy -= 14; }
+    else rows.slice(0, 6).forEach((r, i) => {
+      if (i % 2 === 1) page.drawRectangle({ x: x - 3, y: yy - 3.5, width: cw + 6, height: 13.5, color: rowTint });
+      text(clip(r.name, 15), x, yy, 9, font, ink); right(r.val, x + cw, yy, 8.5, font, muted); yy -= 14;
+    });
     return yy;
   };
   const y1 = drawList(colX[0], "CUTTING BY STONE", COL.cyan, data.cuttingByStone.map((r) => ({ name: r.stone, val: `${r.slabs} · ${r.cft.toFixed(0)} CFT` })));
   const y2 = drawList(colX[1], "CARVING BY VENDOR", COL.amber, data.carvingByVendor.map((r) => ({ name: r.vendor, val: `${r.slabs} · ${r.cft.toFixed(0)} CFT` })));
   const y3 = drawList(colX[2], "DISPATCH BY TEMPLE", COL.green, data.dispatchByTemple.map((r) => ({ name: r.temple, val: `${r.slabs} · ${r.tonnes.toFixed(1)} T` })));
-  top = Math.min(y1, y2, y3) - 14;
+  top = Math.min(y1, y2, y3) - 16;
 
-  // ── payments box ──
-  // Total today (big) → a clear "vs yesterday" line with the +/- change →
-  // a divider → the per-vendor breakdown. (Earlier the yesterday figure sat
-  // up by the title and read ambiguously.)
+  // ── CNC costing — month to date (elapsed days only) ──
+  if (data.cnc) {
+    const c = data.cnc;
+    const cncH = 92;
+    card(M, top, W - 2 * M, cncH, 10, COL.indigo);
+    text("CNC COSTING  ·  MONTH TO DATE", M + 15, top - 19, 10, bold, white);
+    right(`${c.label}   ·   ${c.days} of ${c.monthLen} days`, W - M - 15, top - 19, 9, font, white);
+    // big spend so far + cost-per-SFT on the right
+    text(inr(c.totalCost), M + 14, top - 47, 21, bold, white);
+    text("spent so far", M + 14 + bold.widthOfTextAtSize(inr(c.totalCost), 21) + 8, top - 47, 9, font, white);
+    const perSft = Number.isFinite(c.costPerSft) ? `${inr(c.costPerSft)} / SFT` : "-- / SFT";
+    right(perSft, W - M - 15, top - 46, 14, bold, white);
+    page.drawLine({ start: { x: M + 15, y: top - 57 }, end: { x: W - M - 15, y: top - 57 }, thickness: 0.6, color: white, opacity: 0.32 });
+    const perCft = Number.isFinite(c.costPerCft) ? `${inr(c.costPerCft)} / CFT` : "-- / CFT";
+    text(`Operational ${inr(c.operational)}      Depreciation ${inr(c.depreciation)}      ${perCft}`, M + 15, top - 73, 9, font, white);
+    text(`Output ${c.sft.toFixed(0)} SFT / ${c.cft.toFixed(0)} CFT      ${c.slabs} slabs carved      ${c.machines} machine${c.machines === 1 ? "" : "s"}`, M + 15, top - 85, 9, font, white);
+    top -= cncH + 16;
+  }
+
+  // ── payments card (yesterday comparison removed per request) ──
   const payRows = data.payments.byVendor.slice(0, 6);
   const hasRows = payRows.length > 0;
-  const payH = 70 + (hasRows ? payRows.length * 14 + 10 : 16);
-  page.drawRectangle({ x: M, y: top - payH, width: W - 2 * M, height: payH, color: COL.gold });
-  text("PAYMENTS TO SUPPLIERS TODAY", M + 13, top - 18, 10, bold, white);
-  text(inr(data.payments.total), M + 12, top - 43, 21, bold, white);
-  const pd = data.payments.total - data.payments.prevTotal;
-  text(`Yesterday ${inr(data.payments.prevTotal)}    (${pd >= 0 ? "+" : "-"}${inr(Math.abs(pd))})`, M + 13, top - 57, 9, font, white);
-  let py = top - 70;
+  const payH = 56 + (hasRows ? payRows.length * 15 + 8 : 14);
+  card(M, top, W - 2 * M, payH, 10, COL.gold);
+  text("PAYMENTS TO SUPPLIERS TODAY", M + 15, top - 19, 10, bold, white);
+  text(inr(data.payments.total), M + 14, top - 45, 22, bold, white);
+  let py = top - 56;
   if (!hasRows) {
-    text("No supplier payments recorded today.", M + 13, py - 4, 9.5, font, white);
+    text("No supplier payments recorded today.", M + 15, py - 2, 9.5, font, white);
   } else {
-    page.drawLine({ start: { x: M + 13, y: py }, end: { x: W - M - 13, y: py }, thickness: 0.6, color: white, opacity: 0.35 });
-    py -= 14;
-    for (const v of payRows) { text(clip(v.vendor, 40), M + 13, py, 9.5, font, white); right(inr(v.amount), W - M - 13, py, 9.5, font, white); py -= 14; }
+    page.drawLine({ start: { x: M + 15, y: py }, end: { x: W - M - 15, y: py }, thickness: 0.6, color: white, opacity: 0.35 });
+    py -= 16;
+    for (const v of payRows) { text(clip(v.vendor, 40), M + 15, py, 9.5, font, white); right(inr(v.amount), W - M - 15, py, 9.5, bold, white); py -= 15; }
   }
 
   // ── footer ──
