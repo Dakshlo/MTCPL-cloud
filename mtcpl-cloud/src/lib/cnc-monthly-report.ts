@@ -353,6 +353,36 @@ function monthlyDepreciationFor(
   return (currentValue * rate) / 12;
 }
 
+/** Closing / current book value of a machine TODAY — the WDV-depreciated value
+ *  from its purchase (or legacy book) base to now, floored at salvage. Returns
+ *  null when there's no asset basis yet. Drives the read-only "Closing value"
+ *  shown on the vendor page. */
+export function currentBookValueFor(m: {
+  purchase_price: number | string | null;
+  purchase_date: string | null;
+  current_book_value: number | string | null;
+  book_value_as_of: string | null;
+  depreciation_rate_pct: number | string | null;
+  salvage_value: number | string | null;
+}): number | null {
+  let baseValue: number;
+  let baseDate: Date;
+  if (m.purchase_price != null && m.purchase_date) {
+    baseValue = Number(m.purchase_price);
+    baseDate = new Date(m.purchase_date);
+  } else if (m.current_book_value != null && m.book_value_as_of) {
+    baseValue = Number(m.current_book_value);
+    baseDate = new Date(m.book_value_as_of);
+  } else {
+    return null;
+  }
+  if (!Number.isFinite(baseDate.getTime())) return null;
+  const rate = Math.max(0, Math.min(1, Number(m.depreciation_rate_pct ?? 15) / 100));
+  const salvage = Math.max(0, Number(m.salvage_value ?? 0));
+  const yearsElapsed = Math.max(0, (Date.now() - baseDate.getTime()) / (365.25 * 86_400_000));
+  return Math.max(salvage, baseValue * Math.pow(1 - rate, yearsElapsed));
+}
+
 /** Mig 053 follow-on (Daksh): generalized to accept any date range
  *  via CncReportPeriod. Daily / Weekly / Monthly views all flow
  *  through this same function — the page + Excel route compute the

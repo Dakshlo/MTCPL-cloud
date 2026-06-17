@@ -443,16 +443,22 @@ export async function updateMachineAssetAction(
   if (loadErr) return { ok: false, error: loadErr.message };
   if (!existing) return { ok: false, error: "Machine not found." };
 
+  // The vendor page no longer edits the legacy "current book value" path —
+  // depreciation now keys off purchase price + date. Only touch those columns
+  // if the form actually sent them, so existing legacy values are preserved.
+  const hasCbv = formData.has("current_book_value");
+  const hasBvAsOf = formData.has("book_value_as_of");
+  const update: Record<string, unknown> = {
+    purchase_price: purchasePrice,
+    purchase_date: purchaseDate,
+    depreciation_rate_pct: ratePct,
+    salvage_value: salvage ?? 0,
+  };
+  if (hasCbv) update.current_book_value = currentBookValue;
+  if (hasBvAsOf) update.book_value_as_of = bookValueAsOf;
   const { error: updErr } = await supabase
     .from("cnc_machines")
-    .update({
-      purchase_price: purchasePrice,
-      purchase_date: purchaseDate,
-      current_book_value: currentBookValue,
-      book_value_as_of: bookValueAsOf,
-      depreciation_rate_pct: ratePct,
-      salvage_value: salvage ?? 0,
-    })
+    .update(update)
     .eq("id", machineId);
   if (updErr) return { ok: false, error: updErr.message };
 
@@ -474,8 +480,8 @@ export async function updateMachineAssetAction(
       after: {
         purchase_price: purchasePrice,
         purchase_date: purchaseDate,
-        current_book_value: currentBookValue,
-        book_value_as_of: bookValueAsOf,
+        current_book_value: hasCbv ? currentBookValue : ((existing as { current_book_value?: number | null }).current_book_value ?? null),
+        book_value_as_of: hasBvAsOf ? bookValueAsOf : ((existing as { book_value_as_of?: string | null }).book_value_as_of ?? null),
         rate_pct: ratePct,
         salvage: salvage ?? 0,
       },
