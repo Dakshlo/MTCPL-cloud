@@ -506,3 +506,55 @@ export async function updateMachineAssetFormAction(formData: FormData): Promise<
     console.warn("[updateMachineAssetFormAction] failed", r.error);
   }
 }
+
+/** Bulk save — write every machine's asset values (purchase price + date +
+ *  rate + salvage) in one go. Used by the vendor page's "Save all" button.
+ *  Like the per-machine save, it does NOT touch the legacy current-book-value
+ *  columns (depreciation keys off purchase price + date). */
+export async function updateMachineAssetsBulkAction(
+  formData: FormData,
+): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
+  const { profile } = await requireAuth();
+  if (!canEditMachineAssetValue(profile)) {
+    return { ok: false, error: "Only developer / owner can edit machine asset values." };
+  }
+  const supabase = createAdminSupabaseClient();
+
+  let arr: Array<{ machine_id?: string; purchase_price?: string; purchase_date?: string; depreciation_rate_pct?: string; salvage_value?: string }> = [];
+  try { arr = JSON.parse(txt(formData, "machines_json") || "[]"); } catch { arr = []; }
+  if (!Array.isArray(arr) || arr.length === 0) return { ok: false, error: "Nothing to save." };
+
+  const num = (v: unknown): number | null => {
+    if (v == null || v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  let count = 0;
+  let vendorId = "";
+  for (const m of arr) {
+    if (!m.machine_id) continue;
+    const ratePct = num(m.depreciation_rate_pct) ?? 15;
+    const { data, error } = await supabase
+      .from("cnc_machines")
+      .update({
+        purchase_price: num(m.purchase_price),
+        purchase_date: m.purchase_date || null,
+        depreciation_rate_pct: ratePct,
+        salvage_value: num(m.salvage_value) ?? 0,
+      })
+      .eq("id", m.machine_id)
+      .select("vendor_id")
+      .maybeSingle();
+    if (!error) {
+      count += 1;
+      if (data?.vendor_id) vendorId = data.vendor_id as string;
+    }
+  }
+
+  void logAudit(profile.id, "machine_assets_bulk_updated", "cnc_machine", "bulk", { count });
+  revalidatePath("/carving/vendors");
+  if (vendorId) revalidatePath(`/carving/vendors/${vendorId}`);
+  revalidatePath("/carving/reports");
+  return { ok: true, count };
+}

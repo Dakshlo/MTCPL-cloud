@@ -5,8 +5,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { VendorForm } from "../vendor-form";
 import { ConfirmButton } from "@/components/confirm-button";
 import { deactivateVendorAction } from "../../actions";
-import { updateMachineAssetFormAction } from "../../expenses/actions";
-import { currentBookValueFor } from "@/lib/cnc-monthly-report";
+import { MachineAssetEditor } from "./machine-asset-editor";
 
 export default async function VendorDetailPage({ params }: { params: Promise<{ id: string }> }) {
   // Mig 081 follow-on (Daksh) — opens to carving_head + senior_incharge
@@ -60,11 +59,8 @@ export default async function VendorDetailPage({ params }: { params: Promise<{ i
     current_book_value: number | string | null; book_value_as_of: string | null;
     depreciation_rate_pct: number | string | null; salvage_value: number | string | null;
   }>;
-  const inr = (n: number) => "₹" + Math.round(n).toLocaleString("en-IN");
   const pill = (color: string): React.CSSProperties => ({ fontSize: 11, fontWeight: 800, color, background: `${color}1a`, border: `1px solid ${color}55`, borderRadius: 999, padding: "2px 10px", whiteSpace: "nowrap" });
   const sectionH: React.CSSProperties = { margin: "0 0 12px", fontSize: 15, display: "flex", alignItems: "center", gap: 8 };
-  const fieldLbl: React.CSSProperties = { fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" };
-  const fieldInp: React.CSSProperties = { padding: "8px 10px", fontSize: 13, fontFamily: "ui-monospace, monospace", border: "1px solid var(--border)", borderRadius: 7, background: "var(--bg)", color: "var(--text)" };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18, paddingBottom: 32, maxWidth: 1080 }}>
@@ -112,54 +108,9 @@ export default async function VendorDetailPage({ params }: { params: Promise<{ i
           <p className="muted" style={{ margin: "0 0 14px", fontSize: 12, lineHeight: 1.55 }}>
             Set each machine&apos;s <strong>purchase price + date</strong> and rate. <strong>Closing value</strong> is the machine&apos;s
             depreciated worth today (WDV, floored at salvage) — for an older machine, just back-date the purchase and it
-            depreciates accordingly. Edit and save <strong>one machine at a time</strong>.
+            depreciates accordingly. Save <strong>one machine at a time</strong>, or <strong>Save all</strong> at once.
           </p>
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {machineRows.map((m) => {
-              const typeLabel = m.machine_type === "lathe" ? "LATHE" : m.machine_type === "multi_head_2" ? "2× HEAD" : "SINGLE HEAD";
-              const closing = currentBookValueFor(m);
-              return (
-                <form key={m.id} action={updateMachineAssetFormAction} style={{ padding: "12px 14px", background: "var(--surface-alt)", borderRadius: 10, border: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 12 }}>
-                  <input type="hidden" name="machine_id" value={m.id} />
-                  {/* Header: code + type + computed closing value */}
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                      <span style={{ fontSize: 16, fontWeight: 800, fontFamily: "ui-monospace, monospace" }}>{m.machine_code}</span>
-                      <span style={{ fontSize: 9.5, fontWeight: 800, color: "var(--muted)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 999, padding: "2px 8px" }}>{typeLabel}</span>
-                    </div>
-                    <div style={{ textAlign: "right" }}>
-                      <div style={fieldLbl}>Closing value today</div>
-                      <div style={{ fontSize: 17, fontWeight: 800, color: closing != null ? "#15803d" : "var(--muted-light)", fontFamily: "ui-monospace, monospace" }}>
-                        {closing != null ? inr(closing) : "—"}
-                      </div>
-                    </div>
-                  </div>
-                  {/* Inputs */}
-                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-                    <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: "1 1 150px" }}>
-                      <span style={fieldLbl}>Purchase price (₹)</span>
-                      <input type="number" step="1" min="0" name="purchase_price" defaultValue={m.purchase_price != null ? String(m.purchase_price) : ""} placeholder="e.g. 1200000" style={fieldInp} />
-                    </label>
-                    <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: "1 1 140px" }}>
-                      <span style={fieldLbl}>Purchase date</span>
-                      <input type="date" name="purchase_date" defaultValue={m.purchase_date ?? ""} style={fieldInp} />
-                    </label>
-                    <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: "0 1 100px" }}>
-                      <span style={fieldLbl}>Rate (%/yr)</span>
-                      <input type="number" step="0.5" min="0" max="100" name="depreciation_rate_pct" defaultValue={m.depreciation_rate_pct != null ? String(m.depreciation_rate_pct) : "15"} style={fieldInp} />
-                    </label>
-                    <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: "0 1 120px" }}>
-                      <span style={fieldLbl}>Salvage (₹)</span>
-                      <input type="number" step="1" min="0" name="salvage_value" defaultValue={m.salvage_value != null ? String(m.salvage_value) : "0"} style={fieldInp} />
-                    </label>
-                    <button type="submit" style={{ padding: "9px 18px", fontSize: 12.5, fontWeight: 800, background: "var(--gold-dark)", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", height: "fit-content" }}>
-                      Save
-                    </button>
-                  </div>
-                </form>
-              );
-            })}
-          </div>
+          <MachineAssetEditor machines={machineRows} />
         </section>
       )}
 
