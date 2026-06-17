@@ -303,7 +303,11 @@ function daysOfWindowInMonth(
   const monthStart = isoUtcMidnight({ year, month, day: 1 });
   const monthEnd = isoUtcMidnight({ year, month, day: daysInMonth(year, month) });
   const winStart = isoUtcMidnight(parseDateKey(windowStart));
-  const winEnd = isoUtcMidnight(parseDateKey(windowEnd));
+  // Clamp the window end to TODAY (IST) so a current / partial month prorates
+  // cost to the days ELAPSED, not the full calendar month — Daksh: on the 17th,
+  // June costs 17 days of expense against its 17 days of output, not the full 30.
+  const todayMs = isoUtcMidnight(istTodayParts());
+  const winEnd = Math.min(isoUtcMidnight(parseDateKey(windowEnd)), todayMs);
   const overlapStart = Math.max(monthStart, winStart);
   const overlapEnd = Math.min(monthEnd, winEnd);
   if (overlapEnd < overlapStart) return 0;
