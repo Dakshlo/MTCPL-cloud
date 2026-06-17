@@ -359,7 +359,7 @@ export async function buildCncVariousCostReport(
   // earlier embedded-join issues, do two queries + a lookup map.
   const { data: items, error: itemsErr } = await admin
     .from("carving_items")
-    .select("vendor_id, vendor_name, slab_requirement_id, review_approved_at, carving_sides")
+    .select("vendor_id, vendor_name, slab_requirement_id, review_approved_at, carving_sides, vendor_type")
     .gte("review_approved_at", startIso)
     .lt("review_approved_at", endIso)
     .not("review_approved_at", "is", null);
@@ -409,6 +409,10 @@ export async function buildCncVariousCostReport(
   let totalSft = 0;
   let totalSlabs = 0;
   for (const item of items ?? []) {
+    // CNC costing counts CNC carving only — outsource jobwork is billed on
+    // challans, not part of the plant's CNC cost. (null-safe: only Outsource
+    // is excluded, so legacy CNC rows with no vendor_type still count.)
+    if ((item as { vendor_type?: string | null }).vendor_type === "Outsource") continue;
     const slab = slabMap.get(item.slab_requirement_id as string);
     if (!slab) continue; // Defensive — orphan reference shouldn't happen but skip rather than crash.
     // Mig 088 — double-side carving counts output x2 (twice the work).

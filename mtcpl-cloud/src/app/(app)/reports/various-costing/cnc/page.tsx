@@ -289,7 +289,7 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
           label="Cost per Unit"
           primary={`${fmtINR(costPerCombined)} / unit`}
           secondary="SFT + CFT combined"
-          hint="Operational + depreciation ÷ output"
+          hint={`Operational + depreciation ÷ output · ${report.daysInWindow} day${report.daysInWindow === 1 ? "" : "s"}`}
           tone="accent"
         />
         <DualKpiTile
