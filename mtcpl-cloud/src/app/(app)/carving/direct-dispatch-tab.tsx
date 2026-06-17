@@ -9,10 +9,16 @@
  * Make Dispatch (status 'completed'), vanishing from CNC Unassigned and
  * the Outsource work-order picker. Every send is stamped
  * direct_dispatched_at/by — the permanent record listed below.
+ *
+ * Daksh June 2026 — reskinned to match CNC Unassigned: temple CARDS in
+ * a grid (count + priority + "selected" badge) that open a center-peek
+ * modal holding the slab picker, instead of one long expanded list.
+ * Selection is held at the tab level so picks survive opening/closing
+ * temples and the top "Send" bar shows the running total across temples.
  */
 
 import Link from "next/link";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { directDispatchSlabsAction } from "./actions";
 
@@ -44,6 +50,8 @@ export type DirectHistoryRow = {
   byName: string | null;
 };
 
+const TEAL = "#0f766e";
+
 function cft(l: number, w: number, t: number): number {
   return (l * w * t) / 1728;
 }
@@ -71,6 +79,7 @@ export function DirectDispatchTab({
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [openTemple, setOpenTemple] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [submitting, startSubmit] = useTransition();
@@ -83,12 +92,16 @@ export function DirectDispatchTab({
       arr.push(s);
       map.set(s.temple, arr);
     }
-    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    return [...map.entries()]
+      .map(([temple, items]) => ({ temple, items }))
+      .sort((a, b) => a.temple.localeCompare(b.temple));
   }, [slabs, query]);
 
-  const visibleCount = groups.reduce((n, [, list]) => n + list.length, 0);
+  const visibleCount = groups.reduce((n, g) => n + g.items.length, 0);
   const selSlabs = slabs.filter((s) => selected.has(s.id));
   const selCft = selSlabs.reduce((sum, s) => sum + cft(s.length_ft, s.width_ft, s.thickness_ft), 0);
+
+  const openGroup = openTemple ? groups.find((g) => g.temple === openTemple) ?? null : null;
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -97,6 +110,19 @@ export function DirectDispatchTab({
       else next.add(id);
       return next;
     });
+    setMsg(null);
+    setErr(null);
+  }
+
+  function setMany(ids: string[], select: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (select) for (const id of ids) next.add(id);
+      else for (const id of ids) next.delete(id);
+      return next;
+    });
+    setMsg(null);
+    setErr(null);
   }
 
   function send() {
@@ -121,6 +147,7 @@ export function DirectDispatchTab({
         }
         setMsg(`✓ ${res.count} slab${res.count === 1 ? "" : "s"} sent to Make Dispatch — the dispatch team can build the truck now.`);
         setSelected(new Set());
+        setOpenTemple(null);
         router.refresh();
       } catch (e) {
         setErr(e instanceof Error ? e.message : String(e));
@@ -137,8 +164,8 @@ export function DirectDispatchTab({
           borderRadius: 12, padding: "12px 16px", fontSize: 13, lineHeight: 1.55,
         }}
       >
-        <strong style={{ color: "#0f766e" }}>🚚 Direct Dispatch — slabs that skip carving.</strong>{" "}
-        Tap the cut-&-ready slabs that go straight to site, then press <strong>Send to Make Dispatch</strong>.
+        <strong style={{ color: TEAL }}>🚚 Direct Dispatch — slabs that skip carving.</strong>{" "}
+        Open a temple, tap the cut-&-ready slabs that go straight to site, then press <strong>Send to Make Dispatch</strong>.
         They leave carving completely (CNC Unassigned + Outsource work orders won&apos;t show them) and the
         dispatch team finds them ready in{" "}
         <Link href="/dispatch" style={{ fontWeight: 700 }}>Dispatch → Make Dispatch</Link>.
@@ -178,7 +205,7 @@ export function DirectDispatchTab({
           onClick={send}
           disabled={submitting || selected.size === 0}
           style={{
-            background: submitting || selected.size === 0 ? "var(--border)" : "#0f766e",
+            background: submitting || selected.size === 0 ? "var(--border)" : TEAL,
             color: submitting || selected.size === 0 ? "var(--muted)" : "#fff",
             border: "none", borderRadius: 10, padding: "12px 22px", fontSize: 14, fontWeight: 800,
             cursor: submitting ? "wait" : selected.size === 0 ? "not-allowed" : "pointer", whiteSpace: "nowrap",
@@ -190,7 +217,7 @@ export function DirectDispatchTab({
         </button>
       </div>
 
-      {/* Slab picker, temple-grouped */}
+      {/* Temple cards — click → center-peek picker (mirrors CNC Unassigned) */}
       {visibleCount === 0 ? (
         <div className="muted" style={{ padding: "34px 16px", textAlign: "center", fontSize: 14, background: "var(--surface)", border: "1px dashed var(--border)", borderRadius: 12 }}>
           {slabs.length === 0
@@ -198,84 +225,136 @@ export function DirectDispatchTab({
             : `No slab matches “${query}”.`}
         </div>
       ) : (
-        groups.map(([temple, list]) => {
-          const allSel = list.every((s) => selected.has(s.id));
-          return (
-            <div key={temple} style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: "var(--bg)", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
-                <span style={{ fontSize: 14.5, fontWeight: 800 }}>🏛 {temple}</span>
-                <span className="muted" style={{ fontSize: 12 }}>{list.length} slab{list.length === 1 ? "" : "s"}</span>
+        <>
+          <p className="muted" style={{ margin: "2px 0 0", fontSize: 13 }}>
+            {visibleCount} slab{visibleCount !== 1 ? "s" : ""} across {groups.length} temple
+            {groups.length !== 1 ? "s" : ""}. Tap a temple to view + select slabs to dispatch.
+          </p>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+              gap: 10,
+            }}
+          >
+            {groups.map(({ temple, items }) => {
+              const urgent = items.filter((s) => s.priority).length;
+              const selHere = items.filter((s) => selected.has(s.id)).length;
+              return (
                 <button
+                  key={temple}
                   type="button"
-                  onClick={() => {
-                    setSelected((prev) => {
-                      const next = new Set(prev);
-                      if (allSel) for (const s of list) next.delete(s.id);
-                      else for (const s of list) next.add(s.id);
-                      return next;
-                    });
+                  onClick={() => setOpenTemple(temple)}
+                  style={{
+                    textAlign: "left",
+                    padding: "14px 16px",
+                    background: selHere > 0 ? "rgba(15,118,110,0.05)" : urgent > 0 ? "rgba(220,38,38,0.04)" : "var(--surface)",
+                    border: `1.5px solid ${selHere > 0 ? "rgba(15,118,110,0.5)" : urgent > 0 ? "rgba(220,38,38,0.3)" : "var(--border)"}`,
+                    borderRadius: 10,
+                    cursor: "pointer",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                    transition: "border-color 0.12s, background 0.12s",
                   }}
-                  style={{ marginLeft: "auto", fontSize: 11.5, fontWeight: 700, padding: "5px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--muted)", cursor: "pointer" }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.borderColor = TEAL;
+                    e.currentTarget.style.background = "var(--surface-alt)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.borderColor =
+                      selHere > 0 ? "rgba(15,118,110,0.5)" : urgent > 0 ? "rgba(220,38,38,0.3)" : "var(--border)";
+                    e.currentTarget.style.background =
+                      selHere > 0 ? "rgba(15,118,110,0.05)" : urgent > 0 ? "rgba(220,38,38,0.04)" : "var(--surface)";
+                  }}
                 >
-                  {allSel ? "Clear all" : "Select all"}
-                </button>
-              </div>
-              <div style={{ padding: "10px 12px", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(235px, 1fr))", gap: 9 }}>
-                {list.map((s) => {
-                  const isSel = selected.has(s.id);
-                  return (
-                    <div
-                      key={s.id}
-                      onClick={() => toggle(s.id)}
-                      role="button"
-                      tabIndex={0}
-                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(s.id); } }}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                    <span style={{ fontSize: 11, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>
+                      🏛 Temple
+                    </span>
+                    <span
                       style={{
-                        background: isSel ? "rgba(15,118,110,0.08)" : "var(--surface)",
-                        border: isSel ? "2px solid #0f766e" : "1px solid var(--border)",
-                        borderRadius: 10, padding: "9px 11px", cursor: "pointer", userSelect: "none",
-                        display: "flex", flexDirection: "column", gap: 4,
+                        fontSize: 11,
+                        fontWeight: 700,
+                        padding: "2px 10px",
+                        borderRadius: 999,
+                        background: "var(--gold-dark)",
+                        color: "#fff",
+                        fontFamily: "ui-monospace, monospace",
+                        minWidth: 26,
+                        textAlign: "center",
                       }}
                     >
-                      <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                        <span
-                          aria-hidden
-                          style={{
-                            width: 19, height: 19, borderRadius: 6, flexShrink: 0,
-                            border: isSel ? "none" : "2px solid var(--border)",
-                            background: isSel ? "#0f766e" : "transparent",
-                            color: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
-                            fontSize: 12, fontWeight: 900,
-                          }}
-                        >
-                          {isSel ? "✓" : ""}
-                        </span>
-                        <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 12.5 }}>{s.id}</code>
-                        {s.priority && <span title="Urgent" style={{ fontSize: 12 }}>⚡</span>}
-                        {s.precut_at && (
-                          <span
-                            title="Pre-cut — released early; its block is still cutting. Can still be dispatched."
-                            style={{ marginLeft: "auto", fontSize: 9, fontWeight: 800, color: "#92400e", background: "rgba(180,83,9,0.12)", border: "1px solid rgba(180,83,9,0.35)", borderRadius: 999, padding: "1px 7px", whiteSpace: "nowrap" }}
-                          >
-                            ⏳ block cutting
-                          </span>
-                        )}
-                      </div>
-                      {s.label && <div style={{ fontSize: 12, fontWeight: 600 }}>{s.label}</div>}
-                      <div className="muted" style={{ fontSize: 11, fontFamily: "ui-monospace, monospace" }}>
-                        {s.length_ft}×{s.width_ft}×{s.thickness_ft} in · {cft(s.length_ft, s.width_ft, s.thickness_ft).toFixed(2)} CFT
-                      </div>
-                      <div className="muted" style={{ fontSize: 10.5 }}>
-                        {s.stone ?? "—"}
-                        {s.stock_location ? ` · 📍 ${s.stock_location}` : ""}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })
+                      {items.length}
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 15,
+                      fontWeight: 700,
+                      color: "var(--text)",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      display: "-webkit-box",
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: "vertical",
+                    }}
+                  >
+                    {temple}
+                  </div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {urgent > 0 && (
+                      <span
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          color: "#dc2626",
+                          background: "rgba(220,38,38,0.1)",
+                          padding: "3px 8px",
+                          borderRadius: 5,
+                        }}
+                      >
+                        ⚡ {urgent} priority
+                      </span>
+                    )}
+                    {selHere > 0 && (
+                      <span
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 800,
+                          color: "#fff",
+                          background: TEAL,
+                          padding: "3px 8px",
+                          borderRadius: 5,
+                        }}
+                      >
+                        ✓ {selHere} selected
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ marginTop: "auto", fontSize: 11, color: "var(--gold-dark)", fontWeight: 600 }}>
+                    Open &amp; select →
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {openGroup && (
+        <TempleDispatchPeek
+          temple={openGroup.temple}
+          slabs={openGroup.items}
+          selected={selected}
+          onToggle={toggle}
+          onSetMany={setMany}
+          onClose={() => setOpenTemple(null)}
+          onSend={send}
+          submitting={submitting}
+          totalSelected={selected.size}
+          totalCft={selCft}
+        />
       )}
 
       {/* Permanent record */}
@@ -321,6 +400,285 @@ export function DirectDispatchTab({
           </div>
         )}
       </details>
+    </div>
+  );
+}
+
+// ─── Center-peek picker — all slabs in one temple as a tappable grid.
+// Mirrors CNC Unassigned's TempleSlabsPeek: fixed overlay, dialog with a
+// within-temple search + Select-all, and a sticky footer carrying the
+// same Send button as the top bar (selection lives in the parent, so
+// the footer count includes picks made in other temples too).
+function TempleDispatchPeek({
+  temple,
+  slabs,
+  selected,
+  onToggle,
+  onSetMany,
+  onClose,
+  onSend,
+  submitting,
+  totalSelected,
+  totalCft,
+}: {
+  temple: string;
+  slabs: DirectSlab[];
+  selected: Set<string>;
+  onToggle: (id: string) => void;
+  onSetMany: (ids: string[], select: boolean) => void;
+  onClose: () => void;
+  onSend: () => void;
+  submitting: boolean;
+  totalSelected: number;
+  totalCft: number;
+}) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const [peekQuery, setPeekQuery] = useState("");
+
+  const visibleSlabs = useMemo(
+    () => slabs.filter((s) => matches(s, peekQuery)),
+    [slabs, peekQuery],
+  );
+
+  const allSel = visibleSlabs.length > 0 && visibleSlabs.every((s) => selected.has(s.id));
+  const selHere = slabs.filter((s) => selected.has(s.id)).length;
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      onMouseDown={(e) => {
+        if (dialogRef.current && !dialogRef.current.contains(e.target as Node)) {
+          onClose();
+        }
+      }}
+      style={{
+        position: "fixed",
+        top: 0,
+        left: "var(--content-left)",
+        right: 0,
+        bottom: 0,
+        background: "rgba(15,12,6,0.55)",
+        backdropFilter: "blur(2px)",
+        zIndex: 1000,
+        display: "flex",
+        alignItems: "flex-start",
+        justifyContent: "center",
+        paddingTop: "5vh",
+        paddingLeft: 12,
+        paddingRight: 12,
+      }}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        style={{
+          background: "var(--surface)",
+          border: "1px solid var(--border)",
+          borderRadius: 12,
+          boxShadow: "0 18px 60px rgba(0,0,0,0.45)",
+          width: "100%",
+          maxWidth: 960,
+          maxHeight: "90vh",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
+        {/* Header */}
+        <div
+          style={{
+            padding: "14px 18px",
+            borderBottom: "1px solid var(--border)",
+            background: "var(--bg)",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            gap: 12,
+          }}
+        >
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>
+              🚚 Direct dispatch · Temple
+            </div>
+            <h2 style={{ margin: "2px 0 0", fontSize: 17 }}>{temple}</h2>
+            <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>
+              {peekQuery.trim()
+                ? `${visibleSlabs.length} of ${slabs.length} slab${slabs.length !== 1 ? "s" : ""} match`
+                : `${slabs.length} cut-&-ready slab${slabs.length !== 1 ? "s" : ""}`}
+              {selHere > 0 ? ` · ${selHere} selected here` : ""}
+            </p>
+            <input
+              type="search"
+              value={peekQuery}
+              onChange={(e) => setPeekQuery(e.target.value)}
+              placeholder="🔍 Filter — slab id, label, stone, or 53x29x14"
+              autoCorrect="off"
+              spellCheck={false}
+              style={{
+                marginTop: 8,
+                padding: "8px 10px",
+                fontSize: 12,
+                width: "100%",
+                maxWidth: 420,
+                border: "1px solid var(--border)",
+                borderRadius: 6,
+                background: "var(--surface)",
+                color: "var(--text)",
+                fontFamily: "ui-monospace, monospace",
+              }}
+            />
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
+            <button
+              type="button"
+              onClick={() => onSetMany(visibleSlabs.map((s) => s.id), !allSel)}
+              disabled={visibleSlabs.length === 0}
+              style={{
+                padding: "8px 14px",
+                fontSize: 12,
+                fontWeight: 700,
+                border: `1.5px solid ${allSel ? TEAL : "var(--border)"}`,
+                background: allSel ? "rgba(15,118,110,0.10)" : "var(--surface)",
+                color: allSel ? TEAL : "var(--text)",
+                borderRadius: 6,
+                cursor: visibleSlabs.length === 0 ? "not-allowed" : "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {allSel ? "✕ Clear all" : "✓ Select all"}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              style={{
+                fontSize: 18,
+                border: "none",
+                background: "transparent",
+                cursor: "pointer",
+                color: "var(--muted)",
+                padding: 4,
+              }}
+              aria-label="Close"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+
+        {/* Slab grid */}
+        <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
+          {visibleSlabs.length === 0 ? (
+            <div style={{ padding: 32, textAlign: "center", color: "var(--muted)", fontSize: 13 }}>
+              No slabs match{" "}
+              <code style={{ fontFamily: "ui-monospace, monospace" }}>{peekQuery}</code> in {temple}.
+            </div>
+          ) : (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(225px, 1fr))",
+                gap: 9,
+              }}
+            >
+              {visibleSlabs.map((s) => {
+                const isSel = selected.has(s.id);
+                return (
+                  <div
+                    key={s.id}
+                    onClick={() => onToggle(s.id)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(s.id); } }}
+                    style={{
+                      background: isSel ? "rgba(15,118,110,0.08)" : "var(--surface)",
+                      border: isSel ? `2px solid ${TEAL}` : "1px solid var(--border)",
+                      borderRadius: 10, padding: "9px 11px", cursor: "pointer", userSelect: "none",
+                      display: "flex", flexDirection: "column", gap: 4,
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                      <span
+                        aria-hidden
+                        style={{
+                          width: 19, height: 19, borderRadius: 6, flexShrink: 0,
+                          border: isSel ? "none" : "2px solid var(--border)",
+                          background: isSel ? TEAL : "transparent",
+                          color: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
+                          fontSize: 12, fontWeight: 900,
+                        }}
+                      >
+                        {isSel ? "✓" : ""}
+                      </span>
+                      <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 12.5 }}>{s.id}</code>
+                      {s.priority && <span title="Urgent" style={{ fontSize: 12 }}>⚡</span>}
+                      {s.precut_at && (
+                        <span
+                          title="Pre-cut — released early; its block is still cutting. Can still be dispatched."
+                          style={{ marginLeft: "auto", fontSize: 9, fontWeight: 800, color: "#92400e", background: "rgba(180,83,9,0.12)", border: "1px solid rgba(180,83,9,0.35)", borderRadius: 999, padding: "1px 7px", whiteSpace: "nowrap" }}
+                        >
+                          ⏳ block cutting
+                        </span>
+                      )}
+                    </div>
+                    {s.label && <div style={{ fontSize: 12, fontWeight: 600 }}>{s.label}</div>}
+                    <div className="muted" style={{ fontSize: 11, fontFamily: "ui-monospace, monospace" }}>
+                      {s.length_ft}×{s.width_ft}×{s.thickness_ft} in · {cft(s.length_ft, s.width_ft, s.thickness_ft).toFixed(2)} CFT
+                    </div>
+                    <div className="muted" style={{ fontSize: 10.5 }}>
+                      {s.stone ?? "—"}
+                      {s.stock_location ? ` · 📍 ${s.stock_location}` : ""}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Sticky footer — same Send action as the top bar */}
+        <div
+          style={{
+            padding: "12px 18px",
+            borderTop: "1px solid var(--border)",
+            background: "var(--bg)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <span className="muted" style={{ fontSize: 12.5 }}>
+            {totalSelected === 0
+              ? "Tap slabs to select."
+              : `${totalSelected} slab${totalSelected === 1 ? "" : "s"} selected · ${totalCft.toFixed(1)} CFT`}
+          </span>
+          <button
+            type="button"
+            onClick={onSend}
+            disabled={submitting || totalSelected === 0}
+            style={{
+              background: submitting || totalSelected === 0 ? "var(--border)" : TEAL,
+              color: submitting || totalSelected === 0 ? "var(--muted)" : "#fff",
+              border: "none", borderRadius: 10, padding: "11px 22px", fontSize: 14, fontWeight: 800,
+              cursor: submitting ? "wait" : totalSelected === 0 ? "not-allowed" : "pointer", whiteSpace: "nowrap",
+            }}
+          >
+            {submitting ? "Sending…" : `🚚 Send to Make Dispatch (${totalSelected})`}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
