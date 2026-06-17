@@ -425,6 +425,12 @@ export async function updateMachineAssetAction(
   const ratePctRaw = optNum("depreciation_rate_pct");
   const salvage = optNum("salvage_value");
 
+  // Daksh — purchase date is mandatory whenever a purchase price is set
+  // (depreciation can't compute without the anchor date).
+  if (purchasePrice != null && !purchaseDate) {
+    return { ok: false, error: "Purchase date is required when a purchase price is set." };
+  }
+
   // Sensible default if user leaves rate blank — DB CHECK already
   // bounds 0-100; null isn't allowed because column is NOT NULL.
   const ratePct = ratePctRaw == null ? 15.00 : ratePctRaw;
@@ -529,6 +535,11 @@ export async function updateMachineAssetsBulkAction(
     const n = Number(v);
     return Number.isFinite(n) ? n : null;
   };
+
+  // Purchase date is mandatory when a price is set (same rule as per-machine).
+  if (arr.some((m) => m.machine_id && m.purchase_price != null && m.purchase_price !== "" && !m.purchase_date)) {
+    return { ok: false, error: "Purchase date is required when a purchase price is set." };
+  }
 
   let count = 0;
   let vendorId = "";

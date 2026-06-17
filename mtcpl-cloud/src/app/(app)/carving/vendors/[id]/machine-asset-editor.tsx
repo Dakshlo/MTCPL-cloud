@@ -79,6 +79,10 @@ export function MachineAssetEditor({ machines }: { machines: AssetMachine[] }) {
 
   async function saveOne(r: Row) {
     if (busy) return;
+    if (r.purchase_price !== "" && !r.purchase_date) {
+      setErr(`Purchase date is required for ${r.code} (you entered a purchase price).`);
+      return;
+    }
     setBusy(r.id); setMsg(null); setErr(null);
     try {
       const res = await updateMachineAssetAction(fdFor(r));
@@ -92,6 +96,11 @@ export function MachineAssetEditor({ machines }: { machines: AssetMachine[] }) {
 
   async function saveAll() {
     if (busy) return;
+    const missing = rows.filter((r) => r.purchase_price !== "" && !r.purchase_date);
+    if (missing.length) {
+      setErr(`Purchase date is required for: ${missing.map((m) => m.code).join(", ")}.`);
+      return;
+    }
     setBusy("all"); setMsg(null); setErr(null);
     try {
       const fd = new FormData();
@@ -146,8 +155,8 @@ export function MachineAssetEditor({ machines }: { machines: AssetMachine[] }) {
                 <input type="number" step="1" min="0" inputMode="numeric" value={r.purchase_price} onChange={(e) => patch(r.id, "purchase_price", e.target.value)} placeholder="e.g. 1200000" style={inp} />
               </label>
               <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: "1 1 140px" }}>
-                <span style={lbl}>Purchase date</span>
-                <input type="date" value={r.purchase_date} onChange={(e) => patch(r.id, "purchase_date", e.target.value)} style={inp} />
+                <span style={lbl}>Purchase date <span style={{ color: "#dc2626" }}>*</span></span>
+                <input type="date" required value={r.purchase_date} onChange={(e) => patch(r.id, "purchase_date", e.target.value)} style={{ ...inp, ...(r.purchase_price !== "" && !r.purchase_date ? { borderColor: "#dc2626" } : {}) }} />
               </label>
               <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: "0 1 100px" }}>
                 <span style={lbl}>Rate (%/yr)</span>
