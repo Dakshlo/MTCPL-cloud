@@ -144,6 +144,16 @@ export default async function CarvingDashboardPage({
     /** Mig 132 — a cancel request is pending on this slab. Card shows
      *  RED + locked (no assign) until the owner approves/rejects. */
     cancel_requested_at: string | null;
+    /** Mig 123 / 128 — the slab "component" hierarchy: Category 1
+     *  (component_section), Category 2 (component_element) and the
+     *  Additional Description, plus the plain Description. All nullable —
+     *  older slabs predate these columns and come back null. Surfaced on
+     *  the Unassigned card as a conditional Category-1 › Category-2 › Label
+     *  › Description › Additional block (only the levels that exist). */
+    description: string | null;
+    component_section: string | null;
+    component_element: string | null;
+    additional_description: string | null;
   };
   async function fetchAllUnassignedSlabs(): Promise<UnassignedRow[]> {
     const PAGE = 1000;
@@ -152,7 +162,7 @@ export default async function CarvingDashboardPage({
       const { data, error } = await admin
         .from("slab_requirements")
         .select(
-          "id, label, temple, stone, length_ft, width_ft, thickness_ft, status, priority, source_block_id, updated_at, stock_location, precut_at, cancel_requested_at",
+          "id, label, temple, stone, length_ft, width_ft, thickness_ft, status, priority, source_block_id, updated_at, stock_location, precut_at, cancel_requested_at, description, component_section, component_element, additional_description",
         )
         .eq("status", "cut_done")
         // Mig 125 — parked (temporary storage) slabs are hidden from Unassigned.

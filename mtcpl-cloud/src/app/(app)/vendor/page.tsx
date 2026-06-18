@@ -657,10 +657,16 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
         ]
       : ((vendorPickerRows as { id: string }[] | null) ?? []).map((v) => v.id),
   );
+  // Daksh June 2026 — the cockpit switcher is for flipping between CNC
+  // vendors ONLY. Outsource/manual (jobwork) vendors must never appear here
+  // even if they sit in the allow-list — matches the CNC-only default-vendor
+  // pick above. (Transfer targets keep their own full list below.)
   const otherVendors = (
     (vendorPickerRows as { id: string; name: string; vendor_type: string }[] | null) ?? []
   )
-    .filter((v) => v.id !== vendorId && allowedSwitchIds.has(v.id))
+    .filter(
+      (v) => v.id !== vendorId && allowedSwitchIds.has(v.id) && v.vendor_type === "CNC",
+    )
     .map((v) => ({ id: v.id, name: v.name, vendor_type: v.vendor_type }));
 
   // Daksh June 2026 — the transfer-destination dropdown (Problem /

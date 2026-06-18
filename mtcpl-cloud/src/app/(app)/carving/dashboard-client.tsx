@@ -73,6 +73,15 @@ type UnassignedSlab = {
   /** Mig 132 — a cancel request is pending (slab reported broken). Card
    *  shows RED + locked (no assign) until the owner decides. */
   cancel_requested_at?: string | null;
+  /** Mig 123 / 128 — component hierarchy: Category 1 = component_section,
+   *  Category 2 = component_element, Additional = additional_description,
+   *  plus the plain description. All nullable; each is shown on the
+   *  Unassigned card ONLY when present, so older slabs (null) simply show
+   *  fewer levels. Test bed for rolling this detail out elsewhere. */
+  description?: string | null;
+  component_section?: string | null;
+  component_element?: string | null;
+  additional_description?: string | null;
 };
 
 type JobRow = {
@@ -1431,9 +1440,69 @@ function UnassignedByTemple({
           🏛 {s.temple}
         </div>
       )}
-      {s.label && (
-        <div style={{ fontSize: 10, color: "var(--muted)" }}>{s.label}</div>
-      )}
+      {/* Daksh June 2026 — full component hierarchy on UNASSIGNED cards
+          only (test bed before rolling out elsewhere): Category 1 ›
+          Category 2 › Label › Description › Additional. Each level renders
+          ONLY when it has a value, so older slabs missing Category 1/2
+          (or Additional) just show the levels they have — a slab with only
+          a label + description shows just those two. */}
+      {(() => {
+        const c1 = s.component_section?.trim();
+        const c2 = s.component_element?.trim();
+        const lbl = s.label?.trim();
+        const desc = s.description?.trim();
+        const add = s.additional_description?.trim();
+        if (!c1 && !c2 && !lbl && !desc && !add) return null;
+        return (
+          <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+            {c1 && (
+              <div
+                style={{
+                  fontSize: 9.5,
+                  fontWeight: 800,
+                  color: "var(--muted)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.02em",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+                title={c1}
+              >
+                {c1}
+              </div>
+            )}
+            {c2 && (
+              <div
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  color: "var(--muted)",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+                title={c2}
+              >
+                › {c2}
+              </div>
+            )}
+            {lbl && (
+              <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text)" }}>
+                🏷 {lbl}
+              </div>
+            )}
+            {desc && (
+              <div style={{ fontSize: 10, color: "var(--muted)" }}>{desc}</div>
+            )}
+            {add && (
+              <div style={{ fontSize: 9.5, fontStyle: "italic", color: "var(--muted-light)" }}>
+                + {add}
+              </div>
+            )}
+          </div>
+        );
+      })()}
       <div
         style={{
           fontSize: 10,

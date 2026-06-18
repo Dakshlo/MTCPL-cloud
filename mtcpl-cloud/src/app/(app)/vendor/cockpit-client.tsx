@@ -306,6 +306,52 @@ function dimStr(s: SlabLite | null): string {
   return `${s.length_in}×${s.width_in}×${s.thickness_in}″`;
 }
 
+// Daksh June 2026 — group the Pending-stock / Ready-to-load lists by temple
+// so a CNC vendor sees all of one temple's slabs together instead of a
+// scattered list. Insertion order is preserved (a Map keeps first-seen
+// order), so the existing urgent-first / oldest-first server sort still
+// decides which temple appears first AND the slab order inside each group.
+function groupByTemple(jobs: CarvingJobLite[]): Array<[string, CarvingJobLite[]]> {
+  const groups = new Map<string, CarvingJobLite[]>();
+  for (const j of jobs) {
+    const key = j.slab?.temple?.trim() || "—";
+    const bucket = groups.get(key);
+    if (bucket) bucket.push(j);
+    else groups.set(key, [j]);
+  }
+  return [...groups.entries()];
+}
+
+function TempleGroupHeader({ temple, count }: { temple: string; count: number }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "baseline",
+        gap: 8,
+        marginTop: 6,
+        paddingBottom: 3,
+        borderBottom: "1px solid var(--border)",
+      }}
+    >
+      <span
+        style={{
+          fontSize: 11.5,
+          fontWeight: 800,
+          letterSpacing: "0.02em",
+          color: "var(--text)",
+          textTransform: "uppercase",
+        }}
+      >
+        🏛 {temple}
+      </span>
+      <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)" }}>
+        {count} slab{count === 1 ? "" : "s"}
+      </span>
+    </div>
+  );
+}
+
 // ── Main client component ───────────────────────────────────────────
 
 export function VendorCockpitClient({
@@ -1143,8 +1189,13 @@ export function VendorCockpitClient({
               <Empty text="No slabs awaiting transfer to your shade." />
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {pendingStock.map((job) => (
-                  <PendingStockRow key={job.id} job={job} />
+                {groupByTemple(pendingStock).map(([temple, jobs]) => (
+                  <div key={temple} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <TempleGroupHeader temple={temple} count={jobs.length} />
+                    {jobs.map((job) => (
+                      <PendingStockRow key={job.id} job={job} />
+                    ))}
+                  </div>
                 ))}
               </div>
             ))}
@@ -1159,23 +1210,28 @@ export function VendorCockpitClient({
               />
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {readyToLoad.map((job) => (
-                  <QueueRow
-                    key={job.id}
-                    job={job}
-                    hasIdleMachine={totals.idle > 0}
-                    onLoad={() => {
-                      // Pick first idle machine as the default selection.
-                      // Close the peek so the LoadModal isn't stacked on
-                      // top of it.
-                      const firstIdle = machines.find((m) => m.status === "idle");
-                      if (firstIdle) {
-                        setLoadFor({ machine: firstIdle });
-                        setPeekOpen(null);
-                      }
-                    }}
-                    otherVendorsForTransfer={transferVendors}
-                  />
+                {groupByTemple(readyToLoad).map(([temple, jobs]) => (
+                  <div key={temple} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <TempleGroupHeader temple={temple} count={jobs.length} />
+                    {jobs.map((job) => (
+                      <QueueRow
+                        key={job.id}
+                        job={job}
+                        hasIdleMachine={totals.idle > 0}
+                        onLoad={() => {
+                          // Pick first idle machine as the default selection.
+                          // Close the peek so the LoadModal isn't stacked on
+                          // top of it.
+                          const firstIdle = machines.find((m) => m.status === "idle");
+                          if (firstIdle) {
+                            setLoadFor({ machine: firstIdle });
+                            setPeekOpen(null);
+                          }
+                        }}
+                        otherVendorsForTransfer={transferVendors}
+                      />
+                    ))}
+                  </div>
                 ))}
               </div>
             ))}
