@@ -31,19 +31,20 @@ function MiniBar({ counts, total, track = "rgba(0,0,0,0.08)" }: { counts: Record
   );
 }
 
-/** Stage colour key — shown at the top of EVERY card level so the colour
- *  scheme (used on the mini bars, stage chips, slab cards and the slab
- *  table) is self-explanatory anywhere in the browser. */
-function StageLegend() {
+/** Present-stage count chips for the current node — shown at the top of every
+ *  intermediate card level (Category 1/2 · Label · Description), mirroring the
+ *  slab-level chips. Only the stages that actually occur appear, each coloured,
+ *  labelled and numbered — so the colours stay self-explanatory without a full
+ *  static legend (and no chip for a stage that isn't present here). */
+function StageCountChips({ counts, total }: { counts: Record<StageBucket, number>; total: number }) {
+  const present = STAGE_ORDER.filter((s) => counts[s] > 0);
+  if (present.length === 0) return null;
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "5px 14px", marginBottom: 16, animation: "tcFade .3s ease" }}>
-      <span style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Colour key</span>
-      {STAGE_ORDER.map((s) => (
-        <span key={s} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-          <span style={{ width: 11, height: 11, borderRadius: 3, background: STAGE_META[s].color, flexShrink: 0 }} />
-          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text)" }}>{STAGE_META[s].label}</span>
-        </span>
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 16, animation: "tcFade .3s ease" }}>
+      {present.map((s) => (
+        <span key={s} style={{ fontSize: 11.5, fontWeight: 800, color: "#fff", background: STAGE_META[s].color, borderRadius: 999, padding: "3px 11px" }}>{counts[s]} {STAGE_META[s].label}</span>
       ))}
+      <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)" }}>· {total} total</span>
     </div>
   );
 }
@@ -383,9 +384,13 @@ export function TempleCardBrowser({
 
       {/* ── Body ── */}
       <div key={levelKey} style={{ flex: 1, overflowY: "auto", padding: "20px 22px 40px" }}>
-        {/* Colour key on every in-temple level (Category 1/2 · Label ·
-            Description · slabs) so the stage colours read the same everywhere. */}
-        {temple && <StageLegend />}
+        {/* Present-stage count chips for the current level (Category 1/2 ·
+            Label · Description) — only the stages that occur, with their
+            numbers, mirroring the slab-level chips. The leaf renders its own
+            chips inside SlabCardsGrid, so this is intermediate-levels only. */}
+        {temple && !isLeaf && (currentNode ?? tree) && (
+          <StageCountChips counts={(currentNode ?? tree)!.counts} total={(currentNode ?? tree)!.total} />
+        )}
         {!temple ? (
           /* ── Temple picker landing ── */
           <>
@@ -434,6 +439,7 @@ export function TempleCardBrowser({
           /* ── Leaf: the actual slabs ── */
           <SlabCardsGrid
             node={currentNode!}
+            title={[temple ?? "", ...path.map((n) => n.name)].filter(Boolean).join(" › ")}
             images={imagesByNode[currentNode!.id] ?? []}
             canSelect={canManageImages}
             selectMode={selectMode}
@@ -610,9 +616,10 @@ function crumbStyle(active: boolean): CSSProperties {
 }
 
 function SlabCardsGrid({
-  node, images, canSelect, selectMode, selectedIds, onSingleMove, onEnterSelect, onToggle, onViewImages,
+  node, title, images, canSelect, selectMode, selectedIds, onSingleMove, onEnterSelect, onToggle, onViewImages,
 }: {
   node: TempleTreeNode;
+  title: string;
   images: ComponentImage[];
   canSelect: boolean;
   selectMode: boolean;
@@ -672,7 +679,7 @@ function SlabCardsGrid({
           </div>
         </>
       ) : (
-        <SlabTable slabs={node.slabs} canEdit={canSelect} />
+        <SlabTable slabs={node.slabs} canEdit={canSelect} title={title} />
       )}
     </div>
   );
@@ -779,10 +786,45 @@ function BigSlabCard({
 // (same colour scheme as the cards/chips/legend) and ordered pending →
 // dispatched. Only the Remark is writable (gated by canEdit; the server
 // action enforces the write roles too).
-function SlabTable({ slabs, canEdit }: { slabs: TempleSlabCard[]; canEdit: boolean }) {
+function SlabTable({ slabs, canEdit, title }: { slabs: TempleSlabCard[]; canEdit: boolean; title: string }) {
   const rows = [...slabs].sort(
     (a, b) => STAGE_ORDER.indexOf(bucketOf(a.status)) - STAGE_ORDER.indexOf(bucketOf(b.status)),
   );
+  const [busy, startExport] = useTransition();
+  function onExport() {
+    const data = rows.map((s) => {
+      const b = bucketOf(s.status);
+      return {
+        code: s.id,
+        cat1: s.section || "",
+        cat2: s.element || "",
+        label: s.label || "",
+        description: s.description || "",
+        additional: s.additional || "",
+        dims: `${s.l}"×${s.w}"×${s.t}" · ${calcCft(s.l, s.w, s.t).toFixed(2)} CFT`,
+        stage: STAGE_META[b].label,
+        color: STAGE_META[b].color,
+        remark: s.remark ?? "",
+      };
+    });
+    startExport(async () => {
+      try {
+        const res = await fetch("/api/temples/slab-table.xlsx", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title, rows: data }),
+        });
+        if (!res.ok) return;
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${(title || "slab-list").replace(/[^\w]+/g, "-").slice(0, 60) || "slab-list"}.xlsx`;
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+      } catch { /* ignore — user can retry */ }
+    });
+  }
   const th: CSSProperties = {
     padding: "8px 10px", fontSize: 10.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase",
     letterSpacing: "0.04em", textAlign: "left", whiteSpace: "nowrap", borderBottom: "1px solid var(--border)",
@@ -790,8 +832,14 @@ function SlabTable({ slabs, canEdit }: { slabs: TempleSlabCard[]; canEdit: boole
   };
   const td: CSSProperties = { padding: "7px 10px", fontSize: 12, color: "var(--text)", verticalAlign: "middle", borderBottom: "1px solid var(--border)" };
   return (
-    <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: 10, animation: "tcFade .3s ease" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1000 }}>
+    <div style={{ animation: "tcFade .3s ease" }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+        <button type="button" onClick={onExport} disabled={busy} title="Download this list as an Excel file (landscape, fits the page width)" style={{ fontSize: 12, fontWeight: 800, padding: "6px 14px", borderRadius: 8, border: "1px solid var(--border)", background: busy ? "var(--border)" : "#15803d", color: "#fff", cursor: busy ? "wait" : "pointer" }}>
+          {busy ? "Preparing…" : "⬇ Export Excel"}
+        </button>
+      </div>
+      <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: 10 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1000 }}>
         <thead>
           <tr>
             <th style={th}>Code</th>
@@ -831,6 +879,7 @@ function SlabTable({ slabs, canEdit }: { slabs: TempleSlabCard[]; canEdit: boole
           })}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }
