@@ -2099,10 +2099,11 @@ async function sendVendorPaymentWhatsApp(
         header_1: { type: "document", value: pdfUrl, filename: `Payment-Voucher-${billRowAny.token}.pdf` },
         body_1: { type: "text", value: vendor.name },
         body_2: { type: "text", value: paidAmount.toLocaleString("en-IN") },
-        body_3: { type: "text", value: billRowAny.token },
-        body_4: { type: "text", value: paidDateLabel },
-        body_5: { type: "text", value: (method ?? "").toUpperCase() || "-" },
-        body_6: { type: "text", value: reference || "-" },
+        body_3: { type: "text", value: billRowAny.vendor_bill_no || "-" }, // vendor's own bill no
+        body_4: { type: "text", value: billRowAny.token },                  // our MTCPL token / ref
+        body_5: { type: "text", value: paidDateLabel },
+        body_6: { type: "text", value: (method ?? "").toUpperCase() || "-" },
+        body_7: { type: "text", value: reference || "-" },
       },
     });
 
