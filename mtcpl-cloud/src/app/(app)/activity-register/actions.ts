@@ -78,6 +78,17 @@ function isManager(role: string): boolean {
     role === "carving_head"
   );
 }
+
+const EDIT_WINDOW_MS = 10 * 60 * 1000;
+const LOCK_MSG =
+  "Entries can only be edited or deleted within 10 minutes of being added. Ask the owner or developer.";
+/** Daksh June 2026 — an entry locks to non-owner/dev edits 10 minutes after
+ *  it was created. Owner + developer are never locked out. */
+function lockedForUser(role: string, createdAt: string | null | undefined): boolean {
+  if (role === "owner" || role === "developer") return false;
+  if (!createdAt) return true;
+  return Date.now() - new Date(createdAt).getTime() >= EDIT_WINDOW_MS;
+}
 function homeToast(msg: string): string {
   return `${ROUTE}?toast=${encodeURIComponent(msg)}`;
 }
@@ -258,6 +269,15 @@ export async function updateActivityEntryAction(formData: FormData) {
   if (!activity) redirect(siteToast(siteId, "Activity is required."));
 
   const admin = createAdminSupabaseClient();
+  // Daksh June 2026 — enforce the 10-minute edit window (owner/dev exempt).
+  const { data: lockRow } = await admin
+    .from("activity_register")
+    .select("created_at")
+    .eq("id", id)
+    .maybeSingle();
+  if (lockedForUser(profile.role, (lockRow as { created_at?: string } | null)?.created_at ?? null)) {
+    redirect(siteToast(siteId, LOCK_MSG));
+  }
   // "Person" (who created the entry) is preserved on edit — not overwritten.
   const update: Record<string, unknown> = {
     activity,
@@ -314,11 +334,15 @@ export async function deleteActivityEntryAction(formData: FormData) {
   const admin = createAdminSupabaseClient();
   const { data: cur } = await admin
     .from("activity_register")
-    .select("proof_path, entry_code, site_id")
+    .select("proof_path, entry_code, site_id, created_at")
     .eq("id", id)
     .maybeSingle();
   const path = (cur as { proof_path?: string | null } | null)?.proof_path ?? null;
   const backSite = siteId || ((cur as { site_id?: string | null } | null)?.site_id ?? "");
+  // Daksh June 2026 — 10-minute delete window (owner/dev exempt).
+  if (lockedForUser(profile.role, (cur as { created_at?: string } | null)?.created_at ?? null)) {
+    redirect(backSite ? siteToast(backSite, LOCK_MSG) : homeToast(LOCK_MSG));
+  }
   if (path) {
     try {
       await admin.storage.from(PROOF_BUCKET).remove([path]);

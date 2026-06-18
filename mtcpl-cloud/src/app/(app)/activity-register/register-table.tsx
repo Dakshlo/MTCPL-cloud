@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   createActivityEntryAction,
   updateActivityEntryAction,
@@ -18,6 +18,9 @@ export type RegisterEntry = {
   concernPerson: string;
   reference: string;
   hasProof: boolean;
+  /** Mig 101 — entry creation time. Entries lock to non-owner/dev edits
+   *  10 minutes after this. */
+  createdAt: string;
 };
 
 type Site = { id: string; name: string; nextCode: string };
@@ -57,15 +60,27 @@ export function ActivityRegisterTable({
   site,
   entries,
   toast,
+  privileged,
 }: {
   site: Site;
   entries: RegisterEntry[];
   toast: string | null;
+  /** Owner / developer — can edit & delete entries at any time (no lock). */
+  privileged: boolean;
 }) {
   const [q, setQ] = useState("");
   const [modal, setModal] = useState<
     null | { mode: "new" } | { mode: "edit"; entry: RegisterEntry }
   >(null);
+  // Daksh June 2026 — an entry can be edited/deleted only within 10 minutes
+  // of being added; after that only owner/developer can. `now` ticks every
+  // second so the buttons + countdown update live.
+  const EDIT_WINDOW_MS = 10 * 60 * 1000;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -144,23 +159,50 @@ export function ActivityRegisterTable({
                     )}
                   </td>
                   <td style={{ padding: "9px 12px", whiteSpace: "nowrap", textAlign: "right" }}>
-                    <button
-                      type="button"
-                      onClick={() => setModal({ mode: "edit", entry: e })}
-                      style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 7, padding: "4px 10px", cursor: "pointer", marginRight: 6 }}
-                    >
-                      Edit
-                    </button>
-                    <form action={deleteActivityEntryAction} style={{ display: "inline" }}>
-                      <input type="hidden" name="id" value={e.id} />
-                      <input type="hidden" name="site_id" value={site.id} />
-                      <ConfirmButton
-                        message={`Delete entry ${e.code}? This also deletes its proof file and cannot be undone.`}
-                        style={{ fontSize: 12, fontWeight: 700, color: "#b91c1c", background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.3)", borderRadius: 7, padding: "4px 10px", cursor: "pointer" }}
-                      >
-                        Delete
-                      </ConfirmButton>
-                    </form>
+                    {(() => {
+                      const ageMs = e.createdAt ? now - new Date(e.createdAt).getTime() : Infinity;
+                      const withinWindow = ageMs < EDIT_WINDOW_MS;
+                      const canModify = privileged || withinWindow;
+                      if (!canModify) {
+                        return (
+                          <span
+                            title="Entries lock 10 minutes after they're added. Only the owner or developer can change them now."
+                            style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)" }}
+                          >
+                            🔒 Locked
+                          </span>
+                        );
+                      }
+                      const remainMs = Math.max(0, EDIT_WINDOW_MS - ageMs);
+                      const mm = Math.floor(remainMs / 60000);
+                      const ss = Math.floor((remainMs % 60000) / 1000);
+                      return (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setModal({ mode: "edit", entry: e })}
+                            style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 7, padding: "4px 10px", cursor: "pointer", marginRight: 6 }}
+                          >
+                            Edit
+                          </button>
+                          <form action={deleteActivityEntryAction} style={{ display: "inline" }}>
+                            <input type="hidden" name="id" value={e.id} />
+                            <input type="hidden" name="site_id" value={site.id} />
+                            <ConfirmButton
+                              message={`Delete entry ${e.code}? This also deletes its proof file and cannot be undone.`}
+                              style={{ fontSize: 12, fontWeight: 700, color: "#b91c1c", background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.3)", borderRadius: 7, padding: "4px 10px", cursor: "pointer" }}
+                            >
+                              Delete
+                            </ConfirmButton>
+                          </form>
+                          {!privileged && (
+                            <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 3 }}>
+                              🔓 locks in {mm}:{String(ss).padStart(2, "0")}
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
                   </td>
                 </tr>
               ))

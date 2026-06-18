@@ -3763,6 +3763,7 @@ const MAINTENANCE_REASONS = new Set([
   "electrical",
   "coolant",
   "scheduled_service",
+  "pending_program",
   "other",
 ]);
 

@@ -76,6 +76,7 @@ export default async function ActivitySitePage({
     concernPerson: r.concern_person ?? "",
     reference: r.reference ?? "",
     hasProof: !!r.proof_path,
+    createdAt: r.created_at ?? "",
   }));
 
   return (
@@ -94,6 +95,7 @@ export default async function ActivitySitePage({
         site={{ id: site.id, name: site.name, nextCode }}
         entries={entries}
         toast={sp?.toast ?? null}
+        privileged={profile.role === "owner" || profile.role === "developer"}
       />
     </div>
   );

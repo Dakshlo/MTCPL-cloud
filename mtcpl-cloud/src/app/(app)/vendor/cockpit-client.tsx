@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
   loadSlabOnMachineAction,
@@ -285,12 +285,83 @@ const STATUS_TINT: Record<
   },
 };
 
+// Daksh June 2026 — "Pending slab programming" is flagged through the same
+// maintenance modal, but it is NOT a breakdown: the machine is fine, it is
+// just waiting for the CNC program file. So it renders in a calm INDIGO
+// (not alarming red) with a "No programming file" banner instead of the red
+// DOWN treatment. Detected by maintenance_reason starting with this value.
+const PROG_PENDING_REASON = "pending_program";
+const PROG_TINT = {
+  bg: "linear-gradient(180deg, rgba(79,70,229,0.12) 0%, rgba(79,70,229,0.04) 100%)",
+  bgAccent: "rgba(79,70,229,0.18)",
+  border: "rgba(79,70,229,0.55)",
+  accent: "#4f46e5",
+  fg: "#4338ca",
+  label: "NO PROGRAM",
+  icon: "🗂",
+};
+
+// Small pill style for the recently-completed tiles' status badges.
+const pill = (bg: string, fg: string, bd: string) => ({
+  padding: "3px 8px",
+  borderRadius: 999,
+  background: bg,
+  color: fg,
+  border: `1px solid ${bd}`,
+});
+
+// One launcher tile in the (split) "Recently completed" row.
+function RecentTile({ label, count, accent, badges, blink, onClick }: {
+  label: string;
+  count: number;
+  accent: string;
+  badges: ReactNode;
+  blink?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        flex: "1 1 220px",
+        minWidth: 200,
+        padding: "14px 16px",
+        background: "var(--surface)",
+        border: "1px solid var(--border)",
+        borderRadius: 12,
+        cursor: "pointer",
+        color: "inherit",
+        textAlign: "left",
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+        transition: "transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease",
+        touchAction: "manipulation",
+        boxShadow: "0 1px 0 rgba(0,0,0,0.04)",
+        ...(blink
+          ? { outline: "3px solid rgba(180,83,9,0.9)", outlineOffset: 2, animation: "mtcpl-pending-blink 1s ease-in-out infinite" }
+          : {}),
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 4px 14px rgba(0,0,0,0.08)"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "0 1px 0 rgba(0,0,0,0.04)"; }}
+    >
+      <div style={{ fontSize: 11, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700 }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 800, color: accent, lineHeight: 1.1, fontFeatureSettings: '"tnum"' }}>
+        {count} slab{count === 1 ? "" : "s"}
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 11, fontWeight: 700 }}>{badges}</div>
+    </button>
+  );
+}
+
 const MAINTENANCE_REASONS: Array<{ value: string; label: string }> = [
   { value: "tool_change", label: "Tool change" },
   { value: "spindle_issue", label: "Spindle issue" },
   { value: "electrical", label: "Electrical" },
   { value: "coolant", label: "Coolant / cleaning" },
   { value: "scheduled_service", label: "Scheduled service" },
+  { value: "pending_program", label: "Pending slab programming" },
   { value: "other", label: "Other (write detail below)" },
 ];
 
@@ -1029,166 +1100,52 @@ export function VendorCockpitClient({
           status breakdown so they see "X approved · Y in review · Z
           needs rework" at a glance and tap in for the full list. */}
       {recent.length > 0 && (() => {
-        let approved = 0;
-        let rejected = 0;
-        let inReview = 0;
-        for (const r of recent) {
+        // Daksh June 2026 — split into TWO tiles: Pending approval vs
+        // Completed (approved). Both open the recent peek (which is itself
+        // split into the same two sections).
+        const approvedList = recent.filter((r) => r.review_approved_at);
+        const pendingList = recent.filter((r) => !r.review_approved_at);
+        let inReview = 0,
+          rejected = 0;
+        for (const r of pendingList) {
           if (r.review_notes) rejected++;
-          else if (r.review_approved_at) approved++;
           else inReview++;
         }
-        // Daksh June 2026 — blink the tile when any not-yet-approved slab has
-        // been waiting > 24h for the team's review.
         const DAY_MS = 24 * 60 * 60 * 1000;
-        const pendingStale = recent.some(
-          (r) =>
-            !r.review_approved_at &&
-            r.completed_at &&
-            now - new Date(r.completed_at).getTime() > DAY_MS,
+        const pendingStale = pendingList.some(
+          (r) => r.completed_at && now - new Date(r.completed_at).getTime() > DAY_MS,
         );
         return (
-          <div style={{ marginTop: 18 }}>
+          <div style={{ marginTop: 18, display: "flex", gap: 12, flexWrap: "wrap" }}>
             <style>{`@keyframes mtcpl-pending-blink {0%,100%{outline-color:rgba(180,83,9,0.9)}50%{outline-color:rgba(180,83,9,0.05)}}`}</style>
-            <button
-              type="button"
+            <RecentTile
+              label="Pending approval"
+              count={pendingList.length}
+              accent="#b45309"
+              blink={pendingStale}
               onClick={() => setPeekOpen("recent")}
-              title="Open the full list of recently completed slabs"
-              style={{
-                width: "100%",
-                padding: "14px 16px",
-                background: "var(--surface)",
-                border: "1px solid var(--border)",
-                borderRadius: 12,
-                cursor: "pointer",
-                color: "inherit",
-                textAlign: "left",
-                display: "flex",
-                alignItems: "center",
-                gap: 14,
-                flexWrap: "wrap",
-                transition: "transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease",
-                touchAction: "manipulation",
-                boxShadow: "0 1px 0 rgba(0,0,0,0.04)",
-                ...(pendingStale
-                  ? {
-                      outline: "3px solid rgba(180,83,9,0.9)",
-                      outlineOffset: 2,
-                      animation: "mtcpl-pending-blink 1s ease-in-out infinite",
-                    }
-                  : {}),
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.transform = "translateY(-1px)";
-                e.currentTarget.style.boxShadow = "0 4px 14px rgba(0,0,0,0.08)";
-                e.currentTarget.style.borderColor = "rgba(120,120,120,0.55)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.transform = "translateY(0)";
-                e.currentTarget.style.boxShadow = "0 1px 0 rgba(0,0,0,0.04)";
-                e.currentTarget.style.borderColor = "var(--border)";
-              }}
-            >
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: "var(--muted)",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.08em",
-                    fontWeight: 700,
-                  }}
-                >
-                  Recently completed
-                </div>
-                <div
-                  style={{
-                    fontSize: 22,
-                    fontWeight: 800,
-                    color: "var(--text)",
-                    lineHeight: 1.1,
-                    marginTop: 4,
-                    fontFeatureSettings: '"tnum"',
-                  }}
-                >
-                  {recent.length} slab{recent.length === 1 ? "" : "s"}
-                </div>
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 10,
-                    marginTop: 8,
-                    flexWrap: "wrap",
-                    fontSize: 11,
-                    fontWeight: 700,
-                  }}
-                >
-                  {approved > 0 && (
-                    <span
-                      style={{
-                        padding: "3px 8px",
-                        borderRadius: 999,
-                        background: "rgba(22,163,74,0.15)",
-                        color: "#15803d",
-                        border: "1px solid rgba(22,163,74,0.4)",
-                      }}
-                    >
-                      ✔ {approved} approved
-                    </span>
-                  )}
+              badges={
+                <>
                   {inReview > 0 && (
-                    <span
-                      style={{
-                        padding: "3px 8px",
-                        borderRadius: 999,
-                        background: "rgba(217,119,6,0.15)",
-                        color: "#b45309",
-                        border: "1px solid rgba(217,119,6,0.4)",
-                      }}
-                    >
-                      ⏳ {inReview} in review
-                    </span>
+                    <span style={pill("rgba(217,119,6,0.15)", "#b45309", "rgba(217,119,6,0.4)")}>⏳ {inReview} in review</span>
                   )}
                   {rejected > 0 && (
-                    <span
-                      style={{
-                        padding: "3px 8px",
-                        borderRadius: 999,
-                        background: "rgba(220,38,38,0.15)",
-                        color: "#b91c1c",
-                        border: "1px solid rgba(220,38,38,0.45)",
-                      }}
-                    >
-                      ✗ {rejected} needs rework
-                    </span>
+                    <span style={pill("rgba(220,38,38,0.15)", "#b91c1c", "rgba(220,38,38,0.45)")}>✗ {rejected} needs rework</span>
                   )}
                   {pendingStale && (
-                    <span
-                      style={{
-                        padding: "3px 8px",
-                        borderRadius: 999,
-                        background: "rgba(220,38,38,0.15)",
-                        color: "#b91c1c",
-                        border: "1px solid rgba(220,38,38,0.45)",
-                      }}
-                    >
-                      ⚠ waiting &gt; 24h
-                    </span>
+                    <span style={pill("rgba(220,38,38,0.15)", "#b91c1c", "rgba(220,38,38,0.45)")}>⚠ waiting &gt; 24h</span>
                   )}
-                </div>
-              </div>
-              <span
-                aria-hidden
-                style={{
-                  fontSize: 24,
-                  fontWeight: 700,
-                  color: "var(--muted)",
-                  flexShrink: 0,
-                  lineHeight: 1,
-                }}
-              >
-                ›
-              </span>
-            </button>
+                  {pendingList.length === 0 && <span style={{ color: "var(--muted)" }}>All clear ✓</span>}
+                </>
+              }
+            />
+            <RecentTile
+              label="Completed (approved)"
+              count={approvedList.length}
+              accent="#15803d"
+              onClick={() => setPeekOpen("recent")}
+              badges={<span style={pill("rgba(22,163,74,0.15)", "#15803d", "rgba(22,163,74,0.4)")}>✔ signed off by team</span>}
+            />
           </div>
         );
       })()}
@@ -4397,7 +4354,19 @@ function MachineCard({
    *  running cards so the operator sees a stone-matched preview. */
   stoneTypes: StoneTypeDef[];
 }) {
-  const tint = STATUS_TINT[machine.status];
+  // Daksh June 2026 — "pending slab programming" is flagged via the
+  // maintenance modal but renders calm INDIGO (not alarming red): the machine
+  // is fine, it's just waiting for the CNC program file.
+  const isProgPending =
+    machine.status === "maintenance" &&
+    (machine.maintenance_reason ?? "").startsWith(PROG_PENDING_REASON);
+  const progDetail = isProgPending
+    ? (machine.maintenance_reason ?? "")
+        .slice(PROG_PENDING_REASON.length)
+        .replace(/^:\s*/, "")
+        .trim()
+    : "";
+  const tint = isProgPending ? PROG_TINT : STATUS_TINT[machine.status];
   // Primary job — first one loaded. Used for the timer + the
   // top-level complete-unload action. Second job (if 2-head pair)
   // is rendered as an extra slab block below.
@@ -4462,7 +4431,9 @@ function MachineCard({
           machine.status === "carving"
             ? "0 4px 14px rgba(22,163,74,0.18)"
             : machine.status === "maintenance"
-              ? "0 4px 14px rgba(220,38,38,0.18)"
+              ? isProgPending
+                ? "0 4px 14px rgba(79,70,229,0.18)"
+                : "0 4px 14px rgba(220,38,38,0.18)"
               : "none",
       }}
     >
@@ -5036,39 +5007,67 @@ function MachineCard({
                 })}
               </div>
             )}
-            <div
-              style={{
-                padding: "10px 12px",
-                background: "rgba(255,255,255,0.85)",
-                border: "1px solid rgba(220,38,38,0.25)",
-                borderRadius: 6,
-              }}
-            >
-              {downtimeLabel && (
-                <div
-                  style={{
-                    fontSize: 14,
-                    fontWeight: 800,
-                    color: "#b91c1c",
-                    fontFamily: "ui-monospace, monospace",
-                    marginBottom: 6,
-                  }}
-                >
-                  ⏱ {downtimeLabel}
+            {isProgPending ? (
+              <div
+                style={{
+                  padding: "10px 12px",
+                  background: "rgba(79,70,229,0.08)",
+                  border: "1px solid rgba(79,70,229,0.35)",
+                  borderRadius: 6,
+                }}
+              >
+                <div style={{ fontSize: 13, fontWeight: 800, color: "#4338ca" }}>
+                  🗂 No programming file
                 </div>
-              )}
-              <div style={{ fontSize: 10, fontWeight: 700, color: "#b91c1c", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                Reason
+                <div style={{ fontSize: 11.5, color: "var(--text)", marginTop: 3, lineHeight: 1.4 }}>
+                  Waiting for the slab programming file before this machine can run.
+                </div>
+                {progDetail && (
+                  <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4, fontStyle: "italic" }}>
+                    “{progDetail}”
+                  </div>
+                )}
+                {downtimeLabel && (
+                  <div style={{ fontSize: 10.5, color: "#4338ca", marginTop: 6, fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>
+                    ⏱ {downtimeLabel.replace("Down for", "Waiting")}
+                  </div>
+                )}
               </div>
-              <div style={{ fontSize: 12, color: "var(--text)", marginTop: 2 }}>
-                {machine.maintenance_reason ?? "—"}
-              </div>
-            {machine.maintenance_flagged_at && (
-              <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 4 }}>
-                Flagged {new Date(machine.maintenance_flagged_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+            ) : (
+              <div
+                style={{
+                  padding: "10px 12px",
+                  background: "rgba(255,255,255,0.85)",
+                  border: "1px solid rgba(220,38,38,0.25)",
+                  borderRadius: 6,
+                }}
+              >
+                {downtimeLabel && (
+                  <div
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 800,
+                      color: "#b91c1c",
+                      fontFamily: "ui-monospace, monospace",
+                      marginBottom: 6,
+                    }}
+                  >
+                    ⏱ {downtimeLabel}
+                  </div>
+                )}
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#b91c1c", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                  Reason
+                </div>
+                <div style={{ fontSize: 12, color: "var(--text)", marginTop: 2 }}>
+                  {machine.maintenance_reason ?? "—"}
+                </div>
+                {machine.maintenance_flagged_at && (
+                  <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 4 }}>
+                    Flagged {new Date(machine.maintenance_flagged_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                  </div>
+                )}
               </div>
             )}
-          </div>
           {/* Daksh June 2026 — machines downed by the global power cut
               can ONLY be resumed by the "Power's back — resume all"
               button at the top (so they all come back together). Hide
@@ -5091,19 +5090,19 @@ function MachineCard({
             <form
               action={resolveMaintenanceAction}
               onSubmit={(e) => {
-                if (!confirm(`Mark ${machine.machine_code} as back online?`)) {
+                if (!confirm(isProgPending ? `Mark ${machine.machine_code}: program loaded and ready to run?` : `Mark ${machine.machine_code} as back online?`)) {
                   e.preventDefault();
                 }
               }}
             >
-              <FormPendingOverlay label="Bringing back online…" />
+              <FormPendingOverlay label={isProgPending ? "Resuming…" : "Bringing back online…"} />
               <input type="hidden" name="cnc_machine_id" value={machine.id} />
               <button
                 type="submit"
                 className="primary-button"
                 style={{ fontSize: 13, padding: "10px 14px", fontWeight: 700, width: "100%" }}
               >
-                ✓ Back online
+                {isProgPending ? "✓ Program loaded — resume" : "✓ Back online"}
               </button>
             </form>
           )}
