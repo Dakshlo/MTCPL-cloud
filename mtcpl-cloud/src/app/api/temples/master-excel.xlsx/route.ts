@@ -8,10 +8,15 @@
 // (Category 1 › Category 2 › Label › Description › Additional). We render
 // NESTED GROUP BANDS — each path segment becomes an indented heading band,
 // HIGHLIGHTED by depth (a strong dark Category-1 band stepping down to
-// lighter tints) and wired as collapsible outline groups so a category can
-// be folded away. Slabs sit under their deepest band with Code · Dimensions ·
-// Stage · Check (blank) · Remark. Page setup is LANDSCAPE + fit-to-one-
-// page-wide so it prints across the page horizontally.
+// lighter tints, with a heavy rule above each Category-1 group) so the
+// category / label boundaries are obvious at a glance. Slabs sit under their
+// deepest band with Code · Dimensions · Stage · Check (blank) · Remark. Page
+// setup is LANDSCAPE + fit-to-one-page-wide so it prints across horizontally.
+//
+// NOTE: we deliberately do NOT set worksheet.properties.outlineProperties.
+// ExcelJS would then emit <outlinePr> AFTER <pageSetUpPr> inside <sheetPr>,
+// but the OOXML schema (CT_SheetPr) requires outlinePr BEFORE pageSetUpPr —
+// the wrong order makes Excel refuse to open the file ("unreadable content").
 //
 // Items arrive pre-sorted (by path, then stage, then code), so we just walk
 // them and emit a band wherever the path prefix changes.
@@ -47,6 +52,13 @@ function solidArgb(hex: string): string | null {
   const m = /^#?([0-9a-fA-F]{6})$/.exec((hex || "").trim());
   return m ? `FF${m[1].toUpperCase()}` : null;
 }
+// Strip characters illegal in XML 1.0 (C0 controls except tab/newline/CR) so a
+// stray control char pasted into a free-text remark or label can never corrupt
+// the workbook ("found unreadable content").
+function xmlSafe(v: unknown): string {
+  // eslint-disable-next-line no-control-regex
+  return String(v ?? "").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -56,7 +68,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = (await req.json().catch(() => null)) as { title?: string; items?: Item[] } | null;
-  const title = String(body?.title || "Master Excel");
+  const title = xmlSafe(body?.title || "Master Excel");
   const items = Array.isArray(body?.items) ? body!.items! : [];
 
   const wb = new ExcelJS.Workbook();
@@ -70,9 +82,6 @@ export async function POST(req: NextRequest) {
     },
     views: [{ state: "frozen", ySplit: 2 }],
   });
-  // Group bands sit ABOVE their rows, so the +/- collapse control lives on the
-  // category heading — collapse a Category 1 band to fold its whole group away.
-  ws.properties.outlineProperties = { summaryBelow: false, summaryRight: false };
   WIDTHS.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
 
   // Row 1 — small-font title.
@@ -103,8 +112,7 @@ export async function POST(req: NextRequest) {
     for (let d = common; d < it.path.length; d += 1) {
       const row = ws.getRow(r);
       row.height = pick(BAND_HEIGHT, d);
-      row.outlineLevel = d;
-      row.getCell(1).value = it.path[d];
+      row.getCell(1).value = xmlSafe(it.path[d]);
       row.getCell(1).alignment = { vertical: "middle", indent: d };
       row.getCell(1).font = { bold: true, size: pick(BAND_SIZE, d), color: { argb: pick(BAND_TEXT, d) } };
       const fill = pick(BAND_FILL, d);
@@ -121,15 +129,14 @@ export async function POST(req: NextRequest) {
     }
     // The slab row, indented one past its deepest band.
     const row = ws.getRow(r);
-    row.outlineLevel = it.path.length;
-    row.getCell(1).value = it.code;
+    row.getCell(1).value = xmlSafe(it.code);
     row.getCell(1).font = { name: "Consolas", size: 9, bold: true };
     row.getCell(1).alignment = { vertical: "middle", indent: it.path.length };
-    row.getCell(2).value = it.dims;
+    row.getCell(2).value = xmlSafe(it.dims);
     row.getCell(2).font = { name: "Consolas", size: 9 };
-    row.getCell(3).value = it.stage;
+    row.getCell(3).value = xmlSafe(it.stage);
     row.getCell(4).value = "";
-    row.getCell(5).value = it.remark;
+    row.getCell(5).value = xmlSafe(it.remark);
     row.getCell(5).font = { size: 9 };
     const solid = solidArgb(it.color);
     if (solid) {
