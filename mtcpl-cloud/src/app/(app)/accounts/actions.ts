@@ -1575,7 +1575,7 @@ export async function markPaymentPaidAction(formData: FormData): Promise<ActionR
 
   const { data: payment, error: loadErr } = await supabase
     .from("bill_payments")
-    .select("id, status, bill_id, proposed_amount")
+    .select("id, status, bill_id, proposed_amount, hdfc_csv_downloaded_at")
     .eq("id", paymentId)
     .maybeSingle();
   if (loadErr) return { ok: false, error: loadErr.message };
@@ -1625,6 +1625,15 @@ export async function markPaymentPaidAction(formData: FormData): Promise<ActionR
   }
 
   const now = new Date().toISOString();
+  // Daksh (June 2026) — the official payment date is the day the HDFC
+  // bulk file was generated (= the day money actually moved), NOT the
+  // day the accountant clicks Mark Paid. They mark done a day later on
+  // purpose (buffer to confirm which of a 10-vendor batch cleared), so
+  // paid_at must anchor to hdfc_csv_downloaded_at. Cash / manual rescue
+  // payments have no bank file → fall back to now. The "marked done"
+  // moment is still preserved in updated_at + the payment_paid audit row.
+  const paidAt =
+    (payment as { hdfc_csv_downloaded_at?: string | null }).hdfc_csv_downloaded_at ?? now;
   const { error: updErr } = await supabase
     .from("bill_payments")
     .update({
@@ -1634,7 +1643,7 @@ export async function markPaymentPaidAction(formData: FormData): Promise<ActionR
       payment_reference: reference,
       payment_note: note,
       paid_by: profile.id,
-      paid_at: now,
+      paid_at: paidAt,
       updated_at: now,
     })
     .eq("id", paymentId)
@@ -1672,6 +1681,7 @@ export async function markPaymentPaidAction(formData: FormData): Promise<ActionR
         },
       ),
       sendVendorPaymentEmail(paymentId, payment.bill_id as string, profile.id),
+      sendVendorPaymentWhatsApp(paymentId, payment.bill_id as string, profile.id),
     ]);
   } catch (e) {
     // Cleanup failures must NOT bubble up — the payment is already
@@ -1965,6 +1975,148 @@ async function sendVendorPaymentEmail(
       );
     } catch {
       // logAudit itself can fail — final swallow.
+    }
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Vendor payment WhatsApp — sends after successful Mark Paid, ALONGSIDE
+// the email (email is unchanged). Same voucher PDF, delivered as a
+// WhatsApp document via an approved MSG91 template. Stays dormant until
+// MSG91_WA_VOUCHER_TEMPLATE is set in the environment, so it can ship
+// before the Meta template clears review. Mirrors sendVendorPaymentEmail's
+// fetch + PDF build. NEVER throws — outer caller is fire-and-forget.
+// ──────────────────────────────────────────────────────────────────
+async function sendVendorPaymentWhatsApp(
+  paymentId: string,
+  billId: string,
+  actorId: string,
+): Promise<void> {
+  try {
+    const templateName = process.env.MSG91_WA_VOUCHER_TEMPLATE;
+    if (!templateName || !process.env.MSG91_AUTH_KEY) {
+      await logAudit(actorId, "vendor_payment_wa_skipped", "bill_payment", paymentId, {
+        reason: !templateName
+          ? "MSG91_WA_VOUCHER_TEMPLATE not configured"
+          : "MSG91_AUTH_KEY not configured",
+      });
+      return;
+    }
+
+    const admin = createAdminSupabaseClient();
+    const [{ data: paymentRow }, { data: billRow }, { data: actorRow }] = await Promise.all([
+      admin
+        .from("bill_payments")
+        .select("paid_amount, payment_method, payment_reference, payment_note, paid_at, paid_by")
+        .eq("id", paymentId)
+        .maybeSingle(),
+      admin
+        .from("bills")
+        .select(
+          "token, vendor_bill_no, bill_date, description, cost_head, " +
+            "bill_vendors(id, name, phone, address, gstin, pan, bank_account, ifsc)",
+        )
+        .eq("id", billId)
+        .maybeSingle(),
+      admin.from("profiles").select("full_name").eq("id", actorId).maybeSingle(),
+    ]);
+    if (!paymentRow || !billRow) return;
+
+    type VendorEmbed = {
+      id: string; name: string; phone: string | null; address: string | null;
+      gstin: string | null; pan: string | null; bank_account: string | null; ifsc: string | null;
+    };
+    const billRowAny = billRow as unknown as {
+      token: string; vendor_bill_no: string; bill_date: string; description: string;
+      cost_head: string | null; bill_vendors: VendorEmbed | VendorEmbed[] | null;
+    };
+    const vendor = Array.isArray(billRowAny.bill_vendors)
+      ? billRowAny.bill_vendors[0]
+      : billRowAny.bill_vendors;
+
+    const { normalizeIndianMobile, sendWhatsAppTemplate } = await import("@/lib/wa-send");
+    const to = normalizeIndianMobile(vendor?.phone);
+    if (!vendor || !to) {
+      await logAudit(actorId, "vendor_payment_wa_skipped", "bill_payment", paymentId, {
+        reason: vendor ? `vendor phone missing/invalid: ${vendor.phone ?? ""}` : "vendor row missing",
+      });
+      return;
+    }
+
+    const { buildVoucherPdf } = await import("@/lib/voucher-pdf");
+    const { numberToIndianWords } = await import(
+      "@/app/(app)/accounts/payments/[id]/voucher/number-to-words"
+    );
+    const paidAmount = Number((paymentRow as { paid_amount?: number | null }).paid_amount ?? 0);
+    const amountInWords = numberToIndianWords(paidAmount);
+    const actorName = (actorRow as { full_name?: string | null } | null)?.full_name ?? null;
+    const company = {
+      name: "MATESHWARI TEMPLE CONSTRUCTION PVT LTD",
+      addressLines: ["Opposite Ajari Fatak", "Pindwara, Sirohi", "Rajasthan"],
+    };
+    const method = (paymentRow as { payment_method?: string | null }).payment_method ?? null;
+    const reference = (paymentRow as { payment_reference?: string | null }).payment_reference ?? null;
+    const paidAtIso = (paymentRow as { paid_at?: string | null }).paid_at ?? null;
+
+    // Same voucher the email attaches.
+    const pdfBytes = await buildVoucherPdf({
+      company,
+      vendor: {
+        name: vendor.name, address: vendor.address, gstin: vendor.gstin,
+        pan: vendor.pan, bankAccount: vendor.bank_account, ifsc: vendor.ifsc,
+      },
+      bill: {
+        token: billRowAny.token, vendorBillNo: billRowAny.vendor_bill_no,
+        billDate: billRowAny.bill_date, description: billRowAny.description, costHead: billRowAny.cost_head,
+      },
+      payment: {
+        paymentId, paidAmount, paymentMethod: method, paymentReference: reference,
+        paymentNote: (paymentRow as { payment_note?: string | null }).payment_note ?? null,
+        paidAt: paidAtIso, paidByName: actorName,
+      },
+      amountInWords,
+    });
+
+    // WhatsApp documents need a public URL — upload to the same public
+    // bucket the daily report uses (random path, unguessable).
+    const objectPath = `vouchers/${billRowAny.token}/${crypto.randomUUID()}.pdf`;
+    const { error: upErr } = await admin.storage
+      .from("whatsapp_reports")
+      .upload(objectPath, Buffer.from(pdfBytes), { contentType: "application/pdf", upsert: false });
+    if (upErr) throw new Error(`voucher upload failed: ${upErr.message}`);
+    const pdfUrl = admin.storage.from("whatsapp_reports").getPublicUrl(objectPath).data.publicUrl;
+
+    const paidDateLabel = paidAtIso
+      ? new Date(paidAtIso).toLocaleDateString("en-IN", {
+          timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric",
+        })
+      : "-";
+
+    await sendWhatsAppTemplate({
+      to: [to],
+      templateName,
+      components: {
+        header_1: { type: "document", value: pdfUrl, filename: `Payment-Voucher-${billRowAny.token}.pdf` },
+        body_1: { type: "text", value: vendor.name },
+        body_2: { type: "text", value: paidAmount.toLocaleString("en-IN") },
+        body_3: { type: "text", value: billRowAny.token },
+        body_4: { type: "text", value: paidDateLabel },
+        body_5: { type: "text", value: (method ?? "").toUpperCase() || "-" },
+        body_6: { type: "text", value: reference || "-" },
+      },
+    });
+
+    await logAudit(actorId, "vendor_payment_wa_sent", "bill_payment", paymentId, {
+      to, token: billRowAny.token, amount: paidAmount,
+    });
+  } catch (e) {
+    console.warn("[sendVendorPaymentWhatsApp] failed", e);
+    try {
+      await logAudit(actorId, "vendor_payment_wa_failed", "bill_payment", paymentId, {
+        error: e instanceof Error ? e.message : String(e),
+      });
+    } catch {
+      /* final swallow */
     }
   }
 }
