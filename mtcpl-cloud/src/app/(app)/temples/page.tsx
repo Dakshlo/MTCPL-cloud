@@ -28,7 +28,7 @@ type SlabRow = {
   stone: string | null; quality: string | null;
   length_ft: number | null; width_ft: number | null; thickness_ft: number | null;
   priority: boolean | null;
-  remark: string | null;
+  remark?: string | null;
   // Mig 132 — cancellation fields (cancelled slabs show in Temple View
   // with a replace / no-replace decision).
   cancel_reason: string | null;
@@ -132,15 +132,30 @@ export default async function TemplesPage() {
   async function fetchAll(): Promise<SlabRow[]> {
     const PAGE = 1000;
     const all: SlabRow[] = [];
+    // `remark` (mig 139) is selected only while the column exists. If the
+    // migration hasn't run yet we drop it and degrade gracefully (no remarks)
+    // instead of 500-ing the whole Temple View on a missing column.
+    let withRemark = true;
+    const cols = (r: boolean) =>
+      `id, label, description, temple, status, component_section, component_element, additional_description, stone, quality, length_ft, width_ft, thickness_ft, priority${r ? ", remark" : ""}, cancel_reason, cancel_resolution, replacement_slab_id, replacement_of`;
     for (let offset = 0; offset < SLAB_LIMIT; offset += PAGE) {
-      const { data, error } = await admin
+      let res = await admin
         .from("slab_requirements")
-        .select("id, label, description, temple, status, component_section, component_element, additional_description, stone, quality, length_ft, width_ft, thickness_ft, priority, remark, cancel_reason, cancel_resolution, replacement_slab_id, replacement_of")
+        .select(cols(withRemark))
         .order("temple", { ascending: true })
         .range(offset, offset + PAGE - 1);
-      if (error) throw new Error(error.message);
+      if (res.error && withRemark && /remark/i.test(res.error.message)) {
+        withRemark = false;
+        res = await admin
+          .from("slab_requirements")
+          .select(cols(false))
+          .order("temple", { ascending: true })
+          .range(offset, offset + PAGE - 1);
+      }
+      if (res.error) throw new Error(res.error.message);
+      const data = res.data;
       if (!data || data.length === 0) break;
-      all.push(...(data as SlabRow[]));
+      all.push(...(data as unknown as SlabRow[]));
       if (data.length < PAGE) break;
     }
     return all;
@@ -204,7 +219,7 @@ export default async function TemplesPage() {
       label,
       description,
       additional,
-      remark: s.remark,
+      remark: s.remark ?? null,
       // Mig 132 — cancellation context for the card UI.
       cancelReason: s.cancel_reason,
       cancelResolution: s.cancel_resolution,
