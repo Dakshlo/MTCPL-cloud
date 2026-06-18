@@ -452,235 +452,190 @@ export async function buildDailyReportData(): Promise<DailyReport> {
 
 export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
-  const page = pdf.addPage([595.28, 841.89]); // A4
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
-  const W = 595.28, H = 841.89, M = 40;
+
+  // Phone-screen page (portrait). The report is delivered on WhatsApp and
+  // read on a phone, so: single column, one big card per metric, large
+  // numbers — readable without pinch-zoom.
+  const W = 430, H = 932, M = 18, cw = W - 2 * M;
   const white = rgb(1, 1, 1), ink = rgb(0.12, 0.12, 0.12), muted = rgb(0.45, 0.43, 0.4), line = rgb(0.84, 0.81, 0.76), brown = rgb(0.486, 0.231, 0.047);
-  const paper = rgb(0.984, 0.980, 0.972);   // warm off-white page
-  const rowTint = rgb(0.953, 0.945, 0.929);  // alternating list row
+  const paper = rgb(0.984, 0.980, 0.972), rowTint = rgb(0.953, 0.945, 0.929);
   const COL = {
-    blue: rgb(0.145, 0.388, 0.922),
-    cyan: rgb(0.031, 0.569, 0.698),
-    amber: rgb(0.851, 0.467, 0.024),
-    green: rgb(0.086, 0.639, 0.290),
-    gold: rgb(0.706, 0.325, 0.035),
-    indigo: rgb(0.282, 0.255, 0.604),  // CNC costing
-    teal: rgb(0.086, 0.412, 0.388),    // cutter costing
+    blue: rgb(0.145, 0.388, 0.922), cyan: rgb(0.031, 0.569, 0.698), amber: rgb(0.851, 0.467, 0.024),
+    green: rgb(0.086, 0.639, 0.290), gold: rgb(0.706, 0.325, 0.035), indigo: rgb(0.282, 0.255, 0.604), teal: rgb(0.086, 0.412, 0.388),
   };
 
-  // Warm paper background — softer than stark white, makes the colour cards pop.
-  page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: paper });
+  let logo: Awaited<ReturnType<typeof pdf.embedPng>> | null = null;
+  try { logo = await pdf.embedPng(await readFile(path.join(process.cwd(), "public", "logo-dark.png"))); } catch { /* optional */ }
 
-  const text = (s: string, x: number, y: number, size: number, f = font, c = ink) => page.drawText(s, { x, y, size, font: f, color: c });
-  const right = (s: string, xr: number, y: number, size: number, f = font, c = ink) => page.drawText(s, { x: xr - f.widthOfTextAtSize(s, size), y, size, font: f, color: c });
-  const centre = (s: string, cx: number, y: number, size: number, f = font, c = ink) => page.drawText(s, { x: cx - f.widthOfTextAtSize(s, size) / 2, y, size, font: f, color: c });
-  const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 2)}..` : s);
-
-  // Rounded-rectangle card via an SVG path. (x, yTop) is the TOP-LEFT corner;
-  // the card extends downward. pdf-lib flips SVG-y, so yTop is the top edge.
   const roundPath = (w: number, h: number, r: number) => {
     const rr = Math.min(r, w / 2, h / 2);
     return `M ${rr} 0 L ${w - rr} 0 Q ${w} 0 ${w} ${rr} L ${w} ${h - rr} Q ${w} ${h} ${w - rr} ${h} L ${rr} ${h} Q 0 ${h} 0 ${h - rr} L 0 ${rr} Q 0 0 ${rr} 0 Z`;
   };
-  const card = (
-    x: number, yTop: number, w: number, h: number, r: number,
-    color: ReturnType<typeof rgb>,
-    o?: { opacity?: number; border?: ReturnType<typeof rgb>; borderWidth?: number },
-  ) => page.drawSvgPath(roundPath(w, h, r), {
-    x, y: yTop, color, opacity: o?.opacity,
-    borderColor: o?.border, borderWidth: o?.borderWidth,
+  const mk = (pg: ReturnType<typeof pdf.addPage>) => ({
+    pg,
+    t: (s: string, x: number, y: number, sz: number, f = font, c = ink) => pg.drawText(s, { x, y, size: sz, font: f, color: c }),
+    r: (s: string, xr: number, y: number, sz: number, f = font, c = ink) => pg.drawText(s, { x: xr - f.widthOfTextAtSize(s, sz), y, size: sz, font: f, color: c }),
+    ctr: (s: string, cx: number, y: number, sz: number, f = font, c = ink) => pg.drawText(s, { x: cx - f.widthOfTextAtSize(s, sz) / 2, y, size: sz, font: f, color: c }),
+    card: (x: number, yTop: number, w: number, h: number, rad: number, color: ReturnType<typeof rgb>, o?: { opacity?: number }) => pg.drawSvgPath(roundPath(w, h, rad), { x, y: yTop, color, opacity: o?.opacity }),
+    clip: (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s),
   });
 
-  let top = H - 30;
-
-  // ── Logo + header ──
-  try {
-    const png = await pdf.embedPng(await readFile(path.join(process.cwd(), "public", "logo-dark.png")));
-    const lh = 34, lw = (png.width / png.height) * lh;
-    page.drawImage(png, { x: M, y: top - lh + 2, width: lw, height: lh });
-  } catch { /* logo optional */ }
-  const tx = M + 86;
-  text("MATESHWARI TEMPLE CONSTRUCTION PVT LTD", tx, top - 6, 10, bold, ink);
-  text("Daily Work Report", tx, top - 24, 17, bold, ink);
-  text("Activity in the 24 hours ending 10 AM IST", tx, top - 38, 8, font, muted);
-  // Date in a rounded brand pill, with the comparison day beneath it.
-  const dpw = bold.widthOfTextAtSize(data.label, 12) + 24;
-  card(W - M - dpw, top + 3, dpw, 23, 6, brown);
-  centre(data.label, W - M - dpw / 2, top - 12, 12, bold, white);
-  right(`vs ${data.prevLabel}`, W - M, top - 30, 9, font, muted);
-  top -= 46;
-  // Two-tone rule: a bold gold band over a thin brown baseline.
-  page.drawLine({ start: { x: M, y: top }, end: { x: W - M, y: top }, thickness: 3, color: COL.gold });
-  page.drawLine({ start: { x: M, y: top - 2.4 }, end: { x: W - M, y: top - 2.4 }, thickness: 0.6, color: brown });
-  top -= 18;
-
-  // ── 4 big metric cards (2×2) ──
-  const gap = 12;
-  const bw = (W - 2 * M - gap) / 2;
-  const bh = 88;
-  const delta = (cur: number, prev: number) => { const d = cur - prev; return `Prev day ${prev}   (${d > 0 ? "+" : ""}${d})`; };
-  const box = (x: number, ytop: number, color: ReturnType<typeof rgb>, label: string, big: string, sub: string, compare: string) => {
-    card(x, ytop, bw, bh, 10, color);
-    // soft accent tab top-left for a designed feel
-    card(x + 13, ytop - 11, 26, 4, 2, white, { opacity: 0.5 });
-    text(label, x + 14, ytop - 26, 10, bold, white);
-    text(big, x + 13, ytop - 54, 26, bold, white);
-    text(sub, x + 14, ytop - 68, 9.5, font, white);
-    // translucent pill holding the vs-yesterday delta
-    const cw2 = font.widthOfTextAtSize(compare, 8) + 14;
-    card(x + 13, ytop - 70, cw2, 15, 5, white, { opacity: 0.16 });
-    text(compare, x + 20, ytop - 80, 8, font, white);
-  };
-  box(M, top, COL.blue, "BLOCKS ADDED", String(data.today.blocks.count), `${data.today.blocks.cft.toFixed(1)} CFT`, delta(data.today.blocks.count, data.prev.blocks.count));
-  box(M + bw + gap, top, COL.cyan, "CUTTING DONE", String(data.today.cutting.slabs), `${data.today.cutting.cft.toFixed(1)} CFT`, delta(data.today.cutting.slabs, data.prev.cutting.slabs));
-  top -= bh + gap;
-  box(M, top, COL.amber, "CARVING DONE", String(data.today.carving.slabs), `${data.today.carving.cft.toFixed(1)} CFT`, delta(data.today.carving.slabs, data.prev.carving.slabs));
-  box(M + bw + gap, top, COL.green, "DISPATCHED", String(data.today.dispatch.slabs), `${data.today.dispatch.cft.toFixed(1)} CFT  ·  ${data.today.dispatch.tonnes.toFixed(1)} T  ·  ${data.today.dispatch.trucks} trucks`, delta(data.today.dispatch.slabs, data.prev.dispatch.slabs));
-  top -= bh + 22;
-
-  // ── breakdown columns (blocks / cutting / carving / dispatch) ──
-  const cw = (W - 2 * M - 3 * gap) / 4;
-  const colX = [M, M + cw + gap, M + 2 * (cw + gap), M + 3 * (cw + gap)];
-  const colTop = top;
-  const drawList = (x: number, title: string, color: ReturnType<typeof rgb>, rows: Array<{ name: string; val: string }>) => {
-    let yy = colTop;
-    // colour bullet + title
-    page.drawRectangle({ x, y: yy - 1, width: 6, height: 6, color });
-    text(title, x + 9, yy, 7.5, bold, color); yy -= 6;
-    page.drawLine({ start: { x, y: yy }, end: { x: x + cw, y: yy }, thickness: 1, color }); yy -= 14;
-    if (rows.length === 0) { text("None", x, yy, 8.5, font, muted); yy -= 14; }
-    else rows.slice(0, 6).forEach((r, i) => {
-      if (i % 2 === 1) page.drawRectangle({ x: x - 3, y: yy - 3.5, width: cw + 6, height: 13.5, color: rowTint });
-      text(clip(r.name, 11), x, yy, 8.5, font, ink); right(r.val, x + cw, yy, 7.5, font, muted); yy -= 14;
-    });
-    return yy;
-  };
-  // Mig (Daksh) — blocks added by stone type (sandstone / marble / …) as the
-  // first column; the data was already aggregated but never shown.
-  const y0 = drawList(colX[0], "BLOCKS BY STONE", COL.blue, data.blocksByStone.map((r) => ({ name: r.stone, val: `${r.count} · ${r.cft.toFixed(0)} CFT` })));
-  const y1 = drawList(colX[1], "CUTTING BY STONE", COL.cyan, data.cuttingByStone.map((r) => ({ name: r.stone, val: `${r.slabs} · ${r.cft.toFixed(0)} CFT` })));
-  const y2 = drawList(colX[2], "CARVING BY VENDOR", COL.amber, data.carvingByVendor.map((r) => ({ name: r.vendor, val: `${r.slabs} · ${r.cft.toFixed(0)} CFT` })));
-  const y3 = drawList(colX[3], "DISPATCH BY TEMPLE", COL.green, data.dispatchByTemple.map((r) => ({ name: r.temple, val: `${r.slabs} · ${r.tonnes.toFixed(1)} T` })));
-  top = Math.min(y0, y1, y2, y3) - 16;
-
-  // ── CNC costing — month to date, combined "/unit" headline ──
-  if (data.cnc) {
-    const c = data.cnc;
-    const h = 96;
-    card(M, top, W - 2 * M, h, 10, COL.indigo);
-    text("CNC COSTING  ·  MONTH TO DATE", M + 15, top - 19, 10, bold, white);
-    right(`${c.label}   ·   ${c.days} of ${c.monthLen} days`, W - M - 15, top - 19, 9, font, white);
-    // spend so far (left) + combined cost-per-unit headline (right, matches the
-    // CNC costing page's "COST PER UNIT · SFT + CFT combined" card)
-    text(inr(c.totalCost), M + 14, top - 46, 20, bold, white);
-    text("spent so far", M + 18 + bold.widthOfTextAtSize(inr(c.totalCost), 20), top - 46, 9, font, white);
-    right(Number.isFinite(c.costPerCombined) ? `${inr2(c.costPerCombined)} / unit` : "-- / unit", W - M - 15, top - 44, 16, bold, white);
-    right("SFT + CFT combined", W - M - 15, top - 55, 7.5, font, white);
-    page.drawLine({ start: { x: M + 15, y: top - 61 }, end: { x: W - M - 15, y: top - 61 }, thickness: 0.6, color: white, opacity: 0.32 });
-    const ps = Number.isFinite(c.costPerSft) ? inr2(c.costPerSft) : "--";
-    const pc = Number.isFinite(c.costPerCft) ? inr2(c.costPerCft) : "--";
-    text(`${ps} / SFT      ${pc} / CFT      Operational ${inr(c.operational)}      Depreciation ${inr(c.depreciation)}`, M + 15, top - 76, 8.5, font, white);
-    text(`Output ${c.sft.toFixed(0)} SFT / ${c.cft.toFixed(0)} CFT      ${c.slabs} slabs carved      ${c.machines} machine${c.machines === 1 ? "" : "s"}`, M + 15, top - 88, 8.5, font, white);
-    top -= h + 14;
-  }
-
-  // ── Cutter (block-cutting plant) costing — month to date ──
-  if (data.cutter) {
-    const c = data.cutter;
-    const h = 82;
-    card(M, top, W - 2 * M, h, 10, COL.teal);
-    text("CUTTER COSTING  ·  MONTH TO DATE", M + 15, top - 19, 10, bold, white);
-    right(`${c.label}   ·   ${c.days} of ${c.monthLen} days`, W - M - 15, top - 19, 9, font, white);
-    text(inr(c.totalCost), M + 14, top - 46, 20, bold, white);
-    text("spent so far", M + 18 + bold.widthOfTextAtSize(inr(c.totalCost), 20), top - 46, 9, font, white);
-    right(Number.isFinite(c.costPerCft) ? `${inr2(c.costPerCft)} / CFT` : "-- / CFT", W - M - 15, top - 44, 16, bold, white);
-    right("per CFT cut", W - M - 15, top - 55, 7.5, font, white);
-    page.drawLine({ start: { x: M + 15, y: top - 61 }, end: { x: W - M - 15, y: top - 61 }, thickness: 0.6, color: white, opacity: 0.32 });
-    text(`Operational ${inr(c.operational)}      Depreciation ${inr(c.depreciation)}      Output ${c.cft.toFixed(0)} CFT      ${c.slabs} slabs`, M + 15, top - 76, 8.5, font, white);
-    top -= h + 14;
-  }
-
-  // ── payments card (yesterday comparison removed per request) ──
-  const payRows = data.payments.byVendor.slice(0, 6);
-  const hasRows = payRows.length > 0;
-  const payH = 56 + (hasRows ? payRows.length * 15 + 8 : 14);
-  card(M, top, W - 2 * M, payH, 10, COL.gold);
-  text("PAYMENTS TO SUPPLIERS  ·  24 H", M + 15, top - 19, 10, bold, white);
-  text(inr(data.payments.total), M + 14, top - 45, 22, bold, white);
-  let py = top - 56;
-  if (!hasRows) {
-    text("No supplier payments in this 24 h window.", M + 15, py - 2, 9.5, font, white);
-  } else {
-    page.drawLine({ start: { x: M + 15, y: py }, end: { x: W - M - 15, y: py }, thickness: 0.6, color: white, opacity: 0.35 });
-    py -= 16;
-    for (const v of payRows) { text(clip(v.vendor, 40), M + 15, py, 9.5, font, white); right(inr(v.amount), W - M - 15, py, 9.5, bold, white); py -= 15; }
-  }
-
-  // ── footer ──
-  page.drawLine({ start: { x: M, y: 52 }, end: { x: W - M, y: 52 }, thickness: 0.8, color: line });
-  text("Automated daily report · MTCPL", M, 40, 8.5, font, muted);
   const gen = new Date(Date.now() + 5.5 * 3600 * 1000);
-  right(`Generated ${gen.getUTCDate()} ${MONTHS[gen.getUTCMonth()]} ${gen.getUTCFullYear()}, ${String(gen.getUTCHours()).padStart(2, "0")}:${String(gen.getUTCMinutes()).padStart(2, "0")} IST`, W - M, 40, 8.5, font, muted);
+  const genLabel = `${gen.getUTCDate()} ${MONTHS[gen.getUTCMonth()]}, ${String(gen.getUTCHours()).padStart(2, "0")}:${String(gen.getUTCMinutes()).padStart(2, "0")} IST`;
 
-  // ════════════════════════════════════════════════════════════════
-  // Page 2 — three separate trend charts (one metric each, own scale)
-  // ════════════════════════════════════════════════════════════════
-  const p2 = pdf.addPage([W, H]);
-  p2.drawRectangle({ x: 0, y: 0, width: W, height: H, color: paper });
-  const t2 = (s: string, x: number, y: number, size: number, f = font, c = ink) => p2.drawText(s, { x, y, size, font: f, color: c });
-  const r2 = (s: string, xr: number, y: number, size: number, f = font, c = ink) => p2.drawText(s, { x: xr - f.widthOfTextAtSize(s, size), y, size, font: f, color: c });
-  const c2 = (s: string, cx: number, y: number, size: number, f = font, c = ink) => p2.drawText(s, { x: cx - f.widthOfTextAtSize(s, size) / 2, y, size, font: f, color: c });
-
-  let h2 = H - 44;
-  t2("MATESHWARI TEMPLE CONSTRUCTION PVT LTD", M, h2, 10, bold, ink);
-  t2("10-Day Activity Trends", M, h2 - 21, 16, bold, ink);
-  const tr = data.trend;
-  if (tr.length > 0) r2(`${tr[0].label}  -  ${tr[tr.length - 1].label}`, W - M, h2 - 5, 9, font, muted);
-  h2 -= 32;
-  p2.drawLine({ start: { x: M, y: h2 }, end: { x: W - M, y: h2 }, thickness: 3, color: COL.gold });
-  p2.drawLine({ start: { x: M, y: h2 - 2.4 }, end: { x: W - M, y: h2 - 2.4 }, thickness: 0.6, color: brown });
-  h2 -= 26;
-
-  // One chart per metric, each on its OWN y-scale, so a quiet series isn't
-  // flattened by a busy one — far easier to read than three lines overlaid.
-  const n = tr.length;
-  const PLOTH = 145;
-  const drawMini = (yTop: number, title: string, color: ReturnType<typeof rgb>, key: "blocks" | "cutting" | "carving"): number => {
-    const vals = tr.map((d) => d[key]);
-    const total = vals.reduce((a, b) => a + b, 0);
-    const todayV = vals.length ? vals[vals.length - 1] : 0;
-    const peak = vals.length ? Math.max(...vals) : 0;
-    // title row: colour dot + name (left), quick stats (right)
-    p2.drawCircle({ x: M + 4, y: yTop - 3, size: 3.4, color });
-    t2(title, M + 13, yTop - 6, 11.5, bold, ink);
-    r2(`latest ${todayV}      peak ${peak}      10-day total ${total}`, W - M, yTop - 6, 8.5, font, muted);
-    const left = M + 28, rightX = W - M - 6;
-    const plotTop = yTop - 20, plotBottom = plotTop - PLOTH;
-    const plotW = rightX - left, plotH = plotTop - plotBottom;
-    const niceMax = Math.max(5, Math.ceil(peak / 5) * 5);
-    const STEPS = 4;
-    for (let g = 0; g <= STEPS; g++) {
-      const yy = plotBottom + (plotH * g) / STEPS;
-      p2.drawLine({ start: { x: left, y: yy }, end: { x: rightX, y: yy }, thickness: g === 0 ? 1 : 0.5, color: line, opacity: g === 0 ? 1 : 0.5 });
-      r2(String(Math.round((niceMax * g) / STEPS)), left - 7, yy - 3, 8, font, muted);
-    }
-    const xAt = (i: number) => left + (n <= 1 ? 0 : (plotW * i) / (n - 1));
-    const yAt = (v: number) => plotBottom + plotH * Math.min(1, v / niceMax);
-    for (let i = 0; i < n; i++) c2(tr[i].short, xAt(i), plotBottom - 13, 8, font, muted);
-    for (let i = 0; i < n - 1; i++) p2.drawLine({ start: { x: xAt(i), y: yAt(vals[i]) }, end: { x: xAt(i + 1), y: yAt(vals[i + 1]) }, thickness: 2.2, color });
-    for (let i = 0; i < n; i++) p2.drawCircle({ x: xAt(i), y: yAt(vals[i]), size: 2.5, color });
-    return plotBottom - 13 - 26; // y for the next chart's title row
+  const header = (P: ReturnType<typeof mk>, top: number, withSubtitle: boolean) => {
+    if (logo) { const lh = 20, lw = (logo.width / logo.height) * lh; P.pg.drawImage(logo, { x: M, y: top - lh, width: lw, height: lh }); }
+    const dpw = bold.widthOfTextAtSize(data.label, 11) + 18;
+    P.card(W - M - dpw, top, dpw, 20, 5, brown);
+    P.ctr(data.label, W - M - dpw / 2, top - 13, 11, bold, white);
+    P.r(`vs ${data.prevLabel}`, W - M, top - 30, 8, font, muted);
+    P.t("Daily Work Report", M, top - 42, 16, bold, ink);
+    P.t("MATESHWARI TEMPLE CONSTRUCTION PVT LTD", M, top - 55, 7.5, bold, ink);
+    let y = top - 55;
+    if (withSubtitle) { P.t("Activity in the 24 hours ending 10 AM IST", M, y - 12, 8, font, muted); y -= 12; }
+    y -= 8;
+    P.pg.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 2.5, color: COL.gold });
+    P.pg.drawLine({ start: { x: M, y: y - 2 }, end: { x: W - M, y: y - 2 }, thickness: 0.5, color: brown });
+    return y - 16;
+  };
+  const footer = (P: ReturnType<typeof mk>, pageNo: number, pages: number) => {
+    P.pg.drawLine({ start: { x: M, y: 34 }, end: { x: W - M, y: 34 }, thickness: 0.6, color: line });
+    P.t(pageNo === 1 ? `Automated daily report · MTCPL · Generated ${genLabel}` : "Automated daily report · MTCPL", M, 22, 7.5, font, muted);
+    P.r(`Page ${pageNo} of ${pages}`, W - M, 22, 7.5, font, muted);
   };
 
-  let cy = drawMini(h2, "Blocks added", COL.blue, "blocks");
-  cy = drawMini(cy, "Cutting done", COL.cyan, "cutting");
-  drawMini(cy, "Carving done", COL.amber, "carving");
+  const PAGES = 4;
+  const newPage = () => { const pg = pdf.addPage([W, H]); pg.drawRectangle({ x: 0, y: 0, width: W, height: H, color: paper }); return mk(pg); };
 
-  // footer (page 2)
-  p2.drawLine({ start: { x: M, y: 52 }, end: { x: W - M, y: 52 }, thickness: 0.8, color: line });
-  t2("Automated daily report · MTCPL", M, 40, 8.5, font, muted);
-  r2("Page 2 of 2", W - M, 40, 8.5, font, muted);
+  // ── Page 1 — headline metrics, one big card each ──
+  {
+    const P = newPage();
+    let y = header(P, H - 26, true);
+    const delta = (cur: number, prev: number) => { const d = cur - prev; return `Prev day ${prev}   (${d > 0 ? "+" : ""}${d})`; };
+    const cards = [
+      { c: COL.blue, label: "BLOCKS ADDED", big: String(data.today.blocks.count), sub: `${data.today.blocks.cft.toFixed(1)} CFT`, cmp: delta(data.today.blocks.count, data.prev.blocks.count) },
+      { c: COL.cyan, label: "CUTTING DONE", big: String(data.today.cutting.slabs), sub: `${data.today.cutting.cft.toFixed(1)} CFT`, cmp: delta(data.today.cutting.slabs, data.prev.cutting.slabs) },
+      { c: COL.amber, label: "CARVING DONE", big: String(data.today.carving.slabs), sub: `${data.today.carving.cft.toFixed(1)} CFT`, cmp: delta(data.today.carving.slabs, data.prev.carving.slabs) },
+      { c: COL.green, label: "DISPATCHED", big: String(data.today.dispatch.slabs), sub: `${data.today.dispatch.cft.toFixed(1)} CFT · ${data.today.dispatch.tonnes.toFixed(1)} T · ${data.today.dispatch.trucks} trucks`, cmp: delta(data.today.dispatch.slabs, data.prev.dispatch.slabs) },
+    ];
+    const ch = 150, gap = 12;
+    for (const k of cards) {
+      P.card(M, y, cw, ch, 16, k.c);
+      P.card(M + 18, y - 14, 30, 5, 2.5, white, { opacity: 0.5 });
+      P.t(k.label, M + 20, y - 32, 13, bold, white);
+      P.t(k.big, M + 18, y - 100, 52, bold, white);
+      P.t(k.sub, M + 20, y - 124, 12, font, white);
+      const pw = font.widthOfTextAtSize(k.cmp, 9) + 16;
+      P.card(W - M - pw - 12, y - 40, pw, 18, 6, white, { opacity: 0.18 });
+      P.t(k.cmp, W - M - pw - 4, y - 52, 9, font, white);
+      y -= ch + gap;
+    }
+    footer(P, 1, PAGES);
+  }
+
+  // ── Page 2 — month-to-date costing + supplier payments ──
+  {
+    const P = newPage();
+    let y = header(P, H - 26, false);
+    if (data.cnc) {
+      const c = data.cnc, hh = 168;
+      P.card(M, y, cw, hh, 16, COL.indigo);
+      P.t("CNC COSTING · MONTH TO DATE", M + 18, y - 26, 11, bold, white);
+      P.t(`${c.label} · ${c.days} of ${c.monthLen} days`, M + 18, y - 44, 9.5, font, white);
+      P.t(Number.isFinite(c.costPerCombined) ? `${inr2(c.costPerCombined)} / unit` : "-- / unit", M + 18, y - 80, 30, bold, white);
+      P.t("SFT + CFT combined", M + 20, y - 98, 9, font, white);
+      P.pg.drawLine({ start: { x: M + 18, y: y - 108 }, end: { x: W - M - 18, y: y - 108 }, thickness: 0.5, color: white, opacity: 0.3 });
+      P.t(`Spent so far: ${inr(c.totalCost)}`, M + 18, y - 124, 10.5, bold, white);
+      P.t(`/SFT ${Number.isFinite(c.costPerSft) ? inr2(c.costPerSft) : "--"}   ·   /CFT ${Number.isFinite(c.costPerCft) ? inr2(c.costPerCft) : "--"}`, M + 18, y - 140, 9.5, font, white);
+      P.t(`Op ${inr(c.operational)} · Dep ${inr(c.depreciation)} · ${c.machines} machine${c.machines === 1 ? "" : "s"}`, M + 18, y - 156, 9, font, white);
+      y -= hh + 12;
+    }
+    if (data.cutter) {
+      const c = data.cutter, hh = 128;
+      P.card(M, y, cw, hh, 16, COL.teal);
+      P.t("CUTTER COSTING · MONTH TO DATE", M + 18, y - 26, 11, bold, white);
+      P.t(`${c.label} · ${c.days} of ${c.monthLen} days`, M + 18, y - 44, 9.5, font, white);
+      P.t(Number.isFinite(c.costPerCft) ? `${inr2(c.costPerCft)} / CFT` : "-- / CFT", M + 18, y - 80, 28, bold, white);
+      P.pg.drawLine({ start: { x: M + 18, y: y - 92 }, end: { x: W - M - 18, y: y - 92 }, thickness: 0.5, color: white, opacity: 0.3 });
+      P.t(`Spent so far: ${inr(c.totalCost)}`, M + 18, y - 108, 10.5, bold, white);
+      P.t(`Op ${inr(c.operational)} · Dep ${inr(c.depreciation)} · ${c.cft.toFixed(0)} CFT cut`, M + 18, y - 122, 9, font, white);
+      y -= hh + 12;
+    }
+    {
+      const rows = data.payments.byVendor.slice(0, 6);
+      const hasRows = rows.length > 0;
+      const payH = 56 + (hasRows ? rows.length * 18 + 10 : 14);
+      P.card(M, y, cw, payH, 16, COL.gold);
+      P.t("PAYMENTS TO SUPPLIERS · 24 H", M + 18, y - 24, 11, bold, white);
+      P.t(inr(data.payments.total), M + 18, y - 50, 24, bold, white);
+      let py = y - 64;
+      if (!hasRows) { P.t("No supplier payments in this 24 h window.", M + 18, py - 2, 9.5, font, white); }
+      else {
+        P.pg.drawLine({ start: { x: M + 18, y: py }, end: { x: W - M - 18, y: py }, thickness: 0.5, color: white, opacity: 0.32 });
+        py -= 18;
+        for (const v of rows) { P.t(P.clip(v.vendor, 28), M + 18, py, 10, font, white); P.r(inr(v.amount), W - M - 18, py, 10, bold, white); py -= 18; }
+      }
+    }
+    footer(P, 2, PAGES);
+  }
+
+  // ── Page 3 — breakdowns (blocks / cutting / carving / dispatch) ──
+  {
+    const P = newPage();
+    let y = header(P, H - 26, false);
+    const section = (title: string, color: ReturnType<typeof rgb>, rows: Array<{ n: string; v: string }>) => {
+      P.pg.drawRectangle({ x: M, y: y - 1, width: 7, height: 7, color });
+      P.t(title, M + 11, y, 9.5, bold, color); y -= 6;
+      P.pg.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 0.9, color }); y -= 16;
+      if (rows.length === 0) { P.t("None", M, y, 10, font, muted); y -= 16; }
+      else rows.slice(0, 5).forEach((rw, i) => {
+        if (i % 2 === 1) P.pg.drawRectangle({ x: M - 4, y: y - 4, width: cw + 8, height: 15, color: rowTint });
+        P.t(P.clip(rw.n, 30), M, y, 10.5, font, ink); P.r(rw.v, W - M, y, 10, font, muted); y -= 16;
+      });
+      y -= 12;
+    };
+    section("BLOCKS ADDED BY STONE", COL.blue, data.blocksByStone.map((rw) => ({ n: rw.stone, v: `${rw.count} · ${rw.cft.toFixed(0)} CFT` })));
+    section("CUTTING BY STONE", COL.cyan, data.cuttingByStone.map((rw) => ({ n: rw.stone, v: `${rw.slabs} · ${rw.cft.toFixed(0)} CFT` })));
+    section("CARVING BY VENDOR", COL.amber, data.carvingByVendor.map((rw) => ({ n: rw.vendor, v: `${rw.slabs} · ${rw.cft.toFixed(0)} CFT` })));
+    section("DISPATCH BY TEMPLE", COL.green, data.dispatchByTemple.map((rw) => ({ n: rw.temple, v: `${rw.slabs} · ${rw.tonnes.toFixed(1)} T` })));
+    footer(P, 3, PAGES);
+  }
+
+  // ── Page 4 — 10-day trend, one chart per metric (own scale) ──
+  {
+    const P = newPage();
+    let y = header(P, H - 26, false);
+    P.t("10-DAY ACTIVITY TRENDS", M, y, 10, bold, ink); y -= 18;
+    const tr = data.trend, n = tr.length;
+    const drawMini = (title: string, color: ReturnType<typeof rgb>, key: "blocks" | "cutting" | "carving") => {
+      const vals = tr.map((d) => d[key]);
+      const peak = vals.length ? Math.max(...vals) : 0;
+      const total = vals.reduce((a, b) => a + b, 0);
+      const lastV = vals.length ? vals[vals.length - 1] : 0;
+      P.pg.drawCircle({ x: M + 4, y: y - 3, size: 3.4, color });
+      P.t(title, M + 13, y - 6, 11.5, bold, ink);
+      P.r(`latest ${lastV} · peak ${peak} · total ${total}`, W - M, y - 6, 8, font, muted);
+      const left = M + 26, rightX = W - M - 4, pT = y - 20, pB = pT - 120;
+      const niceMax = Math.max(5, Math.ceil(peak / 5) * 5);
+      for (let g = 0; g <= 4; g++) {
+        const yy = pB + ((pT - pB) * g) / 4;
+        P.pg.drawLine({ start: { x: left, y: yy }, end: { x: rightX, y: yy }, thickness: g === 0 ? 0.8 : 0.4, color: line, opacity: g === 0 ? 1 : 0.5 });
+        P.r(String(Math.round((niceMax * g) / 4)), left - 5, yy - 3, 7, font, muted);
+      }
+      const xAt = (i: number) => left + (n <= 1 ? 0 : ((rightX - left) * i) / (n - 1));
+      const yAt = (v: number) => pB + (pT - pB) * Math.min(1, v / niceMax);
+      for (let i = 0; i < n; i++) P.ctr(tr[i].short, xAt(i), pB - 12, 7.5, font, muted);
+      for (let i = 0; i < n - 1; i++) P.pg.drawLine({ start: { x: xAt(i), y: yAt(vals[i]) }, end: { x: xAt(i + 1), y: yAt(vals[i + 1]) }, thickness: 2.2, color });
+      for (let i = 0; i < n; i++) P.pg.drawCircle({ x: xAt(i), y: yAt(vals[i]), size: 2.4, color });
+      y = pB - 12 - 24;
+    };
+    drawMini("Blocks added", COL.blue, "blocks");
+    drawMini("Cutting done", COL.cyan, "cutting");
+    drawMini("Carving done", COL.amber, "carving");
+    footer(P, 4, PAGES);
+  }
 
   return pdf.save();
 }
