@@ -176,8 +176,9 @@ export function TempleCardBrowser({
   // in the SAME leaf), and move them together.
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  // Master Excel — tick category cards across levels (drill in via ▸ to pick
-  // deeper), then export every slab under the selection as one grouped Excel.
+  // Master Excel — tick category cards down to the Label level (drill in via ▸
+  // through Category 1 / Category 2 only), then export every slab under the
+  // selection as one grouped Excel with highlighted category bands.
   const [exportMode, setExportMode] = useState(false);
   const [exportSel, setExportSel] = useState<Set<string>>(new Set());
   const [exportBusy, startMasterExport] = useTransition();
@@ -472,9 +473,11 @@ export function TempleCardBrowser({
         {temple && !isLeaf && (currentNode ?? tree) && (
           <StageCountChips counts={(currentNode ?? tree)!.counts} total={(currentNode ?? tree)!.total} />
         )}
-        {/* Master Excel — tick category cards across levels, then export all
-            slabs under the selection as one hierarchically-grouped Excel. */}
-        {temple && !isLeaf && children.length > 0 && (
+        {/* Master Excel — tick category cards (Category 1 / 2 / Label only,
+            not down to Description), then export all slabs under the selection
+            as one hierarchically-grouped Excel. path.length: 0=Cat1, 1=Cat2,
+            2=Label cards; >=3 = Description, where Master Excel is hidden. */}
+        {temple && !isLeaf && children.length > 0 && path.length <= 2 && (
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
             {!exportMode ? (
               <button type="button" onClick={() => { setExportMode(true); setExportSel(new Set()); }}
@@ -483,7 +486,11 @@ export function TempleCardBrowser({
               </button>
             ) : (
               <span style={{ fontSize: 12, fontWeight: 700, color: "var(--gold-dark)" }}>
-                ✓ Tick cards to include · <strong>▸ open</strong> a card to pick inside it · then <strong>Download</strong> below.
+                {path.length < 2 ? (
+                  <>✓ Tick cards to include · <strong>▸ open</strong> a card to pick inside it (down to label) · then <strong>Download</strong> below.</>
+                ) : (
+                  <>✓ Tick the labels to include · then <strong>Download</strong> below.</>
+                )}
               </span>
             )}
           </div>
@@ -569,13 +576,16 @@ export function TempleCardBrowser({
                     )}
                     <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, transparent 55%, rgba(0,0,0,0.4))" }} />
                     <div style={{ position: "absolute", top: 10, right: 10 }}><Ring pct={pct} onImage /></div>
-                    {/* Master-Excel select mode: a tick (select whole card) + ▸ open (drill in to pick deeper). */}
+                    {/* Master-Excel select mode: a tick (select whole card) + ▸ open
+                        (drill in to pick deeper). Drilling stops at the Label level —
+                        only Cat1 (depth 0) and Cat2 (depth 1) cards can be opened, so
+                        the deepest pickable card is a Label. */}
                     {exportMode && (
                       <span style={{ position: "absolute", top: 10, left: 10, width: 28, height: 28, borderRadius: "50%", border: "2px solid #fff", background: exportSel.has(c.id) ? "var(--gold-dark)" : "rgba(0,0,0,0.45)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 900, backdropFilter: "blur(2px)" }}>
                         {exportSel.has(c.id) ? "✓" : ""}
                       </span>
                     )}
-                    {exportMode && c.children.length > 0 && (
+                    {exportMode && c.children.length > 0 && depth < 2 && (
                       <button type="button" title={`Open ${c.name} to pick cards inside`} onClick={(e) => { e.stopPropagation(); setPathIds((p) => [...p, c.id]); }}
                         style={{ position: "absolute", bottom: 10, right: 10, fontSize: 11.5, fontWeight: 800, color: "#fff", background: "rgba(0,0,0,0.6)", border: "1px solid rgba(255,255,255,0.4)", borderRadius: 999, padding: "4px 12px", cursor: "pointer", backdropFilter: "blur(3px)" }}>
                         ▸ Open

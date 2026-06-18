@@ -2,11 +2,14 @@
 // POST /api/temples/master-excel.xlsx — the "Master Excel".
 //
 // The client (Temple View card browser) lets the user tick category cards
-// across levels (drilling in to pick deeper), then POSTs every slab under
-// the selection here. Each slab carries its ordered band `path`
+// down to the Label level (Category 1 / Category 2 / Label — no deeper),
+// then POSTs every slab under the selection here. Each slab still carries
+// its full ordered band `path`
 // (Category 1 › Category 2 › Label › Description › Additional). We render
 // NESTED GROUP BANDS — each path segment becomes an indented heading band,
-// and the slabs sit under their deepest band with Code · Dimensions ·
+// HIGHLIGHTED by depth (a strong dark Category-1 band stepping down to
+// lighter tints) and wired as collapsible outline groups so a category can
+// be folded away. Slabs sit under their deepest band with Code · Dimensions ·
 // Stage · Check (blank) · Remark. Page setup is LANDSCAPE + fit-to-one-
 // page-wide so it prints across the page horizontally.
 //
@@ -25,11 +28,20 @@ type Item = { path: string[]; code: string; dims: string; stage: string; color: 
 
 const HEADERS = ["Item", "Dimensions", "Stage", "Check", "Remark"];
 const WIDTHS = [46, 20, 16, 10, 28];
-const BAND_FILL = ["FFE2E8F0", "FFEAEFF5", "FFF1F5F9", "FFF5F8FB", "FFF8FAFC"];
+// Category bands are HIGHLIGHTED so groups are easy to find at a glance:
+// Category 1 is a strong dark band (white text), and each level below it
+// steps down to a lighter tint. Indexed by tree depth (0 = Category 1).
+const BAND_FILL = ["FF334155", "FFCBD5E1", "FFE2E8F0", "FFEFF3F8", "FFF6F8FB"];
+const BAND_TEXT = ["FFFFFFFF", "FF1F2937", "FF1F2937", "FF374151", "FF4B5563"];
+const BAND_SIZE = [12.5, 11, 10, 9.5, 9];
+const BAND_HEIGHT = [23, 20, 18, 16, 15];
 
 function thinBorder() {
   const s = { style: "thin" as const, color: { argb: "FFD1D5DB" } };
   return { top: s, bottom: s, left: s, right: s };
+}
+function pick<T>(arr: T[], d: number): T {
+  return arr[Math.min(d, arr.length - 1)];
 }
 function solidArgb(hex: string): string | null {
   const m = /^#?([0-9a-fA-F]{6})$/.exec((hex || "").trim());
@@ -58,6 +70,9 @@ export async function POST(req: NextRequest) {
     },
     views: [{ state: "frozen", ySplit: 2 }],
   });
+  // Group bands sit ABOVE their rows, so the +/- collapse control lives on the
+  // category heading — collapse a Category 1 band to fold its whole group away.
+  ws.properties.outlineProperties = { summaryBelow: false, summaryRight: false };
   WIDTHS.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
 
   // Row 1 — small-font title.
@@ -87,19 +102,26 @@ export async function POST(req: NextRequest) {
     while (common < prev.length && common < it.path.length && prev[common] === it.path[common]) common += 1;
     for (let d = common; d < it.path.length; d += 1) {
       const row = ws.getRow(r);
+      row.height = pick(BAND_HEIGHT, d);
+      row.outlineLevel = d;
       row.getCell(1).value = it.path[d];
       row.getCell(1).alignment = { vertical: "middle", indent: d };
-      row.getCell(1).font = { bold: true, size: d === 0 ? 11 : d === 1 ? 10 : 9.5, color: { argb: "FF111827" } };
-      const fill = BAND_FILL[Math.min(d, BAND_FILL.length - 1)];
+      row.getCell(1).font = { bold: true, size: pick(BAND_SIZE, d), color: { argb: pick(BAND_TEXT, d) } };
+      const fill = pick(BAND_FILL, d);
+      const thin = { style: "thin" as const, color: { argb: "FFD1D5DB" } };
+      // A heavier rule on top of every Category-1 band separates the groups.
+      const top = d === 0 ? { style: "medium" as const, color: { argb: "FF1F2937" } } : thin;
+      const border = { top, bottom: thin, left: thin, right: thin };
       for (let col = 1; col <= HEADERS.length; col += 1) {
         const c = row.getCell(col);
         c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: fill } };
-        c.border = thinBorder();
+        c.border = border;
       }
       r += 1;
     }
     // The slab row, indented one past its deepest band.
     const row = ws.getRow(r);
+    row.outlineLevel = it.path.length;
     row.getCell(1).value = it.code;
     row.getCell(1).font = { name: "Consolas", size: 9, bold: true };
     row.getCell(1).alignment = { vertical: "middle", indent: it.path.length };
