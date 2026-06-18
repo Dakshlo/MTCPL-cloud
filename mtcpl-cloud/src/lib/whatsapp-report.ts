@@ -55,6 +55,29 @@ function istDay(offset = 0) {
   return { startUTC, endUTC, label: `${ref.getUTCDate()} ${MONTHS[ref.getUTCMonth()]} ${ref.getUTCFullYear()}` };
 }
 
+// The report is sent at 10:00 IST and covers the 24 h ending at 10:00 IST
+// (i.e. "yesterday 10 AM → today 10 AM"), so the recipient gets the previous
+// day's work each morning.
+const REPORT_HOUR_IST = 10;
+
+/** 24-hour window ending at 10:00 IST on (today + dayOffset).
+ *  dayOffset 0  → [10:00 yesterday, 10:00 today]        — the main report
+ *  dayOffset -1 → [10:00 day-before, 10:00 yesterday]   — the comparison
+ *  The label is the date the window STARTS on — the day the work belongs to
+ *  (so the morning report reads as "<yesterday>'s report"). */
+function window24(dayOffset = 0) {
+  const ist = new Date(Date.now() + 5.5 * 3600 * 1000);
+  const y = ist.getUTCFullYear();
+  const m = ist.getUTCMonth();
+  const d = ist.getUTCDate() + dayOffset;
+  const endIstMs = Date.UTC(y, m, d, REPORT_HOUR_IST, 0, 0, 0);
+  const startIstMs = endIstMs - 24 * 3600 * 1000;
+  const startUTC = new Date(startIstMs - 5.5 * 3600 * 1000).toISOString();
+  const endUTC = new Date(endIstMs - 5.5 * 3600 * 1000).toISOString();
+  const s = new Date(startIstMs); // label off the window's start day
+  return { startUTC, endUTC, label: `${s.getUTCDate()} ${MONTHS[s.getUTCMonth()]} ${s.getUTCFullYear()}` };
+}
+
 /** IST "today" as YYYY-MM-DD (for clamping the cutter report to month-to-date). */
 function istDateKey(): string {
   const ist = new Date(Date.now() + 5.5 * 3600 * 1000);
@@ -293,7 +316,9 @@ async function paymentsForWindow(admin: AdminClient, startUTC: string, endUTC: s
  *  slabs approved. Counts (not CFT) so the three series share a clean scale. */
 async function trendForDays(admin: AdminClient, days = 10) {
   const list = Array.from({ length: days }, (_, i) => {
-    const d = istDay(i - (days - 1)); // -(days-1) … 0
+    // End on yesterday (the last COMPLETE calendar day) — the report runs at
+    // 10 AM, so including today would plot a misleading half-day dip.
+    const d = istDay(i - days); // -days … -1
     return { ...d, startMs: Date.parse(d.startUTC), endMs: Date.parse(d.endUTC), blocks: 0, cutting: 0, carving: 0 };
   });
   const windowStart = list[0].startUTC;
@@ -343,8 +368,9 @@ async function trendForDays(admin: AdminClient, days = 10) {
 
 export async function buildDailyReportData(): Promise<DailyReport> {
   const admin = createAdminSupabaseClient();
-  const t = istDay(0);
-  const p = istDay(-1);
+  // Main = last 24 h (10 AM → 10 AM); prev = the 24 h before that.
+  const t = window24(0);
+  const p = window24(-1);
   const today = await aggregateDay(admin, t.startUTC, t.endUTC, true);
   const prev = await aggregateDay(admin, p.startUTC, p.endUTC, false);
   const payToday = await paymentsForWindow(admin, t.startUTC, t.endUTC, true);
@@ -477,6 +503,7 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
   const tx = M + 86;
   text("MATESHWARI TEMPLE CONSTRUCTION PVT LTD", tx, top - 6, 10, bold, brown);
   text("Daily Work Report", tx, top - 24, 17, bold, ink);
+  text("Activity in the 24 hours ending 10 AM IST", tx, top - 38, 8, font, muted);
   // Date in a rounded brand pill, with the comparison day beneath it.
   const dpw = bold.widthOfTextAtSize(data.label, 12) + 24;
   card(W - M - dpw, top + 3, dpw, 23, 6, brown);
@@ -492,7 +519,7 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
   const gap = 12;
   const bw = (W - 2 * M - gap) / 2;
   const bh = 88;
-  const delta = (cur: number, prev: number) => { const d = cur - prev; return `Yesterday ${prev}   (${d > 0 ? "+" : ""}${d})`; };
+  const delta = (cur: number, prev: number) => { const d = cur - prev; return `Prev day ${prev}   (${d > 0 ? "+" : ""}${d})`; };
   const box = (x: number, ytop: number, color: ReturnType<typeof rgb>, label: string, big: string, sub: string, compare: string) => {
     card(x, ytop, bw, bh, 10, color);
     // soft accent tab top-left for a designed feel
@@ -522,7 +549,7 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
     page.drawRectangle({ x, y: yy - 1, width: 7, height: 7, color });
     text(title, x + 11, yy, 8.5, bold, color); yy -= 6;
     page.drawLine({ start: { x, y: yy }, end: { x: x + cw, y: yy }, thickness: 1, color }); yy -= 14;
-    if (rows.length === 0) { text("None today", x, yy, 9, font, muted); yy -= 14; }
+    if (rows.length === 0) { text("None", x, yy, 9, font, muted); yy -= 14; }
     else rows.slice(0, 6).forEach((r, i) => {
       if (i % 2 === 1) page.drawRectangle({ x: x - 3, y: yy - 3.5, width: cw + 6, height: 13.5, color: rowTint });
       text(clip(r.name, 15), x, yy, 9, font, ink); right(r.val, x + cw, yy, 8.5, font, muted); yy -= 14;
@@ -576,11 +603,11 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
   const hasRows = payRows.length > 0;
   const payH = 56 + (hasRows ? payRows.length * 15 + 8 : 14);
   card(M, top, W - 2 * M, payH, 10, COL.gold);
-  text("PAYMENTS TO SUPPLIERS TODAY", M + 15, top - 19, 10, bold, white);
+  text("PAYMENTS TO SUPPLIERS  ·  24 H", M + 15, top - 19, 10, bold, white);
   text(inr(data.payments.total), M + 14, top - 45, 22, bold, white);
   let py = top - 56;
   if (!hasRows) {
-    text("No supplier payments recorded today.", M + 15, py - 2, 9.5, font, white);
+    text("No supplier payments in this 24 h window.", M + 15, py - 2, 9.5, font, white);
   } else {
     page.drawLine({ start: { x: M + 15, y: py }, end: { x: W - M - 15, y: py }, thickness: 0.6, color: white, opacity: 0.35 });
     py -= 16;
@@ -624,7 +651,7 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
     // title row: colour dot + name (left), quick stats (right)
     p2.drawCircle({ x: M + 4, y: yTop - 3, size: 3.4, color });
     t2(title, M + 13, yTop - 6, 11.5, bold, ink);
-    r2(`today ${todayV}      peak ${peak}      10-day total ${total}`, W - M, yTop - 6, 8.5, font, muted);
+    r2(`latest ${todayV}      peak ${peak}      10-day total ${total}`, W - M, yTop - 6, 8.5, font, muted);
     const left = M + 28, rightX = W - M - 6;
     const plotTop = yTop - 20, plotBottom = plotTop - PLOTH;
     const plotW = rightX - left, plotH = plotTop - plotBottom;

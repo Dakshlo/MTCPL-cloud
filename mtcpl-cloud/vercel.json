@@ -2,6 +2,6 @@
   "crons": [
     { "path": "/api/email-snapshot/run", "schedule": "30 23 * * *" },
     { "path": "/api/email-snapshot/run", "schedule": "30 8 * * *" },
-    { "path": "/api/whatsapp-report/run", "schedule": "30 12 * * *" }
+    { "path": "/api/whatsapp-report/run", "schedule": "30 4 * * *" }
   ]
 }
