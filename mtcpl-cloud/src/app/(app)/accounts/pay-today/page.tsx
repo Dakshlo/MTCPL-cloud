@@ -16,6 +16,7 @@ import {
   // Mig 090 — bank-decline approval flow.
   sendConfirmedBackToDueAction,
   requestBankDeclineAction,
+  devUnlockHdfcBatchAction,
 } from "../actions";
 import {
   PayTodayClient,
@@ -349,6 +350,10 @@ export default async function PayTodayPage() {
         // the old immediate bank-reject.
         bankRejectAction={requestBankDeclineAction}
         retryBankRejectedAction={retryBankRejectedPaymentAction}
+        // Developer-only override — re-allow one more CSV download on a
+        // locked batch (re-locks on the next download).
+        canDevUnlock={profile.role === "developer"}
+        devUnlockAction={devUnlockHdfcBatchAction}
       />
 
       {/* Paid today section — Mig 042 follow-on: sticky color-banded

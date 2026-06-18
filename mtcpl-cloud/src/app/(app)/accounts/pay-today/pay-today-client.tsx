@@ -98,12 +98,14 @@ export function PayTodayClient({
   canConfirm,
   canMarkPaid,
   canCancel,
+  canDevUnlock,
   confirmAction,
   markPaidAction,
   cancelAction,
   backToDueAction,
   bankRejectAction,
   retryBankRejectedAction,
+  devUnlockAction,
 }: {
   proposedRows: PayTodayRow[];
   confirmedRows: PayTodayRow[];
@@ -111,6 +113,8 @@ export function PayTodayClient({
   canConfirm: boolean;
   canMarkPaid: boolean;
   canCancel: boolean;
+  /** Developer-only — re-allow one more CSV download on a locked batch. */
+  canDevUnlock: boolean;
   confirmAction: (formData: FormData) => Promise<ServerResult>;
   markPaidAction: (formData: FormData) => Promise<ServerResult>;
   cancelAction: (formData: FormData) => Promise<ServerResult>;
@@ -120,6 +124,7 @@ export function PayTodayClient({
   backToDueAction: (formData: FormData) => Promise<ServerResult>;
   bankRejectAction: (formData: FormData) => Promise<ServerResult>;
   retryBankRejectedAction: (formData: FormData) => Promise<ServerResult>;
+  devUnlockAction: (formData: FormData) => Promise<ServerResult>;
 }) {
   const proposedBatches = useMemo(() => {
     const map = new Map<string, PayTodayRow[]>();
@@ -353,6 +358,8 @@ export function PayTodayClient({
                 ? (row) => setActiveBankRejectRow(row)
                 : undefined
             }
+            canDevUnlock={canDevUnlock}
+            devUnlockAction={devUnlockAction}
           />
         ))}
       </SectionBlock>
@@ -899,6 +906,8 @@ function ConfirmedBatch({
   backToDueAction,
   onMarkPaid,
   onBankReject,
+  canDevUnlock,
+  devUnlockAction,
 }: {
   batchId: string;
   batchIndex: number;
@@ -911,6 +920,9 @@ function ConfirmedBatch({
    *  button (→ owner approval) on DOWNLOADED rows. Undefined for users
    *  who don't have canMarkPaid permission. */
   onBankReject?: (row: PayTodayRow) => void;
+  /** Developer-only — re-allow one more CSV download on a locked batch. */
+  canDevUnlock: boolean;
+  devUnlockAction: (formData: FormData) => Promise<ServerResult>;
 }) {
   // Daksh June 2026 — needed to re-pull the locked state after a CSV
   // download so the just-downloaded batch shows 🔒 and the next
@@ -928,6 +940,19 @@ function ConfirmedBatch({
   const lockedCount = rows.filter((r) => r.hdfcCsvDownloaded).length;
   const allLocked = rows.length > 0 && lockedCount === rows.length;
   const someLocked = lockedCount > 0;
+  // Developer-only: re-allow ONE more CSV download on a locked batch.
+  const [unlocking, startUnlock] = useTransition();
+  function onDevUnlock() {
+    if (unlocking) return;
+    if (!window.confirm(`Developer override: re-allow ONE more CSV download for batch #${batchIndex} (${lockedCount} payment${lockedCount === 1 ? "" : "s"})?\n\nIt re-locks automatically after the next CSV download.`)) return;
+    const fd = new FormData();
+    fd.set("batch_id", batchId);
+    startUnlock(async () => {
+      const res = await devUnlockAction(fd);
+      if (res.ok) router.refresh();
+      else window.alert(res.error || "Couldn't re-allow the download.");
+    });
+  }
 
   // Mig 048 follow-on (Daksh): pre-flight the export so a missing-
   // field error renders as a tidy panel in-page, not raw JSON in a
@@ -1285,6 +1310,23 @@ function ConfirmedBatch({
                 ? "🔒 In HDFC file"
                 : `📥 Download CSV (${downloadableCount})`}
           </button>
+          {/* Developer override — re-open a locked batch for one more CSV
+              download (re-locks automatically on the next download). */}
+          {canDevUnlock && someLocked && (
+            <button
+              type="button"
+              onClick={onDevUnlock}
+              disabled={unlocking}
+              title="Developer override — re-allow ONE more CSV download for this batch. It re-locks after the next download."
+              style={{
+                fontSize: 12.5, fontWeight: 800, padding: "9px 14px", borderRadius: 8,
+                border: "1.5px solid #b45309", background: unlocking ? "var(--border)" : "#fff7ed",
+                color: "#9a3412", cursor: unlocking ? "wait" : "pointer", whiteSpace: "nowrap",
+              }}
+            >
+              {unlocking ? "Re-opening…" : "🔓 Dev: allow 1 more download"}
+            </button>
+          )}
         </div>
       </div>
 

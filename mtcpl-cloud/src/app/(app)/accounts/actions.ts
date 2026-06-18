@@ -2122,6 +2122,44 @@ async function sendVendorPaymentWhatsApp(
   }
 }
 
+// Mig 048 follow-on (Daksh, June 2026) — DEVELOPER-ONLY "allow one more
+// download". Once a batch's HDFC CSV is downloaded its rows lock
+// (hdfc_csv_downloaded_at set) and can't be re-downloaded — the guard that
+// stops a batch being paid twice. If a download was lost or the bank file
+// must be regenerated, a developer can re-open exactly ONE batch: this NULLs
+// the two lock columns for that batch's confirmed rows (the canonical mig-048
+// unlock recipe), so the accountant/owner can download the CSV once more —
+// the next CSV download re-stamps + re-locks automatically. Touches ONLY the
+// lock columns; amount / status / paid_at are never written.
+export async function devUnlockHdfcBatchAction(formData: FormData): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (profile.role !== "developer") {
+    return { ok: false, error: "Only a developer can re-allow an HDFC CSV download." };
+  }
+  const supabase = createAdminSupabaseClient();
+  const batchId = String(formData.get("batch_id") || "").trim();
+  if (!batchId) return { ok: false, error: "Missing batch id." };
+
+  const now = new Date().toISOString();
+  let q = supabase
+    .from("bill_payments")
+    .update({ hdfc_csv_downloaded_at: null, hdfc_csv_downloaded_by: null, updated_at: now })
+    .eq("status", "confirmed")
+    .not("hdfc_csv_downloaded_at", "is", null);
+  // The UI groups legacy null-batch rows under the synthetic "unbatched" key.
+  q = batchId === "unbatched" ? q.is("proposal_batch_id", null) : q.eq("proposal_batch_id", batchId);
+  const { data, error } = await q.select("id");
+  if (error) return { ok: false, error: error.message };
+  const rowsUnlocked = (data ?? []).length;
+  if (rowsUnlocked === 0) {
+    return { ok: false, error: "Nothing to re-open — this batch isn't locked." };
+  }
+
+  await logAudit(profile.id, "hdfc_csv_unlocked", "bill_payment_batch", batchId, { rows_unlocked: rowsUnlocked });
+  await refreshAccountsPaths();
+  return { ok: true };
+}
+
 export async function cancelPaymentAction(formData: FormData): Promise<ActionResult> {
   const { profile } = await requireAuth();
   // Mig 042 follow-on — only owner / dev can send a proposed or
