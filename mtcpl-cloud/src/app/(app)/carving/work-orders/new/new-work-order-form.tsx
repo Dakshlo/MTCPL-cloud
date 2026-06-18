@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { createWorkOrderAction } from "../../actions";
 import { SlabThumb } from "@/components/slab-thumb";
 import type { StoneTypeDef } from "@/lib/stone-utils";
+import { SlabComponentDetail } from "@/components/slab-component-detail";
 
 export type VendorOpt = { id: string; name: string };
 export type PickableSlab = {
@@ -17,6 +18,10 @@ export type PickableSlab = {
   thickness_ft: number;
   stock_location: string | null;
   updated_at: string | null;
+  description?: string | null;
+  component_section?: string | null;
+  component_element?: string | null;
+  additional_description?: string | null;
 };
 
 const STATUS = {
@@ -318,7 +323,13 @@ export function NewWorkOrderForm({
                           <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.id}</span>
                           {s.stone && <span className="role-pill" style={{ fontSize: 9, padding: "1px 6px", flexShrink: 0 }}>{s.stone}</span>}
                         </div>
-                        {s.label && <div style={{ fontSize: 10, color: "var(--muted)" }}>{s.label}</div>}
+                        <SlabComponentDetail
+                          section={s.component_section}
+                          element={s.component_element}
+                          label={s.label}
+                          description={s.description}
+                          additional={s.additional_description}
+                        />
                         <div style={{ fontSize: 10, color: "var(--muted-light)", fontFamily: "ui-monospace, monospace" }}>{s.length_ft}×{s.width_ft}×{s.thickness_ft}&Prime;</div>
                         {s.stock_location && (
                           <div style={{ fontSize: 10, fontWeight: 700, color: "#7c2d12", background: "rgba(180,115,51,0.08)", border: "1px solid rgba(180,115,51,0.25)", padding: "3px 7px", borderRadius: 5, alignSelf: "flex-start", fontFamily: "ui-monospace, monospace" }}>📍 {s.stock_location}</div>

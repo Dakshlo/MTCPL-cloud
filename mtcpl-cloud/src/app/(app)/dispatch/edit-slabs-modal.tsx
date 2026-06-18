@@ -12,6 +12,7 @@
 import { useMemo, useState, type CSSProperties } from "react";
 import { editDispatchSlabsAction } from "./actions";
 import type { ReadySlab } from "./dispatch-client";
+import { SlabComponentDetail } from "@/components/slab-component-detail";
 
 const overlay: CSSProperties = {
   position: "fixed", inset: 0, zIndex: 1500, background: "rgba(15,12,6,0.6)",
@@ -55,7 +56,13 @@ function SlabRow({
           {s.priority && <span title="Urgent">⚡</span>}
           {s.isMarble && <span style={{ fontSize: 9, fontWeight: 800, color: "#b45309", background: "rgba(180,83,9,0.1)", borderRadius: 4, padding: "1px 6px" }}>MARBLE</span>}
         </div>
-        {s.label && <div style={{ fontSize: 12, marginTop: 1 }}>{s.label}</div>}
+        <SlabComponentDetail
+          section={s.component_section}
+          element={s.component_element}
+          label={s.label}
+          description={s.description}
+          additional={s.additional_description}
+        />
         <div className="muted" style={{ fontSize: 11.5, fontFamily: "ui-monospace, monospace", marginTop: 1 }}>{s.dimensions} · {s.cft.toFixed(2)} CFT</div>
       </div>
       <span

@@ -26,6 +26,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { lookupId, type LookupResult } from "@/app/(app)/dashboard/lookup-action";
 import {
   lookupFinance,
@@ -95,6 +96,13 @@ export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
   const [result, setResult] = useState<AnyLookupResult | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+  // The result panel is portaled to <body> so it escapes the sticky topbar's
+  // z-index:50 stacking context — on tablet the menu/backdrop/hamburger
+  // (z 200-301) would otherwise paint over it. panelRef keeps the
+  // outside-click handler from treating clicks INSIDE the portaled panel as
+  // "outside"; `mounted` gates createPortal to the client.
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const [mounted, setMounted] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   // Daksh May 2026 — lifted from the keypad so the input itself can
@@ -170,6 +178,9 @@ export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
       const wrapper = wrapperRef.current;
       if (!wrapper) return;
       if (e.target instanceof Node && wrapper.contains(e.target)) return;
+      // The panel is portaled out of the wrapper — clicks inside it are
+      // "inside", not outside.
+      if (e.target instanceof Node && panelRef.current?.contains(e.target)) return;
       setOpen(false);
     }
     function onEsc(e: KeyboardEvent) {
@@ -184,6 +195,7 @@ export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
   }, [open]);
 
   useEffect(() => {
+    setMounted(true);
     return () => {
       if (closeTimer.current) clearTimeout(closeTimer.current);
     };
@@ -284,7 +296,7 @@ export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
         <span>Find ID</span>
       </button>
 
-      {open && (
+      {open && mounted && createPortal(
         <>
           <style>{`
             @keyframes mtcpl-idlookup-bloom {
@@ -294,11 +306,23 @@ export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
             }
           `}</style>
           <div
+            ref={panelRef}
             role="dialog"
+            /* Daksh June 2026 — hover open/close mirrored from the pill so
+               moving the cursor into the (portaled) panel keeps it open. */
+            onPointerEnter={(e) => {
+              if (e.pointerType === "mouse") openNow();
+            }}
+            onPointerLeave={(e) => {
+              if (e.pointerType === "mouse") scheduleClose();
+            }}
             style={{
-              position: "absolute",
-              top: "calc(100% + 8px)",
-              right: 0,
+              // Portaled to <body> + fixed so the panel clears the tablet
+              // menu/backdrop/hamburger (z 200-301); anchored under the
+              // 56px topbar at the right edge.
+              position: "fixed",
+              top: 64,
+              right: 16,
               width: 440,
               maxWidth: "calc(100vw - 32px)",
               padding: 14,
@@ -309,7 +333,7 @@ export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
               borderRadius: 14,
               boxShadow:
                 "0 12px 40px rgba(15, 23, 42, 0.18), 0 0 0 1px rgba(15, 23, 42, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.55)",
-              zIndex: 200,
+              zIndex: 400,
               animation:
                 "mtcpl-idlookup-bloom 0.34s cubic-bezier(0.2, 0.8, 0.2, 1.05) both",
               display: "flex",
@@ -475,7 +499,8 @@ export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
               </p>
             )}
           </div>
-        </>
+        </>,
+        document.body,
       )}
     </div>
   );
@@ -1150,7 +1175,7 @@ function SlabResultPanel({ result }: { result: Extract<LookupResult, { kind: "sl
           (Daksh May 2026 round 4: they were tucked into the section
           header as a tiny suffix, easy to miss. Now full-width lines
           right below the "where is it" headline). */}
-      {(s.label || s.description) && (
+      {(s.label || s.description || s.additional_description) && (
         <div
           style={{
             display: "flex",
@@ -1190,6 +1215,19 @@ function SlabResultPanel({ result }: { result: Extract<LookupResult, { kind: "sl
               “{s.description}”
             </div>
           )}
+          {s.additional_description && (
+            <div
+              style={{
+                fontSize: 12,
+                color: "var(--muted)",
+                lineHeight: 1.4,
+                wordBreak: "break-word",
+              }}
+              title="Additional description"
+            >
+              + {s.additional_description}
+            </div>
+          )}
         </div>
       )}
 
@@ -1209,6 +1247,8 @@ function SlabResultPanel({ result }: { result: Extract<LookupResult, { kind: "sl
         </div>
         <Field k="Temple" v={s.temple} />
         {s.stone && <Field k="Stone" v={s.stone} />}
+        {s.component_section && <Field k="Category 1" v={s.component_section} />}
+        {s.component_element && <Field k="Category 2" v={s.component_element} />}
         <Field
           k="Dimensions"
           v={

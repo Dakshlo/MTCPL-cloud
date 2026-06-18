@@ -21,6 +21,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { directDispatchSlabsAction } from "./actions";
+import { SlabComponentDetail } from "@/components/slab-component-detail";
 
 export type DirectSlab = {
   id: string;
@@ -36,6 +37,12 @@ export type DirectSlab = {
    *  is still cutting). Direct dispatch is allowed; the chip just tells
    *  the office the block's audit hasn't closed yet. */
   precut_at: string | null;
+  /** Mig 123 / 128 — component hierarchy (Category 1 / Category 2 /
+   *  Description / Additional). Optional; the card shows the levels present. */
+  description?: string | null;
+  component_section?: string | null;
+  component_element?: string | null;
+  additional_description?: string | null;
 };
 
 export type DirectHistoryRow = {
@@ -631,7 +638,13 @@ function TempleDispatchPeek({
                         </span>
                       )}
                     </div>
-                    {s.label && <div style={{ fontSize: 12, fontWeight: 600 }}>{s.label}</div>}
+                    <SlabComponentDetail
+                      section={s.component_section}
+                      element={s.component_element}
+                      label={s.label}
+                      description={s.description}
+                      additional={s.additional_description}
+                    />
                     <div className="muted" style={{ fontSize: 11, fontFamily: "ui-monospace, monospace" }}>
                       {s.length_ft}×{s.width_ft}×{s.thickness_ft} in · {cft(s.length_ft, s.width_ft, s.thickness_ft).toFixed(2)} CFT
                     </div>

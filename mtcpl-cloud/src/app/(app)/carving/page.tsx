@@ -399,12 +399,18 @@ export default async function CarvingDashboardPage({
       thickness_ft: number;
       stock_location: string | null;
       cancel_requested_at: string | null;
+      // Mig 123 / 128 — component hierarchy (Category 1 / Category 2 /
+      // Additional). Joined onto every job so all carving tabs + the job
+      // detail peek can show the full slab breakdown.
+      component_section: string | null;
+      component_element: string | null;
+      additional_description: string | null;
     }
   >();
   if (uniqueSlabReqIds.length > 0) {
     const { data: slabRows } = await admin
       .from("slab_requirements")
-      .select("id, temple, label, description, stone, length_ft, width_ft, thickness_ft, stock_location, cancel_requested_at")
+      .select("id, temple, label, description, stone, length_ft, width_ft, thickness_ft, stock_location, cancel_requested_at, component_section, component_element, additional_description")
       .in("id", uniqueSlabReqIds);
     for (const s of slabRows ?? []) {
       slabInfoMap.set(s.id, {
@@ -417,6 +423,9 @@ export default async function CarvingDashboardPage({
         thickness_ft: Number(s.thickness_ft) || 0,
         stock_location: (s as { stock_location?: string | null }).stock_location ?? null,
         cancel_requested_at: (s as { cancel_requested_at?: string | null }).cancel_requested_at ?? null,
+        component_section: (s as { component_section?: string | null }).component_section ?? null,
+        component_element: (s as { component_element?: string | null }).component_element ?? null,
+        additional_description: (s as { additional_description?: string | null }).additional_description ?? null,
       });
     }
   }
@@ -428,6 +437,9 @@ export default async function CarvingDashboardPage({
       temple: info?.temple ?? "(no temple)",
       slab_label: info?.label ?? null,
       slab_description: info?.description ?? null,
+      slab_component_section: info?.component_section ?? null,
+      slab_component_element: info?.component_element ?? null,
+      slab_additional_description: info?.additional_description ?? null,
       stone: info?.stone ?? null,
       length_ft: info?.length_ft ?? 0,
       width_ft: info?.width_ft ?? 0,

@@ -62,7 +62,7 @@ export default async function DispatchPage({
     // Ready ("Make Dispatch") = status=completed slabs waiting to be packed
     admin
       .from("slab_requirements")
-      .select("id, label, description, temple, stone, quality, length_ft, width_ft, thickness_ft, priority, status, cancel_requested_at")
+      .select("id, label, description, temple, stone, quality, length_ft, width_ft, thickness_ft, priority, status, cancel_requested_at, component_section, component_element, additional_description")
       .eq("status", "completed")
       .order("priority", { ascending: false })
       .order("updated_at", { ascending: true }),
@@ -209,6 +209,7 @@ export default async function DispatchPage({
     id: string; label: string | null; description?: string | null; temple: string; stone: string | null;
     quality: string | null; length_ft: number; width_ft: number; thickness_ft: number; priority: boolean | null;
     cancel_requested_at?: string | null;
+    component_section?: string | null; component_element?: string | null; additional_description?: string | null;
   }): ReadySlab {
     const L = Number(s.length_ft);
     const W = Number(s.width_ft);
@@ -229,6 +230,9 @@ export default async function DispatchPage({
       reworked: timer?.reworked ?? false,
       // Mig 132 — pending cancel request: red card, can't be dispatched.
       cancelPending: !!s.cancel_requested_at,
+      component_section: s.component_section ?? null,
+      component_element: s.component_element ?? null,
+      additional_description: s.additional_description ?? null,
     };
   }
 
@@ -336,7 +340,7 @@ export default async function DispatchPage({
   if (provisionalSlabIds.length > 0) {
     const { data: slabRows } = await admin
       .from("slab_requirements")
-      .select("id, label, description, temple, stone, quality, length_ft, width_ft, thickness_ft, priority")
+      .select("id, label, description, temple, stone, quality, length_ft, width_ft, thickness_ft, priority, component_section, component_element, additional_description")
       .in("id", provisionalSlabIds);
     for (const s of slabRows ?? []) {
       provisionalSlabDetails.set(s.id, shapeReadySlab(s));

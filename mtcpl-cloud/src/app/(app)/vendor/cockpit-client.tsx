@@ -38,6 +38,7 @@ import { useFormStatus } from "react-dom";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 import { CockpitSidebarToggle } from "@/components/cockpit-sidebar-toggle";
 import { POWER_CUT_REASON } from "@/lib/carving-power-cut";
+import { SlabComponentDetail } from "@/components/slab-component-detail";
 
 /**
  * Daksh May 2026 — branded spinner overlay for vendor-cockpit form
@@ -91,6 +92,15 @@ export type SlabLite = {
    *  at finish-block time. Surfaced on in-transit queue rows so the
    *  vendor knows where to pick the slab up. */
   stock_location?: string | null;
+  /** Mig 003 / 123 / 128 — slab "component" hierarchy: free-text
+   *  description plus Category 1 (component_section), Category 2
+   *  (component_element) and Additional. Shown on the Pending stock /
+   *  Ready to load / On hold / Rework rows (NOT the machine cards —
+   *  space-limited). All nullable; older slabs come back null. */
+  description?: string | null;
+  component_section?: string | null;
+  component_element?: string | null;
+  additional_description?: string | null;
 };
 
 /** Mig 069 — a slab the vendor parked mid-carve. Smaller shape
@@ -1027,8 +1037,18 @@ export function VendorCockpitClient({
           else if (r.review_approved_at) approved++;
           else inReview++;
         }
+        // Daksh June 2026 — blink the tile when any not-yet-approved slab has
+        // been waiting > 24h for the team's review.
+        const DAY_MS = 24 * 60 * 60 * 1000;
+        const pendingStale = recent.some(
+          (r) =>
+            !r.review_approved_at &&
+            r.completed_at &&
+            now - new Date(r.completed_at).getTime() > DAY_MS,
+        );
         return (
           <div style={{ marginTop: 18 }}>
+            <style>{`@keyframes mtcpl-pending-blink {0%,100%{outline-color:rgba(180,83,9,0.9)}50%{outline-color:rgba(180,83,9,0.05)}}`}</style>
             <button
               type="button"
               onClick={() => setPeekOpen("recent")}
@@ -1049,6 +1069,13 @@ export function VendorCockpitClient({
                 transition: "transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease",
                 touchAction: "manipulation",
                 boxShadow: "0 1px 0 rgba(0,0,0,0.04)",
+                ...(pendingStale
+                  ? {
+                      outline: "3px solid rgba(180,83,9,0.9)",
+                      outlineOffset: 2,
+                      animation: "mtcpl-pending-blink 1s ease-in-out infinite",
+                    }
+                  : {}),
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.transform = "translateY(-1px)";
@@ -1132,6 +1159,19 @@ export function VendorCockpitClient({
                       }}
                     >
                       ✗ {rejected} needs rework
+                    </span>
+                  )}
+                  {pendingStale && (
+                    <span
+                      style={{
+                        padding: "3px 8px",
+                        borderRadius: 999,
+                        background: "rgba(220,38,38,0.15)",
+                        color: "#b91c1c",
+                        border: "1px solid rgba(220,38,38,0.45)",
+                      }}
+                    >
+                      ⚠ waiting &gt; 24h
                     </span>
                   )}
                 </div>
@@ -1239,8 +1279,18 @@ export function VendorCockpitClient({
             (recent.length === 0 ? (
               <Empty text="Nothing finished yet — completed slabs land here for ~24h." />
             ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {recent.map((r) => (
+              (() => {
+                // Daksh June 2026 — split into Pending approval (anything the
+                // team hasn't approved yet) and Completed (approved). The
+                // pending block blinks constantly while any slab has been
+                // waiting > 24h.
+                const pendingList = recent.filter((r) => !r.review_approved_at);
+                const approvedList = recent.filter((r) => r.review_approved_at);
+                const DAY_MS = 24 * 60 * 60 * 1000;
+                const pendingStale = pendingList.some(
+                  (r) => r.completed_at && now - new Date(r.completed_at).getTime() > DAY_MS,
+                );
+                const renderRow = (r: (typeof recent)[number]) => (
                   <RecentCompletedRow
                     key={r.id}
                     row={r}
@@ -1252,8 +1302,61 @@ export function VendorCockpitClient({
                       })
                     }
                   />
-                ))}
-              </div>
+                );
+                return (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                    <style>{`@keyframes mtcpl-pending-blink {0%,100%{outline-color:rgba(180,83,9,0.9)}50%{outline-color:rgba(180,83,9,0.05)}}`}</style>
+                    {pendingList.length > 0 && (
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 8,
+                          padding: 10,
+                          borderRadius: 12,
+                          border: "1px solid rgba(180,83,9,0.35)",
+                          background: "rgba(180,83,9,0.05)",
+                          ...(pendingStale
+                            ? {
+                                outline: "3px solid rgba(180,83,9,0.9)",
+                                outlineOffset: 2,
+                                animation: "mtcpl-pending-blink 1s ease-in-out infinite",
+                              }
+                            : {}),
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                          <span style={{ fontSize: 12, fontWeight: 800, color: "#b45309", textTransform: "uppercase", letterSpacing: "0.03em" }}>
+                            ⏳ Pending approval
+                          </span>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)" }}>
+                            {pendingList.length}
+                          </span>
+                          {pendingStale && (
+                            <span style={{ fontSize: 10.5, fontWeight: 800, color: "#b91c1c" }}>
+                              ⚠ some waiting &gt; 24h
+                            </span>
+                          )}
+                        </div>
+                        {pendingList.map(renderRow)}
+                      </div>
+                    )}
+                    {approvedList.length > 0 && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                          <span style={{ fontSize: 12, fontWeight: 800, color: "#15803d", textTransform: "uppercase", letterSpacing: "0.03em" }}>
+                            ✓ Completed (approved)
+                          </span>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)" }}>
+                            {approvedList.length}
+                          </span>
+                        </div>
+                        {approvedList.map(renderRow)}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()
             ))}
           {peekOpen === "rework" &&
             (reworkPending.length === 0 ? (
@@ -2095,20 +2198,13 @@ function HeldSlabRow({
           {/* Daksh May 2026 round 3 — slab label surfaced on the held
               card too, matches the running CNC card + queue/pending
               rows. Same identity info everywhere in the cockpit. */}
-          {held.slab?.label && (
-            <div
-              style={{
-                fontSize: 11,
-                color: "var(--text)",
-                marginTop: 3,
-                fontWeight: 600,
-                wordBreak: "break-word",
-              }}
-              title="Slab label (set at cut time)"
-            >
-              🏷 {held.slab.label}
-            </div>
-          )}
+          <SlabComponentDetail
+            section={held.slab?.component_section}
+            element={held.slab?.component_element}
+            label={held.slab?.label}
+            description={held.slab?.description}
+            additional={held.slab?.additional_description}
+          />
         </div>
         {elapsedMin != null && (
           <div
@@ -2488,20 +2584,13 @@ function ReworkSlabRow({
               {item.slab.temple} · {dimStr(item.slab)}
             </div>
           )}
-          {item.slab?.label && (
-            <div
-              style={{
-                fontSize: 11,
-                color: "var(--text)",
-                marginTop: 3,
-                fontWeight: 600,
-                wordBreak: "break-word",
-              }}
-              title="Slab label (set at cut time)"
-            >
-              🏷 {item.slab.label}
-            </div>
-          )}
+          <SlabComponentDetail
+            section={item.slab?.component_section}
+            element={item.slab?.component_element}
+            label={item.slab?.label}
+            description={item.slab?.description}
+            additional={item.slab?.additional_description}
+          />
         </div>
         {item.review_reworked_at && (
           <div
@@ -3651,20 +3740,13 @@ function PendingStockRow({ job }: { job: CarvingJobLite }) {
             vendor needs the full slab identity ("Jagti dodiya thar
             (mohit)") and any drop-off instructions before they
             decide what to do with the slab. */}
-        {job.slab?.label && (
-          <div
-            style={{
-              fontSize: 11,
-              color: "var(--text)",
-              marginTop: 3,
-              fontWeight: 600,
-              wordBreak: "break-word",
-            }}
-            title="Slab label (set at cut time)"
-          >
-            🏷 {job.slab.label}
-          </div>
-        )}
+        <SlabComponentDetail
+          section={job.slab?.component_section}
+          element={job.slab?.component_element}
+          label={job.slab?.label}
+          description={job.slab?.description}
+          additional={job.slab?.additional_description}
+        />
         {job.note && (
           <div
             style={{
@@ -4050,20 +4132,13 @@ function QueueRow({
         )}
         {/* Daksh May 2026 round 3 — slab label surfaced on every row,
             not just the running CNC card. */}
-        {job.slab?.label && (
-          <div
-            style={{
-              fontSize: 11,
-              color: "var(--text)",
-              marginTop: 3,
-              fontWeight: 600,
-              wordBreak: "break-word",
-            }}
-            title="Slab label (set at cut time)"
-          >
-            🏷 {job.slab.label}
-          </div>
-        )}
+        <SlabComponentDetail
+          section={job.slab?.component_section}
+          element={job.slab?.component_element}
+          label={job.slab?.label}
+          description={job.slab?.description}
+          additional={job.slab?.additional_description}
+        />
         {job.note && (
           <div
             style={{

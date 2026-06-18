@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { EventTimeline } from "../event-timeline";
 import { ConfirmButton } from "@/components/confirm-button";
+import { SlabComponentDetail } from "@/components/slab-component-detail";
 import {
   approveCarvingJobAction,
   rejectCarvingJobAction,
@@ -77,7 +78,7 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
   const [{ data: slab }, { data: machine }, { data: assignedByProfile }, { data: eventUserProfiles }, { data: transferVendors }] = await Promise.all([
     admin
       .from("slab_requirements")
-      .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, source_block_id, stock_location")
+      .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, source_block_id, stock_location, description, component_section, component_element, additional_description")
       .eq("id", jobRow.slab_requirement_id)
       .maybeSingle(),
     jobRow.cnc_machine_id
@@ -136,7 +137,14 @@ export default async function CarvingJobDetailPage({ params }: { params: Promise
             {slab && (
               <div style={{ fontSize: 13 }}>
                 <div style={{ fontSize: 15, fontWeight: 700 }}>{slab.temple}</div>
-                <div className="muted" style={{ fontSize: 12 }}>{slab.label}</div>
+                <SlabComponentDetail
+                  section={slab.component_section}
+                  element={slab.component_element}
+                  label={slab.label}
+                  description={slab.description}
+                  additional={slab.additional_description}
+                  style={{ marginTop: 2 }}
+                />
                 <div style={{ marginTop: 8, display: "flex", gap: 10, flexWrap: "wrap" }}>
                   {slab.stone && <span className="role-pill">{slab.stone}</span>}
                   <span className="role-pill">

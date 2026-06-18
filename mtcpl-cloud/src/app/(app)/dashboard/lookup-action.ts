@@ -56,6 +56,12 @@ export type SlabResult = {
      *  the slab is mid-flight (in transit, on a machine, etc) and
      *  the cutter never set it. */
     stock_location: string | null;
+    /** Mig 123 / 128 — component hierarchy: Category 1 = component_section,
+     *  Category 2 = component_element, Additional = additional_description.
+     *  Nullable; older slabs predate these and come back null. */
+    component_section: string | null;
+    component_element: string | null;
+    additional_description: string | null;
   };
   /** Daksh May 2026 — one-line "where is it now per system" string
    *  derived from status + carving + dispatch + stock_location.
@@ -282,7 +288,7 @@ export async function lookupId(query: string): Promise<LookupResult> {
         const { data } = await admin
           .from("slab_requirements")
           .select(
-            "id, label, description, temple, stone, length_ft, width_ft, thickness_ft, source_block_id, status, priority, deadline, priority_note, created_at, updated_at, stock_location",
+            "id, label, description, temple, stone, length_ft, width_ft, thickness_ft, source_block_id, status, priority, deadline, priority_note, created_at, updated_at, stock_location, component_section, component_element, additional_description",
           )
           .eq("id", only.id)
           .maybeSingle();
@@ -325,17 +331,17 @@ export async function lookupId(query: string): Promise<LookupResult> {
   const { data: slabRows } = await admin
     .from("slab_requirements")
     .select(
-      "id, label, description, temple, stone, length_ft, width_ft, thickness_ft, source_block_id, status, priority, deadline, priority_note, created_at, updated_at, stock_location",
+      "id, label, description, temple, stone, length_ft, width_ft, thickness_ft, source_block_id, status, priority, deadline, priority_note, created_at, updated_at, stock_location, component_section, component_element, additional_description",
     )
     .in("id", variants)
-    .limit(10);
+    .limit(200);
   // Also check blocks for the same variants (possible collision
   // since both tables share an ID namespace).
   const { data: blockMatches } = await admin
     .from("blocks")
     .select("id, yard, status, stone")
     .in("id", variants)
-    .limit(10);
+    .limit(200);
 
   const idHits: MultipleResult["items"] = [];
   for (const r of slabRows ?? []) {
@@ -393,7 +399,7 @@ export async function lookupId(query: string): Promise<LookupResult> {
       kind: "multiple",
       query: q,
       reason: `${idHits.length} IDs match "${q}"`,
-      items: idHits.slice(0, 10),
+      items: idHits,
     };
   }
 
@@ -458,6 +464,10 @@ async function loadSlabContext(
     created_at: string;
     updated_at: string;
     stock_location: string | null;
+    // Mig 123 / 128 — may be absent from a caller's SELECT, defensive cast.
+    component_section?: string | null;
+    component_element?: string | null;
+    additional_description?: string | null;
   };
 
   const L = Number(slab.length_ft);
@@ -669,6 +679,9 @@ async function loadSlabContext(
       created_at: slab.created_at,
       updated_at: slab.updated_at,
       stock_location: slab.stock_location ?? null,
+      component_section: slab.component_section ?? null,
+      component_element: slab.component_element ?? null,
+      additional_description: slab.additional_description ?? null,
     },
     current_location: currentLocation,
     cut,
@@ -860,15 +873,19 @@ async function searchByDimensions(
   const { data: slabs } = await admin
     .from("slab_requirements")
     .select(
-      "id, temple, status, length_ft, width_ft, thickness_ft, stock_location",
+      "id, label, temple, status, length_ft, width_ft, thickness_ft, stock_location",
     )
     .in("length_ft", wanted)
     .in("width_ft", wanted)
     .in("thickness_ft", wanted)
-    .limit(60);
+    // Daksh June 2026 — no display cap: a common size (e.g. 36×36×12)
+    // can legitimately have dozens of matching slabs and the user must
+    // be able to scroll the whole list to pick the right one.
+    .limit(1000);
   for (const r of slabs ?? []) {
     const s = r as {
       id: string;
+      label: string | null;
       temple: string;
       status: string;
       length_ft: number | string;
@@ -885,10 +902,9 @@ async function searchByDimensions(
     items.push({
       kind: "slab",
       id: s.id,
-      summary: `${s.temple}${s.stock_location ? ` · ${s.stock_location}` : ""}`,
+      summary: `${s.temple}${s.label ? ` · ${s.label}` : ""}${s.stock_location ? ` · ${s.stock_location}` : ""}`,
       status: s.status,
     });
-    if (items.length >= 10) break;
   }
 
   // Blocks: (length_ft, width_ft, height_ft). Different last-axis
@@ -900,7 +916,7 @@ async function searchByDimensions(
       .in("length_ft", wanted)
       .in("width_ft", wanted)
       .in("height_ft", wanted)
-      .limit(60);
+      .limit(1000);
     for (const r of blocks ?? []) {
       const b = r as {
         id: string;
@@ -923,7 +939,6 @@ async function searchByDimensions(
         summary: `Yard ${b.yard} · ${b.stone}`,
         status: b.status,
       });
-      if (items.length >= 10) break;
     }
   }
 

@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { SlabThumb } from "@/components/slab-thumb";
 import { ConfirmButton } from "@/components/confirm-button";
+import { SlabComponentDetail } from "@/components/slab-component-detail";
 import type { StoneTypeDef } from "@/lib/stone-utils";
 import {
   sendWorkOrderLineToVendorAction,
@@ -74,14 +75,16 @@ export default async function WorkOrderDetailPage({ params, searchParams }: { pa
   type SlabMeta = {
     status: string; label: string | null; stone: string | null;
     l: number; w: number; t: number; stock_location: string | null;
+    description: string | null; component_section: string | null;
+    component_element: string | null; additional_description: string | null;
   };
   const slabMeta = new Map<string, SlabMeta>();
   if (slabIds.length) {
     const { data } = await admin
       .from("slab_requirements")
-      .select("id, status, label, stone, stock_location, length_ft, width_ft, thickness_ft")
+      .select("id, status, label, stone, stock_location, length_ft, width_ft, thickness_ft, description, component_section, component_element, additional_description")
       .in("id", slabIds);
-    for (const s of (data ?? []) as Array<{ id: string; status: string; label: string | null; stone: string | null; stock_location: string | null; length_ft: number | string; width_ft: number | string; thickness_ft: number | string }>) {
+    for (const s of (data ?? []) as Array<{ id: string; status: string; label: string | null; stone: string | null; stock_location: string | null; length_ft: number | string; width_ft: number | string; thickness_ft: number | string; description: string | null; component_section: string | null; component_element: string | null; additional_description: string | null }>) {
       slabMeta.set(s.id, {
         status: s.status,
         label: s.label,
@@ -90,6 +93,10 @@ export default async function WorkOrderDetailPage({ params, searchParams }: { pa
         w: Number(s.width_ft) || 0,
         t: Number(s.thickness_ft) || 0,
         stock_location: s.stock_location,
+        description: s.description,
+        component_section: s.component_section,
+        component_element: s.component_element,
+        additional_description: s.additional_description,
       });
     }
   }
@@ -333,7 +340,15 @@ export default async function WorkOrderDetailPage({ params, searchParams }: { pa
                       <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.slab_requirement_id}</span>
                       {slab?.stone && <span className="role-pill" style={{ fontSize: 9, padding: "1px 6px", flexShrink: 0 }}>{slab.stone}</span>}
                     </div>
-                    {slab?.label && <div style={{ fontSize: 10, color: "var(--muted)" }}>{slab.label}</div>}
+                    {slab && (
+                      <SlabComponentDetail
+                        section={slab.component_section}
+                        element={slab.component_element}
+                        label={slab.label}
+                        description={slab.description}
+                        additional={slab.additional_description}
+                      />
+                    )}
                     {slab && (
                       <div style={{ fontSize: 10, color: "var(--muted-light)", fontFamily: "ui-monospace, monospace" }}>{slab.l}×{slab.w}×{slab.t}&Prime;</div>
                     )}

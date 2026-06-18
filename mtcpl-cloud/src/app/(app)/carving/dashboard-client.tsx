@@ -46,6 +46,7 @@ import { ImageAnnotateModal } from "@/components/image-annotate-modal";
 // request a cancel; owner approves/rejects on /tasks/slab-cancels.
 import { SlabCancelRequestModal, longPressHandlers } from "@/components/slab-cancel-request-modal";
 import { requestSlabCancelAction } from "@/app/(app)/slabs/cancel-actions";
+import { SlabComponentDetail } from "@/components/slab-component-detail";
 
 type UnassignedSlab = {
   id: string;
@@ -93,6 +94,12 @@ type JobRow = {
    *  on the card so the carving head doesn't have to drill into the
    *  detail page just to read the design note. */
   slab_description?: string | null;
+  /** Mig 123 / 128 — component hierarchy joined from slab_requirements
+   *  (Category 1 = section, Category 2 = element, Additional). Shown on the
+   *  job cards + the detail peek. Nullable; older slabs come back null. */
+  slab_component_section?: string | null;
+  slab_component_element?: string | null;
+  slab_additional_description?: string | null;
   // Slab dimensions + stone are needed to render the 3D thumbnail on
   // each job card. Plumbed through from page.tsx → enrich().
   stone: string | null;
@@ -1446,63 +1453,13 @@ function UnassignedByTemple({
           ONLY when it has a value, so older slabs missing Category 1/2
           (or Additional) just show the levels they have — a slab with only
           a label + description shows just those two. */}
-      {(() => {
-        const c1 = s.component_section?.trim();
-        const c2 = s.component_element?.trim();
-        const lbl = s.label?.trim();
-        const desc = s.description?.trim();
-        const add = s.additional_description?.trim();
-        if (!c1 && !c2 && !lbl && !desc && !add) return null;
-        return (
-          <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-            {c1 && (
-              <div
-                style={{
-                  fontSize: 9.5,
-                  fontWeight: 800,
-                  color: "var(--muted)",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.02em",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-                title={c1}
-              >
-                {c1}
-              </div>
-            )}
-            {c2 && (
-              <div
-                style={{
-                  fontSize: 10,
-                  fontWeight: 700,
-                  color: "var(--muted)",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-                title={c2}
-              >
-                › {c2}
-              </div>
-            )}
-            {lbl && (
-              <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text)" }}>
-                🏷 {lbl}
-              </div>
-            )}
-            {desc && (
-              <div style={{ fontSize: 10, color: "var(--muted)" }}>{desc}</div>
-            )}
-            {add && (
-              <div style={{ fontSize: 9.5, fontStyle: "italic", color: "var(--muted-light)" }}>
-                + {add}
-              </div>
-            )}
-          </div>
-        );
-      })()}
+      <SlabComponentDetail
+        section={s.component_section}
+        element={s.component_element}
+        label={s.label}
+        description={s.description}
+        additional={s.additional_description}
+      />
       <div
         style={{
           fontSize: 10,
@@ -3116,30 +3073,16 @@ function JobsByTemple({
                   >
                     🏛 {j.temple}
                   </div>
-                  {j.slab_label && (
-                    <div style={{ fontSize: 10, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {j.slab_label}
-                    </div>
-                  )}
-                  {/* Free-text description — gives context the carving
-                      head needs to brief the vendor (e.g. "NE corner,
-                      set 2"). Two-line clamp keeps card height stable. */}
-                  {j.slab_description && (
-                    <div
-                      style={{
-                        fontSize: 10,
-                        color: "var(--muted)",
-                        fontStyle: "italic",
-                        display: "-webkit-box",
-                        WebkitLineClamp: 2,
-                        WebkitBoxOrient: "vertical",
-                        overflow: "hidden",
-                      }}
-                      title={j.slab_description}
-                    >
-                      “{j.slab_description}”
-                    </div>
-                  )}
+                  {/* Full component hierarchy: Category 1 › Category 2 ›
+                      Label › Description › Additional, each level only when
+                      present. */}
+                  <SlabComponentDetail
+                    section={j.slab_component_section}
+                    element={j.slab_component_element}
+                    label={j.slab_label}
+                    description={j.slab_description}
+                    additional={j.slab_additional_description}
+                  />
 
                   <div
                     style={{
@@ -3418,7 +3361,13 @@ function PendingWorkList({ jobs, stoneTypes }: { jobs: JobRow[]; stoneTypes: Sto
                   <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.slab_requirement_id}</span>
                   {j.stone && <span className="role-pill" style={{ fontSize: 9, padding: "1px 6px", flexShrink: 0 }}>{j.stone}</span>}
                 </div>
-                {j.slab_label && <div style={{ fontSize: 10, color: "var(--muted)" }}>{j.slab_label}</div>}
+                <SlabComponentDetail
+                  section={j.slab_component_section}
+                  element={j.slab_component_element}
+                  label={j.slab_label}
+                  description={j.slab_description}
+                  additional={j.slab_additional_description}
+                />
                 <div style={{ fontSize: 10, color: "var(--muted-light)", fontFamily: "ui-monospace, monospace" }}>{j.length_ft}×{j.width_ft}×{j.thickness_ft}&Prime;</div>
                 <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.04em", color: "#b45309", background: "rgba(180,83,9,0.1)", borderRadius: 999, padding: "3px 9px", alignSelf: "flex-start" }}>⏳ Still pending work</div>
                 {j.pending_work_note && <div style={{ fontSize: 11.5, color: "var(--text)", lineHeight: 1.4 }}>📝 {j.pending_work_note}</div>}
@@ -3787,12 +3736,21 @@ function JobDetailPeek({
                 </span>
               </Field>
               {job.stone && <Field label="Stone">{job.stone}</Field>}
+              {job.slab_component_section && (
+                <Field label="Category 1">{job.slab_component_section}</Field>
+              )}
+              {job.slab_component_element && (
+                <Field label="Category 2">{job.slab_component_element}</Field>
+              )}
               {job.slab_description && (
                 <Field label="Description">
                   <span style={{ fontStyle: "italic", color: "var(--muted)" }}>
                     “{job.slab_description}”
                   </span>
                 </Field>
+              )}
+              {job.slab_additional_description && (
+                <Field label="Additional">{job.slab_additional_description}</Field>
               )}
             </div>
           </section>

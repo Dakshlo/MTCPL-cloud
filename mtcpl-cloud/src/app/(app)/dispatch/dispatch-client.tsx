@@ -31,6 +31,7 @@ import { timeAgoLabel } from "./time-ago";
 // Mig 132 — long-press a slab card to request a cancel (broken slab);
 // the owner approves/rejects on /tasks/slab-cancels.
 import { SlabCancelRequestModal, longPressHandlers } from "@/components/slab-cancel-request-modal";
+import { SlabComponentDetail } from "@/components/slab-component-detail";
 
 type Tab = "ready" | "provisional" | "out_for_delivery" | "delivered";
 
@@ -101,6 +102,11 @@ export type ReadySlab = {
   /** Mig 132 — a cancel request is pending: red card, locked out of
    *  dispatch until the owner approves/rejects. */
   cancelPending: boolean;
+  /** Mig 123 / 128 — component hierarchy (Category 1 = component_section,
+   *  Category 2 = component_element, Additional). Nullable; older slabs null. */
+  component_section: string | null;
+  component_element: string | null;
+  additional_description: string | null;
 };
 
 export type ProvisionalRow = {
@@ -266,12 +272,13 @@ function SlabCard({
           🚫 CANCEL REQUESTED — waiting for owner
         </div>
       )}
-      {(s.label || s.description) && (
-        <div style={{ fontSize: 12.5, lineHeight: 1.35 }}>
-          <strong>{s.label ?? ""}</strong>
-          {s.description && <span style={{ color: "var(--muted)" }}>{s.label ? " · " : ""}{s.description}</span>}
-        </div>
-      )}
+      <SlabComponentDetail
+        section={s.component_section}
+        element={s.component_element}
+        label={s.label}
+        description={s.description}
+        additional={s.additional_description}
+      />
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 11.5 }}>
         <span style={{ fontFamily: "ui-monospace, monospace", color: "var(--text)" }}>{s.dimensions} · {s.cft.toFixed(2)} CFT</span>
         <span className="muted">{s.stone ?? "—"}</span>

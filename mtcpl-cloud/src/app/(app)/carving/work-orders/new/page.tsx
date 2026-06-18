@@ -39,13 +39,17 @@ export default async function NewWorkOrderPage() {
     thickness_ft: number | string;
     stock_location: string | null;
     updated_at: string | null;
+    description: string | null;
+    component_section: string | null;
+    component_element: string | null;
+    additional_description: string | null;
   };
   const sRows: SRow[] = [];
   for (let off = 0; off < 50000; off += 1000) {
     const { data } = await admin
       .from("slab_requirements")
       .select(
-        "id, label, temple, stone, status, length_ft, width_ft, thickness_ft, stock_location, updated_at",
+        "id, label, temple, stone, status, length_ft, width_ft, thickness_ft, stock_location, updated_at, description, component_section, component_element, additional_description",
       )
       .in("status", ["open", "planned", "cut_done"])
       // Mig 132 — slabs with a pending cancel request are locked: they
@@ -91,6 +95,10 @@ export default async function NewWorkOrderPage() {
       thickness_ft: Number(s.thickness_ft) || 0,
       stock_location: s.stock_location,
       updated_at: s.updated_at,
+      description: s.description,
+      component_section: s.component_section,
+      component_element: s.component_element,
+      additional_description: s.additional_description,
     }));
 
   return (
