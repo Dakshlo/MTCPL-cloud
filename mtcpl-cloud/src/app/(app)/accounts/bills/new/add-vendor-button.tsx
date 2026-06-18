@@ -268,30 +268,35 @@ export function AddVendorButton({
               customCategories={customCategories}
             />
           </Field>
+          <Field label="GSTIN">
+            <input
+              value={gstin}
+              onChange={(e) => setGstin(e.target.value)}
+              style={{ ...INPUT_STYLE, fontFamily: "ui-monospace, monospace" }}
+            />
+          </Field>
+          {/* Email + Phone together — the two channels the payment voucher
+              is sent on (email + WhatsApp). Phone promoted to a primary
+              field now that it drives the WhatsApp voucher. */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <Field label="GSTIN">
+            <Field label="Email">
               <input
-                value={gstin}
-                onChange={(e) => setGstin(e.target.value)}
-                style={{ ...INPUT_STYLE, fontFamily: "ui-monospace, monospace" }}
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                style={INPUT_STYLE}
               />
             </Field>
-            <Field label="Phone">
+            <Field label="Phone (WhatsApp)">
               <input
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
+                inputMode="numeric"
+                placeholder="e.g. 9414152740"
                 style={INPUT_STYLE}
               />
             </Field>
           </div>
-          <Field label="Email">
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              style={INPUT_STYLE}
-            />
-          </Field>
 
           {/* Mig 042 follow-on — bank info. Account number + IFSC are
               what the accountant actually needs to pay out, so they

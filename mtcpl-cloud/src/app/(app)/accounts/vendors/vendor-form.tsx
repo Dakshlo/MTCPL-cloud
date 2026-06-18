@@ -302,6 +302,22 @@ export function VendorForm({
         />
       </Field>
 
+      {/* Phone promoted out of "Additional details" — it's now a primary
+          field because it drives the WhatsApp payment voucher (sent on
+          Mark Paid alongside the email). */}
+      <Field
+        label="Phone (mobile)"
+        hint="Where the payment voucher is sent on WhatsApp after a bill is paid. 10-digit mobile; leave blank to skip WhatsApp for this vendor."
+      >
+        <input
+          value={form.phone}
+          onChange={(e) => setForm({ ...form, phone: e.target.value })}
+          inputMode="numeric"
+          placeholder="e.g. 9414152740"
+          style={INPUT_STYLE}
+        />
+      </Field>
+
       {/* Mig 047 — HDFC's bulk payment file (.001) requires the bene
           name to EXACTLY MATCH what HDFC has on record. The internal
           vendor name above can differ — this field carries the
@@ -398,25 +414,16 @@ export function VendorForm({
             padding: "6px 0",
           }}
         >
-          + Additional details (PAN · phone · address · UPI)
+          + Additional details (PAN · address · UPI)
         </summary>
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <Field label="PAN">
-              <input
-                value={form.pan}
-                onChange={(e) => setForm({ ...form, pan: e.target.value })}
-                style={{ ...INPUT_STYLE, fontFamily: "ui-monospace, monospace" }}
-              />
-            </Field>
-            <Field label="Phone">
-              <input
-                value={form.phone}
-                onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                style={INPUT_STYLE}
-              />
-            </Field>
-          </div>
+          <Field label="PAN">
+            <input
+              value={form.pan}
+              onChange={(e) => setForm({ ...form, pan: e.target.value })}
+              style={{ ...INPUT_STYLE, fontFamily: "ui-monospace, monospace" }}
+            />
+          </Field>
           <Field label="Address">
             <textarea
               value={form.address}
