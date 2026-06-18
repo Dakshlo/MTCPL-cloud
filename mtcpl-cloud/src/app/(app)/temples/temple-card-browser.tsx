@@ -176,6 +176,11 @@ export function TempleCardBrowser({
   // in the SAME leaf), and move them together.
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // Master Excel — tick category cards across levels (drill in via ▸ to pick
+  // deeper), then export every slab under the selection as one grouped Excel.
+  const [exportMode, setExportMode] = useState(false);
+  const [exportSel, setExportSel] = useState<Set<string>>(new Set());
+  const [exportBusy, startMasterExport] = useTransition();
   function exitSelect() { setSelectMode(false); setSelectedIds(new Set()); }
   // The currently-rendered card grid (temple picker OR folder cards) — used
   // for full keyboard navigation (arrow keys move focus, Enter drills in).
@@ -200,6 +205,82 @@ export function TempleCardBrowser({
   const isLeaf = currentNode != null && currentNode.children.length === 0;
   const EMPTY_CATS = { cat1: [], cat2: [], labels: [], descriptions: [] };
   const cats = temple ? (templeCats[temple] ?? EMPTY_CATS) : EMPTY_CATS;
+
+  // ── Master Excel helpers ──
+  function toggleExportSel(id: string) {
+    setExportSel((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  }
+  function findNodeById(nodes: TempleTreeNode[], id: string): TempleTreeNode | null {
+    for (const n of nodes) {
+      if (n.id === id) return n;
+      const f = findNodeById(n.children, id);
+      if (f) return f;
+    }
+    return null;
+  }
+  function allSlabsUnder(node: TempleTreeNode): TempleSlabCard[] {
+    return node.children.length === 0 ? node.slabs : node.children.flatMap(allSlabsUnder);
+  }
+  // Ordered band path for a slab — matches how page.tsx builds the tree
+  // (Category 1 ›-levels › Category 2 › Label › Description › Additional).
+  function slabBandPath(s: TempleSlabCard): string[] {
+    const cat1 = s.section ? s.section.split(/\s*[›>]\s*/).map((x) => x.trim()).filter(Boolean) : ["Unassigned"];
+    return [
+      ...cat1,
+      ...(s.element ? [s.element] : []),
+      s.label || "— (no label)",
+      ...(s.description ? [s.description] : []),
+      ...(s.additional ? [s.additional] : []),
+    ];
+  }
+  function runMasterExport() {
+    if (!tree || exportBusy) return;
+    // Gather slabs under every selected node, deduped by id (a parent + one of
+    // its children both selected won't double-count).
+    const byId = new Map<string, TempleSlabCard>();
+    for (const id of exportSel) {
+      const node = findNodeById(tree.roots, id);
+      if (node) for (const s of allSlabsUnder(node)) byId.set(s.id, s);
+    }
+    const items = [...byId.values()].map((s) => {
+      const b = bucketOf(s.status);
+      return {
+        path: slabBandPath(s),
+        rank: STAGE_ORDER.indexOf(b),
+        code: s.id,
+        dims: `${s.l}"×${s.w}"×${s.t}" · ${calcCft(s.l, s.w, s.t).toFixed(2)} CFT`,
+        stage: STAGE_META[b].label,
+        color: STAGE_META[b].color,
+        remark: s.remark ?? "",
+      };
+    });
+    if (items.length === 0) return;
+    // Sort by band path, then production stage, then code — the route walks
+    // this order and emits group bands wherever the path changes.
+    items.sort((a, b) =>
+      a.path.join(" ").localeCompare(b.path.join(" ")) || a.rank - b.rank || a.code.localeCompare(b.code),
+    );
+    const title = `${temple ?? "Temple"} · Master Excel`;
+    startMasterExport(async () => {
+      try {
+        const res = await fetch("/api/temples/master-excel.xlsx", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title, items }),
+        });
+        if (!res.ok) return;
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${(temple ?? "temple").replace(/[^\w]+/g, "-").slice(0, 50) || "temple"}-master.xlsx`;
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+        setExportMode(false);
+        setExportSel(new Set());
+      } catch { /* user can retry */ }
+    });
+  }
 
   function goUp() {
     if (pathIds.length > 0) setPathIds((p) => p.slice(0, -1));
@@ -391,6 +472,22 @@ export function TempleCardBrowser({
         {temple && !isLeaf && (currentNode ?? tree) && (
           <StageCountChips counts={(currentNode ?? tree)!.counts} total={(currentNode ?? tree)!.total} />
         )}
+        {/* Master Excel — tick category cards across levels, then export all
+            slabs under the selection as one hierarchically-grouped Excel. */}
+        {temple && !isLeaf && children.length > 0 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
+            {!exportMode ? (
+              <button type="button" onClick={() => { setExportMode(true); setExportSel(new Set()); }}
+                style={{ fontSize: 12.5, fontWeight: 800, padding: "7px 14px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", cursor: "pointer" }}>
+                📊 Master Excel
+              </button>
+            ) : (
+              <span style={{ fontSize: 12, fontWeight: 700, color: "var(--gold-dark)" }}>
+                ✓ Tick cards to include · <strong>▸ open</strong> a card to pick inside it · then <strong>Download</strong> below.
+              </span>
+            )}
+          </div>
+        )}
         {!temple ? (
           /* ── Temple picker landing ── */
           <>
@@ -461,8 +558,8 @@ export function TempleCardBrowser({
               const depth = path.length;
               const icon = depth === 0 ? "📂" : depth === 1 ? "📁" : depth === 2 ? "🏷️" : "📄";
               return (
-                <div key={c.id} className="tc-card" style={{ ...cardShell, animationDelay: `${Math.min(i * 35, 420)}ms`, cursor: "pointer", position: "relative" }} onClick={() => setPathIds((p) => [...p, c.id])} role="button" tabIndex={0}
-                  onKeyDown={(e) => { if (e.key === "Enter") setPathIds((p) => [...p, c.id]); }}>
+                <div key={c.id} className="tc-card" style={{ ...cardShell, animationDelay: `${Math.min(i * 35, 420)}ms`, cursor: "pointer", position: "relative", ...(exportMode && exportSel.has(c.id) ? { outline: "3px solid var(--gold-dark)", outlineOffset: -1 } : {}) }} onClick={exportMode ? () => toggleExportSel(c.id) : () => setPathIds((p) => [...p, c.id])} role="button" tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === "Enter") { if (exportMode) toggleExportSel(c.id); else setPathIds((p) => [...p, c.id]); } }}>
                   <div style={{ position: "relative", height: 148, background: cover ? "#0f172a" : `linear-gradient(135deg, ${STAGE_META.cutting.color}18, ${STAGE_META.carving.color}22)`, display: "flex", alignItems: "center", justifyContent: "center" }}>
                     {cover ? (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -472,7 +569,19 @@ export function TempleCardBrowser({
                     )}
                     <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, transparent 55%, rgba(0,0,0,0.4))" }} />
                     <div style={{ position: "absolute", top: 10, right: 10 }}><Ring pct={pct} onImage /></div>
-                    {canManageImages && (
+                    {/* Master-Excel select mode: a tick (select whole card) + ▸ open (drill in to pick deeper). */}
+                    {exportMode && (
+                      <span style={{ position: "absolute", top: 10, left: 10, width: 28, height: 28, borderRadius: "50%", border: "2px solid #fff", background: exportSel.has(c.id) ? "var(--gold-dark)" : "rgba(0,0,0,0.45)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 900, backdropFilter: "blur(2px)" }}>
+                        {exportSel.has(c.id) ? "✓" : ""}
+                      </span>
+                    )}
+                    {exportMode && c.children.length > 0 && (
+                      <button type="button" title={`Open ${c.name} to pick cards inside`} onClick={(e) => { e.stopPropagation(); setPathIds((p) => [...p, c.id]); }}
+                        style={{ position: "absolute", bottom: 10, right: 10, fontSize: 11.5, fontWeight: 800, color: "#fff", background: "rgba(0,0,0,0.6)", border: "1px solid rgba(255,255,255,0.4)", borderRadius: 999, padding: "4px 12px", cursor: "pointer", backdropFilter: "blur(3px)" }}>
+                        ▸ Open
+                      </button>
+                    )}
+                    {!exportMode && canManageImages && (
                       <button
                         type="button"
                         title={`Add a photo to ${c.name}`}
@@ -482,7 +591,7 @@ export function TempleCardBrowser({
                         📷
                       </button>
                     )}
-                    {canEditCategories && (
+                    {!exportMode && canEditCategories && (
                       <button
                         type="button"
                         title={`Rename ${c.name}`}
@@ -499,7 +608,7 @@ export function TempleCardBrowser({
                         ✏️
                       </button>
                     )}
-                    {imgs.length > 0 && (
+                    {!exportMode && imgs.length > 0 && (
                       <button
                         type="button"
                         title="View photos"
@@ -584,6 +693,26 @@ export function TempleCardBrowser({
             ↔ Move {selectedIds.size > 0 ? selectedIds.size : ""} →
           </button>
           <button type="button" onClick={exitSelect} style={{ fontSize: 12.5, fontWeight: 800, padding: "8px 13px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--muted)", cursor: "pointer" }}>
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {/* Master Excel — floating bar while picking category cards across levels. */}
+      {exportMode && (
+        <div style={{ position: "fixed", left: "50%", bottom: 22, transform: "translateX(-50%)", zIndex: 1650, display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 14, background: "var(--surface)", border: "1px solid var(--gold-dark)", boxShadow: "0 14px 44px rgba(0,0,0,0.28)", maxWidth: "calc(100vw - 28px)", flexWrap: "wrap", justifyContent: "center", animation: "tcIn .2s ease" }}>
+          <span style={{ fontSize: 13.5, fontWeight: 800 }}>
+            <span style={{ color: "var(--gold-dark)" }}>{exportSel.size}</span> card{exportSel.size === 1 ? "" : "s"} selected
+          </span>
+          <button
+            type="button"
+            disabled={exportSel.size === 0 || exportBusy}
+            onClick={runMasterExport}
+            style={{ fontSize: 13.5, fontWeight: 800, padding: "8px 16px", borderRadius: 9, border: "none", background: exportSel.size === 0 || exportBusy ? "var(--border)" : "#15803d", color: "#fff", cursor: exportSel.size === 0 || exportBusy ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}
+          >
+            {exportBusy ? "Preparing…" : `⬇ Download Master Excel${exportSel.size > 0 ? ` (${exportSel.size})` : ""}`}
+          </button>
+          <button type="button" onClick={() => { setExportMode(false); setExportSel(new Set()); }} style={{ fontSize: 12.5, fontWeight: 800, padding: "8px 13px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--muted)", cursor: "pointer" }}>
             Cancel
           </button>
         </div>
