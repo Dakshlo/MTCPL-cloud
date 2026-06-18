@@ -501,7 +501,7 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
     page.drawImage(png, { x: M, y: top - lh + 2, width: lw, height: lh });
   } catch { /* logo optional */ }
   const tx = M + 86;
-  text("MATESHWARI TEMPLE CONSTRUCTION PVT LTD", tx, top - 6, 10, bold, brown);
+  text("MATESHWARI TEMPLE CONSTRUCTION PVT LTD", tx, top - 6, 10, bold, ink);
   text("Daily Work Report", tx, top - 24, 17, bold, ink);
   text("Activity in the 24 hours ending 10 AM IST", tx, top - 38, 8, font, muted);
   // Date in a rounded brand pill, with the comparison day beneath it.
@@ -539,27 +539,30 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
   box(M + bw + gap, top, COL.green, "DISPATCHED", String(data.today.dispatch.slabs), `${data.today.dispatch.cft.toFixed(1)} CFT  ·  ${data.today.dispatch.tonnes.toFixed(1)} T  ·  ${data.today.dispatch.trucks} trucks`, delta(data.today.dispatch.slabs, data.prev.dispatch.slabs));
   top -= bh + 22;
 
-  // ── breakdown columns ──
-  const cw = (W - 2 * M - 2 * gap) / 3;
-  const colX = [M, M + cw + gap, M + 2 * (cw + gap)];
+  // ── breakdown columns (blocks / cutting / carving / dispatch) ──
+  const cw = (W - 2 * M - 3 * gap) / 4;
+  const colX = [M, M + cw + gap, M + 2 * (cw + gap), M + 3 * (cw + gap)];
   const colTop = top;
   const drawList = (x: number, title: string, color: ReturnType<typeof rgb>, rows: Array<{ name: string; val: string }>) => {
     let yy = colTop;
     // colour bullet + title
-    page.drawRectangle({ x, y: yy - 1, width: 7, height: 7, color });
-    text(title, x + 11, yy, 8.5, bold, color); yy -= 6;
+    page.drawRectangle({ x, y: yy - 1, width: 6, height: 6, color });
+    text(title, x + 9, yy, 7.5, bold, color); yy -= 6;
     page.drawLine({ start: { x, y: yy }, end: { x: x + cw, y: yy }, thickness: 1, color }); yy -= 14;
-    if (rows.length === 0) { text("None", x, yy, 9, font, muted); yy -= 14; }
+    if (rows.length === 0) { text("None", x, yy, 8.5, font, muted); yy -= 14; }
     else rows.slice(0, 6).forEach((r, i) => {
       if (i % 2 === 1) page.drawRectangle({ x: x - 3, y: yy - 3.5, width: cw + 6, height: 13.5, color: rowTint });
-      text(clip(r.name, 15), x, yy, 9, font, ink); right(r.val, x + cw, yy, 8.5, font, muted); yy -= 14;
+      text(clip(r.name, 11), x, yy, 8.5, font, ink); right(r.val, x + cw, yy, 7.5, font, muted); yy -= 14;
     });
     return yy;
   };
-  const y1 = drawList(colX[0], "CUTTING BY STONE", COL.cyan, data.cuttingByStone.map((r) => ({ name: r.stone, val: `${r.slabs} · ${r.cft.toFixed(0)} CFT` })));
-  const y2 = drawList(colX[1], "CARVING BY VENDOR", COL.amber, data.carvingByVendor.map((r) => ({ name: r.vendor, val: `${r.slabs} · ${r.cft.toFixed(0)} CFT` })));
-  const y3 = drawList(colX[2], "DISPATCH BY TEMPLE", COL.green, data.dispatchByTemple.map((r) => ({ name: r.temple, val: `${r.slabs} · ${r.tonnes.toFixed(1)} T` })));
-  top = Math.min(y1, y2, y3) - 16;
+  // Mig (Daksh) — blocks added by stone type (sandstone / marble / …) as the
+  // first column; the data was already aggregated but never shown.
+  const y0 = drawList(colX[0], "BLOCKS BY STONE", COL.blue, data.blocksByStone.map((r) => ({ name: r.stone, val: `${r.count} · ${r.cft.toFixed(0)} CFT` })));
+  const y1 = drawList(colX[1], "CUTTING BY STONE", COL.cyan, data.cuttingByStone.map((r) => ({ name: r.stone, val: `${r.slabs} · ${r.cft.toFixed(0)} CFT` })));
+  const y2 = drawList(colX[2], "CARVING BY VENDOR", COL.amber, data.carvingByVendor.map((r) => ({ name: r.vendor, val: `${r.slabs} · ${r.cft.toFixed(0)} CFT` })));
+  const y3 = drawList(colX[3], "DISPATCH BY TEMPLE", COL.green, data.dispatchByTemple.map((r) => ({ name: r.temple, val: `${r.slabs} · ${r.tonnes.toFixed(1)} T` })));
+  top = Math.min(y0, y1, y2, y3) - 16;
 
   // ── CNC costing — month to date, combined "/unit" headline ──
   if (data.cnc) {
@@ -630,7 +633,7 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
   const c2 = (s: string, cx: number, y: number, size: number, f = font, c = ink) => p2.drawText(s, { x: cx - f.widthOfTextAtSize(s, size) / 2, y, size, font: f, color: c });
 
   let h2 = H - 44;
-  t2("MATESHWARI TEMPLE CONSTRUCTION PVT LTD", M, h2, 10, bold, brown);
+  t2("MATESHWARI TEMPLE CONSTRUCTION PVT LTD", M, h2, 10, bold, ink);
   t2("10-Day Activity Trends", M, h2 - 21, 16, bold, ink);
   const tr = data.trend;
   if (tr.length > 0) r2(`${tr[0].label}  -  ${tr[tr.length - 1].label}`, W - M, h2 - 5, 9, font, muted);
