@@ -555,7 +555,7 @@ export function VendorCockpitClient({
   // completed" to see the last 10 with approval status. Single state
   // covers all three because only one peek is open at a time.
   const [peekOpen, setPeekOpen] = useState<
-    null | "pending" | "ready" | "recent" | "hold" | "rework" | "rejected"
+    null | "pending" | "ready" | "recent_pending" | "recent_approved" | "hold" | "rework" | "rejected"
   >(null);
   // Mig 069 — which held slab is being reloaded right now? When set,
   // we render a small picker modal showing the default machine
@@ -1123,7 +1123,7 @@ export function VendorCockpitClient({
               count={pendingList.length}
               accent="#b45309"
               blink={pendingStale}
-              onClick={() => setPeekOpen("recent")}
+              onClick={() => setPeekOpen("recent_pending")}
               badges={
                 <>
                   {inReview > 0 && (
@@ -1143,7 +1143,7 @@ export function VendorCockpitClient({
               label="Completed (approved)"
               count={approvedList.length}
               accent="#15803d"
-              onClick={() => setPeekOpen("recent")}
+              onClick={() => setPeekOpen("recent_approved")}
               badges={<span style={pill("rgba(22,163,74,0.15)", "#15803d", "rgba(22,163,74,0.4)")}>✔ signed off by team</span>}
             />
           </div>
@@ -1164,7 +1164,11 @@ export function VendorCockpitClient({
                     ? "🔁 Rework pending"
                     : peekOpen === "rejected"
                       ? "✗ Rejected"
-                      : "Recently completed"
+                      : peekOpen === "recent_pending"
+                        ? "⏳ Pending approval"
+                        : peekOpen === "recent_approved"
+                          ? "✓ Completed (approved)"
+                          : "Recently completed"
           }
           subtitle={
             peekOpen === "pending"
@@ -1177,7 +1181,11 @@ export function VendorCockpitClient({
                     ? `${reworkPending.length} slab${reworkPending.length !== 1 ? "s" : ""} sent back by reviewer — reload onto a CNC or mark done`
                     : peekOpen === "rejected"
                       ? `${rejected.length} slab${rejected.length !== 1 ? "s" : ""} rejected by reviewer — read only, for reference`
-                      : `Last ${recent.length} unloaded — awaiting team review unless approved`
+                      : peekOpen === "recent_pending"
+                        ? `${recent.filter((r) => !r.review_approved_at).length} slab(s) awaiting team sign-off`
+                        : peekOpen === "recent_approved"
+                          ? `${recent.filter((r) => r.review_approved_at).length} slab(s) approved & signed off`
+                          : `Last ${recent.length} unloaded — awaiting team review unless approved`
           }
           onClose={() => setPeekOpen(null)}
         >
@@ -1232,89 +1240,71 @@ export function VendorCockpitClient({
                 ))}
               </div>
             ))}
-          {peekOpen === "recent" &&
-            (recent.length === 0 ? (
-              <Empty text="Nothing finished yet — completed slabs land here for ~24h." />
-            ) : (
-              (() => {
-                // Daksh June 2026 — split into Pending approval (anything the
-                // team hasn't approved yet) and Completed (approved). The
-                // pending block blinks constantly while any slab has been
-                // waiting > 24h.
-                const pendingList = recent.filter((r) => !r.review_approved_at);
-                const approvedList = recent.filter((r) => r.review_approved_at);
-                const DAY_MS = 24 * 60 * 60 * 1000;
-                const pendingStale = pendingList.some(
-                  (r) => r.completed_at && now - new Date(r.completed_at).getTime() > DAY_MS,
-                );
-                const renderRow = (r: (typeof recent)[number]) => (
-                  <RecentCompletedRow
-                    key={r.id}
-                    row={r}
-                    onEditLocation={() =>
-                      setEditLocFor({
-                        id: r.id,
-                        slab_id: r.slab_id,
-                        temporary_location: r.temporary_location,
-                      })
-                    }
-                  />
-                );
-                return (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                    <style>{`@keyframes mtcpl-pending-blink {0%,100%{outline-color:rgba(180,83,9,0.9)}50%{outline-color:rgba(180,83,9,0.05)}}`}</style>
-                    {pendingList.length > 0 && (
-                      <div
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 8,
+          {peekOpen === "recent_pending" &&
+            (() => {
+              const pendingList = recent.filter((r) => !r.review_approved_at);
+              const DAY_MS = 24 * 60 * 60 * 1000;
+              const pendingStale = pendingList.some(
+                (r) => r.completed_at && now - new Date(r.completed_at).getTime() > DAY_MS,
+              );
+              if (pendingList.length === 0)
+                return <Empty text="Nothing waiting for approval right now." />;
+              return (
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                    ...(pendingStale
+                      ? {
                           padding: 10,
                           borderRadius: 12,
                           border: "1px solid rgba(180,83,9,0.35)",
                           background: "rgba(180,83,9,0.05)",
-                          ...(pendingStale
-                            ? {
-                                outline: "3px solid rgba(180,83,9,0.9)",
-                                outlineOffset: 2,
-                                animation: "mtcpl-pending-blink 1s ease-in-out infinite",
-                              }
-                            : {}),
-                        }}
-                      >
-                        <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-                          <span style={{ fontSize: 12, fontWeight: 800, color: "#b45309", textTransform: "uppercase", letterSpacing: "0.03em" }}>
-                            ⏳ Pending approval
-                          </span>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)" }}>
-                            {pendingList.length}
-                          </span>
-                          {pendingStale && (
-                            <span style={{ fontSize: 10.5, fontWeight: 800, color: "#b91c1c" }}>
-                              ⚠ some waiting &gt; 24h
-                            </span>
-                          )}
-                        </div>
-                        {pendingList.map(renderRow)}
-                      </div>
-                    )}
-                    {approvedList.length > 0 && (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                          <span style={{ fontSize: 12, fontWeight: 800, color: "#15803d", textTransform: "uppercase", letterSpacing: "0.03em" }}>
-                            ✓ Completed (approved)
-                          </span>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)" }}>
-                            {approvedList.length}
-                          </span>
-                        </div>
-                        {approvedList.map(renderRow)}
-                      </div>
-                    )}
-                  </div>
-                );
-              })()
-            ))}
+                          outline: "3px solid rgba(180,83,9,0.9)",
+                          outlineOffset: 2,
+                          animation: "mtcpl-pending-blink 1s ease-in-out infinite",
+                        }
+                      : {}),
+                  }}
+                >
+                  <style>{`@keyframes mtcpl-pending-blink {0%,100%{outline-color:rgba(180,83,9,0.9)}50%{outline-color:rgba(180,83,9,0.05)}}`}</style>
+                  {pendingStale && (
+                    <div style={{ fontSize: 11, fontWeight: 800, color: "#b91c1c" }}>
+                      ⚠ Some have been waiting more than 24h for sign-off
+                    </div>
+                  )}
+                  {pendingList.map((r) => (
+                    <RecentCompletedRow
+                      key={r.id}
+                      row={r}
+                      onEditLocation={() =>
+                        setEditLocFor({ id: r.id, slab_id: r.slab_id, temporary_location: r.temporary_location })
+                      }
+                    />
+                  ))}
+                </div>
+              );
+            })()}
+          {peekOpen === "recent_approved" &&
+            (() => {
+              const approvedList = recent.filter((r) => r.review_approved_at);
+              if (approvedList.length === 0)
+                return <Empty text="No approved slabs in the recent window yet." />;
+              return (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {approvedList.map((r) => (
+                    <RecentCompletedRow
+                      key={r.id}
+                      row={r}
+                      onEditLocation={() =>
+                        setEditLocFor({ id: r.id, slab_id: r.slab_id, temporary_location: r.temporary_location })
+                      }
+                    />
+                  ))}
+                </div>
+              );
+            })()}
           {peekOpen === "rework" &&
             (reworkPending.length === 0 ? (
               <Empty text="No slabs sent back for rework. When the reviewer hits 'Rework needed' on a finished slab it lands here with the reason + photo." />
