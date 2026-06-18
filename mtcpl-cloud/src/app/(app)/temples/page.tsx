@@ -28,6 +28,7 @@ type SlabRow = {
   stone: string | null; quality: string | null;
   length_ft: number | null; width_ft: number | null; thickness_ft: number | null;
   priority: boolean | null;
+  remark: string | null;
   // Mig 132 — cancellation fields (cancelled slabs show in Temple View
   // with a replace / no-replace decision).
   cancel_reason: string | null;
@@ -41,6 +42,7 @@ export type TempleSlabCard = {
   l: number; w: number; t: number; priority: boolean;
   // Mig 128 — raw component-path fields for the "move slab" modal.
   section: string; element: string; label: string; description: string; additional: string;
+  remark?: string | null;
   // Mig 132 — see temple-shared.ts.
   cancelReason?: string | null;
   cancelResolution?: "no_replacement" | "replaced" | null;
@@ -133,7 +135,7 @@ export default async function TemplesPage() {
     for (let offset = 0; offset < SLAB_LIMIT; offset += PAGE) {
       const { data, error } = await admin
         .from("slab_requirements")
-        .select("id, label, description, temple, status, component_section, component_element, additional_description, stone, quality, length_ft, width_ft, thickness_ft, priority, cancel_reason, cancel_resolution, replacement_slab_id, replacement_of")
+        .select("id, label, description, temple, status, component_section, component_element, additional_description, stone, quality, length_ft, width_ft, thickness_ft, priority, remark, cancel_reason, cancel_resolution, replacement_slab_id, replacement_of")
         .order("temple", { ascending: true })
         .range(offset, offset + PAGE - 1);
       if (error) throw new Error(error.message);
@@ -202,6 +204,7 @@ export default async function TemplesPage() {
       label,
       description,
       additional,
+      remark: s.remark,
       // Mig 132 — cancellation context for the card UI.
       cancelReason: s.cancel_reason,
       cancelResolution: s.cancel_resolution,

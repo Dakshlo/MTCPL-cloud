@@ -129,6 +129,38 @@ export async function moveSlabsComponentAction(
   return { ok: true, count };
 }
 
+// Mig 139 — save a free-text remark on a single slab, edited inline from the
+// Temple View table. Read-only everywhere else; this is the one writable
+// column in the table. Mirrors moveSlabsComponentAction's single-table update.
+export async function saveSlabRemarkAction(
+  formData: FormData,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { profile } = await requireAuth(WRITE_ROLES);
+  const admin = createAdminSupabaseClient();
+
+  const id = String(formData.get("slab_id") || "").trim();
+  if (!id) return { ok: false, error: "Missing slab id." };
+  const remark = String(formData.get("remark") || "").trim();
+
+  const { data: updated, error } = await admin
+    .from("slab_requirements")
+    .update({
+      remark: remark || null,
+      updated_by: profile.id,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .select("id")
+    .maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!updated) return { ok: false, error: "Slab not found." };
+
+  await logAudit(profile.id, "slab_remark_saved", "slab", id, { remark: remark || null });
+  revalidatePath("/temples");
+  revalidatePath("/slabs");
+  return { ok: true };
+}
+
 // Mig 128 follow-on — RENAME a whole tree-head node. Daksh: from the card
 // browser you can rename a Category 1 / Category 2 / Label / Description group
 // in one go (and renaming it to an EXISTING sibling merges them). We rebuild

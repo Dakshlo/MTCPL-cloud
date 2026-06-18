@@ -11,9 +11,9 @@
 // The polish: staggered card entrance, hover lift, progress rings,
 // gradient covers — gallery/finder feel rather than a database page.
 
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
-import { deleteTempleComponentImageAction } from "./actions";
+import { deleteTempleComponentImageAction, saveSlabRemarkAction } from "./actions";
 import { MoveSlabModal, RenameNodeModal, NodeImageUploader } from "./temple-node-modals";
 import {
   STAGE_META, STAGE_ORDER, bucketOf, calcCft, stoneLabel,
@@ -28,6 +28,40 @@ function MiniBar({ counts, total, track = "rgba(0,0,0,0.08)" }: { counts: Record
     <div style={{ display: "flex", height: 8, borderRadius: 999, overflow: "hidden", background: track }}>
       {STAGE_ORDER.map((s) => counts[s] ? <div key={s} title={`${STAGE_META[s].label}: ${counts[s]}`} style={{ width: `${(counts[s] / total) * 100}%`, background: STAGE_META[s].color }} /> : null)}
     </div>
+  );
+}
+
+/** Stage colour key — shown at the top of EVERY card level so the colour
+ *  scheme (used on the mini bars, stage chips, slab cards and the slab
+ *  table) is self-explanatory anywhere in the browser. */
+function StageLegend() {
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "5px 14px", marginBottom: 16, animation: "tcFade .3s ease" }}>
+      <span style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Colour key</span>
+      {STAGE_ORDER.map((s) => (
+        <span key={s} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+          <span style={{ width: 11, height: 11, borderRadius: 3, background: STAGE_META[s].color, flexShrink: 0 }} />
+          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text)" }}>{STAGE_META[s].label}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** Small segmented toggle button (Cards | Table view switch). */
+function ViewToggleBtn({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        padding: "5px 13px", fontSize: 12, fontWeight: 800, borderRadius: 7,
+        border: "1px solid var(--border)", cursor: active ? "default" : "pointer",
+        background: active ? "var(--gold-dark)" : "var(--bg)", color: active ? "#fff" : "var(--text)",
+      }}
+    >
+      {label}
+    </button>
   );
 }
 
@@ -349,6 +383,9 @@ export function TempleCardBrowser({
 
       {/* ── Body ── */}
       <div key={levelKey} style={{ flex: 1, overflowY: "auto", padding: "20px 22px 40px" }}>
+        {/* Colour key on every in-temple level (Category 1/2 · Label ·
+            Description · slabs) so the stage colours read the same everywhere. */}
+        {temple && <StageLegend />}
         {!temple ? (
           /* ── Temple picker landing ── */
           <>
@@ -585,6 +622,7 @@ function SlabCardsGrid({
   onToggle: (id: string) => void;
   onViewImages: (imgs: ComponentImage[], index: number) => void;
 }) {
+  const [view, setView] = useState<"cards" | "table">("cards");
   return (
     <div>
       {/* This node's own reference photos (Description / Label / Additional). */}
@@ -598,32 +636,44 @@ function SlabCardsGrid({
           ))}
         </div>
       )}
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: canSelect ? 8 : 14, animation: "tcFade .3s ease" }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 10, animation: "tcFade .3s ease" }}>
         {STAGE_ORDER.filter((s) => node.counts[s] > 0).map((s) => (
           <span key={s} style={{ fontSize: 11.5, fontWeight: 800, color: "#fff", background: STAGE_META[s].color, borderRadius: 999, padding: "3px 11px" }}>{node.counts[s]} {STAGE_META[s].label}</span>
         ))}
+        <span style={{ flex: 1 }} />
+        {/* Card ⇄ Table view toggle for this slab leaf. */}
+        <div style={{ display: "flex", gap: 6 }}>
+          <ViewToggleBtn active={view === "cards"} onClick={() => setView("cards")} label="▦ Cards" />
+          <ViewToggleBtn active={view === "table"} onClick={() => setView("table")} label="☰ Table" />
+        </div>
       </div>
-      {canSelect && !selectMode && (
-        <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>↔ Tap a slab to move it · <strong>press &amp; hold</strong> a slab to select several at once.</div>
+      {view === "cards" ? (
+        <>
+          {canSelect && !selectMode && (
+            <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>↔ Tap a slab to move it · <strong>press &amp; hold</strong> a slab to select several at once.</div>
+          )}
+          {selectMode && (
+            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--gold-dark)", marginBottom: 12 }}>✓ Tap slabs to select, then move them together. (Esc to cancel)</div>
+          )}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(205px, 1fr))", gap: 10, paddingBottom: selectMode ? 76 : 0 }}>
+            {node.slabs.map((s, i) => (
+              <BigSlabCard
+                key={s.id}
+                s={s}
+                delay={Math.min(i * 18, 360)}
+                canSelect={canSelect}
+                selectMode={selectMode}
+                selected={selectedIds.has(s.id)}
+                onSingleMove={onSingleMove}
+                onEnterSelect={onEnterSelect}
+                onToggle={onToggle}
+              />
+            ))}
+          </div>
+        </>
+      ) : (
+        <SlabTable slabs={node.slabs} canEdit={canSelect} />
       )}
-      {selectMode && (
-        <div style={{ fontSize: 12, fontWeight: 700, color: "var(--gold-dark)", marginBottom: 12 }}>✓ Tap slabs to select, then move them together. (Esc to cancel)</div>
-      )}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(205px, 1fr))", gap: 10, paddingBottom: selectMode ? 76 : 0 }}>
-        {node.slabs.map((s, i) => (
-          <BigSlabCard
-            key={s.id}
-            s={s}
-            delay={Math.min(i * 18, 360)}
-            canSelect={canSelect}
-            selectMode={selectMode}
-            selected={selectedIds.has(s.id)}
-            onSingleMove={onSingleMove}
-            onEnterSelect={onEnterSelect}
-            onToggle={onToggle}
-          />
-        ))}
-      </div>
     </div>
   );
 }
@@ -720,6 +770,109 @@ function BigSlabCard({
         {s.quality && <span style={{ fontSize: 10.5, fontWeight: 700, color: s.quality === "A" ? "#15803d" : "#b45309" }}>Grade {s.quality}</span>}
         {clickable && !selectMode && <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--gold-dark)", fontWeight: 800 }}>↔ move</span>}
       </div>
+    </div>
+  );
+}
+
+// ── Table view of the slab leaf ──────────────────────────────────────
+// 8 read-only columns + an editable Remark. Rows are tinted by stage
+// (same colour scheme as the cards/chips/legend) and ordered pending →
+// dispatched. Only the Remark is writable (gated by canEdit; the server
+// action enforces the write roles too).
+function SlabTable({ slabs, canEdit }: { slabs: TempleSlabCard[]; canEdit: boolean }) {
+  const rows = [...slabs].sort(
+    (a, b) => STAGE_ORDER.indexOf(bucketOf(a.status)) - STAGE_ORDER.indexOf(bucketOf(b.status)),
+  );
+  const th: CSSProperties = {
+    padding: "8px 10px", fontSize: 10.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase",
+    letterSpacing: "0.04em", textAlign: "left", whiteSpace: "nowrap", borderBottom: "1px solid var(--border)",
+    position: "sticky", top: 0, background: "var(--surface)", zIndex: 1,
+  };
+  const td: CSSProperties = { padding: "7px 10px", fontSize: 12, color: "var(--text)", verticalAlign: "middle", borderBottom: "1px solid var(--border)" };
+  return (
+    <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: 10, animation: "tcFade .3s ease" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1000 }}>
+        <thead>
+          <tr>
+            <th style={th}>Code</th>
+            <th style={th}>Category 1</th>
+            <th style={th}>Category 2</th>
+            <th style={th}>Label</th>
+            <th style={th}>Description</th>
+            <th style={th}>Add&apos;l description</th>
+            <th style={th}>Dimensions</th>
+            <th style={th}>Stage</th>
+            <th style={{ ...th, minWidth: 210 }}>Remark</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((s) => {
+            const bucket = bucketOf(s.status);
+            const color = STAGE_META[bucket].color;
+            return (
+              <tr key={s.id} style={{ background: `${color}14` }}>
+                <td style={{ ...td, borderLeft: `4px solid ${color}`, fontFamily: "ui-monospace, monospace", fontWeight: 800, whiteSpace: "nowrap" }}>
+                  {s.priority && <span title="Priority">⚡ </span>}{s.id}
+                </td>
+                <td style={td}>{s.section || "—"}</td>
+                <td style={td}>{s.element || "—"}</td>
+                <td style={td}>{s.label || "—"}</td>
+                <td style={td}>{s.description || "—"}</td>
+                <td style={td}>{s.additional || "—"}</td>
+                <td style={{ ...td, fontFamily: "ui-monospace, monospace", whiteSpace: "nowrap" }}>
+                  {s.l}&quot;×{s.w}&quot;×{s.t}&quot; <span className="muted">· {calcCft(s.l, s.w, s.t).toFixed(2)} CFT</span>
+                </td>
+                <td style={{ ...td, whiteSpace: "nowrap" }}>
+                  <span style={{ fontSize: 10.5, fontWeight: 800, color: "#fff", background: color, borderRadius: 999, padding: "2px 9px" }}>{STAGE_META[bucket].label}</span>
+                </td>
+                <td style={td}><RemarkCell slabId={s.id} initial={s.remark ?? ""} canEdit={canEdit} /></td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// Editable per-slab remark cell. Optimistic — on a successful save we move
+// the baseline forward (no full-page refetch of the 30k-slab tree).
+function RemarkCell({ slabId, initial, canEdit }: { slabId: string; initial: string; canEdit: boolean }) {
+  const [val, setVal] = useState(initial);
+  const [baseline, setBaseline] = useState(initial);
+  const [saving, startSave] = useTransition();
+  const [saved, setSaved] = useState(false);
+  const [err, setErr] = useState(false);
+  useEffect(() => { setVal(initial); setBaseline(initial); }, [initial]);
+
+  if (!canEdit) {
+    return <span style={{ fontSize: 12, color: initial ? "var(--text)" : "var(--muted)" }}>{initial || "—"}</span>;
+  }
+  const dirty = val.trim() !== baseline.trim();
+  function save() {
+    if (!dirty || saving) return;
+    const fd = new FormData();
+    fd.set("slab_id", slabId);
+    fd.set("remark", val);
+    startSave(async () => {
+      const res = await saveSlabRemarkAction(fd);
+      if (res.ok) { setBaseline(val); setSaved(true); setErr(false); window.setTimeout(() => setSaved(false), 1600); }
+      else { setErr(true); }
+    });
+  }
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <input
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => { if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur(); }}
+        placeholder="Add remark…"
+        style={{ flex: 1, minWidth: 150, padding: "5px 8px", fontSize: 12, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}
+      />
+      <span style={{ fontSize: 11, width: 14, textAlign: "center", flexShrink: 0 }}>
+        {saving ? "…" : err ? <span style={{ color: "#dc2626" }} title="Save failed">⚠</span> : saved ? <span style={{ color: "#15803d" }}>✓</span> : dirty ? <span style={{ color: "var(--gold-dark)" }} title="Unsaved — click away to save">●</span> : ""}
+      </span>
     </div>
   );
 }

@@ -16,6 +16,8 @@ export type TempleSlabCard = {
   // Mig 128 — raw component-path fields, so the card browser's "move slab"
   // modal can pre-fill the form and re-categorize the slab in place.
   section: string; element: string; label: string; description: string; additional: string;
+  // Mig 139 — free-text per-slab remark, editable from the Temple View table.
+  remark?: string | null;
   // Mig 132 — slab cancellation. On a CANCELLED slab: why + the
   // replacement decision (null = still undecided → Temple View alert).
   // On a replacement slab: replacementOf = the cancelled slab it replaces.
