@@ -469,14 +469,24 @@ export function CarvingDashboardClient({
     return true;
   }
 
-  // Date filter helper — returns true if the row falls within the
-  // currently-selected date window. `all` always passes.
+  // Date filter helper — true if the row's timestamp falls within the
+  // selected window. `all` always passes.
+  //
+  // Daksh (June 2026) — anchored to IST CALENDAR DAYS, not a rolling 24h
+  // window. Previously this was `now - approved <= days*24h`, so a slab
+  // approved at, say, 8 PM yesterday still showed under "Today" until 8 PM
+  // today (it was < 24h old). Now "Today" = on/after IST-midnight today;
+  // "Last 2d" = today + yesterday; "Last 7d" = 7 calendar days; etc.
   function passesDate(iso: string | null | undefined): boolean {
     if (dateFilter === "all") return true;
     if (!iso) return false;
-    const days =
-      dateFilter === "1d" ? 1 : dateFilter === "2d" ? 2 : dateFilter === "7d" ? 7 : 30;
-    return Date.now() - new Date(iso).getTime() <= days * 86400000;
+    const daysBack =
+      dateFilter === "1d" ? 0 : dateFilter === "2d" ? 1 : dateFilter === "7d" ? 6 : 29;
+    const IST = 5.5 * 3600 * 1000;
+    const istNow = new Date(Date.now() + IST);
+    const cutoffMs =
+      Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth(), istNow.getUTCDate() - daysBack) - IST;
+    return new Date(iso).getTime() >= cutoffMs;
   }
 
   // Daksh May 2026 — apply the "from date" cutoff before the

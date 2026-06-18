@@ -167,7 +167,7 @@ export function OutputPeekCard({
                     </span>
                   </div>
                   <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
-                    Carving approved within the selected window · double-side carving counts ×2
+                    Carving approved in window · thin slabs (≤1 ft thick) count as SFT, thicker as CFT · double-side ×2
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -247,8 +247,8 @@ function FlatTable({
             <td style={td()}>{s.vendorName}</td>
             <td style={{ ...td(), color: "#64748b" }}>{s.stone ?? "—"}</td>
             <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{dims(s)}</td>
-            <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: highlight === "sft" ? 700 : 400, ...hi("sft") }}>{fmtNum(s.sft)}</td>
-            <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: highlight === "cft" ? 700 : 400, ...hi("cft") }}>{fmtNum(s.cft)}</td>
+            <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: highlight === "sft" ? 700 : 400, ...hi("sft") }}>{s.unit === "sft" ? fmtNum(s.sft) : <span style={{ color: "#cbd5e1" }}>—</span>}</td>
+            <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: highlight === "cft" ? 700 : 400, ...hi("cft") }}>{s.unit === "cft" ? fmtNum(s.cft) : <span style={{ color: "#cbd5e1" }}>—</span>}</td>
           </tr>
         ))}
       </tbody>
@@ -304,8 +304,8 @@ function VendorGroupedTable({
                 </td>
                 <td style={{ ...td(), color: "#64748b" }}>{s.stone ?? "—"}</td>
                 <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{dims(s)}</td>
-                <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{fmtNum(s.sft)}</td>
-                <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>{fmtNum(s.cft)}</td>
+                <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{s.unit === "sft" ? fmtNum(s.sft) : <span style={{ color: "#cbd5e1" }}>—</span>}</td>
+                <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>{s.unit === "cft" ? fmtNum(s.cft) : <span style={{ color: "#cbd5e1" }}>—</span>}</td>
               </tr>
             ))}
           </Fragment>

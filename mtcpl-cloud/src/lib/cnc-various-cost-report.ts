@@ -90,7 +90,11 @@ export type CncContributingSlab = {
   lengthIn: number;
   widthIn: number;
   thicknessIn: number;
+  /** Which unit this slab is counted in — by thickness (≤12in → sft, else cft). */
+  unit: "sft" | "cft";
+  /** The counted SFT (its area if thin, else 0). */
   sft: number;
+  /** The counted CFT (its volume if thick, else 0). */
   cft: number;
   /** 1, or 2 for double-side carving (output counts x2). */
   sides: number;
@@ -466,10 +470,16 @@ export async function buildCncVariousCostReport(
     if (!slab) continue; // Defensive — orphan reference shouldn't happen but skip rather than crash.
     // Mig 088 — double-side carving counts output x2 (twice the work).
     const sides = Number((item as { carving_sides?: number }).carving_sides) === 2 ? 2 : 1;
-    const cft = slabCft(slab.length_ft, slab.width_ft, slab.thickness_ft) * sides;
-    const sft = slabSft(slab.length_ft, slab.width_ft) * sides;
     const vendorId = item.vendor_id as string;
     if (excludedVendorIds.has(vendorId)) continue; // defunct vendor — skip output + totals
+    // Daksh (June 2026) — each slab counts in EXACTLY ONE unit by thickness,
+    // matching the CNC monthly Excel report (cnc-monthly-report.ts:578): a slab
+    // ≤ 12 in thick (≤ 1 ft) is measured as SFT (area); a thicker slab is
+    // measured as CFT (volume). Previously this loop added BOTH sft AND cft
+    // for EVERY slab — double-counting output and understating cost-per-unit.
+    const isThick = Number(slab.thickness_ft) > 12;
+    const sft = isThick ? 0 : slabSft(slab.length_ft, slab.width_ft) * sides;
+    const cft = isThick ? slabCft(slab.length_ft, slab.width_ft, slab.thickness_ft) * sides : 0;
     const existing = carvedByVendor.get(vendorId) ?? {
       vendorName: (item.vendor_name as string) || "Unknown",
       cft: 0,
@@ -490,6 +500,7 @@ export async function buildCncVariousCostReport(
       lengthIn: slab.length_ft,
       widthIn: slab.width_ft,
       thicknessIn: slab.thickness_ft,
+      unit: isThick ? "cft" : "sft",
       sft,
       cft,
       sides,
