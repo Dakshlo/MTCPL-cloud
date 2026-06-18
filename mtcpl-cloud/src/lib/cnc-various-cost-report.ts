@@ -79,6 +79,23 @@ export type CncExpenseBreakdownRow = {
   amount: number;
 };
 
+/** One carved slab counted in the period's output — feeds the
+ *  click-through peek modal on the Output KPI tile so the user can
+ *  audit "which 267 slabs make up this output?". Dimensions are in
+ *  inches (slab_requirements stores inches despite the *_ft names). */
+export type CncContributingSlab = {
+  id: string;
+  vendorName: string;
+  stone: string | null;
+  lengthIn: number;
+  widthIn: number;
+  thicknessIn: number;
+  sft: number;
+  cft: number;
+  /** 1, or 2 for double-side carving (output counts x2). */
+  sides: number;
+};
+
 export type CncVariousCostReport = {
   period: CncReportPeriod;
   totalCft: number;
@@ -109,6 +126,9 @@ export type CncVariousCostReport = {
    *  EITHER carving output OR operational expenses OR machines in
    *  the period so the table shows a true picture). */
   perVendor: CncVendorRow[];
+  /** Every carved slab counted in the period — feeds the Output tile's
+   *  click-through peek modal. */
+  contributingSlabs: CncContributingSlab[];
 };
 
 // ── Date helpers (IST-friendly) ───────────────────────────────────
@@ -400,6 +420,7 @@ export async function buildCncVariousCostReport(
     length_ft: number;
     width_ft: number;
     thickness_ft: number;
+    stone: string | null;
   };
   let slabMap = new Map<string, SlabRow>();
   if (slabIds.length > 0) {
@@ -409,7 +430,7 @@ export async function buildCncVariousCostReport(
       const part = slabIds.slice(i, i + CHUNK);
       const { data: slabs, error: slabsErr } = await admin
         .from("slab_requirements")
-        .select("id, length_ft, width_ft, thickness_ft")
+        .select("id, length_ft, width_ft, thickness_ft, stone")
         .in("id", part);
       if (slabsErr) throw new Error(`slab_requirements query failed: ${slabsErr.message}`);
       for (const s of slabs ?? []) {
@@ -418,6 +439,7 @@ export async function buildCncVariousCostReport(
           length_ft: Number(s.length_ft),
           width_ft: Number(s.width_ft),
           thickness_ft: Number(s.thickness_ft),
+          stone: (s as { stone?: string | null }).stone ?? null,
         });
       }
     }
@@ -431,6 +453,7 @@ export async function buildCncVariousCostReport(
     slabsCount: number;
   };
   const carvedByVendor = new Map<string, VendorAgg>();
+  const contributingSlabs: CncContributingSlab[] = [];
   let totalCft = 0;
   let totalSft = 0;
   let totalSlabs = 0;
@@ -460,6 +483,17 @@ export async function buildCncVariousCostReport(
     totalCft += cft;
     totalSft += sft;
     totalSlabs += 1;
+    contributingSlabs.push({
+      id: item.slab_requirement_id as string,
+      vendorName: (item.vendor_name as string) || "Unknown",
+      stone: slab.stone,
+      lengthIn: slab.length_ft,
+      widthIn: slab.width_ft,
+      thicknessIn: slab.thickness_ft,
+      sft,
+      cft,
+      sides,
+    });
   }
 
   // ── 2. Operational expenses for the period ────────────────────
@@ -724,5 +758,6 @@ export async function buildCncVariousCostReport(
     daysInWindow,
     expenseBreakdown,
     perVendor,
+    contributingSlabs,
   };
 }

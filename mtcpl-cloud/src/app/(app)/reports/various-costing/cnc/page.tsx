@@ -32,6 +32,7 @@ import {
   cncPeriodFromSearch,
   type CncPeriodKind,
 } from "@/lib/cnc-various-cost-report";
+import { OutputPeekCard } from "./output-peek-card";
 
 type Search = Promise<Record<string, string | string[] | undefined>>;
 
@@ -292,12 +293,13 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
           hint={`Operational + depreciation ÷ output · ${report.daysInWindow} day${report.daysInWindow === 1 ? "" : "s"}`}
           tone="accent"
         />
-        <DualKpiTile
-          label="Output"
-          primary={`${fmtNum(combinedOutput)} units`}
-          secondary="SFT + CFT combined"
-          hint={`${report.slabsCount} slabs counted`}
-          tone="success"
+        <OutputPeekCard
+          combinedOutput={combinedOutput}
+          totalSft={report.totalSft}
+          totalCft={report.totalCft}
+          slabsCount={report.slabsCount}
+          contributingSlabs={report.contributingSlabs}
+          periodLabel={report.period.label}
         />
         <KpiTile
           label="Total Cost"
