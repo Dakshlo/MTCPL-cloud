@@ -73,12 +73,13 @@ export function ActivityRegisterTable({
     null | { mode: "new" } | { mode: "edit"; entry: RegisterEntry }
   >(null);
   // Daksh June 2026 — an entry can be edited/deleted only within 10 minutes
-  // of being added; after that only owner/developer can. `now` ticks every
-  // second so the buttons + countdown update live.
+  // of being added; after that only owner/developer can. `now` ticks
+  // periodically so the Edit/Delete buttons quietly lock once the window
+  // passes — no visible countdown, it just locks.
   const EDIT_WINDOW_MS = 10 * 60 * 1000;
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
+    const t = setInterval(() => setNow(Date.now()), 15000);
     return () => clearInterval(t);
   }, []);
 
@@ -173,9 +174,6 @@ export function ActivityRegisterTable({
                           </span>
                         );
                       }
-                      const remainMs = Math.max(0, EDIT_WINDOW_MS - ageMs);
-                      const mm = Math.floor(remainMs / 60000);
-                      const ss = Math.floor((remainMs % 60000) / 1000);
                       return (
                         <>
                           <button
@@ -195,11 +193,6 @@ export function ActivityRegisterTable({
                               Delete
                             </ConfirmButton>
                           </form>
-                          {!privileged && (
-                            <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 3 }}>
-                              🔓 locks in {mm}:{String(ss).padStart(2, "0")}
-                            </div>
-                          )}
                         </>
                       );
                     })()}
