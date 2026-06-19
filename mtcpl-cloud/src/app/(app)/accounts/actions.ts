@@ -1987,127 +1987,127 @@ async function sendVendorPaymentEmail(
 // before the Meta template clears review. Mirrors sendVendorPaymentEmail's
 // fetch + PDF build. NEVER throws — outer caller is fire-and-forget.
 // ──────────────────────────────────────────────────────────────────
-async function sendVendorPaymentWhatsApp(
+// Build the approved-template payload for a payment's voucher WhatsApp: fetch
+// rows, render the PDF, upload it, and assemble header + body_1..7. Returns the
+// normalised vendor phone too (may be null) so the caller picks recipients.
+// Shared by the real send AND the developer "send test" so the test message is
+// byte-identical to what a vendor receives.
+type VendorWaPayload = {
+  templateName: string;
+  components: Record<string, { type: string; value: string; filename?: string }>;
+  to: string | null;
+  vendorName: string;
+  token: string;
+  amount: number;
+};
+
+async function buildVendorPaymentWaPayload(
   paymentId: string,
   billId: string,
   actorId: string,
-): Promise<void> {
-  try {
-    const templateName = process.env.MSG91_WA_VOUCHER_TEMPLATE;
-    if (!templateName || !process.env.MSG91_AUTH_KEY) {
-      await logAudit(actorId, "vendor_payment_wa_skipped", "bill_payment", paymentId, {
-        reason: !templateName
-          ? "MSG91_WA_VOUCHER_TEMPLATE not configured"
-          : "MSG91_AUTH_KEY not configured",
-      });
-      return;
-    }
-
-    const admin = createAdminSupabaseClient();
-    const [{ data: paymentRow }, { data: billRow }, { data: actorRow }] = await Promise.all([
-      admin
-        .from("bill_payments")
-        .select("paid_amount, payment_method, payment_reference, payment_note, paid_at, paid_by")
-        .eq("id", paymentId)
-        .maybeSingle(),
-      admin
-        .from("bills")
-        .select(
-          "token, vendor_bill_no, bill_date, description, cost_head, " +
-            "bill_vendors(id, name, phone, address, gstin, pan, bank_account, ifsc)",
-        )
-        .eq("id", billId)
-        .maybeSingle(),
-      admin.from("profiles").select("full_name").eq("id", actorId).maybeSingle(),
-    ]);
-    if (!paymentRow || !billRow) return;
-
-    type VendorEmbed = {
-      id: string; name: string; phone: string | null; address: string | null;
-      gstin: string | null; pan: string | null; bank_account: string | null; ifsc: string | null;
+): Promise<{ ok: true; payload: VendorWaPayload } | { ok: false; reason: string }> {
+  const templateName = process.env.MSG91_WA_VOUCHER_TEMPLATE;
+  if (!templateName || !process.env.MSG91_AUTH_KEY) {
+    return {
+      ok: false,
+      reason: !templateName
+        ? "MSG91_WA_VOUCHER_TEMPLATE not configured"
+        : "MSG91_AUTH_KEY not configured",
     };
-    const billRowAny = billRow as unknown as {
-      token: string; vendor_bill_no: string; bill_date: string; description: string;
-      cost_head: string | null; bill_vendors: VendorEmbed | VendorEmbed[] | null;
-    };
-    const vendor = Array.isArray(billRowAny.bill_vendors)
-      ? billRowAny.bill_vendors[0]
-      : billRowAny.bill_vendors;
+  }
 
-    const { normalizeIndianMobile, sendWhatsAppTemplate } = await import("@/lib/wa-send");
-    const to = normalizeIndianMobile(vendor?.phone);
-    if (!vendor || !to) {
-      await logAudit(actorId, "vendor_payment_wa_skipped", "bill_payment", paymentId, {
-        reason: vendor ? `vendor phone missing/invalid: ${vendor.phone ?? ""}` : "vendor row missing",
-      });
-      return;
-    }
+  const admin = createAdminSupabaseClient();
+  const [{ data: paymentRow }, { data: billRow }, { data: actorRow }] = await Promise.all([
+    admin
+      .from("bill_payments")
+      .select("paid_amount, payment_method, payment_reference, payment_note, paid_at, paid_by")
+      .eq("id", paymentId)
+      .maybeSingle(),
+    admin
+      .from("bills")
+      .select(
+        "token, vendor_bill_no, bill_date, description, cost_head, " +
+          "bill_vendors(id, name, phone, address, gstin, pan, bank_account, ifsc)",
+      )
+      .eq("id", billId)
+      .maybeSingle(),
+    admin.from("profiles").select("full_name").eq("id", actorId).maybeSingle(),
+  ]);
+  if (!paymentRow || !billRow) return { ok: false, reason: "payment/bill row missing" };
 
-    // Carbon-copy (Daksh): the owner gets an identical copy of every vendor
-    // message — separate 1:1 sends, so each vendor only ever sees their own
-    // and never sees the CC. Developer-toggleable in Settings; best-effort, so
-    // a CC hiccup never blocks the vendor's message.
-    const recipients = [to];
-    try {
-      const { getVendorCcRecipient } = await import("@/lib/wa-vendor-cc");
-      const cc = await getVendorCcRecipient();
-      if (cc && !recipients.includes(cc)) recipients.push(cc);
-    } catch {
-      /* CC is best-effort */
-    }
+  type VendorEmbed = {
+    id: string; name: string; phone: string | null; address: string | null;
+    gstin: string | null; pan: string | null; bank_account: string | null; ifsc: string | null;
+  };
+  const billRowAny = billRow as unknown as {
+    token: string; vendor_bill_no: string; bill_date: string; description: string;
+    cost_head: string | null; bill_vendors: VendorEmbed | VendorEmbed[] | null;
+  };
+  const vendor = Array.isArray(billRowAny.bill_vendors)
+    ? billRowAny.bill_vendors[0]
+    : billRowAny.bill_vendors;
+  if (!vendor) return { ok: false, reason: "vendor row missing" };
 
-    const { buildVoucherPdf } = await import("@/lib/voucher-pdf");
-    const { numberToIndianWords } = await import(
-      "@/app/(app)/accounts/payments/[id]/voucher/number-to-words"
-    );
-    const paidAmount = Number((paymentRow as { paid_amount?: number | null }).paid_amount ?? 0);
-    const amountInWords = numberToIndianWords(paidAmount);
-    const actorName = (actorRow as { full_name?: string | null } | null)?.full_name ?? null;
-    const company = {
-      name: "MATESHWARI TEMPLE CONSTRUCTION PVT LTD",
-      addressLines: ["Opposite Ajari Fatak", "Pindwara, Sirohi", "Rajasthan"],
-    };
-    const method = (paymentRow as { payment_method?: string | null }).payment_method ?? null;
-    const reference = (paymentRow as { payment_reference?: string | null }).payment_reference ?? null;
-    const paidAtIso = (paymentRow as { paid_at?: string | null }).paid_at ?? null;
+  const { normalizeIndianMobile } = await import("@/lib/wa-send");
+  const to = normalizeIndianMobile(vendor.phone);
 
-    // Same voucher the email attaches.
-    const pdfBytes = await buildVoucherPdf({
-      company,
-      vendor: {
-        name: vendor.name, address: vendor.address, gstin: vendor.gstin,
-        pan: vendor.pan, bankAccount: vendor.bank_account, ifsc: vendor.ifsc,
-      },
-      bill: {
-        token: billRowAny.token, vendorBillNo: billRowAny.vendor_bill_no,
-        billDate: billRowAny.bill_date, description: billRowAny.description, costHead: billRowAny.cost_head,
-      },
-      payment: {
-        paymentId, paidAmount, paymentMethod: method, paymentReference: reference,
-        paymentNote: (paymentRow as { payment_note?: string | null }).payment_note ?? null,
-        paidAt: paidAtIso, paidByName: actorName,
-      },
-      amountInWords,
-    });
+  const { buildVoucherPdf } = await import("@/lib/voucher-pdf");
+  const { numberToIndianWords } = await import(
+    "@/app/(app)/accounts/payments/[id]/voucher/number-to-words"
+  );
+  const paidAmount = Number((paymentRow as { paid_amount?: number | null }).paid_amount ?? 0);
+  const amountInWords = numberToIndianWords(paidAmount);
+  const actorName = (actorRow as { full_name?: string | null } | null)?.full_name ?? null;
+  const company = {
+    name: "MATESHWARI TEMPLE CONSTRUCTION PVT LTD",
+    addressLines: ["Opposite Ajari Fatak", "Pindwara, Sirohi", "Rajasthan"],
+  };
+  const method = (paymentRow as { payment_method?: string | null }).payment_method ?? null;
+  const reference = (paymentRow as { payment_reference?: string | null }).payment_reference ?? null;
+  const paidAtIso = (paymentRow as { paid_at?: string | null }).paid_at ?? null;
 
-    // WhatsApp documents need a public URL — upload to the same public
-    // bucket the daily report uses (random path, unguessable).
-    const objectPath = `vouchers/${billRowAny.token}/${crypto.randomUUID()}.pdf`;
-    const { error: upErr } = await admin.storage
-      .from("whatsapp_reports")
-      .upload(objectPath, Buffer.from(pdfBytes), { contentType: "application/pdf", upsert: false });
-    if (upErr) throw new Error(`voucher upload failed: ${upErr.message}`);
-    const pdfUrl = admin.storage.from("whatsapp_reports").getPublicUrl(objectPath).data.publicUrl;
+  // Same voucher the email attaches.
+  const pdfBytes = await buildVoucherPdf({
+    company,
+    vendor: {
+      name: vendor.name, address: vendor.address, gstin: vendor.gstin,
+      pan: vendor.pan, bankAccount: vendor.bank_account, ifsc: vendor.ifsc,
+    },
+    bill: {
+      token: billRowAny.token, vendorBillNo: billRowAny.vendor_bill_no,
+      billDate: billRowAny.bill_date, description: billRowAny.description, costHead: billRowAny.cost_head,
+    },
+    payment: {
+      paymentId, paidAmount, paymentMethod: method, paymentReference: reference,
+      paymentNote: (paymentRow as { payment_note?: string | null }).payment_note ?? null,
+      paidAt: paidAtIso, paidByName: actorName,
+    },
+    amountInWords,
+  });
 
-    const paidDateLabel = paidAtIso
-      ? new Date(paidAtIso).toLocaleDateString("en-IN", {
-          timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric",
-        })
-      : "-";
+  // WhatsApp documents need a public URL — upload to the same public bucket the
+  // daily report uses (random path, unguessable).
+  const objectPath = `vouchers/${billRowAny.token}/${crypto.randomUUID()}.pdf`;
+  const { error: upErr } = await admin.storage
+    .from("whatsapp_reports")
+    .upload(objectPath, Buffer.from(pdfBytes), { contentType: "application/pdf", upsert: false });
+  if (upErr) return { ok: false, reason: `voucher upload failed: ${upErr.message}` };
+  const pdfUrl = admin.storage.from("whatsapp_reports").getPublicUrl(objectPath).data.publicUrl;
 
-    await sendWhatsAppTemplate({
-      to: recipients,
+  const paidDateLabel = paidAtIso
+    ? new Date(paidAtIso).toLocaleDateString("en-IN", {
+        timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric",
+      })
+    : "-";
+
+  return {
+    ok: true,
+    payload: {
       templateName,
+      to,
+      vendorName: vendor.name,
+      token: billRowAny.token,
+      amount: paidAmount,
       components: {
         header_1: { type: "document", value: pdfUrl, filename: `Payment-Voucher-${billRowAny.token}.pdf` },
         body_1: { type: "text", value: vendor.name },
@@ -2118,13 +2118,52 @@ async function sendVendorPaymentWhatsApp(
         body_6: { type: "text", value: (method ?? "").toUpperCase() || "-" },
         body_7: { type: "text", value: reference || "-" },
       },
-    });
+    },
+  };
+}
+
+// Real vendor send (fires on Mark Paid) — to the vendor + the owner carbon-copy.
+// NEVER throws — outer caller is fire-and-forget.
+async function sendVendorPaymentWhatsApp(
+  paymentId: string,
+  billId: string,
+  actorId: string,
+): Promise<void> {
+  try {
+    const built = await buildVendorPaymentWaPayload(paymentId, billId, actorId);
+    if (!built.ok) {
+      await logAudit(actorId, "vendor_payment_wa_skipped", "bill_payment", paymentId, { reason: built.reason });
+      return;
+    }
+    const { templateName, components, to, token, amount } = built.payload;
+    if (!to) {
+      await logAudit(actorId, "vendor_payment_wa_skipped", "bill_payment", paymentId, {
+        reason: "vendor phone missing/invalid",
+      });
+      return;
+    }
+
+    // Carbon-copy (Daksh): the owner gets an identical 1:1 copy of every vendor
+    // message — separate sends, so each vendor only ever sees their own and
+    // never sees the CC. Developer-toggleable in Settings; best-effort, so a CC
+    // hiccup never blocks the vendor's message.
+    const recipients = [to];
+    try {
+      const { getVendorCcRecipient } = await import("@/lib/wa-vendor-cc");
+      const cc = await getVendorCcRecipient();
+      if (cc && !recipients.includes(cc)) recipients.push(cc);
+    } catch {
+      /* CC is best-effort */
+    }
+
+    const { sendWhatsAppTemplate } = await import("@/lib/wa-send");
+    await sendWhatsAppTemplate({ to: recipients, templateName, components });
 
     await logAudit(actorId, "vendor_payment_wa_sent", "bill_payment", paymentId, {
       to,
       cc: recipients.slice(1), // owner carbon-copy, if enabled
-      token: billRowAny.token,
-      amount: paidAmount,
+      token,
+      amount,
     });
   } catch (e) {
     console.warn("[sendVendorPaymentWhatsApp] failed", e);
@@ -2136,6 +2175,53 @@ async function sendVendorPaymentWhatsApp(
       /* final swallow */
     }
   }
+}
+
+// ──────────────────────────────────────────────────────────────────
+// DEVELOPER-only test: send the real voucher for a chosen recent payment to the
+// carbon-copy number ONLY (never the vendor), so the owner can verify the
+// WhatsApp end-to-end — template, PDF, formatting — without messaging a vendor.
+// ──────────────────────────────────────────────────────────────────
+export async function sendVendorCcTestAction(
+  formData: FormData,
+): Promise<{ ok: true; to: string; vendor: string } | { ok: false; error: string }> {
+  const { profile } = await requireAuth(["developer"]);
+  const paymentId = String(formData.get("paymentId") || "").trim();
+  if (!paymentId) return { ok: false, error: "Pick a payment to test." };
+
+  const { getVendorCcSetting } = await import("@/lib/wa-vendor-cc");
+  const { normalizeIndianMobile, sendWhatsAppTemplate } = await import("@/lib/wa-send");
+  const cc = normalizeIndianMobile((await getVendorCcSetting()).number);
+  if (!cc) return { ok: false, error: "Set a valid carbon-copy number above first." };
+
+  const admin = createAdminSupabaseClient();
+  const { data: payRow } = await admin
+    .from("bill_payments")
+    .select("bill_id")
+    .eq("id", paymentId)
+    .maybeSingle();
+  const billId = (payRow as { bill_id?: string } | null)?.bill_id;
+  if (!billId) return { ok: false, error: "That payment no longer exists." };
+
+  const built = await buildVendorPaymentWaPayload(paymentId, billId, profile.id);
+  if (!built.ok) return { ok: false, error: built.reason };
+
+  try {
+    await sendWhatsAppTemplate({
+      to: [cc], // owner ONLY — the vendor is never messaged by a test
+      templateName: built.payload.templateName,
+      components: built.payload.components,
+    });
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+
+  await logAudit(profile.id, "vendor_payment_wa_test_sent", "bill_payment", paymentId, {
+    to: cc,
+    vendor: built.payload.vendorName,
+    token: built.payload.token,
+  });
+  return { ok: true, to: cc, vendor: built.payload.vendorName };
 }
 
 // Mig 048 follow-on (Daksh, June 2026) — DEVELOPER-ONLY "allow one more

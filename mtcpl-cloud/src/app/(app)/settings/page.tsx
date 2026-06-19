@@ -146,6 +146,27 @@ export default async function SettingsPage() {
   const canManageVendorCc = currentUser.role === "developer";
   const vendorCc = canManageVendorCc ? await getVendorCcSetting() : null;
 
+  // Last 5 paid payments — fuel the developer "send test" in the CC card.
+  const recentPaidForTest: { id: string; label: string }[] = [];
+  if (canManageVendorCc) {
+    const { data: rp } = await admin
+      .from("bill_payments")
+      .select("id, paid_amount, paid_at, bills(token, bill_vendors(name))")
+      .eq("status", "paid")
+      .order("paid_at", { ascending: false })
+      .limit(5);
+    for (const row of (rp ?? []) as unknown[]) {
+      const r = row as { id: string; paid_amount: number | null; paid_at: string | null; bills: unknown };
+      const bill = (Array.isArray(r.bills) ? r.bills[0] : r.bills) as { token?: string; bill_vendors?: unknown } | null;
+      const vend = (Array.isArray(bill?.bill_vendors) ? bill?.bill_vendors[0] : bill?.bill_vendors) as { name?: string } | null;
+      const d = r.paid_at ? new Date(r.paid_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "";
+      recentPaidForTest.push({
+        id: r.id,
+        label: `${bill?.token ?? "?"} · ${vend?.name ?? "Vendor"} · ₹${Number(r.paid_amount || 0).toLocaleString("en-IN")} · ${d}`,
+      });
+    }
+  }
+
   // System Status — load global + per-department flags (Migration 036).
   // Each falls back to `down: false` if the relevant migration hasn't
   // run, so the page renders normally even on a fresh deploy.
@@ -405,7 +426,7 @@ export default async function SettingsPage() {
           sees them all. Stored in app_settings; no redeploy needed. */}
       {canManageVendorCc && vendorCc && (
         <PeekSection icon="📩" title="Vendor message carbon-copy" subtitle={vendorCc.enabled ? `ON · copies to +91 ${vendorCc.number}` : "OFF — no copies sent"} modalMaxWidth={520}>
-          <WaVendorCcEditor initial={vendorCc} />
+          <WaVendorCcEditor initial={vendorCc} recentPaid={recentPaidForTest} />
         </PeekSection>
       )}
 

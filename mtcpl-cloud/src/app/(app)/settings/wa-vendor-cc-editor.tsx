@@ -7,11 +7,14 @@
 import { useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { updateVendorCcAction } from "./wa-vendor-cc-actions";
+import { sendVendorCcTestAction } from "../accounts/actions";
 
 export function WaVendorCcEditor({
   initial,
+  recentPaid,
 }: {
   initial: { enabled: boolean; number: string };
+  recentPaid: { id: string; label: string }[];
 }) {
   const router = useRouter();
   const [enabled, setEnabled] = useState(initial.enabled);
@@ -19,6 +22,11 @@ export function WaVendorCcEditor({
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // "Send test" — to the owner's number only, never the vendor.
+  const [testId, setTestId] = useState(recentPaid[0]?.id ?? "");
+  const [testBusy, setTestBusy] = useState(false);
+  const [testMsg, setTestMsg] = useState<string | null>(null);
+  const [testErr, setTestErr] = useState<string | null>(null);
 
   async function persist(nextEnabled: boolean, nextNumber: string) {
     setBusy(true);
@@ -55,6 +63,28 @@ export function WaVendorCcEditor({
       return;
     }
     void persist(enabled, d);
+  }
+
+  async function sendTest() {
+    if (testBusy || !testId) return;
+    if (!window.confirm("Send a test voucher to YOUR number only? The vendor will NOT be messaged.")) return;
+    setTestBusy(true);
+    setTestMsg(null);
+    setTestErr(null);
+    try {
+      const fd = new FormData();
+      fd.set("paymentId", testId);
+      const res = await sendVendorCcTestAction(fd);
+      if (!res.ok) {
+        setTestErr(res.error);
+        return;
+      }
+      setTestMsg(`✓ Test sent to +91 ${res.to.replace(/^91/, "")} — voucher for ${res.vendor}. The vendor was not messaged.`);
+    } catch {
+      setTestErr("Failed — check your connection.");
+    } finally {
+      setTestBusy(false);
+    }
   }
 
   const track: CSSProperties = {
@@ -149,6 +179,39 @@ export function WaVendorCcEditor({
 
       {msg && <div style={{ fontSize: 13, fontWeight: 700, color: "#15803d" }}>{msg}</div>}
       {err && <div style={{ fontSize: 13, fontWeight: 700, color: "#991b1b" }}>⚠ {err}</div>}
+
+      {/* Send a test — to the owner's number ONLY, never the vendor. */}
+      <div style={{ borderTop: "1px solid var(--border)", paddingTop: 14, marginTop: 2, display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ fontSize: 13, fontWeight: 800 }}>🧪 Send a test (to your number only)</div>
+        <p className="muted" style={{ fontSize: 12.5, margin: 0, lineHeight: 1.5 }}>
+          Pick one of the last 5 paid bills and send its <strong>real voucher</strong> to the carbon-copy number above. The <strong>vendor is not messaged</strong> — this only goes to you, so you can check the template, PDF and formatting.
+        </p>
+        {recentPaid.length === 0 ? (
+          <div style={{ fontSize: 12.5, color: "var(--muted)" }}>No paid bills yet to test with.</div>
+        ) : (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <select
+              value={testId}
+              onChange={(e) => { setTestId(e.target.value); setTestErr(null); setTestMsg(null); }}
+              style={{ flex: "1 1 240px", padding: "9px 12px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", color: "var(--text)" }}
+            >
+              {recentPaid.map((p) => (
+                <option key={p.id} value={p.id}>{p.label}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={sendTest}
+              disabled={testBusy || !testId}
+              style={{ padding: "9px 16px", fontSize: 13, fontWeight: 800, color: "#fff", background: testBusy ? "var(--border)" : "#16A34A", border: "none", borderRadius: 8, cursor: testBusy ? "wait" : "pointer", whiteSpace: "nowrap" }}
+            >
+              {testBusy ? "Sending…" : "Send test to me"}
+            </button>
+          </div>
+        )}
+        {testMsg && <div style={{ fontSize: 12.5, fontWeight: 700, color: "#15803d", background: "rgba(22,163,74,0.1)", border: "1px solid rgba(22,163,74,0.4)", borderRadius: 7, padding: "8px 12px" }}>{testMsg}</div>}
+        {testErr && <div style={{ fontSize: 12.5, fontWeight: 700, color: "#b91c1c", background: "rgba(185,28,28,0.08)", border: "1px solid rgba(185,28,28,0.3)", borderRadius: 7, padding: "8px 12px" }}>⚠ {testErr}</div>}
+      </div>
     </div>
   );
 }
