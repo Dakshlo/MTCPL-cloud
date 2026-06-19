@@ -540,7 +540,7 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
     const P = newPage();
     let y = header(P, H - 26, false);
     if (data.cnc) {
-      const c = data.cnc, hh = 168;
+      const c = data.cnc, hh = 186;
       P.card(M, y, cw, hh, 16, COL.indigo);
       P.t("CNC COSTING · MONTH TO DATE", M + 18, y - 26, 11, bold, white);
       P.t(`${c.label} · ${c.days} of ${c.monthLen} days`, M + 18, y - 44, 9.5, font, white);
@@ -548,8 +548,11 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
       P.t("SFT + CFT combined", M + 20, y - 98, 9, font, white);
       P.pg.drawLine({ start: { x: M + 18, y: y - 108 }, end: { x: W - M - 18, y: y - 108 }, thickness: 0.5, color: white, opacity: 0.3 });
       P.t(`Spent so far: ${inr(c.totalCost)}`, M + 18, y - 124, 10.5, bold, white);
-      P.t(`/SFT ${Number.isFinite(c.costPerSft) ? inr2(c.costPerSft) : "--"}   ·   /CFT ${Number.isFinite(c.costPerCft) ? inr2(c.costPerCft) : "--"}`, M + 18, y - 140, 9.5, font, white);
-      P.t(`Op ${inr(c.operational)} · Dep ${inr(c.depreciation)} · ${c.machines} machine${c.machines === 1 ? "" : "s"}`, M + 18, y - 156, 9, font, white);
+      // Carved output that the cost is spread over — slab count + the combined
+      // SFT/CFT quantity (Daksh). Marble carves in SFT, sandstone in CFT.
+      P.t(`Carved ${c.slabs} slab${c.slabs === 1 ? "" : "s"} · ${c.sft.toFixed(0)} SFT + ${c.cft.toFixed(0)} CFT`, M + 18, y - 140, 9.5, bold, white);
+      P.t(`/SFT ${Number.isFinite(c.costPerSft) ? inr2(c.costPerSft) : "--"}   ·   /CFT ${Number.isFinite(c.costPerCft) ? inr2(c.costPerCft) : "--"}`, M + 18, y - 158, 9.5, font, white);
+      P.t(`Op ${inr(c.operational)} · Dep ${inr(c.depreciation)} · ${c.machines} machine${c.machines === 1 ? "" : "s"}`, M + 18, y - 174, 9, font, white);
       y -= hh + 12;
     }
     if (data.cutter) {
@@ -564,9 +567,26 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
       y -= hh + 12;
     }
     {
-      const rows = data.payments.byVendor.slice(0, 6);
-      const hasRows = rows.length > 0;
-      const payH = 56 + (hasRows ? rows.length * 18 + 10 : 14);
+      // Show EVERY supplier paid in the window (Daksh: the old top-6 cap
+      // silently dropped vendors while the total stayed correct). Two columns
+      // fit ~40; only an extreme tail collapses into a "+N more" line so the
+      // page can never overflow. Capacity is computed from the space left
+      // under the costing cards above.
+      const all = data.payments.byVendor;
+      const hasRows = all.length > 0;
+      const lineH = 16, headH = 64, padBot = 12, footMargin = 46;
+      const maxLines = Math.max(1, Math.floor((y - footMargin - headH) / lineH));
+      const cap = maxLines * 2;
+      let shown = all, ovN = 0, ovAmt = 0;
+      if (all.length > cap) {
+        const showLines = Math.max(1, maxLines - 1); // reserve last line for "+N more"
+        shown = all.slice(0, showLines * 2);
+        const rest = all.slice(showLines * 2);
+        ovN = rest.length;
+        ovAmt = rest.reduce((s, v) => s + v.amount, 0);
+      }
+      const bodyLines = hasRows ? Math.ceil(shown.length / 2) + (ovN > 0 ? 1 : 0) : 1;
+      const payH = headH + bodyLines * lineH + padBot;
       P.card(M, y, cw, payH, 16, COL.gold);
       P.t("PAYMENTS TO SUPPLIERS · 24 H", M + 18, y - 24, 11, bold, white);
       P.t(inr(data.payments.total), M + 18, y - 50, 24, bold, white);
@@ -575,7 +595,20 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
       else {
         P.pg.drawLine({ start: { x: M + 18, y: py }, end: { x: W - M - 18, y: py }, thickness: 0.5, color: white, opacity: 0.32 });
         py -= 18;
-        for (const v of rows) { P.t(P.clip(v.vendor, 28), M + 18, py, 10, font, white); P.r(inr(v.amount), W - M - 18, py, 10, bold, white); py -= 18; }
+        const colGap = 16, innerW = cw - 36;
+        const colX = [M + 18, M + 18 + (innerW + colGap) / 2];
+        const colR = [M + 18 + (innerW - colGap) / 2, W - M - 18];
+        shown.forEach((v, i) => {
+          const col = i % 2;
+          if (col === 0 && i > 0) py -= lineH;
+          P.t(P.clip(v.vendor, 18), colX[col], py, 9, font, white);
+          P.r(inr(v.amount), colR[col], py, 9, bold, white);
+        });
+        if (ovN > 0) {
+          py -= lineH;
+          P.t(`+${ovN} more supplier${ovN === 1 ? "" : "s"}`, colX[0], py, 9, font, white);
+          P.r(inr(ovAmt), W - M - 18, py, 9, bold, white);
+        }
       }
     }
     footer(P, 2, PAGES);
