@@ -34,7 +34,7 @@ import {
 import { SlabThumb } from "@/components/slab-thumb";
 import type { StoneTypeDef } from "@/lib/stone-utils";
 import { batchTint } from "@/lib/batch-colours";
-import { useFormStatus } from "react-dom";
+import { createPortal, useFormStatus } from "react-dom";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 import { CockpitSidebarToggle } from "@/components/cockpit-sidebar-toggle";
 import { POWER_CUT_REASON } from "@/lib/carving-power-cut";
@@ -101,6 +101,10 @@ export type SlabLite = {
   component_section?: string | null;
   component_element?: string | null;
   additional_description?: string | null;
+  /** Daksh June 2026 — the Temple-View photo for this slab: the image on its
+   *  Additional-Description node if it has one, else its Description node
+   *  (server-resolved public URL). null = no photo → row renders as before. */
+  image_url?: string | null;
 };
 
 /** Mig 069 — a slab the vendor parked mid-carve. Smaller shape
@@ -385,6 +389,70 @@ function fmtDuration(minutes: number): string {
 function dimStr(s: SlabLite | null): string {
   if (!s) return "—";
   return `${s.length_in}×${s.width_in}×${s.thickness_in}″`;
+}
+
+// Daksh June 2026 — small slab PHOTO thumbnail (the Temple-View node image for
+// the slab's description / additional level). Tap to open full-size in a
+// lightbox. Only rendered when the slab actually has a photo; rows without a
+// photo look exactly as before.
+function SlabPhotoThumb({ url, alt }: { url: string; alt: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen(true);
+        }}
+        title="View slab photo"
+        style={{
+          padding: 0,
+          border: "1px solid var(--border)",
+          borderRadius: 7,
+          overflow: "hidden",
+          cursor: "zoom-in",
+          width: 44,
+          height: 44,
+          flexShrink: 0,
+          background: "var(--surface)",
+          lineHeight: 0,
+        }}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={url}
+          alt={alt}
+          loading="lazy"
+          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+        />
+      </button>
+      {open &&
+        createPortal(
+          <div
+            onClick={() => setOpen(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.82)",
+              zIndex: 1200,
+              display: "grid",
+              placeItems: "center",
+              padding: 24,
+              cursor: "zoom-out",
+            }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={url}
+              alt={alt}
+              style={{ maxWidth: "95vw", maxHeight: "90vh", borderRadius: 10, boxShadow: "0 18px 60px rgba(0,0,0,0.5)" }}
+            />
+          </div>,
+          document.body,
+        )}
+    </>
+  );
 }
 
 // Daksh June 2026 — group the Pending-stock / Ready-to-load lists by temple
@@ -1980,6 +2048,9 @@ function RecentCompletedRow({
             {row.slab_id}
           </code>
         </div>
+        {row.slab?.image_url && (
+          <SlabPhotoThumb url={row.slab.image_url} alt={row.slab_id} />
+        )}
         {row.slab && (
           <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
             {row.slab.temple} · {dimStr(row.slab)}
@@ -2137,6 +2208,9 @@ function HeldSlabRow({
               {held.slab_id}
             </span>
           </div>
+          {held.slab?.image_url && (
+            <SlabPhotoThumb url={held.slab.image_url} alt={held.slab_id} />
+          )}
           {held.slab && (
             <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
               {held.slab.temple} · {dimStr(held.slab)}
@@ -2526,6 +2600,9 @@ function ReworkSlabRow({
               🔁 REWORK
             </span>
           </div>
+          {item.slab?.image_url && (
+            <SlabPhotoThumb url={item.slab.image_url} alt={item.slab_id} />
+          )}
           {item.slab && (
             <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
               {item.slab.temple} · {dimStr(item.slab)}
@@ -3677,6 +3754,9 @@ function PendingStockRow({ job }: { job: CarvingJobLite }) {
             {job.slab_id}
           </span>
         </div>
+        {job.slab?.image_url && (
+          <SlabPhotoThumb url={job.slab.image_url} alt={job.slab_id} />
+        )}
         {job.slab && (
           <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
             {job.slab.temple} · {dimStr(job.slab)}
@@ -4050,6 +4130,9 @@ function QueueRow({
             {job.slab_id}
           </span>
         </div>
+        {job.slab?.image_url && (
+          <SlabPhotoThumb url={job.slab.image_url} alt={job.slab_id} />
+        )}
         {job.slab && (
           <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
             {job.slab.temple} · {dimStr(job.slab)}

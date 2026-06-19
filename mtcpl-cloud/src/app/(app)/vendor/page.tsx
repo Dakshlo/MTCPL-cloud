@@ -296,6 +296,60 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
     }
   }
 
+  // Daksh June 2026 — attach each slab's Temple-View photo for the cockpit
+  // rows. A slab is linked to its DESCRIPTION node, or its ADDITIONAL-
+  // DESCRIPTION node when it has one (the most specific level) — matching how
+  // Temple View keys node images (temple_component_images.node_path = the
+  // "/"-joined tree path). READ-ONLY: selects image rows + builds public URLs;
+  // it changes no data.
+  const slabNodePaths = (s: SlabLite): { desc: string | null; addl: string | null } => {
+    const sectionRaw = (s.component_section ?? "").trim();
+    const element = (s.component_element ?? "").trim();
+    const label = (s.label ?? "").trim();
+    const description = (s.description ?? "").trim();
+    const additional = (s.additional_description ?? "").trim();
+    const cat1 = sectionRaw
+      ? sectionRaw.split(/\s*[›>]\s*/).map((x) => x.trim()).filter(Boolean)
+      : ["Unassigned"];
+    const base = [s.temple, ...cat1, ...(element ? [element] : []), label || "— (no label)"];
+    const desc = description ? [...base, description].join("/") : null;
+    const addl = additional
+      ? (description ? [...base, description, additional] : [...base, additional]).join("/")
+      : null;
+    return { desc, addl };
+  };
+  const wantedNodePaths = new Set<string>();
+  for (const sl of slabById.values()) {
+    const { desc, addl } = slabNodePaths(sl);
+    if (desc) wantedNodePaths.add(desc);
+    if (addl) wantedNodePaths.add(addl);
+  }
+  if (wantedNodePaths.size > 0) {
+    const imgByPath = new Map<string, string>();
+    const allPaths = [...wantedNodePaths];
+    for (let i = 0; i < allPaths.length; i += 150) {
+      const { data: imgRows } = await admin
+        .from("temple_component_images")
+        .select("node_path, image_path")
+        .in("node_path", allPaths.slice(i, i + 150))
+        .order("created_at", { ascending: false });
+      for (const r of (imgRows ?? []) as Array<{ node_path: string | null; image_path: string }>) {
+        const np = (r.node_path ?? "").trim();
+        if (np && r.image_path && !imgByPath.has(np)) {
+          imgByPath.set(
+            np,
+            admin.storage.from("temple_component_images").getPublicUrl(r.image_path).data.publicUrl,
+          );
+        }
+      }
+    }
+    for (const sl of slabById.values()) {
+      const { desc, addl } = slabNodePaths(sl);
+      sl.image_url =
+        (addl ? imgByPath.get(addl) : undefined) ?? (desc ? imgByPath.get(desc) : undefined) ?? null;
+    }
+  }
+
   // Reshape rows for the client component.
   const queue: CarvingJobLite[] = [];
   // Map machine_id → ALL active jobs on it. Used to be a single
