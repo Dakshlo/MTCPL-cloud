@@ -22,6 +22,89 @@ import {
   VendorAvatar,
 } from "../../_ui/components";
 
+// Daksh June 2026 — Paid column for the bill-history table. Shows the total
+// paid (green) plus, for part-paid bills, one small green chip per payment
+// (amount · paid date), mirroring the Due Bills page. Display-only.
+function PaidCell({
+  paid,
+  parts,
+}: {
+  paid: number;
+  parts: Array<{ amount: number; paidAt: string | null; method: string | null }>;
+}) {
+  if (paid <= 0 && parts.length === 0) {
+    return <span style={{ fontSize: 11, color: "var(--muted)" }}>—</span>;
+  }
+  return (
+    <div style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+      <Money value={paid} tone="success" />
+      {parts.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+          {parts.map((p, i) => {
+            const datePart = p.paidAt
+              ? new Date(p.paidAt).toLocaleDateString("en-IN", {
+                  timeZone: "Asia/Kolkata",
+                  day: "numeric",
+                  month: "short",
+                })
+              : null;
+            return (
+              <span
+                key={i}
+                title={[
+                  `Part #${i + 1}`,
+                  datePart ? `Paid on ${datePart}` : null,
+                  p.method ? `via ${p.method}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  color: "#15803d",
+                  background: "rgba(34,197,94,0.10)",
+                  border: "1px solid rgba(34,197,94,0.25)",
+                  borderRadius: 4,
+                  padding: "1px 6px",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                ₹{p.amount.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+                {datePart ? <span style={{ opacity: 0.7, fontWeight: 500 }}> · {datePart}</span> : null}
+              </span>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Hold column — the owner-withheld amount (mig 072) as an amber chip,
+// reason on hover. Display-only.
+function HoldCell({ amount, reason }: { amount: number; reason: string | null }) {
+  if (!(amount > 0)) {
+    return <span style={{ fontSize: 11, color: "var(--muted)" }}>—</span>;
+  }
+  return (
+    <span
+      title={reason ? `On hold — ${reason}` : "Owner-withheld amount"}
+      style={{
+        fontSize: 11,
+        fontWeight: 700,
+        color: "#b45309",
+        background: "rgba(217,119,6,0.12)",
+        border: "1px solid rgba(217,119,6,0.35)",
+        borderRadius: 6,
+        padding: "2px 7px",
+        whiteSpace: "nowrap",
+      }}
+    >
+      ₹{Number(amount).toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+    </span>
+  );
+}
+
 type Params = Promise<{ id: string }>;
 // Mig 082 follow-on (Daksh) — `?from=...` query param tells the
 // page where the user came from. Used to render a context-aware
@@ -70,7 +153,7 @@ export default async function BillVendorDetailPage({
   const { data: billsRaw } = await supabase
     .from("bills")
     .select(
-      "id, token, vendor_bill_no, bill_date, description, amount_total, amount_paid, amount_outstanding, amount_tds, amount_tcs, amount_payable_to_vendor, status",
+      "id, token, vendor_bill_no, bill_date, description, amount_total, amount_paid, amount_outstanding, amount_tds, amount_tcs, amount_payable_to_vendor, status, held_amount, held_reason",
     )
     .eq("bill_vendor_id", id)
     .order("bill_date", { ascending: false })
@@ -134,7 +217,40 @@ export default async function BillVendorDetailPage({
     amount_tcs: number | null;
     amount_payable_to_vendor: number | null;
     status: string;
+    held_amount: number;
+    held_reason: string | null;
   }>;
+
+  // Daksh June 2026 — per-bill PAID part-payments for the new Paid column's
+  // chips. READ-ONLY: only the confirmed-paid bill_payments rows, oldest
+  // first. Touches no totals and no payment logic.
+  const partsByBill = new Map<
+    string,
+    Array<{ amount: number; paidAt: string | null; method: string | null }>
+  >();
+  const billIds = bills.map((b) => b.id);
+  if (billIds.length > 0) {
+    const { data: payRows } = await supabase
+      .from("bill_payments")
+      .select("bill_id, paid_amount, paid_at, payment_method")
+      .in("bill_id", billIds)
+      .eq("status", "paid")
+      .order("paid_at", { ascending: true });
+    for (const p of (payRows ?? []) as Array<{
+      bill_id: string;
+      paid_amount: number | null;
+      paid_at: string | null;
+      payment_method: string | null;
+    }>) {
+      const list = partsByBill.get(p.bill_id) ?? [];
+      list.push({
+        amount: Number(p.paid_amount) || 0,
+        paidAt: p.paid_at ?? null,
+        method: p.payment_method ?? null,
+      });
+      partsByBill.set(p.bill_id, list);
+    }
+  }
 
   const totalOutstanding = bills
     .filter((b) => b.status === "approved")
@@ -533,6 +649,8 @@ export default async function BillVendorDetailPage({
                       {(vendor.tcs_applicable || totalTcsCollected > 0) && (
                         <th style={TABLE_STYLES.thRight}>TCS</th>
                       )}
+                      <th style={TABLE_STYLES.thRight}>Paid</th>
+                      <th style={TABLE_STYLES.thRight}>Hold</th>
                       <th style={TABLE_STYLES.thRight}>Outstanding</th>
                       <th style={TABLE_STYLES.th}>Status</th>
                     </tr>
@@ -589,6 +707,12 @@ export default async function BillVendorDetailPage({
                             )}
                           </td>
                         )}
+                        <td style={TABLE_STYLES.tdRight}>
+                          <PaidCell paid={Number(b.amount_paid ?? 0)} parts={partsByBill.get(b.id) ?? []} />
+                        </td>
+                        <td style={TABLE_STYLES.tdRight}>
+                          <HoldCell amount={Number(b.held_amount ?? 0)} reason={b.held_reason} />
+                        </td>
                         <td style={TABLE_STYLES.tdRight}>
                           {Number(b.amount_outstanding) > 0 ? (
                             <Money value={Number(b.amount_outstanding)} tone="warning" />
