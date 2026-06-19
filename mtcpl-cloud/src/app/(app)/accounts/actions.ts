@@ -2043,6 +2043,19 @@ async function sendVendorPaymentWhatsApp(
       return;
     }
 
+    // Carbon-copy (Daksh): the owner gets an identical copy of every vendor
+    // message — separate 1:1 sends, so each vendor only ever sees their own
+    // and never sees the CC. Developer-toggleable in Settings; best-effort, so
+    // a CC hiccup never blocks the vendor's message.
+    const recipients = [to];
+    try {
+      const { getVendorCcRecipient } = await import("@/lib/wa-vendor-cc");
+      const cc = await getVendorCcRecipient();
+      if (cc && !recipients.includes(cc)) recipients.push(cc);
+    } catch {
+      /* CC is best-effort */
+    }
+
     const { buildVoucherPdf } = await import("@/lib/voucher-pdf");
     const { numberToIndianWords } = await import(
       "@/app/(app)/accounts/payments/[id]/voucher/number-to-words"
@@ -2093,7 +2106,7 @@ async function sendVendorPaymentWhatsApp(
       : "-";
 
     await sendWhatsAppTemplate({
-      to: [to],
+      to: recipients,
       templateName,
       components: {
         header_1: { type: "document", value: pdfUrl, filename: `Payment-Voucher-${billRowAny.token}.pdf` },
@@ -2108,7 +2121,10 @@ async function sendVendorPaymentWhatsApp(
     });
 
     await logAudit(actorId, "vendor_payment_wa_sent", "bill_payment", paymentId, {
-      to, token: billRowAny.token, amount: paidAmount,
+      to,
+      cc: recipients.slice(1), // owner carbon-copy, if enabled
+      token: billRowAny.token,
+      amount: paidAmount,
     });
   } catch (e) {
     console.warn("[sendVendorPaymentWhatsApp] failed", e);

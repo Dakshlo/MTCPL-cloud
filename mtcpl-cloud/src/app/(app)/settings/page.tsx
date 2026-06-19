@@ -16,6 +16,8 @@ import { MaintenanceCollapsible } from "./maintenance-collapsible";
 import { UserRoleVendorPicker } from "./user-role-vendor-picker";
 import { WaRecipientsEditor } from "./wa-recipients-editor";
 import { getReportRecipientNumbers } from "@/lib/wa-recipients";
+import { WaVendorCcEditor } from "./wa-vendor-cc-editor";
+import { getVendorCcSetting } from "@/lib/wa-vendor-cc";
 
 // All assignable roles — only shown to developer.
 //
@@ -139,6 +141,10 @@ export default async function SettingsPage() {
   // Daily WhatsApp report recipients (owner/developer manage these below).
   const canManageWaReport = currentUser.role === "owner" || currentUser.role === "developer";
   const waReportRecipients = canManageWaReport ? await getReportRecipientNumbers() : [];
+
+  // Vendor-message carbon-copy (developer only).
+  const canManageVendorCc = currentUser.role === "developer";
+  const vendorCc = canManageVendorCc ? await getVendorCcSetting() : null;
 
   // System Status — load global + per-department flags (Migration 036).
   // Each falls back to `down: false` if the relevant migration hasn't
@@ -391,6 +397,15 @@ export default async function SettingsPage() {
       {canManageWaReport && (
         <PeekSection icon="📲" title="Daily WhatsApp report" subtitle={`Recipients, preview & test · ${waReportRecipients.length} number${waReportRecipients.length === 1 ? "" : "s"}`} modalMaxWidth={520}>
           <WaRecipientsEditor initial={waReportRecipients} />
+        </PeekSection>
+      )}
+
+      {/* Vendor-message carbon-copy — DEVELOPER only. Mirrors every WhatsApp
+          sent to a vendor (the payment voucher) to one number, so the owner
+          sees them all. Stored in app_settings; no redeploy needed. */}
+      {canManageVendorCc && vendorCc && (
+        <PeekSection icon="📩" title="Vendor message carbon-copy" subtitle={vendorCc.enabled ? `ON · copies to +91 ${vendorCc.number}` : "OFF — no copies sent"} modalMaxWidth={520}>
+          <WaVendorCcEditor initial={vendorCc} />
         </PeekSection>
       )}
 
