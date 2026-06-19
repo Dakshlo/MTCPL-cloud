@@ -129,6 +129,9 @@ export default async function CuttingApprovalsPage() {
     const p = r.pending_approval_payload;
     for (const id of p?.cut_slab_ids ?? []) slabIdSet.add(id);
     for (const id of p?.extra_slab_ids ?? []) slabIdSet.add(id);
+    // Transferred slabs are cut from THIS block too — load their dims so the
+    // recovery bar can count them (see slabsForEff below).
+    for (const id of p?.transferred_slab_ids ?? []) slabIdSet.add(id);
   }
   const slabDims = new Map<string, { sw: number; sh: number; sd: number }>();
   const allSlabIds = [...slabIdSet];
@@ -146,11 +149,17 @@ export default async function CuttingApprovalsPage() {
 
   const rows: ApprovalRow[] = visible.map((r) => {
     const payload = r.pending_approval_payload ?? null;
-    // Projected recovery from the submitted payload (becomes actual on approval).
+    // Projected recovery from the submitted payload (becomes actual on
+    // approval). Includes transferred slabs: they're cut from THIS block and
+    // on approval get source_block_id = this block, so the post-approval ACTUAL
+    // recovery already counts them — the projection must too, or the bar jumps
+    // up the moment you approve. (The donor block loses these from its own
+    // layout on approval, so there's no double-count.)
     const blk = r.layout?.blk ?? null;
     const slabsForEff = [
       ...(payload?.cut_slab_ids ?? []),
       ...(payload?.extra_slab_ids ?? []),
+      ...(payload?.transferred_slab_ids ?? []),
     ].map((id) => slabDims.get(id)).filter(Boolean) as Array<{ sw: number; sh: number; sd: number }>;
     const remsForEff = (payload?.remainders ?? [])
       .map((rm) => ({ l: Number(rm.l ?? 0), w: Number(rm.w ?? 0), h: Number(rm.h ?? 0) }))
