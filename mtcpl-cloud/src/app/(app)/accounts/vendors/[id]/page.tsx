@@ -741,33 +741,33 @@ export default async function BillVendorDetailPage({
                     ))}
                   </tbody>
                   <tfoot>
-                    <tr style={{ borderTop: "2px solid var(--border)", background: ACCOUNTS_TOKENS.surfaceMuted, fontWeight: 800 }}>
-                      <td colSpan={3} style={{ ...TABLE_STYLES.td, fontWeight: 800 }}>
+                    <tr style={{ borderTop: "2px solid var(--text)", background: ACCOUNTS_TOKENS.surfaceMuted, fontWeight: 800 }}>
+                      <td colSpan={3} style={{ ...TABLE_STYLES.td, fontWeight: 800, borderTop: "2px solid var(--text)" }}>
                         Totals · {bills.length} bill{bills.length === 1 ? "" : "s"}
                       </td>
-                      <td style={{ ...TABLE_STYLES.tdRight, fontWeight: 800 }}>
+                      <td style={{ ...TABLE_STYLES.tdRight, fontWeight: 800, borderTop: "2px solid var(--text)" }}>
                         <Money value={colTotals.total} tone="muted" />
                       </td>
                       {(vendor.tds_applicable || totalTdsDeducted > 0) && (
-                        <td style={{ ...TABLE_STYLES.tdRight, fontWeight: 800 }}>
+                        <td style={{ ...TABLE_STYLES.tdRight, fontWeight: 800, borderTop: "2px solid var(--text)" }}>
                           <Money value={colTotals.tds} tone="danger" />
                         </td>
                       )}
                       {(vendor.tcs_applicable || totalTcsCollected > 0) && (
-                        <td style={{ ...TABLE_STYLES.tdRight, fontWeight: 800 }}>
+                        <td style={{ ...TABLE_STYLES.tdRight, fontWeight: 800, borderTop: "2px solid var(--text)" }}>
                           <Money value={colTotals.tcs} tone="muted" />
                         </td>
                       )}
-                      <td style={{ ...TABLE_STYLES.tdRight, fontWeight: 800 }}>
+                      <td style={{ ...TABLE_STYLES.tdRight, fontWeight: 800, borderTop: "2px solid var(--text)" }}>
                         <Money value={colTotals.paid} tone="success" />
                       </td>
-                      <td style={{ ...TABLE_STYLES.tdRight, fontWeight: 800 }}>
+                      <td style={{ ...TABLE_STYLES.tdRight, fontWeight: 800, borderTop: "2px solid var(--text)" }}>
                         <Money value={colTotals.held} tone="warning" />
                       </td>
-                      <td style={{ ...TABLE_STYLES.tdRight, fontWeight: 800 }}>
+                      <td style={{ ...TABLE_STYLES.tdRight, fontWeight: 800, borderTop: "2px solid var(--text)" }}>
                         <Money value={colTotals.outstanding} tone="warning" />
                       </td>
-                      <td style={TABLE_STYLES.td} />
+                      <td style={{ ...TABLE_STYLES.td, borderTop: "2px solid var(--text)" }} />
                     </tr>
                   </tfoot>
                 </table>
