@@ -270,6 +270,20 @@ export default async function BillVendorDetailPage({
     .filter((b) => b.status !== "cancelled" && b.status !== "rejected")
     .reduce((s, b) => s + Number(b.amount_tcs ?? 0), 0);
 
+  // Daksh June 2026 — column totals for the Bill-history footer row. Plain
+  // sums of the rows shown (display-only; no data is changed).
+  const colTotals = bills.reduce(
+    (a, b) => ({
+      total: a.total + Number(b.amount_total || 0),
+      tds: a.tds + Number(b.amount_tds || 0),
+      tcs: a.tcs + Number(b.amount_tcs || 0),
+      paid: a.paid + Number(b.amount_paid || 0),
+      held: a.held + Number(b.held_amount || 0),
+      outstanding: a.outstanding + Number(b.amount_outstanding || 0),
+    }),
+    { total: 0, tds: 0, tcs: 0, paid: 0, held: 0, outstanding: 0 },
+  );
+
   // Mig 073 — advance credit balance (per-vendor view) + the
   // vendor's advance history. Used by the new KPI tile + the
   // Advances section below the bill history.
@@ -726,6 +740,36 @@ export default async function BillVendorDetailPage({
                       </tr>
                     ))}
                   </tbody>
+                  <tfoot>
+                    <tr style={{ borderTop: "2px solid var(--border)", background: ACCOUNTS_TOKENS.surfaceMuted, fontWeight: 800 }}>
+                      <td colSpan={3} style={{ ...TABLE_STYLES.td, fontWeight: 800 }}>
+                        Totals · {bills.length} bill{bills.length === 1 ? "" : "s"}
+                      </td>
+                      <td style={{ ...TABLE_STYLES.tdRight, fontWeight: 800 }}>
+                        <Money value={colTotals.total} tone="muted" />
+                      </td>
+                      {(vendor.tds_applicable || totalTdsDeducted > 0) && (
+                        <td style={{ ...TABLE_STYLES.tdRight, fontWeight: 800 }}>
+                          <Money value={colTotals.tds} tone="danger" />
+                        </td>
+                      )}
+                      {(vendor.tcs_applicable || totalTcsCollected > 0) && (
+                        <td style={{ ...TABLE_STYLES.tdRight, fontWeight: 800 }}>
+                          <Money value={colTotals.tcs} tone="muted" />
+                        </td>
+                      )}
+                      <td style={{ ...TABLE_STYLES.tdRight, fontWeight: 800 }}>
+                        <Money value={colTotals.paid} tone="success" />
+                      </td>
+                      <td style={{ ...TABLE_STYLES.tdRight, fontWeight: 800 }}>
+                        <Money value={colTotals.held} tone="warning" />
+                      </td>
+                      <td style={{ ...TABLE_STYLES.tdRight, fontWeight: 800 }}>
+                        <Money value={colTotals.outstanding} tone="warning" />
+                      </td>
+                      <td style={TABLE_STYLES.td} />
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
             </div>
