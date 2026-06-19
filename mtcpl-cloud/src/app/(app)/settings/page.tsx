@@ -243,6 +243,11 @@ export default async function SettingsPage() {
   }>;
   const stoneList = stoneTypes ?? [];
   const userList = users ?? [];
+  // Deactivated ("removed") users are hidden from the main list and tucked
+  // into a collapsed "Inactive" disclosure (still reactivatable). userList
+  // stays full — it's used elsewhere (e.g. live-users name lookup).
+  const activeUsers = userList.filter((u) => u.is_active);
+  const inactiveUsers = userList.filter((u) => !u.is_active);
 
   // Pre-compute usage counts so delete guards are visible in UI
   const blockStoneCount = (blockStones ?? []).reduce<Record<string, number>>((acc, b) => {
@@ -442,10 +447,10 @@ export default async function SettingsPage() {
         <PeekSection
           icon="👥"
           title="Users"
-          count={userList.length}          modalMaxWidth={1100}
+          count={activeUsers.length}          modalMaxWidth={1100}
         >
-          {userList.length === 0 ? (
-            <div className="banner">No users found.</div>
+          {activeUsers.length === 0 ? (
+            <div className="banner">No active users.</div>
           ) : (
             <div className="settings-table">
               <div className="settings-table-head" style={{ gridTemplateColumns: "2fr 1fr 1fr 1fr auto" }}>
@@ -455,7 +460,7 @@ export default async function SettingsPage() {
                 <span>Status</span>
                 <span></span>
               </div>
-              {userList.map((user) => {
+              {activeUsers.map((user) => {
                 const role = user.role as AppRole;
                 const isSelf = user.id === currentUser.id;
                 const isDeveloper = role === "developer";
@@ -743,6 +748,51 @@ export default async function SettingsPage() {
                 );
               })}
             </div>
+          )}
+
+          {/* Removed (deactivated) users — hidden from the list above, kept
+              here in a collapsed disclosure so they don't clutter but can
+              still be reactivated. */}
+          {inactiveUsers.length > 0 && (
+            <details style={{ marginTop: 14, borderTop: "1px solid var(--border)", paddingTop: 10 }}>
+              <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 700, color: "var(--muted)", padding: "6px 4px" }}>
+                Inactive users ({inactiveUsers.length}) · removed — hidden from the list above
+              </summary>
+              <div className="settings-table" style={{ marginTop: 8 }}>
+                {inactiveUsers.map((user) => {
+                  const role = user.role as AppRole;
+                  const isSelf = user.id === currentUser.id;
+                  const isLocked =
+                    (role === "developer" && !isSelf) ||
+                    (role === "owner" && currentUser.role !== "developer" && currentUser.role !== "owner") ||
+                    (role === "senior_incharge" && currentUser.role === "team_head");
+                  return (
+                    <div key={user.id} className="settings-table-row-face" style={{ gridTemplateColumns: "2fr 1fr 1fr auto", alignItems: "center", opacity: 0.7 }}>
+                      <span>
+                        <span className="settings-temple-name">{user.full_name || "—"}</span>
+                        {user.phone ? <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>{user.phone}</span> : null}
+                      </span>
+                      <span><span className="role-pill">{roleLabel(role)}</span></span>
+                      <span><span className="role-pill badge-discarded">Inactive</span></span>
+                      <span>
+                        {isLocked ? (
+                          <span className="muted" style={{ fontSize: 12 }}>🔒</span>
+                        ) : (
+                          <form action={updateUserAction} style={{ display: "inline" }}>
+                            <input type="hidden" name="id" value={user.id} />
+                            <input type="hidden" name="full_name" value={user.full_name ?? ""} />
+                            <input type="hidden" name="role" value={user.role} />
+                            <input type="hidden" name="is_active" value="true" />
+                            {user.vendor_id ? <input type="hidden" name="vendor_id" value={user.vendor_id} /> : null}
+                            <button className="ghost-button" type="submit" style={{ fontSize: 12 }}>Reactivate</button>
+                          </form>
+                        )}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </details>
           )}
         </PeekSection>
       )}
