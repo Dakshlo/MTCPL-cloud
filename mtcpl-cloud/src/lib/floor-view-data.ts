@@ -177,6 +177,12 @@ export async function buildFloorViewData(): Promise<FloorVendor[]> {
     }>).filter((c) => c.vendor_id === v.id && c.completed_at)
       .filter((c) => new Date(c.completed_at!).getTime() >= startOfTodayMs).length;
 
+    // Carving-Done items awaiting the carving head's approval (completed but
+    // not yet review-approved) — shown on the wall in place of "Today".
+    const approvalPending = ((completed ?? []) as Array<{
+      vendor_id: string; completed_at: string | null; review_approved_at: string | null;
+    }>).filter((c) => c.vendor_id === v.id && c.completed_at && !c.review_approved_at).length;
+
     const recentCompleted: FloorRecent[] = completedRecent24h
       .filter((c) => c.vendor_id === v.id)
       .map((c) => ({
@@ -199,6 +205,7 @@ export async function buildFloorViewData(): Promise<FloorVendor[]> {
         maintenance: machineCards.filter((m) => m.status === "maintenance").length,
         queue: queue.length,
         today: todayCompleted,
+        approvalPending,
       },
     };
   });

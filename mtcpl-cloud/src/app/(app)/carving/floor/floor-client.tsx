@@ -124,6 +124,7 @@ export type FloorVendor = {
     maintenance: number;
     queue: number;
     today: number;
+    approvalPending: number;
   };
 };
 
@@ -217,7 +218,7 @@ export function FloorViewClient({
   // Aggregate fleet totals across all vendors — shown in the grid
   // header and on each TV slide for quick context.
   const fleetTotals = useMemo(() => {
-    const acc = { total: 0, idle: 0, carving: 0, maintenance: 0, queue: 0, today: 0 };
+    const acc = { total: 0, idle: 0, carving: 0, maintenance: 0, queue: 0, today: 0, approvalPending: 0 };
     for (const v of vendors) {
       acc.total += v.totals.total;
       acc.idle += v.totals.idle;
@@ -225,6 +226,7 @@ export function FloorViewClient({
       acc.maintenance += v.totals.maintenance;
       acc.queue += v.totals.queue;
       acc.today += v.totals.today;
+      acc.approvalPending += v.totals.approvalPending;
     }
     return acc;
   }, [vendors]);
@@ -1123,20 +1125,22 @@ function VendorTvSlide({ vendor, now, slideKey, dark }: { vendor: FloorVendor; n
           to   { transform: translateX(0);    opacity: 1; }
         }
       `}</style>
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 14 }}>
-        <span style={{ fontSize: 40, fontWeight: 800, letterSpacing: "-0.6px", color: dark ? "#fff" : "#1a1a1a" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 14, flex: "0 0 auto" }}>
+        <span style={{ fontSize: 48, fontWeight: 800, letterSpacing: "-0.6px", color: dark ? "#fff" : "#1a1a1a" }}>
           {vendor.name}
         </span>
-        <span style={{ fontSize: 14, color: muted, fontWeight: 600 }}>
+        <span style={{ fontSize: 18, color: muted, fontWeight: 600 }}>
           {vendor.totals.total} CNC{vendor.totals.total !== 1 ? "s" : ""}
         </span>
-        <div style={{ marginLeft: "auto", display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <TvBigStat label="Free" value={vendor.totals.idle} fg={dark ? "#38bdf8" : "#0369a1"} dark={dark} />
-          <TvBigStat label="Carving" value={vendor.totals.carving} fg={dark ? "#4ade80" : "#15803d"} dark={dark} />
-          <TvBigStat label="Maint" value={vendor.totals.maintenance} fg={dark ? "#f87171" : "#b91c1c"} dark={dark} />
-          <TvBigStat label="Stock pending" value={vendor.totals.queue} fg={dark ? "#fbbf24" : "#b45309"} dark={dark} />
-          <TvBigStat label="Today" value={vendor.totals.today} fg={dark ? "#E8C572" : "#b87333"} dark={dark} />
-        </div>
+      </div>
+      {/* Full-width stat strip — tiles stretch so the numbers read from across
+          the floor. "Today" swapped for "Approval pending" (Daksh). */}
+      <div style={{ display: "flex", gap: 12, flex: "0 0 auto" }}>
+        <TvBigStat label="Free" value={vendor.totals.idle} fg={dark ? "#38bdf8" : "#0369a1"} dark={dark} />
+        <TvBigStat label="Carving" value={vendor.totals.carving} fg={dark ? "#4ade80" : "#15803d"} dark={dark} />
+        <TvBigStat label="Maint" value={vendor.totals.maintenance} fg={dark ? "#f87171" : "#b91c1c"} dark={dark} />
+        <TvBigStat label="Stock pending" value={vendor.totals.queue} fg={dark ? "#fbbf24" : "#b45309"} dark={dark} />
+        <TvBigStat label="Approval pending" value={vendor.totals.approvalPending} fg={dark ? "#c4b5fd" : "#7c3aed"} dark={dark} />
       </div>
 
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 14 }}>
@@ -1364,7 +1368,7 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
           style={{
             fontFamily: "ui-monospace, monospace",
             fontWeight: 800,
-            fontSize: 32,
+            fontSize: 40,
             color: codeColor,
             letterSpacing: "-0.5px",
           }}
@@ -1373,9 +1377,9 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
         </span>
         <span
           style={{
-            fontSize: 12,
+            fontSize: 15,
             fontWeight: 800,
-            padding: "4px 12px",
+            padding: "5px 14px",
             borderRadius: 999,
             color: "#fff",
             background: accent,
@@ -1390,9 +1394,9 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
           {machine.machine_type !== "single_head" && (
             <span
               style={{
-                fontSize: 11,
+                fontSize: 14,
                 fontWeight: 800,
-                padding: "3px 9px",
+                padding: "3px 10px",
                 borderRadius: 4,
                 background: machine.machine_type === "lathe" ? "rgba(124,58,237,0.12)" : "rgba(180,115,51,0.15)",
                 color: machine.machine_type === "lathe" ? (dark ? "#c4b5fd" : "#7c3aed") : (dark ? "#fbbf24" : "#b45309"),
@@ -1406,9 +1410,9 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
           {machine.cnc_axes != null && (
             <span
               style={{
-                fontSize: 11,
+                fontSize: 14,
                 fontWeight: 800,
-                padding: "3px 9px",
+                padding: "3px 10px",
                 borderRadius: 4,
                 background: dark ? "rgba(99,102,241,0.20)" : "rgba(99,102,241,0.12)",
                 color: dark ? "#c7d2fe" : "#4338ca",
@@ -1422,7 +1426,7 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
         </div>
       )}
       {machine.operator_name && (
-        <div style={{ fontSize: 13, color: subColor }}>
+        <div style={{ fontSize: 17, color: subColor }}>
           👷 {machine.operator_name}
         </div>
       )}
@@ -1430,14 +1434,14 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
         <div style={{ paddingTop: 8, borderTop: `1px solid ${dividerColor}`, display: "flex", flexDirection: "column", gap: 8 }}>
           {machine.current_jobs.map((job, ji) => (
             <div key={job.id} style={ji > 0 ? { paddingTop: 8, borderTop: `1px dashed ${dividerColor}` } : undefined}>
-              <div style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 16, color: codeColor }}>
+              <div style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 22, color: codeColor }}>
                 {machine.current_jobs.length > 1 && (
                   <span style={{ color: accent, marginRight: 4 }}>{ji + 1}.</span>
                 )}
                 {job.slab_id}
               </div>
               {job.slab && (
-                <div style={{ fontSize: 12, color: sub2Color }}>
+                <div style={{ fontSize: 16, color: sub2Color }}>
                   {job.slab.temple} · {job.slab.length_in}×{job.slab.width_in}″
                   {(() => {
                     const cft = (job.slab.length_in * job.slab.width_in * job.slab.thickness_in) / 1728;
@@ -1460,13 +1464,13 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
                       marginTop: 6,
                     }}
                   >
-                    <span style={{ fontSize: 16, fontWeight: 800, color: dark ? "#4ade80" : "#15803d" }}>
+                    <span style={{ fontSize: 22, fontWeight: 800, color: dark ? "#4ade80" : "#15803d" }}>
                       ▶ {fmtDuration(elapsed)}
                     </span>
                     {remaining != null && (
                       <span
                         style={{
-                          fontSize: 18,
+                          fontSize: 26,
                           fontWeight: 800,
                           color: remaining < 0
                             ? (dark ? "#fca5a5" : "#dc2626")
@@ -1490,12 +1494,12 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
           {machine.maintenance_flagged_at && (() => {
             const downMin = (now - new Date(machine.maintenance_flagged_at).getTime()) / 60000;
             return (
-              <div style={{ fontSize: 16, fontWeight: 800, color: prog ? (dark ? "#c7d2fe" : "#4338ca") : (dark ? "#fca5a5" : "#b91c1c"), fontFamily: "ui-monospace, monospace" }}>
+              <div style={{ fontSize: 20, fontWeight: 800, color: prog ? (dark ? "#c7d2fe" : "#4338ca") : (dark ? "#fca5a5" : "#b91c1c"), fontFamily: "ui-monospace, monospace" }}>
                 {prog ? "⏱ waiting " : "⏱ down for "}{fmtDuration(downMin)}
               </div>
             );
           })()}
-          <div style={{ fontSize: 13, color: prog ? (dark ? "#c7d2fe" : "#4338ca") : sub2Color, marginTop: 4, fontWeight: prog ? 700 : 400 }}>
+          <div style={{ fontSize: 17, color: prog ? (dark ? "#c7d2fe" : "#4338ca") : sub2Color, marginTop: 4, fontWeight: prog ? 700 : 400 }}>
             {prog ? "🗂 No programming file" : (machine.maintenance_reason ?? "—")}
           </div>
         </div>
@@ -1562,17 +1566,18 @@ function TvStat({ label, value, fg, dark = false }: { label: string; value: numb
 function TvBigStat({ label, value, fg, dark = false }: { label: string; value: number; fg: string; dark?: boolean }) {
   return (
     <div style={{
-      padding: "10px 18px",
+      flex: 1,
+      minWidth: 0,
+      padding: "10px 14px",
       background: dark ? "rgba(255,255,255,0.08)" : "#fff",
       border: `1px solid ${dark ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.08)"}`,
-      borderRadius: 10,
+      borderRadius: 12,
       textAlign: "center",
-      minWidth: 88,
     }}>
-      <div style={{ fontSize: 11, color: dark ? "rgba(255,255,255,0.55)" : "#8a7a55", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700 }}>
+      <div style={{ fontSize: 14, color: dark ? "rgba(255,255,255,0.6)" : "#8a7a55", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 800, lineHeight: 1.15 }}>
         {label}
       </div>
-      <div style={{ fontSize: 32, fontWeight: 800, color: fg, lineHeight: 1, marginTop: 4, fontFamily: "ui-monospace, monospace" }}>
+      <div style={{ fontSize: 54, fontWeight: 800, color: fg, lineHeight: 1, marginTop: 6, fontFamily: "ui-monospace, monospace" }}>
         {value}
       </div>
     </div>
@@ -1586,7 +1591,7 @@ function VendorStatRow({ totals }: { totals: FloorVendor["totals"] }) {
       <Tile label="Carving" value={totals.carving} fg="#16a34a" />
       <Tile label="Maint" value={totals.maintenance} fg="#dc2626" />
       <Tile label="Stock pending" value={totals.queue} fg="#b45309" />
-      <Tile label="Today" value={totals.today} fg="#b87333" />
+      <Tile label="Approval pending" value={totals.approvalPending} fg="#7c3aed" />
     </div>
   );
 }
