@@ -232,14 +232,21 @@ export function TransferDispatchList({
         <div>
           <h1 style={{ margin: 0, fontSize: 22 }}>🚧 Slab Transfer</h1>
           <p className="muted" style={{ margin: "4px 0 0", fontSize: 13 }}>
-            Move cut slabs from the stock yard to each vendor&apos;s shade.
-            Claim a slab before picking it up.
+            {activeTab === "carving"
+              ? "Move cut slabs from the stock yard to each vendor's shade. Pick a truck and claim a slab before picking it up."
+              : "Bring carved-done slabs in to their dispatch station so they can be loaded."}
           </p>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <StatTile label="Mine" value={mineRows.length} fg="#1d4ed8" />
-          <StatTile label="To claim" value={availableRows.length} fg="#b45309" />
-          <StatTile label="Delivered" value={delivered.length} fg="#15803d" />
+          {activeTab === "carving" ? (
+            <>
+              <StatTile label="Mine" value={mineRows.length} fg="#1d4ed8" />
+              <StatTile label="To claim" value={availableRows.length} fg="#b45309" />
+              <StatTile label="Delivered" value={delivered.length} fg="#15803d" />
+            </>
+          ) : (
+            <StatTile label="To bring in" value={dispatchRows.length} fg="#4f46e5" />
+          )}
         </div>
       </div>
 
