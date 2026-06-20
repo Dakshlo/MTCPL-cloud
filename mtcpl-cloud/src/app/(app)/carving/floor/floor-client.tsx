@@ -44,8 +44,8 @@ function TvFit({ children, dep }: { children: React.ReactNode; dep: unknown }) {
     return () => { ro.disconnect(); clearTimeout(t); };
   }, [dep]);
   return (
-    <div ref={outerRef} style={{ flex: 1, minHeight: 0, overflow: "hidden", display: "flex", justifyContent: "center", alignItems: "flex-start" }}>
-      <div ref={innerRef} style={{ width: "100%", transformOrigin: "top center", transform: `scale(${scale})` }}>
+    <div ref={outerRef} style={{ flex: 1, minHeight: 0, overflow: "hidden", display: "flex", justifyContent: "center", alignItems: "stretch" }}>
+      <div ref={innerRef} style={{ width: "100%", height: "100%", transformOrigin: "top center", transform: `scale(${scale})` }}>
         {children}
       </div>
     </div>
@@ -1101,6 +1101,7 @@ function VendorTvSlide({ vendor, now, slideKey, dark }: { vendor: FloorVendor; n
         display: "flex",
         flexDirection: "column",
         gap: 18,
+        height: "100%",
         animation: "tv-slide-in 360ms cubic-bezier(0.22, 1, 0.36, 1)",
       }}
     >
@@ -1110,7 +1111,7 @@ function VendorTvSlide({ vendor, now, slideKey, dark }: { vendor: FloorVendor; n
           to   { transform: translateX(0);    opacity: 1; }
         }
       `}</style>
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 14 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 14, flex: "0 0 auto" }}>
         <span style={{ fontSize: 40, fontWeight: 800, letterSpacing: "-0.6px", color: dark ? "#fff" : "#1a1a1a" }}>
           {vendor.name}
         </span>
@@ -1126,18 +1127,20 @@ function VendorTvSlide({ vendor, now, slideKey, dark }: { vendor: FloorVendor; n
         </div>
       </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 14 }}>
         {grouped.map((g) => {
           // Fill the screen width: choose a column count whose grid shape
           // roughly matches the wide viewport, so TvFit barely letterboxes and
           // the cards stretch (1fr) into the left/right space instead of
           // centering with empty margins.
           const cols = Math.min(g.machines.length, Math.max(1, Math.round(Math.sqrt(g.machines.length) * 1.5)));
+          const rows = Math.ceil(g.machines.length / cols);
           return (
-          <div key={g.type} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div key={g.type} style={{ flex: rows, minHeight: 0, display: "flex", flexDirection: "column", gap: 8 }}>
             {grouped.length > 1 && (
               <div
                 style={{
+                  flex: "0 0 auto",
                   fontSize: 12,
                   fontWeight: 800,
                   color: muted,
@@ -1150,8 +1153,11 @@ function VendorTvSlide({ vendor, now, slideKey, dark }: { vendor: FloorVendor; n
             )}
             <div
               style={{
+                flex: 1,
+                minHeight: 0,
                 display: "grid",
                 gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+                gridAutoRows: "1fr",
                 gap: 16,
               }}
             >
