@@ -334,7 +334,7 @@ const navEntries: NavEntry[] = [
     // Mig 076 — carving_head + senior_incharge added so the
     // Global My Jobs entry below shows up for them too (read-only
     // oversight tour, gated by readOnlyCockpit on the /vendor page).
-    roles: ["developer", "owner", "vendor", "slab_transfer", "carving_head", "senior_incharge"],
+    roles: ["developer", "owner", "vendor", "slab_transfer", "storekeeper", "carving_head", "senior_incharge"],
     children: [
       {
         href: "/vendor",
@@ -350,7 +350,7 @@ const navEntries: NavEntry[] = [
         href: "/carving/transfer",
         label: "Slab Transfer",
         icon: "🚧",
-        roles: ["developer", "slab_transfer"],
+        roles: ["developer", "slab_transfer", "storekeeper"],
         department: "production",
       },
       // Daksh (June 2026) — CNC Expenses / Cutter Expenses / Various

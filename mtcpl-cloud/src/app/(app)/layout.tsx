@@ -12,6 +12,7 @@ import { RouteTracker } from "@/components/route-tracker";
 import { Sidebar } from "@/components/sidebar";
 import { TopbarTasksBadge, type TopbarTask } from "@/components/topbar-tasks-badge";
 import { TopbarIdLookup } from "@/components/topbar-id-lookup";
+import { TopbarRefreshButton } from "@/components/topbar-refresh-button";
 import { Toast } from "@/components/toast";
 import { Heartbeat } from "@/components/heartbeat";
 import { LoginLocationProbe } from "@/components/login-location-probe";
@@ -664,6 +665,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                 cnc_expense_entry: "EXPENSES ENTRY",
               } as Record<string, string>)[profile.role] ?? profile.role.replace(/_/g, " ").toUpperCase()}
             </span>
+            <TopbarRefreshButton />
             {NOTIFICATION_ROLES.includes(profile.role) && (
               <NotificationBell userId={profile.id} role={profile.role} />
             )}
