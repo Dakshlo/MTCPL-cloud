@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { batchTint } from "@/lib/batch-colours";
 
 // Light / dark theme variable packs for the TV overlay. The wall display
@@ -205,6 +206,16 @@ export function FloorViewClient({
     const t = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(t);
   }, []);
+
+  // Always-on wall: re-fetch the floor data periodically so the TV never shows
+  // stale CNC state. router.refresh() is a SOFT refresh — it re-runs the server
+  // fetch and updates the cards in place, keeping the rotation index, theme,
+  // pause and full-screen intact (no flash, no reset).
+  const router = useRouter();
+  useEffect(() => {
+    const t = setInterval(() => router.refresh(), 45_000);
+    return () => clearInterval(t);
+  }, [router]);
 
   // TV auto-rotate. Pauses if user clicks ⏸ or hovers.
   useEffect(() => {
@@ -1149,7 +1160,7 @@ function VendorTvSlide({ vendor, now, slideKey, dark }: { vendor: FloorVendor; n
           // roughly matches the wide viewport, so TvFit barely letterboxes and
           // the cards stretch (1fr) into the left/right space instead of
           // centering with empty margins.
-          const cols = Math.min(g.machines.length, Math.max(1, Math.round(Math.sqrt(g.machines.length) * 1.5)));
+          const cols = Math.min(g.machines.length, Math.max(1, Math.round(Math.sqrt(g.machines.length) * 1.35)));
           const rows = Math.ceil(g.machines.length / cols);
           return (
           <div key={g.type} style={{ flex: `${rows} 0 auto`, minHeight: 0, display: "flex", flexDirection: "column", gap: 8 }}>

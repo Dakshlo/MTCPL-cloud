@@ -1,12 +1,35 @@
 "use client";
 
-// Tiny corner sign-out for the "tv" wall-display kiosk role, which runs with
-// no top bar (so there's no normal logout). Self-contained — clears the
-// Supabase session then hard-redirects — and kept small + low-opacity so it
-// doesn't distract on the wall.
+// Wall-display kiosk helpers for the "tv" role (runs with no top bar):
+//   • auto full-screen — browsers refuse full-screen without a user gesture,
+//     so we trigger it on the FIRST interaction (tap / click / key) after the
+//     page opens. One touch on the kiosk and the browser chrome is gone. For a
+//     PERMANENT no-browser kiosk, launch Chrome with --kiosk (OS-level; a web
+//     page can't remove the browser itself).
+//   • a tiny corner sign-out (there's no top-bar logout for this role).
+import { useEffect } from "react";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 export function TvKioskSignOut() {
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const go = () => {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen?.().catch(() => {
+          /* user/Permissions-Policy may still block it — the ⛶ button remains */
+        });
+      }
+      window.removeEventListener("pointerdown", go);
+      window.removeEventListener("keydown", go);
+    };
+    window.addEventListener("pointerdown", go);
+    window.addEventListener("keydown", go);
+    return () => {
+      window.removeEventListener("pointerdown", go);
+      window.removeEventListener("keydown", go);
+    };
+  }, []);
+
   return (
     <button
       type="button"
