@@ -134,10 +134,13 @@ export async function buildFloorViewData(): Promise<FloorVendor[]> {
       }))
       .sort((a, b) => (a.urgency === b.urgency ? 0 : a.urgency === "urgent" ? -1 : 1));
 
-    const activeByMachine = new Map<string, FloorMachine["current_job"]>();
+    // Accumulate ALL in-progress jobs per machine — a multi_head_2 runs two
+    // slabs at once, and the wall display shows every loaded slab.
+    const activeByMachine = new Map<string, FloorMachine["current_jobs"]>();
     for (const j of vJobs) {
       if (j.status === "carving_in_progress" && j.cnc_machine_id) {
-        activeByMachine.set(j.cnc_machine_id, {
+        const arr = activeByMachine.get(j.cnc_machine_id) ?? [];
+        arr.push({
           id: j.id,
           slab_id: j.slab_requirement_id,
           vendor_estimated_minutes: j.vendor_estimated_minutes,
@@ -145,6 +148,7 @@ export async function buildFloorViewData(): Promise<FloorVendor[]> {
           loaded_at: j.loaded_at,
           slab: slabById.get(j.slab_requirement_id) ?? null,
         });
+        activeByMachine.set(j.cnc_machine_id, arr);
       }
     }
 
@@ -163,7 +167,7 @@ export async function buildFloorViewData(): Promise<FloorVendor[]> {
           : "single_head") as FloorMachine["machine_type"],
         maintenance_reason: m.maintenance_reason,
         maintenance_flagged_at: m.maintenance_flagged_at,
-        current_job: activeByMachine.get(m.id) ?? null,
+        current_jobs: activeByMachine.get(m.id) ?? [],
       };
     });
 

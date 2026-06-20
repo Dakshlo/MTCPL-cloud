@@ -72,15 +72,19 @@ export type FloorMachine = {
   machine_type: "single_head" | "multi_head_2" | "lathe";
   maintenance_reason: string | null;
   maintenance_flagged_at: string | null;
-  current_job: {
+  // A machine can run more than one slab at once (multi_head_2 carves two),
+  // so this is every in-progress job on the machine, not just one.
+  current_jobs: Array<{
     id: string;
     slab_id: string;
     vendor_estimated_minutes: number | null;
     estimated_minutes: number | null;
     loaded_at: string | null;
     slab: FloorSlab | null;
-  } | null;
+  }>;
 };
+
+export type FloorJob = FloorMachine["current_jobs"][number];
 
 export type FloorQueueItem = {
   id: string;
@@ -473,13 +477,9 @@ function TvHeader({
         </div>
       </div>
 
-      {/* Right: fleet stats + exit TV. Stats stay always-visible since
-          they're the headline numbers the floor wants to see. */}
+      {/* Right: just Exit TV. The fleet-wide stat totals were removed —
+          each vendor slide already shows that vendor's own counts. */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-        <TvStat label="Free" value={fleetTotals.idle} fg={isDark ? "#38bdf8" : "#0369a1"} dark={isDark} />
-        <TvStat label="Carving" value={fleetTotals.carving} fg={isDark ? "#4ade80" : "#15803d"} dark={isDark} />
-        <TvStat label="Maint" value={fleetTotals.maintenance} fg={isDark ? "#f87171" : "#b91c1c"} dark={isDark} />
-        <TvStat label="Stock pending" value={fleetTotals.queue} fg={isDark ? "#fbbf24" : "#b45309"} dark={isDark} />
         <button
           type="button"
           onClick={() => setMode("grid")}
@@ -553,28 +553,6 @@ function TvHeader({
               >
                 {paused ? "▶ Resume" : "⏸ Pause"}
               </button>
-            </SettingRow>
-
-            <SettingRow label="Rotate every">
-              <select
-                value={rotateSec}
-                onChange={(e) => setRotateSec(Number(e.target.value))}
-                style={{
-                  background: ctrlBg,
-                  color: ctrlFg,
-                  border: `1px solid ${ctrlBorder}`,
-                  padding: "6px 10px",
-                  fontSize: 12,
-                  borderRadius: 6,
-                  minWidth: 90,
-                }}
-              >
-                {[5, 10, 15, 20, 30, 45, 60].map((s) => (
-                  <option key={s} value={s} style={{ color: "#000" }}>
-                    {s} seconds
-                  </option>
-                ))}
-              </select>
             </SettingRow>
 
             <SettingRow label="Theme">
@@ -1142,8 +1120,8 @@ function VendorTvSlide({ vendor, now, slideKey, dark }: { vendor: FloorVendor; n
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))",
-                gap: 10,
+                gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+                gap: 16,
               }}
             >
               {g.machines.map((m) => (
@@ -1154,19 +1132,6 @@ function VendorTvSlide({ vendor, now, slideKey, dark }: { vendor: FloorVendor; n
         ))}
       </div>
 
-      {/* Queue + last-24h completed fills the lower part of the
-          screen so the TV isn't a void below the cards. */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 14,
-          marginTop: 4,
-        }}
-      >
-        <QueueList queue={vendor.queue} dark={dark} compact={false} />
-        <RecentList recent={vendor.recentCompleted} dark={dark} compact={false} />
-      </div>
     </div>
   );
 }
@@ -1243,14 +1208,14 @@ function CompactMachineTile({ machine, now }: { machine: FloorMachine; now: numb
       {machine.operator_name && (
         <div style={{ fontSize: 10, color: "var(--muted)" }}>👷 {machine.operator_name}</div>
       )}
-      {machine.status === "carving" && machine.current_job && (
-        <div style={{ fontSize: 10, color: "var(--muted)", paddingTop: 2, borderTop: "1px dashed var(--border)" }}>
+      {machine.status === "carving" && machine.current_jobs.map((job, ji) => (
+        <div key={job.id} style={{ fontSize: 10, color: "var(--muted)", paddingTop: 2, borderTop: "1px dashed var(--border)" }}>
           <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, color: "var(--text)" }}>
-            {machine.current_job.slab_id}
+            {machine.current_jobs.length > 1 ? `${ji + 1}. ` : ""}{job.slab_id}
           </span>
-          {machine.current_job.loaded_at && (() => {
-            const elapsed = (now - new Date(machine.current_job!.loaded_at!).getTime()) / 60000;
-            const eta = machine.current_job!.vendor_estimated_minutes ?? machine.current_job!.estimated_minutes;
+          {job.loaded_at && (() => {
+            const elapsed = (now - new Date(job.loaded_at).getTime()) / 60000;
+            const eta = job.vendor_estimated_minutes ?? job.estimated_minutes;
             const remaining = eta != null ? eta - elapsed : null;
             return (
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 2, fontFamily: "ui-monospace, monospace" }}>
@@ -1266,7 +1231,7 @@ function CompactMachineTile({ machine, now }: { machine: FloorMachine; now: numb
             );
           })()}
         </div>
-      )}
+      ))}
       {machine.status === "maintenance" && (
         <div style={{ fontSize: 10, color: "#b91c1c", fontWeight: 600 }}>
           🔧 {machine.maintenance_reason ?? "—"}
@@ -1392,56 +1357,63 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
           👷 {machine.operator_name}
         </div>
       )}
-      {machine.status === "carving" && machine.current_job && (
-        <div style={{ marginTop: "auto", paddingTop: 8, borderTop: `1px solid ${dividerColor}` }}>
-          <div style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 16, color: codeColor }}>
-            {machine.current_job.slab_id}
-          </div>
-          {machine.current_job.slab && (
-            <div style={{ fontSize: 12, color: sub2Color }}>
-              {machine.current_job.slab.temple} · {machine.current_job.slab.length_in}×{machine.current_job.slab.width_in}″
-              {(() => {
-                const cft = (machine.current_job!.slab!.length_in * machine.current_job!.slab!.width_in * machine.current_job!.slab!.thickness_in) / 1728;
-                return cft > 0 ? ` · ${cft.toFixed(2)} CFT` : "";
-              })()}
-            </div>
-          )}
-          {machine.current_job.loaded_at && (() => {
-            const elapsed = (now - new Date(machine.current_job!.loaded_at!).getTime()) / 60000;
-            const eta = machine.current_job!.vendor_estimated_minutes ?? machine.current_job!.estimated_minutes;
-            const remaining = eta != null ? eta - elapsed : null;
-            return (
-              <div
-                style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  gap: 14,
-                  alignItems: "baseline",
-                  fontFamily: "ui-monospace, monospace",
-                  marginTop: 6,
-                }}
-              >
-                <span style={{ fontSize: 16, fontWeight: 800, color: dark ? "#4ade80" : "#15803d" }}>
-                  ▶ {fmtDuration(elapsed)}
-                </span>
-                {remaining != null && (
-                  <span
+      {machine.status === "carving" && machine.current_jobs.length > 0 && (
+        <div style={{ marginTop: "auto", paddingTop: 8, borderTop: `1px solid ${dividerColor}`, display: "flex", flexDirection: "column", gap: 8 }}>
+          {machine.current_jobs.map((job, ji) => (
+            <div key={job.id} style={ji > 0 ? { paddingTop: 8, borderTop: `1px dashed ${dividerColor}` } : undefined}>
+              <div style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 16, color: codeColor }}>
+                {machine.current_jobs.length > 1 && (
+                  <span style={{ color: accent, marginRight: 4 }}>{ji + 1}.</span>
+                )}
+                {job.slab_id}
+              </div>
+              {job.slab && (
+                <div style={{ fontSize: 12, color: sub2Color }}>
+                  {job.slab.temple} · {job.slab.length_in}×{job.slab.width_in}″
+                  {(() => {
+                    const cft = (job.slab.length_in * job.slab.width_in * job.slab.thickness_in) / 1728;
+                    return cft > 0 ? ` · ${cft.toFixed(2)} CFT` : "";
+                  })()}
+                </div>
+              )}
+              {job.loaded_at && (() => {
+                const elapsed = (now - new Date(job.loaded_at).getTime()) / 60000;
+                const eta = job.vendor_estimated_minutes ?? job.estimated_minutes;
+                const remaining = eta != null ? eta - elapsed : null;
+                return (
+                  <div
                     style={{
-                      fontSize: 18,
-                      fontWeight: 800,
-                      color: remaining < 0
-                        ? (dark ? "#fca5a5" : "#dc2626")
-                        : remaining < 15
-                          ? (dark ? "#fbbf24" : "#b45309")
-                          : (dark ? "#4ade80" : "#15803d"),
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: 14,
+                      alignItems: "baseline",
+                      fontFamily: "ui-monospace, monospace",
+                      marginTop: 6,
                     }}
                   >
-                    ⏱ {remaining < 0 ? `${fmtDuration(remaining)} over` : fmtDuration(remaining) + " left"}
-                  </span>
-                )}
-              </div>
-            );
-          })()}
+                    <span style={{ fontSize: 16, fontWeight: 800, color: dark ? "#4ade80" : "#15803d" }}>
+                      ▶ {fmtDuration(elapsed)}
+                    </span>
+                    {remaining != null && (
+                      <span
+                        style={{
+                          fontSize: 18,
+                          fontWeight: 800,
+                          color: remaining < 0
+                            ? (dark ? "#fca5a5" : "#dc2626")
+                            : remaining < 15
+                              ? (dark ? "#fbbf24" : "#b45309")
+                              : (dark ? "#4ade80" : "#15803d"),
+                        }}
+                      >
+                        ⏱ {remaining < 0 ? `${fmtDuration(remaining)} over` : fmtDuration(remaining) + " left"}
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+          ))}
         </div>
       )}
       {machine.status === "maintenance" && (
