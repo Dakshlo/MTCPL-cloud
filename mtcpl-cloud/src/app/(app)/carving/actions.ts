@@ -16,28 +16,30 @@ import { nextSlabCodeFromMaxId } from "../slabs/utils";
 import { jobworkQuantity } from "@/lib/dimensions";
 
 /**
- * Daksh May 2026 — temporary feature flag.
+ * Daksh May 2026 → re-enabled Jun 2026.
  *
- * The slab_transfer runner role isn't stabilised on the floor yet,
- * so the "yard → vendor shade" handoff step is being skipped: when
- * the carving head assigns a slab to a vendor, the slab is treated
- * as IMMEDIATELY received at the vendor's shade. It bypasses the
- * Pending stock tray and lands straight in Ready to load.
+ * The "yard → vendor shade" handoff (slab_transfer runner) is now
+ * LIVE: when the carving head assigns a slab it sits in the vendor's
+ * Pending stock tray until a runner claims + delivers it, then it
+ * moves to Ready to load. This flag is the global kill-switch — set
+ * it back to `true` to make EVERY assignment auto-receive again (the
+ * old "skip the runner" behaviour) if the floor handoff falls apart.
+ *
+ * Per-assignment bypass (the day-to-day escape hatch): the assign
+ * form carries a "Receive now (skip transfer)" checkbox. When the
+ * carving head ticks it, that single assignment auto-receives even
+ * though the flag is false — so work never stalls when no runner is
+ * around. See `receiveNow` in the two assign actions below.
  *
  * Mechanics: assign actions stamp received_at_vendor_at=NOW() +
  * received_at_vendor_by=actor on the new carving_items row when
- * this flag is true.
- *
- * To re-enable the real transfer flow (the day the slab_transfer
- * runner is trained up): flip this to false. Existing assignments
- * already in flight are unaffected — only NEW assignments take
- * the new path.
+ * EITHER this flag is true OR the per-assignment checkbox is ticked.
  *
  * Inter-vendor transfers (Problem/Transfer → other vendor) keep
  * their existing flow because they have their own Accept/Flag
  * self-receive path that doesn't depend on slab_transfer.
  */
-const SKIP_SLAB_TRANSFER_STAGE = true;
+const SKIP_SLAB_TRANSFER_STAGE = false;
 
 // ── Shared helpers ──────────────────────────────────────────────────
 
@@ -1053,6 +1055,11 @@ export async function assignCarvingJobAction(formData: FormData) {
   const slabId = txt(formData, "slab_id");
   const vendorId = txt(formData, "vendor_id");
   const note = txt(formData, "note") || null;
+  // Per-assignment slab-transfer bypass (Jun 2026). When the carving
+  // head ticks "Receive now (skip transfer)" the slab auto-receives
+  // even though SKIP_SLAB_TRANSFER_STAGE is false — so a slab never
+  // stalls in Pending stock when no runner is on the floor.
+  const receiveNow = txt(formData, "receive_now") === "1";
   // CNC ops: urgency + rough estimated carving minutes from the
   // carving head. Machine is NOT picked here — the vendor (CNC
   // supervisor) decides which of their machines to load it on.
@@ -1205,7 +1212,10 @@ export async function assignCarvingJobAction(formData: FormData) {
   // (transfer in-progress) tray. Reverting the flag to false
   // restores the regular yard→shade flow.
   const nowIso = new Date().toISOString();
-  const autoReceipt = SKIP_SLAB_TRANSFER_STAGE
+  // Outsource jobs auto-start (carving_in_progress) and have no
+  // runner/receive lifecycle, so they ALWAYS auto-receive — only CNC
+  // assignments route through the Pending stock tray.
+  const autoReceipt = SKIP_SLAB_TRANSFER_STAGE || receiveNow || isOutsource
     ? {
         received_at_vendor_at: nowIso,
         received_at_vendor_by: profile.id,
@@ -1311,6 +1321,8 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
   const slabIdsJson = txt(formData, "slab_ids");
   const vendorId = txt(formData, "vendor_id");
   const note = txt(formData, "note") || null;
+  // Per-assignment slab-transfer bypass — see single-assign note above.
+  const receiveNow = txt(formData, "receive_now") === "1";
   const urgency = txt(formData, "urgency") === "urgent" ? "urgent" : "normal";
   const estimatedMinutes = Math.max(0, num(formData, "estimated_minutes", 0));
   // Mig 088 — double-side carving; one choice applies to the whole batch.
@@ -1431,7 +1443,7 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
   const now = new Date().toISOString();
   // Daksh May 2026 — see SKIP_SLAB_TRANSFER_STAGE comment at the
   // top of this file. Same auto-receipt as the single-slab path.
-  const autoReceiptBatch = SKIP_SLAB_TRANSFER_STAGE
+  const autoReceiptBatch = SKIP_SLAB_TRANSFER_STAGE || receiveNow || vendorType === "Outsource"
     ? {
         received_at_vendor_at: now,
         received_at_vendor_by: profile.id,

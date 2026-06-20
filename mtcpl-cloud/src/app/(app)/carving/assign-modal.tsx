@@ -1289,6 +1289,43 @@ export function AssignModal({
               />
             </label>
 
+            {/* Slab-transfer bypass (Jun 2026). Default OFF: the slab
+                sits in the vendor's Pending stock until a transfer
+                runner delivers it. Tick this only when no runner is
+                around so the slab lands straight in Ready to load. */}
+            {!isManual && (
+              <label
+                style={{
+                  display: "flex",
+                  gap: 10,
+                  alignItems: "flex-start",
+                  padding: "10px 12px",
+                  border: "1px solid var(--border)",
+                  borderRadius: 8,
+                  background: "color-mix(in srgb, #f59e0b 8%, var(--bg))",
+                  cursor: "pointer",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  name="receive_now"
+                  value="1"
+                  style={{ marginTop: 2, width: 16, height: 16, cursor: "pointer", accentColor: "#d97706" }}
+                />
+                <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
+                    Receive now (skip transfer runner)
+                  </span>
+                  <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                    Leave unchecked to send the slab to the vendor&apos;s
+                    Pending stock — a transfer runner brings it in. Tick
+                    only if no runner is available; the slab is then
+                    counted as received immediately.
+                  </span>
+                </span>
+              </label>
+            )}
+
             <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
               <button
                 type="submit"
