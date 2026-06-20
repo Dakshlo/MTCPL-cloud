@@ -60,6 +60,8 @@ const UI_ROLES_ALL = [
   // cutter expenses too, so the display label is just "EXPENSES
   // ENTRY" now (DB enum stays `cnc_expense_entry`).
   { value: "cnc_expense_entry", label: "EXPENSES ENTRY" },
+  // Wall-display kiosk role — lands on the carving floor TV view only.
+  { value: "tv",               label: "TV DISPLAY" },
 ];
 
 // Roles owner/team-head can assign — cannot promote to owner or developer.
@@ -75,6 +77,7 @@ const UI_ROLES_PLANNER = [
   { value: "cutting_operator", label: "CUTTING OPERATOR" },
   { value: "vendor",           label: "CNC OPERATOR" },
   { value: "slab_transfer",    label: "SLAB TRANSFER" },
+  { value: "tv",               label: "TV DISPLAY" },
 ];
 
 // Legacy — kept for roleLabel lookup
@@ -99,6 +102,7 @@ const ROLE_ACCESS: Record<string, string[]> = {
   dispatch:         ["Dashboard"],
   vendor:           ["My Jobs"],
   slab_transfer:    ["Slab Transfer"],
+  tv:               ["Carving Floor (wall)"],
   // Mig 037 — crosscheck verifies pending bills. Mig 061 follow-on
   // (Daksh): also gets read-access to Vendor Account so they can
   // verify a vendor's GSTIN / bank / address while reviewing a bill.

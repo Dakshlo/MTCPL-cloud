@@ -88,6 +88,9 @@ export function getDefaultRouteForRole(role?: AppRole | null) {
       // primary workspace; everything else (issue/return forms,
       // sites, catalog) is a click away from there.
       return "/inventory/scaffolding";
+    case "tv":
+      // Wall-display kiosk — straight to the carving floor TV view.
+      return "/carving/floor?mode=tv";
     case "worker":
       return "/pending";
     default:

@@ -20,6 +20,7 @@ import { LoginLocationProbe } from "@/components/login-location-probe";
 // Mounted once at the (app) layout root so every Sign out button
 // (topbar + sidebar) can trigger the same gold-pulse overlay.
 import { SignOutOverlayHost } from "@/components/sign-out-overlay";
+import { TvKioskSignOut } from "@/components/tv-kiosk-signout";
 // Idle auto-logout for accounts-desk users (handle money) — 10 min of
 // inactivity signs them out, active use keeps the session alive.
 import { IdleLogout } from "@/components/idle-logout";
@@ -73,6 +74,19 @@ const NOTIFICATION_ROLES = ["developer"];
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const { profile } = await requireAuth();
   const displayName = profile.vendor_name || profile.full_name || profile.phone || "MTCPL User";
+
+  // "tv" — wall-display kiosk role. No dashboard, no sidebar, no top bar:
+  // just the page (the carving floor TV view, which is a full-screen overlay)
+  // plus a tiny corner sign-out — the only chrome it needs, since there's no
+  // top bar to log out from.
+  if (profile.role === "tv") {
+    return (
+      <>
+        {children}
+        <TvKioskSignOut />
+      </>
+    );
+  }
 
   // Pathname from middleware (Migration 036). Used to figure out which
   // department the current route belongs to so the maintenance check

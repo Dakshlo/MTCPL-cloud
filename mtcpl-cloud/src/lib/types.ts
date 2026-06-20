@@ -39,6 +39,8 @@ export type AppRole =
   //   owner approve their submissions; the storekeeper cannot
   //   approve their own work (segregation of duties).
   | "storekeeper"
+  // tv — wall-display kiosk role: carving floor TV view only, no chrome.
+  | "tv"
   // Migration 053 — Finance final audit role.
   //
   // final_auditor — after a payment is marked paid, this role
