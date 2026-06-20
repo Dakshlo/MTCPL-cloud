@@ -179,13 +179,7 @@ export function FloorViewClient({
 }) {
   const [mode, setMode] = useState<"grid" | "tv">(initialMode);
   const [rotateSec, setRotateSec] = useState(initialRotateSec);
-  const [tvIndex, setTvIndex] = useState(() => {
-    if (initialVendorId) {
-      const idx = vendors.findIndex((v) => v.id === initialVendorId);
-      if (idx >= 0) return idx;
-    }
-    return 0;
-  });
+  const [tvIndex, setTvIndex] = useState(0);
   const [paused, setPaused] = useState(false);
   const [now, setNow] = useState(Date.now());
   // TV theme — light is the default but the user wanted a toggle so
@@ -217,14 +211,31 @@ export function FloorViewClient({
     return () => clearInterval(t);
   }, [router]);
 
-  // TV auto-rotate. Pauses if user clicks ⏸ or hovers.
+  // Paginate each vendor's machines into pages of up to 10 (5 per row). Vendors
+  // with ≤10 (e.g. Vivek) stay one page; bigger ones (Mohit, 18) split, and the
+  // rotation steps through (vendor, page) slides. Machines are flattened in type
+  // order so a vendor's pages are stable across refreshes.
+  const slides = useMemo(() => {
+    const PAGE_SIZE = 10;
+    const out: Array<{ vendor: FloorVendor; machines: FloorMachine[]; page: number; pageCount: number }> = [];
+    for (const v of vendors) {
+      const flat = groupMachinesByType(v.machines).flatMap((g) => g.machines);
+      const pageCount = Math.max(1, Math.ceil(flat.length / PAGE_SIZE));
+      for (let p = 0; p < pageCount; p++) {
+        out.push({ vendor: v, machines: flat.slice(p * PAGE_SIZE, (p + 1) * PAGE_SIZE), page: p, pageCount });
+      }
+    }
+    return out;
+  }, [vendors]);
+
+  // TV auto-rotate. Pauses if the user clicks ⏸.
   useEffect(() => {
-    if (mode !== "tv" || paused || vendors.length <= 1) return;
+    if (mode !== "tv" || paused || slides.length <= 1) return;
     const t = setInterval(() => {
-      setTvIndex((i) => (i + 1) % vendors.length);
+      setTvIndex((i) => (i + 1) % slides.length);
     }, rotateSec * 1000);
     return () => clearInterval(t);
-  }, [mode, paused, rotateSec, vendors.length]);
+  }, [mode, paused, rotateSec, slides.length]);
 
   // Aggregate fleet totals across all vendors — shown in the grid
   // header and on each TV slide for quick context.
@@ -260,7 +271,8 @@ export function FloorViewClient({
   // reads better on a wall TV under fluorescent lighting (the dark
   // gradient was washing out from a distance).
   if (mode === "tv") {
-    const v = vendors[tvIndex];
+    const s = slides[slides.length ? tvIndex % slides.length : 0];
+    const v = s.vendor;
     const isDark = tvTheme === "dark";
     // NOTE: previously onMouseEnter paused the rotation. For a
     // kiosk display the cursor is always somewhere on screen, so
@@ -299,15 +311,15 @@ export function FloorViewClient({
           setPaused={setPaused}
           tvIndex={tvIndex}
           setTvIndex={setTvIndex}
-          vendors={vendors}
+          slides={slides}
           fleetTotals={fleetTotals}
           tvTheme={tvTheme}
           setTvTheme={setTvTheme}
         />
 
         {/* Scale the whole operator board to fit the screen — no scroll. */}
-        <TvFit dep={`${v.id}:${vendors.length}:${v.machines.length}`}>
-          <VendorTvSlide vendor={v} now={now} slideKey={tvIndex} dark={isDark} />
+        <TvFit dep={`${v.id}:${s.page}:${s.machines.length}:${slides.length}`}>
+          <VendorTvSlide vendor={v} machines={s.machines} page={s.page} pageCount={s.pageCount} now={now} dark={isDark} />
         </TvFit>
       </div>
     );
@@ -399,7 +411,7 @@ function TvHeader({
   setPaused,
   tvIndex,
   setTvIndex,
-  vendors,
+  slides,
   fleetTotals,
   tvTheme,
   setTvTheme,
@@ -412,7 +424,7 @@ function TvHeader({
   setPaused: (b: boolean) => void;
   tvIndex: number;
   setTvIndex: (n: number) => void;
-  vendors: FloorVendor[];
+  slides: Array<{ vendor: FloorVendor; page: number; pageCount: number }>;
   fleetTotals: FloorVendor["totals"];
   tvTheme: "light" | "dark";
   setTvTheme: (t: "light" | "dark") => void;
@@ -506,9 +518,9 @@ function TvHeader({
         )}
         {/* Vendor dots — quick jump */}
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          {vendors.map((v, i) => (
+          {slides.map((s, i) => (
             <button
-              key={v.id}
+              key={`${s.vendor.id}:${s.page}`}
               type="button"
               onClick={() => setTvIndex(i)}
               style={{
@@ -521,7 +533,7 @@ function TvHeader({
                 transition: "background 0.2s",
                 padding: 0,
               }}
-              title={v.name}
+              title={s.pageCount > 1 ? `${s.vendor.name} (${s.page + 1}/${s.pageCount})` : s.vendor.name}
             />
           ))}
         </div>
@@ -1116,18 +1128,19 @@ function fmtAgo(ms: number): string {
 // `slideKey` forces a fresh React mount each rotation so the
 // keyframe animation re-runs on every advance (CSS `animation`
 // only fires once per mount).
-function VendorTvSlide({ vendor, now, slideKey, dark }: { vendor: FloorVendor; now: number; slideKey: number; dark: boolean }) {
-  const grouped = groupMachinesByType(vendor.machines);
+function VendorTvSlide({ vendor, machines, page, pageCount, now, dark }: {
+  vendor: FloorVendor; machines: FloorMachine[]; page: number; pageCount: number; now: number; dark: boolean;
+}) {
   const muted = dark ? "rgba(255,255,255,0.55)" : "#8a7a55";
+  // Up to 10 machines per page → max 5 per row, balanced into ~2 rows.
+  const cols = Math.max(1, Math.ceil(machines.length / Math.ceil(machines.length / 5)));
   return (
     <div
-      key={slideKey}
       style={{
         display: "flex",
         flexDirection: "column",
         gap: 18,
         height: "100%",
-        animation: "tv-slide-in 360ms cubic-bezier(0.22, 1, 0.36, 1)",
       }}
     >
       <style>{`
@@ -1143,6 +1156,11 @@ function VendorTvSlide({ vendor, now, slideKey, dark }: { vendor: FloorVendor; n
         <span style={{ fontSize: 18, color: muted, fontWeight: 600 }}>
           {vendor.totals.total} CNC{vendor.totals.total !== 1 ? "s" : ""}
         </span>
+        {pageCount > 1 && (
+          <span style={{ fontSize: 18, fontWeight: 800, color: dark ? "#c4b5fd" : "#7c3aed", marginLeft: 4 }}>
+            · page {page + 1} / {pageCount}
+          </span>
+        )}
       </div>
       {/* Full-width stat strip — tiles stretch so the numbers read from across
           the floor. "Today" swapped for "Approval pending" (Daksh). */}
@@ -1154,48 +1172,25 @@ function VendorTvSlide({ vendor, now, slideKey, dark }: { vendor: FloorVendor; n
         <TvBigStat label="Approval pending" value={vendor.totals.approvalPending} fg={dark ? "#c4b5fd" : "#7c3aed"} dark={dark} />
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 14 }}>
-        {grouped.map((g) => {
-          // Fill the screen width: choose a column count whose grid shape
-          // roughly matches the wide viewport, so TvFit barely letterboxes and
-          // the cards stretch (1fr) into the left/right space instead of
-          // centering with empty margins.
-          const cols = Math.min(g.machines.length, Math.max(1, Math.round(Math.sqrt(g.machines.length) * 1.35)));
-          const rows = Math.ceil(g.machines.length / cols);
-          return (
-          <div key={g.type} style={{ flex: `${rows} 0 auto`, minHeight: 0, display: "flex", flexDirection: "column", gap: 8 }}>
-            {grouped.length > 1 && (
-              <div
-                style={{
-                  fontSize: 12,
-                  fontWeight: 800,
-                  color: muted,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.1em",
-                }}
-              >
-                {g.label} ({g.machines.length})
-              </div>
-            )}
-            <div
-              style={{
-                flex: 1,
-                minHeight: 0,
-                display: "grid",
-                gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
-                gridAutoRows: "minmax(min-content, 1fr)",
-                gap: 16,
-              }}
-            >
-              {g.machines.map((m) => (
-                <TvMachineTile key={m.id} machine={m} now={now} dark={dark} />
-              ))}
-            </div>
-          </div>
-          );
-        })}
+      {/* Machine grid — keyed by vendor+page so ONLY this section re-mounts and
+          slides on a page change; the header above stays put (same-vendor
+          paging reads as the same vendor). */}
+      <div
+        key={`${vendor.id}:${page}`}
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: "grid",
+          gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+          gridAutoRows: "minmax(min-content, 1fr)",
+          gap: 16,
+          animation: "tv-slide-in 360ms cubic-bezier(0.22, 1, 0.36, 1)",
+        }}
+      >
+        {machines.map((m) => (
+          <TvMachineTile key={m.id} machine={m} now={now} dark={dark} />
+        ))}
       </div>
-
     </div>
   );
 }
@@ -1363,7 +1358,7 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
         padding: 18,
         background: cardBg,
         border: `2px solid ${cardBorder}`,
-        borderRadius: isLathe ? 40 : 14,
+        borderRadius: 14,
         display: "flex",
         flexDirection: "column",
         gap: 10,
