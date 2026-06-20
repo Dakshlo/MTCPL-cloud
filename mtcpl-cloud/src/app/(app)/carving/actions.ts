@@ -5054,17 +5054,16 @@ export async function acknowledgeReceiptAction(formData: FormData) {
 // developer can also claim (and can unclaim someone else's grab if
 // they need to redirect — useful when a runner goes off shift).
 /**
- * Mig 144 — resolve a truck name from the claim form to a trucks.id,
- * creating the truck if it's a brand-new name (pick-or-create). Case-
- * insensitive find so "MH-04-1234" / "mh-04-1234" reuse one row.
- * Returns null when no name was supplied (truck is optional server-side;
- * the claim UI requires it). Non-fatal: a failure resolves to null so a
- * claim is never blocked by truck bookkeeping.
+ * Mig 144 (Jun 2026, choose-only) — resolve a truck name from the form to
+ * a trucks.id. Trucks are managed in Settings now, so this only FINDS an
+ * existing one (case-insensitive); it NEVER creates a truck. An
+ * unrecognised name resolves to null (claim_truck_id stays empty) — the
+ * pickers only offer existing trucks, so this is just a safety net.
  */
 async function resolveTruckByName(
   admin: ReturnType<typeof createAdminSupabaseClient>,
   name: string,
-  userId: string,
+  _userId: string,
 ): Promise<string | null> {
   const clean = (name ?? "").trim();
   if (!clean) return null;
@@ -5074,13 +5073,7 @@ async function resolveTruckByName(
       .select("id")
       .ilike("name", clean)
       .maybeSingle();
-    if (existing) return (existing as { id: string }).id;
-    const { data: created } = await admin
-      .from("trucks")
-      .insert({ name: clean, created_by: userId })
-      .select("id")
-      .maybeSingle();
-    return created ? (created as { id: string }).id : null;
+    return existing ? (existing as { id: string }).id : null;
   } catch (e) {
     console.warn("[resolveTruckByName] non-fatal", e);
     return null;

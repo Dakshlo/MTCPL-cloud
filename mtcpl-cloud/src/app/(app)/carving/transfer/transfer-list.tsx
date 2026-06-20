@@ -2170,12 +2170,12 @@ function TruckCombobox({
     () => (q ? all.filter((t) => t.name.toLowerCase().includes(q)) : all),
     [all, q],
   );
-  const exactMatch = all.some((t) => t.name.toLowerCase() === q);
-  const showCreate = q.length > 0 && !exactMatch;
-  const rows: Array<{ kind: "opt" | "new"; name: string; busy: boolean }> = [
-    ...filtered.map((t) => ({ kind: "opt" as const, name: t.name, busy: t.busy })),
-    ...(showCreate ? [{ kind: "new" as const, name: value.trim(), busy: false }] : []),
-  ];
+  // Choose-only (Jun 2026): trucks are managed in Settings, so there's no
+  // "create new" row — the runner can only pick an existing truck.
+  const rows: Array<{ name: string; busy: boolean }> = filtered.map((t) => ({
+    name: t.name,
+    busy: t.busy,
+  }));
 
   useEffect(() => {
     if (!open) return;
@@ -2190,7 +2190,7 @@ function TruckCombobox({
     setActive((a) => Math.min(Math.max(a, 0), Math.max(rows.length - 1, 0)));
   }, [rows.length]);
 
-  function choose(row: { kind: "opt" | "new"; name: string; busy: boolean }) {
+  function choose(row: { name: string; busy: boolean }) {
     if (row.busy) return; // can't load onto a truck already out on a run
     onChange(row.name);
     setOpen(false);
@@ -2225,7 +2225,7 @@ function TruckCombobox({
             }
           }}
           autoComplete="off"
-          placeholder="Pick a truck or type a new name…"
+          placeholder="Pick a truck…"
           style={{
             width: "100%",
             padding: "10px 36px 10px 12px",
@@ -2262,7 +2262,7 @@ function TruckCombobox({
         </button>
       </div>
 
-      {open && rows.length > 0 && (
+      {open && (
         <div
           role="listbox"
           style={{
@@ -2280,65 +2280,59 @@ function TruckCombobox({
             padding: 4,
           }}
         >
-          {rows.map((row, i) => {
-            const isActive = i === active;
-            const isNew = row.kind === "new";
-            const disabled = row.busy;
-            return (
-              <div
-                key={`${row.kind}:${row.name}`}
-                role="option"
-                aria-selected={isActive}
-                aria-disabled={disabled}
-                onMouseEnter={() => setActive(i)}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  choose(row);
-                }}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  padding: "9px 10px",
-                  borderRadius: 6,
-                  cursor: disabled ? "not-allowed" : "pointer",
-                  fontSize: 14,
-                  color: disabled ? "var(--muted)" : "var(--text)",
-                  opacity: disabled ? 0.6 : 1,
-                  background:
-                    isActive && !disabled ? "var(--gold-soft, rgba(232,197,114,0.18))" : "transparent",
-                }}
-              >
-                {isNew ? (
-                  <>
-                    <span style={{ fontSize: 13 }}>＋</span>
-                    <span>
-                      Use new: <strong style={{ color: "var(--gold-dark)" }}>{row.name}</strong>
+          {rows.length === 0 ? (
+            <div style={{ padding: "10px 12px", fontSize: 13, color: "var(--muted)" }}>
+              No trucks yet — add one in Settings → Transfer trucks.
+            </div>
+          ) : (
+            rows.map((row, i) => {
+              const isActive = i === active;
+              const disabled = row.busy;
+              return (
+                <div
+                  key={row.name}
+                  role="option"
+                  aria-selected={isActive}
+                  aria-disabled={disabled}
+                  onMouseEnter={() => setActive(i)}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    choose(row);
+                  }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    padding: "9px 10px",
+                    borderRadius: 6,
+                    cursor: disabled ? "not-allowed" : "pointer",
+                    fontSize: 14,
+                    color: disabled ? "var(--muted)" : "var(--text)",
+                    opacity: disabled ? 0.6 : 1,
+                    background:
+                      isActive && !disabled ? "var(--gold-soft, rgba(232,197,114,0.18))" : "transparent",
+                  }}
+                >
+                  <span style={{ fontSize: 13, opacity: 0.7 }}>🚚</span>
+                  <span style={{ flex: 1 }}>{row.name}</span>
+                  {row.busy && (
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        color: "#b45309",
+                        background: "rgba(180,115,51,0.12)",
+                        padding: "2px 6px",
+                        borderRadius: 999,
+                      }}
+                    >
+                      busy
                     </span>
-                  </>
-                ) : (
-                  <>
-                    <span style={{ fontSize: 13, opacity: 0.7 }}>🚚</span>
-                    <span style={{ flex: 1 }}>{row.name}</span>
-                    {row.busy && (
-                      <span
-                        style={{
-                          fontSize: 10,
-                          fontWeight: 700,
-                          color: "#b45309",
-                          background: "rgba(180,115,51,0.12)",
-                          padding: "2px 6px",
-                          borderRadius: 999,
-                        }}
-                      >
-                        busy
-                      </span>
-                    )}
-                  </>
-                )}
-              </div>
-            );
-          })}
+                  )}
+                </div>
+              );
+            })
+          )}
         </div>
       )}
     </div>
