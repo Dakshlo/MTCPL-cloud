@@ -1,7 +1,7 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { getAuthContext } from "@/lib/auth";
+import { PendingSignOutButton } from "./pending-signout-button";
 
 export default async function PendingAccessPage() {
   const { user, profile } = await getAuthContext();
@@ -37,9 +37,7 @@ export default async function PendingAccessPage() {
           </p>
         </div>
         <div className="landing-actions" style={{ marginTop: 24 }}>
-          <Link className="secondary-button" href="/login">
-            Back to login
-          </Link>
+          <PendingSignOutButton />
         </div>
       </section>
     </main>
