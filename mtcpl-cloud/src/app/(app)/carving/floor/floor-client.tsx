@@ -438,6 +438,31 @@ function TvHeader({
         >
           ⚙
         </button>
+        <button
+          type="button"
+          onClick={() => {
+            if (typeof document === "undefined") return;
+            if (document.fullscreenElement) document.exitFullscreen?.();
+            else document.documentElement.requestFullscreen?.();
+          }}
+          style={{
+            background: ctrlBg,
+            color: ctrlFg,
+            border: `1px solid ${ctrlBorder}`,
+            width: 32,
+            height: 32,
+            fontSize: 15,
+            borderRadius: 6,
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+          title="Full screen — hide the browser bars"
+          aria-label="Toggle full screen"
+        >
+          ⛶
+        </button>
         {paused && (
           <span
             style={{
@@ -1102,7 +1127,13 @@ function VendorTvSlide({ vendor, now, slideKey, dark }: { vendor: FloorVendor; n
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-        {grouped.map((g) => (
+        {grouped.map((g) => {
+          // Fill the screen width: choose a column count whose grid shape
+          // roughly matches the wide viewport, so TvFit barely letterboxes and
+          // the cards stretch (1fr) into the left/right space instead of
+          // centering with empty margins.
+          const cols = Math.min(g.machines.length, Math.max(1, Math.round(Math.sqrt(g.machines.length) * 1.5)));
+          return (
           <div key={g.type} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {grouped.length > 1 && (
               <div
@@ -1120,7 +1151,7 @@ function VendorTvSlide({ vendor, now, slideKey, dark }: { vendor: FloorVendor; n
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+                gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
                 gap: 16,
               }}
             >
@@ -1129,7 +1160,8 @@ function VendorTvSlide({ vendor, now, slideKey, dark }: { vendor: FloorVendor; n
               ))}
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
 
     </div>
