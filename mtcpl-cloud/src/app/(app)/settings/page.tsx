@@ -1,6 +1,6 @@
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { addTempleAction, updateTempleAction, deleteTempleAction, updateUserAction, deleteUserAction, updateOwnNameAction, addStoneTypeAction, deleteStoneTypeAction, setStoneCategoryAction, setBulkImportPasswordAction } from "./actions";
+import { addTempleAction, updateTempleAction, deleteTempleAction, updateUserAction, deleteUserAction, updateOwnNameAction, addStoneTypeAction, deleteStoneTypeAction, setStoneCategoryAction, setBulkImportPasswordAction, addTransferTruckAction, setTransferTruckActiveAction } from "./actions";
 import {
   takeSystemDownAction,
   bringSystemUpAction,
@@ -381,6 +381,18 @@ export default async function SettingsPage() {
 
   const templeList = temples ?? [];
 
+  // Mig 144 — transfer fleet (owner/developer manage). Safe if the
+  // table doesn't exist yet (returns null → empty list).
+  const canManageTrucks = currentUser.role === "developer" || currentUser.role === "owner";
+  let truckList: Array<{ id: string; name: string; is_active: boolean }> = [];
+  if (canManageTrucks) {
+    const { data: trucks } = await admin
+      .from("trucks")
+      .select("id, name, is_active")
+      .order("name");
+    truckList = (trucks ?? []) as Array<{ id: string; name: string; is_active: boolean }>;
+  }
+
   return (
     <>
       <div className="page-header">
@@ -436,6 +448,75 @@ export default async function SettingsPage() {
       {canManageVendorCc && vendorCc && (
         <PeekSection icon="📩" title="Vendor message carbon-copy" subtitle={vendorCc.enabled ? `ON · copies to +91 ${vendorCc.number}` : "OFF — no copies sent"} modalMaxWidth={520}>
           <WaVendorCcEditor initial={vendorCc} recentPaid={recentPaidForTest} />
+        </PeekSection>
+      )}
+
+      {/* Transfer trucks (Mig 144) — owner/developer fleet management.
+          Add trucks by number plate; the slab-transfer runner picks one
+          when claiming. Deactivating hides a truck from the picker
+          without deleting its history. */}
+      {canManageTrucks && (
+        <PeekSection
+          icon="🚚"
+          title="Transfer trucks"
+          subtitle={`${truckList.filter((t) => t.is_active).length} active · slab-transfer fleet`}
+          modalMaxWidth={560}
+        >
+          <div className="settings-card">
+            <h3 className="settings-card-title">Add truck</h3>
+            <form action={addTransferTruckAction}>
+              <div className="settings-form-row" style={{ alignItems: "flex-end" }}>
+                <label className="stack" style={{ flex: 1 }}>
+                  <span>Truck number / plate</span>
+                  <input
+                    name="name"
+                    placeholder="e.g. MH-04-AB-1234"
+                    required
+                    style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, textTransform: "uppercase" }}
+                  />
+                </label>
+                <button type="submit" className="primary-button" style={{ minHeight: 40 }}>
+                  Add truck
+                </button>
+              </div>
+            </form>
+            {truckList.length > 0 && (
+              <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 6 }}>
+                {truckList.map((t) => (
+                  <div
+                    key={t.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      padding: "8px 10px",
+                      border: "1px solid var(--border)",
+                      borderRadius: 8,
+                      background: t.is_active ? "var(--surface)" : "var(--surface-alt)",
+                      opacity: t.is_active ? 1 : 0.6,
+                    }}
+                  >
+                    <span style={{ fontSize: 16 }}>🚚</span>
+                    <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 14 }}>
+                      {t.name}
+                    </code>
+                    {!t.is_active && (
+                      <span style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)", background: "var(--bg)", borderRadius: 999, padding: "2px 8px" }}>
+                        inactive
+                      </span>
+                    )}
+                    <form action={setTransferTruckActiveAction} style={{ marginLeft: "auto" }}>
+                      <input type="hidden" name="id" value={t.id} />
+                      <input type="hidden" name="active" value={t.is_active ? "0" : "1"} />
+                      <button type="submit" className="ghost-button" style={{ fontSize: 12, padding: "6px 12px" }}>
+                        {t.is_active ? "Deactivate" : "Activate"}
+                      </button>
+                    </form>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </PeekSection>
       )}
 

@@ -156,6 +156,9 @@ export function TransferDispatchList({
   const [activeTab, setActiveTab] = useState<"carving" | "dispatch">(initialTab);
   // Selected ids for the Carving→Dispatch "bring in" batch.
   const [dispatchSelected, setDispatchSelected] = useState<Set<string>>(new Set());
+  // Mig 144 — truck for the carving→dispatch run. Shares the same fleet
+  // (and busy state) as the cutting→carving claim picker.
+  const [dispatchTruckName, setDispatchTruckName] = useState("");
   const [toastMsg, setToastMsg] = useState<string | null>(toast);
   // Mig 065 — multi-select state for batch claim. Clearing rules:
   //   • Initial render → empty Set
@@ -881,6 +884,9 @@ export function TransferDispatchList({
           selected={dispatchSelected}
           setSelected={setDispatchSelected}
           stoneTypes={stoneTypes}
+          trucks={trucks}
+          truckName={dispatchTruckName}
+          setTruckName={setDispatchTruckName}
           onNeedToast={setToastMsg}
         />
       )}
@@ -897,12 +903,18 @@ function DispatchTransferTab({
   selected,
   setSelected,
   stoneTypes,
+  trucks,
+  truckName,
+  setTruckName,
   onNeedToast,
 }: {
   rows: DispatchTransferRow[];
   selected: Set<string>;
   setSelected: React.Dispatch<React.SetStateAction<Set<string>>>;
   stoneTypes: StoneTypeDef[];
+  trucks: TruckOption[];
+  truckName: string;
+  setTruckName: (v: string) => void;
   onNeedToast: (m: string) => void;
 }) {
   const byStation = new Map<string, DispatchTransferRow[]>();
@@ -934,6 +946,31 @@ function DispatchTransferTab({
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {/* Mig 144 — truck picker for the dispatch run. Shares the same
+              fleet + busy state as the cutting→carving claim, so a truck
+              out on a carving claim shows busy here too. */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              padding: "10px 14px",
+              background: "var(--surface-alt)",
+              border: `1.5px solid ${truckName.trim() ? "#1d4ed8" : "var(--border)"}`,
+              borderRadius: 10,
+              flexWrap: "wrap",
+            }}
+          >
+            <span style={{ fontSize: 14, fontWeight: 800, color: truckName.trim() ? "#1d4ed8" : "#b45309" }}>
+              🚚 Truck
+            </span>
+            <div style={{ flex: "1 1 220px", minWidth: 180 }}>
+              <TruckCombobox value={truckName} onChange={setTruckName} trucks={trucks} />
+            </div>
+            <span style={{ fontSize: 12, color: "var(--muted)" }}>
+              {truckName.trim() ? "Carries this dispatch run." : "Pick or add the truck before bringing in."}
+            </span>
+          </div>
           {/* Bring-in action bar */}
           <div
             style={{
@@ -970,6 +1007,11 @@ function DispatchTransferTab({
               <form
                 action={bringInToDispatchBatchAction}
                 onSubmit={(e) => {
+                  if (!truckName.trim()) {
+                    e.preventDefault();
+                    onNeedToast("Pick or add the truck first.");
+                    return;
+                  }
                   if (selected.size === 0) {
                     e.preventDefault();
                     onNeedToast("Select at least one slab.");
@@ -980,17 +1022,19 @@ function DispatchTransferTab({
               >
                 <input type="hidden" name="carving_item_ids" value={JSON.stringify([...selected])} />
                 <input type="hidden" name="redirect_to" value="/carving/transfer?tab=dispatch" />
+                <input type="hidden" name="truck_name" value={truckName.trim()} />
                 <button
                   type="submit"
                   className="primary-button"
-                  disabled={selected.size === 0}
+                  disabled={selected.size === 0 || !truckName.trim()}
+                  title={!truckName.trim() ? "Pick or add the truck first" : undefined}
                   style={{
                     fontSize: 14,
                     padding: "10px 20px",
                     fontWeight: 700,
                     minHeight: 44,
-                    opacity: selected.size === 0 ? 0.5 : 1,
-                    cursor: selected.size === 0 ? "not-allowed" : "pointer",
+                    opacity: selected.size === 0 || !truckName.trim() ? 0.5 : 1,
+                    cursor: selected.size === 0 || !truckName.trim() ? "not-allowed" : "pointer",
                   }}
                 >
                   🚚 Bring {selected.size > 0 ? `${selected.size} ` : ""}in to dispatch

@@ -5552,9 +5552,15 @@ export async function bringInToDispatchAction(formData: FormData) {
   }
 
   const now = new Date().toISOString();
+  // Mig 144 — record which truck moved it to dispatch (pick-or-create).
+  const claimTruckId = await resolveTruckByName(admin, txt(formData, "truck_name"), profile.id);
   await admin
     .from("carving_items")
-    .update({ received_at_dispatch_at: now, received_at_dispatch_by: profile.id })
+    .update({
+      received_at_dispatch_at: now,
+      received_at_dispatch_by: profile.id,
+      ...(claimTruckId ? { claim_truck_id: claimTruckId } : {}),
+    })
     .eq("id", carvingItemId)
     .is("received_at_dispatch_at", null);
 
@@ -5607,9 +5613,15 @@ export async function bringInToDispatchBatchAction(formData: FormData) {
   }
 
   const now = new Date().toISOString();
+  // Mig 144 — record which truck moved the load to dispatch.
+  const claimTruckId = await resolveTruckByName(admin, txt(formData, "truck_name"), profile.id);
   await admin
     .from("carving_items")
-    .update({ received_at_dispatch_at: now, received_at_dispatch_by: profile.id })
+    .update({
+      received_at_dispatch_at: now,
+      received_at_dispatch_by: profile.id,
+      ...(claimTruckId ? { claim_truck_id: claimTruckId } : {}),
+    })
     .in("id", eligible)
     .is("received_at_dispatch_at", null);
 

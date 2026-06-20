@@ -195,6 +195,49 @@ export async function addTempleAction(formData: FormData) {
   redirect("/settings?toast=Temple+added");
 }
 
+// ── Transfer trucks (Mig 144) — managed fleet for slab transfers ───
+// Owner/developer add trucks here (by number plate); the slab-transfer
+// runner picks one when claiming. `name` IS the plate.
+
+export async function addTransferTruckAction(formData: FormData) {
+  const { profile } = await requireAuth(["owner", "developer"]);
+  const admin = createAdminSupabaseClient();
+
+  const name = text(formData, "name").trim();
+  if (!name) redirect("/settings?toast=Truck+number+required");
+
+  // Case-insensitive dedupe (the unique index is on lower(name)).
+  const { data: existing } = await admin
+    .from("trucks")
+    .select("id")
+    .ilike("name", name)
+    .maybeSingle();
+  if (existing) redirect(`/settings?toast=${encodeURIComponent(`Truck "${name}" already exists`)}`);
+
+  const { error } = await admin.from("trucks").insert({ name, created_by: profile.id });
+  if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
+
+  revalidatePath("/settings");
+  revalidatePath("/carving/transfer");
+  redirect(`/settings?toast=${encodeURIComponent(`🚚 Truck "${name}" added`)}`);
+}
+
+export async function setTransferTruckActiveAction(formData: FormData) {
+  await requireAuth(["owner", "developer"]);
+  const admin = createAdminSupabaseClient();
+
+  const id = text(formData, "id");
+  const active = text(formData, "active") === "1";
+  if (!id) redirect("/settings?toast=Truck+id+required");
+
+  const { error } = await admin.from("trucks").update({ is_active: active }).eq("id", id);
+  if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
+
+  revalidatePath("/settings");
+  revalidatePath("/carving/transfer");
+  redirect(`/settings?toast=${encodeURIComponent(active ? "Truck activated" : "Truck deactivated")}`);
+}
+
 export async function updateTempleAction(formData: FormData) {
   await requireAuth(["owner", "team_head", "senior_incharge", "developer"]);
   const admin = createAdminSupabaseClient();
