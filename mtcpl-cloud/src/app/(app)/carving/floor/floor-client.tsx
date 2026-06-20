@@ -70,6 +70,8 @@ export type FloorMachine = {
   operator_name: string | null;
   status: "idle" | "carving" | "maintenance" | "inactive";
   machine_type: "single_head" | "multi_head_2" | "lathe";
+  /** Mig 079 — hardware axis count (3/4/5). NULL on lathes. */
+  cnc_axes: number | null;
   maintenance_reason: string | null;
   maintenance_flagged_at: string | null;
   // A machine can run more than one slab at once (multi_head_2 carves two),
@@ -149,6 +151,16 @@ const STATUS_TINT: Record<FloorMachine["status"], { bg: string; border: string; 
   maintenance: { bg: "rgba(220,38,38,0.06)", border: "rgba(220,38,38,0.5)", fg: "#b91c1c", accent: "#dc2626", label: "DOWN" },
   inactive: { bg: "var(--surface-alt)", border: "var(--border)", fg: "var(--muted)", accent: "var(--muted)", label: "OFFLINE" },
 };
+
+// "Pending slab programming" is a maintenance sub-state, but NOT a breakdown —
+// the machine is fine, just waiting for the CNC program file. It renders in a
+// calm INDIGO (not alarming red), mirroring the vendor cockpit's PROG_TINT.
+// Detected by maintenance_reason starting with this value.
+const PROG_PENDING_REASON = "pending_program";
+const PROG_TINT = { bg: "rgba(79,70,229,0.08)", border: "rgba(79,70,229,0.55)", fg: "#4338ca", accent: "#4f46e5", label: "NO PROGRAM" };
+function isProgPending(m: FloorMachine): boolean {
+  return m.status === "maintenance" && (m.maintenance_reason ?? "").startsWith(PROG_PENDING_REASON);
+}
 
 // ── Main client component ─────────────────────────────────────────
 
@@ -1176,7 +1188,7 @@ function VendorTvSlide({ vendor, now, slideKey, dark }: { vendor: FloorVendor; n
 // ── Machine tiles ──────────────────────────────────────────────────
 
 function CompactMachineTile({ machine, now }: { machine: FloorMachine; now: number }) {
-  const tint = STATUS_TINT[machine.status];
+  const tint = isProgPending(machine) ? PROG_TINT : STATUS_TINT[machine.status];
   // Lathe machines render with a heavily rounded pill shape on the
   // floor view too, matching the rest of the cockpit surfaces. Easy
   // to pick out the turning machines from the panel CNCs at a glance.
@@ -1290,18 +1302,19 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
   // stays soft + low-key (light surface). Both modes (dark TV /
   // light grid) recoloured in lockstep so the wall display matches
   // the in-app cockpit.
+  const prog = isProgPending(machine); // maintenance waiting on a CNC program
   const cardBg = dark
     ? machine.status === "carving"
       ? "rgba(22,163,74,0.18)"
       : machine.status === "maintenance"
-        ? "rgba(220,38,38,0.18)"
+        ? (prog ? "rgba(79,70,229,0.18)" : "rgba(220,38,38,0.18)")
         : machine.status === "idle"
           ? "rgba(56,189,248,0.10)"
           : "rgba(255,255,255,0.05)"
     : machine.status === "carving"
       ? "linear-gradient(180deg, #f0fdf4 0%, #dcfce7 100%)"
       : machine.status === "maintenance"
-        ? "linear-gradient(180deg, #fef2f2 0%, #fee2e2 100%)"
+        ? (prog ? "linear-gradient(180deg, #eef2ff 0%, #e0e7ff 100%)" : "linear-gradient(180deg, #fef2f2 0%, #fee2e2 100%)")
         : machine.status === "idle"
           ? "#fff"
           : "#f5f5f0";
@@ -1309,7 +1322,7 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
     machine.status === "carving"
       ? "#16a34a"
       : machine.status === "maintenance"
-        ? "#dc2626"
+        ? (prog ? "#4f46e5" : "#dc2626")
         : machine.status === "idle"
           ? (dark ? "rgba(255,255,255,0.18)" : "#cbd5e1")
           : (dark ? "rgba(255,255,255,0.1)" : "#e5e7eb");
@@ -1317,11 +1330,11 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
     machine.status === "carving"
       ? "#16a34a"
       : machine.status === "maintenance"
-        ? "#dc2626"
+        ? (prog ? "#4f46e5" : "#dc2626")
         : machine.status === "idle"
           ? "#38bdf8"
           : "#9ca3af";
-  const label = STATUS_TINT[machine.status].label;
+  const label = prog ? "NO PROGRAM" : STATUS_TINT[machine.status].label;
   const codeColor = dark ? "#fff" : "#1a1a1a";
   const subColor = dark ? "rgba(255,255,255,0.7)" : "#666";
   const sub2Color = dark ? "rgba(255,255,255,0.5)" : "#666";
@@ -1372,22 +1385,41 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
           {label}
         </span>
       </div>
-      {machine.machine_type !== "single_head" && (
-        <span
-          style={{
-            fontSize: 11,
-            fontWeight: 800,
-            padding: "3px 9px",
-            borderRadius: 4,
-            background: machine.machine_type === "lathe" ? "rgba(124,58,237,0.12)" : "rgba(180,115,51,0.15)",
-            color: machine.machine_type === "lathe" ? (dark ? "#c4b5fd" : "#7c3aed") : (dark ? "#fbbf24" : "#b45309"),
-            letterSpacing: "0.08em",
-            alignSelf: "flex-start",
-            fontFamily: "ui-monospace, monospace",
-          }}
-        >
-          {machine.machine_type === "multi_head_2" ? "2× HEAD" : "LATHE"}
-        </span>
+      {(machine.machine_type !== "single_head" || machine.cnc_axes != null) && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+          {machine.machine_type !== "single_head" && (
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 800,
+                padding: "3px 9px",
+                borderRadius: 4,
+                background: machine.machine_type === "lathe" ? "rgba(124,58,237,0.12)" : "rgba(180,115,51,0.15)",
+                color: machine.machine_type === "lathe" ? (dark ? "#c4b5fd" : "#7c3aed") : (dark ? "#fbbf24" : "#b45309"),
+                letterSpacing: "0.08em",
+                fontFamily: "ui-monospace, monospace",
+              }}
+            >
+              {machine.machine_type === "multi_head_2" ? "2× HEAD" : "LATHE"}
+            </span>
+          )}
+          {machine.cnc_axes != null && (
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 800,
+                padding: "3px 9px",
+                borderRadius: 4,
+                background: dark ? "rgba(99,102,241,0.20)" : "rgba(99,102,241,0.12)",
+                color: dark ? "#c7d2fe" : "#4338ca",
+                letterSpacing: "0.08em",
+                fontFamily: "ui-monospace, monospace",
+              }}
+            >
+              {machine.cnc_axes} AXIS
+            </span>
+          )}
+        </div>
       )}
       {machine.operator_name && (
         <div style={{ fontSize: 13, color: subColor }}>
@@ -1458,13 +1490,13 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
           {machine.maintenance_flagged_at && (() => {
             const downMin = (now - new Date(machine.maintenance_flagged_at).getTime()) / 60000;
             return (
-              <div style={{ fontSize: 16, fontWeight: 800, color: dark ? "#fca5a5" : "#b91c1c", fontFamily: "ui-monospace, monospace" }}>
-                ⏱ down for {fmtDuration(downMin)}
+              <div style={{ fontSize: 16, fontWeight: 800, color: prog ? (dark ? "#c7d2fe" : "#4338ca") : (dark ? "#fca5a5" : "#b91c1c"), fontFamily: "ui-monospace, monospace" }}>
+                {prog ? "⏱ waiting " : "⏱ down for "}{fmtDuration(downMin)}
               </div>
             );
           })()}
-          <div style={{ fontSize: 13, color: sub2Color, marginTop: 4 }}>
-            {machine.maintenance_reason ?? "—"}
+          <div style={{ fontSize: 13, color: prog ? (dark ? "#c7d2fe" : "#4338ca") : sub2Color, marginTop: 4, fontWeight: prog ? 700 : 400 }}>
+            {prog ? "🗂 No programming file" : (machine.maintenance_reason ?? "—")}
           </div>
         </div>
       )}

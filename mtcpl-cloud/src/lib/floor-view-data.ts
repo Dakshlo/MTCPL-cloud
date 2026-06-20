@@ -36,7 +36,7 @@ export async function buildFloorViewData(): Promise<FloorVendor[]> {
     admin
       .from("cnc_machines")
       .select(
-        "id, vendor_id, machine_code, operator_name, is_active, status, current_carving_item_id, maintenance_reason, maintenance_flagged_at, machine_type",
+        "id, vendor_id, machine_code, operator_name, is_active, status, current_carving_item_id, maintenance_reason, maintenance_flagged_at, machine_type, cnc_axes",
       )
       .eq("is_active", true)
       .order("machine_code"),
@@ -106,7 +106,7 @@ export async function buildFloorViewData(): Promise<FloorVendor[]> {
       operator_name: string | null; status: string;
       current_carving_item_id: string | null;
       maintenance_reason: string | null; maintenance_flagged_at: string | null;
-      machine_type: string | null;
+      machine_type: string | null; cnc_axes: number | null;
     }>).filter((m) => m.vendor_id === v.id);
 
     const vJobs = ((jobs ?? []) as Array<{
@@ -166,6 +166,7 @@ export async function buildFloorViewData(): Promise<FloorVendor[]> {
           ? mt
           : "single_head") as FloorMachine["machine_type"],
         maintenance_reason: m.maintenance_reason,
+        cnc_axes: m.cnc_axes ?? null,
         maintenance_flagged_at: m.maintenance_flagged_at,
         current_jobs: activeByMachine.get(m.id) ?? [],
       };
