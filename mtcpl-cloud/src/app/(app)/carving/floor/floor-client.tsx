@@ -20,6 +20,14 @@ const TV_DARK_VARS = {
   "--text": "#E8E2D6", "--muted": "#A89A84", "--muted-light": "#7A705C",
 } as const;
 
+// Auto theme by the wall TV's local clock (IST on the floor): DARK from
+// 7 PM to 9 AM, LIGHT from 9 AM to 7 PM. Client-only — never called during
+// SSR (which would use the server's UTC clock and mismatch).
+function themeForNow(): "light" | "dark" {
+  const h = new Date().getHours();
+  return h >= 19 || h < 9 ? "dark" : "light";
+}
+
 // Scale-to-fit wrapper — shrinks its child uniformly so the whole
 // operator board fits the viewport with NO scroll. transform doesn't
 // reflow layout, so measuring scrollWidth/Height stays stable (no loop).
@@ -182,18 +190,27 @@ export function FloorViewClient({
   const [tvIndex, setTvIndex] = useState(0);
   const [paused, setPaused] = useState(false);
   const [now, setNow] = useState(Date.now());
-  // TV theme — light is the default but the user wanted a toggle so
-  // the wall TV can adapt to ambient light. Persists in localStorage
-  // so the choice survives a Vercel redeploy / browser restart.
-  const [tvTheme, setTvTheme] = useState<"light" | "dark">(() => {
-    if (typeof window === "undefined") return "light";
-    return (localStorage.getItem("mtcpl_tv_theme") as "light" | "dark") || "light";
-  });
+  // TV theme auto-follows the clock: DARK from 7 PM to 9 AM (night shift,
+  // easier on the eyes in a dim shed) and LIGHT from 9 AM to 7 PM (reads
+  // better under daylight). Start "light" so SSR + first client render
+  // match (no hydration flash); an on-mount effect snaps to the real
+  // clock theme, then re-checks each minute and only re-applies at the
+  // 7 PM / 9 AM boundaries — so the manual toggle holds in between.
+  const [tvTheme, setTvTheme] = useState<"light" | "dark">("light");
+  const lastAutoThemeRef = useRef<"light" | "dark">("light");
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      localStorage.setItem("mtcpl_tv_theme", tvTheme);
-    }
-  }, [tvTheme]);
+    const auto = themeForNow();
+    lastAutoThemeRef.current = auto;
+    setTvTheme(auto);
+    const t = setInterval(() => {
+      const next = themeForNow();
+      if (next !== lastAutoThemeRef.current) {
+        lastAutoThemeRef.current = next;
+        setTvTheme(next);
+      }
+    }, 60_000);
+    return () => clearInterval(t);
+  }, []);
 
   // 30s tick — keeps "Xh Ym remaining" + "Xh Ym down" timers fresh.
   useEffect(() => {
