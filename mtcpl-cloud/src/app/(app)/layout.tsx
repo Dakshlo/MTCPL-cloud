@@ -417,8 +417,14 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     fetchSlabImportBadge(),
   ]);
 
+  // Storekeeper (slab_transfer) — hide the menu by default and serve a
+  // focused, full-width page; the hamburger drawer opens it to switch
+  // pages. (See `.app-shell.storekeeper-drawer` in globals.css.)
+  const storekeeperDrawer =
+    profile.role === "slab_transfer" || profile.role === "storekeeper";
+
   return (
-    <div className="app-shell">
+    <div className={`app-shell${storekeeperDrawer ? " storekeeper-drawer" : ""}`}>
       {/* Daksh May 2026 — rotate-to-landscape prompt. CSS-only;
           renders nothing on desktop or in landscape orientation.
           On a phone in portrait, the .rotate-prompt CSS media

@@ -1628,6 +1628,59 @@ details.block-card[open] {
   }
 }
 
+/* ── Storekeeper drawer (slab_transfer) ─────────────────────────
+ * The floor storekeeper gets a focused, full-width Slab Transfer page:
+ * the menu is hidden by default at EVERY width and only the hamburger
+ * drawer opens it (to switch pages). Mirrors the ≤900px mobile drawer
+ * but with no width gate. Applied via `.app-shell.storekeeper-drawer`
+ * set in (app)/layout.tsx for the role. */
+.app-shell.storekeeper-drawer {
+  grid-template-columns: 1fr;
+  --content-left: 0px;
+}
+.app-shell.storekeeper-drawer .hamburger-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 301;
+  width: 44px;
+  height: 44px;
+  background: var(--sidebar-bg);
+  color: var(--gold);
+  border: 1px solid #3d3020;
+  border-radius: 8px;
+  font-size: 20px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+.app-shell.storekeeper-drawer .sidebar-backdrop {
+  display: block;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 200;
+}
+.app-shell.storekeeper-drawer .sidebar {
+  position: fixed;
+  left: 0;
+  top: 0;
+  height: 100vh;
+  width: var(--sidebar-width);
+  z-index: 250;
+  transform: translateX(-100%);
+  transition: transform 0.25s ease;
+}
+.app-shell.storekeeper-drawer .sidebar.sidebar-mobile-open {
+  transform: translateX(0);
+}
+/* Clear the fixed hamburger so it doesn't sit on top of the topbar. */
+.app-shell.storekeeper-drawer .topbar {
+  padding-left: 64px;
+}
+
 /* ── Responsive ─────────────────────────────────────────────── */
 
 @media (max-width: 900px) {
